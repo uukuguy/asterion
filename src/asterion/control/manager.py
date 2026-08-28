@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from asterion.control.authority import (
     ActionReceipt,
@@ -57,8 +57,10 @@ from asterion.pathlight.recorder import (
     NOOP_PATHLIGHT_RECORDER,
     PathlightRecorder,
 )
-from asterion.operation.manager import OperationManager, OperationManagerError
-from asterion.operation.protocol import OperationTransaction
+
+if TYPE_CHECKING:
+    from asterion.operation.manager import OperationManager
+    from asterion.operation.protocol import OperationTransaction
 
 
 class ControlHostError(RuntimeError):
@@ -67,6 +69,25 @@ class ControlHostError(RuntimeError):
 
 class ControlHostTransportError(ControlHostError):
     """Raised when a persisted provider operation has uncertain transport state."""
+
+
+class _RecoveredOperationHost:
+    """Narrow recovery facade; the operation manager remains private."""
+
+    def __init__(self, manager: object) -> None:
+        self._manager = manager
+
+    async def execute_operation(self, transaction: object) -> object:
+        try:
+            return await self._manager.execute(transaction)
+        except Exception:
+            raise ControlHostError("control operation failed") from None
+
+    async def reconcile_operation(self, transaction: object) -> object:
+        try:
+            return await self._manager.reconcile(transaction)
+        except Exception:
+            raise ControlHostError("control operation reconciliation failed") from None
 
 
 class ActionExecutor(Protocol):
@@ -240,7 +261,7 @@ class ControlHost:
             or not _valid_provider_owned_actions(provider_owned_actions)
             or (
                 operation_manager is not None
-                and not isinstance(operation_manager, OperationManager)
+                and not _valid_operation_manager(operation_manager)
             )
             or (
                 session_context_client is not None
@@ -540,6 +561,8 @@ class ControlHost:
         """Delegate only validated operation work to the injected durable manager."""
         if self._operation_manager is None:
             raise ControlHostError("control operation manager is unavailable")
+        from asterion.operation.manager import OperationManagerError
+
         try:
             return await self._operation_manager.execute(transaction)
         except OperationManagerError:
@@ -548,6 +571,8 @@ class ControlHost:
     async def reconcile_operation(self, transaction: OperationTransaction):
         if self._operation_manager is None:
             raise ControlHostError("control operation manager is unavailable")
+        from asterion.operation.manager import OperationManagerError
+
         try:
             return await self._operation_manager.reconcile(transaction)
         except OperationManagerError:
@@ -563,10 +588,12 @@ class ControlHost:
         resolver: object | None = None,
         private_store: object | None = None,
         now_ms: Callable[[], int] | None = None,
-    ) -> OperationManager:
+    ) -> object:
         """Recover operation state without loading a provider or private values."""
 
         from asterion.control.authority import AuthorityEnvelope
+        from asterion.operation.manager import OperationManager, OperationManagerError
+        from asterion.operation.protocol import OperationTransaction
 
         if not isinstance(envelope, AuthorityEnvelope):
             raise ControlHostError("control operation recovery failed")
@@ -581,7 +608,7 @@ class ControlHost:
             if not transactions:
                 raise TypeError
             transaction = transactions[0]
-            return OperationManager(
+            manager = OperationManager(
                 authority=AuthorityLedger(envelope),
                 journal=journal,
                 resolver=resolver
@@ -595,6 +622,7 @@ class ControlHost:
                 session_id=transaction.session_id,
                 generation=transaction.generation,
             )
+            return _RecoveredOperationHost(manager)
         except (OperationManagerError, TypeError, ValueError):
             raise ControlHostError("control operation recovery failed") from None
 
@@ -1266,6 +1294,14 @@ def _valid_child_service(value: object) -> bool:
         ) and (isinstance(active_ids, property) or isinstance(active_ids, tuple))
     except Exception:
         return False
+
+
+def _valid_operation_manager(value: object) -> bool:
+    return value is None or (
+        callable(getattr(value, "execute", None))
+        and callable(getattr(value, "reconcile", None))
+        and callable(getattr(value, "cancel", None))
+    )
 
 
 def _valid_provider_owned_actions(value: object) -> bool:

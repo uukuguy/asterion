@@ -7,6 +7,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from asterion.control.host import ControlEvent
 from asterion.control.protocol import (
@@ -20,7 +21,9 @@ from asterion.control.session_context import (
     SESSION_CONTEXT_OPERATIONS,
     SessionContextCommand,
 )
-from asterion.operation.protocol import OperationTransaction
+
+if TYPE_CHECKING:
+    from asterion.operation.protocol import OperationTransaction
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
 
@@ -383,6 +386,7 @@ class AuthorityLedger:
         self._context_settlements: dict[str, SessionContextSettlement] = {}
         self._operation_reservations: dict[str, OperationDecision] = {}
         self._operation_settlements: dict[str, OperationSettlement] = {}
+        self._operation_feature_bindings: dict[str, OperationDecision] = {}
         self._frozen = False
 
     @property
@@ -475,6 +479,7 @@ class AuthorityLedger:
             and self._context_settlements == other._context_settlements
             and self._operation_reservations == other._operation_reservations
             and self._operation_settlements == other._operation_settlements
+            and self._operation_feature_bindings == other._operation_feature_bindings
         )
 
     @classmethod
@@ -573,12 +578,15 @@ class AuthorityLedger:
         ledger._context_settlements = dict(self._context_settlements)
         ledger._operation_reservations = dict(self._operation_reservations)
         ledger._operation_settlements = dict(self._operation_settlements)
+        ledger._operation_feature_bindings = dict(self._operation_feature_bindings)
         return ledger
 
     def evaluate_operation(
         self, transaction: OperationTransaction, *, now_ms: int
     ) -> OperationDecision:
         """Evaluate one closed operation transaction without mutation."""
+
+        from asterion.operation.protocol import OperationTransaction
 
         if not isinstance(transaction, OperationTransaction):
             raise AuthorityError("operation transaction is invalid")
@@ -599,6 +607,16 @@ class AuthorityLedger:
             return self._operation_rejected(
                 transaction, digest, "operation-not-authorized"
             )
+        if transaction.feature_id not in self._envelope.host_service_grants:
+            return self._operation_rejected(
+                transaction, digest, "host-service-not-authorized"
+            )
+        existing = self._operation_feature_bindings.get(transaction.feature_id)
+        if existing is not None and (
+            existing.operation_id != transaction.operation_id
+            or existing.transaction_digest != digest
+        ):
+            return self._operation_rejected(transaction, digest, "operation-consumed")
         return OperationDecision(
             transaction.operation_id,
             self._envelope.authority_id,
@@ -620,13 +638,18 @@ class AuthorityLedger:
             return
         if decision.operation_id in self._operation_settlements:
             raise AuthorityError("operation is already settled")
+        feature_binding = self._operation_feature_bindings.get(decision.feature_id)
+        if feature_binding is not None and feature_binding != decision:
+            raise AuthorityError("operation ability is already consumed")
         if (
             decision.authority_id != self._envelope.authority_id
             or decision.authority_revision != self._envelope.revision
             or decision.feature_id not in self._envelope.allowed_operations
+            or decision.feature_id not in self._envelope.host_service_grants
         ):
             raise AuthorityError("operation authority revision is stale")
         self._operation_reservations[decision.operation_id] = decision
+        self._operation_feature_bindings[decision.feature_id] = decision
 
     def settle_operation(
         self, operation_id: str, settlement: OperationSettlement
@@ -1048,6 +1071,8 @@ def session_context_command_digest(command: SessionContextCommand) -> str:
 
 
 def operation_transaction_digest(transaction: OperationTransaction) -> str:
+    from asterion.operation.protocol import OperationTransaction
+
     if not isinstance(transaction, OperationTransaction):
         raise AuthorityError("operation transaction is invalid")
     encoded = json.dumps(

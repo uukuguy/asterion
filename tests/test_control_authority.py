@@ -104,7 +104,12 @@ class TestControlAuthority(unittest.TestCase):
                 "requested_at": "2026-08-10T15:00:00Z",
             }
         )
-        ledger = AuthorityLedger(_envelope(allowed_operations=("operation.auth",)))
+        ledger = AuthorityLedger(
+            _envelope(
+                allowed_operations=("operation.auth",),
+                host_service_grants=("operation.auth",),
+            )
+        )
         decision = ledger.evaluate_operation(transaction, now_ms=1_000)
         ledger.reserve_operation(decision)
         ledger.reserve_operation(decision)

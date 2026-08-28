@@ -180,6 +180,22 @@ def _action_prefix() -> tuple[MemoryCanonicalJournal, ControlEvent]:
 
 
 class TestControlRecovery(unittest.TestCase):
+    def test_operation_prefix_recovers_reserved_authority(self) -> None:
+        from tests.test_operation_manager import _manager, _transaction
+
+        manager, _, _, _, journal = _manager()
+        asyncio.run(manager.execute(_transaction()))
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)),
+            _envelope(
+                host_service_grants=("operation.auth",),
+                allowed_operations=("operation.auth",),
+            ),
+            expected_session_id="session-1",
+            expected_generation=1,
+        )
+        self.assertEqual(recovered.authority.reserved_operation_ids, ())
+
     def test_live_terminal_delivery_binds_public_safe_result_projection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             proposal = _proposal_event()
@@ -306,12 +322,28 @@ class TestControlRecovery(unittest.TestCase):
 
     def test_budget_report_recovery_is_exact_and_frozen(self) -> None:
         journal = _journal()
-        _accept(journal, _created(), _running(), _event("budget.reported", 3, {
-            "controller_tokens": 20, "application_tokens": 0, "child_tokens": 0,
-            "aggregate_tokens": 20, "cost_micros": 3,
-        }))
-        recovered = recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
-        self.assertEqual(recovered.authority.reported_usage, BudgetUsage(20, 0, 0, 20, 3))
+        _accept(
+            journal,
+            _created(),
+            _running(),
+            _event(
+                "budget.reported",
+                3,
+                {
+                    "controller_tokens": 20,
+                    "application_tokens": 0,
+                    "child_tokens": 0,
+                    "aggregate_tokens": 20,
+                    "cost_micros": 3,
+                },
+            ),
+        )
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)), _envelope()
+        )
+        self.assertEqual(
+            recovered.authority.reported_usage, BudgetUsage(20, 0, 0, 20, 3)
+        )
         self.assertEqual(recovered.authority_usage, BudgetUsage(20, 0, 0, 20, 3))
         with self.assertRaises(AuthorityError):
             recovered.authority.record_provider_usage(object())  # type: ignore[arg-type]
@@ -325,12 +357,24 @@ class TestControlRecovery(unittest.TestCase):
                 journal = _journal()
                 _accept(journal, _created(), _running())
                 for sequence, (application, aggregate) in enumerate(reports, start=3):
-                    _accept(journal, _event("budget.reported", sequence, {
-                        "controller_tokens": 0, "application_tokens": application,
-                        "child_tokens": 0, "aggregate_tokens": aggregate, "cost_micros": 0,
-                    }))
+                    _accept(
+                        journal,
+                        _event(
+                            "budget.reported",
+                            sequence,
+                            {
+                                "controller_tokens": 0,
+                                "application_tokens": application,
+                                "child_tokens": 0,
+                                "aggregate_tokens": aggregate,
+                                "cost_micros": 0,
+                            },
+                        ),
+                    )
                 with self.assertRaises(JournalConflictError):
-                    recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
+                    recover_control_host_state(
+                        journal.replay(JournalCursor(0)), _envelope()
+                    )
 
     def test_reopen_reduces_receipt_usage_and_exact_cursor(self) -> None:
         journal, _ = _action_prefix()

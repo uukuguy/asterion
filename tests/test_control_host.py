@@ -183,6 +183,28 @@ def _create_command() -> ControlCommand:
 
 
 class TestControlHost(unittest.IsolatedAsyncioTestCase):
+    async def test_recovered_operation_host_exposes_host_operation_methods(
+        self,
+    ) -> None:
+        from tests.test_operation_manager import _manager, _transaction
+
+        manager, _, _, service, journal = _manager()
+        service.fail_execute = True
+        transaction = _transaction()
+        await manager.execute(transaction)
+        recovered = ControlHost.recover_operation_host(
+            journal,
+            _envelope(
+                allowed_operations=("operation.auth",),
+                host_service_grants=("operation.auth",),
+            ),
+            services={"operation.auth": service},
+        )
+        self.assertTrue(callable(getattr(recovered, "execute_operation", None)))
+        self.assertEqual(
+            (await recovered.reconcile_operation(transaction)).status, "uncertain"
+        )
+
     async def test_dispatch_rejects_unverified_client_journal_tail(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(
@@ -254,19 +276,28 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(command.type, "input.submit")
         self.assertEqual(command.command_id, "client:intent-1")
 
-    async def test_provider_owned_child_skips_generic_executor_and_settles_later(self) -> None:
+    async def test_provider_owned_child_skips_generic_executor_and_settles_later(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(
-                _manifest(), application_providers=(_provider(Path(directory)),),
-                control_factories=_control_factories([]), host_capabilities=("clock.monotonic", "storage.private"),
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
             )
             executor = SpyExecutor()
             lifecycle = ProviderOwnedLifecycle()
             host = ControlHost(
-                session_id="session-1", generation=1, plan=plan,
-                authority=AuthorityLedger(_envelope()), journal=MemoryCanonicalJournal("session-1"),
-                client=ScriptedClient(plan.control_binding.manifest), action_executor=executor,
-                clock_ms=lambda: 1_000, provider_owned_actions=lifecycle,
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=MemoryCanonicalJournal("session-1"),
+                client=ScriptedClient(plan.control_binding.manifest),
+                action_executor=executor,
+                clock_ms=lambda: 1_000,
+                provider_owned_actions=lifecycle,
             )
             child_payload = _proposal().to_mapping()["payload"]
             assert isinstance(child_payload, dict)
@@ -286,23 +317,37 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
             await host._accept_event(running)
             await host._accept_event(proposal)
             self.assertEqual(executor.calls, [])
-            self.assertEqual(host.snapshot().state.actions["action-1"].status, "running")
+            self.assertEqual(
+                host.snapshot().state.actions["action-1"].status, "running"
+            )
 
             await host.pump()
 
-            self.assertEqual(host.snapshot().state.actions["action-1"].status, "succeeded")
-    async def test_admitted_action_preparer_runs_before_admission_delivery(self) -> None:
+            self.assertEqual(
+                host.snapshot().state.actions["action-1"].status, "succeeded"
+            )
+
+    async def test_admitted_action_preparer_runs_before_admission_delivery(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             audit: list[str] = []
             plan = resolve_agent_system(
-                _manifest(), application_providers=(_provider(Path(directory)),),
-                control_factories=_control_factories([]), host_capabilities=("clock.monotonic", "storage.private"),
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
             )
             client = ScriptedClient(plan.control_binding.manifest, audit=audit)
             host = ControlHost(
-                session_id="session-1", generation=1, plan=plan,
-                authority=AuthorityLedger(_envelope()), journal=MemoryCanonicalJournal("session-1"),
-                client=client, action_executor=SpyExecutor(), clock_ms=lambda: 1_000,
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=MemoryCanonicalJournal("session-1"),
+                client=client,
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
                 admitted_action_preparer=AdmissionPreparer(audit),
             )
             proposal = ControlEvent.from_mapping(
@@ -319,9 +364,14 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
             await host._accept_event(running)
             await host._accept_event(proposal)
 
-        self.assertLess(audit.index(f"prepare:{proposal.payload['action_id']}"), audit.index("provider.send"))
+        self.assertLess(
+            audit.index(f"prepare:{proposal.payload['action_id']}"),
+            audit.index("provider.send"),
+        )
 
-    async def test_recovery_rebuilds_admitted_provider_binding_before_ownership(self) -> None:
+    async def test_recovery_rebuilds_admitted_provider_binding_before_ownership(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             audit: list[str] = []
 
@@ -345,10 +395,14 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
             )
             journal = MemoryCanonicalJournal("session-1")
             first = ControlHost(
-                session_id="session-1", generation=1, plan=plan,
-                authority=AuthorityLedger(_envelope()), journal=journal,
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=journal,
                 client=ScriptedClient(plan.control_binding.manifest),
-                action_executor=SpyExecutor(), clock_ms=lambda: 1_000,
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
                 admitted_action_preparer=AdmissionPreparer(audit),
                 provider_owned_actions=RecoveryLifecycle(),
             )
@@ -368,10 +422,14 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
 
             audit.clear()
             recovered = ControlHost(
-                session_id="session-1", generation=1, plan=plan,
-                authority=AuthorityLedger(_envelope()), journal=journal,
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=journal,
                 client=ScriptedClient(plan.control_binding.manifest),
-                action_executor=SpyExecutor(), clock_ms=lambda: 1_000,
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
                 admitted_action_preparer=AdmissionPreparer(audit),
                 provider_owned_actions=RecoveryLifecycle(),
             )
@@ -379,10 +437,15 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             audit,
-            [f"prepare:{proposal.payload['action_id']}", f"owns:{proposal.payload['action_id']}"]
+            [
+                f"prepare:{proposal.payload['action_id']}",
+                f"owns:{proposal.payload['action_id']}",
+            ],
         )
 
-    async def test_exact_stale_budget_report_replay_preserves_current_usage(self) -> None:
+    async def test_exact_stale_budget_report_replay_preserves_current_usage(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(
                 _manifest(),
@@ -444,31 +507,53 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(host.snapshot().authority_usage.controller_tokens, 20)
             self.assertEqual(host.snapshot().state.next_sequence, 5)
 
-    async def test_overflow_budget_report_is_rejected_before_journal_append(self) -> None:
+    async def test_overflow_budget_report_is_rejected_before_journal_append(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(
-                _manifest(), application_providers=(_provider(Path(directory)),),
-                control_factories=_control_factories([]), host_capabilities=("clock.monotonic", "storage.private"),
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
             )
             journal = MemoryCanonicalJournal("session-1")
             authority = AuthorityLedger(_envelope())
             host = ControlHost(
-                session_id="session-1", generation=1, plan=plan, authority=authority,
-                journal=journal, client=ScriptedClient(plan.control_binding.manifest),
-                action_executor=SpyExecutor(), clock_ms=lambda: 1_000,
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=authority,
+                journal=journal,
+                client=ScriptedClient(plan.control_binding.manifest),
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
             )
             before = host.snapshot()
-            event = ControlEvent.from_mapping({
-                "protocol": "asterion.agent-control/v1", "event_id": "budget-1",
-                "session_id": "session-1", "generation": 1, "sequence": 1,
-                "emitted_at": "2026-08-10T00:00:00Z", "type": "budget.reported",
-                "payload": {"controller_tokens": 0, "application_tokens": 1001,
-                            "child_tokens": 0, "aggregate_tokens": 1001, "cost_micros": 0},
-            })
+            event = ControlEvent.from_mapping(
+                {
+                    "protocol": "asterion.agent-control/v1",
+                    "event_id": "budget-1",
+                    "session_id": "session-1",
+                    "generation": 1,
+                    "sequence": 1,
+                    "emitted_at": "2026-08-10T00:00:00Z",
+                    "type": "budget.reported",
+                    "payload": {
+                        "controller_tokens": 0,
+                        "application_tokens": 1001,
+                        "child_tokens": 0,
+                        "aggregate_tokens": 1001,
+                        "cost_micros": 0,
+                    },
+                }
+            )
             with self.assertRaises(ControlHostError):
                 await host._accept_event(event)
             self.assertEqual(journal.position, before.journal_position)
-            self.assertEqual(host.snapshot().state.next_sequence, before.state.next_sequence)
+            self.assertEqual(
+                host.snapshot().state.next_sequence, before.state.next_sequence
+            )
             self.assertEqual(host.snapshot().authority_usage, before.authority_usage)
 
     async def test_command_is_journaled_before_provider_send(self) -> None:

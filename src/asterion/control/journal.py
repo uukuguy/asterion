@@ -10,12 +10,14 @@ from pathlib import Path
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import fcntl
 
 from asterion.control.authority import OperationDecision, SessionContextDecision
-from asterion.operation.protocol import OperationReceipt, OperationTransaction
+
+if TYPE_CHECKING:
+    from asterion.operation.protocol import OperationReceipt, OperationTransaction
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.protocol import (
     IDENTIFIER,
@@ -381,6 +383,10 @@ class JournalRecord:
     def operation_transaction_accepted(
         cls, transaction: OperationTransaction
     ) -> JournalRecord:
+        from asterion.operation.protocol import OperationTransaction
+
+        if not isinstance(transaction, OperationTransaction):
+            raise JournalConflictError("journal operation transaction is invalid")
         return cls(
             record_id=f"operation-transaction:{transaction.operation_id}",
             kind="operation.transaction.accepted",
@@ -418,6 +424,10 @@ class JournalRecord:
     def operation_dispatch_started(
         cls, transaction: OperationTransaction
     ) -> JournalRecord:
+        from asterion.operation.protocol import OperationTransaction
+
+        if not isinstance(transaction, OperationTransaction):
+            raise JournalConflictError("journal operation transaction is invalid")
         return cls(
             record_id=f"operation-dispatch:{transaction.operation_id}",
             kind="operation.dispatch.started",
@@ -431,6 +441,10 @@ class JournalRecord:
     def operation_handoff_fenced(
         cls, transaction: OperationTransaction
     ) -> JournalRecord:
+        from asterion.operation.protocol import OperationTransaction
+
+        if not isinstance(transaction, OperationTransaction):
+            raise JournalConflictError("journal operation transaction is invalid")
         return cls(
             record_id=f"operation-handoff:{transaction.operation_id}",
             kind="operation.handoff.fenced",
@@ -442,6 +456,10 @@ class JournalRecord:
 
     @classmethod
     def operation_receipted(cls, receipt: OperationReceipt) -> JournalRecord:
+        from asterion.operation.protocol import OperationReceipt
+
+        if not isinstance(receipt, OperationReceipt):
+            raise JournalConflictError("journal operation receipt is invalid")
         return cls(
             record_id=f"operation-receipt:{receipt.operation_id}:{receipt.status}",
             kind="operation.receipted",
@@ -1575,6 +1593,8 @@ def _validate_record_payload(kind: str, value: object) -> None:
         validate_session_context_command(value["command"])
         return
     if kind == "operation.transaction.accepted":
+        from asterion.operation.protocol import OperationTransaction
+
         _require_fields(value, {"transaction"})
         if not isinstance(value["transaction"], Mapping):
             raise JournalConflictError("journal operation transaction is invalid")
@@ -1606,6 +1626,8 @@ def _validate_record_payload(kind: str, value: object) -> None:
         _require_digest(value["transaction_digest"], "journal operation digest")
         return
     if kind == "operation.receipted":
+        from asterion.operation.protocol import OperationReceipt
+
         _require_fields(value, {"receipt"})
         if not isinstance(value["receipt"], Mapping):
             raise JournalConflictError("journal operation receipt is invalid")

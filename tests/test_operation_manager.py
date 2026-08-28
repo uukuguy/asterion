@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
 import unittest
 
 from asterion.control.authority import AuthorityLedger
@@ -130,10 +132,13 @@ class Service:
     def __init__(self) -> None:
         self.execute_calls: list[str] = []
         self.reconcile_calls: list[str] = []
+        self.fail_execute = False
 
     async def execute(self, transaction, typed_request):
         self.execute_calls.append(transaction.operation_id)
         assert typed_request == {"action": "read"}
+        if self.fail_execute:
+            raise RuntimeError("transport")
         return _receipt(transaction)
 
     async def cancel(self, transaction):
@@ -157,7 +162,12 @@ def _manager():
     )
     resolver, store, service = Resolver(), Store(), Service()
     manager = OperationManager(
-        authority=AuthorityLedger(_envelope(allowed_operations=("operation.auth",))),
+        authority=AuthorityLedger(
+            _envelope(
+                allowed_operations=("operation.auth",),
+                host_service_grants=("operation.auth",),
+            )
+        ),
         journal=journal,
         resolver=resolver,
         private_store=store,
@@ -170,6 +180,15 @@ def _manager():
 
 
 class TestOperationManager(unittest.IsolatedAsyncioTestCase):
+    async def test_operation_protocol_imports_in_fresh_process(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-c", "import asterion.operation.protocol"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     async def test_identical_retry_reuses_receipt_and_conflict_never_calls_service(
         self,
     ) -> None:
@@ -192,3 +211,11 @@ class TestOperationManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await manager.reconcile(_transaction())).status, "succeeded")
         self.assertEqual(service.execute_calls, [])
         self.assertEqual(service.reconcile_calls, ["operation-1"])
+
+    async def test_feature_grant_is_consumed_after_first_transaction(self) -> None:
+        manager, resolver, _, service, _ = _manager()
+        await manager.execute(_transaction())
+        rejected = await manager.execute(_transaction("operation-2"))
+        self.assertEqual(rejected.status, "rejected")
+        self.assertEqual(resolver.calls, 1)
+        self.assertEqual(service.execute_calls, ["operation-1"])

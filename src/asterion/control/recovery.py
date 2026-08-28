@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from asterion.control.authority import (
     ActionReceipt,
@@ -21,7 +22,9 @@ from asterion.control.authority import (
     OperationSettlement,
     session_context_command_digest,
 )
-from asterion.operation.protocol import OperationReceipt, OperationTransaction
+
+if TYPE_CHECKING:
+    from asterion.operation.protocol import OperationReceipt, OperationTransaction
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.host import ControlCommand, ControlEvent, EventCursor
 from asterion.control.journal import (
@@ -111,6 +114,8 @@ def recover_control_host_state(
     expected_generation: int | None = None,
 ) -> RecoveredControlState:
     """Validate and replay one complete journal prefix without mutating inputs."""
+
+    from asterion.operation.protocol import OperationReceipt, OperationTransaction
 
     try:
         values = tuple(entries)

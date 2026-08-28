@@ -95,6 +95,13 @@ class OperationManager:
             self._append(JournalRecord.operation_transaction_accepted(transaction))
             self._transactions[transaction.operation_id] = transaction
         try:
+            try:
+                service = self._service(transaction)
+            except OperationManagerError:
+                return self._record_terminal(
+                    self._receipt(transaction, "rejected", "request-not-supported"),
+                    reserve=False,
+                )
             decision = self._authority.evaluate_operation(
                 transaction, now_ms=self._now_ms()
             )
@@ -106,6 +113,13 @@ class OperationManager:
                 )
             self._append(JournalRecord.operation_reserved(decision))
             self._authority.reserve_operation(decision)
+            try:
+                typed = self._resolve(transaction, service)
+            except OperationManagerError:
+                return self._record_terminal(
+                    self._receipt(transaction, "failed", "private-request-unavailable"),
+                    reserve=True,
+                )
             self._append(JournalRecord.operation_dispatch_started(transaction))
             self._dispatched.add(transaction.operation_id)
             if self.fail_after == "operation.dispatch.started":
@@ -113,8 +127,7 @@ class OperationManager:
             self._append(JournalRecord.operation_handoff_fenced(transaction))
             if self.fail_after == "operation.handoff.fenced":
                 return self._uncertain(transaction)
-            typed = self._resolve(transaction, self._service(transaction))
-            receipt = await self._service(transaction).execute(transaction, typed)
+            receipt = await service.execute(transaction, typed)
             return self._record_terminal(receipt, reserve=True)
         except OperationManagerError:
             raise
@@ -137,6 +150,11 @@ class OperationManager:
         existing = self._receipts.get(operation_id)
         if existing is not None:
             return existing
+        if operation_id not in self._dispatched:
+            return self._record_terminal(
+                self._receipt(transaction, "cancelled", "cancelled-before-dispatch"),
+                reserve=operation_id in self._authority.reserved_operation_ids,
+            )
         try:
             return self._record_terminal(
                 await self._service(transaction).cancel(transaction),
@@ -151,6 +169,11 @@ class OperationManager:
         self._validate_transaction(transaction)
         if self._transactions.get(transaction.operation_id) != transaction:
             raise OperationManagerError("operation reconciliation conflicts")
+        existing = self._receipts.get(transaction.operation_id)
+        if existing is not None and existing.status != "uncertain":
+            return existing
+        if existing is None or existing.status != "uncertain":
+            raise OperationManagerError("operation reconciliation is unavailable")
         if transaction.operation_id not in self._dispatched:
             raise OperationManagerError("operation reconciliation is unavailable")
         service = self._service(transaction)
@@ -171,7 +194,9 @@ class OperationManager:
                 ),
             )
             return self._record_terminal(result, reserve=True)
-        except OperationManagerError:
+        except OperationManagerError as error:
+            if str(error) == "operation private request is unavailable":
+                return self._uncertain(transaction)
             raise
         except Exception:
             return self._uncertain(transaction)
@@ -245,6 +270,11 @@ class OperationManager:
                     self._attempts[operation_id] = max(
                         self._attempts.get(operation_id, 0), attempt
                     )
+            for operation_id in sorted(self._dispatched - set(self._receipts)):
+                transaction = self._transactions.get(operation_id)
+                if transaction is None:
+                    raise ValueError
+                self._uncertain(transaction)
         except (JournalConflictError, OperationProtocolError, TypeError, ValueError):
             raise OperationManagerError("operation recovery is invalid") from None
 
@@ -261,7 +291,6 @@ class OperationManager:
             != self._authority.envelope.revision
         ):
             raise OperationManagerError("operation transaction is invalid")
-        self._service(transaction)
 
     def _service(self, transaction: OperationTransaction) -> OperationService:
         service = self._services.get(transaction.feature_id)
@@ -271,6 +300,7 @@ class OperationManager:
             or getattr(service, "feature_id", None) != transaction.feature_id
             or getattr(service, "request_kind", None) != request.request_kind
             or getattr(service, "request_purpose", None) != request.purpose
+            or request.media_type != "application/json"
             or type(getattr(service, "max_request_bytes", None)) is not int
             or service.max_request_bytes < request.byte_count
         ):
