@@ -31,6 +31,7 @@ export interface PrimeClientObservationMapperOptions {
   readonly commit?: (
     nativeSequence: number,
     observation: PrimeClientObservation | null,
+    stage?: Readonly<{ generation: number; nativeSequence: number; reference: string; kind: string; mediaType: string; size: number; sha256: string }> | null,
   ) => Promise<void>;
   readonly stage?: (value: Readonly<{
     generation: number;
@@ -123,7 +124,12 @@ export class PrimeClientObservationMapper {
       const next = this.sequence + 1;
       const observation = Object.freeze({ observation_id: `prime-client-${this.options.generation}-${next}`, active_session_id: this.options.sessionId,
         generation: this.options.generation, source_sequence: next, emitted_at: emittedAt, kind: prepared.kind, payload: Object.freeze({ ...prepared.payload }) });
-      await this.options.commit?.(prepared.nativeSequence, observation);
+      const descriptor = written.at(-1);
+      await this.options.commit?.(prepared.nativeSequence, observation, descriptor === undefined ? null : Object.freeze({
+        generation: this.options.generation, nativeSequence: prepared.nativeSequence,
+        reference: descriptor.reference, kind: descriptor.kind, mediaType: descriptor.mediaType,
+        size: descriptor.size, sha256: descriptor.sha256,
+      }));
       this.nativeSequence = prepared.nativeSequence;
       this.sequence = next;
       return Object.freeze([observation]);

@@ -669,9 +669,14 @@ function validateClientObservationProgressPayload(value: unknown): Readonly<{
   nativeSequence: number;
   observation: GatewayClientObservation | null;
   stagedReference: string | null;
+  stagedSha256: string | null;
+  stagedSize: number | null;
 }> {
-  if (!isRecord(value) || !hasExactKeys(value, ["native_sequence", "observation", "staged_reference"]) || !positiveInteger(value.native_sequence) ||
+  if (!isRecord(value) || !hasExactKeys(value, ["native_sequence", "observation", "staged_reference", "staged_sha256", "staged_size"]) || !positiveInteger(value.native_sequence) ||
     (value.staged_reference !== null && (typeof value.staged_reference !== "string" || !PRIVATE_REF_PATTERN.test(value.staged_reference))) ||
+    (value.staged_sha256 !== null && (typeof value.staged_sha256 !== "string" || !DIGEST_PATTERN.test(value.staged_sha256))) ||
+    (value.staged_size !== null && !nonNegativeInteger(value.staged_size)) ||
+    (value.staged_reference === null && (value.staged_sha256 !== null || value.staged_size !== null)) ||
     (value.observation !== null && !isRecord(value.observation))) {
     throw new GatewayStoreConflictError();
   }
@@ -679,6 +684,8 @@ function validateClientObservationProgressPayload(value: unknown): Readonly<{
     nativeSequence: value.native_sequence,
     observation: value.observation === null ? null : validateClientObservationPayload(value.observation),
     stagedReference: value.staged_reference,
+    stagedSha256: value.staged_sha256,
+    stagedSize: value.staged_size,
   });
 }
 
@@ -1796,14 +1803,28 @@ export class GatewayDurableStore {
     generation: number,
     nativeSequence: number,
     observation: GatewayClientObservation | null,
+    authoritativeStage: GatewayClientObservationStage | null = null,
   ): Promise<GatewayRecordReceipt> {
     if (!positiveInteger(generation)) {
       throw new GatewayStoreConflictError();
     }
+    const binding = clientObservationBodyBinding(observation);
+    const supplied = authoritativeStage === null ? null : validateClientObservationStagePayload({
+      generation: authoritativeStage.generation, native_sequence: authoritativeStage.nativeSequence,
+      reference: authoritativeStage.reference, kind: authoritativeStage.kind, media_type: authoritativeStage.mediaType,
+      size: authoritativeStage.size, sha256: authoritativeStage.sha256,
+    });
+    if ((binding === null) !== (supplied === null) || (supplied !== null &&
+      (supplied.generation !== generation || supplied.nativeSequence !== nativeSequence || supplied.reference !== binding!.reference ||
+        supplied.kind !== binding!.kind || supplied.mediaType !== binding!.mediaType ||
+        (binding!.sha256 !== undefined && (supplied.sha256 !== binding!.sha256 || supplied.size !== binding!.size))))) {
+      throw new GatewayStoreConflictError();
+    }
     const progress = validateClientObservationProgressPayload({
-      native_sequence: nativeSequence,
-      observation,
-      staged_reference: clientObservationBodyBinding(observation)?.reference ?? null,
+      native_sequence: nativeSequence, observation,
+      staged_reference: supplied?.reference ?? null,
+      staged_sha256: supplied?.sha256 ?? null,
+      staged_size: supplied?.size ?? null,
     });
     const previous = this.clientObservationProgressByGeneration.get(generation);
     const recordId = `client-observation:${generation}:${nativeSequence}`;
@@ -1811,6 +1832,8 @@ export class GatewayDurableStore {
       native_sequence: progress.nativeSequence,
       observation: progress.observation,
       staged_reference: progress.stagedReference,
+      staged_sha256: progress.stagedSha256,
+      staged_size: progress.stagedSize,
     };
     if (
       previous !== undefined &&
@@ -1822,11 +1845,11 @@ export class GatewayDurableStore {
         payload,
       );
     }
-    const binding = clientObservationBodyBinding(progress.observation);
     const staged = binding === null ? undefined : this.clientObservationStages.get(`${generation}:${progress.nativeSequence}`);
     if (binding !== null && (
       staged === undefined || progress.stagedReference !== staged.reference ||
       staged.reference !== binding.reference || staged.kind !== binding.kind || staged.mediaType !== binding.mediaType ||
+      staged.sha256 !== progress.stagedSha256 || staged.size !== progress.stagedSize ||
       (binding.sha256 !== undefined && (staged.sha256 !== binding.sha256 || staged.size !== binding.size))
     )) throw new GatewayStoreConflictError();
     const expectedNative = (previous?.nativeSequence ?? 0) + 1;
@@ -2391,9 +2414,9 @@ export class GatewayDurableStore {
         }
         const binding = clientObservationBodyBinding(progress.observation);
         const staged = binding === null ? undefined : this.clientObservationStages.get(`${generation}:${nativeSequence}`);
-        if (binding === null ? progress.stagedReference !== null : (
+        if (binding === null ? (progress.stagedReference !== null || progress.stagedSha256 !== null || progress.stagedSize !== null) : (
           staged === undefined || progress.stagedReference !== staged.reference || staged.reference !== binding.reference ||
-          staged.kind !== binding.kind || staged.mediaType !== binding.mediaType ||
+          staged.kind !== binding.kind || staged.mediaType !== binding.mediaType || staged.sha256 !== progress.stagedSha256 || staged.size !== progress.stagedSize ||
           (binding.sha256 !== undefined && (staged.sha256 !== binding.sha256 || staged.size !== binding.size))
         )) throw new GatewayStoreCorruptionError();
         return progress as unknown as Record<string, unknown>;
@@ -2834,11 +2857,17 @@ export class GatewayDurableStore {
         observation: GatewayClientObservation | null;
         staged_reference?: string | null;
         stagedReference?: string | null;
+        staged_sha256?: string | null;
+        stagedSha256?: string | null;
+        staged_size?: number | null;
+        stagedSize?: number | null;
       }>;
       const progress = Object.freeze({
         nativeSequence: persisted.nativeSequence ?? persisted.native_sequence,
         observation: persisted.observation,
         stagedReference: persisted.stagedReference ?? persisted.staged_reference,
+        stagedSha256: persisted.stagedSha256 ?? persisted.staged_sha256,
+        stagedSize: persisted.stagedSize ?? persisted.staged_size,
       });
       const previous = this.clientObservationProgressByGeneration.get(generation);
       if (match === null || !positiveInteger(generation) ||
@@ -2849,9 +2878,9 @@ export class GatewayDurableStore {
       const observationSequence = previous?.observationSequence ?? 0;
       const binding = clientObservationBodyBinding(progress.observation);
       const staged = binding === null ? undefined : this.clientObservationStages.get(`${generation}:${progress.nativeSequence}`);
-      if (binding === null ? progress.stagedReference !== null : (
+      if (binding === null ? (progress.stagedReference !== null || progress.stagedSha256 !== null || progress.stagedSize !== null) : (
         staged === undefined || progress.stagedReference !== staged.reference || staged.reference !== binding.reference ||
-        staged.kind !== binding.kind || staged.mediaType !== binding.mediaType ||
+        staged.kind !== binding.kind || staged.mediaType !== binding.mediaType || staged.sha256 !== progress.stagedSha256 || staged.size !== progress.stagedSize ||
         (binding.sha256 !== undefined && (staged.sha256 !== binding.sha256 || staged.size !== binding.size))
       )) throw new GatewayStoreCorruptionError();
       if (progress.observation !== null) {

@@ -840,17 +840,19 @@ test("durable store reopens only a contiguous canonical client observation prefi
     });
     const stage = async (sequence) => {
       const value = observation(sequence);
-      await store.stageClientObservationValue({
+      const descriptor = {
         generation: 1, nativeSequence: sequence,
         reference: value.payload.content_ref, kind: "message", mediaType: "text/plain",
         size: value.payload.size, sha256: value.payload.sha256,
-      });
+      };
+      await store.stageClientObservationValue(descriptor);
+      return descriptor;
     };
-    await stage(1);
-    await store.recordClientObservationProgress(1, 1, observation(1));
-    await stage(2);
-    await store.recordClientObservationProgress(1, 2, observation(2));
-    await store.recordClientObservationProgress(1, 2, observation(2));
+    const first = await stage(1);
+    await store.recordClientObservationProgress(1, 1, observation(1), first);
+    const second = await stage(2);
+    await store.recordClientObservationProgress(1, 2, observation(2), second);
+    await store.recordClientObservationProgress(1, 2, observation(2), second);
     await assert.rejects(
       store.recordClientObservationProgress(1, 4, observation(3)),
     );
@@ -933,6 +935,48 @@ test("durable progress binds its staged private reference exactly", async () => 
       },
     }));
     assert.equal(store.stagedClientObservationValues(1).length, 1);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable extension progress requires the authoritative staged digest and size", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const staged = {
+    generation: 1, nativeSequence: 1,
+    reference: "private:00000000-0000-4000-8000-000000000001",
+    kind: "extension-ui", mediaType: "application/json", size: 7, sha256: "a".repeat(64),
+  };
+  const observation = {
+    observation_id: "prime-client-1-1", active_session_id: "session-1", generation: 1,
+    source_sequence: 1, emitted_at: "2026-08-10T03:00:01.000Z", kind: "extension-ui.requested",
+    payload: { deadline_ms: 1, method: "extension-ui", payload_ref: staged.reference, request_id: "request-1" },
+  };
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.stageClientObservationValue(staged);
+    await assert.rejects(store.recordClientObservationProgress(1, 1, observation, {
+      ...staged, size: 8, sha256: "b".repeat(64),
+    }));
+    await assert.rejects(store.recordClientObservationProgress(1, 1, observation, {
+      ...staged, size: 8,
+    }));
+    assert.equal(store.stagedClientObservationValues(1).length, 1);
+    await store.recordClientObservationProgress(1, 1, observation, staged);
+    const records = (await readdir(join(fixtureRoot.root, "public", "records"))).sort();
+    const path = join(fixtureRoot.root, "public", "records", records.at(-1));
+    const forged = JSON.parse(await readFile(path, "utf8"));
+    forged.payload.staged_size = 8;
+    forged.payload_digest = sha256Hex(canonicalJsonBytes({
+      kind: forged.kind, record_id: forged.record_id, payload: forged.payload,
+    }));
+    forged.digest = sha256Hex(canonicalJsonBytes({
+      format: forged.format, position: forged.position, previous_digest: forged.previous_digest,
+      kind: forged.kind, record_id: forged.record_id, payload: forged.payload,
+      payload_digest: forged.payload_digest,
+    }));
+    await writeFile(path, Buffer.concat([canonicalJsonBytes(forged), Buffer.from("\n")]), { mode: 0o600 });
+    await assert.rejects(GatewayDurableStore.open(fixtureRoot.root, "session-1"));
   } finally {
     await fixtureRoot.cleanup();
   }

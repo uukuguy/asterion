@@ -2463,11 +2463,12 @@ export class PrimeGateway {
       privateValues: values,
       initialNativeSequence: progress.nativeSequence,
       initialObservationSequence: progress.observationSequence,
-      commit: async (nativeSequence, observation) => {
+      commit: async (nativeSequence, observation, stage) => {
         await this.options.store.recordClientObservationProgress(
           this.options.generation,
           nativeSequence,
           observation,
+          stage ?? null,
         );
       },
       stage: async (stage) => {
