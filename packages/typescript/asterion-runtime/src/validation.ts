@@ -12,6 +12,7 @@ import type {
   ModelSelectionRequest,
   SettingsKeybindingsRequest,
   TelemetryUsageRequest,
+  DoctorRequest,
   AgentSystemManifest,
   AssemblyManifest,
   BenchmarkSuiteManifest,
@@ -107,6 +108,7 @@ const settingsKeybindingsRequestValidator = ajv.compile(
 const telemetryUsageRequestValidator = ajv.compile(
   readSchema("telemetry-usage-request.schema.json"),
 );
+const doctorRequestValidator = ajv.compile(readSchema("doctor-request.schema.json"));
 
 const EFFECT_COUNTERS = [
   "credential_value_reads",
@@ -402,6 +404,16 @@ export function validateTelemetryUsageRequest(
   ) {
     throw new OperationProtocolError("telemetry usage attribution", null);
   }
+  return request;
+}
+
+export function validateDoctorRequest(value: unknown): DoctorRequest {
+  requireNoForbiddenOperationKeys(value);
+  const request = requireOperationValid<DoctorRequest>(
+    "doctor request",
+    doctorRequestValidator,
+    value,
+  );
   return request;
 }
 

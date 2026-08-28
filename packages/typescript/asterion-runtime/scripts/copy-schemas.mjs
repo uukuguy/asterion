@@ -131,6 +131,12 @@ const telemetryUsageRequestSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const doctorRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/doctor-request.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -193,3 +199,4 @@ cpSync(
   telemetryUsageRequestSource,
   `${destination}/telemetry-usage-request.schema.json`,
 );
+cpSync(doctorRequestSource, `${destination}/doctor-request.schema.json`);

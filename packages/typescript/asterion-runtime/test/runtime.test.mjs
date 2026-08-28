@@ -41,6 +41,7 @@ import {
   validateModelSelectionRequest,
   validateSettingsKeybindingsRequest,
   validateTelemetryUsageRequest,
+  validateDoctorRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
   validateEventStream,
@@ -473,6 +474,25 @@ test("validates closed immutable telemetry usage without bodies or forged attrib
     { ...valid, usage: { ...valid.usage, child_tokens: 1 } },
   ]) {
     assert.throws(() => validateTelemetryUsageRequest(value), OperationProtocolError);
+  }
+});
+
+test("validates closed immutable doctor requests without probe selectors or repair fields", async () => {
+  const valid = await readFixture(operationFixtures, "valid-doctor-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-doctor-request-fix.json");
+  const snapshot = validateDoctorRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.throws(() => validateDoctorRequest(invalid), OperationProtocolError);
+  for (const value of [
+    { check_ids: ["storage.private", "clock.monotonic"] },
+    { check_ids: ["storage.private", "storage.private"] },
+    { check_ids: ["Storage.private"] },
+    { check_ids: [true] },
+    { check_ids: [] },
+    { fix: "repair" },
+  ]) {
+    assert.throws(() => validateDoctorRequest(value), OperationProtocolError);
   }
 });
 

@@ -16,6 +16,9 @@ PROJECT = Path(__file__).resolve().parents[1]
 BENCHMARK_SOURCE = PROJECT / "src/asterion/benchmarks"
 DCI_SOURCE = PROJECT / "src/asterion/capabilities/dci"
 PACKAGED_SCHEMAS = {
+    "schemas/operation/v1/doctor-request.schema.json": (
+        "asterion/schemas/operation/v1/doctor-request.schema.json"
+    ),
     "schemas/operation/v1/telemetry-usage-request.schema.json": (
         "asterion/schemas/operation/v1/telemetry-usage-request.schema.json"
     ),

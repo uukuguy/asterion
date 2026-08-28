@@ -186,6 +186,8 @@ export interface TelemetryUsageRequest {
   readonly usage: TelemetryUsageSnapshot;
 }
 
+export type DoctorRequest = Readonly<Record<string, never>>;
+
 export interface ClientCursor {
   readonly generation: number;
   readonly sequence: number;

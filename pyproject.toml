@@ -64,6 +64,7 @@ artifacts = [
 "schemas/operation/v1/model-selection-request.schema.json" = "asterion/schemas/operation/v1/model-selection-request.schema.json"
 "schemas/operation/v1/settings-keybindings-request.schema.json" = "asterion/schemas/operation/v1/settings-keybindings-request.schema.json"
 "schemas/operation/v1/telemetry-usage-request.schema.json" = "asterion/schemas/operation/v1/telemetry-usage-request.schema.json"
+"schemas/operation/v1/doctor-request.schema.json" = "asterion/schemas/operation/v1/doctor-request.schema.json"
 "schemas/operation/v1/operation-request-descriptor.schema.json" = "asterion/schemas/operation/v1/operation-request-descriptor.schema.json"
 "schemas/operation/v1/operation-transaction.schema.json" = "asterion/schemas/operation/v1/operation-transaction.schema.json"
 "schemas/operation/v1/operation-receipt.schema.json" = "asterion/schemas/operation/v1/operation-receipt.schema.json"

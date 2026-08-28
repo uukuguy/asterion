@@ -19,6 +19,7 @@ import type {
   ModelSelectionRequest,
   SettingsKeybindingsRequest,
   TelemetryUsageRequest,
+  DoctorRequest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -61,6 +62,13 @@ export const fixtureTelemetryUsageRequest: TelemetryUsageRequest = {
     cost_micros: 7,
   },
 };
+
+export const fixtureDoctorRequest: DoctorRequest = {};
+
+// @ts-expect-error Doctor requests are compile-time closed.
+export const invalidDoctorFixRequest: DoctorRequest = { fix: "repair" };
+// @ts-expect-error Doctor requests cannot select probes.
+export const invalidDoctorCheckIdsRequest: DoctorRequest = { check_ids: [] };
 
 export const fixtureOperationRequestDescriptor: OperationRequestDescriptor = {
   protocol: "asterion.operation/v1",

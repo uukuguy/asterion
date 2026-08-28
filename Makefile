@@ -34,7 +34,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test.prime-client-interactive.provider-free
 .PHONY: test.prime-client-export-share.provider-free
 .PHONY: test.prime-client-parity.provider-free
-.PHONY: test.prime-operational-auth.provider-free test.prime-operational-telemetry.provider-free
+.PHONY: test.prime-operational-auth.provider-free test.prime-operational-telemetry.provider-free test.prime-operational-doctor.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -254,6 +254,12 @@ test.prime-operational-telemetry.provider-free:
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_operation_telemetry \
 		tests.test_prime_operational_telemetry
+	npm --prefix packages/typescript/asterion-runtime test
+
+test.prime-operational-doctor.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_operation_doctor \
+		tests.test_prime_operational_doctor
 	npm --prefix packages/typescript/asterion-runtime test
 
 .PHONY: test.prime-operational-model-selection.provider-free

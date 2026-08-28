@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/operation/v1/doctor-request.schema.json",
+  "title": "Asterion Read-only Doctor Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}

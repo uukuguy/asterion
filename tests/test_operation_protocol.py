@@ -145,6 +145,7 @@ class TestOperationProtocol(unittest.TestCase):
                 "auth-request.schema.json",
                 "model-selection-request.schema.json",
                 "settings-keybindings-request.schema.json",
+                "doctor-request.schema.json",
                 "operation-request-descriptor.schema.json",
                 "operation-transaction.schema.json",
                 "operation-receipt.schema.json",

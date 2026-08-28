@@ -366,6 +366,7 @@ class PromotionCheckTests(unittest.TestCase):
             "asterion/schemas/agent-control/v1/event.schema.json",
             "asterion/schemas/session-context/v1/command.schema.json",
             "asterion/schemas/session-context/v1/receipt.schema.json",
+            "asterion/schemas/operation/v1/doctor-request.schema.json",
         ):
             self.assertIn(schema_path, smoke_source)
         for expected in (

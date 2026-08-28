@@ -52,6 +52,18 @@ from asterion.operation.telemetry import (
     UsageSnapshot,
     validate_telemetry_usage_request,
 )
+from asterion.operation.doctor import (
+    DOCTOR_MAX_REQUEST_BYTES,
+    DOCTOR_REQUEST_KIND,
+    DOCTOR_REQUEST_PURPOSE,
+    DiagnosticResult,
+    DoctorOperationError,
+    DoctorOperationService,
+    DoctorProbe,
+    DoctorReport,
+    reduce_diagnostics,
+    validate_doctor_request,
+)
 
 __all__ = [
     "EFFECT_COUNTERS",
@@ -96,4 +108,14 @@ __all__ = [
     "TelemetrySink",
     "UsageSnapshot",
     "validate_telemetry_usage_request",
+    "DOCTOR_MAX_REQUEST_BYTES",
+    "DOCTOR_REQUEST_KIND",
+    "DOCTOR_REQUEST_PURPOSE",
+    "DiagnosticResult",
+    "DoctorOperationError",
+    "DoctorOperationService",
+    "DoctorProbe",
+    "DoctorReport",
+    "reduce_diagnostics",
+    "validate_doctor_request",
 ]
