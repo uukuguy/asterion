@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import unittest
 
@@ -12,6 +13,7 @@ _GATE_ID = "test.prime-client-export-share.provider-free"
 _FEATURE_IDS = ("interface.export-share",)
 _SCENARIO_IDS = ("prime-client-export-share.public", "prime-client-export-share.private", "prime-client-export-share.share")
 _MODULE_IDS = ("tests.test_client_export_share", "tests.test_prime_client_export_share")
+_AUTHORITY_IDS = itertools.count(1)
 
 
 class _Share:
@@ -23,7 +25,10 @@ class _Share:
 def _receipt() -> dict[str, object]:
     store = _Store()
     exported = export_client_session(_events(), visibility="public", artifacts=store, client_id="client-1")
-    shared = share_client_export(exported, authority=_authority(), shares=_Share())
+    shared = share_client_export(
+        exported, authority=_authority(f"prime-evidence-authority-{next(_AUTHORITY_IDS)}"),
+        shares=_Share(),
+    )
     if shared.share_ref != "share-ref-1" or len(store.contents) != 1:
         raise AssertionError("export/share behavior is invalid")
     stream_digest = hashlib.sha256(store.contents[0]).hexdigest()

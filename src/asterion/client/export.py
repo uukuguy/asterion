@@ -131,7 +131,10 @@ class _ExportBinding:
 
 
 _AUTHORITY_USE_LOCK = threading.Lock()
-_AUTHORITY_USES: dict[int, tuple[ClientExportAuthority, _AuthorityUse]] = {}
+_AuthorityIdentity = tuple[
+    str, str, str, int, int, int, tuple[str, ...], str, str, int, int
+]
+_AUTHORITY_USES: dict[_AuthorityIdentity, _AuthorityUse] = {}
 _EXPORT_BINDINGS_LOCK = threading.Lock()
 _EXPORT_BINDINGS: dict[tuple[str, str, str], _ExportBinding] = {}
 
@@ -213,6 +216,7 @@ def share_client_export(
         if artifact.media_type != authority.media_type:
             raise ClientExportError("client share authority is invalid")
         _validate_share_binding(artifact, authority)
+        _consume(authority, "share")
         if shares is None:
             receipt = ClientShareReceipt(
                 share_id=f"local-share:{artifact.artifact_id}", artifact_id=artifact.artifact_id,
@@ -222,7 +226,6 @@ def share_client_export(
         else:
             if not callable(getattr(shares, "share", None)):
                 raise ClientExportError("client share service is invalid")
-            _consume(authority, "share")
             receipt = shares.share(artifact, authority=authority)
             if (
                 not isinstance(receipt, ClientShareReceipt)
@@ -295,14 +298,12 @@ def _private_references(stream: tuple[ClientEvent, ...]) -> tuple[_PrivateRefere
 
 
 def _consume(authority: ClientExportAuthority, operation: str) -> None:
+    identity = _authority_identity(authority)
     with _AUTHORITY_USE_LOCK:
-        entry = _AUTHORITY_USES.get(id(authority))
-        if entry is None:
-            entry = (authority, _AuthorityUse())
-            _AUTHORITY_USES[id(authority)] = entry
-        elif entry[0] is not authority:
-            raise ClientExportError("client export authority is invalid")
-    use = entry[1]
+        use = _AUTHORITY_USES.get(identity)
+        if use is None:
+            use = _AuthorityUse()
+            _AUTHORITY_USES[identity] = use
     with use.lock:
         if operation == "export":
             if use.exports:
@@ -314,6 +315,18 @@ def _consume(authority: ClientExportAuthority, operation: str) -> None:
             use.shares = True
         else:
             raise ClientExportError("client export authority is invalid")
+
+
+def _authority_identity(authority: ClientExportAuthority) -> _AuthorityIdentity:
+    """Return the complete validated authority witness used for one-use state."""
+
+    return (
+        authority.authority_id, authority.client_id, authority.session_id,
+        authority.authority_revision, authority.generation,
+        authority.covered_sequence, authority.reference_ids,
+        authority.destination_ref, authority.media_type, authority.max_bytes,
+        authority.expires_at_ms,
+    )
 
 
 def _validate_store(artifacts: object) -> None:
