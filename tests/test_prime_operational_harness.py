@@ -397,6 +397,45 @@ class TestPrimeOperationalHarness(unittest.TestCase):
                     check=False, capture_output=True, text=True, timeout=20,
                 )
 
+    def test_resource_loader_source_and_distribution_drift_reject_before_doctor_import(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="asterion-prime-operational-resource-loader-") as temporary:
+            parent = Path(temporary)
+            root = _external_pinned_root(parent)
+            resources = parent / "resources"
+            shutil.copytree(RESOURCE_ROOT, resources, symlinks=False)
+            try:
+                _rebuild_locked_workspaces(root)
+                locks = verify_operational_locks(root, resources)
+                self.assertEqual(
+                    tuple(locks.source_anchor_digests),
+                    tuple(sorted(locks.source_anchor_digests)),
+                )
+                self.assertEqual(
+                    tuple(locks.built_anchor_digests),
+                    tuple(sorted(locks.built_anchor_digests)),
+                )
+                for relative in (
+                    "packages/coding-agent/src/core/resource-loader.ts",
+                    "packages/coding-agent/dist/core/resource-loader.js",
+                ):
+                    with self.subTest(relative=relative):
+                        target = root / relative
+                        original = target.read_bytes()
+                        try:
+                            target.write_bytes(original + b"\n// drift\n")
+                            rejected = _run_fixture(resources, root, "doctor")
+                            self.assertNotEqual(rejected.returncode, 0)
+                            self.assertNotIn(str(root), rejected.stdout + rejected.stderr)
+                            with self.assertRaises(OperationalHarnessError):
+                                verify_operational_locks(root, resources)
+                        finally:
+                            target.write_bytes(original)
+            finally:
+                subprocess.run(
+                    ("git", "-C", str(PINNED_ROOT), "worktree", "remove", "--force", str(root)),
+                    check=False, capture_output=True, text=True, timeout=20,
+                )
+
     def test_fixture_rejects_falsified_model_settings_and_counter_receipts(self) -> None:
         mutations = (
             ("auth", "scenario_counts: Object.freeze({ ...receiptCounters(packageId), scenario_calls: 2 })"),

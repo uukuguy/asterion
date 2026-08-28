@@ -102,9 +102,9 @@ export const PRIME_CLIENT_BUNDLE_DIGEST =
 
 /** Digests for the repository resource that gates real Prime operations. */
 export const PRIME_OPERATIONAL_MODULE_LOCK_DIGEST =
-  "611610818b44b3047879a3eae987be00b93e42b8b63a315bb112975b588c7300";
+  "74d83039792d9d20147d718b5d3cc8d4e450228412d14469a3a0e1c895909034";
 export const PRIME_OPERATIONAL_BUNDLE_DIGEST =
-  "54d794454de24c5bec140ee0f4d5b946df829337d9ae43c9b1711b7971d5bc3d";
+  "a4f2b94a8a4216985aa5a073f879b44bf37bcac2484ceea03d0d186a7887b0c2";
 
 export interface PrimeClientReceipt {
   readonly artifact_lock_digest: string;

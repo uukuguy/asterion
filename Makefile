@@ -34,7 +34,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test.prime-client-interactive.provider-free
 .PHONY: test.prime-client-export-share.provider-free
 .PHONY: test.prime-client-parity.provider-free
-.PHONY: test.prime-operational-auth.provider-free test.prime-operational-telemetry.provider-free test.prime-operational-doctor.provider-free test.prime-operational-update-restart.provider-free
+.PHONY: test.prime-operational-auth.provider-free test.prime-operational-telemetry-usage.provider-free test.prime-operational-doctor.provider-free test.prime-operational-controlled-update-restart.provider-free
 .PHONY: test.prime-operational-harness.provider-free
 
 help:
@@ -260,23 +260,26 @@ test.prime-operational-harness.provider-free:
 		test/operational-interface.test.mjs \
 		test/main.test.mjs
 
-test.prime-operational-telemetry.provider-free:
+test.prime-operational-telemetry-usage.provider-free:
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_operation_telemetry \
 		tests.test_prime_operational_telemetry
 	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
 
 test.prime-operational-doctor.provider-free:
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_operation_doctor \
 		tests.test_prime_operational_doctor
 	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
 
-test.prime-operational-update-restart.provider-free:
+test.prime-operational-controlled-update-restart.provider-free:
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_operation_update_restart \
 		tests.test_prime_operational_update_restart
 	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
 
 .PHONY: test.prime-operational-model-selection.provider-free
 test.prime-operational-model-selection.provider-free:

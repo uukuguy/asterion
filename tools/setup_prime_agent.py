@@ -51,6 +51,7 @@ PRIME_OPERATIONAL_SOURCE_ANCHORS = (
     "packages/coding-agent/src/core/auth-storage.ts",
     "packages/coding-agent/src/core/diagnostics.ts",
     "packages/coding-agent/src/core/keybindings.ts",
+    "packages/coding-agent/src/core/resource-loader.ts",
     "packages/coding-agent/src/core/settings-manager.ts",
     "packages/coding-agent/src/core/telemetry.ts",
     "packages/coding-agent/src/core/usage.ts",

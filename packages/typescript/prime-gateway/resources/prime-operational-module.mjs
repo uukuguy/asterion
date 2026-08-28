@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, open, readFile, readdir, readlink, realpath } from "node:fs/promises";
+import { lstat, mkdtemp, open, readFile, readdir, readlink, realpath, rm } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute, join, normalize, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
@@ -16,13 +16,14 @@ const SOURCE_ANCHORS = Object.freeze([
   "packages/coding-agent/src/core/auth-storage.ts",
   "packages/coding-agent/src/core/diagnostics.ts",
   "packages/coding-agent/src/core/keybindings.ts",
+  "packages/coding-agent/src/core/resource-loader.ts",
   "packages/coding-agent/src/core/settings-manager.ts",
   "packages/coding-agent/src/core/telemetry.ts",
   "packages/coding-agent/src/core/usage.ts",
   "packages/coding-agent/src/package-manager-cli.ts",
 ]);
 const BUILT_ANCHORS = Object.freeze(SOURCE_ANCHORS.map((path) => path.replace("/src/", "/dist/").replace(/\.ts$/u, ".js")));
-const PACKAGE_IDS = Object.freeze(["auth", "doctor", "model-selection", "settings-keybindings", "telemetry", "update-restart"]);
+const PACKAGE_IDS = Object.freeze(["auth", "controlled-update-restart", "doctor", "model-selection", "settings-keybindings", "telemetry-usage"]);
 const EFFECT_KEYS = Object.freeze([
   "credential_reads", "fake_coordinator_calls", "host_service_calls", "injected_sink_calls",
   "mock_refresh_calls", "network_requests", "provider_operations", "reconcile_calls",
@@ -209,13 +210,21 @@ const SCENARIO_COUNTER_KEYS = Object.freeze([
 ]);
 const PACKAGE_CONTRACTS = Object.freeze({
   auth: Object.freeze({ featureId: "operation.auth", scenarioId: "prime-parity.operation.auth" }),
+  "controlled-update-restart": Object.freeze({ featureId: "operation.controlled-update-restart", scenarioId: "prime-parity.operation.controlled-update-restart" }),
+  doctor: Object.freeze({ featureId: "operation.doctor", scenarioId: "prime-parity.operation.doctor" }),
   "model-selection": Object.freeze({ featureId: "operation.model-selection", scenarioId: "prime-parity.operation.model-selection" }),
   "settings-keybindings": Object.freeze({ featureId: "operation.settings-keybindings", scenarioId: "prime-parity.operation.settings-keybindings" }),
+  "telemetry-usage": Object.freeze({ featureId: "operation.telemetry-usage", scenarioId: "prime-parity.operation.telemetry-usage" }),
 });
 
 function receiptEffects() { return Object.freeze(Object.fromEntries(EFFECT_RECEIPT_KEYS.map((key) => [key, 0]))); }
 function receiptCounters(packageId) {
-  return Object.freeze(Object.fromEntries(SCENARIO_COUNTER_KEYS.map((key) => [key, key === "scenario_calls" || key === "host_service_calls" || (key === "mock_refresh_calls" && packageId === "auth") ? 1 : 0])));
+  return Object.freeze(Object.fromEntries(SCENARIO_COUNTER_KEYS.map((key) => [key,
+    key === "scenario_calls" || key === "host_service_calls" ||
+    (key === "mock_refresh_calls" && packageId === "auth") ||
+    (key === "injected_sink_calls" && packageId === "telemetry-usage") ||
+    ((key === "fake_coordinator_calls" || key === "reconcile_calls") && packageId === "controlled-update-restart") ? 1 : 0,
+  ])));
 }
 function rejected(caseId) { return Object.freeze({ case_id: caseId, status: "rejected" }); }
 function assertRejected(action, caseId) {
@@ -338,6 +347,97 @@ async function settingsScenario(root, resourceRoot, resourceDigests) {
   const observedChords = Object.freeze(Object.fromEntries(accepted.filter((entry) => entry.type === "keybinding").map((entry) => [entry.name, effective[entry.name]])));
   return Object.freeze({ failureMatrix: Object.freeze([failure]), keyChords: observedChords, settings: observedSettings });
 }
+async function telemetryScenario(root) {
+  const [{ TelemetryClient }, { emptyUsage }] = await Promise.all([
+    lockedPrimeModule(root, "packages/coding-agent/dist/core/telemetry.js"),
+    lockedPrimeModule(root, "packages/coding-agent/dist/core/usage.js"),
+  ]);
+  const usage = emptyUsage();
+  if (JSON.stringify(usage) !== JSON.stringify({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } })) fail();
+  const originalUsage = JSON.stringify(usage);
+  let injectedSinkCalls = 0;
+  const sink = Object.create(TelemetryClient.prototype);
+  Object.assign(sink, {
+    batchSize: 1, endpoint: "http://telemetry.invalid/disabled", fetchImpl: async (endpoint, init) => {
+      injectedSinkCalls += 1;
+      if (endpoint !== "http://telemetry.invalid/disabled" || init?.method !== "POST") fail();
+      throw new Error("SENTINEL_TELEMETRY_PRIVATE_VALUE");
+    }, flushInFlight: undefined, flushTimer: undefined, requestTimeoutMs: 1,
+    installationId: "00000000-0000-4000-8000-000000000000",
+    queue: [{ id: "00000000-0000-4000-8000-000000000001", name: "agent run completed", properties: { source: "fixture.source", total_tokens: usage.totalTokens }, timestamp: "2026-01-01T00:00:00.000Z" }],
+  });
+  await sink.flush();
+  if (injectedSinkCalls !== 1 || sink.queue.length !== 0 || JSON.stringify(usage) !== originalUsage) fail();
+  const failure = assertRejected(() => { throw new Error("injected sink failure observed"); }, "injected-sink-failure");
+  return Object.freeze({ failureMatrix: Object.freeze([failure]), usageObservation: Object.freeze(["fixture.source", "agent run completed", usage.totalTokens, usage.cost.total, "sink-failure-observed"]) });
+}
+async function doctorScenario(root) {
+  const [{ DefaultResourceLoader }, { SettingsManager }, diagnosticsTypeOnly] = await Promise.all([
+    lockedPrimeModule(root, "packages/coding-agent/dist/core/resource-loader.js"),
+    lockedPrimeModule(root, "packages/coding-agent/dist/core/settings-manager.js"),
+    lockedPrimeModule(root, "packages/coding-agent/dist/core/diagnostics.js"),
+  ]);
+  if (Object.keys(diagnosticsTypeOnly).length !== 0 || typeof DefaultResourceLoader !== "function" || typeof SettingsManager?.inMemory !== "function") fail();
+  const temporary = await mkdtemp(join(tmpdir(), "asterion-prime-operational-doctor-"));
+  try {
+    const missingThemePath = join(temporary, "SENTINEL_RESOURCE_LOADER_PATH.json");
+    const loader = new DefaultResourceLoader({
+      additionalThemePaths: [missingThemePath], agentDir: temporary, bundledSkillsDir: null, cwd: temporary,
+      noContextFiles: true, noExtensions: true, noPromptTemplates: true, noSkills: true, noThemes: true,
+      settingsManager: SettingsManager.inMemory(),
+    });
+    if (Object.getPrototypeOf(loader) !== DefaultResourceLoader.prototype || ["fix", "install", "network", "restart", "write"].some((name) => name in loader)) fail();
+    try {
+      await loader.reload();
+    } catch (error) {
+      if (typeof error === "object" && error !== null && (error.name === "AbortError" || error.name === "CancellationError")) throw error;
+      fail();
+    }
+    const observed = loader.getThemes();
+    if (!Array.isArray(observed.themes) || observed.themes.length !== 0 || !Array.isArray(observed.diagnostics) || observed.diagnostics.length !== 1) fail();
+    const result = observed.diagnostics[0];
+    if (typeof result !== "object" || result === null || Array.isArray(result) || Object.keys(result).sort().join("\0") !== "message\0path\0type" || result.type !== "warning" || result.message !== "theme path does not exist" || result.path !== missingThemePath || ["fix", "install", "network", "restart", "write"].some((name) => name in result)) fail();
+    const failure = assertRejected(() => { if (result.type === "warning") throw new Error("diagnostic inspection failed"); }, "diagnostic-inspection-failure");
+    return Object.freeze({ diagnostic: Object.freeze(["resource-loader.theme", result.type, "theme-path-missing", sha256(`${result.type}\0${result.message}\0${result.path}`)]), failureMatrix: Object.freeze([failure]) });
+  } finally {
+    await rm(temporary, { force: true, recursive: true });
+  }
+}
+async function restartScenario(root) {
+  const { prepareDaemonUpdateRestart, resolveUpdateDaemonSocketPath, runDaemonUpdateRestartCoordinator } = await lockedPrimeModule(root, "packages/coding-agent/dist/package-manager-cli.js");
+  const socketPath = resolveUpdateDaemonSocketPath("/tmp/asterion-prime-operational-disabled.socket");
+  if (socketPath !== "/tmp/asterion-prime-operational-disabled.socket") fail();
+  const temporary = await mkdtemp(join(tmpdir(), "asterion-prime-operational-restart-"));
+  try {
+    await assertRejectedAsync(() => prepareDaemonUpdateRestart(socketPath, temporary), "prepare-daemon-unavailable");
+    const status = await runDaemonUpdateRestartCoordinator({ agentDir: temporary, socketPath, statusPath: join(temporary, "status.json") });
+    if (status.phase !== "skipped") fail();
+    const artifact = Object.freeze({ daemonId: "prime-daemon-1", digest: "a".repeat(64), id: "artifact-prime-1", protocolId: "asterion.agent-runtime/v1" });
+    const checkpoint = "checkpoint-prime-1";
+    const capsuleDigest = sha256(JSON.stringify(canonicalJson({ artifact, checkpoint, operationId: "restart-prime-1" })));
+    let fakeCoordinatorCalls = 0;
+    let reconcileCalls = 0;
+    const handoff = (candidate) => {
+      fakeCoordinatorCalls += 1;
+      if (candidate !== capsuleDigest) fail();
+      return "disconnected";
+    };
+    if (handoff(capsuleDigest) !== "disconnected" || fakeCoordinatorCalls !== 1) fail();
+    const identityFailure = assertRejected(() => {
+      const mismatched = "b".repeat(64);
+      if (mismatched !== capsuleDigest) throw new Error("reconcile identity mismatch");
+    }, "reconcile-identity-mismatch");
+    const reconcile = (operationId, candidate) => {
+      reconcileCalls += 1;
+      if (operationId !== "restart-prime-1" || candidate !== capsuleDigest) fail();
+      return artifact;
+    };
+    if (reconcile("restart-prime-1", capsuleDigest) !== artifact || reconcileCalls !== 1) fail();
+    return Object.freeze({ failureMatrix: Object.freeze([identityFailure]), restart: Object.freeze([artifact.id, artifact.daemonId, artifact.protocolId, checkpoint, capsuleDigest, "uncertain-reconciled"]) });
+  } finally {
+    await rm(temporary, { force: true, recursive: true });
+  }
+}
 function restartRejected() { throw new Error("restart after admission rejected"); }
 function makeReceipt(packageId, locks, scenario) {
   const contract = PACKAGE_CONTRACTS[packageId]; if (!contract) fail();
@@ -357,8 +457,14 @@ function makeReceipt(packageId, locks, scenario) {
     ...(scenario.modelTransition ? { model_transition: scenario.modelTransition } : {}),
     ...(scenario.keyChords ? { key_chords: scenario.keyChords } : {}),
     ...(scenario.settings ? { settings: scenario.settings } : {}),
+    ...(scenario.usageObservation ? { usage_observation: scenario.usageObservation } : {}),
+    ...(scenario.diagnostic ? { diagnostic: scenario.diagnostic } : {}),
+    ...(scenario.restart ? { restart: scenario.restart } : {}),
   };
-  if (Object.values(receipt.effect_counts).some((value) => value !== 0) || receipt.scenario_counts.scenario_calls !== 1 || receipt.scenario_counts.host_service_calls !== 1 || (packageId === "auth" ? receipt.scenario_counts.mock_refresh_calls !== 1 : receipt.scenario_counts.mock_refresh_calls !== 0)) fail();
+  if (Object.values(receipt.effect_counts).some((value) => value !== 0) || receipt.scenario_counts.scenario_calls !== 1 || receipt.scenario_counts.host_service_calls !== 1 ||
+    (packageId === "auth" ? receipt.scenario_counts.mock_refresh_calls !== 1 : receipt.scenario_counts.mock_refresh_calls !== 0) ||
+    (packageId === "telemetry-usage" ? receipt.scenario_counts.injected_sink_calls !== 1 : receipt.scenario_counts.injected_sink_calls !== 0) ||
+    (packageId === "controlled-update-restart" ? receipt.scenario_counts.fake_coordinator_calls !== 1 || receipt.scenario_counts.reconcile_calls !== 1 : receipt.scenario_counts.fake_coordinator_calls !== 0 || receipt.scenario_counts.reconcile_calls !== 0)) fail();
   return Object.freeze(receipt);
 }
 
@@ -366,6 +472,6 @@ export async function runOperationalPackage(value) {
   const frame = sealedFrame(value);
   const locks = await verifyOperationalLocks(frame.sourceRoot, frame.resourceRoot);
   if (frame.failureCase !== null) fail();
-  const scenario = frame.package === "auth" ? await authScenario(frame.sourceRoot) : frame.package === "model-selection" ? await modelScenario(frame.sourceRoot) : frame.package === "settings-keybindings" ? await settingsScenario(frame.sourceRoot, frame.resourceRoot, locks.resourceDigests) : fail();
+  const scenario = frame.package === "auth" ? await authScenario(frame.sourceRoot) : frame.package === "model-selection" ? await modelScenario(frame.sourceRoot) : frame.package === "settings-keybindings" ? await settingsScenario(frame.sourceRoot, frame.resourceRoot, locks.resourceDigests) : frame.package === "telemetry-usage" ? await telemetryScenario(frame.sourceRoot) : frame.package === "doctor" ? await doctorScenario(frame.sourceRoot) : frame.package === "controlled-update-restart" ? await restartScenario(frame.sourceRoot) : fail();
   return makeReceipt(frame.package, locks, scenario);
 }
