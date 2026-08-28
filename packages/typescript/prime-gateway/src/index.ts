@@ -118,6 +118,14 @@ export {
   PrivateValueStore,
   PrivateValueWriteError,
 } from "./private-store.js";
+export {
+  PrimeOperationError,
+  PrimeOperationGateway,
+  transactionDigest,
+} from "./operation.js";
+export type {
+  PrimeOperationDispatcher,
+} from "./operation.js";
 export type {
   PrivateResultProjection,
   PrivateAttachmentMetadata,

@@ -34,6 +34,10 @@ from asterion.control.providers.prime.ecosystem import (
     McpCredentialRefresh,
     PrimeEcosystemService,
 )
+from asterion.control.providers.prime.operation import (
+    PrimeOperationClient,
+    PrimeOperationError,
+)
 from asterion.control.private_store import (
     PrivateAttachmentResolver,
     PrivateContentResolver,
@@ -88,6 +92,7 @@ _CAPABILITIES = (
     "client-observations-v1",
     "ecosystem.portfolio",
     "event-replay",
+    "operations-v1",
     "session-lifecycle",
     "session.context-v1",
 )
@@ -170,7 +175,7 @@ class _EcosystemSourceStoreSnapshot:
         return self._open_file(resource_id, relative_path)
 
 
-class _EcosystemMaterializerSnapshot:
+class _EcosystemMaterializerSnapshot(SealedEcosystemMaterializer):
     def __init__(
         self,
         materialize: Callable[
@@ -314,11 +319,20 @@ def build_prime_control_plane_client(
             )
             client.bind_ecosystem_service(service, credential_refresh)
         process = process_factory(launch_options)
+        operation_client = PrimeOperationClient(process)
         transport.bind(process)
+        client.bind_operation_client(operation_client)
         return client
     except ControlPlaneFactoryError:
         raise
-    except (OSError, RuntimeError, TypeError, ValueError, PrimeSidecarProcessError):
+    except (
+        OSError,
+        PrimeOperationError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        PrimeSidecarProcessError,
+    ):
         raise ControlPlaneFactoryError("Prime control plane is unavailable") from None
 
 
@@ -352,6 +366,11 @@ def _require_ecosystem_services(
     SealedEcosystemMaterializer,
     McpCredentialRefresh,
 ]:
+    private_resource: object = None
+    open_file: object = None
+    materialize: object = None
+    close: object = None
+    refresh: object = None
     try:
         source_store = services.get(_ECOSYSTEM_SOURCE_STORE_SERVICE)
         materializer = services.get(_ECOSYSTEM_MATERIALIZER_SERVICE)

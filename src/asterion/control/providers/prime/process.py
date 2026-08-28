@@ -605,6 +605,9 @@ def _validate_response(
         "command.accept": "command.accepted",
         "client_value_read": "client_value",
         "ecosystem_activate": "ecosystem_receipt",
+        "operation.cancel": "operation.receipt",
+        "operation.execute": "operation.receipt",
+        "operation.reconcile": "operation.receipt",
         "events.stream": "events.batch",
         "client_observations": "client_observations.batch",
         "private.read": "private.value",
@@ -624,6 +627,7 @@ def _validate_response(
             "client_value",
             "client_observations.batch",
             "ecosystem_receipt",
+            "operation.receipt",
             "events.batch",
             "private.value",
             "rlm.binding.value",
@@ -664,6 +668,7 @@ def _validate_response(
             raise PrimeSidecarProcessError()
     if response.get("type") in {
         "ecosystem_receipt",
+        "operation.receipt",
         "session-context.receipt",
     }:
         expected = expected | {"receipt"}

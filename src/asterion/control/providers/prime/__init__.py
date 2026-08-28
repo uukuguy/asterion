@@ -7,6 +7,10 @@ from asterion.control.providers.prime.client import (
     PrimeControlError,
     PrimeControlPlaneClient,
 )
+from asterion.control.providers.prime.operation import (
+    PrimeOperationClient,
+    PrimeOperationError,
+)
 from asterion.control.private_store import (
     PrivateAttachmentResolver,
     PrivateContentResolver,
@@ -48,6 +52,8 @@ __all__ = (
     "PrivateAttachmentResolver",
     "PrimeControlError",
     "PrimeControlPlaneClient",
+    "PrimeOperationClient",
+    "PrimeOperationError",
     "PrimeContinualHarnessService",
     "PrimeHarnessEdit",
     "PrimeHarnessEffect",

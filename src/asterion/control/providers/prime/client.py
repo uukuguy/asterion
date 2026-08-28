@@ -41,6 +41,7 @@ from asterion.control.session_context import (
     SessionContextReceipt,
 )
 from asterion.control.providers.prime.process import PRIME_GATEWAY_IPC_PROTOCOL
+from asterion.control.providers.prime.operation import PrimeOperationClient
 from asterion.client.protocol import ClientCursor
 from asterion.client.private import PrivateValueDescriptor
 from asterion.client.session import ClientObservation
@@ -217,6 +218,7 @@ class PrimeControlPlaneClient:
         self._close_task: asyncio.Task[None] | None = None
         self._ecosystem_service: PrimeEcosystemService | None = None
         self._ecosystem_credential_refresh: McpCredentialRefresh | None = None
+        self._operation_client: PrimeOperationClient | None = None
 
     @property
     def manifest(self) -> ControlPlaneManifest:
@@ -227,6 +229,23 @@ class PrimeControlPlaneClient:
         """Return the private selected-provider ecosystem boundary, if bound."""
 
         return self._ecosystem_service
+
+    @property
+    def operation_client(self) -> PrimeOperationClient:
+        """Return the generic, body-free operation sidecar bridge."""
+
+        client = self._operation_client
+        if client is None:
+            client = PrimeOperationClient(self._process)
+            self._operation_client = client
+        return client
+
+    def bind_operation_client(self, client: PrimeOperationClient) -> None:
+        """Bind the factory-validated operations-v1 bridge exactly once."""
+
+        if type(client) is not PrimeOperationClient or self._operation_client is not None:
+            raise PrimeControlError()
+        self._operation_client = client
 
     def bind_ecosystem_service(
         self,

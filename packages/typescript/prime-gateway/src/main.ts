@@ -104,6 +104,8 @@ import type {
   RlmMessageProposal,
   RlmSpawnProposal,
 } from "./rlm-host-bridge.js";
+import { PrimeOperationGateway } from "./operation.js";
+import type { OperationReceipt } from "@dci/agent-runtime";
 
 export const PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1";
 export const PRIME_GATEWAY_SKILL_DISCOVERY = "asterion.skill-control-discovery/v1";
@@ -120,6 +122,9 @@ type SidecarEnvelopeType =
   | "client_value_read"
   | "events.stream"
   | "ecosystem_activate"
+  | "operation.cancel"
+  | "operation.execute"
+  | "operation.reconcile"
   | "private.read"
   | "rlm.binding.read"
   | "rlm.message.binding.read"
@@ -134,6 +139,9 @@ const SIDE_CAR_ENVELOPE_TYPES: ReadonlySet<SidecarEnvelopeType> = new Set([
   "client_value_read",
   "events.stream",
   "ecosystem_activate",
+  "operation.cancel",
+  "operation.execute",
+  "operation.reconcile",
   "private.read",
   "rlm.binding.read",
   "rlm.message.binding.read",
@@ -180,6 +188,8 @@ export interface PrimeGatewaySidecarOptions {
     | "describeClientValue"
     | "readClientValue"
   >;
+  /** Production composition deliberately supplies no feature-specific dispatcher. */
+  readonly operation?: PrimeOperationGateway;
 }
 
 interface PrimeSidecarDescriptor {
@@ -223,6 +233,9 @@ interface SidecarEnvelope {
   readonly action_id?: unknown;
   readonly max_bytes?: unknown;
   readonly frame?: unknown;
+  readonly transaction?: unknown;
+  readonly operation_id?: unknown;
+  readonly authority_revision?: unknown;
 }
 
 export type RlmLifecycleObservation =
@@ -315,6 +328,12 @@ type SidecarResponse =
     readonly id: string;
     readonly type: "ecosystem_receipt";
     readonly receipt: PrimeEcosystemReceipt;
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "operation.receipt";
+    readonly receipt: OperationReceipt;
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -718,6 +737,9 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
       value.type !== "client_value_read" &&
       value.type !== "events.stream" &&
       value.type !== "ecosystem_activate" &&
+      value.type !== "operation.cancel" &&
+      value.type !== "operation.execute" &&
+      value.type !== "operation.reconcile" &&
       value.type !== "private.read" &&
       value.type !== "rlm.binding.read" &&
       value.type !== "rlm.message.binding.read" &&
@@ -746,6 +768,20 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
   if (
     value.type === "ecosystem_activate" &&
     !hasExactKeys(value, ["protocol", "id", "type", "frame"])
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    (value.type === "operation.execute" || value.type === "operation.reconcile") &&
+    (!hasExactKeys(value, ["protocol", "id", "type", "transaction", "private"]) ||
+      !isRecord(value.private) || !hasExactKeys(value.private, []))
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    value.type === "operation.cancel" &&
+    (!hasExactKeys(value, ["protocol", "id", "type", "operation_id", "authority_revision", "private"]) ||
+      !isRecord(value.private) || !hasExactKeys(value.private, []))
   ) {
     throw new PrimeGatewayError();
   }
@@ -983,6 +1019,33 @@ export class PrimeGatewaySidecar {
           protocol: PRIME_GATEWAY_IPC_PROTOCOL,
           id: envelope.id,
           type: "ecosystem_receipt",
+          receipt,
+        });
+      }
+      if (envelope.type === "operation.execute" || envelope.type === "operation.reconcile") {
+        const operation = this.options.operation;
+        if (operation === undefined) throw new PrimeGatewayError();
+        const receipt = envelope.type === "operation.execute"
+          ? await operation.execute(envelope.transaction)
+          : await operation.reconcile(envelope.transaction);
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "operation.receipt",
+          receipt,
+        });
+      }
+      if (envelope.type === "operation.cancel") {
+        const operation = this.options.operation;
+        if (operation === undefined) throw new PrimeGatewayError();
+        const receipt = await operation.cancel(
+          envelope.operation_id,
+          envelope.authority_revision,
+        );
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "operation.receipt",
           receipt,
         });
       }
