@@ -6,8 +6,12 @@ import subprocess
 import sys
 import unittest
 
-from asterion.control.authority import AuthorityLedger
-from asterion.control.journal import JournalRecord, MemoryCanonicalJournal
+from asterion.control.authority import (
+    AuthorityLedger,
+    OperationDecision,
+    operation_transaction_digest,
+)
+from asterion.control.journal import JournalCursor, JournalRecord, MemoryCanonicalJournal
 from asterion.operation.manager import OperationManager, OperationManagerError
 from asterion.operation.protocol import (
     EFFECT_COUNTERS,
@@ -52,7 +56,9 @@ def _transaction(
 
 
 def _receipt(
-    transaction: OperationTransaction, status: str = "succeeded"
+    transaction: OperationTransaction,
+    status: str = "succeeded",
+    reason: str | None = None,
 ) -> OperationReceipt:
     return OperationReceipt.from_mapping(
         {
@@ -70,7 +76,7 @@ def _receipt(
             "idempotency_key": transaction.idempotency_key,
             "feature_id": transaction.feature_id,
             "status": status,
-            "reason_code": f"operation-{status}",
+            "reason_code": reason or f"operation-{status}",
             "receipt_ref": f"public-{transaction.operation_id}",
             "reconciliation_ref": None,
             "effect_counts": {key: 0 for key in EFFECT_COUNTERS},
@@ -179,6 +185,65 @@ def _manager():
     return manager, resolver, store, service, journal
 
 
+def _append_records(journal, records: list[JournalRecord]) -> None:
+    position = journal.position
+    for record in records:
+        position = journal.append(position, record).position
+
+
+def _recovered_manager(journal):
+    resolver, store, service = Resolver(), Store(), Service()
+    manager = OperationManager(
+        authority=AuthorityLedger(
+            _envelope(
+                allowed_operations=("operation.auth",),
+                host_service_grants=("operation.auth",),
+            )
+        ),
+        journal=journal,
+        resolver=resolver,
+        private_store=store,
+        services={"operation.auth": service},
+        now_ms=lambda: 1000,
+        session_id="session-1",
+        generation=1,
+    )
+    return manager, resolver, store, service
+
+
+def _admitted(transaction: OperationTransaction) -> OperationDecision:
+    return OperationDecision(
+        operation_id=transaction.operation_id,
+        authority_id=transaction.authority_id,
+        authority_revision=transaction.authority_revision,
+        transaction_digest=operation_transaction_digest(transaction),
+        feature_id=transaction.feature_id,
+        status="admitted",
+        reason="admitted",
+    )
+
+
+def _rejected(transaction: OperationTransaction) -> OperationDecision:
+    return OperationDecision(
+        operation_id=transaction.operation_id,
+        authority_id=transaction.authority_id,
+        authority_revision=transaction.authority_revision,
+        transaction_digest=operation_transaction_digest(transaction),
+        feature_id=transaction.feature_id,
+        status="rejected",
+        reason="host-service-not-authorized",
+    )
+
+
+def _admitted_prefix(transaction: OperationTransaction) -> list[JournalRecord]:
+    decision = _admitted(transaction)
+    return [
+        JournalRecord.operation_transaction_accepted(transaction),
+        JournalRecord.operation_admitted(decision),
+        JournalRecord.operation_reserved(decision),
+    ]
+
+
 class TestOperationManager(unittest.IsolatedAsyncioTestCase):
     async def test_operation_protocol_imports_in_fresh_process(self) -> None:
         result = subprocess.run(
@@ -243,3 +308,157 @@ class TestOperationManager(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual((await recovered.execute(_transaction())).status, "rejected")
         self.assertEqual(recovered._authority.operation_settlements, {})
+
+    async def test_authority_rejection_recovery_is_non_settling_and_replays(self) -> None:
+        _, _, _, _, journal = _manager()
+        transaction = _transaction()
+        _append_records(
+            journal,
+            [
+                JournalRecord.operation_transaction_accepted(transaction),
+                JournalRecord.operation_admitted(_rejected(transaction)),
+                JournalRecord.operation_receipted(_receipt(transaction, "rejected")),
+            ],
+        )
+
+        recovered, resolver, _, service = _recovered_manager(journal)
+
+        self.assertEqual((await recovered.execute(transaction)).status, "rejected")
+        self.assertEqual((resolver.calls, service.execute_calls), (0, []))
+        self.assertEqual(recovered._authority.operation_settlements, {})
+
+    async def test_recovery_accepts_only_legal_operation_phase_prefixes(self) -> None:
+        transaction = _transaction()
+        decision = _admitted(transaction)
+        accepted = JournalRecord.operation_transaction_accepted(transaction)
+        admitted = JournalRecord.operation_admitted(decision)
+        reserved = JournalRecord.operation_reserved(decision)
+        dispatch = JournalRecord.operation_dispatch_started(transaction)
+        handoff = JournalRecord.operation_handoff_fenced(transaction)
+        uncertain = JournalRecord.operation_receipted(_receipt(transaction, "uncertain"))
+        terminal = JournalRecord.operation_receipted(_receipt(transaction))
+        wrong_dispatch = JournalRecord(
+            "operation-dispatch-wrong-digest",
+            "operation.dispatch.started",
+            {
+                "operation_id": transaction.operation_id,
+                "transaction_digest": "a" * 64,
+            },
+        )
+        duplicate_dispatch = JournalRecord(
+            "operation-dispatch-duplicate",
+            "operation.dispatch.started",
+            dispatch.payload,
+        )
+        duplicate_handoff = JournalRecord(
+            "operation-handoff-duplicate",
+            "operation.handoff.fenced",
+            handoff.payload,
+        )
+        duplicate_accepted = JournalRecord(
+            "operation-transaction-duplicate",
+            "operation.transaction.accepted",
+            accepted.payload,
+        )
+        terminal_after_terminal = JournalRecord.operation_receipted(
+            _receipt(transaction, "failed", "private-request-unavailable")
+        )
+        cases = {
+            "decision-without-accepted": [admitted],
+            "reserve-without-admitted": [accepted, reserved],
+            "dispatch-without-reservation": [accepted, admitted, dispatch],
+            "handoff-without-dispatch": [accepted, admitted, reserved, handoff],
+            "wrong-dispatch-digest": [accepted, admitted, reserved, wrong_dispatch],
+            "duplicate-dispatch": [accepted, admitted, reserved, dispatch, duplicate_dispatch],
+            "duplicate-handoff": [accepted, admitted, reserved, dispatch, handoff, duplicate_handoff],
+            "duplicate-accepted": [accepted, duplicate_accepted],
+            "uncertain-without-dispatch": [accepted, admitted, reserved, uncertain],
+            "terminal-without-handoff": [accepted, admitted, reserved, dispatch, terminal],
+            "reconcile-without-uncertain": [
+                accepted,
+                admitted,
+                reserved,
+                dispatch,
+                handoff,
+                JournalRecord.operation_reconciliation_recorded(
+                    operation_id=transaction.operation_id, attempt=1
+                ),
+            ],
+            "reconcile-attempt-gap": [
+                accepted,
+                admitted,
+                reserved,
+                dispatch,
+                uncertain,
+                JournalRecord.operation_reconciliation_recorded(
+                    operation_id=transaction.operation_id, attempt=2
+                ),
+            ],
+            "terminal-after-uncertain-without-reconcile": [
+                accepted,
+                admitted,
+                reserved,
+                dispatch,
+                uncertain,
+                terminal,
+            ],
+            "terminal-to-terminal": [
+                accepted,
+                admitted,
+                reserved,
+                dispatch,
+                handoff,
+                terminal,
+                terminal_after_terminal,
+            ],
+        }
+        for name, records in cases.items():
+            with self.subTest(name=name):
+                _, _, _, _, journal = _manager()
+                _append_records(journal, records)
+                with self.assertRaisesRegex(
+                    OperationManagerError, "operation recovery is invalid"
+                ):
+                    _recovered_manager(journal)
+
+    async def test_recovery_accepts_uncertain_reconciliation_and_terminal_prefix(self) -> None:
+        transaction = _transaction()
+        records = _admitted_prefix(transaction)
+        records.extend(
+            [
+                JournalRecord.operation_dispatch_started(transaction),
+                JournalRecord.operation_receipted(_receipt(transaction, "uncertain")),
+                JournalRecord.operation_reconciliation_recorded(
+                    operation_id=transaction.operation_id, attempt=1
+                ),
+                JournalRecord.operation_receipted(_receipt(transaction)),
+            ]
+        )
+        _, _, _, _, journal = _manager()
+        _append_records(journal, records)
+
+        recovered, resolver, _, service = _recovered_manager(journal)
+
+        self.assertEqual((await recovered.reconcile(transaction)).status, "succeeded")
+        self.assertEqual((resolver.calls, service.reconcile_calls), (0, []))
+        self.assertEqual(
+            set(recovered._authority.operation_settlements), {transaction.operation_id}
+        )
+
+    async def test_recovery_turns_unreceipted_dispatch_prefix_into_uncertain_once(self) -> None:
+        transaction = _transaction()
+        records = _admitted_prefix(transaction)
+        records.append(JournalRecord.operation_dispatch_started(transaction))
+        _, _, _, _, journal = _manager()
+        _append_records(journal, records)
+
+        recovered, resolver, _, service = _recovered_manager(journal)
+
+        self.assertEqual((await recovered.execute(transaction)).status, "uncertain")
+        self.assertEqual((resolver.calls, service.execute_calls), (0, []))
+        operation_receipts = [
+            entry.record
+            for entry in journal.replay(JournalCursor(0))
+            if entry.record.kind == "operation.receipted"
+        ]
+        self.assertEqual(len(operation_receipts), 1)

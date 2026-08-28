@@ -33,3 +33,44 @@ class TestOperationPrivateResolver(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt.status, "failed")
         self.assertNotIn("SENTINEL_SECRET", repr(receipt))
         self.assertEqual(service.execute_calls, [])
+
+    async def test_cancellation_before_or_during_resolution_is_not_private_failure(
+        self,
+    ) -> None:
+        for name, cancel_before_read in {
+            "before-read": True,
+            "after-read": False,
+        }.items():
+            with self.subTest(name=name):
+                manager, resolver, _, service, _ = _manager()
+                cancelled = [cancel_before_read]
+                manager._cancelled = lambda: cancelled[0]
+                if not cancel_before_read:
+                    original = resolver.resolve
+
+                    def cancel_after_read(*args, **kwargs):
+                        body = original(*args, **kwargs)
+                        cancelled[0] = True
+                        return body
+
+                    resolver.resolve = cancel_after_read  # type: ignore[method-assign]
+                receipt = await manager.execute(_transaction())
+                self.assertEqual(
+                    (receipt.status, receipt.reason_code),
+                    ("cancelled", "cancelled-before-dispatch"),
+                )
+                self.assertEqual(resolver.calls, 0 if cancel_before_read else 1)
+                self.assertEqual(service.execute_calls, [])
+
+    async def test_malicious_private_store_digest_is_never_accepted(self) -> None:
+        manager, _, store, service, _ = _manager()
+        transaction = _transaction()
+        manager.fail_after = "operation.dispatch.started"
+        self.assertEqual((await manager.execute(transaction)).status, "uncertain")
+        store.digests[transaction.operation_id] = "a" * 64
+
+        with self.assertRaisesRegex(
+            ValueError, "operation private request conflicts"
+        ):
+            await manager.reconcile(transaction)
+        self.assertEqual(service.reconcile_calls, [])

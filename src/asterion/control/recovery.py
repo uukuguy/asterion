@@ -1,6 +1,4 @@
 """Pure reconstruction of host-owned control state from a canonical journal."""
-# pyright: reportGeneralTypeIssues=false
-
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -47,6 +45,17 @@ from asterion.control.state import (
     mark_action_running,
     reconcile_uncertain_action,
     reduce_control_event,
+)
+
+
+_RecoveryAuthorityOperation = (
+    AdmissionDecision
+    | ActionReceipt
+    | ProviderUsageReport
+    | SessionContextDecision
+    | SessionContextSettlement
+    | OperationDecision
+    | OperationSettlement
 )
 
 
@@ -107,6 +116,20 @@ class RecoveredControlState:
         return self.authority.reserved_action_ids
 
 
+@dataclass
+class _OperationRecoveryPhase:
+    """Strict, per-operation durable prefix used by control-state recovery."""
+
+    transaction: OperationTransaction | None = None
+    decision: OperationDecision | None = None
+    reserved: bool = False
+    dispatched: bool = False
+    handoff: bool = False
+    receipt: OperationReceipt | None = None
+    reconciliation_attempt: int = 0
+    reconciled_after_uncertain: bool = False
+
+
 def recover_control_host_state(
     entries: Sequence[JournalEntry],
     envelope: AuthorityEnvelope,
@@ -115,8 +138,6 @@ def recover_control_host_state(
     expected_generation: int | None = None,
 ) -> RecoveredControlState:
     """Validate and replay one complete journal prefix without mutating inputs."""
-
-    from asterion.operation.protocol import OperationReceipt, OperationTransaction
 
     try:
         values = tuple(entries)
@@ -152,15 +173,7 @@ def recover_control_host_state(
         accepted_events: dict[str, ControlEvent] = {}
         receipts: dict[str, ActionReceipt] = {}
         result_receipts: dict[str, ActionExecutionReceipt] = {}
-        authority_operations: list[
-            AdmissionDecision
-            | ActionReceipt
-            | ProviderUsageReport
-            | SessionContextDecision
-            | SessionContextSettlement
-            | OperationDecision
-            | OperationSettlement
-        ] = []
+        authority_operations: list[_RecoveryAuthorityOperation] = []
         decisions: dict[str, AdmissionDecision] = {}
         terminal_commands: dict[str, ControlCommand] = {}
         admission_commands: dict[str, ControlCommand] = {}
@@ -169,10 +182,7 @@ def recover_control_host_state(
         context_decisions: dict[str, SessionContextDecision] = {}
         context_receipts: dict[str, SessionContextReceipt] = {}
         context_idempotency: dict[str, str] = {}
-        operation_transactions: dict[str, OperationTransaction] = {}
-        operation_decisions: dict[str, OperationDecision] = {}
-        operation_reserved: set[str] = set()
-        operation_receipts: dict[str, OperationReceipt] = {}
+        operation_phases: dict[str, _OperationRecoveryPhase] = {}
 
         for entry in values[start:]:
             record = entry.record
@@ -182,84 +192,7 @@ def recover_control_host_state(
                 "client.event.accepted",
             }:
                 continue
-            if record.kind == "operation.transaction.accepted":
-                value = record.payload["transaction"]
-                if not isinstance(value, Mapping):
-                    raise JournalConflictError("control journal recovery failed")
-                transaction = OperationTransaction.from_mapping(value)
-                if transaction.operation_id in operation_transactions:
-                    raise JournalConflictError("control journal recovery failed")
-                operation_transactions[transaction.operation_id] = transaction
-                continue
-            if record.kind == "operation.admitted":
-                decision = OperationDecision(**record.payload)  # type: ignore[arg-type]
-                transaction = operation_transactions.get(decision.operation_id)
-                if (
-                    transaction is None
-                    or decision.transaction_digest
-                    != _operation_transaction_digest(transaction)
-                    or decision.operation_id in operation_decisions
-                ):
-                    raise JournalConflictError("control journal recovery failed")
-                operation_decisions[decision.operation_id] = decision
-                continue
-            if record.kind == "operation.reserved":
-                operation_id = str(record.payload["operation_id"])
-                decision = operation_decisions.get(operation_id)
-                if (
-                    decision is None
-                    or decision.status != "admitted"
-                    or record.payload["transaction_digest"]
-                    != decision.transaction_digest
-                    or operation_id in operation_reserved
-                ):
-                    raise JournalConflictError("control journal recovery failed")
-                operation_reserved.add(operation_id)
-                authority_operations.append(decision)
-                continue
-            if record.kind in {
-                "operation.dispatch.started",
-                "operation.handoff.fenced",
-                "operation.reconciliation.recorded",
-            }:
-                continue
-            if record.kind == "operation.receipted":
-                value = record.payload["receipt"]
-                if not isinstance(value, Mapping):
-                    raise JournalConflictError("control journal recovery failed")
-                receipt = OperationReceipt.from_mapping(value)
-                transaction = operation_transactions.get(receipt.operation_id)
-                decision = operation_decisions.get(receipt.operation_id)
-                previous_receipt = operation_receipts.get(receipt.operation_id)
-                rejected = decision is not None and decision.status == "rejected"
-                if (
-                    transaction is None
-                    or decision is None
-                    or (
-                        previous_receipt is not None
-                        and (
-                            previous_receipt.status != "uncertain"
-                            or receipt.status == "uncertain"
-                        )
-                    )
-                    or (rejected and receipt.status != "rejected")
-                    or (not rejected and receipt.operation_id not in operation_reserved)
-                    or not _same_operation_identity(transaction, receipt)
-                ):
-                    raise JournalConflictError("control journal recovery failed")
-                operation_receipts[receipt.operation_id] = receipt
-                if (
-                    receipt.status != "uncertain"
-                    and decision.status == "admitted"
-                    and receipt.operation_id in operation_reserved
-                ):
-                    authority_operations.append(
-                        OperationSettlement(
-                            receipt.operation_id,
-                            receipt.receipt_id,
-                            _operation_receipt_digest(receipt),
-                        )
-                    )
+            if _recover_operation_record(record, operation_phases, authority_operations):
                 continue
             if record.kind == "event.accepted":
                 event = ControlEvent.from_mapping(_mapping(record.payload["event"]))
@@ -555,6 +488,139 @@ def recover_control_host_state(
         raise JournalConflictError("control journal recovery failed") from None
 
 
+def _recover_operation_record(
+    record: object,
+    phases: dict[str, _OperationRecoveryPhase],
+    authority_operations: list[_RecoveryAuthorityOperation],
+) -> bool:
+    """Replay one operation record and report whether the record belonged to this FSM."""
+
+    from asterion.operation.protocol import OperationReceipt, OperationTransaction
+
+    kind = getattr(record, "kind", None)
+    payload = getattr(record, "payload", None)
+    if not isinstance(payload, Mapping):
+        raise JournalConflictError("control journal recovery failed")
+    if kind == "operation.transaction.accepted":
+        value = payload.get("transaction")
+        if not isinstance(value, Mapping):
+            raise JournalConflictError("control journal recovery failed")
+        transaction = OperationTransaction.from_mapping(value)
+        phase = phases.setdefault(transaction.operation_id, _OperationRecoveryPhase())
+        if phase.transaction is not None:
+            raise JournalConflictError("control journal recovery failed")
+        phase.transaction = transaction
+        return True
+    if kind == "operation.admitted":
+        decision = OperationDecision(**payload)  # type: ignore[arg-type]
+        phase = phases.get(decision.operation_id)
+        if phase is None or phase.transaction is None:
+            raise JournalConflictError("control journal recovery failed")
+        transaction = phase.transaction
+        if (
+            phase.decision is not None
+            or phase.receipt is not None
+            or decision.authority_id != transaction.authority_id
+            or decision.authority_revision != transaction.authority_revision
+            or decision.feature_id != transaction.feature_id
+            or decision.transaction_digest != _operation_transaction_digest(transaction)
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.decision = decision
+        return True
+    if kind == "operation.reserved":
+        operation_id = payload.get("operation_id")
+        digest = payload.get("transaction_digest")
+        phase = phases.get(operation_id) if isinstance(operation_id, str) else None
+        if (
+            phase is None
+            or phase.decision is None
+            or not isinstance(digest, str)
+            or phase.decision.status != "admitted"
+            or phase.reserved
+            or phase.receipt is not None
+            or digest != phase.decision.transaction_digest
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.reserved = True
+        authority_operations.append(phase.decision)
+        return True
+    if kind == "operation.dispatch.started":
+        phase = _operation_phase_for_digest(phases, record)
+        if (
+            phase.decision is None
+            or phase.decision.status != "admitted"
+            or not phase.reserved
+            or phase.dispatched
+            or phase.handoff
+            or phase.receipt is not None
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.dispatched = True
+        return True
+    if kind == "operation.handoff.fenced":
+        phase = _operation_phase_for_digest(phases, record)
+        if (
+            phase.decision is None
+            or phase.decision.status != "admitted"
+            or not phase.reserved
+            or not phase.dispatched
+            or phase.handoff
+            or phase.receipt is not None
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.handoff = True
+        return True
+    if kind == "operation.reconciliation.recorded":
+        operation_id = payload.get("operation_id")
+        attempt = payload.get("attempt")
+        phase = phases.get(operation_id) if isinstance(operation_id, str) else None
+        if (
+            phase is None
+            or phase.transaction is None
+            or phase.decision is None
+            or type(attempt) is not int
+            or phase.decision.status != "admitted"
+            or not phase.reserved
+            or not phase.dispatched
+            or phase.receipt is None
+            or phase.receipt.status != "uncertain"
+            or attempt != phase.reconciliation_attempt + 1
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.reconciliation_attempt = attempt
+        phase.reconciled_after_uncertain = True
+        return True
+    if kind == "operation.receipted":
+        value = payload.get("receipt")
+        if not isinstance(value, Mapping):
+            raise JournalConflictError("control journal recovery failed")
+        receipt = OperationReceipt.from_mapping(value)
+        phase = phases.get(receipt.operation_id)
+        if (
+            phase is None
+            or phase.transaction is None
+            or not _same_operation_identity(phase.transaction, receipt)
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        _record_recovered_operation_receipt(phase, receipt)
+        if (
+            receipt.status != "uncertain"
+            and phase.decision is not None
+            and phase.decision.status == "admitted"
+            and phase.reserved
+        ):
+            authority_operations.append(
+                OperationSettlement(
+                    receipt.operation_id,
+                    receipt.receipt_id,
+                    _operation_receipt_digest(receipt),
+                )
+            )
+        return True
+    return False
+
+
 def _same_operation_identity(
     transaction: OperationTransaction, receipt: OperationReceipt
 ) -> bool:
@@ -571,6 +637,82 @@ def _same_operation_identity(
         and receipt.idempotency_key == transaction.idempotency_key
         and receipt.feature_id == transaction.feature_id
     )
+
+
+def _operation_phase_for_digest(
+    phases: Mapping[str, _OperationRecoveryPhase], record: object
+) -> _OperationRecoveryPhase:
+    payload = getattr(record, "payload", None)
+    if not isinstance(payload, Mapping):
+        raise JournalConflictError("control journal recovery failed")
+    operation_id = payload.get("operation_id")
+    digest = payload.get("transaction_digest")
+    if not isinstance(operation_id, str) or not isinstance(digest, str):
+        raise JournalConflictError("control journal recovery failed")
+    phase = phases.get(operation_id)
+    if (
+        phase is None
+        or phase.transaction is None
+        or digest != _operation_transaction_digest(phase.transaction)
+    ):
+        raise JournalConflictError("control journal recovery failed")
+    return phase
+
+
+def _record_recovered_operation_receipt(
+    phase: _OperationRecoveryPhase, receipt: OperationReceipt
+) -> None:
+    """Validate every operation receipt as the next legal durable phase."""
+
+    prior = phase.receipt
+    decision = phase.decision
+    if prior is not None:
+        if (
+            prior.status != "uncertain"
+            or receipt.status == "uncertain"
+            or not phase.reconciled_after_uncertain
+            or receipt.status not in {"succeeded", "failed", "cancelled", "rejected"}
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.receipt = receipt
+        return
+    if decision is None:
+        if (
+            receipt.status != "rejected"
+            or phase.reserved
+            or phase.dispatched
+            or phase.handoff
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.receipt = receipt
+        return
+    if decision.status == "rejected":
+        if (
+            receipt.status != "rejected"
+            or phase.reserved
+            or phase.dispatched
+            or phase.handoff
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.receipt = receipt
+        return
+    if not phase.reserved:
+        raise JournalConflictError("control journal recovery failed")
+    if receipt.status == "uncertain":
+        if not phase.dispatched:
+            raise JournalConflictError("control journal recovery failed")
+        phase.receipt = receipt
+        return
+    if phase.dispatched:
+        if not phase.handoff:
+            raise JournalConflictError("control journal recovery failed")
+    elif (
+        receipt.status not in {"failed", "cancelled"}
+        or receipt.reason_code
+        not in {"private-request-unavailable", "cancelled-before-dispatch"}
+    ):
+        raise JournalConflictError("control journal recovery failed")
+    phase.receipt = receipt
 
 
 def _operation_transaction_digest(transaction: OperationTransaction) -> str:

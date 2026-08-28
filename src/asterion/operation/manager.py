@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
 from asterion.control.authority import (
     AuthorityError,
@@ -35,6 +36,20 @@ from asterion.operation.services import (
 
 class OperationManagerError(ValueError):
     """Raised without private request values when operation execution cannot proceed."""
+
+
+@dataclass
+class _RecoveryPhase:
+    """The legal durable prefix for one operation identity."""
+
+    transaction: OperationTransaction | None = None
+    decision: OperationDecision | None = None
+    reserved: bool = False
+    dispatched: bool = False
+    handoff: bool = False
+    receipt: OperationReceipt | None = None
+    reconciliation_attempt: int = 0
+    reconciled_after_uncertain: bool = False
 
 
 class OperationManager:
@@ -217,8 +232,7 @@ class OperationManager:
 
     def _recover(self) -> None:
         try:
-            decisions: dict[str, OperationDecision] = {}
-            reserved: set[str] = set()
+            phases: dict[str, _RecoveryPhase] = {}
             for entry in self._journal.replay(JournalCursor(0)):
                 record = entry.record
                 if record.kind == "operation.transaction.accepted":
@@ -226,63 +240,94 @@ class OperationManager:
                     if not isinstance(transaction_value, Mapping):
                         raise ValueError
                     transaction = OperationTransaction.from_mapping(transaction_value)
-                    prior = self._transactions.get(transaction.operation_id)
-                    if prior is not None and prior != transaction:
-                        raise OperationManagerError("operation recovery conflicts")
+                    self._validate_transaction(transaction)
+                    phase = phases.setdefault(transaction.operation_id, _RecoveryPhase())
+                    if phase.transaction is not None:
+                        raise ValueError
+                    phase.transaction = transaction
                     self._transactions[transaction.operation_id] = transaction
                 elif record.kind == "operation.admitted":
                     decision = OperationDecision(**record.payload)  # type: ignore[arg-type]
-                    transaction = self._transactions.get(decision.operation_id)
+                    phase = phases.get(decision.operation_id)
+                    if phase is None or phase.transaction is None:
+                        raise ValueError
+                    transaction = phase.transaction
                     if (
-                        transaction is None
+                        phase.decision is not None
+                        or phase.receipt is not None
+                        or decision.authority_id != transaction.authority_id
+                        or decision.authority_revision != transaction.authority_revision
+                        or decision.feature_id != transaction.feature_id
                         or decision.transaction_digest
                         != operation_transaction_digest(transaction)
                     ):
                         raise ValueError
-                    decisions[decision.operation_id] = decision
+                    phase.decision = decision
                 elif record.kind == "operation.reserved":
-                    operation_id = str(record.payload["operation_id"])
-                    decision = decisions.get(operation_id)
+                    operation_id = record.payload["operation_id"]
+                    digest = record.payload["transaction_digest"]
+                    if not isinstance(operation_id, str) or not isinstance(digest, str):
+                        raise ValueError
+                    phase = phases.get(operation_id)
+                    if phase is None or phase.decision is None:
+                        raise ValueError
+                    decision = phase.decision
                     if (
-                        decision is None
-                        or record.payload["transaction_digest"]
+                        decision.status != "admitted"
+                        or phase.reserved
+                        or phase.receipt is not None
+                        or digest
                         != decision.transaction_digest
                     ):
                         raise ValueError
                     self._authority.reserve_operation(decision)
-                    reserved.add(operation_id)
-                elif record.kind in {
-                    "operation.dispatch.started",
-                    "operation.handoff.fenced",
-                }:
-                    self._dispatched.add(str(record.payload["operation_id"]))
+                    phase.reserved = True
+                elif record.kind == "operation.dispatch.started":
+                    phase = self._phase_for_digest(phases, record)
+                    if (
+                        phase.decision is None
+                        or phase.decision.status != "admitted"
+                        or not phase.reserved
+                        or phase.dispatched
+                        or phase.handoff
+                        or phase.receipt is not None
+                    ):
+                        raise ValueError
+                    phase.dispatched = True
+                    assert phase.transaction is not None
+                    self._dispatched.add(phase.transaction.operation_id)
+                elif record.kind == "operation.handoff.fenced":
+                    phase = self._phase_for_digest(phases, record)
+                    if (
+                        phase.decision is None
+                        or phase.decision.status != "admitted"
+                        or not phase.reserved
+                        or not phase.dispatched
+                        or phase.handoff
+                        or phase.receipt is not None
+                    ):
+                        raise ValueError
+                    phase.handoff = True
                 elif record.kind == "operation.receipted":
                     receipt_value = record.payload["receipt"]
                     if not isinstance(receipt_value, Mapping):
                         raise ValueError
                     receipt = OperationReceipt.from_mapping(receipt_value)
-                    prior = self._receipts.get(receipt.operation_id)
-                    if (
-                        prior is not None
-                        and prior.status != "uncertain"
-                        and prior != receipt
+                    phase = phases.get(receipt.operation_id)
+                    if phase is None or phase.transaction is None:
+                        raise ValueError
+                    transaction = phase.transaction
+                    if not self._same_receipt_identity(
+                        transaction, receipt
                     ):
-                        raise OperationManagerError("operation recovery conflicts")
+                        raise ValueError
+                    self._record_recovered_receipt(phase, receipt)
                     self._receipts[receipt.operation_id] = receipt
-                    decision = decisions.get(receipt.operation_id)
-                    if decision is None and receipt.status != "rejected":
-                        raise ValueError
                     if (
-                        decision is not None
-                        and decision.status == "rejected"
-                        and receipt.status != "rejected"
-                    ):
-                        raise ValueError
-                    if (
-                        receipt.status != "uncertain"
-                        and decision is not None
-                        and decision.status == "admitted"
-                        and receipt.operation_id in reserved
+                        phase.decision is not None
+                        and phase.decision.status == "admitted"
+                        and phase.reserved
+                        and receipt.status != "uncertain"
                     ):
                         self._authority.settle_operation(
                             receipt.operation_id,
@@ -293,20 +338,113 @@ class OperationManager:
                             ),
                         )
                 elif record.kind == "operation.reconciliation.recorded":
-                    attempt_value = record.payload["attempt"]
-                    if type(attempt_value) is not int:
+                    operation_id = record.payload["operation_id"]
+                    attempt = record.payload["attempt"]
+                    if not isinstance(operation_id, str) or type(attempt) is not int:
                         raise ValueError
-                    operation_id, attempt = str(record.payload["operation_id"]), attempt_value
-                    self._attempts[operation_id] = max(
-                        self._attempts.get(operation_id, 0), attempt
-                    )
-            for operation_id in sorted(self._dispatched - set(self._receipts)):
-                transaction = self._transactions.get(operation_id)
-                if transaction is None:
-                    raise ValueError
-                self._uncertain(transaction)
-        except (JournalConflictError, OperationProtocolError, TypeError, ValueError):
+                    phase = phases.get(operation_id)
+                    if (
+                        phase is None
+                        or phase.transaction is None
+                        or phase.decision is None
+                        or phase.decision.status != "admitted"
+                        or not phase.reserved
+                        or not phase.dispatched
+                        or phase.receipt is None
+                        or phase.receipt.status != "uncertain"
+                        or attempt != phase.reconciliation_attempt + 1
+                    ):
+                        raise ValueError
+                    phase.reconciliation_attempt = attempt
+                    phase.reconciled_after_uncertain = True
+                    self._attempts[operation_id] = attempt
+            for phase in phases.values():
+                if phase.dispatched and phase.receipt is None:
+                    if phase.transaction is None:
+                        raise ValueError
+                    self._uncertain(phase.transaction)
+        except (
+            AuthorityError,
+            JournalConflictError,
+            OperationManagerError,
+            OperationProtocolError,
+            TypeError,
+            ValueError,
+        ):
             raise OperationManagerError("operation recovery is invalid") from None
+
+    @staticmethod
+    def _phase_for_digest(
+        phases: Mapping[str, _RecoveryPhase], record: JournalRecord
+    ) -> _RecoveryPhase:
+        operation_id = record.payload["operation_id"]
+        digest = record.payload["transaction_digest"]
+        if not isinstance(operation_id, str) or not isinstance(digest, str):
+            raise ValueError
+        phase = phases.get(operation_id)
+        if (
+            phase is None
+            or phase.transaction is None
+            or digest != operation_transaction_digest(phase.transaction)
+        ):
+            raise ValueError
+        return phase
+
+    @staticmethod
+    def _record_recovered_receipt(
+        phase: _RecoveryPhase, receipt: OperationReceipt
+    ) -> None:
+        """Validate a terminal record against the durable prefix without effects."""
+
+        prior = phase.receipt
+        decision = phase.decision
+        if prior is not None:
+            if (
+                prior.status != "uncertain"
+                or receipt.status == "uncertain"
+                or not phase.reconciled_after_uncertain
+                or receipt.status not in {"succeeded", "failed", "cancelled", "rejected"}
+            ):
+                raise ValueError
+            phase.receipt = receipt
+            return
+        if decision is None:
+            if (
+                receipt.status != "rejected"
+                or phase.reserved
+                or phase.dispatched
+                or phase.handoff
+            ):
+                raise ValueError
+            phase.receipt = receipt
+            return
+        if decision.status == "rejected":
+            if (
+                receipt.status != "rejected"
+                or phase.reserved
+                or phase.dispatched
+                or phase.handoff
+            ):
+                raise ValueError
+            phase.receipt = receipt
+            return
+        if not phase.reserved:
+            raise ValueError
+        if receipt.status == "uncertain":
+            if not phase.dispatched:
+                raise ValueError
+            phase.receipt = receipt
+            return
+        if phase.dispatched:
+            if not phase.handoff:
+                raise ValueError
+        elif (
+            receipt.status not in {"failed", "cancelled"}
+            or receipt.reason_code
+            not in {"private-request-unavailable", "cancelled-before-dispatch"}
+        ):
+            raise ValueError
+        phase.receipt = receipt
 
     def _validate_transaction(self, transaction: object) -> None:
         if (
@@ -352,8 +490,6 @@ class OperationManager:
                 authority_revision=transaction.authority_revision,
                 cancelled=False,
             )
-            if self._cancelled():
-                raise OperationManagerError("operation cancelled")
             if (
                 not isinstance(body, bytes)
                 or len(body) != request.byte_count
@@ -369,9 +505,14 @@ class OperationManager:
                 not isinstance(digest, str)
                 or len(digest) != 64
                 or any(value not in "0123456789abcdef" for value in digest)
+                or digest != _typed_digest(typed)
             ):
                 raise ValueError
+            if self._cancelled():
+                raise OperationManagerError("operation cancelled")
             return typed
+        except OperationManagerError:
+            raise
         except Exception:
             raise OperationManagerError(
                 "operation private request is unavailable"
@@ -382,6 +523,9 @@ class OperationManager:
     ) -> object:
         value = self._store.get(transaction)
         if value is not None:
+            digest = self._store.get_digest(transaction)
+            if digest != _typed_digest(value):
+                raise OperationManagerError("operation private request conflicts")
             return value
         expected = self._store.get_digest(transaction)
         value = self._resolve(transaction, service)
@@ -489,3 +633,9 @@ def _json_value(value: object) -> object:
     if isinstance(value, tuple):
         return [_json_value(item) for item in value]
     return value
+
+
+def _typed_digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(_json_value(value), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()

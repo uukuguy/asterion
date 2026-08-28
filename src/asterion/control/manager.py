@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from asterion.control.authority import (
     ActionReceipt,
@@ -60,7 +60,12 @@ from asterion.pathlight.recorder import (
 
 if TYPE_CHECKING:
     from asterion.operation.manager import OperationManager
-    from asterion.operation.protocol import OperationTransaction
+    from asterion.operation.protocol import OperationReceipt, OperationTransaction
+    from asterion.operation.services import (
+        OperationPrivateRequestResolver,
+        OperationPrivateRequestStore,
+        OperationService,
+    )
 
 
 class ControlHostError(RuntimeError):
@@ -71,19 +76,29 @@ class ControlHostTransportError(ControlHostError):
     """Raised when a persisted provider operation has uncertain transport state."""
 
 
+class _OperationExecutionManager(Protocol):
+    async def execute(self, transaction: OperationTransaction) -> OperationReceipt: ...
+
+    async def reconcile(
+        self, transaction: OperationTransaction
+    ) -> OperationReceipt: ...
+
+
 class _RecoveredOperationHost:
     """Narrow recovery facade; the operation manager remains private."""
 
-    def __init__(self, manager: object) -> None:
-        self._manager: Any = manager
+    def __init__(self, manager: _OperationExecutionManager) -> None:
+        self._manager = manager
 
-    async def execute_operation(self, transaction: object) -> object:
+    async def execute_operation(self, transaction: OperationTransaction) -> OperationReceipt:
         try:
             return await self._manager.execute(transaction)
         except Exception:
             raise ControlHostError("control operation failed") from None
 
-    async def reconcile_operation(self, transaction: object) -> object:
+    async def reconcile_operation(
+        self, transaction: OperationTransaction
+    ) -> OperationReceipt:
         try:
             return await self._manager.reconcile(transaction)
         except Exception:
@@ -183,21 +198,37 @@ class _NeverCancelled:
 
 
 class _UnavailableOperationResolver:
-    def resolve(self, *args: object, **kwargs: object) -> bytes:
-        del args, kwargs
+    def resolve(
+        self,
+        descriptor: object,
+        *,
+        purpose: str,
+        max_bytes: int,
+        deadline_ms: int,
+        authority_revision: int,
+        cancelled: bool,
+    ) -> bytes:
+        del (
+            descriptor,
+            purpose,
+            max_bytes,
+            deadline_ms,
+            authority_revision,
+            cancelled,
+        )
         raise RuntimeError("private operation request unavailable")
 
 
 class _UnavailableOperationStore:
-    def put(self, transaction: object, typed_request: object) -> str:
+    def put(self, transaction: OperationTransaction, typed_request: object) -> str:
         del transaction, typed_request
         raise RuntimeError("private operation request unavailable")
 
-    def get(self, transaction: object) -> None:
+    def get(self, transaction: OperationTransaction) -> None:
         del transaction
         return None
 
-    def get_digest(self, transaction: object) -> None:
+    def get_digest(self, transaction: OperationTransaction) -> None:
         del transaction
         return None
 
@@ -584,11 +615,11 @@ class ControlHost:
         journal: CanonicalJournal,
         envelope: object,
         *,
-        services: Mapping[str, object],
-        resolver: object | None = None,
-        private_store: object | None = None,
+        services: Mapping[str, OperationService],
+        resolver: OperationPrivateRequestResolver | None = None,
+        private_store: OperationPrivateRequestStore | None = None,
         now_ms: Callable[[], int] | None = None,
-    ) -> object:
+    ) -> _RecoveredOperationHost:
         """Recover operation state without loading a provider or private values."""
 
         from asterion.control.authority import AuthorityEnvelope
@@ -611,13 +642,9 @@ class ControlHost:
             manager = OperationManager(
                 authority=AuthorityLedger(envelope),
                 journal=journal,
-                resolver=cast(Any, resolver)
-                if resolver is not None
-                else _UnavailableOperationResolver(),
-                private_store=cast(Any, private_store)
-                if private_store is not None
-                else _UnavailableOperationStore(),
-                services=cast(Any, services),
+                resolver=_validated_operation_resolver(resolver),
+                private_store=_validated_operation_store(private_store),
+                services=_validated_operation_services(services),
                 now_ms=now_ms or (lambda: 0),
                 session_id=transaction.session_id,
                 generation=transaction.generation,
@@ -1302,6 +1329,40 @@ def _valid_operation_manager(value: object) -> bool:
         and callable(getattr(value, "reconcile", None))
         and callable(getattr(value, "cancel", None))
     )
+
+
+def _validated_operation_resolver(
+    value: OperationPrivateRequestResolver | None,
+) -> OperationPrivateRequestResolver:
+    if value is None:
+        return _UnavailableOperationResolver()
+    if not callable(getattr(value, "resolve", None)):
+        raise TypeError
+    return value
+
+
+def _validated_operation_store(
+    value: OperationPrivateRequestStore | None,
+) -> OperationPrivateRequestStore:
+    if value is None:
+        return _UnavailableOperationStore()
+    if not all(callable(getattr(value, method, None)) for method in ("put", "get", "get_digest")):
+        raise TypeError
+    return value
+
+
+def _validated_operation_services(
+    value: Mapping[str, OperationService],
+) -> Mapping[str, OperationService]:
+    if not all(
+        isinstance(feature_id, str)
+        and callable(getattr(service, "execute", None))
+        and callable(getattr(service, "cancel", None))
+        and callable(getattr(service, "reconcile", None))
+        for feature_id, service in value.items()
+    ):
+        raise TypeError
+    return dict(value)
 
 
 def _valid_provider_owned_actions(value: object) -> bool:

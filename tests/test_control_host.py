@@ -13,7 +13,7 @@ from asterion.control.host import (
     ControlPlaneManifest,
     EventCursor,
 )
-from asterion.control.journal import MemoryCanonicalJournal
+from asterion.control.journal import JournalRecord, MemoryCanonicalJournal
 from asterion.control.manager import (
     ControlHost,
     ControlHostError,
@@ -204,6 +204,45 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             (await recovered.reconcile_operation(transaction)).status, "uncertain"
         )
+
+    async def test_recovered_operation_host_replays_both_rejected_shapes(self) -> None:
+        from tests.test_operation_manager import (
+            _append_records,
+            _manager,
+            _receipt,
+            _rejected,
+            _transaction,
+        )
+
+        transaction = _transaction()
+        cases = {
+            "prevalidation": [
+                JournalRecord.operation_transaction_accepted(transaction),
+                JournalRecord.operation_receipted(_receipt(transaction, "rejected")),
+            ],
+            "authority": [
+                JournalRecord.operation_transaction_accepted(transaction),
+                JournalRecord.operation_admitted(_rejected(transaction)),
+                JournalRecord.operation_receipted(_receipt(transaction, "rejected")),
+            ],
+        }
+        for name, records in cases.items():
+            with self.subTest(name=name):
+                _, _, _, service, journal = _manager()
+                _append_records(journal, records)
+                recovered = ControlHost.recover_operation_host(
+                    journal,
+                    _envelope(
+                        allowed_operations=("operation.auth",),
+                        host_service_grants=("operation.auth",),
+                    ),
+                    services={"operation.auth": service},
+                )
+                self.assertEqual(
+                    (await recovered.execute_operation(transaction)).status,
+                    "rejected",
+                )
+                self.assertEqual(service.execute_calls, [])
 
     async def test_dispatch_rejects_unverified_client_journal_tail(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
