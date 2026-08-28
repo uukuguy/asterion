@@ -1,0 +1,29 @@
+{
+  "built_anchor_digests": {
+    "packages/coding-agent/dist/core/agent-session.js": "0fe28b4cd8bc093ddee791e86f8d594878f5119e5b9105c32d1dc6cd7d4d8321",
+    "packages/coding-agent/dist/core/auth-storage.js": "fa45c9ed883363475bbca80839ec42d518597c3671d2cda9d320f083f1393c76",
+    "packages/coding-agent/dist/core/diagnostics.js": "b84fc4bac1fa2a4554cbc33b8b20f56908a2de8c302e63178c2981bfd185dc08",
+    "packages/coding-agent/dist/core/keybindings.js": "e147e1bef2aeb10d4a034e48ea63f7a3cea85fd07e2947e4ac9499c0a2dc4b2f",
+    "packages/coding-agent/dist/core/settings-manager.js": "867be3ac28592431d772f9ffdbd3d5a2e24dc2f9932c2de1baa41a4d2d8cfe64",
+    "packages/coding-agent/dist/core/telemetry.js": "fb2a879d5beb9db95de88e4735eb86a359f6a12e8aea29e3bd7ee822c482850a",
+    "packages/coding-agent/dist/core/usage.js": "de168e741a4aaa2fc58ba5a14c0b5f87055d5ee9665c5eacf8ae0994079f48ae",
+    "packages/coding-agent/dist/package-manager-cli.js": "2f8472b8d9de974123de3584630b92285b9ebf980d1614891980049c9752ca3c"
+  },
+  "dependency_lock_sha256": "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8",
+  "format": "asterion.prime-operational-module-lock/v1",
+  "module_digest": "ab667efab62011ca2bf69b8b4debebbde7b04501c37000771db5ae2b5823387a",
+  "node_runtime": "v22.23.2",
+  "runtime_digest": "ea7cd4333f84cb10727d2feeba58ddfd177c9ae35601f505e346e085280a00b6",
+  "source_anchor_digests": {
+    "packages/coding-agent/src/core/agent-session.ts": "44d66f879ac71e4fe1e520b19f7d1073e5311f62373ef62dd5dbee97f4f0b5e0",
+    "packages/coding-agent/src/core/auth-storage.ts": "8cb1c7dcaab1c017136f5a1626faed45d7ea9b61e845d88519a18b4787c9717b",
+    "packages/coding-agent/src/core/diagnostics.ts": "1914431098db1b4638e4fb3582ac22e8125356c4ab024671494f565c6d5ffb39",
+    "packages/coding-agent/src/core/keybindings.ts": "ee493ac30dc1a3ca20415f6b0e8125cb9c1b252d1eed4fde876af715018f704a",
+    "packages/coding-agent/src/core/settings-manager.ts": "9fa62f6e72527e8aefe4278954e51464e73b7b8a22fbe25740d742a3ddd0b8c9",
+    "packages/coding-agent/src/core/telemetry.ts": "c42df2bd87ad5ccfb4c8282de8abdddd5f04ab1ca13b7e77606bccf9e0b45d2b",
+    "packages/coding-agent/src/core/usage.ts": "7a43a041f30f8233648e6d57f047cc6534b7fa0cf7b447e42c6815dab5807a0e",
+    "packages/coding-agent/src/package-manager-cli.ts": "349b464c03982ebaa0aca02d7bff01b9d72a5e4c86c3f0b60c802e78637a3027"
+  },
+  "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+  "workspace_digest": "4e49f896d35be953c7939c2daaf5fcf884092f3b10370778e1643a54185c4033"
+}

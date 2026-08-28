@@ -90,6 +90,12 @@ PRIME_DISTRIBUTION_MEMBERS = {
     "packages/typescript/prime-gateway/resources/prime-client-module.mjs": (
         "asterion/control/providers/prime/resources/prime-client-module.mjs"
     ),
+    "packages/typescript/prime-gateway/resources/prime-operational-module-lock.json": (
+        "asterion/control/providers/prime/resources/prime-operational-module-lock.json"
+    ),
+    "packages/typescript/prime-gateway/resources/prime-operational-module.mjs": (
+        "asterion/control/providers/prime/resources/prime-operational-module.mjs"
+    ),
     "src/asterion/control/providers/prime/resources/skills/asterion-control/SKILL.md": (
         "asterion/control/providers/prime/resources/skills/asterion-control/SKILL.md"
     ),
@@ -252,6 +258,36 @@ class DistributionTests(unittest.TestCase):
                     hashlib.sha256(bundle.read_bytes()).hexdigest(),
                 ],
             )
+            self.assertNotIn(str(PROJECT), completed.stdout)
+
+    def test_wheel_installed_layout_resolves_exact_operational_lock_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            destination = Path(temporary_directory)
+            subprocess.run(
+                ("uv", "build", "--wheel", "--out-dir", str(destination), "."),
+                cwd=PROJECT, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            wheel = next(destination.glob("*.whl"))
+            installed = destination / "installed"
+            with ZipFile(wheel) as archive:
+                archive.extractall(installed)
+            environment = dict(os.environ)
+            environment["PYTHONPATH"] = f"{installed}{os.pathsep}{PROJECT}"
+            completed = subprocess.run(
+                (
+                    sys.executable, "-c",
+                    "import hashlib; import tools.setup_prime_agent as setup; "
+                    "setup.__file__ = 'missing/setup_prime_agent.py'; "
+                    "path = setup.default_operational_module_lock_path(); "
+                    "print(hashlib.sha256(path.read_bytes()).hexdigest())",
+                ),
+                cwd=destination, env=environment, check=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            lock = PROJECT / "packages/typescript/prime-gateway/resources/prime-operational-module-lock.json"
+            bundle = installed / "asterion/control/providers/prime/resources/prime-operational-module.mjs"
+            self.assertEqual(completed.stdout.strip(), hashlib.sha256(lock.read_bytes()).hexdigest())
+            self.assertTrue(bundle.is_file())
             self.assertNotIn(str(PROJECT), completed.stdout)
 
 

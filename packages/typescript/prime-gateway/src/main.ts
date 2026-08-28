@@ -50,6 +50,8 @@ import {
   PRIME_CLIENT_ARTIFACT_LOCK_DIGEST,
   PRIME_CLIENT_BUNDLE_DIGEST,
   PRIME_CLIENT_MODULE_LOCK_DIGEST,
+  PRIME_OPERATIONAL_BUNDLE_DIGEST,
+  PRIME_OPERATIONAL_MODULE_LOCK_DIGEST,
 } from "./gateway.js";
 import type {
   PrimeGatewayPrivateInputs,
@@ -391,6 +393,10 @@ const PRIME_ECOSYSTEM_BUNDLE_EXPORTS = Object.freeze([
   "runMcpFixture",
 ]);
 const PRIME_CLIENT_MODULE_EXPORTS = Object.freeze(["runClientPackage"]);
+const PRIME_OPERATIONAL_MODULE_EXPORTS = Object.freeze([
+  "runOperationalPackage",
+  "verifyOperationalLocks",
+]);
 
 export async function loadPrimeClientModule(paths: Readonly<{
   artifactLockPath: string;
@@ -408,6 +414,49 @@ export async function loadPrimeClientModule(paths: Readonly<{
     const loaded = await import(`${pathToFileURL(paths.bundlePath).href}?sha256=${PRIME_CLIENT_BUNDLE_DIGEST}`) as Record<string, unknown>;
     if (Object.keys(loaded).join("\0") !== PRIME_CLIENT_MODULE_EXPORTS.join("\0") || typeof loaded.runClientPackage !== "function") throw new PrimeGatewayError();
     return Object.freeze({ module: Object.freeze({ runClientPackage: loaded.runClientPackage as (frame: object) => Promise<unknown> }) });
+  } catch { throw new PrimeGatewayError(); }
+}
+
+/** Load only the exact checked-in operational resource before any Prime import. */
+export async function loadPrimeOperationalModule(paths: Readonly<{
+  bundlePath: string;
+  moduleLockPath: string;
+}>): Promise<Readonly<{
+  module: Readonly<{
+    runOperationalPackage: (frame: object) => Promise<unknown>;
+    verifyOperationalLocks: (sourceRoot: string, resourceRoot: string) => Promise<unknown>;
+  }>;
+}>> {
+  try {
+    if (!isRecord(paths) || !hasExactKeys(paths, ["bundlePath", "moduleLockPath"])) {
+      throw new PrimeGatewayError();
+    }
+    const [lock, bundle] = await Promise.all([
+      readLockedEcosystemFile(paths.moduleLockPath),
+      readLockedEcosystemFile(paths.bundlePath),
+    ]);
+    if (
+      createHash("sha256").update(lock).digest("hex") !== PRIME_OPERATIONAL_MODULE_LOCK_DIGEST ||
+      createHash("sha256").update(bundle).digest("hex") !== PRIME_OPERATIONAL_BUNDLE_DIGEST
+    ) throw new PrimeGatewayError();
+    const parsed = JSON.parse(lock.toString("utf8"));
+    if (
+      !isRecord(parsed) ||
+      parsed.format !== "asterion.prime-operational-module-lock/v1" ||
+      parsed.module_digest !== PRIME_OPERATIONAL_BUNDLE_DIGEST ||
+      parsed.source_commit !== "a18809e00ea30638584d87b3afea7285a9d7296c"
+    ) throw new PrimeGatewayError();
+    const loaded = await import(
+      `${pathToFileURL(paths.bundlePath).href}?sha256=${PRIME_OPERATIONAL_BUNDLE_DIGEST}`,
+    ) as Record<string, unknown>;
+    if (
+      Object.keys(loaded).sort().join("\0") !== PRIME_OPERATIONAL_MODULE_EXPORTS.join("\0") ||
+      PRIME_OPERATIONAL_MODULE_EXPORTS.some((name) => typeof loaded[name] !== "function")
+    ) throw new PrimeGatewayError();
+    return Object.freeze({ module: Object.freeze({
+      runOperationalPackage: loaded.runOperationalPackage as (frame: object) => Promise<unknown>,
+      verifyOperationalLocks: loaded.verifyOperationalLocks as (sourceRoot: string, resourceRoot: string) => Promise<unknown>,
+    }) });
   } catch { throw new PrimeGatewayError(); }
 }
 
