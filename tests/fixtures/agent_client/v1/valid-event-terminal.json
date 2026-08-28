@@ -1,0 +1,13 @@
+{
+  "protocol": "asterion.agent-client/v1",
+  "event_id": "event-2",
+  "session_id": "session-1",
+  "generation": 1,
+  "sequence": 2,
+  "emitted_at": "2026-08-10T15:00:01Z",
+  "type": "session.terminal",
+  "payload": {
+    "reason_code": "completed",
+    "status": "completed"
+  }
+}

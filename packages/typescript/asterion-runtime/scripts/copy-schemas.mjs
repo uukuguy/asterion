@@ -77,6 +77,18 @@ const sessionContextReceiptSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const agentClientIntentSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/agent-client/v1/intent.schema.json",
+    import.meta.url,
+  ),
+);
+const agentClientEventSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/agent-client/v1/event.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -118,3 +130,5 @@ cpSync(
   sessionContextReceiptSource,
   `${destination}/session-context-receipt.schema.json`,
 );
+cpSync(agentClientIntentSource, `${destination}/agent-client-intent.schema.json`);
+cpSync(agentClientEventSource, `${destination}/agent-client-event.schema.json`);

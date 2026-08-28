@@ -5,6 +5,7 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import {
+  AGENT_CLIENT_PROTOCOL,
   AGENT_CONTROL_PROTOCOL,
   AGENT_SYSTEM_PROTOCOL,
   APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
@@ -19,6 +20,9 @@ import {
   RUNTIME_PROTOCOL_VERSION,
   validateAssemblyManifest,
   validateAgentSystemManifest,
+  validateClientEvent,
+  validateClientEventStream,
+  validateClientIntent,
   validateBenchmarkSuiteManifest,
   validateCapabilityPackageManifest,
   validateCapabilityManifest,
@@ -78,6 +82,10 @@ const sessionContextFixtures = new URL(
   "../../../../tests/fixtures/session_context/v1/",
   import.meta.url,
 );
+const agentClientFixtures = new URL(
+  "../../../../tests/fixtures/agent_client/v1/",
+  import.meta.url,
+);
 const referenceAssemblyRoots = [
   new URL(
     "../../../../src/asterion/applications/dci_agent_lite/assemblies/",
@@ -114,6 +122,75 @@ async function readJsonl(name) {
 
 test("uses the Asterion-owned runtime protocol identity", () => {
   assert.equal(RUNTIME_PROTOCOL_VERSION, "asterion.agent-runtime/v1");
+});
+
+test("validates the closed body-free agent client contract", async () => {
+  assert.equal(AGENT_CLIENT_PROTOCOL, "asterion.agent-client/v1");
+  const intent = await readFixture(agentClientFixtures, "valid-intent-input.json");
+  const message = await readFixture(agentClientFixtures, "valid-event-message.json");
+  const terminal = await readFixture(agentClientFixtures, "valid-event-terminal.json");
+
+  const validatedIntent = validateClientIntent(intent);
+  const validatedMessage = validateClientEvent(message);
+  assert.deepEqual(validatedIntent, intent);
+  assert.equal(validatedMessage.payload.content_ref, "private-message-1");
+  assert.ok(Object.isFrozen(validatedMessage.payload));
+  assert.deepEqual(validateClientEventStream([message, terminal]), [message, terminal]);
+
+  for (const name of [
+    "invalid-intent-secret.json",
+    "invalid-event-body.json",
+    "invalid-event-unknown.json",
+  ]) {
+    const value = await readFixture(agentClientFixtures, name);
+    const validate = name.startsWith("invalid-intent")
+      ? validateClientIntent
+      : validateClientEvent;
+    assert.throws(() => validate(value), ProtocolValidationError);
+  }
+  assert.throws(
+    () => validateClientEventStream([message, { ...terminal, sequence: 3 }]),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () => validateClientEventStream([message, { ...terminal, generation: 2 }]),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () => validateClientEventStream([message, { ...terminal, event_id: message.event_id }]),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateClientEventStream([
+        message,
+        {
+          ...message,
+          event_id: "event-2",
+          sequence: 2,
+          type: "tool.completed",
+          payload: {
+            call_id: "call-1",
+            is_error: false,
+            media_type: "application/json",
+            result_ref: "private-result-1",
+            sha256: "b".repeat(64),
+            size: 2,
+          },
+        },
+        { ...terminal, event_id: "event-3", sequence: 3 },
+      ]),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateClientEventStream([
+        message,
+        terminal,
+        { ...terminal, event_id: "event-3", sequence: 3 },
+      ]),
+    ProtocolValidationError,
+  );
 });
 
 test("validates the shared long-running control contracts", async () => {

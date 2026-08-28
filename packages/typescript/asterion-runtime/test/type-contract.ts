@@ -1,6 +1,8 @@
 import type {
   AgentSystemManifest,
   AgentRuntimeClient,
+  ClientEvent,
+  ClientIntent,
   AssemblyManifest,
   BenchmarkSuiteManifest,
   CapabilityPackageManifest,
@@ -16,6 +18,38 @@ import type {
   SessionContextCommand,
   SessionContextReceipt,
 } from "../src/index.js";
+
+export const fixtureClientIntent: ClientIntent = {
+  protocol: "asterion.agent-client/v1",
+  intent_id: "intent-1",
+  client_id: "client-1",
+  session_id: "session-1",
+  authority_revision: 1,
+  type: "input.submit",
+  payload: {
+    content_ref: "private-input-1",
+    delivery: "direct",
+    input_id: "input-1",
+  },
+};
+
+export const fixtureClientEvent: ClientEvent = {
+  protocol: "asterion.agent-client/v1",
+  event_id: "event-1",
+  session_id: "session-1",
+  generation: 1,
+  sequence: 1,
+  emitted_at: "2026-08-10T15:00:00Z",
+  type: "message.available",
+  payload: {
+    content_ref: "private-message-1",
+    media_type: "text/plain",
+    message_id: "message-1",
+    role: "assistant",
+    sha256: "a".repeat(64),
+    size: 13,
+  },
+};
 
 export const fixtureSessionContextCommand: SessionContextCommand = {
   protocol: "asterion.session-context/v1",

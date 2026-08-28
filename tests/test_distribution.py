@@ -15,6 +15,12 @@ PROJECT = Path(__file__).resolve().parents[1]
 BENCHMARK_SOURCE = PROJECT / "src/asterion/benchmarks"
 DCI_SOURCE = PROJECT / "src/asterion/capabilities/dci"
 PACKAGED_SCHEMAS = {
+    "schemas/agent-client/v1/event.schema.json": (
+        "asterion/schemas/agent-client/v1/event.schema.json"
+    ),
+    "schemas/agent-client/v1/intent.schema.json": (
+        "asterion/schemas/agent-client/v1/intent.schema.json"
+    ),
     "schemas/agent-control/v1/command.schema.json": (
         "asterion/schemas/agent-control/v1/command.schema.json"
     ),

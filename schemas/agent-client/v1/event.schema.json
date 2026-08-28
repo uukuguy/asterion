@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/agent-client/v1/event.schema.json",
+  "title": "Asterion Agent Client Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "event_id", "session_id", "generation", "sequence", "emitted_at", "type", "payload"],
+  "properties": {
+    "protocol": {"const": "asterion.agent-client/v1"}, "event_id": {"$ref": "#/$defs/opaque_id"}, "session_id": {"$ref": "#/$defs/opaque_id"}, "generation": {"type": "integer", "minimum": 1}, "sequence": {"type": "integer", "minimum": 1}, "emitted_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?Z$"},
+    "type": {"enum": ["artifact.available", "commands.changed", "export.created", "extension-ui.requested", "fault.raised", "message.available", "session.state", "session.terminal", "share.created", "tool.completed", "tool.started", "usage.reported"]}, "payload": {}
+  },
+  "allOf": [{"oneOf": [
+    {"properties": {"type": {"const": "artifact.available"}, "payload": {"$ref": "#/$defs/artifact"}}},
+    {"properties": {"type": {"const": "commands.changed"}, "payload": {"$ref": "#/$defs/commands"}}},
+    {"properties": {"type": {"const": "export.created"}, "payload": {"$ref": "#/$defs/export"}}},
+    {"properties": {"type": {"const": "extension-ui.requested"}, "payload": {"$ref": "#/$defs/extension"}}},
+    {"properties": {"type": {"const": "fault.raised"}, "payload": {"$ref": "#/$defs/fault"}}},
+    {"properties": {"type": {"const": "message.available"}, "payload": {"$ref": "#/$defs/message"}}},
+    {"properties": {"type": {"const": "session.state"}, "payload": {"$ref": "#/$defs/session_state"}}},
+    {"properties": {"type": {"const": "session.terminal"}, "payload": {"$ref": "#/$defs/session_terminal"}}},
+    {"properties": {"type": {"const": "share.created"}, "payload": {"$ref": "#/$defs/share"}}},
+    {"properties": {"type": {"const": "tool.completed"}, "payload": {"$ref": "#/$defs/tool_completed"}}},
+    {"properties": {"type": {"const": "tool.started"}, "payload": {"$ref": "#/$defs/tool_started"}}},
+    {"properties": {"type": {"const": "usage.reported"}, "payload": {"$ref": "#/$defs/usage"}}}
+  ]}],
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"}, "opaque_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}, "media_type": {"type": "string", "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["artifact_id", "artifact_ref", "media_type", "sha256", "size"], "properties": {"artifact_id": {"$ref": "#/$defs/opaque_id"}, "artifact_ref": {"$ref": "#/$defs/opaque_id"}, "media_type": {"$ref": "#/$defs/media_type"}, "sha256": {"$ref": "#/$defs/sha256"}, "size": {"type": "integer", "minimum": 0}}},
+    "commands": {"type": "object", "additionalProperties": false, "required": ["commands", "revision"], "properties": {"commands": {"type": "array", "items": {"$ref": "#/$defs/identifier"}, "uniqueItems": true}, "revision": {"type": "integer", "minimum": 1}}},
+    "export": {"type": "object", "additionalProperties": false, "required": ["artifact_id", "artifact_ref", "export_id", "media_type", "sha256", "size", "visibility"], "properties": {"artifact_id": {"$ref": "#/$defs/opaque_id"}, "artifact_ref": {"$ref": "#/$defs/opaque_id"}, "export_id": {"$ref": "#/$defs/opaque_id"}, "media_type": {"$ref": "#/$defs/media_type"}, "sha256": {"$ref": "#/$defs/sha256"}, "size": {"type": "integer", "minimum": 0}, "visibility": {"enum": ["private", "public"]}}},
+    "extension": {"type": "object", "additionalProperties": false, "required": ["deadline_ms", "method", "payload_ref", "request_id"], "properties": {"deadline_ms": {"type": "integer", "minimum": 1}, "method": {"$ref": "#/$defs/identifier"}, "payload_ref": {"$ref": "#/$defs/opaque_id"}, "request_id": {"$ref": "#/$defs/opaque_id"}}},
+    "fault": {"type": "object", "additionalProperties": false, "required": ["code", "evidence_ref", "recoverable"], "properties": {"code": {"$ref": "#/$defs/identifier"}, "evidence_ref": {"$ref": "#/$defs/opaque_id"}, "recoverable": {"type": "boolean"}}},
+    "message": {"type": "object", "additionalProperties": false, "required": ["content_ref", "media_type", "message_id", "role", "sha256", "size"], "properties": {"content_ref": {"$ref": "#/$defs/opaque_id"}, "media_type": {"$ref": "#/$defs/media_type"}, "message_id": {"$ref": "#/$defs/opaque_id"}, "role": {"enum": ["assistant", "system", "tool", "user"]}, "sha256": {"$ref": "#/$defs/sha256"}, "size": {"type": "integer", "minimum": 0}}},
+    "session_state": {"type": "object", "additionalProperties": false, "required": ["reason_code", "status"], "properties": {"reason_code": {"$ref": "#/$defs/identifier"}, "status": {"enum": ["budget_limited", "cancelled", "completed", "creating", "failed", "idle", "needs_input", "paused", "running"]}}},
+    "session_terminal": {"type": "object", "additionalProperties": false, "required": ["reason_code", "status"], "properties": {"reason_code": {"$ref": "#/$defs/identifier"}, "status": {"enum": ["budget_limited", "cancelled", "completed", "failed"]}}},
+    "share": {"type": "object", "additionalProperties": false, "required": ["export_id", "share_id", "share_ref"], "properties": {"export_id": {"$ref": "#/$defs/opaque_id"}, "share_id": {"$ref": "#/$defs/opaque_id"}, "share_ref": {"$ref": "#/$defs/opaque_id"}}},
+    "tool_completed": {"type": "object", "additionalProperties": false, "required": ["call_id", "is_error", "media_type", "result_ref", "sha256", "size"], "properties": {"call_id": {"$ref": "#/$defs/opaque_id"}, "is_error": {"type": "boolean"}, "media_type": {"$ref": "#/$defs/media_type"}, "result_ref": {"$ref": "#/$defs/opaque_id"}, "sha256": {"$ref": "#/$defs/sha256"}, "size": {"type": "integer", "minimum": 0}}},
+    "tool_started": {"type": "object", "additionalProperties": false, "required": ["arguments_ref", "call_id", "name", "sha256", "size"], "properties": {"arguments_ref": {"$ref": "#/$defs/opaque_id"}, "call_id": {"$ref": "#/$defs/opaque_id"}, "name": {"$ref": "#/$defs/identifier"}, "sha256": {"$ref": "#/$defs/sha256"}, "size": {"type": "integer", "minimum": 0}}},
+    "usage": {"type": "object", "additionalProperties": false, "required": ["aggregate_tokens", "application_tokens", "child_tokens", "controller_tokens", "cost_micros"], "properties": {"aggregate_tokens": {"type": "integer", "minimum": 0}, "application_tokens": {"type": "integer", "minimum": 0}, "child_tokens": {"type": "integer", "minimum": 0}, "controller_tokens": {"type": "integer", "minimum": 0}, "cost_micros": {"type": "integer", "minimum": 0}}}
+  }
+}

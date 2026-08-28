@@ -18,6 +18,8 @@ import type {
   ControlCommand,
   ControlEvent,
   ControlPlaneManifest,
+  ClientEvent,
+  ClientIntent,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -68,6 +70,12 @@ const sessionContextCommandValidator = ajv.compile(
 );
 const sessionContextReceiptValidator = ajv.compile(
   readSchema("session-context-receipt.schema.json"),
+);
+const clientIntentValidator = ajv.compile(
+  readSchema("agent-client-intent.schema.json"),
+);
+const clientEventValidator = ajv.compile(
+  readSchema("agent-client-event.schema.json"),
 );
 
 export class ProtocolValidationError extends Error {
@@ -381,6 +389,75 @@ export function validateControlEventStream(
     terminalIndexes[0] !== events.length - 1
   ) {
     throw new ProtocolValidationError("control event stream terminal", null);
+  }
+  return immutableSnapshot(events);
+}
+
+export function validateClientIntent(value: unknown): ClientIntent {
+  const intent = requireValid<ClientIntent>(
+    "client intent",
+    clientIntentValidator,
+    value,
+  );
+  if (intent.type === "export.request") {
+    requireSortedUnique("client export references", intent.payload.reference_ids);
+  }
+  return intent;
+}
+
+export function validateClientEvent(value: unknown): ClientEvent {
+  const event = requireValid<ClientEvent>(
+    "client event",
+    clientEventValidator,
+    value,
+  );
+  if (event.type === "commands.changed") {
+    requireSortedUnique("client commands", event.payload.commands);
+  }
+  return event;
+}
+
+export function validateClientEventStream(
+  value: unknown,
+): readonly ClientEvent[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ProtocolValidationError("client event stream", null);
+  }
+  const events = value.map((event) => validateClientEvent(event));
+  const sessionId = events[0]!.session_id;
+  const generation = events[0]!.generation;
+  const eventIds = new Set<string>();
+  const activeCalls = new Set<string>();
+  let terminalSeen = false;
+  for (const [index, event] of events.entries()) {
+    if (
+      event.session_id !== sessionId ||
+      event.generation !== generation ||
+      event.sequence !== index + 1 ||
+      eventIds.has(event.event_id) ||
+      terminalSeen
+    ) {
+      throw new ProtocolValidationError("client event stream sequence", null);
+    }
+    eventIds.add(event.event_id);
+    if (event.type === "tool.started") {
+      if (activeCalls.has(event.payload.call_id)) {
+        throw new ProtocolValidationError("client event stream tool call", null);
+      }
+      activeCalls.add(event.payload.call_id);
+    } else if (event.type === "tool.completed") {
+      if (!activeCalls.delete(event.payload.call_id)) {
+        throw new ProtocolValidationError("client event stream tool call", null);
+      }
+    } else if (event.type === "session.terminal") {
+      if (index !== events.length - 1 || activeCalls.size !== 0) {
+        throw new ProtocolValidationError("client event stream terminal", null);
+      }
+      terminalSeen = true;
+    }
+  }
+  if (!terminalSeen) {
+    throw new ProtocolValidationError("client event stream terminal", null);
   }
   return immutableSnapshot(events);
 }

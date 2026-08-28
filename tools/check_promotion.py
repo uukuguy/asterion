@@ -120,6 +120,8 @@ from pathlib import Path
 
 root = Path(str(resources.files('asterion')))
 schema_paths = (
+    'asterion/schemas/agent-client/v1/intent.schema.json',
+    'asterion/schemas/agent-client/v1/event.schema.json',
     'asterion/schemas/agent-system/v1/agent-system.schema.json',
     'asterion/schemas/control-plane/v1/control-plane-manifest.schema.json',
     'asterion/schemas/agent-control/v1/command.schema.json',

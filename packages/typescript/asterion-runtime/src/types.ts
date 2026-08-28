@@ -15,6 +15,7 @@ export const AGENT_SYSTEM_PROTOCOL = "asterion.agent-system/v1" as const;
 export const CONTROL_PLANE_PROTOCOL = "asterion.control-plane/v1" as const;
 export const AGENT_CONTROL_PROTOCOL = "asterion.agent-control/v1" as const;
 export const SESSION_CONTEXT_PROTOCOL = "asterion.session-context/v1" as const;
+export const AGENT_CLIENT_PROTOCOL = "asterion.agent-client/v1" as const;
 
 export type ProtocolVersion = typeof RUNTIME_PROTOCOL_VERSION;
 export type CapabilityProtocolVersion = typeof CAPABILITY_PROTOCOL_VERSION;
@@ -32,6 +33,131 @@ export type AgentSystemProtocolVersion = typeof AGENT_SYSTEM_PROTOCOL;
 export type ControlPlaneProtocolVersion = typeof CONTROL_PLANE_PROTOCOL;
 export type AgentControlProtocolVersion = typeof AGENT_CONTROL_PROTOCOL;
 export type SessionContextProtocolVersion = typeof SESSION_CONTEXT_PROTOCOL;
+export type AgentClientProtocolVersion = typeof AGENT_CLIENT_PROTOCOL;
+
+export interface ClientCursor {
+  readonly generation: number;
+  readonly sequence: number;
+}
+
+export type ClientIntentType =
+  | "command.invoke"
+  | "export.request"
+  | "extension-ui.respond"
+  | "input.submit"
+  | "session.attach"
+  | "session.cancel"
+  | "session.create"
+  | "session.detach"
+  | "session.pause"
+  | "session.resume"
+  | "share.request";
+
+export interface ClientIntentBase<T extends string, P> {
+  readonly protocol: AgentClientProtocolVersion;
+  readonly intent_id: string;
+  readonly client_id: string;
+  readonly session_id: string;
+  readonly authority_revision: number;
+  readonly type: T;
+  readonly payload: P;
+}
+
+export type ClientIntent =
+  | ClientIntentBase<
+      "command.invoke",
+      {
+        readonly arguments_ref: string;
+        readonly command_name: string;
+        readonly command_revision: number;
+      }
+    >
+  | ClientIntentBase<
+      "export.request",
+      {
+        readonly destination_ref: string;
+        readonly expires_at_ms: number;
+        readonly export_id: string;
+        readonly max_bytes: number;
+        readonly media_type: string;
+        readonly reference_ids: readonly string[];
+        readonly visibility: "private" | "public";
+      }
+    >
+  | ClientIntentBase<
+      "extension-ui.respond",
+      {
+        readonly cancelled: boolean;
+        readonly request_id: string;
+        readonly response_ref: string;
+      }
+    >
+  | ClientIntentBase<
+      "input.submit",
+      {
+        readonly content_ref: string;
+        readonly delivery: "direct" | "steer" | "follow_up";
+        readonly input_id: string;
+      }
+    >
+  | ClientIntentBase<"session.attach", { readonly cursor: ClientCursor }>
+  | ClientIntentBase<"session.cancel", ReasonPayload>
+  | ClientIntentBase<
+      "session.create",
+      { readonly goal_id: string; readonly goal_ref: string }
+    >
+  | ClientIntentBase<"session.detach", ReasonPayload>
+  | ClientIntentBase<"session.pause", ReasonPayload>
+  | ClientIntentBase<"session.resume", ReasonPayload>
+  | ClientIntentBase<
+      "share.request",
+      { readonly expires_at_ms: number; readonly export_id: string; readonly share_id: string }
+    >;
+
+export type ClientEventType =
+  | "artifact.available"
+  | "commands.changed"
+  | "export.created"
+  | "extension-ui.requested"
+  | "fault.raised"
+  | "message.available"
+  | "session.state"
+  | "session.terminal"
+  | "share.created"
+  | "tool.completed"
+  | "tool.started"
+  | "usage.reported";
+
+export interface ClientEventBase<T extends string, P> {
+  readonly protocol: typeof AGENT_CLIENT_PROTOCOL;
+  readonly event_id: string;
+  readonly session_id: string;
+  readonly generation: number;
+  readonly sequence: number;
+  readonly emitted_at: string;
+  readonly type: T;
+  readonly payload: P;
+}
+
+export type ClientEvent =
+  | ClientEventBase<
+      "artifact.available",
+      { readonly artifact_id: string; readonly artifact_ref: string; readonly media_type: string; readonly sha256: string; readonly size: number }
+    >
+  | ClientEventBase<"commands.changed", { readonly commands: readonly string[]; readonly revision: number }>
+  | ClientEventBase<
+      "export.created",
+      { readonly artifact_id: string; readonly artifact_ref: string; readonly export_id: string; readonly media_type: string; readonly sha256: string; readonly size: number; readonly visibility: "private" | "public" }
+    >
+  | ClientEventBase<"extension-ui.requested", { readonly deadline_ms: number; readonly method: string; readonly payload_ref: string; readonly request_id: string }>
+  | ClientEventBase<"fault.raised", { readonly code: string; readonly evidence_ref: string; readonly recoverable: boolean }>
+  | ClientEventBase<"message.available", { readonly content_ref: string; readonly media_type: string; readonly message_id: string; readonly role: "assistant" | "system" | "tool" | "user"; readonly sha256: string; readonly size: number }>
+  | ClientEventBase<"session.state", { readonly reason_code: string; readonly status: "budget_limited" | "cancelled" | "completed" | "creating" | "failed" | "idle" | "needs_input" | "paused" | "running" }>
+  | ClientEventBase<"session.terminal", { readonly reason_code: string; readonly status: "budget_limited" | "cancelled" | "completed" | "failed" }>
+  | ClientEventBase<"share.created", { readonly export_id: string; readonly share_id: string; readonly share_ref: string }>
+  | ClientEventBase<"tool.completed", { readonly call_id: string; readonly is_error: boolean; readonly media_type: string; readonly result_ref: string; readonly sha256: string; readonly size: number }>
+  | ClientEventBase<"tool.started", { readonly arguments_ref: string; readonly call_id: string; readonly name: string; readonly sha256: string; readonly size: number }>
+  | ClientEventBase<"usage.reported", { readonly aggregate_tokens: number; readonly application_tokens: number; readonly child_tokens: number; readonly controller_tokens: number; readonly cost_micros: number }>;
 
 export type SessionContextOperation =
   | "session.attachment.bind"
