@@ -36,6 +36,11 @@ import type {
   PrivateBoundAttachment,
   PrivateValueRef,
 } from "./private-store.js";
+import type { PrivateValueStore } from "./private-store.js";
+import {
+  PrimeClientObservationMapper,
+} from "./client-observation.js";
+import type { PrimeClientObservation } from "./client-observation.js";
 import type {
   PrimeCheckpointCreated,
   PrimeCheckpointRecovery,
@@ -242,6 +247,7 @@ export interface PrimeGatewayOptions {
   readonly store: GatewayDurableStore;
   readonly privateValues: PrimeGatewayPrivateInputs;
   readonly privateResults?: PrimeGatewayPrivateResults;
+  readonly clientObservationValues?: Pick<PrivateValueStore, "putClientValue">;
   readonly ecosystem?: Pick<PrimeEcosystemAdapter, "activate">;
   readonly createSession: (
     goal: string,
@@ -377,6 +383,8 @@ export class PrimeGateway {
   private lastAppendedSequence: number;
   private session: PrimeGatewaySession | undefined;
   private mapper: PrimeEventMapper | undefined;
+  private clientObservationMapper: PrimeClientObservationMapper | undefined;
+  private readonly clientObservations: PrimeClientObservation[] = [];
   private unsubscribe: (() => void) | undefined;
   private eventQueue: Promise<void> = Promise.resolve();
   private durableQueue: Promise<void> = Promise.resolve();
@@ -550,6 +558,14 @@ export class PrimeGateway {
       generation: this.options.generation,
       status: this.sessionStatus ?? "uninitialized",
     });
+  }
+
+  clientObservationsAfterCursor(cursor: { readonly generation: number; readonly sequence: number }): readonly PrimeClientObservation[] {
+    if (
+      !Number.isSafeInteger(cursor.generation) || cursor.generation !== this.options.generation ||
+      !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 0 || cursor.sequence > this.clientObservations.length
+    ) throw new PrimeGatewayError();
+    return Object.freeze(this.clientObservations.slice(cursor.sequence));
   }
 
   async activateEcosystem(value: unknown): Promise<GatewayEcosystemEffectResult> {
@@ -837,6 +853,7 @@ export class PrimeGateway {
     }
     await this.settle();
     this.closed = true;
+    await this.clientObservationMapper?.close();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
   }
@@ -2240,6 +2257,15 @@ export class PrimeGateway {
         ? {}
         : { primeCursor: this.options.store.snapshot().primeCursor }),
     });
+    this.clientObservationMapper = this.options.clientObservationValues === undefined
+      ? undefined
+      : new PrimeClientObservationMapper({
+        sessionId: this.options.sessionId,
+        generation: this.options.generation,
+        activeSessionId: session.activeSessionId,
+        privateValues: this.options.clientObservationValues,
+        now: this.now,
+      });
     await this.append(this.event("session.created", {
       goal_id: this.goalId,
       authority_id: this.options.authorityId,
@@ -2610,6 +2636,15 @@ export class PrimeGateway {
       this.session = session;
       await this.recoverPreparedContextOperations();
       this.mapper = this.recoveredMapper(recovered.primeCursor);
+      this.clientObservationMapper = this.options.clientObservationValues === undefined
+        ? undefined
+        : new PrimeClientObservationMapper({
+          sessionId: this.options.sessionId,
+          generation: this.options.generation,
+          activeSessionId: session.activeSessionId,
+          privateValues: this.options.clientObservationValues,
+          now: this.now,
+        });
       const restoredStatus = previousStatus === "paused"
         ? "paused"
         : recovered.sessionStatus;
@@ -2898,6 +2933,15 @@ export class PrimeGateway {
   private async handlePrimeOutbound(outbound: PrimeDaemonOutbound): Promise<void> {
     if (this.mapper === undefined || this.terminal) {
       return;
+    }
+    const observations = this.clientObservationMapper === undefined
+      ? []
+      : await this.clientObservationMapper.map(outbound);
+    for (const observation of observations) {
+      if (observation.source_sequence !== this.clientObservations.length + 1) {
+        throw new PrimeGatewayError();
+      }
+      this.clientObservations.push(observation);
     }
     const events = this.mapper.map(outbound);
     await Promise.all(events.map((event) => this.append(event)));

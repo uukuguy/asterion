@@ -41,6 +41,9 @@ from asterion.control.session_context import (
     SessionContextReceipt,
 )
 from asterion.control.providers.prime.process import PRIME_GATEWAY_IPC_PROTOCOL
+from asterion.client.protocol import ClientCursor
+from asterion.client.private import PrivateValueDescriptor
+from asterion.client.session import ClientObservation
 
 
 MAX_PRIVATE_TEXT_BYTES = 1024 * 1024
@@ -209,6 +212,7 @@ class PrimeControlPlaneClient:
             str, Mapping[str, str | list[str]]
         ] = {}
         self._prepared_inputs: OrderedDict[str, str] = OrderedDict()
+        self._client_private_descriptors: dict[str, PrivateValueDescriptor] = {}
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Task[None] | None = None
         self._ecosystem_service: PrimeEcosystemService | None = None
@@ -693,6 +697,119 @@ class PrimeControlPlaneClient:
         except (ControlProtocolError, TypeError, ValueError, RuntimeError):
             raise PrimeControlError() from None
 
+    def client_observations(
+        self, cursor: ClientCursor | None = None
+    ) -> AsyncIterator[ClientObservation]:
+        """Yield closed client observations from the selected private sidecar."""
+
+        if self._closed or (cursor is not None and not isinstance(cursor, ClientCursor)):
+            raise PrimeControlError()
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "client_observations",
+            "cursor": None if cursor is None else {
+                "generation": cursor.generation,
+                "sequence": cursor.sequence,
+            },
+        }
+
+        async def iterate() -> AsyncIterator[ClientObservation]:
+            previous = 0 if cursor is None else cursor.sequence
+            try:
+                async for value in self._process.events(envelope):
+                    observation = _client_observation_from_mapping(value)
+                    if cursor is not None and observation.generation != cursor.generation:
+                        raise PrimeControlError()
+                    if observation.source_sequence != previous + 1:
+                        raise PrimeControlError()
+                    previous = observation.source_sequence
+                    self._remember_client_descriptors(observation)
+                    yield observation
+            except (PrimeControlError, TypeError, ValueError, RuntimeError):
+                raise PrimeControlError() from None
+
+        return iterate()
+
+    def describe(self, reference: str) -> PrivateValueDescriptor:
+        """Return a previously observed immutable private-value descriptor."""
+
+        try:
+            descriptor = self._client_private_descriptors.get(reference)
+        except Exception:
+            descriptor = None
+        if self._closed or not isinstance(reference, str) or descriptor is None:
+            raise PrimeControlError()
+        return descriptor
+
+    async def read(self, reference: str, *, max_bytes: int) -> bytes:
+        """Read one descriptor-bound private value through the sidecar only."""
+
+        descriptor = self.describe(reference)
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 1:
+            raise PrimeControlError()
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "client_value_read",
+            "reference": reference,
+            "max_bytes": max_bytes,
+        }
+        try:
+            response = await self._process.request(envelope)
+            body_value = response.get("body_base64")
+            response_descriptor = response.get("descriptor")
+            if (
+                set(response) != {"protocol", "id", "type", "descriptor", "body_base64"}
+                or response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
+                or response.get("id") != envelope["id"]
+                or response.get("type") != "client_value"
+                or not isinstance(body_value, str)
+                or not isinstance(response_descriptor, Mapping)
+            ):
+                raise PrimeControlError()
+            returned = _private_descriptor_from_mapping(response_descriptor)
+            body = base64.b64decode(body_value.encode("ascii"), validate=True)
+            if (
+                returned != descriptor
+                or len(body) != descriptor.size
+                or len(body) > max_bytes
+                or hashlib.sha256(body).hexdigest() != descriptor.sha256
+            ):
+                raise PrimeControlError()
+            return bytes(body)
+        except (PrimeControlError, TypeError, ValueError, RuntimeError):
+            raise PrimeControlError() from None
+
+    def _remember_client_descriptors(self, observation: ClientObservation) -> None:
+        payload = observation.payload
+        reference_fields = {
+            "artifact.available": ("artifact_ref", "artifact", "media_type"),
+            "message.available": ("content_ref", "message", "media_type"),
+            "tool.completed": ("result_ref", "tool-result", "media_type"),
+            "tool.started": ("arguments_ref", "tool-arguments", None),
+        }
+        binding = reference_fields.get(observation.kind)
+        if binding is None:
+            return
+        reference = payload.get(binding[0])
+        sha256 = payload.get("sha256")
+        size = payload.get("size")
+        media_type = payload.get(binding[2]) if binding[2] is not None else "application/json"
+        if (
+            not isinstance(reference, str)
+            or not isinstance(sha256, str)
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or not isinstance(media_type, str)
+        ):
+            raise PrimeControlError()
+        descriptor = PrivateValueDescriptor(reference, binding[1], media_type, size, sha256)
+        existing = self._client_private_descriptors.get(reference)
+        if existing is not None and existing != descriptor:
+            raise PrimeControlError()
+        self._client_private_descriptors[reference] = descriptor
+
     async def close(self) -> None:
         async with self._close_lock:
             if self._closed:
@@ -824,6 +941,75 @@ class PrimeControlPlaneClient:
         self._prepared_inputs.move_to_end(reference)
         while len(self._prepared_inputs) > MAX_PREPARED_PRIVATE_INPUTS:
             self._prepared_inputs.popitem(last=False)
+
+
+def _client_observation_from_mapping(value: Mapping[str, object]) -> ClientObservation:
+    if set(value) != {
+        "observation_id",
+        "active_session_id",
+        "generation",
+        "source_sequence",
+        "emitted_at",
+        "kind",
+        "payload",
+    }:
+        raise PrimeControlError()
+    try:
+        active_session_id = value["active_session_id"]
+        payload = value["payload"]
+        observation_id = value["observation_id"]
+        generation = value["generation"]
+        source_sequence = value["source_sequence"]
+        emitted_at = value["emitted_at"]
+        kind = value["kind"]
+        if (
+            not isinstance(active_session_id, str)
+            or not isinstance(payload, Mapping)
+            or not isinstance(observation_id, str)
+            or isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or isinstance(source_sequence, bool)
+            or not isinstance(source_sequence, int)
+            or not isinstance(emitted_at, str)
+            or not isinstance(kind, str)
+        ):
+            raise PrimeControlError()
+        return ClientObservation(
+            observation_id=observation_id,
+            session_id=active_session_id,
+            generation=generation,
+            source_sequence=source_sequence,
+            emitted_at=emitted_at,
+            kind=kind,
+            payload=payload,
+        )
+    except (KeyError, TypeError, ValueError):
+        raise PrimeControlError() from None
+
+
+def _private_descriptor_from_mapping(value: Mapping[str, object]) -> PrivateValueDescriptor:
+    if set(value) != {"reference", "kind", "media_type", "size", "sha256"}:
+        raise PrimeControlError()
+    try:
+        reference = value["reference"]
+        kind = value["kind"]
+        media_type = value["media_type"]
+        size = value["size"]
+        sha256 = value["sha256"]
+        if (
+            not isinstance(reference, str)
+            or not isinstance(kind, str)
+            or not isinstance(media_type, str)
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or not isinstance(sha256, str)
+        ):
+            raise PrimeControlError()
+        return PrivateValueDescriptor(
+            reference, kind, media_type, size, sha256
+        )
+    except (KeyError, TypeError, ValueError):
+        raise PrimeControlError() from None
 
 
 def _request_id() -> str:

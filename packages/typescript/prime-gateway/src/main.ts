@@ -61,6 +61,7 @@ import type {
   PrivateResultProjection,
   PrivateContinuationBinding,
 } from "./private-store.js";
+import type { PrimeClientObservation } from "./client-observation.js";
 import type {
   GatewayRlmBinding,
   GatewayRlmMessageBinding,
@@ -111,6 +112,8 @@ export const PRIME_GATEWAY_RLM_HOST_SHIM_FILE = "asterion-rlm-host-shim.mjs";
 type SidecarEnvelopeType =
   | "authority.update"
   | "command.accept"
+  | "client_observations"
+  | "client_value_read"
   | "events.stream"
   | "ecosystem_activate"
   | "private.read"
@@ -123,6 +126,8 @@ type SidecarEnvelopeType =
 const SIDE_CAR_ENVELOPE_TYPES: ReadonlySet<SidecarEnvelopeType> = new Set([
   "authority.update",
   "command.accept",
+  "client_observations",
+  "client_value_read",
   "events.stream",
   "ecosystem_activate",
   "private.read",
@@ -142,10 +147,12 @@ type SessionContextPrivateValues =
 
 export interface PrimeGatewaySidecarOptions {
   readonly currentGeneration: number;
+  readonly sessionId?: string;
   readonly gateway: {
     accept(command: ControlCommand): Promise<void>;
     updateRemainingBudget(budget: SkillBudget): void;
     eventsAfterCursor(cursor: { readonly generation: number; readonly sequence: number }): readonly ControlEvent[];
+    clientObservationsAfterCursor?(cursor: { readonly generation: number; readonly sequence: number }): readonly PrimeClientObservation[];
     executeSessionContext?(
       command: SessionContextCommand,
       preparePrivate: () => Promise<void>,
@@ -166,6 +173,8 @@ export interface PrimeGatewaySidecarOptions {
     | "readInput"
     | "readBoundInputReference"
     | "readBoundResultReference"
+    | "describeClientValue"
+    | "readClientValue"
   >;
 }
 
@@ -208,6 +217,7 @@ interface SidecarEnvelope {
   readonly budget?: unknown;
   readonly command_id?: unknown;
   readonly action_id?: unknown;
+  readonly max_bytes?: unknown;
   readonly frame?: unknown;
 }
 
@@ -240,6 +250,25 @@ type SidecarResponse =
     readonly id: string;
     readonly type: "events.batch";
     readonly events: readonly ControlEvent[];
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "client_observations.batch";
+    readonly observations: readonly PrimeClientObservation[];
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "client_value";
+    readonly descriptor: Readonly<{
+      readonly reference: string;
+      readonly kind: string;
+      readonly media_type: string;
+      readonly size: number;
+      readonly sha256: string;
+    }>;
+    readonly body_base64: string;
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -660,6 +689,8 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
     !REQUEST_ID.test(value.id) ||
     (
       value.type !== "command.accept" &&
+      value.type !== "client_observations" &&
+      value.type !== "client_value_read" &&
       value.type !== "events.stream" &&
       value.type !== "ecosystem_activate" &&
       value.type !== "private.read" &&
@@ -670,6 +701,20 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
       value.type !== "session-context.cancel" &&
       value.type !== "session-context.execute"
     )
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    value.type === "client_observations" &&
+    !hasExactKeys(value, ["protocol", "id", "type", "cursor"])
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    value.type === "client_value_read" &&
+    (!hasExactKeys(value, ["protocol", "id", "type", "reference", "max_bytes"]) ||
+      typeof value.reference !== "string" ||
+      !Number.isSafeInteger(value.max_bytes) || Number(value.max_bytes) < 1 || Number(value.max_bytes) > MAX_PRIVATE_ATTACHMENT_BYTES)
   ) {
     throw new PrimeGatewayError();
   }
@@ -924,6 +969,24 @@ export class PrimeGatewaySidecar {
           type: "command.accepted",
         });
       }
+      if (envelope.type === "client_observations") {
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "client_observations.batch",
+          observations: this.clientObservations(envelope),
+        });
+      }
+      if (envelope.type === "client_value_read") {
+        const value = await this.readClientValue(envelope);
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "client_value",
+          descriptor: value.descriptor,
+          body_base64: value.body_base64,
+        });
+      }
       if (envelope.type === "private.read") {
         return Object.freeze({
           protocol: PRIME_GATEWAY_IPC_PROTOCOL,
@@ -1120,6 +1183,42 @@ export class PrimeGatewaySidecar {
       return validated;
     });
     return Object.freeze(events);
+  }
+
+  private clientObservations(envelope: SidecarEnvelope): readonly PrimeClientObservation[] {
+    const cursor = validateCursor(envelope.cursor);
+    const replayCursor = cursor ?? { generation: this.options.currentGeneration, sequence: 0 };
+    const observations = this.options.gateway.clientObservationsAfterCursor;
+    if (observations === undefined) throw new PrimeGatewayError();
+    const batch = observations.call(this.options.gateway, replayCursor);
+    let expected = replayCursor.sequence + 1;
+    for (const observation of batch) {
+      if (
+        observation.active_session_id !== this.options.sessionId ||
+        observation.generation !== replayCursor.generation ||
+        observation.source_sequence !== expected ||
+        JSON.stringify(observation).includes("SENTINEL_BODY")
+      ) throw new PrimeGatewayError();
+      expected += 1;
+    }
+    return Object.freeze([...batch]);
+  }
+
+  private async readClientValue(envelope: SidecarEnvelope): Promise<Readonly<{
+    descriptor: Readonly<{ reference: string; kind: string; media_type: string; size: number; sha256: string }>;
+    body_base64: string;
+  }>> {
+    if (typeof envelope.reference !== "string" || !Number.isSafeInteger(envelope.max_bytes)) throw new PrimeGatewayError();
+    const descriptor = await this.options.privateValues.describeClientValue(envelope.reference, this.options.sessionId);
+    const body = await this.options.privateValues.readClientValue(envelope.reference, Number(envelope.max_bytes), this.options.sessionId);
+    if (
+      body.byteLength !== descriptor.size ||
+      createHash("sha256").update(body).digest("hex") !== descriptor.sha256
+    ) throw new PrimeGatewayError();
+    return Object.freeze({
+      descriptor: Object.freeze({ reference: descriptor.reference, kind: descriptor.kind, media_type: descriptor.mediaType, size: descriptor.size, sha256: descriptor.sha256 }),
+      body_base64: body.toString("base64"),
+    });
   }
 
   private async readPrivate(envelope: SidecarEnvelope): Promise<string> {
@@ -1904,6 +2003,7 @@ async function createSidecarFromDescriptor(
     ecosystem,
     restoreExistingSession: !descriptor.recoveryReadOnly,
     store,
+    clientObservationValues: privateValues,
     privateValues: boundPrivateInputs,
     privateResults: privateValues,
     async createSession(goal, bindIdentity, context) {
@@ -2049,6 +2149,7 @@ async function createSidecarFromDescriptor(
 
   return new PrimeGatewaySidecar({
     currentGeneration: descriptor.generation,
+    sessionId: descriptor.sessionId,
     privateValues,
     gateway: {
       accept: (command) => gateway.accept(command),
@@ -2058,6 +2159,8 @@ async function createSidecarFromDescriptor(
       },
       eventsAfterCursor: (cursor) =>
         store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
+      clientObservationsAfterCursor: (cursor) =>
+        gateway.clientObservationsAfterCursor(cursor),
       rlmLifecycle: () => store.rlmLifecycle(),
       rlmBinding: (actionId) => store.rlmBinding(actionId),
       rlmMessageBinding: (actionId) => store.rlmMessageBinding(actionId),

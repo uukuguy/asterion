@@ -288,6 +288,7 @@ class TestPrimeControlFactory(unittest.TestCase):
         )
         self.assertIn("session.context-v1", manifest.capabilities)
         self.assertIn("ecosystem.portfolio", manifest.capabilities)
+        self.assertIn("client-observations-v1", manifest.capabilities)
 
     def test_factory_requires_ecosystem_services_before_process_creation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

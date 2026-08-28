@@ -126,7 +126,17 @@ export type {
   PrivateContinuationLocator,
   PrivateValueRef,
   PrivateValueStoreOptions,
+  PrivateClientValueDescriptor,
 } from "./private-store.js";
+export {
+  PrimeClientObservationMapper,
+  PrimeClientObservationError,
+} from "./client-observation.js";
+export type {
+  PrimeClientObservation,
+  PrimeClientObservationKind,
+  PrimeClientObservationMapperOptions,
+} from "./client-observation.js";
 export {
   AsterionSkillBridge,
   MAX_SKILL_FRAME_BYTES,

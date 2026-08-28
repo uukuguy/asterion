@@ -395,10 +395,12 @@ async def _event_iterator(
     process: PrimeSidecarProcess, envelope: Mapping[str, object]
 ) -> AsyncIterator[Mapping[str, object]]:
     response = await process.request(envelope)
-    events = response.get("events")
-    if not isinstance(events, list):
+    values = response.get(
+        "observations" if envelope.get("type") == "client_observations" else "events"
+    )
+    if not isinstance(values, list):
         raise PrimeSidecarProcessError()
-    for event in events:
+    for event in values:
         if not isinstance(event, Mapping):
             raise PrimeSidecarProcessError()
         yield event
@@ -524,8 +526,10 @@ def _validate_response(
     expected_response_type = {
         "authority.update": "authority.accepted",
         "command.accept": "command.accepted",
+        "client_value_read": "client_value",
         "ecosystem_activate": "ecosystem_receipt",
         "events.stream": "events.batch",
+        "client_observations": "client_observations.batch",
         "private.read": "private.value",
         "rlm.binding.read": "rlm.binding.value",
         "rlm.lifecycle.read": "rlm.lifecycle.batch",
@@ -540,6 +544,8 @@ def _validate_response(
         not in {
             "authority.accepted",
             "command.accepted",
+            "client_value",
+            "client_observations.batch",
             "ecosystem_receipt",
             "events.batch",
             "private.value",
@@ -553,6 +559,17 @@ def _validate_response(
     expected = {"protocol", "id", "type"}
     if response.get("type") == "events.batch":
         expected = expected | {"events"}
+    if response.get("type") == "client_observations.batch":
+        expected = expected | {"observations"}
+        if not isinstance(response.get("observations"), list):
+            raise PrimeSidecarProcessError()
+    if response.get("type") == "client_value":
+        expected = expected | {"descriptor", "body_base64"}
+        if (
+            not isinstance(response.get("descriptor"), Mapping)
+            or not isinstance(response.get("body_base64"), str)
+        ):
+            raise PrimeSidecarProcessError()
     if response.get("type") == "rlm.lifecycle.batch":
         expected = expected | {"lifecycle"}
         if not isinstance(response.get("lifecycle"), list):

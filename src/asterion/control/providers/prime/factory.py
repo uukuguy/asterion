@@ -85,6 +85,7 @@ _EVENTS = (
 _CAPABILITIES = (
     "action-proposals",
     "checkpointing",
+    "client-observations-v1",
     "ecosystem.portfolio",
     "event-replay",
     "session-lifecycle",
