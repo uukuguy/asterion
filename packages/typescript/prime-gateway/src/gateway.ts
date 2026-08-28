@@ -96,9 +96,9 @@ export const PRIME_CLIENT_RECEIPT_FORMAT = "asterion.prime-client-receipt/v1";
 export const PRIME_CLIENT_ARTIFACT_LOCK_DIGEST =
   "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3";
 export const PRIME_CLIENT_MODULE_LOCK_DIGEST =
-  "b24a58d0957b9b927df74f2368b57a842376d64b52155fbff11a6e7e9160fa4c";
+  "54a86432a565da6f8495f9d9d13716501fe431231174824f1069162964e95bda";
 export const PRIME_CLIENT_BUNDLE_DIGEST =
-  "2a7468316f0da078228912196e01d54bfd5c7fd998479f520826ed7fb187f503";
+  "490c90e5b02678cc189dd3e9e79c3b9151a74dfb50c78f1465eab42e2585c08e";
 
 export interface PrimeClientReceipt {
   readonly artifact_lock_digest: string;

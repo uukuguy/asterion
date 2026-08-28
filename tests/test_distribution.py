@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import shutil
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -72,6 +73,40 @@ PRIME_DISTRIBUTION_MEMBERS = {
 
 
 class DistributionTests(unittest.TestCase):
+    def test_installed_wheel_client_module_requires_explicit_external_prime_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            destination = Path(temporary_directory)
+            subprocess.run(("uv", "build", "--wheel", "--out-dir", str(destination), "."), cwd=PROJECT, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            wheel = next(destination.glob("*.whl"))
+            installed = destination / "installed"
+            with ZipFile(wheel) as archive:
+                archive.extractall(installed)
+            external_root = destination / "external-prime-agent"
+            subprocess.run(("git", "clone", "--no-hardlinks", "--no-checkout", str(PROJECT / "3th-party/prime-agent"), str(external_root)), check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            subprocess.run(("git", "checkout", "--detach", "a18809e00ea30638584d87b3afea7285a9d7296c"), cwd=external_root, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            shutil.copytree(PROJECT / "3th-party/prime-agent/node_modules", external_root / "node_modules", symlinks=False)
+            shutil.copytree(PROJECT / "3th-party/prime-agent/packages/coding-agent/node_modules", external_root / "packages/coding-agent/node_modules", symlinks=False)
+            shutil.copytree(PROJECT / "3th-party/prime-agent/packages/coding-agent/dist", external_root / "packages/coding-agent/dist", symlinks=False)
+            module = installed / "asterion/control/providers/prime/resources/prime-client-module.mjs"
+            lock = installed / "asterion/control/providers/prime/resources/prime-client-module-lock.json"
+            artifact = installed / "asterion/control/providers/prime/resources/prime-artifact-lock.json"
+            harness = PROJECT / "tests/fixtures/prime_gateway/v1/real-prime-clients.mjs"
+            completed = subprocess.run(("node", str(harness), "--package", "core", "--resource-root", str(module.parent), "--prime-root", str(external_root)), cwd=destination, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(json.loads(completed.stdout)["package"], "core")
+            self.assertFalse((destination / "3th-party").exists())
+            escaped_root = destination / "external-prime-link"
+            try:
+                escaped_root.symlink_to(external_root, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+            for invalid_root in (destination / "missing", external_root / "packages", external_root.parent, escaped_root):
+                with self.subTest(root=invalid_root):
+                    rejected = subprocess.run(("node", str(harness), "--package", "core", "--resource-root", str(module.parent), "--prime-root", str(invalid_root)), cwd=destination, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    self.assertNotEqual(rejected.returncode, 0)
+            self.assertTrue(lock.is_file())
+            self.assertTrue(artifact.is_file())
+
     def test_wheel_contains_generic_benchmark_modules_and_schema(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             destination = Path(temporary_directory)

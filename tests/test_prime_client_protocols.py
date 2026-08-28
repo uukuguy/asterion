@@ -43,7 +43,8 @@ _PROJECT = Path(__file__).resolve().parents[1]
 def _real_prime_receipt(package: str) -> dict[str, object]:
     completed = subprocess.run(
         ("node", str(_PROJECT / "tests/fixtures/prime_gateway/v1/real-prime-clients.mjs"),
-         "--package", package),
+         "--package", package, "--resource-root", str(_PROJECT / "packages/typescript/prime-gateway/resources"),
+         "--prime-root", str(_PROJECT / "3th-party/prime-agent")),
         cwd=_PROJECT, check=True, capture_output=True, text=True,
     )
     return cast(dict[str, object], json.loads(completed.stdout))

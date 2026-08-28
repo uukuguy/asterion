@@ -90,6 +90,8 @@ class PromotionCheckTests(unittest.TestCase):
 
         self.assertIn("prime-client-module-lock.json", WHEEL_PROTOCOL_RESOURCE_SMOKE)
         self.assertIn("prime-client-module.mjs", WHEEL_PROTOCOL_RESOURCE_SMOKE)
+        self.assertIn("runClientPackage", WHEEL_PROTOCOL_RESOURCE_SMOKE)
+        self.assertIn("external_prime_root", WHEEL_PROTOCOL_RESOURCE_SMOKE)
 
     def test_default_runner_forces_sparse_cargo_registry_and_preserves_environment(self) -> None:
         result = completed(("cargo", "test"))

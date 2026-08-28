@@ -114,7 +114,9 @@ with tempfile.TemporaryDirectory() as temporary:
 """
 
 WHEEL_PROTOCOL_RESOURCE_SMOKE = r"""
+import hashlib
 import json
+import subprocess
 from importlib import resources
 from pathlib import Path
 
@@ -145,6 +147,35 @@ client_lock = json.loads(
 assert client_lock['format'] == 'asterion.prime-client-module-lock/v1'
 assert client_lock['source_commit'] == prime_lock['source_commit']
 assert (prime_root / 'prime-client-module.mjs').is_file()
+external_prime_root = (Path.cwd() / '3th-party/prime-agent').resolve()
+module_path = (prime_root / 'prime-client-module.mjs').resolve()
+frame = {
+    'artifactLockDigest': hashlib.sha256(
+        (prime_root / 'prime-artifact-lock.json').read_bytes()
+    ).hexdigest(),
+    'format': 'asterion.prime-client-frame/v1',
+    'moduleLockDigest': hashlib.sha256(
+        (prime_root / 'prime-client-module-lock.json').read_bytes()
+    ).hexdigest(),
+    'package': 'core',
+    'primeRoot': str(external_prime_root),
+    'sourceCommit': prime_lock['source_commit'],
+}
+module_smoke = (
+    "import {pathToFileURL} from 'node:url';"
+    f"const module = await import(pathToFileURL({str(module_path)!r}).href);"
+    f"const receipt = await module.runClientPackage(Object.freeze({json.dumps(frame)}));"
+    "if (receipt.package !== 'core' || receipt.providerOperations !== 0 || "
+    "receipt.credentialReads !== 0 || receipt.networkRequests !== 0 || "
+    "receipt.retainedProcesses !== 0 || receipt.privateReads !== 0 || "
+    "receipt.unauthorizedUploads !== 0 || receipt.stdoutWrites !== 0 || "
+    "receipt.scenarioEvidence.length !== 11) process.exit(1);"
+)
+module_result = subprocess.run(
+    ('node', '--input-type=module', '--eval', module_smoke),
+    cwd='/', capture_output=True, text=True, check=False,
+)
+assert module_result.returncode == 0
 assert (prime_root / 'control-plane.json').is_file()
 assert (prime_root / 'skills/asterion-control/SKILL.md').is_file()
 assert (prime_root / 'skills/asterion-control/pyproject.toml').is_file()
