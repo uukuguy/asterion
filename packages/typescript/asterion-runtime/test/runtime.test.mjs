@@ -39,6 +39,7 @@ import {
   validateOperationTransaction,
   validateAuthRequest,
   validateModelSelectionRequest,
+  validateSettingsKeybindingsRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
   validateEventStream,
@@ -417,6 +418,40 @@ test("validates the closed exact fixture model selection request", async () => {
     () => validateModelSelectionRequest({ ...valid, model_id: "Fixture.Model.Small" }),
     OperationProtocolError,
   );
+});
+
+test("validates closed typed settings and keybindings without secret-shaped fields", async () => {
+  const valid = await readFixture(operationFixtures, "valid-settings-keybindings-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-settings-keybindings-secret.json");
+  const snapshot = validateSettingsKeybindingsRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.throws(() => validateSettingsKeybindingsRequest(invalid), OperationProtocolError);
+  assert.throws(
+    () => validateSettingsKeybindingsRequest({ type: "setting", name: "app.new_session", scope: "global", value: "SENTINEL_SECRET" }),
+    OperationProtocolError,
+  );
+  assert.throws(
+    () => validateSettingsKeybindingsRequest({ type: "setting", name: "theme", scope: "global", value: true }),
+    OperationProtocolError,
+  );
+  assert.throws(
+    () => validateSettingsKeybindingsRequest({ type: "setting", name: "telemetry.enabled", scope: "global", value: "dark" }),
+    OperationProtocolError,
+  );
+  for (const chord of ["Ctrl+Ctrl+N", "Alt+Ctrl+N", "Ctrl+Alt+Shift+Meta+Ctrl+N"]) {
+    assert.throws(
+      () => validateSettingsKeybindingsRequest({ type: "keybinding", name: "app.session.new", scope: "global", value: chord }),
+      OperationProtocolError,
+      chord,
+    );
+  }
+  for (const chord of ["Ctrl+N", "Ctrl+Alt+Shift+Meta+F12"]) {
+    assert.equal(
+      validateSettingsKeybindingsRequest({ type: "keybinding", name: "app.session.new", scope: "global", value: chord }).value,
+      chord,
+    );
+  }
 });
 
 test("validates complete control event streams and semantic ordering", async () => {

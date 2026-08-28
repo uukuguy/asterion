@@ -10,6 +10,7 @@ import type {
   ActionKind,
   AuthRequest,
   ModelSelectionRequest,
+  SettingsKeybindingsRequest,
   AgentSystemManifest,
   AssemblyManifest,
   BenchmarkSuiteManifest,
@@ -98,6 +99,9 @@ const operationReceiptValidator = ajv.compile(
 const authRequestValidator = ajv.compile(readSchema("auth-request.schema.json"));
 const modelSelectionRequestValidator = ajv.compile(
   readSchema("model-selection-request.schema.json"),
+);
+const settingsKeybindingsRequestValidator = ajv.compile(
+  readSchema("settings-keybindings-request.schema.json"),
 );
 
 const EFFECT_COUNTERS = [
@@ -360,6 +364,17 @@ export function validateModelSelectionRequest(value: unknown): ModelSelectionReq
   return requireOperationValid<ModelSelectionRequest>(
     "model selection request",
     modelSelectionRequestValidator,
+    value,
+  );
+}
+
+export function validateSettingsKeybindingsRequest(
+  value: unknown,
+): SettingsKeybindingsRequest {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<SettingsKeybindingsRequest>(
+    "settings keybindings request",
+    settingsKeybindingsRequestValidator,
     value,
   );
 }

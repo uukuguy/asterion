@@ -132,6 +132,7 @@ schema_paths = (
     'asterion/schemas/session-context/v1/receipt.schema.json',
     'asterion/schemas/operation/v1/auth-request.schema.json',
     'asterion/schemas/operation/v1/model-selection-request.schema.json',
+    'asterion/schemas/operation/v1/settings-keybindings-request.schema.json',
     'asterion/schemas/operation/v1/operation-request-descriptor.schema.json',
     'asterion/schemas/operation/v1/operation-transaction.schema.json',
     'asterion/schemas/operation/v1/operation-receipt.schema.json',

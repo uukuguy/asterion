@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/operation/v1/settings-keybindings-request.schema.json",
+  "title": "Asterion Private Settings and Keybindings Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": {"type": "string"},
+    "name": {"type": "string"},
+    "scope": {"type": "string"},
+    "value": {},
+    "project_id": {"$ref": "#/$defs/project_id"}
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/global"},
+    {"$ref": "#/$defs/project"}
+  ],
+  "$defs": {
+    "project_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "keybinding_value": {"type": "string", "pattern": "^(?=(?:Ctrl|Alt|Shift|Meta)\\+)(?:Ctrl\\+)?(?:Alt\\+)?(?:Shift\\+)?(?:Meta\\+)?(?:[A-Z0-9]|F(?:[1-9]|1[0-2])|Enter|Escape|Space|Tab)$"},
+    "global": {
+      "oneOf": [
+        {"$ref": "#/$defs/global_setting"},
+        {"$ref": "#/$defs/global_telemetry"},
+        {"$ref": "#/$defs/global_keybinding"}
+      ]
+    },
+    "project": {
+      "oneOf": [
+        {"$ref": "#/$defs/project_setting"},
+        {"$ref": "#/$defs/project_telemetry"},
+        {"$ref": "#/$defs/project_keybinding"}
+      ]
+    },
+    "global_setting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name", "scope", "value"],
+      "properties": {
+        "type": {"const": "setting"}, "name": {"const": "theme"}, "scope": {"const": "global"}, "value": {"enum": ["dark", "light", "system"]}
+      }
+    },
+    "global_keybinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name", "scope", "value"],
+      "properties": {
+        "type": {"const": "keybinding"}, "name": {"enum": ["app.session.new", "app.input.clear", "app.interrupt"]}, "scope": {"const": "global"}, "value": {"$ref": "#/$defs/keybinding_value"}
+      }
+    },
+    "project_setting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name", "scope", "value", "project_id"],
+      "properties": {
+        "type": {"const": "setting"}, "name": {"const": "theme"}, "scope": {"const": "project"}, "value": {"enum": ["dark", "light", "system"]}, "project_id": {"$ref": "#/$defs/project_id"}
+      }
+    },
+    "global_telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name", "scope", "value"],
+      "properties": {
+        "type": {"const": "setting"}, "name": {"const": "telemetry.enabled"}, "scope": {"const": "global"}, "value": {"type": "boolean"}
+      }
+    },
+    "project_telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name", "scope", "value", "project_id"],
+      "properties": {
+        "type": {"const": "setting"}, "name": {"const": "telemetry.enabled"}, "scope": {"const": "project"}, "value": {"type": "boolean"}, "project_id": {"$ref": "#/$defs/project_id"}
+      }
+    },
+    "project_keybinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name", "scope", "value", "project_id"],
+      "properties": {
+        "type": {"const": "keybinding"}, "name": {"enum": ["app.session.new", "app.input.clear", "app.interrupt"]}, "scope": {"const": "project"}, "value": {"$ref": "#/$defs/keybinding_value"}, "project_id": {"$ref": "#/$defs/project_id"}
+      }
+    }
+  }
+}

@@ -17,6 +17,7 @@ import type {
   OperationTransaction,
   AuthRequest,
   ModelSelectionRequest,
+  SettingsKeybindingsRequest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -37,6 +38,13 @@ export const fixtureModelSelectionRequest: ModelSelectionRequest = {
   thinking_level: "low",
   service_tier: "standard",
   transport_id: "fixture.transport-1",
+};
+
+export const fixtureSettingsKeybindingsRequest: SettingsKeybindingsRequest = {
+  type: "setting",
+  name: "theme",
+  scope: "global",
+  value: "dark",
 };
 
 export const fixtureOperationRequestDescriptor: OperationRequestDescriptor = {

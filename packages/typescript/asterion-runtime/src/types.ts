@@ -129,6 +129,47 @@ export interface ModelSelectionRequest {
   readonly transport_id: string;
 }
 
+export type SettingsKeybindingsRequest =
+  | {
+      readonly type: "setting";
+      readonly name: "theme";
+      readonly scope: "global";
+      readonly value: "dark" | "light" | "system";
+    }
+  | {
+      readonly type: "setting";
+      readonly name: "theme";
+      readonly scope: "project";
+      readonly value: "dark" | "light" | "system";
+      readonly project_id: string;
+    }
+  | {
+      readonly type: "setting";
+      readonly name: "telemetry.enabled";
+      readonly scope: "global";
+      readonly value: boolean;
+    }
+  | {
+      readonly type: "setting";
+      readonly name: "telemetry.enabled";
+      readonly scope: "project";
+      readonly value: boolean;
+      readonly project_id: string;
+    }
+  | {
+      readonly type: "keybinding";
+      readonly name: "app.session.new" | "app.input.clear" | "app.interrupt";
+      readonly scope: "global";
+      readonly value: string;
+    }
+  | {
+      readonly type: "keybinding";
+      readonly name: "app.session.new" | "app.input.clear" | "app.interrupt";
+      readonly scope: "project";
+      readonly value: string;
+      readonly project_id: string;
+    };
+
 export interface ClientCursor {
   readonly generation: number;
   readonly sequence: number;

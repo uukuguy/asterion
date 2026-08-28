@@ -29,6 +29,17 @@ from asterion.operation.model_selection import (
     ModelSelectionStoreReceipt,
     validate_model_selection_request,
 )
+from asterion.operation.settings import (
+    KeybindingRecord,
+    OperationServiceError,
+    PreferenceRecord,
+    PreferenceReceipt,
+    PreferenceStore,
+    PreferenceStoreSnapshot,
+    SettingsAllowlist,
+    SettingsOperationService,
+    validate_settings_keybindings_request,
+)
 
 __all__ = [
     "EFFECT_COUNTERS",
@@ -54,4 +65,13 @@ __all__ = [
     "ModelSelectionStore",
     "ModelSelectionStoreReceipt",
     "validate_model_selection_request",
+    "KeybindingRecord",
+    "OperationServiceError",
+    "PreferenceRecord",
+    "PreferenceReceipt",
+    "PreferenceStore",
+    "PreferenceStoreSnapshot",
+    "SettingsAllowlist",
+    "SettingsOperationService",
+    "validate_settings_keybindings_request",
 ]
