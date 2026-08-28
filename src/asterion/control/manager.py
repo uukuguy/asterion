@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from asterion.control.authority import (
     ActionReceipt,
@@ -75,7 +75,7 @@ class _RecoveredOperationHost:
     """Narrow recovery facade; the operation manager remains private."""
 
     def __init__(self, manager: object) -> None:
-        self._manager = manager
+        self._manager: Any = manager
 
     async def execute_operation(self, transaction: object) -> object:
         try:
@@ -611,13 +611,13 @@ class ControlHost:
             manager = OperationManager(
                 authority=AuthorityLedger(envelope),
                 journal=journal,
-                resolver=resolver
+                resolver=cast(Any, resolver)
                 if resolver is not None
                 else _UnavailableOperationResolver(),
-                private_store=private_store
+                private_store=cast(Any, private_store)
                 if private_store is not None
                 else _UnavailableOperationStore(),
-                services=services,
+                services=cast(Any, services),
                 now_ms=now_ms or (lambda: 0),
                 session_id=transaction.session_id,
                 generation=transaction.generation,

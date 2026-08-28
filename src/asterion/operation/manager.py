@@ -113,9 +113,23 @@ class OperationManager:
                 )
             self._append(JournalRecord.operation_reserved(decision))
             self._authority.reserve_operation(decision)
+            if self._cancelled():
+                return self._record_terminal(
+                    self._receipt(
+                        transaction, "cancelled", "cancelled-before-dispatch"
+                    ),
+                    reserve=True,
+                )
             try:
                 typed = self._resolve(transaction, service)
-            except OperationManagerError:
+            except OperationManagerError as error:
+                if str(error) == "operation cancelled":
+                    return self._record_terminal(
+                        self._receipt(
+                            transaction, "cancelled", "cancelled-before-dispatch"
+                        ),
+                        reserve=True,
+                    )
                 return self._record_terminal(
                     self._receipt(transaction, "failed", "private-request-unavailable"),
                     reserve=True,
@@ -204,6 +218,7 @@ class OperationManager:
     def _recover(self) -> None:
         try:
             decisions: dict[str, OperationDecision] = {}
+            reserved: set[str] = set()
             for entry in self._journal.replay(JournalCursor(0)):
                 record = entry.record
                 if record.kind == "operation.transaction.accepted":
@@ -235,6 +250,7 @@ class OperationManager:
                     ):
                         raise ValueError
                     self._authority.reserve_operation(decision)
+                    reserved.add(operation_id)
                 elif record.kind in {
                     "operation.dispatch.started",
                     "operation.handoff.fenced",
@@ -253,7 +269,21 @@ class OperationManager:
                     ):
                         raise OperationManagerError("operation recovery conflicts")
                     self._receipts[receipt.operation_id] = receipt
-                    if receipt.status != "uncertain":
+                    decision = decisions.get(receipt.operation_id)
+                    if decision is None and receipt.status != "rejected":
+                        raise ValueError
+                    if (
+                        decision is not None
+                        and decision.status == "rejected"
+                        and receipt.status != "rejected"
+                    ):
+                        raise ValueError
+                    if (
+                        receipt.status != "uncertain"
+                        and decision is not None
+                        and decision.status == "admitted"
+                        and receipt.operation_id in reserved
+                    ):
                         self._authority.settle_operation(
                             receipt.operation_id,
                             OperationSettlement(
@@ -263,10 +293,10 @@ class OperationManager:
                             ),
                         )
                 elif record.kind == "operation.reconciliation.recorded":
-                    operation_id, attempt = (
-                        str(record.payload["operation_id"]),
-                        int(record.payload["attempt"]),
-                    )
+                    attempt_value = record.payload["attempt"]
+                    if type(attempt_value) is not int:
+                        raise ValueError
+                    operation_id, attempt = str(record.payload["operation_id"]), attempt_value
                     self._attempts[operation_id] = max(
                         self._attempts.get(operation_id, 0), attempt
                     )
@@ -322,11 +352,12 @@ class OperationManager:
                 authority_revision=transaction.authority_revision,
                 cancelled=False,
             )
+            if self._cancelled():
+                raise OperationManagerError("operation cancelled")
             if (
                 not isinstance(body, bytes)
                 or len(body) != request.byte_count
                 or hashlib.sha256(body).hexdigest() != request.request_sha256
-                or self._cancelled()
             ):
                 raise ValueError
             value = json.loads(body.decode("utf-8"))
@@ -334,7 +365,11 @@ class OperationManager:
                 raise ValueError
             typed = dict(value)
             digest = self._store.put(transaction, typed)
-            if not isinstance(digest, str) or len(digest) != 64:
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(value not in "0123456789abcdef" for value in digest)
+            ):
                 raise ValueError
             return typed
         except Exception:

@@ -219,3 +219,27 @@ class TestOperationManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rejected.status, "rejected")
         self.assertEqual(resolver.calls, 1)
         self.assertEqual(service.execute_calls, ["operation-1"])
+
+    async def test_rejected_prevalidation_recovery_is_non_settling(self) -> None:
+        manager, resolver, _, service, journal = _manager()
+        manager._services.clear()
+        receipt = await manager.execute(_transaction())
+        self.assertEqual(receipt.status, "rejected")
+        self.assertEqual((resolver.calls, service.execute_calls), (0, []))
+        recovered = OperationManager(
+            authority=AuthorityLedger(
+                _envelope(
+                    allowed_operations=("operation.auth",),
+                    host_service_grants=("operation.auth",),
+                )
+            ),
+            journal=journal,
+            resolver=Resolver(),
+            private_store=Store(),
+            services={},
+            now_ms=lambda: 1000,
+            session_id="session-1",
+            generation=1,
+        )
+        self.assertEqual((await recovered.execute(_transaction())).status, "rejected")
+        self.assertEqual(recovered._authority.operation_settlements, {})

@@ -1,4 +1,5 @@
 """Pure reconstruction of host-owned control state from a canonical journal."""
+# pyright: reportGeneralTypeIssues=false
 
 from __future__ import annotations
 
@@ -247,7 +248,11 @@ def recover_control_host_state(
                 ):
                     raise JournalConflictError("control journal recovery failed")
                 operation_receipts[receipt.operation_id] = receipt
-                if receipt.status != "uncertain":
+                if (
+                    receipt.status != "uncertain"
+                    and decision.status == "admitted"
+                    and receipt.operation_id in operation_reserved
+                ):
                     authority_operations.append(
                         OperationSettlement(
                             receipt.operation_id,
