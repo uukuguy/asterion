@@ -8,6 +8,7 @@ uses the injected :class:`AgentClient` private-value service with a named purpos
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import time
@@ -159,6 +160,12 @@ class ClientCommandRegistry:
 
     revision: int
     commands: tuple[ClientCommand, ...]
+    _invocations: dict[tuple[str, ...], asyncio.Task[str]] = field(
+        default_factory=dict, init=False, compare=False, repr=False
+    )
+    _invocation_lock: asyncio.Lock = field(
+        default_factory=asyncio.Lock, init=False, compare=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if (
@@ -207,11 +214,24 @@ class ClientCommandRegistry:
     ) -> str:
         if not isinstance(client, AgentClient):
             raise ClientInteractiveError("client command is invalid")
-        return await client.submit(self.intent(
-            session_id=session_id, authority_revision=authority_revision, intent_id=intent_id,
-            command_name=command_name, arguments_ref=arguments_ref,
-            client_id=_client_id(client),
-        ))
+        try:
+            client_id = _client_id(client)
+            intent = self.intent(
+                session_id=session_id, authority_revision=authority_revision,
+                intent_id=intent_id, command_name=command_name,
+                arguments_ref=arguments_ref, client_id=client_id,
+            )
+            key = (client_id, session_id, str(authority_revision), intent_id, command_name, arguments_ref)
+            async with self._invocation_lock:
+                admission = self._invocations.get(key)
+                if admission is None:
+                    admission = asyncio.create_task(client.submit(intent))
+                    self._invocations[key] = admission
+            return await asyncio.shield(admission)
+        except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            raise ClientInteractiveError("client command submission is unavailable") from None
 
 
 def reduce_client_view(state: ClientViewState, event: ClientEvent) -> ClientViewState:
@@ -238,7 +258,7 @@ async def run_headless(
     if mode not in {"json", "text"}:
         raise ClientInteractiveError("client headless mode is invalid")
     state: ClientViewState | None = None
-    final_message: ClientEvent | None = None
+    final_messages: list[ClientEvent] = []
     try:
         async for raw_event in client.events():
             event = _validated_event(raw_event)
@@ -248,19 +268,28 @@ async def run_headless(
             if mode == "json":
                 _write_bounded(stdout, json.dumps(_public_event(event), separators=(",", ":"), sort_keys=True) + "\n", max_output_bytes)
             elif event.type == "message.available" and event.payload["role"] == "assistant":
-                final_message = event
+                final_messages.append(event)
         if state is None or not state.terminal:
             raise ClientInteractiveError("client event stream is incomplete")
-        if mode == "text" and final_message is not None:
-            payload = final_message.payload
+        if mode == "text":
+            if len(final_messages) != 1:
+                raise ClientInteractiveError("client final message is unavailable")
+            payload = final_messages[0].payload
             size = payload["size"]
             if not isinstance(size, int) or isinstance(size, bool) or not _nonnegative_integer(size):
-                raise ClientInteractiveError("client final message is invalid")
-            value = client.resolve_text(
-                str(payload["content_ref"]), purpose="headless-final",
-                max_bytes=max(1, size),
-                deadline_ms=_deadline(deadline_ms),
-            )
+                raise ClientInteractiveError("client final message is unavailable")
+            try:
+                value = client.resolve_text(
+                    str(payload["content_ref"]), purpose="headless-final",
+                    max_bytes=max(1, size), deadline_ms=_deadline(deadline_ms),
+                )
+                body = value.encode("utf-8")
+                if len(body) != size or hashlib.sha256(body).hexdigest() != payload["sha256"]:
+                    raise ValueError
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                raise
+            except Exception:
+                raise ClientInteractiveError("client final message is unavailable") from None
             _write_bounded(stdout, value + "\n", max_output_bytes)
         return state
     except asyncio.CancelledError:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import unittest
@@ -8,6 +9,7 @@ from typing import cast
 
 from asterion.client import AgentClient, ClientCursor, ClientEvent, ClientInteractiveError
 from asterion.client.interactive import (
+    ClientCommand,
     ClientCommandRegistry,
     ClientUiRequest,
     ClientViewState,
@@ -48,6 +50,7 @@ class _Endpoint:
         self.private_values = _PrivateValues()
         self.submitted: list[object] = []
         self.closed = False
+        self.close_calls = 0
 
     async def submit(self, intent: object) -> str:
         self.submitted.append(intent)
@@ -64,6 +67,7 @@ class _Endpoint:
 
     async def close(self) -> None:
         self.closed = True
+        self.close_calls += 1
 
 
 def _client(events: tuple[ClientEvent, ...]) -> tuple[AgentClient, _Endpoint]:
@@ -88,15 +92,65 @@ class TestClientInteractive(unittest.IsolatedAsyncioTestCase):
 
     async def test_headless_resolves_only_final_message(self) -> None:
         client, endpoint = _client((
-            _event("message.available", 1, {"content_ref": "private-earlier-1", "media_type": "text/plain", "message_id": "message-1", "role": "assistant", "sha256": "a" * 64, "size": 7}),
-            _event("message.available", 2, {"content_ref": "private-final-1", "media_type": "text/plain", "message_id": "message-2", "role": "assistant", "sha256": hashlib.sha256(b"FINAL_SENTINEL").hexdigest(), "size": 14}),
-            _event("session.terminal", 3, {"reason_code": "completed", "status": "completed"}),
+            _event("message.available", 1, {"content_ref": "private-final-1", "media_type": "text/plain", "message_id": "message-2", "role": "assistant", "sha256": hashlib.sha256(b"FINAL_SENTINEL").hexdigest(), "size": 14}),
+            _event("session.terminal", 2, {"reason_code": "completed", "status": "completed"}),
         ))
         output = io.StringIO()
         await run_headless(client, mode="text", stdout=output, deadline_ms=100)
         self.assertEqual(output.getvalue(), "FINAL_SENTINEL\n")
         self.assertEqual([(reference, purpose) for reference, purpose, _, _ in endpoint.private_values.reads], [("private-final-1", "headless-final")])
         self.assertTrue(endpoint.closed)
+
+    async def test_headless_text_requires_exactly_one_final_assistant_message(self) -> None:
+        final = _event("message.available", 1, {"content_ref": "private-final-1", "media_type": "text/plain", "message_id": "message-1", "role": "assistant", "sha256": hashlib.sha256(b"FINAL_SENTINEL").hexdigest(), "size": 14})
+        terminal = _event("session.terminal", 2, {"reason_code": "completed", "status": "completed"})
+        terminal_only = _event("session.terminal", 1, {"reason_code": "completed", "status": "completed"})
+        fault = _event("fault.raised", 1, {"code": "failed", "evidence_ref": "evidence-1", "recoverable": False})
+        duplicate = _event("message.available", 2, {"content_ref": "private-final-2", "media_type": "text/plain", "message_id": "message-2", "role": "assistant", "sha256": "a" * 64, "size": 1})
+        duplicate_terminal = _event("session.terminal", 3, {"reason_code": "completed", "status": "completed"})
+        for events in ((terminal_only,), (fault, terminal), (final, duplicate, duplicate_terminal)):
+            with self.subTest(events=tuple(event.type for event in events)):
+                client, endpoint = _client(events)
+                output = io.StringIO()
+                with self.assertRaisesRegex(ClientInteractiveError, "^client final message is unavailable$"):
+                    await run_headless(client, mode="text", stdout=output, deadline_ms=100)
+                self.assertEqual(output.getvalue(), "")
+                self.assertEqual(endpoint.private_values.reads, [])
+                self.assertEqual(endpoint.close_calls, 1)
+
+    async def test_headless_validates_final_bytes_before_stdout(self) -> None:
+        client, endpoint = _client((
+            _event("message.available", 1, {"content_ref": "private-final-1", "media_type": "text/plain", "message_id": "message-1", "role": "assistant", "sha256": "a" * 64, "size": 14}),
+            _event("session.terminal", 2, {"reason_code": "completed", "status": "completed"}),
+        ))
+        output = io.StringIO()
+        with self.assertRaisesRegex(ClientInteractiveError, "^client final message is unavailable$") as raised:
+            await run_headless(client, mode="text", stdout=output, deadline_ms=100)
+        self.assertEqual(output.getvalue(), "")
+        self.assertNotIn("FINAL_SENTINEL", str(raised.exception))
+        self.assertEqual(endpoint.close_calls, 1)
+
+    async def test_headless_redacts_resolver_and_encoding_failures_before_stdout(self) -> None:
+        event = _event("message.available", 1, {"content_ref": "private-final-1", "media_type": "text/plain", "message_id": "message-1", "role": "assistant", "sha256": "a" * 64, "size": 1})
+        terminal = _event("session.terminal", 2, {"reason_code": "completed", "status": "completed"})
+        def raise_private_error(*args: object, **kwargs: object) -> str:
+            del args, kwargs
+            raise RuntimeError("SENTINEL_PRIVATE_VALUE")
+
+        def return_invalid_text(*args: object, **kwargs: object) -> str:
+            del args, kwargs
+            return "\ud800"
+
+        for resolve_text in (raise_private_error, return_invalid_text):
+            with self.subTest(resolve_text=resolve_text.__name__):
+                client, endpoint = _client((event, terminal))
+                endpoint.private_values.resolve_text = resolve_text  # type: ignore[method-assign]
+                output = io.StringIO()
+                with self.assertRaisesRegex(ClientInteractiveError, "^client final message is unavailable$") as raised:
+                    await run_headless(client, mode="text", stdout=output, deadline_ms=100)
+                self.assertEqual(output.getvalue(), "")
+                self.assertNotIn("SENTINEL_PRIVATE_VALUE", str(raised.exception))
+                self.assertEqual(endpoint.close_calls, 1)
 
     async def test_reducer_handles_all_events_and_revalidates_hostile_event(self) -> None:
         events = (
@@ -143,3 +197,25 @@ class TestClientInteractive(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(getattr(endpoint.submitted[0], "payload")["command_revision"], 1)
         with self.assertRaises(ClientInteractiveError):
             registry.intent(session_id="session-1", authority_revision=1, intent_id="invoke-2", command_name="missing", arguments_ref="arguments-1")
+
+    async def test_command_registry_redacts_submission_errors_and_deduplicates_concurrent_invocation(self) -> None:
+        registry = ClientCommandRegistry(1, (ClientCommand("alpha"),))
+
+        class FailingEndpoint(_Endpoint):
+            async def submit(self, intent: object) -> str:
+                del intent
+                raise RuntimeError("SENTINEL_PRIVATE_VALUE")
+
+        failing = FailingEndpoint(())
+        client = AgentClient(cast(ClientSessionEndpoint, failing), client_id="client-1")
+        with self.assertRaisesRegex(ClientInteractiveError, "^client command submission is unavailable$") as raised:
+            await registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="invoke-1", command_name="alpha", arguments_ref="arguments-1")
+        self.assertNotIn("SENTINEL_PRIVATE_VALUE", str(raised.exception))
+
+        client, endpoint = _client(())
+        first, second = await asyncio.gather(
+            registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="invoke-2", command_name="alpha", arguments_ref="arguments-1"),
+            registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="invoke-2", command_name="alpha", arguments_ref="arguments-1"),
+        )
+        self.assertEqual((first, second), ("accepted", "accepted"))
+        self.assertEqual(len(endpoint.submitted), 1)
