@@ -90,6 +90,7 @@ class ClientPrivateValueService:
         access: ClientAccess,
         backend: ClientPrivateValueBackend,
         clock_ms: Callable[[], int],
+        authority_revision_source: Callable[[], int],
         cancellation_signal: _CancellationSignal | None = None,
     ) -> None:
         if (
@@ -97,6 +98,7 @@ class ClientPrivateValueService:
             or not callable(getattr(backend, "describe", None))
             or not callable(getattr(backend, "read", None))
             or not callable(clock_ms)
+            or not callable(authority_revision_source)
             or (
                 cancellation_signal is not None
                 and not isinstance(getattr(cancellation_signal, "cancelled", None), bool)
@@ -106,6 +108,7 @@ class ClientPrivateValueService:
         self._access = access
         self._backend = backend
         self._clock_ms = clock_ms
+        self._authority_revision_source = authority_revision_source
         self._cancellation_signal = cancellation_signal
 
     @property
@@ -175,6 +178,10 @@ class ClientPrivateValueService:
         expires_at_ms: int | None,
     ) -> None:
         now = self._clock_ms()
+        try:
+            live_authority_revision = self._authority_revision_source()
+        except Exception:
+            raise ClientPrivateValueError("private value access is denied") from None
         if (
             _OPAQUE_ID.fullmatch(reference) is None
             or purpose not in _PURPOSES
@@ -186,7 +193,10 @@ class ClientPrivateValueService:
             or not isinstance(deadline_ms, int)
             or deadline_ms < now
             or (expires_at_ms is not None and (isinstance(expires_at_ms, bool) or not isinstance(expires_at_ms, int) or expires_at_ms < now))
-            or (authority_revision is not None and authority_revision != self._access.authority_revision)
+            or isinstance(live_authority_revision, bool)
+            or not isinstance(live_authority_revision, int)
+            or live_authority_revision != self._access.authority_revision
+            or (authority_revision is not None and authority_revision != live_authority_revision)
             or (self._cancellation_signal is not None and self._cancellation_signal.cancelled)
         ):
             raise ClientPrivateValueError("private value access is denied")

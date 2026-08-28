@@ -30,6 +30,7 @@ from asterion.control.journal import (
     CanonicalJournal,
     JournalConflictError,
     JournalCursor,
+    JournalEntry,
     JournalRecord,
 )
 from asterion.control.recovery import recover_control_host_state
@@ -453,13 +454,12 @@ class ControlHost:
             await self._close_children()
         try:
             journal_position = self._journal.position
-            if journal_position < self._journal_position:
+            if journal_position != self._journal_position:
                 raise JournalConflictError("control journal changed")
-            self._journal_position = journal_position
             entry = self._journal.accept_command(
                 command, expected_position=self._journal_position
             )
-            self._journal_position = max(self._journal_position, entry.position)
+            self._journal_position = entry.position
         except (JournalConflictError, TypeError, ValueError):
             raise ControlHostError("control command journal admission failed") from None
         try:
@@ -1086,6 +1086,40 @@ class ControlHost:
         except Exception:
             raise ControlHostError("control child cascade is unavailable") from None
         self._children_closed = True
+
+    def advance_client_record(self, entry: JournalEntry) -> None:
+        """Accept exactly one endpoint-verified client record into this host cursor."""
+
+        if (
+            not isinstance(entry, JournalEntry)
+            or entry.position != self._journal_position + 1
+            or entry.position != self._journal.position
+            or entry.record.kind
+            not in {
+                "client.intent.accepted",
+                "client.observation.accepted",
+                "client.event.accepted",
+            }
+        ):
+            raise ControlHostError("control client journal handoff conflicts")
+        try:
+            suffix = self._journal.replay(JournalCursor(self._journal_position))
+            if suffix != (entry,):
+                raise JournalConflictError("control journal changed")
+            field = {
+                "client.intent.accepted": "intent",
+                "client.observation.accepted": "observation",
+                "client.event.accepted": "event",
+            }[entry.record.kind]
+            value = entry.record.payload[field]
+            if (
+                not isinstance(value, Mapping)
+                or value.get("session_id") != self._state.session_id
+            ):
+                raise JournalConflictError("control client record identity mismatches")
+        except (JournalConflictError, KeyError, TypeError, ValueError):
+            raise ControlHostError("control client journal handoff conflicts") from None
+        self._journal_position = entry.position
 
     def _active_child_count(self) -> int:
         try:

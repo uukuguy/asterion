@@ -47,6 +47,27 @@ def _journal() -> MemoryCanonicalJournal:
 
 
 class TestControlJournal(unittest.TestCase):
+    def test_client_observation_rejects_noncanonical_values_without_coercion(self) -> None:
+        with self.assertRaises(JournalConflictError):
+            JournalRecord.client_observation_accepted(
+                {
+                    "observation_id": 1,
+                    "session_id": "session-1",
+                    "generation": 1,
+                    "source_sequence": 1,
+                    "emitted_at": "2026-08-10T00:00:00Z",
+                    "kind": "message.available",
+                    "payload": {
+                        "content_ref": "private-message-1",
+                        "media_type": "text/plain",
+                        "message_id": "message-1",
+                        "role": "assistant",
+                        "sha256": "a" * 64,
+                        "size": 1,
+                    },
+                }
+            )
+
     def test_client_intent_is_session_bound_and_body_free(self) -> None:
         journal = _journal()
         intent = ClientIntent(

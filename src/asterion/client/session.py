@@ -10,8 +10,14 @@ from types import MappingProxyType
 from typing import Protocol
 
 from asterion.client.private import ClientPrivateValueService
-from asterion.client.protocol import ClientCursor, ClientEvent, ClientIntent
+from asterion.client.protocol import (
+    ClientCursor,
+    ClientEvent,
+    ClientIntent,
+    validate_client_event_stream,
+)
 from asterion.control.journal import CanonicalJournal, JournalCursor
+from asterion.control.host import ControlCommand
 from asterion.control.manager import ControlHost
 
 
@@ -119,7 +125,14 @@ class HostClientSessionEndpoint:
         self._private_values = private_values
         self._observation_source = observation_source
         self._intent_digests: dict[str, str] = {}
+        self._dispatched_intent_ids: set[str] = set()
+        self._pending_intent_id: str | None = None
         self._events: list[ClientEvent] = []
+        self._event_ids: set[str] = set()
+        self._active_call_ids: set[str] = set()
+        self._seen_call_ids: set[str] = set()
+        self._terminal_seen = False
+        self._last_observation_source_sequence: int | None = None
         self._rebuild()
 
     @property
@@ -139,23 +152,24 @@ class HostClientSessionEndpoint:
         if previous is not None:
             if previous != digest:
                 raise ClientSessionError("client intent retry conflicts")
+            if intent.intent_id not in self._dispatched_intent_ids:
+                await self._dispatch_intent(intent)
             return f"client:{intent.intent_id}"
+        if self._pending_intent_id is not None:
+            raise ClientSessionError("client intent recovery is incomplete")
         command_type, payload = _control_mapping(intent)
         try:
-            self._journal.accept_client_intent(intent, expected_position=self._journal.position)
+            entry = self._journal.accept_client_intent(
+                intent, expected_position=self._journal.position
+            )
+            self._host.advance_client_record(entry)
         except Exception:
             raise ClientSessionError("client intent journal admission failed") from None
         self._intent_digests[intent.intent_id] = digest
-        try:
-            command = self._host.client_command(
-                command_id=f"client:{intent.intent_id}",
-                command_type=command_type,
-                payload=payload,
-            )
-            await self._host.dispatch(command)
-        except Exception:
-            raise ClientSessionError("client intent dispatch failed") from None
-        return command.command_id
+        self._pending_intent_id = intent.intent_id
+        del command_type, payload
+        await self._dispatch_intent(intent)
+        return f"client:{intent.intent_id}"
 
     def events(self, cursor: ClientCursor | None = None) -> AsyncIterator[ClientEvent]:
         if cursor is not None and (
@@ -177,11 +191,22 @@ class HostClientSessionEndpoint:
         source = self._observation_source
         if source is None:
             return
-        cursor = None if not self._events else ClientCursor(self._host.generation, len(self._events))
+        cursor = (
+            None
+            if self._last_observation_source_sequence is None
+            else ClientCursor(
+                self._host.generation, self._last_observation_source_sequence
+            )
+        )
         async for observation in source.client_observations(cursor):
             if (
                 observation.session_id != self._host.session_id
                 or observation.generation != self._host.generation
+                or (
+                    self._last_observation_source_sequence is not None
+                    and observation.source_sequence
+                    <= self._last_observation_source_sequence
+                )
             ):
                 raise ClientSessionError("client observation identity is invalid")
             event = ClientEvent(
@@ -194,16 +219,20 @@ class HostClientSessionEndpoint:
                 type=observation.kind,
                 payload=observation.payload,
             )
+            self._validate_next_event(event)
             try:
-                self._journal.accept_client_observation(
+                observation_entry = self._journal.accept_client_observation(
                     observation.to_mapping(), expected_position=self._journal.position
                 )
-                self._journal.accept_client_event(
+                self._host.advance_client_record(observation_entry)
+                event_entry = self._journal.accept_client_event(
                     event, expected_position=self._journal.position
                 )
+                self._host.advance_client_record(event_entry)
             except Exception:
                 raise ClientSessionError("client observation journal admission failed") from None
-            self._events.append(event)
+            self._append_event(event)
+            self._last_observation_source_sequence = observation.source_sequence
 
     async def close(self) -> None:
         await self._host.close()
@@ -211,26 +240,142 @@ class HostClientSessionEndpoint:
     def _rebuild(self) -> None:
         try:
             entries = self._journal.replay(JournalCursor(0))
+            pending_intent: ClientIntent | None = None
+            pending_observation: ClientObservation | None = None
             for entry in entries:
                 record = entry.record
+                if pending_intent is not None:
+                    if record.kind != "command.accepted":
+                        raise ValueError
+                    command = ControlCommand.from_mapping(
+                        _mapping(record.payload["command"])
+                    )
+                    if command != self._client_command(pending_intent):
+                        raise ValueError
+                    self._dispatched_intent_ids.add(pending_intent.intent_id)
+                    pending_intent = None
+                    self._pending_intent_id = None
+                    continue
+                if pending_observation is not None:
+                    if record.kind != "client.event.accepted":
+                        raise ValueError
+                    event = ClientEvent.from_mapping(_mapping(record.payload["event"]))
+                    if not _matches_observation(event, pending_observation):
+                        raise ValueError
+                    self._append_event(event)
+                    self._last_observation_source_sequence = (
+                        pending_observation.source_sequence
+                    )
+                    pending_observation = None
+                    continue
                 if record.kind == "client.intent.accepted":
-                    intent = ClientIntent.from_mapping(record.payload["intent"])
-                    if intent.client_id != self._client_id or intent.session_id != self._host.session_id:
+                    intent = ClientIntent.from_mapping(_mapping(record.payload["intent"]))
+                    if (
+                        intent.client_id != self._client_id
+                        or intent.session_id != self._host.session_id
+                        or intent.authority_revision != self._host.authority_revision
+                    ):
                         raise ValueError
                     digest = _digest(intent.to_mapping())
                     prior = self._intent_digests.get(intent.intent_id)
-                    if prior is not None and prior != digest:
+                    if prior is not None:
                         raise ValueError
                     self._intent_digests[intent.intent_id] = digest
+                    pending_intent = intent
+                    self._pending_intent_id = intent.intent_id
+                elif record.kind == "client.observation.accepted":
+                    observation = _observation_from_mapping(record.payload["observation"])
+                    if (
+                        observation.session_id != self._host.session_id
+                        or observation.generation != self._host.generation
+                        or (
+                            self._last_observation_source_sequence is not None
+                            and observation.source_sequence
+                            <= self._last_observation_source_sequence
+                        )
+                    ):
+                        raise ValueError
+                    pending_observation = observation
                 elif record.kind == "client.event.accepted":
-                    event = ClientEvent.from_mapping(record.payload["event"])
-                    if event.session_id != self._host.session_id or event.generation != self._host.generation:
-                        raise ValueError
-                    if event.sequence != len(self._events) + 1:
-                        raise ValueError
-                    self._events.append(event)
+                    raise ValueError
+            if pending_observation is not None:
+                raise ValueError
         except Exception:
             raise ClientSessionError("client session recovery failed") from None
+
+    async def _dispatch_intent(self, intent: ClientIntent) -> None:
+        if self._pending_intent_id != intent.intent_id:
+            raise ClientSessionError("client intent recovery is invalid")
+        command = self._client_command(intent)
+        try:
+            await self._host.dispatch(command)
+        except Exception:
+            if self._journal_has_command(command):
+                self._dispatched_intent_ids.add(intent.intent_id)
+                self._pending_intent_id = None
+            raise ClientSessionError("client intent dispatch failed") from None
+        self._dispatched_intent_ids.add(intent.intent_id)
+        self._pending_intent_id = None
+
+    def _client_command(self, intent: ClientIntent) -> ControlCommand:
+        command_type, payload = _control_mapping(intent)
+        return self._host.client_command(
+            command_id=f"client:{intent.intent_id}",
+            command_type=command_type,
+            payload=payload,
+        )
+
+    def _journal_has_command(self, command: ControlCommand) -> bool:
+        try:
+            return any(
+                entry.record.kind == "command.accepted"
+                and ControlCommand.from_mapping(
+                    _mapping(entry.record.payload["command"])
+                )
+                == command
+                for entry in self._journal.replay(JournalCursor(0))
+            )
+        except Exception:
+            raise ClientSessionError("client intent recovery failed") from None
+
+    def _validate_next_event(self, event: ClientEvent) -> None:
+        if (
+            event.session_id != self._host.session_id
+            or event.generation != self._host.generation
+            or event.sequence != len(self._events) + 1
+            or event.event_id in self._event_ids
+            or self._terminal_seen
+        ):
+            raise ClientSessionError("client event prefix is invalid")
+        if event.type == "tool.started":
+            call_id = event.payload["call_id"]
+            if not isinstance(call_id, str) or call_id in self._seen_call_ids:
+                raise ClientSessionError("client event prefix is invalid")
+        elif event.type == "tool.completed":
+            call_id = event.payload["call_id"]
+            if not isinstance(call_id, str) or call_id not in self._active_call_ids:
+                raise ClientSessionError("client event prefix is invalid")
+        elif event.type == "session.terminal":
+            try:
+                validate_client_event_stream((*self._events, event))
+            except ValueError:
+                raise ClientSessionError("client event prefix is invalid") from None
+
+    def _append_event(self, event: ClientEvent) -> None:
+        self._validate_next_event(event)
+        if event.type == "tool.started":
+            call_id = event.payload["call_id"]
+            assert isinstance(call_id, str)
+            self._active_call_ids.add(call_id)
+            self._seen_call_ids.add(call_id)
+        elif event.type == "tool.completed":
+            call_id = event.payload["call_id"]
+            assert isinstance(call_id, str)
+            self._active_call_ids.remove(call_id)
+        elif event.type == "session.terminal":
+            self._terminal_seen = True
+        self._event_ids.add(event.event_id)
+        self._events.append(event)
 
 
 def _control_mapping(intent: ClientIntent) -> tuple[str, Mapping[str, object]]:
@@ -240,6 +385,37 @@ def _control_mapping(intent: ClientIntent) -> tuple[str, Mapping[str, object]]:
     if intent.type == "session.create":
         payload = {"goal_id": payload["goal_id"], "goal_ref": payload["goal_ref"]}
     return intent.type, payload
+
+
+def _observation_from_mapping(value: object) -> ClientObservation:
+    value = _mapping(value)
+    return ClientObservation(
+        observation_id=value["observation_id"],  # type: ignore[arg-type]
+        session_id=value["session_id"],  # type: ignore[arg-type]
+        generation=value["generation"],  # type: ignore[arg-type]
+        source_sequence=value["source_sequence"],  # type: ignore[arg-type]
+        emitted_at=value["emitted_at"],  # type: ignore[arg-type]
+        kind=value["kind"],  # type: ignore[arg-type]
+        payload=value["payload"],  # type: ignore[arg-type]
+    )
+
+
+def _matches_observation(event: ClientEvent, observation: ClientObservation) -> bool:
+    return (
+        event.event_id == observation.observation_id
+        and event.session_id == observation.session_id
+        and event.generation == observation.generation
+        and event.sequence > 0
+        and event.emitted_at == observation.emitted_at
+        and event.type == observation.kind
+        and event.payload == observation.payload
+    )
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ValueError
+    return value
 
 
 def _digest(value: Mapping[str, object]) -> str:

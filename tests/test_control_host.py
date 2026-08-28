@@ -183,6 +183,45 @@ def _create_command() -> ControlCommand:
 
 
 class TestControlHost(unittest.IsolatedAsyncioTestCase):
+    async def test_dispatch_rejects_unverified_client_journal_tail(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            journal = MemoryCanonicalJournal("session-1")
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=journal,
+                client=ScriptedClient(plan.control_binding.manifest),
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+            journal.accept_client_intent(
+                {
+                    "protocol": "asterion.agent-client/v1",
+                    "intent_id": "intent-1",
+                    "client_id": "client-1",
+                    "session_id": "session-1",
+                    "authority_revision": 1,
+                    "type": "input.submit",
+                    "payload": {
+                        "content_ref": "private-input-1",
+                        "delivery": "direct",
+                        "input_id": "input-1",
+                    },
+                },
+                expected_position=journal.position,
+            )
+
+            with self.assertRaises(ControlHostError):
+                await host.dispatch(_create_command())
+
     async def test_client_command_uses_only_existing_control_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(

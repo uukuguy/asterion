@@ -196,10 +196,14 @@ class JournalRecord:
     def client_observation_accepted(
         cls, observation: Mapping[str, object]
     ) -> JournalRecord:
+        try:
+            accepted = _canonical_client_observation(observation)
+        except (TypeError, ValueError):
+            raise JournalConflictError("journal client observation is invalid") from None
         return cls(
-            record_id=f"client-observation:{observation.get('observation_id', '')}",
+            record_id=f"client-observation:{accepted['observation_id']}",
             kind="client.observation.accepted",
-            payload={"observation": observation},
+            payload={"observation": accepted},
         )
 
     @classmethod
@@ -1519,6 +1523,10 @@ def _validate_record_payload(kind: str, value: object) -> None:
 
 
 def _validate_client_observation(value: object) -> None:
+    _canonical_client_observation(value)
+
+
+def _canonical_client_observation(value: object) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
         raise JournalConflictError("journal client observation is invalid")
     _require_fields(
@@ -1535,15 +1543,26 @@ def _validate_client_observation(value: object) -> None:
     )
     from asterion.client.protocol import ClientEvent
 
-    ClientEvent(
+    event = ClientEvent(
         protocol="asterion.agent-client/v1",
-        event_id=str(value["observation_id"]),
-        session_id=str(value["session_id"]),
+        event_id=value["observation_id"],  # type: ignore[arg-type]
+        session_id=value["session_id"],  # type: ignore[arg-type]
         generation=value["generation"],  # type: ignore[arg-type]
         sequence=value["source_sequence"],  # type: ignore[arg-type]
-        emitted_at=str(value["emitted_at"]),
-        type=str(value["kind"]),
+        emitted_at=value["emitted_at"],  # type: ignore[arg-type]
+        type=value["kind"],  # type: ignore[arg-type]
         payload=value["payload"],  # type: ignore[arg-type]
+    )
+    return MappingProxyType(
+        {
+            "observation_id": event.event_id,
+            "session_id": event.session_id,
+            "generation": event.generation,
+            "source_sequence": event.sequence,
+            "emitted_at": event.emitted_at,
+            "kind": event.type,
+            "payload": event.payload,
+        }
     )
 
 
