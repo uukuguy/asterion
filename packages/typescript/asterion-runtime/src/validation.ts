@@ -11,6 +11,7 @@ import type {
   AuthRequest,
   ModelSelectionRequest,
   SettingsKeybindingsRequest,
+  TelemetryUsageRequest,
   AgentSystemManifest,
   AssemblyManifest,
   BenchmarkSuiteManifest,
@@ -102,6 +103,9 @@ const modelSelectionRequestValidator = ajv.compile(
 );
 const settingsKeybindingsRequestValidator = ajv.compile(
   readSchema("settings-keybindings-request.schema.json"),
+);
+const telemetryUsageRequestValidator = ajv.compile(
+  readSchema("telemetry-usage-request.schema.json"),
 );
 
 const EFFECT_COUNTERS = [
@@ -377,6 +381,28 @@ export function validateSettingsKeybindingsRequest(
     settingsKeybindingsRequestValidator,
     value,
   );
+}
+
+export function validateTelemetryUsageRequest(
+  value: unknown,
+): TelemetryUsageRequest {
+  requireNoForbiddenOperationKeys(value);
+  const request = requireOperationValid<TelemetryUsageRequest>(
+    "telemetry usage request",
+    telemetryUsageRequestValidator,
+    value,
+  );
+  const { aggregate_tokens, application_tokens, child_tokens, controller_tokens } = request.usage;
+  if (
+    aggregate_tokens !== application_tokens + child_tokens + controller_tokens ||
+    (request.source_id !== "application" && application_tokens !== 0) ||
+    (request.source_id !== "child" && child_tokens !== 0) ||
+    (request.source_id !== "controller" && controller_tokens !== 0) ||
+    aggregate_tokens !== request.usage[`${request.source_id}_tokens`]
+  ) {
+    throw new OperationProtocolError("telemetry usage attribution", null);
+  }
+  return request;
 }
 
 export function validateAgentSystemManifest(

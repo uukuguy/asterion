@@ -40,6 +40,7 @@ import {
   validateAuthRequest,
   validateModelSelectionRequest,
   validateSettingsKeybindingsRequest,
+  validateTelemetryUsageRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
   validateEventStream,
@@ -451,6 +452,27 @@ test("validates closed typed settings and keybindings without secret-shaped fiel
       validateSettingsKeybindingsRequest({ type: "keybinding", name: "app.session.new", scope: "global", value: chord }).value,
       chord,
     );
+  }
+});
+
+test("validates closed immutable telemetry usage without bodies or forged attribution", async () => {
+  const valid = await readFixture(operationFixtures, "valid-telemetry-usage-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-telemetry-usage-request-body.json");
+  const snapshot = validateTelemetryUsageRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.ok(Object.isFrozen(snapshot.usage));
+  assert.throws(() => validateTelemetryUsageRequest(invalid), OperationProtocolError);
+  for (const value of [
+    { ...valid, event_count: true },
+    { ...valid, event_count: -1 },
+    { ...valid, result_sha256: "B".repeat(64) },
+    { ...valid, source_id: "unknown" },
+    { ...valid, event_name: "message.available" },
+    { ...valid, usage: { ...valid.usage, aggregate_tokens: 11 } },
+    { ...valid, usage: { ...valid.usage, child_tokens: 1 } },
+  ]) {
+    assert.throws(() => validateTelemetryUsageRequest(value), OperationProtocolError);
   }
 });
 

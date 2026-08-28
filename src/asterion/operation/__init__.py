@@ -40,6 +40,18 @@ from asterion.operation.settings import (
     SettingsOperationService,
     validate_settings_keybindings_request,
 )
+from asterion.operation.telemetry import (
+    TELEMETRY_USAGE_MAX_REQUEST_BYTES,
+    TELEMETRY_USAGE_REQUEST_KIND,
+    TELEMETRY_USAGE_REQUEST_PURPOSE,
+    TelemetryEffects,
+    TelemetryObservation,
+    TelemetryOperationError,
+    TelemetryOperationService,
+    TelemetrySink,
+    UsageSnapshot,
+    validate_telemetry_usage_request,
+)
 
 __all__ = [
     "EFFECT_COUNTERS",
@@ -74,4 +86,14 @@ __all__ = [
     "SettingsAllowlist",
     "SettingsOperationService",
     "validate_settings_keybindings_request",
+    "TELEMETRY_USAGE_MAX_REQUEST_BYTES",
+    "TELEMETRY_USAGE_REQUEST_KIND",
+    "TELEMETRY_USAGE_REQUEST_PURPOSE",
+    "TelemetryEffects",
+    "TelemetryObservation",
+    "TelemetryOperationError",
+    "TelemetryOperationService",
+    "TelemetrySink",
+    "UsageSnapshot",
+    "validate_telemetry_usage_request",
 ]

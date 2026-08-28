@@ -125,6 +125,12 @@ const settingsKeybindingsRequestSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const telemetryUsageRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/telemetry-usage-request.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -182,4 +188,8 @@ cpSync(
 cpSync(
   settingsKeybindingsRequestSource,
   `${destination}/settings-keybindings-request.schema.json`,
+);
+cpSync(
+  telemetryUsageRequestSource,
+  `${destination}/telemetry-usage-request.schema.json`,
 );

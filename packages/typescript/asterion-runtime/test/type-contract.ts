@@ -18,6 +18,7 @@ import type {
   AuthRequest,
   ModelSelectionRequest,
   SettingsKeybindingsRequest,
+  TelemetryUsageRequest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -45,6 +46,20 @@ export const fixtureSettingsKeybindingsRequest: SettingsKeybindingsRequest = {
   name: "theme",
   scope: "global",
   value: "dark",
+};
+
+export const fixtureTelemetryUsageRequest: TelemetryUsageRequest = {
+  source_id: "application",
+  event_name: "usage.reported",
+  event_count: 1,
+  result_sha256: "b".repeat(64),
+  usage: {
+    aggregate_tokens: 12,
+    application_tokens: 12,
+    child_tokens: 0,
+    controller_tokens: 0,
+    cost_micros: 7,
+  },
 };
 
 export const fixtureOperationRequestDescriptor: OperationRequestDescriptor = {

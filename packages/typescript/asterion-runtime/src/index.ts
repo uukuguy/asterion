@@ -3,6 +3,8 @@ export type {
   AuthRequest,
   ModelSelectionRequest,
   SettingsKeybindingsRequest,
+  TelemetryUsageRequest,
+  TelemetryUsageSnapshot,
   ActionKind,
   ActionResolution,
   ActionTarget,
@@ -107,6 +109,7 @@ export {
   validateAuthRequest,
   validateModelSelectionRequest,
   validateSettingsKeybindingsRequest,
+  validateTelemetryUsageRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
 } from "./validation.js";

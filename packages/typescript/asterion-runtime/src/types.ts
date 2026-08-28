@@ -170,6 +170,22 @@ export type SettingsKeybindingsRequest =
       readonly project_id: string;
     };
 
+export interface TelemetryUsageSnapshot {
+  readonly aggregate_tokens: number;
+  readonly application_tokens: number;
+  readonly child_tokens: number;
+  readonly controller_tokens: number;
+  readonly cost_micros: number;
+}
+
+export interface TelemetryUsageRequest {
+  readonly source_id: "application" | "child" | "controller";
+  readonly event_name: "usage.reported";
+  readonly event_count: number;
+  readonly result_sha256: string;
+  readonly usage: TelemetryUsageSnapshot;
+}
+
 export interface ClientCursor {
   readonly generation: number;
   readonly sequence: number;
