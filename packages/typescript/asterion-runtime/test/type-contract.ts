@@ -15,12 +15,20 @@ import type {
   OperationReceipt,
   OperationRequestDescriptor,
   OperationTransaction,
+  AuthRequest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
   SessionContextCommand,
   SessionContextReceipt,
 } from "../src/index.js";
+
+export const fixtureAuthRequest: AuthRequest = {
+  action: "auth.store",
+  credential_ref: "credential-ref-1",
+  subject_digest: "a".repeat(64),
+  precedence: 4,
+};
 
 export const fixtureOperationRequestDescriptor: OperationRequestDescriptor = {
   protocol: "asterion.operation/v1",

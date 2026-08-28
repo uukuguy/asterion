@@ -8,6 +8,7 @@ import {
 
 import type {
   ActionKind,
+  AuthRequest,
   AgentSystemManifest,
   AssemblyManifest,
   BenchmarkSuiteManifest,
@@ -93,6 +94,7 @@ const operationTransactionValidator = ajv.compile(
 const operationReceiptValidator = ajv.compile(
   readSchema("operation-receipt.schema.json"),
 );
+const authRequestValidator = ajv.compile(readSchema("auth-request.schema.json"));
 
 const EFFECT_COUNTERS = [
   "credential_value_reads",
@@ -338,6 +340,15 @@ export function validateOperationReceipt(value: unknown): OperationReceipt {
   );
   requireOperationReceipt(receipt);
   return receipt;
+}
+
+export function validateAuthRequest(value: unknown): AuthRequest {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<AuthRequest>(
+    "auth request",
+    authRequestValidator,
+    value,
+  );
 }
 
 export function validateAgentSystemManifest(

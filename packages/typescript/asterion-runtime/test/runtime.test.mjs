@@ -37,6 +37,7 @@ import {
   validateOperationReceipt,
   validateOperationRequestDescriptor,
   validateOperationTransaction,
+  validateAuthRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
   validateEventStream,
@@ -389,6 +390,19 @@ test("validates the closed shared operation protocol fixtures", async () => {
     const invalid = await readFixture(operationFixtures, name);
     assert.throws(() => validate(invalid), OperationProtocolError);
   }
+});
+
+test("validates closed private auth request fixtures", async () => {
+  const valid = await readFixture(operationFixtures, "valid-auth-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-auth-request-secret.json");
+  const snapshot = validateAuthRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.throws(() => validateAuthRequest(invalid), OperationProtocolError);
+  assert.throws(
+    () => validateAuthRequest({ action: "auth.clear", refresh_ref: "refresh-ref-1" }),
+    OperationProtocolError,
+  );
 });
 
 test("validates complete control event streams and semantic ordering", async () => {

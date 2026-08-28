@@ -130,6 +130,7 @@ schema_paths = (
     'asterion/schemas/agent-control/v1/event.schema.json',
     'asterion/schemas/session-context/v1/command.schema.json',
     'asterion/schemas/session-context/v1/receipt.schema.json',
+    'asterion/schemas/operation/v1/auth-request.schema.json',
     'asterion/schemas/operation/v1/operation-request-descriptor.schema.json',
     'asterion/schemas/operation/v1/operation-transaction.schema.json',
     'asterion/schemas/operation/v1/operation-receipt.schema.json',

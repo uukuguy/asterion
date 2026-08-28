@@ -12,6 +12,14 @@ from asterion.operation.protocol import (
     validate_operation_request_descriptor,
     validate_operation_transaction,
 )
+from asterion.operation.auth import (
+    AuthOperationError,
+    AuthOperationService,
+    AuthStatus,
+    AuthStorageBackend,
+    OAuthRefresher,
+    validate_auth_request,
+)
 
 __all__ = [
     "EFFECT_COUNTERS",
@@ -24,4 +32,10 @@ __all__ = [
     "validate_operation_receipt",
     "validate_operation_request_descriptor",
     "validate_operation_transaction",
+    "AuthOperationError",
+    "AuthOperationService",
+    "AuthStatus",
+    "AuthStorageBackend",
+    "OAuthRefresher",
+    "validate_auth_request",
 ]

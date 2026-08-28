@@ -107,6 +107,12 @@ const operationReceiptSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const authRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/auth-request.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -156,3 +162,4 @@ cpSync(
 );
 cpSync(operationTransactionSource, `${destination}/operation-transaction.schema.json`);
 cpSync(operationReceiptSource, `${destination}/operation-receipt.schema.json`);
+cpSync(authRequestSource, `${destination}/auth-request.schema.json`);

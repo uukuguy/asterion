@@ -95,8 +95,10 @@ class TestOperationProtocol(unittest.TestCase):
 
     def test_receipts_have_the_exact_zeroed_prohibited_effect_vector(self) -> None:
         receipt = validate_operation_receipt(_fixture("valid-receipt.json"))
-        self.assertEqual(tuple(receipt["effect_counts"]), EFFECT_COUNTERS)
-        self.assertEqual(set(receipt["effect_counts"].values()), {0})  # type: ignore[union-attr]
+        effects = receipt["effect_counts"]
+        assert isinstance(effects, Mapping)
+        self.assertEqual(tuple(effects), EFFECT_COUNTERS)
+        self.assertEqual(set(effects.values()), {0})
 
     def test_feature_and_purpose_are_distinct_and_retained_for_later_binding(
         self,
@@ -137,7 +139,7 @@ class TestOperationProtocol(unittest.TestCase):
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(SCHEMAS.glob("*.json"))
         )
-        self.assertEqual(len(schemas), 3)
+        self.assertEqual(len(schemas), 4)
         rendered = json.dumps(schemas, sort_keys=True)
         for schema in schemas:
             self.assertFalse(schema["additionalProperties"])

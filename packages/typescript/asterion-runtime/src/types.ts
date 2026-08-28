@@ -105,6 +105,22 @@ export interface OperationReceipt {
   readonly completed_at: string;
 }
 
+export type AuthRequest =
+  | { readonly action: "auth.status" }
+  | {
+      readonly action: "auth.store";
+      readonly credential_ref: string;
+      readonly subject_digest: string;
+      readonly precedence: number;
+    }
+  | { readonly action: "auth.clear"; readonly credential_ref: string }
+  | {
+      readonly action: "auth.refresh";
+      readonly refresh_ref: string;
+      readonly subject_digest: string;
+      readonly precedence: number;
+    };
+
 export interface ClientCursor {
   readonly generation: number;
   readonly sequence: number;
