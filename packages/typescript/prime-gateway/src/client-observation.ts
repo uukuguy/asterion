@@ -26,6 +26,12 @@ export interface PrimeClientObservationMapperOptions {
   readonly generation: number;
   readonly activeSessionId: string;
   readonly privateValues: Pick<PrivateValueStore, "putClientValue">;
+  readonly initialNativeSequence?: number;
+  readonly initialObservationSequence?: number;
+  readonly commit?: (
+    nativeSequence: number,
+    observation: PrimeClientObservation | null,
+  ) => Promise<void>;
   readonly now?: () => string;
 }
 
@@ -61,16 +67,21 @@ interface Prepared {
 }
 
 export class PrimeClientObservationMapper {
-  private sequence = 0;
-  private nativeSequence = 0;
+  private sequence: number;
+  private nativeSequence: number;
   private closed = false;
   private serial: Promise<void> = Promise.resolve();
   private readonly now: () => string;
 
   constructor(private readonly options: PrimeClientObservationMapperOptions) {
     if (!OPAQUE_ID.test(options.sessionId) || !Number.isSafeInteger(options.generation) || options.generation < 1 ||
-      !OPAQUE_ID.test(options.activeSessionId) || typeof options.privateValues.putClientValue !== "function") throw new PrimeClientObservationError();
+      !OPAQUE_ID.test(options.activeSessionId) || typeof options.privateValues.putClientValue !== "function" ||
+      !Number.isSafeInteger(options.initialNativeSequence ?? 0) || Number(options.initialNativeSequence ?? 0) < 0 ||
+      !Number.isSafeInteger(options.initialObservationSequence ?? 0) || Number(options.initialObservationSequence ?? 0) < 0 ||
+      (options.commit !== undefined && typeof options.commit !== "function")) throw new PrimeClientObservationError();
     this.now = options.now ?? (() => new Date().toISOString());
+    this.nativeSequence = options.initialNativeSequence ?? 0;
+    this.sequence = options.initialObservationSequence ?? 0;
   }
 
   async map(value: unknown): Promise<readonly PrimeClientObservation[]> {
@@ -87,12 +98,18 @@ export class PrimeClientObservationMapper {
       const nativeSequence = this.nextNativeSequence(value.meta);
       const prepared = value.type === "session_event" ? await this.prepareSessionEvent(value.event, nativeSequence)
         : value.type === "extension_ui_request" ? await this.prepareExtension(value, nativeSequence) : undefined;
-      if (prepared === undefined) { this.nativeSequence = nativeSequence; return Object.freeze([]); }
-      const emittedAt = this.now();
-      if (typeof emittedAt !== "string" || Number.isNaN(Date.parse(emittedAt))) throw new PrimeClientObservationError();
+      if (prepared === undefined) {
+        await this.options.commit?.(nativeSequence, null);
+        this.nativeSequence = nativeSequence;
+        return Object.freeze([]);
+      }
+      const emittedAtValue = this.now();
+      if (typeof emittedAtValue !== "string" || Number.isNaN(Date.parse(emittedAtValue))) throw new PrimeClientObservationError();
+      const emittedAt = new Date(emittedAtValue).toISOString();
       const next = this.sequence + 1;
       const observation = Object.freeze({ observation_id: `prime-client-${this.options.generation}-${next}`, active_session_id: this.options.sessionId,
         generation: this.options.generation, source_sequence: next, emitted_at: emittedAt, kind: prepared.kind, payload: Object.freeze({ ...prepared.payload }) });
+      await this.options.commit?.(prepared.nativeSequence, observation);
       this.nativeSequence = prepared.nativeSequence;
       this.sequence = next;
       return Object.freeze([observation]);

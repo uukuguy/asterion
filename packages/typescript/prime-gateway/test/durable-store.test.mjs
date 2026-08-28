@@ -818,6 +818,44 @@ test("durable store reopens identity cursor and safe event suffix", async () => 
   }
 });
 
+test("durable store reopens only a contiguous canonical client observation prefix", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    const observation = (sequence) => ({
+      observation_id: `prime-client-1-${sequence}`,
+      active_session_id: "session-1",
+      generation: 1,
+      source_sequence: sequence,
+      emitted_at: `2026-08-10T03:00:0${sequence}.000Z`,
+      kind: "message.available",
+      payload: {
+        content_ref: `private:00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+        media_type: "text/plain",
+        message_id: `message-${sequence}`,
+        role: "assistant",
+        sha256: "a".repeat(64),
+        size: sequence,
+      },
+    });
+    await store.recordClientObservationProgress(1, 1, observation(1));
+    await store.recordClientObservationProgress(1, 2, observation(2));
+    await store.recordClientObservationProgress(1, 2, observation(2));
+    await assert.rejects(
+      store.recordClientObservationProgress(1, 4, observation(3)),
+    );
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.clientObservations(1), [observation(1), observation(2)]);
+    assert.deepEqual(reopened.clientObservationProgress(1), {
+      nativeSequence: 2,
+      observationSequence: 2,
+    });
+    assert.equal(JSON.stringify(reopened.clientObservations(1)).includes("SENTINEL"), false);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("durable store replays events by generation and sequence across mixed records", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   try {

@@ -17,6 +17,7 @@ import type {
   GatewayDurableStore,
   GatewayContextBinding,
   GatewayContextModelBaseline,
+  GatewayClientObservation,
   PrimeIdentityBinding,
 } from "./durable-store.js";
 import {
@@ -247,7 +248,10 @@ export interface PrimeGatewayOptions {
   readonly store: GatewayDurableStore;
   readonly privateValues: PrimeGatewayPrivateInputs;
   readonly privateResults?: PrimeGatewayPrivateResults;
-  readonly clientObservationValues?: Pick<PrivateValueStore, "putClientValue">;
+  readonly clientObservationValues?: Pick<
+    PrivateValueStore,
+    "putClientValue" | "describeClientValue"
+  >;
   readonly ecosystem?: Pick<PrimeEcosystemAdapter, "activate">;
   readonly createSession: (
     goal: string,
@@ -403,6 +407,13 @@ export class PrimeGateway {
       .filter((event) => event.generation === options.generation);
     this.nextSequence = (events.at(-1)?.sequence ?? 0) + 1;
     this.lastAppendedSequence = this.nextSequence - 1;
+    try {
+      this.clientObservations.push(
+        ...options.store.clientObservations(options.generation) as readonly PrimeClientObservation[],
+      );
+    } catch {
+      throw new PrimeGatewayError();
+    }
     for (const event of events) {
       if (event.type === "session.created") {
         this.goalId = event.payload.goal_id;
@@ -519,6 +530,7 @@ export class PrimeGateway {
       throw new PrimeGatewayError();
     }
     const gateway = new PrimeGateway(options);
+    await gateway.restoreClientObservationPrefix();
     await gateway.restoreActionCommands();
     if (options.restoreExistingSession !== false) {
       await gateway.restoreExistingSession();
@@ -2258,15 +2270,9 @@ export class PrimeGateway {
         ? {}
         : { primeCursor: this.options.store.snapshot().primeCursor }),
     });
-    this.clientObservationMapper = this.options.clientObservationValues === undefined
-      ? undefined
-      : new PrimeClientObservationMapper({
-        sessionId: this.options.sessionId,
-        generation: this.options.generation,
-        activeSessionId: session.activeSessionId,
-        privateValues: this.options.clientObservationValues,
-        now: this.now,
-      });
+    this.clientObservationMapper = this.newClientObservationMapper(
+      session.activeSessionId,
+    );
     await this.append(this.event("session.created", {
       goal_id: this.goalId,
       authority_id: this.options.authorityId,
@@ -2437,6 +2443,85 @@ export class PrimeGateway {
       mapper.noteExternalGoalStatus(this.goalStatus);
     }
     return mapper;
+  }
+
+  private newClientObservationMapper(
+    activeSessionId: string,
+  ): PrimeClientObservationMapper | undefined {
+    const values = this.options.clientObservationValues;
+    if (values === undefined) {
+      return undefined;
+    }
+    const progress = this.options.store.clientObservationProgress(
+      this.options.generation,
+    );
+    return new PrimeClientObservationMapper({
+      sessionId: this.options.sessionId,
+      generation: this.options.generation,
+      activeSessionId,
+      privateValues: values,
+      initialNativeSequence: progress.nativeSequence,
+      initialObservationSequence: progress.observationSequence,
+      commit: async (nativeSequence, observation) => {
+        await this.options.store.recordClientObservationProgress(
+          this.options.generation,
+          nativeSequence,
+          observation,
+        );
+      },
+      now: this.now,
+    });
+  }
+
+  private async restoreClientObservationPrefix(): Promise<void> {
+    if (this.clientObservations.length === 0) {
+      return;
+    }
+    const values = this.options.clientObservationValues;
+    if (values === undefined) {
+      throw new PrimeGatewayError();
+    }
+    try {
+      for (const observation of this.clientObservations) {
+        const payload = observation.payload;
+        const verify = async (
+          reference: unknown,
+          kind: string,
+          mediaType: string,
+          digest?: unknown,
+          size?: unknown,
+        ): Promise<void> => {
+          if (typeof reference !== "string") {
+            throw new PrimeGatewayError();
+          }
+          const descriptor = await values.describeClientValue(
+            reference,
+            this.options.sessionId,
+          );
+          if (
+            descriptor.kind !== kind ||
+            descriptor.mediaType !== mediaType ||
+            (digest !== undefined && descriptor.sha256 !== digest) ||
+            (size !== undefined && descriptor.size !== size)
+          ) {
+            throw new PrimeGatewayError();
+          }
+        };
+        if (observation.kind === "message.available") {
+          await verify(payload.content_ref, "message", String(payload.media_type), payload.sha256, payload.size);
+        } else if (observation.kind === "tool.started") {
+          await verify(payload.arguments_ref, "tool-arguments", "application/json", payload.sha256, payload.size);
+        } else if (observation.kind === "tool.completed") {
+          await verify(payload.result_ref, "tool-result", String(payload.media_type), payload.sha256, payload.size);
+        } else if (observation.kind === "artifact.available") {
+          await verify(payload.artifact_ref, "artifact", String(payload.media_type), payload.sha256, payload.size);
+        } else if (observation.kind === "extension-ui.requested") {
+          await verify(payload.payload_ref, "extension-ui", "application/json");
+        }
+      }
+    } catch {
+      throw new PrimeGatewayError();
+    }
   }
 
   private async restoreExistingSession(): Promise<void> {
@@ -2637,15 +2722,9 @@ export class PrimeGateway {
       this.session = session;
       await this.recoverPreparedContextOperations();
       this.mapper = this.recoveredMapper(recovered.primeCursor);
-      this.clientObservationMapper = this.options.clientObservationValues === undefined
-        ? undefined
-        : new PrimeClientObservationMapper({
-          sessionId: this.options.sessionId,
-          generation: this.options.generation,
-          activeSessionId: session.activeSessionId,
-          privateValues: this.options.clientObservationValues,
-          now: this.now,
-        });
+      this.clientObservationMapper = this.newClientObservationMapper(
+        session.activeSessionId,
+      );
       const restoredStatus = previousStatus === "paused"
         ? "paused"
         : recovered.sessionStatus;

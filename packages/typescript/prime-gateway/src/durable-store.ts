@@ -55,6 +55,7 @@ const MEDIA_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-
 const PRIVATE_REF_PATTERN = /^private:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const RECORD_KINDS = new Set([
   "command.accepted",
+  "client.observation.progress",
   "context.binding.initialized",
   "context.binding.rebound",
   "context.command.accepted",
@@ -197,6 +198,25 @@ export interface GatewayDurableSnapshot {
 export interface GatewayEventCursor {
   readonly generation: number;
   readonly sequence: number;
+}
+
+export type GatewayClientObservationKind =
+  | "artifact.available" | "commands.changed" | "extension-ui.requested"
+  | "message.available" | "tool.completed" | "tool.started";
+
+export interface GatewayClientObservation {
+  readonly observation_id: string;
+  readonly active_session_id: string;
+  readonly generation: number;
+  readonly source_sequence: number;
+  readonly emitted_at: string;
+  readonly kind: GatewayClientObservationKind;
+  readonly payload: Readonly<Record<string, unknown>>;
+}
+
+export interface GatewayClientObservationProgress {
+  readonly nativeSequence: number;
+  readonly observationSequence: number;
 }
 
 interface StoredRecordBody {
@@ -543,6 +563,100 @@ function validateCursorPayload(value: unknown): PrimeDaemonCursor {
     throw new GatewayStoreConflictError();
   }
   return Object.freeze({ generation: value.generation, sequence: value.sequence });
+}
+
+function canonicalTimestamp(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value)) &&
+    new Date(value).toISOString() === value;
+}
+
+function validateClientObservationPayload(
+  value: unknown,
+): GatewayClientObservation {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "active_session_id",
+      "emitted_at",
+      "generation",
+      "kind",
+      "observation_id",
+      "payload",
+      "source_sequence",
+    ]) ||
+    !nonEmptyIdentifier(value.active_session_id) ||
+    !positiveInteger(value.generation) ||
+    !positiveInteger(value.source_sequence) ||
+    !canonicalTimestamp(value.emitted_at) ||
+    !isRecord(value.payload) ||
+    typeof value.observation_id !== "string" ||
+    value.observation_id !== `prime-client-${value.generation}-${value.source_sequence}` ||
+    typeof value.kind !== "string"
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  const payload = value.payload;
+  const descriptor = (
+    reference: unknown,
+    mediaType: unknown,
+    digest: unknown,
+    size: unknown,
+  ): boolean =>
+    typeof reference === "string" && PRIVATE_REF_PATTERN.test(reference) &&
+    typeof mediaType === "string" && MEDIA_TYPE_PATTERN.test(mediaType) &&
+    typeof digest === "string" && DIGEST_PATTERN.test(digest) &&
+    nonNegativeInteger(size);
+  const kind = value.kind as GatewayClientObservationKind;
+  if (kind === "message.available") {
+    if (!hasExactKeys(payload, ["content_ref", "media_type", "message_id", "role", "sha256", "size"]) ||
+      !nonEmptyIdentifier(payload.message_id) ||
+      (payload.role !== "assistant" && payload.role !== "user") ||
+      !descriptor(payload.content_ref, payload.media_type, payload.sha256, payload.size)) throw new GatewayStoreConflictError();
+  } else if (kind === "tool.started") {
+    if (!hasExactKeys(payload, ["arguments_ref", "call_id", "name", "sha256", "size"]) ||
+      !nonEmptyIdentifier(payload.call_id) || !nonEmptyIdentifier(payload.name) ||
+      !descriptor(payload.arguments_ref, "application/json", payload.sha256, payload.size)) throw new GatewayStoreConflictError();
+  } else if (kind === "tool.completed") {
+    if (!hasExactKeys(payload, ["call_id", "is_error", "media_type", "result_ref", "sha256", "size"]) ||
+      !nonEmptyIdentifier(payload.call_id) || typeof payload.is_error !== "boolean" ||
+      !descriptor(payload.result_ref, payload.media_type, payload.sha256, payload.size)) throw new GatewayStoreConflictError();
+  } else if (kind === "artifact.available") {
+    if (!hasExactKeys(payload, ["artifact_id", "artifact_ref", "media_type", "sha256", "size"]) ||
+      !nonEmptyIdentifier(payload.artifact_id) ||
+      !descriptor(payload.artifact_ref, payload.media_type, payload.sha256, payload.size)) throw new GatewayStoreConflictError();
+  } else if (kind === "commands.changed") {
+    if (!hasExactKeys(payload, ["commands", "revision"]) || !Array.isArray(payload.commands) || !positiveInteger(payload.revision)) throw new GatewayStoreConflictError();
+  } else if (kind === "extension-ui.requested") {
+    if (!hasExactKeys(payload, ["deadline_ms", "method", "payload_ref", "request_id"]) ||
+      !Number.isSafeInteger(payload.deadline_ms) || Number(payload.deadline_ms) < 0 ||
+      !nonEmptyIdentifier(payload.method) || !nonEmptyIdentifier(payload.request_id) ||
+      typeof payload.payload_ref !== "string" || !PRIVATE_REF_PATTERN.test(payload.payload_ref)) throw new GatewayStoreConflictError();
+  } else {
+    throw new GatewayStoreConflictError();
+  }
+  return deepFreeze({
+    observation_id: value.observation_id,
+    active_session_id: value.active_session_id,
+    generation: value.generation,
+    source_sequence: value.source_sequence,
+    emitted_at: value.emitted_at,
+    kind,
+    payload: { ...payload },
+  });
+}
+
+function validateClientObservationProgressPayload(value: unknown): Readonly<{
+  nativeSequence: number;
+  observation: GatewayClientObservation | null;
+}> {
+  if (!isRecord(value) || !hasExactKeys(value, ["native_sequence", "observation"]) || !positiveInteger(value.native_sequence) ||
+    (value.observation !== null && !isRecord(value.observation))) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({
+    nativeSequence: value.native_sequence,
+    observation: value.observation === null ? null : validateClientObservationPayload(value.observation),
+  });
 }
 
 function validateRlmLifecycleObservation(
@@ -1099,6 +1213,14 @@ export class GatewayDurableStore {
   private readonly recordsById = new Map<string, LoadedRecord>();
   private readonly eventCounts = new Map<number, number>();
   private readonly knownEventGenerations = new Set<number>();
+  private readonly clientObservationsByGeneration = new Map<
+    number,
+    GatewayClientObservation[]
+  >();
+  private readonly clientObservationProgressByGeneration = new Map<
+    number,
+    GatewayClientObservationProgress
+  >();
   private readonly contextCommands = new Map<string, SessionContextCommand>();
   private readonly controlCommands = new Map<string, ControlCommand>();
   private readonly inputDeliveryValues = new Map<string, GatewayInputDelivery>();
@@ -1622,6 +1744,69 @@ export class GatewayDurableStore {
     return Object.freeze({ ...receipt, event: validated });
   }
 
+  async recordClientObservationProgress(
+    generation: number,
+    nativeSequence: number,
+    observation: GatewayClientObservation | null,
+  ): Promise<GatewayRecordReceipt> {
+    if (!positiveInteger(generation)) {
+      throw new GatewayStoreConflictError();
+    }
+    const progress = validateClientObservationProgressPayload({
+      native_sequence: nativeSequence,
+      observation,
+    });
+    const previous = this.clientObservationProgressByGeneration.get(generation);
+    const recordId = `client-observation:${generation}:${nativeSequence}`;
+    const payload = {
+      native_sequence: progress.nativeSequence,
+      observation: progress.observation,
+    };
+    if (
+      previous !== undefined &&
+      progress.nativeSequence <= previous.nativeSequence
+    ) {
+      return this.appendRecord(
+        "client.observation.progress",
+        recordId,
+        payload,
+      );
+    }
+    const expectedNative = (previous?.nativeSequence ?? 0) + 1;
+    const expectedObservation = (previous?.observationSequence ?? 0) + 1;
+    if (
+      progress.nativeSequence !== expectedNative ||
+      (progress.observation !== null &&
+        (progress.observation.active_session_id !== this.sessionId ||
+          progress.observation.generation !== generation ||
+          progress.observation.source_sequence !== expectedObservation))
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.appendRecord(
+      "client.observation.progress",
+      recordId,
+      payload,
+    );
+  }
+
+  clientObservations(generation: number): readonly GatewayClientObservation[] {
+    if (!positiveInteger(generation)) {
+      throw new GatewayStoreConflictError();
+    }
+    return Object.freeze([
+      ...(this.clientObservationsByGeneration.get(generation) ?? []),
+    ]);
+  }
+
+  clientObservationProgress(generation: number): GatewayClientObservationProgress {
+    if (!positiveInteger(generation)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.clientObservationProgressByGeneration.get(generation) ??
+      Object.freeze({ nativeSequence: 0, observationSequence: 0 });
+  }
+
   registerEventGeneration(generation: number): void {
     if (!positiveInteger(generation)) {
       throw new GatewayStoreConflictError();
@@ -2104,6 +2289,28 @@ export class GatewayDurableStore {
         }
         return Object.freeze({ event });
       }
+      if (kind === "client.observation.progress") {
+        const match = /^client-observation:(?<generation>[1-9][0-9]*):(?<native>[1-9][0-9]*)$/u.exec(recordId);
+        const progress = validateClientObservationProgressPayload(payload);
+        const generation = Number(match?.groups?.generation);
+        const nativeSequence = Number(match?.groups?.native);
+        const previous = this.clientObservationProgressByGeneration.get(generation);
+        if (
+          match === null ||
+          !positiveInteger(generation) ||
+          !positiveInteger(nativeSequence) ||
+          progress.nativeSequence !== nativeSequence ||
+          nativeSequence !== (previous?.nativeSequence ?? 0) + 1 ||
+          (progress.observation !== null &&
+            (progress.observation.active_session_id !== this.sessionId ||
+              progress.observation.generation !== generation ||
+              progress.observation.source_sequence !==
+                (previous?.observationSequence ?? 0) + 1))
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return progress as unknown as Record<string, unknown>;
+      }
       if (kind === "input.delivery.committed") {
         if (this.inputDeliveryProtocolRecordPosition === undefined) {
           throw new GatewayStoreCorruptionError();
@@ -2522,6 +2729,37 @@ export class GatewayDurableStore {
         throw new GatewayStoreCorruptionError();
       }
       this.eventCounts.set(event.generation, count);
+    } else if (record.stored.kind === "client.observation.progress") {
+      const match = /^client-observation:(?<generation>[1-9][0-9]*):[1-9][0-9]*$/u.exec(record.stored.record_id);
+      const generation = Number(match?.groups?.generation);
+      const persisted = record.payload as unknown as Readonly<{
+        native_sequence?: number;
+        nativeSequence?: number;
+        observation: GatewayClientObservation | null;
+      }>;
+      const progress = Object.freeze({
+        nativeSequence: persisted.nativeSequence ?? persisted.native_sequence,
+        observation: persisted.observation,
+      });
+      const previous = this.clientObservationProgressByGeneration.get(generation);
+      if (match === null || !positiveInteger(generation) ||
+        !positiveInteger(progress.nativeSequence) ||
+        progress.nativeSequence !== (previous?.nativeSequence ?? 0) + 1) {
+        throw new GatewayStoreCorruptionError();
+      }
+      const observationSequence = previous?.observationSequence ?? 0;
+      if (progress.observation !== null) {
+        if (progress.observation.source_sequence !== observationSequence + 1) {
+          throw new GatewayStoreCorruptionError();
+        }
+        const observations = this.clientObservationsByGeneration.get(generation) ?? [];
+        observations.push(progress.observation);
+        this.clientObservationsByGeneration.set(generation, observations);
+      }
+      this.clientObservationProgressByGeneration.set(generation, Object.freeze({
+        nativeSequence: progress.nativeSequence,
+        observationSequence: observationSequence + (progress.observation === null ? 0 : 1),
+      }));
     } else if (record.stored.kind === "input.delivery.committed") {
       const delivery = record.payload as unknown as GatewayInputDelivery;
       if (this.inputDeliveryValues.has(delivery.commandId)) {
