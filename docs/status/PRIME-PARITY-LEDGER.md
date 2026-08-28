@@ -39,7 +39,7 @@
 | `operation.long-running` | Detach/attach, goals, autonomy, heartbeat, schedules, restart, residency, and cleanup | PASS | Missing | PASS — nine provider-free plus one bounded gate | Native-kernel parity remains separate. |
 | `harness.continual` | Scoped prompt/memory/skill/subagent refinement, history, isolation, and rollback | PASS | Missing | PASS — seven provider-free plus one bounded gate | Native-kernel parity remains separate. |
 | `ecosystem.capabilities` | Context files, skills, extensions, tools, packages, MCP, and provider/model integration | PASS | Missing | PASS — H-034 closure | Four provider-free gates, exact 10/10 reducer, clean repository gate, and isolated promotion passed. |
-| `interfaces.operations` | SDK/CLI/RPC/ACP/JSON/TUI/headless/export/auth/settings/telemetry/doctor/update | Missing | Missing | Not run | Pixel-identical TUI and hidden reasoning are excluded; functional reachability is mandatory. |
+| `interfaces.operations` | SDK/CLI/RPC/ACP/JSON/TUI/headless/export/auth/settings/telemetry/doctor/update | Partial — 9/15 interface rows PASS | Missing | BLOCKED on six operational rows | Pixel-identical TUI and hidden reasoning are excluded; functional reachability is mandatory. |
 
 ## Ecosystem evidence boundary
 
@@ -83,10 +83,34 @@ The exact H-034 cycle passed at `ef685f4`:
 - `git diff --check` passed;
 - cycle 34 occurs exactly once, H-034 is passed, and H-035 is next.
 
+## Client interface evidence boundary
+
+H-035 passed exactly once through the four provider-free client receipts:
+
+- `test.prime-client-core.provider-free` — 9 tests
+- `test.prime-client-protocols.provider-free` — 15 tests
+- `test.prime-client-interactive.provider-free` — 55 tests
+- `test.prime-client-export-share.provider-free` — 10 tests
+
+The exact nine-feature Prime Gateway checker selected and passed all nine rows
+with zero blocking, provider, and application operations. The receipts bind the
+same pinned Prime source and record zero provider/model/credential/network/
+upload operations. No full dataset was run.
+
+The nine passed rows are `interface.sdk`, `interface.cli-interactive`,
+`interface.rpc`, `interface.acp`, `interface.json-stream`,
+`interface.headless-print`, `interface.tui-commands`,
+`interface.tui-extension-ui`, and `interface.export-share`. Native rows remain
+missing. The six `operation.*` rows remain missing, so
+`interfaces.operations` and `Verified-system-parity` remain BLOCKED.
+
+The clean H-035 cycle used the four receipts, the exact nine-feature checker,
+`make check`, `make promotion-check`, and `git diff --check`; promotion reported
+`commands=27 provider_operations=0 full_dataset=no`. Cycle 35 occurs exactly
+once with `check.client-interfaces-closure`; H-036 is next.
+
 ## Next evidence boundary
 
-H-035 is the closed client-interface inventory. It covers nine `interface.*`
-features that must consume one validated public event stream and one private
-value service. The six `operation.*` features remain a separate subsequent
-package. Passing `ecosystem.capabilities` does not establish
-`interfaces.operations`, `Verified-system-parity`, or Asterion-native parity.
+H-036 is the pending operational surface inventory for six host-owned authority
+packages. It does not broaden the client-interface, system-parity, or native
+parity claim.

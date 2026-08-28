@@ -174,4 +174,9 @@
   description: client interface closure inventory identifies exact shared-stream evidence packages
   parent_paradigm: interface-clients
   ranking: 0.7
+  status: passed
+- id: H-036
+  description: operational surface inventory identifies six host-owned authority packages
+  parent_paradigm: interface-operations
+  ranking: 0.7
   status: pending

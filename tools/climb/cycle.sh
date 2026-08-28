@@ -157,5 +157,16 @@ case "${1-}" in
     git diff --check
     python3 tools/climb/regen-tree.py H-034 passed H-035 check.ecosystem-capabilities-closure
     ;;
+  H-035)
+    make test.prime-client-core.provider-free
+    make test.prime-client-protocols.provider-free
+    make test.prime-client-interactive.provider-free
+    make test.prime-client-export-share.provider-free
+    uv run python tools/check_prime_parity.py --features interface.sdk,interface.cli-interactive,interface.rpc,interface.acp,interface.json-stream,interface.headless-print,interface.tui-commands,interface.tui-extension-ui,interface.export-share --provider asterion.prime-gateway
+    make check
+    make promotion-check
+    git diff --check
+    python3 tools/climb/regen-tree.py H-035 passed H-036 check.client-interfaces-closure
+    ;;
   *) exit 2 ;;
 esac

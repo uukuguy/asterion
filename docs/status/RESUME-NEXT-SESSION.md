@@ -1,67 +1,46 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-28. H-034 is closed. H-035 specification is approved and
-> its ten-task implementation plan is ready; execution mode is not selected.
+> Updated: 2026-08-28 15:24. H-035 is closed; H-036 is the next pending
+> inventory and has no implementation authority yet.
 
 ## TL;DR
 
-- Ecosystem Task 10 closes at `3db6685`; independent re-review is clean.
-- Prime Gateway `ecosystem.capabilities` is exact 10/10 PASS with zero
-  provider/model operations; all native ecosystem rows remain missing.
-- H-034 passed one clean cycle. `runs.csv` contains cycle 34 exactly once and
-  session state points to H-035.
-- Full clean evidence passed: 1,954 Python tests, TypeScript, Ruff, docs, Rust,
-  sdist/wheel, and promotion 27/27 with no full dataset.
-- H-035 fixes nine client features and four shared-stream evidence packages.
-  Design `7add4fb` is approved; plan `0880045` is ready. No implementation or
-  system-parity claim exists.
+- H-035 closed the nine `interface.*` Prime Gateway rows at 9/9 through four
+  provider-free receipts: core (9 tests), protocols (15), interactive (55), and
+  export/share (10).
+- A clean detached candidate with pinned Prime `a18809e…` rebuilt its locked
+  workspaces under Node 22.23.2. Its H-035 cycle passed the receipts, exact
+  checker, `make check`, `make promotion-check`, and `git diff --check`.
+- Cycle 35 occurs exactly once with `check.client-interfaces-closure`; its next
+  action is H-036.
 
 ## Current work package
 
-- Branch: `h024-ecosystem-capabilities`.
-- Completed plan:
-  `docs/superpowers/plans/2026-08-10-asterion-prime-ecosystem-parity.md`.
-- Approved implementation plan:
-  `docs/superpowers/plans/2026-08-10-asterion-prime-client-interfaces-parity.md`.
-- Existing unrelated working-tree changes must remain untouched.
+- Worktree: `.worktrees/prime-client-interfaces`.
+- Branch: `feature/prime-client-interfaces`.
+- Approved plan: `docs/superpowers/plans/2026-08-10-asterion-prime-client-interfaces-parity.md`.
+- Closure report: `.superpowers/sdd/client-interfaces-task-10-report.md`.
 
 ## Verified work
 
-- Exact domain:
-  `uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway`
-  returned selected 10, passed 10, blocking 0.
-- Exact H-034 cycle passed four ecosystem evidence gates, the domain reducer,
-  `make check`, `make promotion-check`, and `git diff --check`.
-- `make check`: 1,954 Python tests plus all cross-language, lint, docs, Rust,
-  and distribution checks passed.
-- Promotion: `promotion full PASS commands=27 provider_operations=0
-  full_dataset=no`.
-- Climb state: H-034 passed exactly once; next action H-035; generated tree and
-  session state agree.
-- Independent Task 10 re-review found no Critical, Important, or Minor issue.
-- Commit-state verification passed 46 focused tests with one expected external
-  source skip, exact ecosystem reduction 10/10, Climb cycles 1–34, and
-  `git diff --check`.
+- Exact checker: selected 9, passed 9, blocking 0; provider/application
+  operations 0.
+- Promotion: `commands=27 provider_operations=0 full_dataset=no`.
+- No provider/model/credential/network/upload operation or full dataset run was
+  performed by the H-035 closure.
 
 ## Next action
 
-1. Ask whether execution is subagent-driven or inline.
-2. Execute the ten tasks with TDD, atomic commits, and review gates.
-3. Preserve all unrelated dirty working-tree changes through exact staging.
-4. Keep H-035 pending until implementation and all four evidence packages pass.
-
-## Claim boundaries
-
-- `Verified-system-parity` remains BLOCKED on 15 `interfaces.operations` rows.
-- H-035 covers the nine `interface.*` rows; the six `operation.*` rows remain a
-  separate subsequent package.
-- Pixel-identical TUI and hidden reasoning identity remain the only exclusions.
-- No provider/model operation or full dataset run is authorized by this state.
+1. Keep H-036 pending until its six operational packages have their own approved
+   evidence plan.
+2. Preserve `docs/status/JOURNAL.md` as an append-only log.
+3. Do not promote the six missing `operation.*` rows, native rows,
+   `interfaces.operations`, or `Verified-system-parity`.
 
 ## Ready-to-paste verification
 
 ```bash
-uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway
-uv run python -m unittest -v tests.test_prime_ecosystem_parity tests.test_prime_parity_ledger tests.test_check_prime_parity tests.test_check_promotion
+uv run python -m unittest -v tests.test_prime_climb tests.test_prime_parity_ledger tests.test_check_prime_parity
+uv run python tools/check_prime_parity.py --features interface.sdk,interface.cli-interactive,interface.rpc,interface.acp,interface.json-stream,interface.headless-print,interface.tui-commands,interface.tui-extension-ui,interface.export-share --provider asterion.prime-gateway
 git diff --check
 ```

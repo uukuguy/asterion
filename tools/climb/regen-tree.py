@@ -213,6 +213,12 @@ def main(arguments: list[str]) -> int:
             "H-035",
             "check.ecosystem-capabilities-closure",
         ): 34,
+        (
+            "H-035",
+            "passed",
+            "H-036",
+            "check.client-interfaces-closure",
+        ): 35,
     }
     cycle = accepted.get((hypothesis_id, outcome, next_action, command_id))
     if cycle is None:
@@ -220,6 +226,29 @@ def main(arguments: list[str]) -> int:
     root = state_dir()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     runs_path = root / "runs.csv"
+    expected_transitions = tuple(accepted.items())
+    existing_rows: list[tuple[str, str, str, str]] = []
+    if runs_path.exists():
+        with runs_path.open(encoding="utf-8", newline="") as handle:
+            reader = csv.reader(handle)
+            if next(reader, None) != ["cycle", "hypothesis_id", "outcome", "command_id"]:
+                return 2
+            for row in reader:
+                if len(row) != 4:
+                    return 2
+                existing_rows.append(tuple(row))
+    if len(existing_rows) != cycle - 1:
+        return 2
+    for index, row in enumerate(existing_rows, start=1):
+        transition, expected_cycle = expected_transitions[index - 1]
+        expected_row = (
+            str(index),
+            transition[0],
+            transition[1],
+            transition[3],
+        )
+        if expected_cycle != index or row != expected_row:
+            return 2
     existing = runs_path.exists()
     with runs_path.open("a", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n")
@@ -419,11 +448,19 @@ def main(arguments: list[str]) -> int:
         rendered.append("- H-033: passed — local MCP evidence")
     if cycle == 33:
         rendered.append("- Next: H-034 — ecosystem closure gates")
-    elif cycle >= 34:
+    elif cycle == 34:
         rendered.extend(
             (
                 "- H-034: passed — ecosystem closure gates",
                 "- Next: H-035 — client interface closure inventory",
+            )
+        )
+    elif cycle >= 35:
+        rendered.extend(
+            (
+                "- H-034: passed — ecosystem closure gates",
+                "- H-035: passed — client interface closure gates",
+                "- Next: H-036 — operational surface inventory",
             )
         )
     (root / "research-tree.md").write_text(
