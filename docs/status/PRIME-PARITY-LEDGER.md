@@ -21,7 +21,7 @@
 | `control-plane-foundation` | PASS | Phase 0 gate | Provider-free fake only; no Prime/model/runtime/application operation. |
 | Prime Gateway implemented | Implemented; provider-free gate PASS | `make prime-verify-provider-free` | Real-process fake-Prime scenarios; no model-provider operation. |
 | `Verified-loop` | PASS | `make ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent prime-verify-native-rlm-bounded` | Real finite Prime run under prior explicit bounded authority. |
-| `Verified-system-parity` | Missing | Not run | Requires zero missing mandatory pinned Prime entries. Current exact checker remains `BLOCKED` on `interfaces.operations`. |
+| `Verified-system-parity` | BLOCKED | `uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway` | Current exact checker reports 40 passed, 21 blocking, 2 excluded, zero provider/application operations. |
 | Native `Verified-loop` | Missing | Not run | Requires native provider common and differential evidence. |
 | `Verified-native-parity` | Missing | Not run | Final goal; requires every mandatory native parity scenario. |
 
@@ -39,7 +39,7 @@
 | `operation.long-running` | Detach/attach, goals, autonomy, heartbeat, schedules, restart, residency, and cleanup | PASS | Missing | PASS — nine provider-free plus one bounded gate | Native-kernel parity remains separate. |
 | `harness.continual` | Scoped prompt/memory/skill/subagent refinement, history, isolation, and rollback | PASS | Missing | PASS — seven provider-free plus one bounded gate | Native-kernel parity remains separate. |
 | `ecosystem.capabilities` | Context files, skills, extensions, tools, packages, MCP, and provider/model integration | PASS | Missing | PASS — H-034 closure | Four provider-free gates, exact 10/10 reducer, clean repository gate, and isolated promotion passed. |
-| `interfaces.operations` | SDK/CLI/RPC/ACP/JSON/TUI/headless/export/auth/settings/telemetry/doctor/update | Partial — 9/15 interface rows PASS | Missing | BLOCKED on six operational rows | Pixel-identical TUI and hidden reasoning are excluded; functional reachability is mandatory. |
+| `interfaces.operations` | SDK/CLI/RPC/ACP/JSON/TUI/headless/export/auth/settings/telemetry/doctor/update | PASS — 15/15 Prime Gateway rows | Missing | PASS — H-035 + H-036 closure gates | Pixel-identical TUI and hidden reasoning are excluded; functional reachability is mandatory. |
 
 ## Ecosystem evidence boundary
 
@@ -101,16 +101,60 @@ The nine passed rows are `interface.sdk`, `interface.cli-interactive`,
 `interface.rpc`, `interface.acp`, `interface.json-stream`,
 `interface.headless-print`, `interface.tui-commands`,
 `interface.tui-extension-ui`, and `interface.export-share`. Native rows remain
-missing. The six `operation.*` rows remain missing, so
-`interfaces.operations` and `Verified-system-parity` remain BLOCKED.
+missing.
 
 The clean H-035 cycle used the four receipts, the exact nine-feature checker,
 `make check`, `make promotion-check`, and `git diff --check`; promotion reported
 `commands=27 provider_operations=0 full_dataset=no`. Cycle 35 occurs exactly
-once with `check.client-interfaces-closure`; H-036 is next.
+once with `check.client-interfaces-closure`.
+
+## Operational interface evidence boundary
+
+H-036 passed exactly once through the six provider-free operational receipts:
+
+- `operation.auth` —
+  `evidence.operation.b1ad7223aab563156d8991d97e8b216b33ce131fefdc5a4bbc976b2a867031e8`
+- `operation.model-selection` —
+  `evidence.operation.d607c48b96afe83a2fc1346020dbf914ac40138c6ff04105a7daf06d8c85f92a`
+- `operation.settings-keybindings` —
+  `evidence.operation.14ec3308d4c777eb349be8f8a79710301d8db0264f2013ad06fe0cbb9e83fe2e`
+- `operation.telemetry-usage` —
+  `evidence.operation.84a78d29b2fc30cec854b81e32d95072a308d6eae98d7d7288c19b882a48f731`
+- `operation.doctor` —
+  `evidence.operation.e51e972608257ddd54c7fb1835e08f4da361078d2c145c0f31bb04a5f9f79e02`
+- `operation.controlled-update-restart` —
+  `evidence.operation.8d973b07690020955820347d724f1a609a808a01ca734fac9f30f56ca4837071`
+
+The accepted provider-free commands are:
+
+```bash
+make test.prime-operational-auth.provider-free
+make test.prime-operational-model-selection.provider-free
+make test.prime-operational-settings-keybindings.provider-free
+make test.prime-operational-telemetry-usage.provider-free
+make test.prime-operational-doctor.provider-free
+make test.prime-operational-controlled-update-restart.provider-free
+uv run python tools/check_prime_parity.py --features operation.auth,operation.model-selection,operation.settings-keybindings,operation.telemetry-usage,operation.doctor,operation.controlled-update-restart --provider asterion.prime-gateway
+```
+
+The exact six-feature Prime Gateway checker selected six, passed six, reported
+zero blocking rows, and reported zero provider/application operations. With
+H-035, `interfaces.operations` is now PASS at exactly 15/15 Prime Gateway rows.
+
+The clean H-036 cycle used the six receipts, the exact six-feature checker,
+`make check`, `make promotion-check`, and `git diff --check`; promotion reported
+`commands=28 provider_operations=0 full_dataset=no`. Cycle 36 occurs exactly
+once with `check.operational-parity-closure`; the climb state now points to the
+future-work queue.
+
+This does not claim live OAuth, live model selection, live telemetry delivery,
+actual update/restart effects, Asterion-native behavior, or full system parity.
+`Verified-system-parity` remains BLOCKED on other mandatory rows; the exact
+system checker reports 40 passed, 21 blocking, and two excluded rows with zero
+provider/application operations. `Verified-native-parity` remains missing.
 
 ## Next evidence boundary
 
-H-036 is the pending operational surface inventory for six host-owned authority
-packages. It does not broaden the client-interface, system-parity, or native
-parity claim.
+No H-037 exists in the canonical queue. The next hypothesis requires separate
+approval and must preserve the native/system parity nonclaims above until new
+evidence closes those exact rows.

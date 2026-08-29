@@ -3,8 +3,11 @@ from __future__ import annotations
 import asyncio
 import io
 import unittest
-from collections.abc import AsyncIterator, Buffer, Mapping
-from typing import cast
+from collections.abc import AsyncIterator, Mapping
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Buffer
 
 from asterion.client import AgentClient, ClientCursor, ClientEvent
 from asterion.client.acp import ACP_EVENT_METHODS, ClientAcpAdapter, ClientAcpError

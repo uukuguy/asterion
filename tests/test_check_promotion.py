@@ -262,6 +262,15 @@ class PromotionCheckTests(unittest.TestCase):
 
     def test_default_runner_forces_sparse_cargo_registry_and_preserves_environment(self) -> None:
         result = completed(("cargo", "test"))
+        injected_project_environment = {
+            "PYTHONHOME": "/outside/python-home",
+            "PYTHONPATH": "/outside/source",
+            "PYTHONSTARTUP": "/outside/startup.py",
+            "PYTHONUSERBASE": "/outside/user-base",
+            "UV_NO_SYNC": "1",
+            "UV_PROJECT_ENVIRONMENT": "/outside/venv",
+            "VIRTUAL_ENV": "/outside/venv",
+        }
         with (
             mock.patch.dict(
                 os.environ,
@@ -269,6 +278,7 @@ class PromotionCheckTests(unittest.TestCase):
                     "ASTERION_PROMOTION_TEST_MARKER": "preserved",
                     "ASTERION_PRIME_SOURCE_ROOT": "/external/prime",
                     "CARGO_HOME": "/untrusted-cargo-home",
+                    **injected_project_environment,
                 },
                 clear=False,
             ),
@@ -286,6 +296,9 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertEqual(environment["CARGO_HOME"], "/promotion-workspace/cargo-home")
         self.assertEqual(environment["ASTERION_PROMOTION_TEST_MARKER"], "preserved")
         self.assertNotIn("ASTERION_PRIME_SOURCE_ROOT", environment)
+        for name in injected_project_environment:
+            with self.subTest(name=name):
+                self.assertFalse(name in environment, name)
 
     def test_default_runner_binds_only_the_isolated_prime_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

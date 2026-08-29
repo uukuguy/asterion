@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Buffer, Mapping
+from collections.abc import AsyncIterator, Mapping
 from types import MappingProxyType
 from typing import Protocol
 
@@ -27,7 +27,7 @@ ACP_EVENT_METHODS = MappingProxyType(
 
 
 class _BinaryStdout(Protocol):
-    def write(self, data: Buffer, /) -> int:
+    def write(self, data: bytes, /) -> int:
         """Write one complete protocol frame."""
         ...
 

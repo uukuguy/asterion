@@ -950,7 +950,7 @@ git commit -m "build: package Prime operation evidence"
 
 **Interfaces:** Consumes Tasks 1–15. Produces exactly one `H-036` passed run with command ID `check.operational-parity-closure`. This plan does not invent an `H-037`: it preserves the canonical future-work queue until a separately approved hypothesis defines the next scope.
 
-- [ ] **Step 1: Write failing climb and nonclaim tests**
+- [x] **Step 1: Write failing climb and nonclaim tests**
 
 ```python
 EXPECTED_H036 = {
@@ -965,7 +965,7 @@ def test_h036_requires_all_six_receipts_and_does_not_invent_successor_or_native_
     self.assertNotIn("Verified-native-parity", _ledger_claims())
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 uv run python -m unittest -v tests.test_prime_climb tests.test_prime_parity_ledger tests.test_check_prime_parity
@@ -973,11 +973,11 @@ uv run python -m unittest -v tests.test_prime_climb tests.test_prime_parity_ledg
 
 Expected: FAIL because H-036 has no cycle gate or six-receipt closure transition.
 
-- [ ] **Step 3: Teach the cycle to require the exact clean boundary**
+- [x] **Step 3: Teach the cycle to require the exact clean boundary**
 
 `tools/climb/cycle.sh H-036` must invoke all six `test.prime-operational-*.provider-free` targets, the exact six-feature checker, `make check`, `make promotion-check`, and `git diff --check`. It must reject missing real-Prime receipts, dirty input, duplicate/noncontiguous cycles, Node outside `>=22.8.0 <23`, source/built-distribution/module lock drift, nonzero prohibited effect counters, a skipped command, or a promoted broader claim. `regen-tree.py` derives the transition only from canonical `runs.csv` evidence.
 
-- [ ] **Step 4: Run the detached Node 22 closure twice**
+- [x] **Step 4: Run the detached Node 22 closure twice**
 
 From two fresh clean detached worktrees, each with a separately rebuilt pinned Prime root under Node `>=22.8.0 <23` and no credentials/configuration copied in:
 
@@ -988,7 +988,7 @@ tools/climb/cycle.sh H-036
 
 Expected: only the first clean canonical run writes `runs.csv` and its evidence ID. The second is a disposable confirmation run recorded only in `.superpowers/sdd/operational-parity-task-16-report.md` and must append no cycle/evidence identity. Both report six exact receipts, selected `6`, passed `6`, blocking `0`, prohibited external vector all zero (`credential_value_reads`, `provider_model_requests`, `network_operations`, `package_manager_operations`, `os_process_restart_operations`, `external_telemetry_deliveries`, `uploads`), package-specific scenario counters exactly as Tasks 12–13 require, and `full_dataset=no`.
 
-- [ ] **Step 5: Record exact claims/nonclaims, verify twice, and commit**
+- [x] **Step 5: Record exact claims/nonclaims, verify twice, and commit**
 
 Record the six named Prime Gateway rows and six receipt identities only after the primary clean gate passes. With H-035's nine rows, record `interfaces.operations` PASS at exactly `15/15`; `Verified-system-parity` remains BLOCKED on every other mandatory ledger row and native parity remains missing. Do not claim live OAuth/model/telemetry/update behavior or any native behavior.
 
@@ -1009,15 +1009,19 @@ git commit -m "docs: close H036 operational parity"
 
 ## Final Review Checklist
 
-- [ ] `asterion.operation/v1` descriptor/transaction/receipt schemas, Python validators, TypeScript validators, and exhaustive valid/invalid fixtures agree exactly.
-- [ ] Canonical `AuthorityEnvelope`/`AuthorityLedger`, not a parallel authority store, owns durable reservation and settlement across every crash window.
-- [ ] Private request resolution rechecks descriptor identity/purpose/digest/media/size/revision/cancellation and redacts all errors.
-- [ ] Each of the six host-owned packages has a closed Python/TypeScript typed private request validator, independent injected services, provider-free redaction, and complete effect-counter assertions.
-- [ ] Auth has private precedence/status and mocked refresh only; model selection uses only fixture catalog entries; Prime-compatible `theme`, `telemetry.enabled`, and `app.*` keybindings remain preference only.
-- [ ] Telemetry is network-disabled and observation-only on sink failure; doctor is read-only; update/restart uses only a deterministic fake coordinator.
-- [ ] Prime IPC exposes only generic `operation.execute`/`operation.cancel`/`operation.reconcile`; client invokes a narrow ControlHost dispatcher and adds only generic `operation.receipted`.
-- [ ] Locked harness verifies source and built-distribution anchors for auth, model tuple, settings/keybindings, telemetry/usage, diagnostics, and all three controlled-update/restart anchors.
-- [ ] Six independent receipts feed the atomic reducer; incomplete/dirty closure cannot mutate any ledger row and native rows remain missing.
-- [ ] Installed-wheel promotion resolves resources through package metadata and uses an external pinned root under Node `>=22.8.0 <23`.
-- [ ] The exact six-feature checker reports selected `6`, passed `6`, blocking `0`; H-035 plus H-036 reports `interfaces.operations` PASS at `15/15`, while `Verified-system-parity` stays BLOCKED.
-- [ ] Only the canonical clean closure writes its H-036 run/evidence ID; the second disposable confirmation is retained only in the Task 16 report.
+- [x] `asterion.operation/v1` descriptor/transaction/receipt schemas, Python validators, TypeScript validators, and exhaustive valid/invalid fixtures agree exactly.
+- [x] Canonical `AuthorityEnvelope`/`AuthorityLedger`, not a parallel authority store, owns durable reservation and settlement across every crash window.
+- [x] Private request resolution rechecks descriptor identity/purpose/digest/media/size/revision/cancellation and redacts all errors.
+- [x] Each of the six host-owned packages has a closed Python/TypeScript typed private request validator, independent injected services, provider-free redaction, and complete effect-counter assertions.
+- [x] Auth has private precedence/status and mocked refresh only; model selection uses only fixture catalog entries; Prime-compatible `theme`, `telemetry.enabled`, and `app.*` keybindings remain preference only.
+- [x] Telemetry is network-disabled and observation-only on sink failure; doctor is read-only; update/restart uses only a deterministic fake coordinator.
+- [x] Prime IPC exposes only generic `operation.execute`/`operation.cancel`/`operation.reconcile`; client invokes a narrow ControlHost dispatcher and adds only generic `operation.receipted`.
+- [x] Locked harness verifies source and built-distribution anchors for auth, model tuple, settings/keybindings, telemetry/usage, diagnostics, and all three controlled-update/restart anchors.
+- [x] Six independent receipts feed the atomic reducer; incomplete/dirty closure cannot mutate any ledger row and native rows remain missing.
+- [x] Installed-wheel promotion resolves resources through package metadata and uses an external pinned root under Node `>=22.8.0 <23`.
+- [x] The exact six-feature checker reports selected `6`, passed `6`, blocking `0`; H-035 plus H-036 reports `interfaces.operations` PASS at `15/15`, while `Verified-system-parity` stays BLOCKED.
+- [x] Only the canonical clean closure writes its H-036 run/evidence ID; the second disposable confirmation is retained only in the Task 16 report.
+
+Task 16 closure note: canonical cycle 36 is
+`H-036,passed,check.operational-parity-closure`; climb now points to
+`future-work-queue` with no H-037.

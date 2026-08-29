@@ -35,4 +35,5 @@
 - H-033: passed — local MCP evidence
 - H-034: passed — ecosystem closure gates
 - H-035: passed — client interface closure gates
-- Next: H-036 — operational surface inventory
+- H-036: passed — operational surface closure gates
+- Future: separately approved hypothesis required

@@ -219,6 +219,12 @@ def main(arguments: list[str]) -> int:
             "H-036",
             "check.client-interfaces-closure",
         ): 35,
+        (
+            "H-036",
+            "passed",
+            "future-work-queue",
+            "check.operational-parity-closure",
+        ): 36,
     }
     cycle = accepted.get((hypothesis_id, outcome, next_action, command_id))
     if cycle is None:
@@ -455,12 +461,21 @@ def main(arguments: list[str]) -> int:
                 "- Next: H-035 — client interface closure inventory",
             )
         )
-    elif cycle >= 35:
+    elif cycle == 35:
         rendered.extend(
             (
                 "- H-034: passed — ecosystem closure gates",
                 "- H-035: passed — client interface closure gates",
                 "- Next: H-036 — operational surface inventory",
+            )
+        )
+    elif cycle >= 36:
+        rendered.extend(
+            (
+                "- H-034: passed — ecosystem closure gates",
+                "- H-035: passed — client interface closure gates",
+                "- H-036: passed — operational surface closure gates",
+                "- Future: separately approved hypothesis required",
             )
         )
     (root / "research-tree.md").write_text(

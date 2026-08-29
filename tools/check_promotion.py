@@ -552,6 +552,16 @@ def _default_runner(
     command: tuple[str, ...], cwd: Path
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
+    for name in (
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PYTHONUSERBASE",
+        "UV_NO_SYNC",
+        "UV_PROJECT_ENVIRONMENT",
+        "VIRTUAL_ENV",
+    ):
+        environment.pop(name, None)
     environment["CARGO_REGISTRIES_CRATES_IO_PROTOCOL"] = "sparse"
     environment["CARGO_HOME"] = str(cwd.parent / "cargo-home")
     environment.pop(PRIME_SOURCE_ENV, None)

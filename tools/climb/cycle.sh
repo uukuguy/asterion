@@ -1,6 +1,26 @@
 #!/bin/sh
 set -eu
 
+require_clean_tree() {
+  if [ -n "$(git status --porcelain)" ]; then
+    exit 2
+  fi
+}
+
+require_node22() {
+  version="$(node -v 2>/dev/null || true)"
+  case "$version" in
+    v22.*) ;;
+    *) exit 2 ;;
+  esac
+  IFS=.
+  set -- ${version#v}
+  IFS=' '
+  if [ "$1" -ne 22 ] || [ "$2" -lt 8 ]; then
+    exit 2
+  fi
+}
+
 case "${1-}" in
   H-001)
     uv run python -m unittest -v tests.test_prime_rlm_messaging_parity
@@ -167,6 +187,21 @@ case "${1-}" in
     make promotion-check
     git diff --check
     python3 tools/climb/regen-tree.py H-035 passed H-036 check.client-interfaces-closure
+    ;;
+  H-036)
+    require_clean_tree
+    require_node22
+    make test.prime-operational-auth.provider-free
+    make test.prime-operational-model-selection.provider-free
+    make test.prime-operational-settings-keybindings.provider-free
+    make test.prime-operational-telemetry-usage.provider-free
+    make test.prime-operational-doctor.provider-free
+    make test.prime-operational-controlled-update-restart.provider-free
+    uv run python tools/check_prime_parity.py --features operation.auth,operation.model-selection,operation.settings-keybindings,operation.telemetry-usage,operation.doctor,operation.controlled-update-restart --provider asterion.prime-gateway
+    make check
+    make promotion-check
+    git diff --check
+    python3 tools/climb/regen-tree.py H-036 passed future-work-queue check.operational-parity-closure
     ;;
   *) exit 2 ;;
 esac

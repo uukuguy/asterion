@@ -822,3 +822,20 @@
 - 15:24 Closed H-035 once after four provider-free client receipts, exact 9/9
   checker, clean repository, and isolated promotion gates; H-036 remains
   pending with no broader system/native claim [pending]
+- 15:33 Closed H-035 client interfaces; records exact one-cycle handoff to H-036 [c1fd976]
+- 17:02 Planned H-036 operational parity with approved authority and evidence boundaries [c719045]
+- 19:58 Added typed operational preferences without authority [b440f4f]
+- 21:43 Added read-only doctor diagnostics with redacted immutable reports [fdd2404]
+- 23:44 Added generic private Prime operation bridge and closed IPC fences [b05852f]
+
+## 2026-08-29
+- 06:38 Proved locked Prime telemetry, doctor, and restart receipts [15ff2ac]
+- 19:12 Added H-036 cycle gate and nonclaim tests to require exact operational closure [48ed2a6]
+- 20:33 Closed H-036 operational parity once; future queue preserves system/native nonclaims [pending]
+- 23:12 修正 HOME 隔离测试期望，确保闭环沙箱可重现 [45a5c04]
+- 23:39 修复 Python 3.10/3.11 ACP wheel 导入兼容性 [ca3270e]
+
+## 2026-08-30
+- 02:00 封闭 promotion 外层 Python/uv 路径注入，确保复制树独立验证 [c320747]
+- 03:29 完成 H-036 两次独立闭环确认，排除环境假阳性 [c320747]
+- 03:30 定稿 H-036 双确认报告，记录最终边界 [7d1fa34]
