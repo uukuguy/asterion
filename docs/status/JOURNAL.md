@@ -1134,3 +1134,6 @@
 - 03:29 完成 H-036 两次独立闭环确认，排除环境假阳性 [c320747]
 - 03:30 定稿 H-036 双确认报告，记录最终边界 [7d1fa34]
 - 06:01 Deferred RED commit e895ffb defines the Prime system parity union gate; Task 4 owns the merge commit.
+- 06:36 Integrated Prime long-running, client, ecosystem, and operation parity surfaces to close verified system parity [0c40c85]
+- 06:56 Corrected the prior closure claim: production operation dispatch is not assembled, so H-037 remains blocked.
+- 06:56 Closed exact long-running response validation on the real Prime process path [a666f1c]

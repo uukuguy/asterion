@@ -1,56 +1,53 @@
-# Resume Next Session
+# Live Session Checkpoint
 
-> Updated: 2026-08-29. H-036 is closed; no H-037 is approved.
+> Updated: 2026-08-30 06:56 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- H-036 closed exactly once with
-  `36,H-036,passed,check.operational-parity-closure`.
-- Canonical climb state now records
-  `{"last_hypothesis":"H-036","last_outcome":"passed","next_action":"future-work-queue"}`.
-- H-035 plus H-036 closes `interfaces.operations` at exactly 15/15 Prime
-  Gateway rows.
-- `Verified-system-parity` remains BLOCKED; `Verified-native-parity` remains
-  missing.
+- Prime system-parity integration landed as merge commit `0c40c85`, with
+  parents `e895ffb` and main `262b2fd`.
+- The selected Gateway retains long-running, client, ecosystem, and operation
+  protocol surfaces, but independent review proved the production descriptor
+  does not inject an operator-owned TypeScript operation dispatcher.
+- Python long-running transport validation is closed by `a666f1c`: Task 4
+  Python `90/90` and Task 3 `35/35` pass.
+- The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
+  provider/application operations, but Phase 2 must not close until the
+  operation production-assembly gap is resolved and independently reverified.
 
-## Current work package
+## Durable recovery boundary
 
-- Worktree: `.worktrees/prime-client-interfaces`.
-- Branch: `feature/prime-client-interfaces`.
-- Approved plan:
-  `docs/superpowers/plans/2026-08-10-asterion-prime-operational-parity.md`.
-- Task report:
-  `.superpowers/sdd/operational-parity-task-16-report.md`.
+- The Prime artifact lock expanded from
+  `c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3`
+  to `34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d`.
+- The synchronized client bundle and module-lock digests are
+  `5ada8386371b8b68bf2bf34b892fdee1b93ad936dfa906110901b14141b63e86`
+  and `577f5ea261d515223d578673f7431fd12d141fb5160c1611315ab015892485a8`.
+- The synchronized ecosystem module-lock digest is
+  `4cee1b9e8a1292e92232f2cafe0872988658a27680bece3755f710ac1bad5dd2`.
+- Do not rerun or invent Climb hypotheses. Canonical state ends at H-036 with
+  `next_action=future-work-queue`.
+- Do not instantiate `PrimeOperationGateway` with synthetic receipts or select
+  an operation service from request data. No existing operator-owned dispatcher
+  or reverse callback transport is available in the TypeScript descriptor path.
+- The literal `$(getconf DARWIN_USER_TEMP_DIR)/` and
+  `.task13-promotion-bin/` artifact roots remain excluded and untouched.
 
-## Verified work
+## Immediate next action
 
-- H-036 consumed the six real provider-free Prime Gateway operational receipts:
-  `operation.auth`, `operation.model-selection`,
-  `operation.settings-keybindings`, `operation.telemetry-usage`,
-  `operation.doctor`, and `operation.controlled-update-restart`.
-- The exact six-feature checker passed with selected `6`, passed `6`,
-  blocking `0`, and zero provider/application operations.
-- The canonical clean cycle invoked the six receipt gates, exact checker,
-  `make check`, `make promotion-check`, and `git diff --check`.
-- Promotion reported `promotion full PASS commands=28 provider_operations=0
-  full_dataset=no`.
+1. Decide whether to add an explicit operator-owned host callback
+   transport/service for Prime operations (recommended) or withdraw the
+   unreachable `operations-v1` production claim and reopen the six operation
+   parity rows.
+2. Amend the approved design/plan before implementation. H-037 remains blocked.
 
-## Recovery boundary
-
-- Do not rerun H-036 against canonical climb state; a duplicate canonical row
-  would be wrong.
-- Do not invent H-037. Start only from a separately approved hypothesis and
-  evidence boundary.
-- Do not promote provider-free H-036 evidence to live OAuth/model selection,
-  live telemetry delivery, real update/restart effects, system parity, or
-  native parity.
-- Native rows stay `missing` until Phase 3 evidence exists.
-
-## Ready-to-paste status checks
+## Ready-to-paste verification
 
 ```bash
-tail -n 3 docs/status/climb/runs.csv
-cat docs/status/climb/session-state.json
-uv run python tools/check_prime_parity.py --features operation.auth,operation.model-selection,operation.settings-keybindings,operation.telemetry-usage,operation.doctor,operation.controlled-update-restart --provider asterion.prime-gateway
+npm --prefix packages/typescript/prime-gateway run build
+npm --prefix packages/typescript/prime-gateway test
+uv run python -m unittest -v tests.test_control_host tests.test_prime_control_factory tests.test_prime_long_running_parity tests.test_client_session tests.test_client_operations
+uv run python -m unittest -v tests.test_prime_parity_ledger tests.test_check_prime_parity tests.test_prime_climb
 uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway
+git diff --check --cached
 ```
