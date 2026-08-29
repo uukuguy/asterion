@@ -73,21 +73,28 @@ class TestCheckPrimeParity(unittest.TestCase):
         self.assertEqual(report["provider_operations"], 0)
         self.assertEqual(report["application_operations"], 0)
 
-    def test_verified_system_claim_fails_closed_with_only_stable_ids(self) -> None:
+    def test_verified_system_claim_passes_only_with_closed_union(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
             exit_code = parity_checker.main(
-                ["--claim", "verified-system-parity"]
+                [
+                    "--claim",
+                    "verified-system-parity",
+                    "--provider",
+                    "asterion.prime-gateway",
+                ]
             )
 
         rendered = output.getvalue()
         report = json.loads(rendered)
-        self.assertEqual(exit_code, 1)
-        self.assertEqual(report["status"], "BLOCKED")
-        self.assertEqual(report["blocking_feature_count"], 15)
-        self.assertEqual(len(report["blocking_feature_ids"]), 15)
-        self.assertEqual(report["passed_feature_count"], 46)
-        self.assertEqual(report["reason_codes"], ["result-missing"])
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["passed_feature_count"], 61)
+        self.assertEqual(report["blocking_feature_count"], 0)
+        self.assertEqual(report["blocking_feature_ids"], [])
+        self.assertEqual(report["excluded_feature_count"], 2)
+        self.assertEqual(report["provider_operations"], 0)
+        self.assertEqual(report["application_operations"], 0)
         self.assertNotIn("prime_evidence", rendered)
         self.assertNotIn("anchors", rendered)
         self.assertNotIn(str(ROOT), rendered)
