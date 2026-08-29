@@ -773,6 +773,112 @@ class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(_validate_response(response, request), response)
 
+    async def test_long_running_client_round_trips_exact_receipt_through_process(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "long_running_receipt.py"
+            script.write_text(
+                "import json, sys\n"
+                "request = json.loads(sys.stdin.readline())\n"
+                "response = {\n"
+                "    'protocol': 'asterion.prime-gateway-ipc/v1',\n"
+                "    'id': request['id'],\n"
+                "    'type': 'long-running.receipt',\n"
+                "    'receipt': {\n"
+                "        'commandId': request['command_id'],\n"
+                "        'commandDigest': 'a' * 64,\n"
+                "        'status': 'succeeded',\n"
+                "    },\n"
+                "}\n"
+                "print(json.dumps(response), flush=True)\n",
+                encoding="utf-8",
+            )
+            process = await PrimeSidecarProcess.start(
+                PrimeSidecarLaunchOptions(
+                    node_executable=Path(sys.executable),
+                    sidecar_entry=script,
+                    private_descriptor={},
+                    environ={"PATH": os.environ.get("PATH", "")},
+                    close_timeout=0.2,
+                    request_timeout=0.2,
+                )
+            )
+            client = PrimeControlPlaneClient(
+                process=process,
+                private_content=FakeResolver(),
+            )
+            try:
+                receipt = await client.execute_long_running(
+                    "heartbeat-effect-1",
+                    {"type": "heartbeats_list"},
+                )
+            finally:
+                await client.close()
+
+            self.assertEqual(receipt.command_id, "heartbeat-effect-1")
+            self.assertEqual(receipt.command_digest, "a" * 64)
+            self.assertEqual(receipt.status, "succeeded")
+
+    def test_long_running_transport_rejects_non_exact_receipt_shapes(self) -> None:
+        request = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "long-running-request-1",
+            "type": "long-running.execute",
+            "command_id": "heartbeat-effect-1",
+            "command": {"type": "heartbeats_list"},
+        }
+        valid = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "long-running-request-1",
+            "type": "long-running.receipt",
+            "receipt": {
+                "commandId": "heartbeat-effect-1",
+                "commandDigest": "a" * 64,
+                "status": "succeeded",
+            },
+        }
+        invalid = {
+            "outer-extra": {**valid, "private": "SENTINEL_SECRET"},
+            "receipt-extra": {
+                **valid,
+                "receipt": {**cast(dict[str, object], valid["receipt"]), "extra": 1},
+            },
+            "invalid-command-id": {
+                **valid,
+                "receipt": {
+                    **cast(dict[str, object], valid["receipt"]),
+                    "commandId": "invalid id",
+                },
+            },
+            "mismatched-command-id": {
+                **valid,
+                "receipt": {
+                    **cast(dict[str, object], valid["receipt"]),
+                    "commandId": "heartbeat-effect-other",
+                },
+            },
+            "invalid-command-digest": {
+                **valid,
+                "receipt": {
+                    **cast(dict[str, object], valid["receipt"]),
+                    "commandDigest": "A" * 64,
+                },
+            },
+            "invalid-status": {
+                **valid,
+                "receipt": {
+                    **cast(dict[str, object], valid["receipt"]),
+                    "status": "completed",
+                },
+            },
+        }
+
+        for name, response in invalid.items():
+            with self.subTest(name=name), self.assertRaises(PrimeSidecarProcessError):
+                _validate_response(response, request)
+
     async def test_sidecar_creates_private_files_with_owner_only_permissions(
         self,
     ) -> None:

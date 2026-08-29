@@ -818,6 +818,7 @@ def _validate_response(
         "command.accept": "command.accepted",
         "client_value_read": "client_value",
         "ecosystem_activate": "ecosystem_receipt",
+        "long-running.execute": "long-running.receipt",
         "operation.cancel": "operation.receipt",
         "operation.execute": "operation.receipt",
         "operation.reconcile": "operation.receipt",
@@ -841,6 +842,7 @@ def _validate_response(
             "client_value",
             "client_observations.batch",
             "ecosystem_receipt",
+            "long-running.receipt",
             "operation.receipt",
             "events.batch",
             "private.value",
@@ -883,6 +885,20 @@ def _validate_response(
     if response.get("type") == "private.value":
         expected = expected | {"text"}
         if not isinstance(response.get("text"), str):
+            raise PrimeSidecarProcessError()
+    if response.get("type") == "long-running.receipt":
+        expected = expected | {"receipt"}
+        receipt = response.get("receipt")
+        if (
+            not isinstance(receipt, Mapping)
+            or set(receipt) != {"commandId", "commandDigest", "status"}
+            or receipt.get("commandId") != request.get("command_id")
+            or not isinstance(receipt.get("commandId"), str)
+            or _REQUEST_ID.fullmatch(receipt["commandId"]) is None
+            or not isinstance(receipt.get("commandDigest"), str)
+            or _LIFECYCLE_TOKEN.fullmatch(receipt["commandDigest"]) is None
+            or receipt.get("status") not in {"succeeded", "failed", "uncertain"}
+        ):
             raise PrimeSidecarProcessError()
     if response.get("type") in {
         "ecosystem_receipt",
