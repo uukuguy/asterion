@@ -35,6 +35,7 @@ from asterion.control.providers.prime.process import (
     PrimeSidecarLaunchOptions,
     PrimeSidecarProcessError,
     _encode_frame,
+    _validate_response,
     build_prime_sidecar_spawn_plan,
 )
 
