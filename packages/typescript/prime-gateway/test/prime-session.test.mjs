@@ -12,6 +12,7 @@ class FakeTransport {
   constructor() {
     this.commands = [];
     this.cancellationStatus = "cancelled";
+    this.abortFailure = false;
     this.holdPrompts = false;
     this.promptResolvers = [];
     this.acknowledgements = [];
@@ -26,6 +27,7 @@ class FakeTransport {
       tokensBefore: 90,
     };
     this.modelFailure = undefined;
+    this.appendPostModelState = false;
     this.holdModelOperations = false;
     this.modelResolvers = [];
     this.sessionFile = "/private/sessions/transcript-1.jsonl";
@@ -218,6 +220,19 @@ class FakeTransport {
           };
           this.sessionTree.flatNodes.push({ entry: summaryEntry });
           this.sessionTree.leafId = summaryEntry.id;
+          if (this.appendPostModelState) {
+            const stateEntry = {
+              type: "custom_message",
+              id: "post-summary-state",
+              parentId: summaryEntry.id,
+              timestamp: "2026-08-10T03:00:03Z",
+              customType: "ipython_state",
+              content: [],
+              display: false,
+            };
+            this.sessionTree.flatNodes.push({ entry: stateEntry });
+            this.sessionTree.leafId = stateEntry.id;
+          }
           this.sessionStats.tokens.input += 8;
           this.sessionStats.tokens.output += 4;
           this.sessionStats.tokens.total += 12;
@@ -277,6 +292,19 @@ class FakeTransport {
         };
         this.sessionTree.flatNodes.push({ entry });
         this.sessionTree.leafId = entry.id;
+        if (this.appendPostModelState) {
+          const stateEntry = {
+            type: "custom_message",
+            id: "post-compact-state",
+            parentId: entry.id,
+            timestamp: "2026-08-10T03:00:03Z",
+            customType: "ipython_state",
+            content: [],
+            display: false,
+          };
+          this.sessionTree.flatNodes.push({ entry: stateEntry });
+          this.sessionTree.leafId = stateEntry.id;
+        }
         this.sessionStats.tokens.input += 12;
         this.sessionStats.tokens.output += 8;
         this.sessionStats.tokens.total += 20;
@@ -391,6 +419,14 @@ class FakeTransport {
         command: command.type,
         success: true,
         data: { status: this.cancellationStatus },
+      });
+    }
+    if (command.type === "abort_and_clear_queue" && this.abortFailure) {
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: false,
       });
     }
     return Promise.resolve({
@@ -541,6 +577,20 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
     active_session_id: "prime-root-1",
     supervisor_generation: "supervisor-generation-1",
   });
+});
+
+test("checkpoint idleness accepts a quiescent resident Prime root", async () => {
+  const transport = new FakeTransport();
+  transport.sessionState.isSessionActive = true;
+  transport.sessionState.activity = "idle";
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    async bindIdentity() {},
+  });
+
+  assert.equal(await session.isIdle(), true);
 });
 
 test("native RLM child uses the pinned daemon create and prompt protocol", async () => {
@@ -982,6 +1032,48 @@ test("manual compaction and branch summary reconcile exact durable baselines and
       }],
     ],
   );
+});
+
+test("model outcomes remain exact when Prime restores native state after the result node", async () => {
+  const transport = new FakeTransport();
+  transport.appendPostModelState = true;
+  const session = PrimeSession.restore({
+    transport,
+    sessionId: "session-1",
+    activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-1",
+    continuationId: "continuation-1",
+    sessionPath: transport.sessionFile,
+  });
+  const compactBaseline = await session.measureContextModelBaseline(
+    "native-state-compact",
+    "continuation-1",
+  );
+  const compacted = await session.compactContext(
+    "native-state-compact",
+    "continuation-1",
+    null,
+    MODEL_BUDGET,
+    compactBaseline,
+  );
+  assert.equal(compacted.status, "succeeded");
+  assert.equal(transport.sessionTree.leafId, "post-compact-state");
+
+  const summaryBaseline = await session.measureContextModelBaseline(
+    "native-state-summary",
+    "continuation-1",
+    "entry-1",
+  );
+  const summarized = await session.summarizeContextBranch(
+    "native-state-summary",
+    "continuation-1",
+    "entry-1",
+    null,
+    MODEL_BUDGET,
+    summaryBaseline,
+  );
+  assert.equal(summarized.status, "succeeded");
+  assert.equal(transport.sessionTree.leafId, "post-summary-state");
 });
 
 test("bounded model operations distinguish rejection, cancellation, and post-effect uncertainty", async () => {
@@ -1485,6 +1577,7 @@ test("lifecycle maps input modes pause resume detach and cancellation cascade", 
     "prompt",
     "abort_and_clear_queue",
     "wait_for_idle",
+    "wait_for_idle",
     "prompt",
     "detach",
     "abort_and_clear_queue",
@@ -1493,9 +1586,28 @@ test("lifecycle maps input modes pause resume detach and cancellation cascade", 
   assert.equal(transport.commands[0].command.streamingBehavior, undefined);
   assert.equal(transport.commands[1].command.streamingBehavior, "steer");
   assert.equal(transport.commands[2].command.streamingBehavior, "followUp");
-  assert.equal(transport.commands[5].command.message, "Continue the active goal.");
-  assert.equal(transport.commands[5].command.expandPromptTemplates, false);
-  assert.equal(transport.commands[6].command.activeSessionId, "prime-root-1");
+  assert.equal(transport.commands[6].command.message, "Continue the active goal.");
+  assert.equal(transport.commands[6].command.expandPromptTemplates, false);
+  assert.equal(transport.commands[7].command.activeSessionId, "prime-root-1");
+});
+
+test("cancellation still terminates the session when cooperative abort is unavailable", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  transport.commands.length = 0;
+  transport.abortFailure = true;
+
+  await session.cancel("cancel-after-recovery-1");
+
+  assert.deepEqual(transport.commands.map(({ command }) => command.type), [
+    "abort_and_clear_queue",
+    "kill",
+  ]);
 });
 
 test("lifecycle delivers exact private images with stable input replay identity", async () => {
@@ -1631,6 +1743,7 @@ test("lifecycle fences every pending prompt before pause", async () => {
       "prompt",
       "cancel_prompt_admission",
       "abort_and_clear_queue",
+      ...(status === "unknown" ? [] : ["wait_for_idle"]),
     ]);
     transport.releasePrompts();
     await pending;

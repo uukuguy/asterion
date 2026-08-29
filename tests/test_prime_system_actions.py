@@ -56,7 +56,7 @@ def _proposal(kind: str) -> ControlEvent:
 
 
 class TestPrimeSystemActionService(unittest.IsolatedAsyncioTestCase):
-    async def test_checkpoint_action_uses_exact_gateway_command(self) -> None:
+    async def test_checkpoint_action_defers_materialization_to_gateway_terminal(self) -> None:
         client = RecordingClient()
         service = PrimeSystemActionService(client)
 
@@ -68,17 +68,7 @@ class TestPrimeSystemActionService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt.usage, BudgetUsage.zero())
         self.assertEqual(receipt.artifact_ids, ())
         self.assertEqual(receipt.media_types, ())
-        self.assertEqual(len(client.commands), 1)
-        self.assertEqual(
-            client.commands[0],
-            ControlCommand(
-                command_id="system-checkpoint-action-1",
-                session_id="session-1",
-                authority_revision=7,
-                type="checkpoint.request",
-                payload={"checkpoint_id": "checkpoint-1"},
-            ),
-        )
+        self.assertEqual(client.commands, [])
 
     async def test_goal_actions_are_zero_usage_terminal_intents(self) -> None:
         for kind in ("goal.complete", "goal.fail"):
@@ -92,7 +82,7 @@ class TestPrimeSystemActionService(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(client.commands, [])
                 self.assertEqual(receipt.receipt_ref, f"system-{kind}-action-1")
 
-    async def test_cancellation_and_transport_failure_fail_closed(self) -> None:
+    async def test_cancellation_fails_closed_before_checkpoint_terminal(self) -> None:
         service = PrimeSystemActionService(RecordingClient())
         with self.assertRaises(ActionExecutionFailure) as cancelled:
             await service.execute(
@@ -101,18 +91,6 @@ class TestPrimeSystemActionService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cancelled.exception.status, "cancelled")
         self.assertIsNone(cancelled.exception.receipt_ref)
 
-        class FaultingClient:
-            async def send(self, command: ControlCommand) -> None:
-                del command
-                raise RuntimeError("SENTINEL_SECRET")
-
-        with self.assertRaises(ActionExecutionFailure) as uncertain:
-            await PrimeSystemActionService(FaultingClient()).execute(
-                _proposal("checkpoint.create"), MutableSignal()
-            )
-        self.assertEqual(uncertain.exception.status, "uncertain")
-        self.assertEqual(uncertain.exception.reason_code, "checkpoint-progress-unknown")
-        self.assertNotIn("SENTINEL_SECRET", str(uncertain.exception))
 
 
 if __name__ == "__main__":

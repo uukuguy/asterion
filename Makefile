@@ -23,6 +23,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded
 .PHONY: prime-parity-inventory prime-verify-system-parity
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
+.PHONY: test.prime-long-running.provider-free test.prime-long-running.bounded
 .PHONY: test.prime-continual-harness.provider-free
 .PHONY: test.prime-continual-harness.bounded
 .PHONY: test.prime-ecosystem-resources.provider-free
@@ -39,7 +40,7 @@ help:
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
-	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free"
+	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free test.prime-long-running.bounded"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
 
@@ -164,12 +165,28 @@ test.prime-session-context-parity.provider-free:
 	npm --prefix packages/typescript/asterion-runtime test
 	npm --prefix packages/typescript/prime-gateway test
 
+test.prime-session-context-parity.bounded:
+	ASTERION_PRIME_SESSION_CONTEXT_BOUNDED=1 $(UV_BIN) run python -m unittest -v \
+		tests.test_prime_session_context_parity.TestPrimeSessionContextParity.test_real_prime_provider_free_scenarios_match_committed_evidence
+
 test.prime-rlm-spawn-admission.provider-free:
 	npm --prefix packages/typescript/prime-gateway test -- \
 		test/daemon-wire.test.mjs \
 		test/rlm-host-shim.test.mjs
 	$(UV_BIN) run python -m unittest -v \
-		tests.test_prime_rlm_messaging_parity
+		 tests.test_prime_rlm_messaging_parity
+
+test.prime-long-running.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_control_long_running \
+		tests.test_prime_long_running_experiment \
+		tests.test_prime_long_running_parity
+	npm --prefix packages/typescript/prime-gateway test -- test/long-running.test.mjs
+
+test.prime-long-running.bounded:
+	$(UV_BIN) run python tools/prime_long_running_experiment.py \
+		--authorized-bounded-provider \
+		--source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
 
 test.prime-continual-harness.provider-free:
 	$(UV_BIN) run python -m unittest -v \
@@ -201,7 +218,6 @@ test.prime-ecosystem-packages.provider-free:
 		tests.test_local_capability_source \
 		tests.test_distribution_capability_source
 
-
 test.prime-ecosystem-mcp.provider-free:
 	npm --prefix packages/typescript/prime-gateway run build
 	$(UV_BIN) run python -m unittest -v \
@@ -209,7 +225,7 @@ test.prime-ecosystem-mcp.provider-free:
 		tests.test_prime_ecosystem_mcp
 
 prime-verify-bounded:
-	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"
+	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" $(if $(ASTERION_PRIME_AUTHORITY),--authority "$(ASTERION_PRIME_AUTHORITY)") $(if $(ASTERION_PRIME_MAX_COST_MICROS),--max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)")
 
 prime-verify-native-rlm-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level native-rlm-bounded --native-rlm-experiment --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"

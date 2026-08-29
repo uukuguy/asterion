@@ -422,6 +422,18 @@ class ControlHost:
                 events = self._client.events(cursor)
                 async for event in events:
                     seen = True
+                    if event.type in {
+                        "session.cancelled",
+                        "session.completed",
+                        "session.failed",
+                        "session.budget-limited",
+                    }:
+                        # Providers can report a root terminal in the same
+                        # stream batch as the final provider-owned child
+                        # terminal. Settle that child first so the canonical
+                        # state machine retains its no-active-actions terminal
+                        # invariant without rejecting an ordered provider flow.
+                        await self._settle_provider_owned_actions_before_terminal()
                     await self._accept_event(event)
                     if until_terminal and self._state.terminal_event_id is not None:
                         break
@@ -842,6 +854,23 @@ class ControlHost:
             raise
         except Exception:
             raise ControlHostError("provider-owned action lifecycle is invalid") from None
+
+    async def _settle_provider_owned_actions_before_terminal(self) -> None:
+        """Give one bounded provider lifecycle window before a root terminal."""
+
+        max_polls = max(
+            _TERMINAL_MAX_EMPTY_POLLS,
+            self._authority.envelope.max_action_deadline_ms
+            // int(_TERMINAL_POLL_INTERVAL_SECONDS * 1_000),
+        )
+        for _ in range(max_polls):
+            await self._reconcile_provider_owned_actions()
+            if all(
+                action.status in {"rejected", "succeeded", "failed", "cancelled", "uncertain"}
+                for action in self._state.actions.values()
+            ):
+                return
+            await asyncio.sleep(_TERMINAL_POLL_INTERVAL_SECONDS)
 
     async def _settle_provider_owned_receipt(
         self, receipt: ActionExecutionReceipt

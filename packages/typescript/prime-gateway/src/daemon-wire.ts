@@ -112,6 +112,7 @@ const COMMAND_FIELDS = Object.freeze({
   get_state: ["type", "activeSessionId"],
   get_session_stats: ["type", "activeSessionId"],
   get_session_tree: ["type", "activeSessionId"],
+  set_model: ["type", "activeSessionId", "provider", "modelId"],
   set_auto_compaction: ["type", "activeSessionId", "enabled"],
   compact: ["type", "activeSessionId", "customInstructions"],
   abort_compaction: ["type", "activeSessionId"],
@@ -137,6 +138,17 @@ const COMMAND_FIELDS = Object.freeze({
     "label",
   ],
   set_rlm_max_depth: ["type", "activeSessionId", "maxDepth", "global"],
+  heartbeats_list: ["type"],
+  heartbeat_get: ["type", "activeSessionId"],
+  heartbeat_set: [
+    "type",
+    "activeSessionId",
+    "schedule",
+    "prompt",
+    "deliveryMode",
+  ],
+  heartbeat_update: ["type", "activeSessionId", "action"],
+  heartbeat_manage: ["type", "activeSessionId", "jobId", "action"],
   prepare_update_restart: ["type"],
   retry_worker: ["type", "activeSessionId"],
   shutdown: ["type", "force"],
@@ -144,7 +156,7 @@ const COMMAND_FIELDS = Object.freeze({
 } satisfies Record<string, readonly string[]>);
 
 const CREATE_CONFIG_FIELDS = Object.freeze([
-  "cwd", "agentDir", "sessionDir", "provider", "model", "skills",
+  "cwd", "agentDir", "sessionDir", "provider", "model", "models", "skills",
   "autonomous", "telemetryDisabled", "initialGoal",
 ]);
 
@@ -308,6 +320,39 @@ export type PrimeDaemonCursor = Readonly<{
 export type PrimeDaemonCommand = Readonly<
   { type: keyof typeof COMMAND_FIELDS } & Record<string, unknown>
 >;
+
+export type PrimeHeartbeatCommand =
+  | Readonly<{ readonly type: "heartbeats_list" }>
+  | Readonly<{
+      readonly type: "heartbeat_get";
+      readonly activeSessionId: string;
+    }>
+  | Readonly<{
+      readonly type: "heartbeat_set";
+      readonly activeSessionId: string;
+      readonly schedule: string;
+      readonly prompt: string;
+      readonly deliveryMode?: "steer" | "followUp";
+    }>
+  | Readonly<{
+      readonly type: "heartbeat_update";
+      readonly activeSessionId: string;
+      readonly action: "pause" | "resume" | "cancel";
+    }>
+  | Readonly<{
+      readonly type: "heartbeat_manage";
+      readonly activeSessionId: string;
+      readonly jobId: string;
+      readonly action: "pause" | "resume" | "cancel";
+    }>;
+
+const HEARTBEAT_COMMAND_TYPES = new Set<PrimeHeartbeatCommand["type"]>([
+  "heartbeats_list",
+  "heartbeat_get",
+  "heartbeat_set",
+  "heartbeat_update",
+  "heartbeat_manage",
+]);
 
 export type PrimeDaemonCommandEnvelope = Readonly<{
   type: "command";
@@ -477,6 +522,10 @@ function validCreateConfig(value: unknown): boolean {
     (value.skills === undefined ||
       (Array.isArray(value.skills) &&
         value.skills.every((skill) => nonEmptyString(skill)))) &&
+    (value.models === undefined ||
+      (Array.isArray(value.models) &&
+        value.models.length > 0 &&
+        value.models.every((model) => nonEmptyString(model)))) &&
     (value.autonomous === undefined || validAutonomousConfig(value.autonomous)) &&
     (value.telemetryDisabled === undefined ||
       typeof value.telemetryDisabled === "boolean") &&
@@ -905,6 +954,7 @@ function validateCommand(command: PrimeDaemonCommand): void {
     "prepare_update_restart",
     "shutdown",
     "ack_result",
+    "heartbeats_list",
   ].includes(command.type);
   if (
     (needsActiveSession && !nonEmptyString(command.activeSessionId)) ||
@@ -937,7 +987,21 @@ function validateCommand(command: PrimeDaemonCommand): void {
       !nonEmptyString(command.admissionId)) ||
     (command.type === "set_rlm_max_depth" &&
       !nonNegativeInteger(command.maxDepth)) ||
+    (command.type === "heartbeat_set" &&
+      (!nonEmptyString(command.schedule) ||
+        !nonEmptyString(command.prompt) ||
+        (command.deliveryMode !== undefined &&
+          command.deliveryMode !== "steer" &&
+          command.deliveryMode !== "followUp"))) ||
+    ((command.type === "heartbeat_update" ||
+      command.type === "heartbeat_manage") &&
+      command.action !== "pause" &&
+      command.action !== "resume" &&
+      command.action !== "cancel") ||
+    (command.type === "heartbeat_manage" && !nonEmptyString(command.jobId)) ||
     (command.type === "set_auto_compaction" && command.enabled !== false) ||
+    (command.type === "set_model" &&
+      (!nonEmptyString(command.provider) || !nonEmptyString(command.modelId))) ||
     (command.type === "ack_result" && !nonEmptyString(command.commandId)) ||
     (command.capabilities !== undefined && !validCapabilities(command.capabilities)) ||
     (command.type === "compact" &&
@@ -971,6 +1035,20 @@ function validateCommand(command: PrimeDaemonCommand): void {
   ) {
     protocolViolation();
   }
+}
+
+export function validatePrimeHeartbeatCommand(
+  value: unknown,
+): PrimeHeartbeatCommand {
+  if (
+    !isRecord(value) ||
+    typeof value.type !== "string" ||
+    !HEARTBEAT_COMMAND_TYPES.has(value.type as PrimeHeartbeatCommand["type"])
+  ) {
+    protocolViolation();
+  }
+  validateCommand(value as PrimeDaemonCommand);
+  return deepFreeze({ ...value }) as PrimeHeartbeatCommand;
 }
 
 export function encodePrimeDaemonCommand(

@@ -57,6 +57,15 @@ export interface PrimeCheckpointRuntime {
   relaunch(): Promise<PrimeDaemonTransport>;
 }
 
+export type PrimeCheckpointStage =
+  | "idle"
+  | "prepare"
+  | "stop"
+  | "relaunch"
+  | "attach"
+  | "recover"
+  | "capsule";
+
 export interface PrimeCheckpointManagerOptions {
   readonly sessionId: string;
   readonly asterionGeneration: number;
@@ -68,6 +77,8 @@ export interface PrimeCheckpointManagerOptions {
   readonly transport: PrimeDaemonTransport;
   readonly runtime: PrimeCheckpointRuntime;
   readonly primeCursor: PrimeDaemonCursor;
+  /** Private, fixed-category lifecycle telemetry. */
+  readonly onStage?: (stage: PrimeCheckpointStage) => void;
 }
 
 interface ManifestSession {
@@ -309,6 +320,13 @@ function requireSuccessful(
   return response;
 }
 
+function rejectAttachRecovery(category: string): never {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+    process.stderr.write(`asterion-prime-checkpoint-recovery-invalid:${category}\n`);
+  }
+  throw new PrimeCheckpointError();
+}
+
 export function recoveryFromAttach(
   response: PrimeDaemonResponse,
   activeSessionId: string,
@@ -318,36 +336,60 @@ export function recoveryFromAttach(
   primeCursor: PrimeDaemonCursor;
   sessionStatus: "running" | "paused";
 }> {
-  const successful = requireSuccessful(response, "attach");
+  if (!response.success || response.command !== "attach") {
+    rejectAttachRecovery("response");
+  }
+  const successful = response;
   const data = successful.data;
   if (!isRecord(data) || data.activeSessionId !== activeSessionId) {
-    throw new PrimeCheckpointError();
+    rejectAttachRecovery("identity");
   }
   const replay = data.replay;
   const snapshot = data.snapshot;
   if (
     !isRecord(data.protocol) ||
     data.protocol.name !== "prime-agent.daemon" ||
-    data.protocol.version !== 7 ||
+    data.protocol.version !== 7
+  ) {
+    rejectAttachRecovery("protocol");
+  }
+  if (
     !isRecord(replay) ||
     (replay.status !== "complete" && replay.status !== "unavailable") ||
-    !nonNegativeInteger(replay.toSequence) ||
+    !nonNegativeInteger(replay.toSequence)
+  ) {
+    rejectAttachRecovery("replay");
+  }
+  if (
     !isRecord(snapshot) ||
-    snapshot.activeSessionId !== activeSessionId ||
+    snapshot.activeSessionId !== activeSessionId
+  ) {
+    rejectAttachRecovery("snapshot");
+  }
+  if (
     !nonNegativeInteger(snapshot.lastEventSequence) ||
     !nonNegativeInteger(data.lastEventSequence) ||
     snapshot.lastEventSequence !== data.lastEventSequence ||
-    replay.toSequence !== data.lastEventSequence ||
+    replay.toSequence !== data.lastEventSequence
+  ) {
+    rejectAttachRecovery("sequence");
+  }
+  if (
     !isRecord(snapshot.summary) ||
     snapshot.summary.sessionId !== transcriptSessionId ||
     (snapshot.summary.activeSessionId !== undefined &&
-      snapshot.summary.activeSessionId !== activeSessionId) ||
+      snapshot.summary.activeSessionId !== activeSessionId)
+  ) {
+    rejectAttachRecovery("summary");
+  }
+  if (
     !isRecord(snapshot.state) ||
     !isRecord(snapshot.state.goal) ||
     (snapshot.state.goal.status !== "active" &&
-      snapshot.state.goal.status !== "paused")
+      snapshot.state.goal.status !== "paused" &&
+      snapshot.state.goal.status !== "idle")
   ) {
-    throw new PrimeCheckpointError();
+    rejectAttachRecovery("goal");
   }
   const selected = validCursor(data.lastEventCursor)
     ? data.lastEventCursor
@@ -362,13 +404,16 @@ export function recoveryFromAttach(
     selected.sequence !== data.lastEventSequence ||
     (replay.status === "unavailable" && !validCursor(snapshot.lastEventCursor))
   ) {
-    throw new PrimeCheckpointError();
+    rejectAttachRecovery("cursor");
   }
   return Object.freeze({
     primeCursor: Object.freeze({
       generation: selected.generation,
       sequence: selected.sequence,
     }),
+    // Prime represents a resident session that has never been assigned a goal
+    // as `idle`.  It is quiescent and cannot advance autonomously, which is
+    // exactly Asterion's externally visible paused state after recovery.
     sessionStatus: snapshot.state.goal.status === "active" ? "running" : "paused",
   });
 }
@@ -486,11 +531,13 @@ export class PrimeCheckpointManager {
     checkpointId: string,
     coveredSequence: number,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void> = async () => undefined,
+    timeoutMs = 120_000,
   ): Promise<PrimeCheckpointCreated> {
     if (
       !validOpaqueId(checkpointId) ||
       !positiveInteger(coveredSequence) ||
-      typeof onRecovered !== "function"
+      typeof onRecovered !== "function" ||
+      !positiveInteger(timeoutMs)
     ) {
       return Promise.reject(new PrimeCheckpointError());
     }
@@ -500,7 +547,7 @@ export class PrimeCheckpointManager {
         ? existing.promise
         : Promise.reject(new PrimeCheckpointError());
     }
-    const promise = this.createOnce(checkpointId, coveredSequence, onRecovered)
+    const promise = this.createOnce(checkpointId, coveredSequence, onRecovered, timeoutMs)
       .catch(() => {
         throw new PrimeCheckpointError();
       });
@@ -568,43 +615,57 @@ export class PrimeCheckpointManager {
     checkpointId: string,
     coveredSequence: number,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
+    timeoutMs: number,
   ): Promise<PrimeCheckpointCreated> {
     validateHello(
       this.transport.hello,
       this.artifactEvidence,
       this.options.expectedRuntimeBuildId,
     );
+    this.noteStage("idle");
     requireSuccessful(
       await this.transport.request(
         { type: "wait_for_idle", activeSessionId: this.options.activeSessionId },
         `${this.options.sessionId}-checkpoint-${checkpointId}-idle`,
-        120_000,
+        timeoutMs,
       ),
       "wait_for_idle",
     );
     const prepareCommandId =
       `${this.options.sessionId}-checkpoint-${checkpointId}-prepare`;
+    this.noteStage("prepare");
     const deferred = await this.transport.requestDeferred(
       { type: "prepare_update_restart" },
       prepareCommandId,
-      120_000,
+      timeoutMs,
     );
     const manifest = this.manifestFromDeferred(deferred);
-
-    await this.options.runtime.stop();
+    this.noteStage("stop");
+    try {
+      await this.options.runtime.stop();
+    } catch {
+      if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+        process.stderr.write("asterion-prime-checkpoint-runtime-stop-failed\n");
+      }
+      throw new PrimeCheckpointError();
+    }
+    this.noteStage("relaunch");
     this.transport = await this.options.runtime.relaunch();
     validateHello(
       this.transport.hello,
       this.artifactEvidence,
       this.options.expectedRuntimeBuildId,
     );
+    this.noteStage("attach");
     const restored = await this.attachAndValidate(
       this.primeCursor,
       `checkpoint-${checkpointId}`,
+      timeoutMs,
     );
     this.primeCursor = restored.primeCursor;
     const acknowledgementTransport = this.transport;
     const recovery = this.recovery(restored);
+    this.noteStage("recover");
     await onRecovered(recovery);
 
     const capsule: PrimeCapsuleV1 = Object.freeze({
@@ -617,9 +678,11 @@ export class PrimeCheckpointManager {
       asterionSequence: coveredSequence,
       updateManifest: manifest.value,
     });
+    this.noteStage("capsule");
     const capsuleBytes = canonicalJsonBytes(capsule);
     const capsuleDigest = sha256Hex(capsuleBytes);
     const storageRef = await this.options.privateValues.putCapsule(capsuleBytes);
+
     return this.created(
       checkpointId,
       coveredSequence,
@@ -636,6 +699,14 @@ export class PrimeCheckpointManager {
     );
   }
 
+  private noteStage(stage: PrimeCheckpointStage): void {
+    try {
+      this.options.onStage?.(stage);
+    } catch {
+      // Diagnostics are strictly observational and cannot alter checkpointing.
+    }
+  }
+
   private manifestFromDeferred(deferred: PrimeDaemonDeferredResponse): ValidatedManifest {
     const response = requireSuccessful(deferred.response, "prepare_update_restart");
     return validateManifest(
@@ -648,29 +719,58 @@ export class PrimeCheckpointManager {
   private async attachAndValidate(
     cursor: PrimeDaemonCursor,
     purpose: string,
+    timeoutMs = 120_000,
   ): Promise<Readonly<{
     primeCursor: PrimeDaemonCursor;
     sessionStatus: "running" | "paused";
   }>> {
-    const response = await this.transport.request(
-      {
-        type: "attach",
-        activeSessionId: this.options.activeSessionId,
-        supportsExtensionUi: false,
-        clientId: `asterion-${this.options.sessionId}`,
-        capabilities: ["attach_snapshot", "event_sequence", "slim_attach"],
-        resumeCursor: cursor,
-        telemetryDisabled: true,
-      },
-      `${this.options.sessionId}-${purpose}-attach`,
-      120_000,
-    );
-    return recoveryFromAttach(
-      response,
-      this.options.activeSessionId,
-      this.requireTranscriptSessionId(),
-      cursor,
-    );
+    const startedAt = Date.now();
+    const retryDelaysMs = [0, 250, 1_000, 5_000];
+    for (const delayMs of retryDelaysMs) {
+      const remainingMs = timeoutMs - (Date.now() - startedAt);
+      if (remainingMs <= 0) break;
+      if (delayMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, Math.min(delayMs, remainingMs)));
+      }
+      try {
+        const response = await this.transport.request(
+          {
+            type: "attach",
+            activeSessionId: this.options.activeSessionId,
+            supportsExtensionUi: false,
+            clientId: `asterion-${this.options.sessionId}`,
+            capabilities: [
+              "attach_snapshot", "chunked_snapshot", "client_owned_sessions",
+              "event_sequence", "slim_attach",
+            ],
+            // Prime's daemon resume cursor is scoped by active session.  The
+            // Asterion cursor deliberately carries only generation/sequence,
+            // so bind it to this exact root at the native adapter boundary.
+            resumeCursor: {
+              activeSessionId: this.options.activeSessionId,
+              ...cursor,
+            },
+            telemetryDisabled: true,
+          },
+          `${this.options.sessionId}-${purpose}-attach`,
+          remainingMs,
+        );
+        return recoveryFromAttach(response, this.options.activeSessionId, this.requireTranscriptSessionId(), cursor);
+      } catch (error) {
+        if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+          const category = error instanceof PrimeCheckpointError
+            ? "validation"
+            : error instanceof Error && error.name === "PrimeDaemonConnectionError"
+              ? "connection"
+              : error instanceof Error && error.name === "PrimeDaemonTimeoutError"
+                ? "timeout"
+                : "response";
+          process.stderr.write(`asterion-prime-checkpoint-attach-failed:${category}\n`);
+        }
+        // Prime restarts resident workers asynchronously after update commit.
+      }
+    }
+    throw new PrimeCheckpointError();
   }
 
   private created(

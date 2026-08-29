@@ -925,6 +925,27 @@ export class PrivateValueStore {
     return this.projectContinuationLocator(stored, sessionPath);
   }
 
+  /**
+   * Re-pin a transcript only after a caller has independently authenticated a
+   * Prime recovery. This is deliberately separate from ordinary reads: it
+   * accepts a replaced inode, but never a different bound continuation.
+   */
+  async rebindRecoveredContinuationLocator(
+    bindingValue: PrivateContinuationBinding,
+    expected: Omit<PrivateContinuationLocator, "sessionPath">,
+  ): Promise<PrivateContinuationBinding> {
+    const { stored, sessionPath } = await this.readStoredContinuation(bindingValue);
+    const pinned = this.projectContinuationLocator(stored, sessionPath);
+    if (
+      pinned.continuationId !== expected.continuationId ||
+      pinned.activeSessionId !== expected.activeSessionId ||
+      pinned.transcriptSessionId !== expected.transcriptSessionId
+    ) {
+      throw new PrivateValueInvalidError();
+    }
+    return this.putContinuationLocator({ ...expected, sessionPath: pinned.sessionPath });
+  }
+
   private async readStoredContinuation(
     bindingValue: PrivateContinuationBinding,
   ): Promise<Readonly<{

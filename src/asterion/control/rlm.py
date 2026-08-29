@@ -269,7 +269,12 @@ class RlmChildService:
     def public_registry(self) -> tuple[RlmChildStatus, ...]:
         return tuple(self._entries[child_id].status for child_id in sorted(self._entries))
 
-    def admit_message(self, binding: RlmMessageBinding) -> RlmMessageStatus:
+    def admit_message(
+        self,
+        binding: RlmMessageBinding,
+        *,
+        allow_terminal_sender_to_parent: bool = False,
+    ) -> RlmMessageStatus:
         if not isinstance(binding, RlmMessageBinding):
             raise RlmError("RLM message binding is invalid")
         if (
@@ -284,7 +289,11 @@ class RlmChildService:
             if current.binding != binding:
                 raise RlmError("RLM message identity conflicts")
             return current.status
-        self._require_message_edge(binding.sender_id, binding.recipient_id)
+        self._require_message_edge(
+            binding.sender_id,
+            binding.recipient_id,
+            allow_terminal_sender_to_parent=allow_terminal_sender_to_parent,
+        )
         status = self._message_status(binding, "admitted")
         self._messages[binding.message_id] = _MessageEntry(binding, status)
         self._persist()
@@ -310,15 +319,34 @@ class RlmChildService:
     def public_messages(self) -> tuple[RlmMessageStatus, ...]:
         return tuple(self._messages[message_id].status for message_id in sorted(self._messages))
 
-    def _require_message_edge(self, sender_id: str, recipient_id: str) -> None:
+    def _require_message_edge(
+        self,
+        sender_id: str,
+        recipient_id: str,
+        *,
+        allow_terminal_sender_to_parent: bool = False,
+    ) -> None:
         """Admit only Prime's direct parent, child, or sibling roster edges."""
 
-        sender = self._message_party(sender_id)
+        sender = self._message_party(
+            sender_id, allow_terminal_sender=allow_terminal_sender_to_parent
+        )
         recipient = self._message_party(recipient_id)
         if sender is None or recipient is None:
             raise RlmError("RLM message target is unavailable")
         sender_parent, sender_child = sender
         recipient_parent, recipient_child = recipient
+        if (
+            sender_child is not None
+            and self._entries[sender_child].status.status in _TERMINAL
+        ):
+            if (
+                allow_terminal_sender_to_parent
+                and recipient_child is None
+                and recipient_parent == sender_parent
+            ):
+                return
+            raise RlmError("RLM message target is unavailable")
         if (
             (sender_child is None and recipient_child is not None and recipient_parent == sender_id)
             or (recipient_child is None and sender_child is not None and sender_parent == recipient_id)
@@ -331,7 +359,9 @@ class RlmChildService:
             return
         raise RlmError("RLM message target is unavailable")
 
-    def _message_party(self, identity: str) -> tuple[str, str | None] | None:
+    def _message_party(
+        self, identity: str, *, allow_terminal_sender: bool = False
+    ) -> tuple[str, str | None] | None:
         """Return the parent edge and child identity only for active family members."""
 
         parent_ids = {entry.binding.parent_session_id for entry in self._entries.values()}
@@ -341,7 +371,10 @@ class RlmChildService:
             entry = self._entries[identity]
         except KeyError:
             return None
-        if entry.status.status not in {"admitted", "started"}:
+        if entry.status.status not in {"admitted", "started"} and not (
+            allow_terminal_sender
+            and entry.status.status in _TERMINAL
+        ):
             return None
         return (entry.binding.parent_session_id, entry.binding.child_id)
 

@@ -25,6 +25,7 @@
         "session.attach",
         "session.cancel",
         "session.create",
+        "session.detach",
         "session.pause",
         "session.resume"
       ]
@@ -44,6 +45,12 @@
           "properties": {
             "type": {"const": "session.attach"},
             "payload": {"$ref": "#/$defs/session_attach"}
+          }
+        },
+        {
+          "properties": {
+            "type": {"const": "session.detach"},
+            "payload": {"$ref": "#/$defs/reason"}
           }
         },
         {

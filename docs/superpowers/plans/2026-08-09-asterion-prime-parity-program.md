@@ -91,16 +91,14 @@ Map every required Phase 1 operation to a documented RPC request/event, pin the 
 
 The plan must cover gateway process hygiene, authenticated session-private bridge, action admission, application receipts, RLM children, goal/autonomous continuation, cursor replay/resync, capsule sealing, crash-window reconciliation, cancellation cascade, finite budgets, redaction and Pathlight causality.
 
-- [ ] **Step 3: Implement through the common provider conformance suite**
+- [x] **Step 3: Implement through the common provider conformance suite**
 
 Start with a deterministic fake Prime RPC process, then the pinned local Prime build, then bounded model-backed verification. Every external-effect crash point must result in a proven receipt or `uncertain`.
 
-Provider-free implementation and real-process fault coverage are complete. The
-pinned local Prime preflight is currently `External-limited` on Node 23.11.0;
-the approved compatibility boundary is Node 22.8.0 through 22.x. Bounded
-model-backed verification remains unrun and this step therefore remains open.
+Provider-free implementation, real-process fault coverage, and the finite
+model-backed bounded receipt are complete against the pinned source boundary.
 
-- [ ] **Step 4: Run and publish the Verified-loop gate**
+- [x] **Step 4: Run and publish the Verified-loop gate**
 
 The named gate must prove goal continuation, an admitted portfolio invocation, recursive child work, detach/attach, checkpoint, host/gateway/worker crash recovery, root cancellation, budget exhaustion, public sentinel redaction and complete causal evidence. External-limited or not-rerun results remain non-PASS.
 

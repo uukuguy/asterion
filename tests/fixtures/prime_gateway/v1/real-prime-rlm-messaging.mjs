@@ -37,7 +37,7 @@ try {
   const spawn = await rlm.proposeSpawn({
     child_id: "rlm-child-1",
     goal_text: "PRIVATE_RLM_CHILD_GOAL",
-    rlm_depth: 1,
+    rlm_depth: 0,
     model_selector_digest: createHash("sha256").update("provider-free\0provider-free-model").digest("hex"),
     idempotency_key: "rlm-harness-spawn-1",
     budget: rlm.hostContext.budget,
@@ -50,6 +50,17 @@ try {
     child_id: "rlm-child-1",
     native_identity_digest: createHash("sha256").update("provider-free-child").digest("hex"),
   });
+  const message = await rlm.proposeMessage({
+    request_id: "rlm-harness-message-1",
+    message_id: "rlm-harness-message-1",
+    sender_id: "rlm-child-1",
+    recipient_id: rlm.parentSessionId,
+    body_text: "PRIVATE_RLM_FAMILY_MESSAGE",
+  });
+  if (message.resolution !== "admitted" || message.message_id !== "rlm-harness-message-1") {
+    throw new Error("real Prime RLM message admission failed");
+  }
+  await rlm.recordMessageDelivered({ message_id: "rlm-harness-message-1" });
   await rlm.recordLifecycle({
     type: "rlm.child.terminal",
     child_id: "rlm-child-1",
@@ -63,7 +74,7 @@ try {
     provider_operations: 0,
     spawn_admitted: true,
     lifecycle_recorded: true,
-    message_delivered: false,
+    message_delivered: true,
     teardown_recorded: true,
   }) + "\n");
 } finally {

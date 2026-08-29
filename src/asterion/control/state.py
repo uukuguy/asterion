@@ -38,9 +38,18 @@ SESSION_TRANSITIONS = {
         }
     ),
     "paused": frozenset(
-        {"running", "completed", "failed", "cancelled", "budget_limited"}
+        {
+            "running",
+            "recovery_required",
+            "completed",
+            "failed",
+            "cancelled",
+            "budget_limited",
+        }
     ),
-    "recovery_required": frozenset({"running", "failed", "cancelled"}),
+    "recovery_required": frozenset(
+        {"running", "paused", "completed", "failed", "cancelled", "budget_limited"}
+    ),
     "budget_limited": frozenset(),
 }
 GOAL_TRANSITIONS = {
@@ -152,6 +161,17 @@ def reduce_control_event(state: ControlState, event: ControlEvent) -> ControlSta
         result = _transition_goal(state, event)
     elif event.type == "action.proposed":
         result = _propose_action(state, event)
+    elif event.type == "fault.raised":
+        if state.session_status not in {"running", "paused", "recovery_required"}:
+            raise ControlStateError("fault.raised requires an active session")
+        result = state
+    elif event.type == "checkpoint.created":
+        # A checkpoint is allowed to preserve an explicit operator pause.  Its
+        # preceding checkpoint action is already restricted to that same
+        # paused-only exception in ``_propose_action``.
+        if state.session_status not in {"running", "paused"}:
+            raise ControlStateError("checkpoint.created requires an active session")
+        result = state
     else:
         _require_running_session(state, event.type)
         result = state
@@ -184,7 +204,16 @@ def apply_action_admission(
 
 def mark_action_running(state: ControlState, action_id: str) -> ControlState:
     action = _action(state, action_id)
-    if action.status != "admitted" or state.session_status != "running":
+    if (
+        action.status != "admitted"
+        or (
+            state.session_status != "running"
+            and not (
+                state.session_status == "paused"
+                and action.kind == "checkpoint.create"
+            )
+        )
+    ):
         raise ControlStateError("action cannot enter running state")
     return _replace_action(state, replace(action, status="running"))
 
@@ -310,11 +339,15 @@ def _transition_session(
 
 
 def _transition_goal(state: ControlState, event: ControlEvent) -> ControlState:
-    _require_running_session(state, event.type)
     payload = event.payload
     if payload["goal_id"] != state.goal_id or state.goal_status is None:
         raise ControlStateError("control goal identity is invalid")
     target = str(payload["status"])
+    if state.session_status not in {"running", "paused"} and not (
+        state.session_status == "recovery_required"
+        and target in {"completed", "failed", "cancelled", "budget_limited"}
+    ):
+        raise ControlStateError(f"{event.type} requires a running session")
     if target == state.goal_status:
         raise ControlStateError("control goal transition is duplicated")
     if target not in GOAL_TRANSITIONS.get(state.goal_status, frozenset()):
@@ -323,8 +356,15 @@ def _transition_goal(state: ControlState, event: ControlEvent) -> ControlState:
 
 
 def _propose_action(state: ControlState, event: ControlEvent) -> ControlState:
-    _require_running_session(state, event.type)
     payload = event.payload
+    if not (
+        state.session_status == "running"
+        or (
+            state.session_status == "paused"
+            and payload.get("kind") == "checkpoint.create"
+        )
+    ):
+        raise ControlStateError(f"{event.type} requires a running session")
     action_id = str(payload["action_id"])
     idempotency_key = str(payload["idempotency_key"])
     if (

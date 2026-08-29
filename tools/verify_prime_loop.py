@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
@@ -61,6 +62,7 @@ REQUIRED_BOUNDED_OPERATIONS = frozenset(
 REQUIRED_BOUNDED_RLM_OPERATIONS = frozenset(
     {"rlm.child.delete", "rlm.child.message", "rlm.child.spawn"}
 )
+_DEFAULT_BOUNDED_MAX_COST_MICROS = 500_000
 
 
 class PrimeVerificationError(RuntimeError):
@@ -495,17 +497,84 @@ def _command(
 
 def _bounded_external_limit(
     source_root: Path,
-    authority_path: Path,
-    max_cost_micros: int,
+    authority_path: Path | None,
+    max_cost_micros: int | None,
 ) -> Mapping[str, object]:
-    load_bounded_authority(
+    if authority_path is not None:
+        load_bounded_rlm_authority(
+            authority_path,
+            max_cost_micros=(
+                _DEFAULT_BOUNDED_MAX_COST_MICROS
+                if max_cost_micros is None
+                else max_cost_micros
+            ),
+        )
+    report = _native_rlm_bounded_external_limit(
+        source_root,
         authority_path,
-        max_cost_micros=max_cost_micros,
+        max_cost_micros,
+        _default_native_rlm_evidence_root(),
     )
-    verify_preflight(source_root)
-    raise PrimeExternalLimit(
-        "Prime bounded execution requires separately injected run configuration"
-    )
+    if report.get("status") != "PASS":
+        raise PrimeExternalLimit("Prime bounded execution did not complete")
+    return {
+        "status": "PASS",
+        "level": "bounded",
+        "terminal": "completed",
+        "provider_operations": 1,
+        "application_operations": 1,
+        "full_dataset_ran": False,
+    }
+
+
+def _native_rlm_public_usage(value: object) -> dict[str, int]:
+    """Project only finite, body-free counters from a native probe receipt."""
+
+    try:
+        if not isinstance(value, Mapping) or frozenset(value) not in {
+            frozenset(("aggregate_tokens", "cost_micros")),
+            frozenset((
+                "controller_tokens",
+                "application_tokens",
+                "child_tokens",
+                "aggregate_tokens",
+                "cost_micros",
+            )),
+        }:
+            raise ValueError
+        aggregate_tokens = value["aggregate_tokens"]
+        cost_micros = value["cost_micros"]
+        if (
+            isinstance(aggregate_tokens, bool)
+            or not isinstance(aggregate_tokens, int)
+            or aggregate_tokens < 1
+            or isinstance(cost_micros, bool)
+            or not isinstance(cost_micros, int)
+            or cost_micros < 0
+        ):
+            raise ValueError
+        if "controller_tokens" in value:
+            components = (
+                value["controller_tokens"],
+                value["application_tokens"],
+                value["child_tokens"],
+            )
+            if (
+                any(
+                    isinstance(component, bool)
+                    or not isinstance(component, int)
+                    or component < 0
+                    for component in components
+                )
+                or sum(components) != aggregate_tokens
+            ):
+                raise ValueError
+        return {
+            "aggregate_tokens": aggregate_tokens,
+            "cost_micros": cost_micros,
+        }
+    except (KeyError, TypeError, ValueError):
+        raise PrimeVerificationError("Prime native RLM usage is invalid") from None
 
 
 def _native_rlm_bounded_external_limit(
@@ -520,26 +589,52 @@ def _native_rlm_bounded_external_limit(
     try:
         from tools.prime_native_rlm_experiment import (
             PrimeRlmExperimentError,
+            native_rlm_model_selector_digest,
             prepare_native_rlm_experiment,
             resolve_native_rlm_model,
             run_native_rlm_controlled_probe,
+            run_native_rlm_maintenance_probe,
             run_native_rlm_experiment,
             run_owned_native_rlm_sidecar_probe,
             write_native_rlm_experiment_receipt,
+            write_native_rlm_model_evidence_receipt,
+        )
+        from tools.prime_bounded_loop_experiment import (
+            assertions_from_native_probe_observation,
+            reduce_native_probe_observation,
+            write_bounded_loop_receipt,
         )
     except ModuleNotFoundError:
         from prime_native_rlm_experiment import (
             PrimeRlmExperimentError,
+            native_rlm_model_selector_digest,
             prepare_native_rlm_experiment,
             resolve_native_rlm_model,
             run_native_rlm_controlled_probe,
+            run_native_rlm_maintenance_probe,
             run_native_rlm_experiment,
             run_owned_native_rlm_sidecar_probe,
             write_native_rlm_experiment_receipt,
+            write_native_rlm_model_evidence_receipt,
+        )
+        from prime_bounded_loop_experiment import (
+            assertions_from_native_probe_observation,
+            reduce_native_probe_observation,
+            write_bounded_loop_receipt,
         )
 
-    if not private_evidence_root.is_dir():
+    if (
+        not private_evidence_root.is_dir()
+        or private_evidence_root.is_symlink()
+    ):
         raise PrimeVerificationError("Prime native RLM evidence root is invalid")
+    try:
+        evidence_run_root = Path(
+            tempfile.mkdtemp(prefix="run-", dir=private_evidence_root)
+        )
+        evidence_run_root.chmod(0o700)
+    except OSError:
+        raise PrimeVerificationError("Prime native RLM evidence root is invalid") from None
     stage = "preflight"
     stderr_path: Path | None = None
     preflight = verify_preflight(source_root)
@@ -570,19 +665,70 @@ def _native_rlm_bounded_external_limit(
             async def runner(active: object) -> object:
                 nonlocal consumed, observation
                 consumed = active
+                maintenance_root = run_root / "maintenance"
+                maintenance_root.mkdir(mode=0o700)
+                maintenance = await run_owned_native_rlm_sidecar_probe(
+                    active,  # type: ignore[arg-type]
+                    selection,
+                    maintenance_root,
+                    resources,
+                    environ=environment,
+                    session_id="native-rlm-maintenance",
+                    probe=lambda sidecar: run_native_rlm_maintenance_probe(
+                        sidecar,
+                        active,  # type: ignore[arg-type]
+                        maintenance_root,
+                    ),
+                    private_stderr_sink=stderr_sink,
+                )
+                (evidence_run_root / "native-rlm-runner-stage").write_text(
+                    "maintenance-return\n", encoding="ascii"
+                )
+                rlm_root = run_root / "rlm"
+                rlm_root.mkdir(mode=0o700)
+                (evidence_run_root / "native-rlm-runner-stage").write_text(
+                    "observation-root\n", encoding="ascii"
+                )
+                (evidence_run_root / "native-rlm-progress.json").write_text(
+                    '{"format":"asterion.prime-native-rlm-progress/v1","stage":"observation-starting"}\n',
+                    encoding="ascii",
+                )
+                (evidence_run_root / "native-rlm-runner-stage").write_text(
+                    "observation-call\n", encoding="ascii"
+                )
                 observation = await run_owned_native_rlm_sidecar_probe(
                     active,  # type: ignore[arg-type]
                     selection,
-                    run_root,
+                    rlm_root,
                     resources,
                     environ=environment,
                     probe=lambda sidecar: run_native_rlm_controlled_probe(
                         sidecar,
                         active,
-                        run_root,
-                        progress_root=private_evidence_root,  # type: ignore[arg-type]
+                        rlm_root,
+                        progress_root=evidence_run_root,  # type: ignore[arg-type]
+                        exercise_application=True,
+                        exercise_checkpoint=False,
+                        exercise_cancellation=False,
+                        exercise_budget_probe=True,
+                        expected_model_selector_digest=native_rlm_model_selector_digest(
+                            selection
+                        ),
                     ),
                     private_stderr_sink=stderr_sink,
+                )
+                observation = replace(
+                    observation,
+                    checkpoint_recovered=maintenance.checkpoint_recovered,
+                    cancelled=maintenance.cancelled,
+                    observed_event_types=(
+                        *maintenance.observed_event_types,
+                        *observation.observed_event_types,
+                    ),
+                    causal_identities={
+                        **maintenance.causal_identities,
+                        **observation.causal_identities,
+                    },
                 )
                 return observation
 
@@ -592,13 +738,55 @@ def _native_rlm_bounded_external_limit(
             raise ValueError
         stage = "receipt"
         receipt = write_native_rlm_experiment_receipt(
-            private_evidence_root,
+            evidence_run_root,
             consumed,  # type: ignore[arg-type]
             terminal=observation.terminal,
             child_started=observation.child_started,
             message_delivered=observation.message_delivered,
             child_deleted=observation.child_deleted,
             usage=observation.usage,
+            checkpoint_recovered=observation.checkpoint_recovered,
+            detach_attached=observation.detach_attached,
+            cancelled=observation.cancelled,
+            budget_limited=observation.budget_limited,
+        )
+        bounded_receipt = reduce_native_probe_observation(
+            session_events=observation.observed_event_types,
+            application_receipted=observation.application_receipted,
+            child_completed=(
+                observation.terminal == "completed"
+                and observation.child_started
+                and observation.child_deleted
+            ),
+            detached_attached=observation.detach_attached,
+            checkpoint_recovered=observation.checkpoint_recovered,
+            cancelled=observation.cancelled,
+            budget_limited=observation.budget_limited,
+            usage={"aggregate_tokens": observation.usage.aggregate_tokens},
+            causal_identities=observation.causal_identities,
+        )
+        write_bounded_loop_receipt(
+            evidence_run_root,
+            assertions_from_native_probe_observation(
+                session_events=observation.observed_event_types,
+                application_receipted=observation.application_receipted,
+                child_completed=(observation.terminal == "completed" and observation.child_started and observation.child_deleted),
+                detached_attached=observation.detach_attached,
+                checkpoint_recovered=observation.checkpoint_recovered,
+                cancelled=observation.cancelled,
+                budget_limited=observation.budget_limited,
+            ),
+            usage=bounded_receipt["usage"],
+            causal_digests=bounded_receipt["causal_digests"],
+        )
+        model_receipt = write_native_rlm_model_evidence_receipt(
+            evidence_run_root,
+            consumed,  # type: ignore[arg-type]
+            {
+                "child_model_selected": observation.child_model_selected,
+                "generated_program_admitted": observation.generated_program_admitted,
+                "recursion_depth_limited": observation.recursion_depth_limited,
+            },
         )
         return {
             "status": report["status"],
@@ -607,13 +795,23 @@ def _native_rlm_bounded_external_limit(
             "child_started": receipt["child_started"],
             "message_delivered": receipt["message_delivered"],
             "child_deleted": receipt["child_deleted"],
+            "checkpoint_recovered": receipt["checkpoint_recovered"],
+            "detach_attached": receipt["detach_attached"],
+            "cancelled": receipt["cancelled"],
+            "budget_limited": receipt["budget_limited"],
+            "child_model_selected": model_receipt["child_model_selected"],
+            "generated_program_admitted": model_receipt[
+                "generated_program_admitted"
+            ],
+            "recursion_depth_limited": model_receipt["recursion_depth_limited"],
             "provider_operations": 1,
-            "application_operations": 0,
+            "application_operations": 1,
+            "usage": _native_rlm_public_usage(receipt["usage"]),
             "full_dataset_ran": False,
         }
     except PrimeRlmExperimentError as error:
         _write_native_rlm_external_limit_evidence(
-            private_evidence_root,
+            evidence_run_root,
             stage,
             stderr_path=stderr_path,
             safe_error=str(error),
@@ -621,7 +819,7 @@ def _native_rlm_bounded_external_limit(
         raise PrimeExternalLimit(str(error)) from None
     except (OSError, RuntimeError, TypeError, ValueError):
         _write_native_rlm_external_limit_evidence(
-            private_evidence_root, stage, stderr_path=stderr_path
+            evidence_run_root, stage, stderr_path=stderr_path
         )
         raise PrimeExternalLimit(
             f"Prime native RLM probe {stage} did not complete"
@@ -664,8 +862,146 @@ def _native_rlm_failure_class(
     stderr_path: Path | None, *, safe_error: str | None = None
 ) -> str:
     """Classify private sidecar diagnostics without retaining their content."""
+    private_category: str | None = None
+    if isinstance(stderr_path, Path):
+        try:
+            content = stderr_path.read_bytes()[-65_536:].lower()
+        except OSError:
+            content = b""
+        checkpoint_stages = (
+            "idle",
+            "prepare",
+            "stop",
+            "relaunch",
+            "attach",
+            "recover",
+            "capsule",
+            "manager-open",
+            "manager-create",
+        )
+        attach_failure = next(
+            (
+                category
+                for category in ("validation", "connection", "timeout", "response")
+                if f"asterion-prime-checkpoint-attach-failed:{category}".encode() in content
+            ),
+            None,
+        )
+        recovery_failure = next(
+            (
+                category
+                for category in (
+                    "identity", "protocol", "replay", "snapshot", "sequence",
+                    "summary", "goal", "cursor", "response",
+                )
+                if f"asterion-prime-checkpoint-recovery-invalid:{category}".encode()
+                in content
+            ),
+            None,
+        )
+        shutdown_failure = next(
+            (
+                category
+                for category in ("connection", "response")
+                if f"asterion-prime-checkpoint-shutdown-failed:{category}".encode()
+                in content
+            ),
+            None,
+        )
+        checkpoint_stage = max(
+            (
+                (content.rfind(f"asterion-prime-checkpoint-stage:{stage}".encode()), stage)
+                for stage in checkpoint_stages
+                if f"asterion-prime-checkpoint-stage:{stage}".encode() in content
+            ),
+            default=(-1, None),
+        )[1]
+        lifecycle_stage = max(
+            (
+                (content.rfind(f"asterion-prime-checkpoint-lifecycle:{stage}".encode()), stage)
+                for stage in ("connect", "request", "response", "complete", "unavailable", "refused", "denied", "failed")
+                if f"asterion-prime-checkpoint-lifecycle:{stage}".encode() in content
+            ),
+            default=(-1, None),
+        )[1]
+        maintenance_completed = (
+            b"asterion-prime-checkpoint-stage:capsule" in content
+            and b"asterion-prime-gateway-cancel-stage:terminal-appended" in content
+        )
+        if maintenance_completed and (
+            recovery_failure is None
+            and attach_failure is None
+            and shutdown_failure is None
+            and b"asterion-prime-gateway-checkpoint-stage:failed" not in content
+        ):
+            private_category = "observation_unclassified"
+        elif recovery_failure is not None:
+            private_category = "checkpoint_recovery_" + recovery_failure
+        elif attach_failure is not None:
+            private_category = "checkpoint_attach_" + attach_failure
+        elif shutdown_failure is not None:
+            private_category = "checkpoint_shutdown_" + shutdown_failure
+        elif b"asterion-prime-checkpoint-coordinator-failed:" in content:
+            coordinator_phase = next(
+                (phase for phase in ("manifest", "prepare", "shutdown", "fence", "start", "restore", "coordinator")
+                 if f"asterion-prime-checkpoint-coordinator-failed:{phase}".encode() in content),
+                "coordinator",
+            )
+            private_category = "checkpoint_coordinator_" + coordinator_phase
+        elif b"asterion-prime-checkpoint-lifecycle-failed" in content:
+            private_category = "checkpoint_lifecycle"
+        elif b"asterion-prime-checkpoint-runtime-stop-failed" in content:
+            private_category = "checkpoint_runtime_stop"
+        elif lifecycle_stage is not None:
+            private_category = "checkpoint_lifecycle_" + lifecycle_stage
+        elif checkpoint_stage is not None:
+            private_category = "checkpoint_" + checkpoint_stage
+        elif b"asterion-prime-gateway-checkpoint-stage:failed" in content:
+            private_category = "gateway_checkpoint_failed"
+        elif b"asterion-prime-gateway-checkpoint-stage:started" in content:
+            private_category = "gateway_checkpoint_started"
+        elif b"asterion-prime-gateway-checkpoint-stage:scheduled" in content:
+            private_category = "gateway_checkpoint_scheduled"
+        elif b"asterion-prime-gateway-cancel-stage:terminal-appended" in content:
+            private_category = "gateway_cancel_terminal_appended"
+        elif b"asterion-prime-gateway-cancel-stage:goal-updated" in content:
+            private_category = "gateway_cancel_goal_updated"
+        elif b"asterion-prime-skill-request:dispatch" in content:
+            private_category = "skill_dispatch"
+        elif b"asterion-prime-cancel-stage:kill-confirmed" in content:
+            private_category = "cancel_kill_confirmed"
+        elif b"asterion-prime-cancel-stage:abort" in content:
+            private_category = "cancel_abort"
+        elif b"asterion-prime-cancel-stage:kill" in content:
+            private_category = "cancel_kill"
+        elif b"asterion-prime-sidecar-failed:checkpoint-request" in content:
+            private_category = "sidecar_checkpoint_request"
+        elif b"asterion-prime-sidecar-failed:private.read" in content:
+            private_category = "sidecar_private_read"
+        elif b"asterion-prime-sidecar-failed:action-resolve" in content:
+            private_category = "sidecar_action_resolve"
+        elif b"asterion-prime-sidecar-failed:session-cancel" in content:
+            private_category = "sidecar_session_cancel"
+        elif b"asterion-prime-sidecar-failed:session-create" in content:
+            private_category = "sidecar_session_create"
+        elif b"asterion-prime-sidecar-failed:input-submit" in content:
+            private_category = "sidecar_input_submit"
+        elif b"asterion-prime-sidecar-failed:events" in content:
+            private_category = "sidecar_events"
+        elif b"asterion-prime-sidecar-failed:authority.update" in content:
+            private_category = "sidecar_authority_update"
+        elif b"asterion-prime-sidecar-failed:command.accept" in content:
+            private_category = "sidecar_command_accept"
+        elif b"asterion-prime-sidecar-stage:" in content:
+            private_category = "sidecar"
+        elif b"asterion-prime-sidecar-failed:" in content:
+            private_category = "sidecar_request"
+        elif b"asterion-prime-rlm-host-frame:" in content:
+            private_category = "rlm_host_frame"
     if safe_error == "Native RLM controlled probe running event-transport did not complete":
-        return "event_transport"
+        return private_category or "event_transport"
+    if private_category is not None:
+        return private_category
     control_categories = {
         "Native RLM controlled probe running control did not complete": "control",
         "Native RLM controlled probe running event-transition did not complete": "event_transition",
@@ -677,6 +1013,18 @@ def _native_rlm_failure_class(
     }
     if safe_error in control_categories:
         return control_categories[safe_error]
+    if (
+        isinstance(safe_error, str)
+        and safe_error.startswith(
+            "Native RLM controlled probe running action-admission-"
+        )
+        and safe_error.endswith(" did not complete")
+    ):
+        action_kind = safe_error.removeprefix(
+            "Native RLM controlled probe running action-admission-"
+        ).removesuffix(" did not complete")
+        if action_kind in {"child-spawn", "child-message", "child-cancel"}:
+            return "action_admission_" + action_kind.replace("-", "_")
     if (
         isinstance(safe_error, str)
         and safe_error.startswith("Native RLM controlled probe running event-transition-")
@@ -692,10 +1040,6 @@ def _native_rlm_failure_class(
         }:
             return "event_transition_" + event_type.replace("-", "_")
     if not isinstance(stderr_path, Path):
-        return "unavailable"
-    try:
-        content = stderr_path.read_bytes()[-65_536:].lower()
-    except OSError:
         return "unavailable"
     patterns = (
         ("credential", (b"unauthorized", b"forbidden", b"api key", b"authentication")),
@@ -740,6 +1084,46 @@ def _native_rlm_environment() -> dict[str, str]:
         raise PrimeVerificationError("Prime native RLM environment is invalid") from None
 
 
+def resolve_bounded_prime_environment() -> Mapping[str, str]:
+    """Resolve one selected model credential into a minimal private daemon environment."""
+    try:
+        project_root = str(Path(__file__).resolve().parents[1])
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        try:
+            from tools.prime_native_rlm_experiment import (
+                PrimeRlmExperimentError,
+                resolve_native_rlm_model,
+            )
+        except ModuleNotFoundError:
+            from prime_native_rlm_experiment import (
+                PrimeRlmExperimentError,
+                resolve_native_rlm_model,
+            )
+        inherited = _native_rlm_environment()
+        selection = resolve_native_rlm_model(inherited)
+        credential = inherited.get(selection.credential_env)
+        if not isinstance(credential, str) or not credential:
+            raise ValueError
+        environment = {
+            key: inherited[key]
+            for key in (
+                "HOME",
+                "PATH",
+                "ASTERION_PRIME_EXPERIMENT_MODEL",
+                selection.credential_env,
+                "PRIME_AGENT_KERNEL_PYTHON",
+                "PRIME_AGENT_KERNEL_VENV",
+            )
+            if key in inherited
+        }
+        if "HOME" not in environment or "PATH" not in environment:
+            raise ValueError
+        return dict(environment)
+    except (ImportError, OSError, TypeError, ValueError, PrimeRlmExperimentError):
+        raise PrimeExternalLimit("Prime bounded private runtime is unavailable") from None
+
+
 def _native_rlm_runtime_resources(
     source_root: Path, preflight: Mapping[str, object]
 ) -> object:
@@ -766,7 +1150,7 @@ def _native_rlm_runtime_resources(
             ),
             prime_source_root=source_root.resolve(),
             skill_path=(
-                project_root / "src" / "asterion" / "control" / "providers" / "prime" / "resources" / "skills" / "asterion-control"
+                project_root / "src" / "asterion" / "control" / "providers" / "prime" / "resources" / "skills" / "prime-native-rlm"
             ),
             expected_runtime_build_id=runtime_build_id,
         )
@@ -827,11 +1211,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif arguments.level == "bounded":
             if (
                 arguments.source_root is None
-                or arguments.authority is None
-                or arguments.max_cost_micros is None
             ):
                 raise PrimeVerificationError(
-                    "Prime bounded verification requires explicit finite authorization"
+                    "Prime bounded verification requires an explicit source root"
                 )
             report = _bounded_external_limit(
                 arguments.source_root,

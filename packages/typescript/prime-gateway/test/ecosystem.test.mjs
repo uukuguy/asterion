@@ -404,6 +404,7 @@ test("hashes the complete projection manifest in global relative-path order", as
       { relative_path: "a.", sha256: digest("sibling"), size_bytes: 7 },
       { relative_path: "a/x", sha256: digest("nested"), size_bytes: 6 },
     ]);
+
     assert.doesNotThrow(() => validatePrimeEcosystemFrame(state.frame));
   } finally {
     await state.cleanup();
@@ -562,6 +563,7 @@ test("concurrent duplicate activation invokes the module once and fences the dup
     releaseModule();
     const first = await firstPromise;
     const second = await secondPromise;
+
     assert.notEqual(duplicate, "timed-out");
     assert.equal(module.calls, 1);
     assert.equal(first.status, "uncertain");
@@ -623,6 +625,7 @@ test("commit write failure reopens as uncertain without replaying the module", a
       (error) => error.message === "Prime gateway durable write failed",
     );
     assert.equal(module.calls, 1);
+
     const reopened = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
     const replayModule = {
       calls: 0,
@@ -686,6 +689,7 @@ test("replay rejects a terminal result whose expected count drifts from its bind
     const { digest: _digest, ...body } = record;
     record.digest = sha256Canonical(body);
     await writeFile(recordPath, `${canonical(record)}\n`, { mode: 0o600 });
+
     await assert.rejects(
       GatewayDurableStore.open(state.gatewayRoot, "session-1"),
       (error) => error.message === "Prime gateway durable store is corrupt",

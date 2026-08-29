@@ -23,7 +23,11 @@ import type {
   SessionContextReceipt,
 } from "@dci/agent-runtime";
 
-import type { PrimeDaemonCursor } from "./daemon-wire.js";
+import { validatePrimeHeartbeatCommand } from "./daemon-wire.js";
+import type {
+  PrimeDaemonCursor,
+  PrimeHeartbeatCommand,
+} from "./daemon-wire.js";
 import { harnessEffectBinding } from "./continual-harness.js";
 import type {
   GatewayHarnessEffectBinding,
@@ -73,6 +77,8 @@ const RECORD_KINDS = new Set([
   "rlm.lifecycle",
   "rlm.message.binding",
   "rlm.message.delivered",
+  "long-running.command.bound",
+  "long-running.result.committed",
   "harness.effect.bound",
   "harness.effect.committed",
 ]);
@@ -92,6 +98,18 @@ export interface GatewayRlmMessageBinding {
   readonly recipient_id: string;
   readonly authority_revision: number;
   readonly body_digest: string;
+}
+
+export interface GatewayLongRunningCommandBinding {
+  readonly commandId: string;
+  readonly commandDigest: string;
+  readonly command: PrimeHeartbeatCommand;
+}
+
+export interface GatewayLongRunningResult {
+  readonly commandId: string;
+  readonly commandDigest: string;
+  readonly status: "succeeded" | "failed" | "uncertain";
 }
 
 export type GatewayRlmLifecycleObservation =
@@ -320,6 +338,55 @@ export function canonicalJsonBytes(value: unknown): Buffer {
 
 export function sha256Hex(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function validateLongRunningCommandBinding(
+  value: unknown,
+): GatewayLongRunningCommandBinding {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["command", "commandDigest", "commandId"]) ||
+    !nonEmptyIdentifier(value.commandId) ||
+    typeof value.commandDigest !== "string" ||
+    !DIGEST_PATTERN.test(value.commandDigest)
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  let command: PrimeHeartbeatCommand;
+  try {
+    command = validatePrimeHeartbeatCommand(value.command);
+  } catch {
+    throw new GatewayStoreConflictError();
+  }
+  const commandDigest = sha256Hex(canonicalJsonBytes(command));
+  if (commandDigest !== value.commandDigest) {
+    throw new GatewayStoreConflictError();
+  }
+  return deepFreeze({
+    commandId: value.commandId,
+    commandDigest,
+    command,
+  });
+}
+
+function validateLongRunningResult(value: unknown): GatewayLongRunningResult {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["commandDigest", "commandId", "status"]) ||
+    !nonEmptyIdentifier(value.commandId) ||
+    typeof value.commandDigest !== "string" ||
+    !DIGEST_PATTERN.test(value.commandDigest) ||
+    (value.status !== "succeeded" &&
+      value.status !== "failed" &&
+      value.status !== "uncertain")
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({
+    commandId: value.commandId,
+    commandDigest: value.commandDigest,
+    status: value.status,
+  });
 }
 
 function validateHarnessBinding(value: unknown): GatewayHarnessEffectBinding {
@@ -1150,6 +1217,14 @@ export class GatewayDurableStore {
   private readonly deliveredRlmMessageIds = new Set<string>();
   private readonly activeRlmChildIds = new Set<string>();
   private readonly closedRlmChildIds = new Set<string>();
+  private readonly longRunningBindings = new Map<
+    string,
+    GatewayLongRunningCommandBinding
+  >();
+  private readonly longRunningResults = new Map<
+    string,
+    GatewayLongRunningResult
+  >();
   private readonly harnessBindings = new Map<string, GatewayHarnessEffectBinding>();
   private readonly harnessResults = new Map<string, GatewayHarnessEffectResult>();
   private readonly ecosystemBindings = new Map<
@@ -1682,6 +1757,77 @@ export class GatewayDurableStore {
       `rlm-lifecycle:${this.rlmLifecycleValues.length}:${validated.child_id}:${validated.type}`,
       validated as unknown as Record<string, unknown>,
     );
+  }
+
+  async bindLongRunningCommand(
+    commandId: string,
+    command: unknown,
+  ): Promise<GatewayLongRunningCommandBinding> {
+    let validatedCommand: PrimeHeartbeatCommand;
+    try {
+      if (!nonEmptyIdentifier(commandId)) {
+        throw new GatewayStoreConflictError();
+      }
+      validatedCommand = validatePrimeHeartbeatCommand(command);
+    } catch {
+      throw new GatewayStoreConflictError();
+    }
+    const binding = validateLongRunningCommandBinding({
+      commandId,
+      commandDigest: sha256Hex(canonicalJsonBytes(validatedCommand)),
+      command: validatedCommand,
+    });
+    await this.appendRecord(
+      "long-running.command.bound",
+      `long-running-command:${commandId}`,
+      binding as unknown as Record<string, unknown>,
+    );
+    const stored = this.longRunningBindings.get(commandId);
+    if (stored === undefined) {
+      throw new GatewayStoreConflictError();
+    }
+    return stored;
+  }
+
+  async commitLongRunningResult(
+    commandId: string,
+    status: GatewayLongRunningResult["status"],
+  ): Promise<GatewayLongRunningResult> {
+    const binding = this.longRunningBindings.get(commandId);
+    if (binding === undefined) {
+      throw new GatewayStoreConflictError();
+    }
+    const result = validateLongRunningResult({
+      commandId,
+      commandDigest: binding.commandDigest,
+      status,
+    });
+    await this.appendRecord(
+      "long-running.result.committed",
+      `long-running-result:${commandId}`,
+      result as unknown as Record<string, unknown>,
+    );
+    const stored = this.longRunningResults.get(commandId);
+    if (stored === undefined) {
+      throw new GatewayStoreConflictError();
+    }
+    return stored;
+  }
+
+  longRunningBinding(
+    commandId: string,
+  ): GatewayLongRunningCommandBinding | undefined {
+    if (!nonEmptyIdentifier(commandId)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.longRunningBindings.get(commandId);
+  }
+
+  longRunningResult(commandId: string): GatewayLongRunningResult | undefined {
+    if (!nonEmptyIdentifier(commandId)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.longRunningResults.get(commandId);
   }
 
   async bindHarnessEffect(effect: unknown): Promise<GatewayHarnessEffectBinding> {
@@ -2309,6 +2455,25 @@ export class GatewayDurableStore {
         }
         return observation as unknown as Record<string, unknown>;
       }
+      if (kind === "long-running.command.bound") {
+        const binding = validateLongRunningCommandBinding(payload);
+        if (recordId !== `long-running-command:${binding.commandId}`) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return binding as unknown as Record<string, unknown>;
+      }
+      if (kind === "long-running.result.committed") {
+        const result = validateLongRunningResult(payload);
+        const binding = this.longRunningBindings.get(result.commandId);
+        if (
+          recordId !== `long-running-result:${result.commandId}` ||
+          binding === undefined ||
+          binding.commandDigest !== result.commandDigest
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return result as unknown as Record<string, unknown>;
+      }
       if (kind === "harness.effect.bound") {
         const binding = validateHarnessBinding(payload);
         if (recordId !== `harness-effect:${binding.effectId}`) throw new GatewayStoreCorruptionError();
@@ -2547,6 +2712,24 @@ export class GatewayDurableStore {
         throw new GatewayStoreCorruptionError();
       }
       this.primeCursor = cursor;
+    } else if (record.stored.kind === "long-running.command.bound") {
+      const binding = validateLongRunningCommandBinding(record.payload);
+      const existing = this.longRunningBindings.get(binding.commandId);
+      if (existing !== undefined) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.longRunningBindings.set(binding.commandId, binding);
+    } else if (record.stored.kind === "long-running.result.committed") {
+      const result = validateLongRunningResult(record.payload);
+      const binding = this.longRunningBindings.get(result.commandId);
+      if (
+        binding === undefined ||
+        binding.commandDigest !== result.commandDigest ||
+        this.longRunningResults.has(result.commandId)
+      ) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.longRunningResults.set(result.commandId, result);
     } else if (record.stored.kind === "harness.effect.bound") {
       const binding = validateHarnessBinding(record.payload);
       if (this.harnessBindings.has(binding.effectId)) throw new GatewayStoreCorruptionError();

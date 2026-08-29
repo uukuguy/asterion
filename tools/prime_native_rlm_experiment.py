@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from contextlib import suppress
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 import asyncio
 import json
@@ -24,6 +25,7 @@ from asterion.control.authority import (
     PortfolioGrant,
 )
 from asterion.control.execution import ActionExecutionReceipt
+from asterion.control.application_executor import ApplicationActionExecutor
 from asterion.control.factory import ControlPlaneFactoryRegistry
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.journal import FileCanonicalJournal
@@ -32,9 +34,13 @@ from asterion.control.manager import (
     ControlHostError,
     ControlHostTransportError,
 )
-from asterion.control.providers.prime.client import PrimeControlPlaneClient
+from asterion.control.providers.prime.client import (
+    PrimeControlPlaneClient,
+    RlmAdmissionBinding,
+)
 from asterion.control.providers.prime.factory import prime_control_plane_binding
 from asterion.control.providers.prime.rlm import build_prime_rlm_control_host
+from asterion.control.providers.prime.system_actions import PrimeSystemActionService
 from asterion.control.system import AgentSystemPlan, resolve_agent_system
 from asterion.applications.provider import (
     APPLICATION_PROVIDER_PROTOCOL,
@@ -45,6 +51,8 @@ from asterion.applications.provider import (
 from asterion.assembly.protocol import AssemblyPlan
 from asterion.capabilities.composition import CapabilityComposition
 from asterion.immutable import RedactedImmutableMapping
+from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
+from asterion.runtime.host import RuntimeManifest
 try:
     from tools.verify_prime_loop import PrimeVerificationError, load_bounded_rlm_authority
 except ModuleNotFoundError:  # Direct ``python tools/verify_prime_loop.py`` execution.
@@ -55,17 +63,28 @@ _MAX_COST_MICROS = 500_000
 _MAX_DEADLINE_MS = 600_000
 _PUMP_TIMEOUT_SECONDS = 10
 _MODEL_INITIATION_TIMEOUT_SECONDS = 90
+_NATIVE_RLM_SYSTEM_ACTION_DEADLINE_MS = 300_000
 _MODEL_KEY = "ASTERION_PRIME_EXPERIMENT_MODEL"
 _SESSION_ID = "native-rlm-root"
 _GOAL_REFERENCE = "native-rlm-goal"
 _START_REFERENCE = "native-rlm-start-input"
+_APPLICATION_TARGET = {
+    "kind": "application",
+    "provider_id": "asterion.prime-gateway",
+    "application_id": "native-rlm-probe",
+    "version": "0.1.0",
+    "runtime_id": "prime.gateway",
+}
 _PROBE_GOAL = (
-    "Use the IPython kernel immediately; do not answer in prose or inspect anything. "
-    "Execute exactly these native Prime calls in order:\n"
+    "Do not explain, inspect, or retry. Your next action must be one IPython "
+    "code execution containing exactly these two statements:\n"
     "handle = await rlm('Wait for one parent message, reply exactly pong to the parent, "
     "then finish.', name='native-rlm-child')\n"
     "await agent_message.send('ping', receiver_role='child', receiver_name=handle.name)\n"
-    "Do not create another child, send another message, or cancel the child. Then finish."
+    "After that code executes, finish the current turn. When the child reply pong arrives "
+    "as a later prompt, your only action must be this one IPython statement:\n"
+    "await rlm.delete_subagent(handle.rlm_child_id)\n"
+    "Then finish. Do not create another child, send another message, or cancel the child."
 )
 _DEFAULT_OPERATIONS = tuple(
     sorted(
@@ -163,6 +182,62 @@ class NativeRlmProbeResult:
     message_delivered: bool
     child_deleted: bool
     usage: BudgetUsage
+    checkpoint_recovered: bool = False
+    detach_attached: bool = False
+    cancelled: bool = False
+    budget_limited: bool = False
+    application_receipted: bool = False
+    child_model_selected: bool = False
+    generated_program_admitted: bool = False
+    recursion_depth_limited: bool = False
+    observed_event_types: tuple[str, ...] = ()
+    causal_identities: Mapping[str, tuple[str, str]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+
+
+def _require_native_rlm_skill_success(
+    result: object, *, operation: str
+) -> None:
+    """Validate the closed Skill Bridge admission/terminal pair."""
+
+    if not isinstance(result, Mapping) or operation not in {"application", "checkpoint"}:
+        raise PrimeRlmExperimentError("Native RLM controlled probe skill result is invalid")
+    admission = result.get("admission")
+    terminal = result.get("terminal")
+    if not isinstance(admission, Mapping):
+        raise PrimeRlmExperimentError(
+            f"Native RLM controlled probe {operation} admission is invalid"
+        )
+    if admission.get("resolution") != "admitted":
+        raise PrimeRlmExperimentError(
+            f"Native RLM controlled probe {operation} admission was rejected "
+            + _native_rlm_admission_failure_category(admission.get("reason_code"))
+        )
+    if not isinstance(terminal, Mapping):
+        raise PrimeRlmExperimentError(
+            f"Native RLM controlled probe {operation} terminal is invalid"
+        )
+    if terminal.get("resolution") != "succeeded":
+        raise PrimeRlmExperimentError(
+            f"Native RLM controlled probe {operation} terminal did not succeed"
+        )
+
+
+def _require_native_rlm_skill_budget_rejection(result: object) -> None:
+    """Require the host to reject the deliberate over-budget proposal."""
+    if not isinstance(result, Mapping):
+        raise PrimeRlmExperimentError("Native RLM budget probe result is invalid")
+    admission = result.get("admission")
+    if (
+        not isinstance(admission, Mapping)
+        or admission.get("resolution") != "rejected"
+        or admission.get("reason_code") != "budget-exceeded"
+        or "terminal" in result
+    ):
+        raise PrimeRlmExperimentError(
+            "Native RLM budget probe was not rejected"
+        )
 
 
 @dataclass(frozen=True, repr=False)
@@ -193,6 +268,7 @@ SidecarLauncher = Callable[
 SidecarProbe = Callable[[object], Awaitable[NativeRlmProbeResult]]
 OwnedWorkerCleanup = Callable[[], Awaitable[None]]
 OwnedDaemonShutdown = Callable[[NativeRlmDaemonPlan, NativeRlmRuntimeResources], Awaitable[None]]
+LifecyclePreflight = Callable[[Path], Awaitable[None]]
 
 
 async def _send_native_rlm_skill_effect(
@@ -200,7 +276,15 @@ async def _send_native_rlm_skill_effect(
 ) -> Mapping[str, object]:
     """Use the same private skill socket as Prime's kernel, without model mediation."""
 
-    if operation not in {"child.spawn", "child.message"} or not isinstance(root, Path):
+    if operation not in {
+        "application.invoke",
+        "child.spawn",
+        "child.message",
+        "child.cancel",
+        "checkpoint.request",
+        "goal.complete",
+        "goal.fail",
+    } or not isinstance(root, Path):
         raise PrimeRlmExperimentError("Native RLM skill effect is invalid")
     stage = "discovery"
     try:
@@ -250,6 +334,107 @@ async def _send_native_rlm_skill_effect(
         ) from None
 
 
+async def _probe_native_rlm_depth_limit(
+    root: Path,
+    reservation: NativeRlmExperimentReservation,
+    model_selector_digest: str,
+) -> str:
+    """Submit one over-depth private bridge proposal and retain only its resolution."""
+
+    stage = "discovery"
+    try:
+        discovery = json.loads(
+            (root / "agent" / "asterion-rlm-host.json").read_text("utf-8")
+        )
+        if (
+            not isinstance(discovery, Mapping)
+            or set(discovery)
+            != {"protocol", "socket_path", "token", "session_id", "budget"}
+            or discovery.get("protocol") != "asterion.prime-rlm-host-discovery/v1"
+            or not isinstance(discovery.get("socket_path"), str)
+            or not isinstance(discovery.get("token"), str)
+            or not isinstance(discovery.get("session_id"), str)
+            or not isinstance(discovery.get("budget"), Mapping)
+        ):
+            raise ValueError
+        stage = "connect"
+        reader, writer = await asyncio.open_unix_connection(discovery["socket_path"])
+        try:
+            request_id = "rlm-depth-" + secrets.token_hex(16)
+            proposal = {
+                "type": "rlm.spawn.propose",
+                "request_id": request_id,
+                "child_id": "rlm-depth-probe",
+                "idempotency_key": request_id,
+                "goal_text": "",
+                "rlm_depth": reservation.authority.max_recursion_depth + 1,
+                "model_selector_digest": model_selector_digest,
+                "budget": dict(discovery["budget"]),
+            }
+            for frame in (
+                {
+                    "protocol": "asterion.prime-rlm-host/v1",
+                    "type": "authenticate",
+                    "token": discovery["token"],
+                    "session_id": discovery["session_id"],
+                },
+                proposal,
+            ):
+                writer.write(
+                    json.dumps(frame, sort_keys=True, separators=(",", ":")).encode()
+                    + b"\n"
+                )
+            await writer.drain()
+            response = json.loads(await reader.readline())
+        finally:
+            writer.close()
+            await writer.wait_closed()
+        if (
+            not isinstance(response, Mapping)
+            or set(response) != {"resolution", "childId"}
+            or response.get("childId") != "rlm-depth-probe"
+            or response.get("resolution") not in {"admitted", "rejected", "uncertain"}
+        ):
+            raise ValueError
+        return str(response["resolution"])
+    except Exception:
+        raise PrimeRlmExperimentError(
+            f"Native RLM depth probe {stage} did not complete"
+        ) from None
+
+
+def _native_rlm_system_action_deadline(
+    reservation: NativeRlmExperimentReservation,
+) -> int:
+    """Return the bounded default deadline for a gateway-materialized action."""
+
+    if not isinstance(reservation, NativeRlmExperimentReservation):
+        raise PrimeRlmExperimentError("Native RLM action deadline is invalid")
+    return min(
+        _NATIVE_RLM_SYSTEM_ACTION_DEADLINE_MS,
+        reservation.authority.max_action_deadline_ms,
+        reservation.limits.deadline_ms,
+    )
+
+
+def _native_rlm_pump_timeout_seconds(
+    reservation: NativeRlmExperimentReservation, exercise_checkpoint: bool
+) -> int:
+    """Allow the driver to await one authorized gateway checkpoint resolution."""
+
+    if (
+        not isinstance(reservation, NativeRlmExperimentReservation)
+        or not isinstance(exercise_checkpoint, bool)
+    ):
+        raise PrimeRlmExperimentError("Native RLM pump deadline is invalid")
+    if not exercise_checkpoint:
+        return _PUMP_TIMEOUT_SECONDS
+    return max(
+        _PUMP_TIMEOUT_SECONDS,
+        _native_rlm_system_action_deadline(reservation) // 1_000 + 5,
+    )
+
+
 class _NativeRlmActionExecutor:
     """Defensive fence: admitted native RLM work must remain provider-owned."""
 
@@ -258,6 +443,58 @@ class _NativeRlmActionExecutor:
     ) -> ActionExecutionReceipt:
         del proposal, signal
         raise RuntimeError("native RLM action escaped provider ownership")
+
+
+class _BoundedProbeRuntime:
+    """A no-capability runtime for the explicit verification application."""
+
+    manifest = RuntimeManifest(runtime_id="prime.gateway", capabilities=())
+
+    async def run(self, *args: object, **kwargs: object):
+        del args, kwargs
+        if False:
+            yield None
+
+
+def build_native_rlm_application_executor(
+    plan: AgentSystemPlan, client: PrimeControlPlaneClient, root: Path
+) -> ApplicationActionExecutor:
+    """Bind the virtual probe application to the normal host execution path."""
+    if not isinstance(plan, AgentSystemPlan) or not isinstance(root, Path):
+        raise PrimeRlmExperimentError("Native RLM application executor is invalid")
+    try:
+        from tools.prime_bounded_loop_experiment import BoundedLoopPrivateResultStore
+
+        applications = tuple(entry.application for entry in plan.portfolio)
+        provider = InstalledApplicationProvider(
+            protocol=APPLICATION_PROVIDER_PROTOCOL,
+            provider_id="asterion.prime-gateway",
+            resource_root=root,
+            applications=applications,
+        )
+        factories = RuntimeFactoryRegistry(
+            (
+                RuntimeFactoryBinding(
+                    runtime_id="prime.gateway",
+                    capabilities=(),
+                    factory=lambda _context: _BoundedProbeRuntime(),
+                ),
+            )
+        )
+        return ApplicationActionExecutor(
+            plan=plan,
+            providers=(provider,),
+            runtime_factories=factories,
+            runtime_options={identity: {} for identity in plan.portfolio_by_identity},
+            content=client,
+            results=BoundedLoopPrivateResultStore(),
+            host_services={},
+            system_service=PrimeSystemActionService(client),
+        )
+    except (ImportError, TypeError, ValueError):
+        raise PrimeRlmExperimentError(
+            "Native RLM application executor is invalid"
+        ) from None
 
 
 def build_native_rlm_experiment_system(root: Path) -> AgentSystemPlan:
@@ -339,6 +576,7 @@ def build_native_rlm_control_host(
     root: Path,
     *,
     goal: NativeRlmPrivateGoal,
+    session_id: str = _SESSION_ID,
     clock_ms: Callable[[], int] | None = None,
     event_observer: Callable[[ControlEvent], None] | None = None,
 ) -> ControlHost:
@@ -348,6 +586,8 @@ def build_native_rlm_control_host(
         or not isinstance(root, Path)
         or not root.is_dir()
         or not isinstance(goal, NativeRlmPrivateGoal)
+        or not isinstance(session_id, str)
+        or not session_id
         or not callable(getattr(sidecar, "request", None))
         or not callable(getattr(sidecar, "events", None))
         or not callable(getattr(sidecar, "close", None))
@@ -361,14 +601,15 @@ def build_native_rlm_control_host(
             private_attachments=goal,
             event_observer=event_observer,
         )
+        system = build_native_rlm_experiment_system(root)
         return build_prime_rlm_control_host(
-            session_id=_SESSION_ID,
+            session_id=session_id,
             generation=1,
-            plan=build_native_rlm_experiment_system(root),
+            plan=system,
             authority=AuthorityLedger(reservation.authority),
-            journal=FileCanonicalJournal.open(root / "journal", _SESSION_ID),
+            journal=FileCanonicalJournal.open(root / "journal", session_id),
             client=client,
-            action_executor=_NativeRlmActionExecutor(),
+            action_executor=build_native_rlm_application_executor(system, client, root),
             clock_ms=(lambda: int(time.time() * 1000)) if clock_ms is None else clock_ms,
             private_root=root / "rlm-private",
         )
@@ -378,14 +619,16 @@ def build_native_rlm_control_host(
 
 def native_rlm_session_create_command(
     reservation: NativeRlmExperimentReservation,
+    *,
+    session_id: str = _SESSION_ID,
 ) -> ControlCommand:
     """Build the sole root-session command without exposing its private goal."""
-    if not isinstance(reservation, NativeRlmExperimentReservation):
+    if not isinstance(reservation, NativeRlmExperimentReservation) or not isinstance(session_id, str) or not session_id:
         raise PrimeRlmExperimentError("Native RLM session command is invalid")
     try:
         return ControlCommand(
             command_id="native-rlm-create",
-            session_id=_SESSION_ID,
+            session_id=session_id,
             authority_revision=reservation.authority.revision,
             type="session.create",
             payload={
@@ -401,14 +644,16 @@ def native_rlm_session_create_command(
 
 def native_rlm_start_command(
     reservation: NativeRlmExperimentReservation,
+    *,
+    session_id: str = _SESSION_ID,
 ) -> ControlCommand:
     """Submit the one private root instruction after session creation."""
-    if not isinstance(reservation, NativeRlmExperimentReservation):
+    if not isinstance(reservation, NativeRlmExperimentReservation) or not isinstance(session_id, str) or not session_id:
         raise PrimeRlmExperimentError("Native RLM start command is invalid")
     try:
         return ControlCommand(
             command_id="native-rlm-start",
-            session_id=_SESSION_ID,
+            session_id=session_id,
             authority_revision=reservation.authority.revision,
             type="input.submit",
             payload={
@@ -421,16 +666,78 @@ def native_rlm_start_command(
         raise PrimeRlmExperimentError("Native RLM start command is invalid") from None
 
 
+def native_rlm_session_detach_command(
+    reservation: NativeRlmExperimentReservation,
+    *,
+    session_id: str = _SESSION_ID,
+) -> ControlCommand:
+    """Detach the owned Prime root through the public control contract."""
+    if not isinstance(reservation, NativeRlmExperimentReservation) or not isinstance(session_id, str) or not session_id:
+        raise PrimeRlmExperimentError("Native RLM detach command is invalid")
+    try:
+        return ControlCommand(
+            command_id="native-rlm-detach",
+            session_id=session_id,
+            authority_revision=reservation.authority.revision,
+            type="session.detach",
+            payload={"reason_code": "bounded-receipt"},
+        )
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM detach command is invalid") from None
+
+
+def native_rlm_session_pause_command(
+    reservation: NativeRlmExperimentReservation,
+    *,
+    session_id: str = _SESSION_ID,
+) -> ControlCommand:
+    """Pause an owned root before its independent checkpoint boundary."""
+    if not isinstance(reservation, NativeRlmExperimentReservation) or not isinstance(session_id, str) or not session_id:
+        raise PrimeRlmExperimentError("Native RLM pause command is invalid")
+    try:
+        return ControlCommand(
+            command_id="native-rlm-maintenance-pause",
+            session_id=session_id,
+            authority_revision=reservation.authority.revision,
+            type="session.pause",
+            payload={"reason_code": "checkpoint-boundary"},
+        )
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM pause command is invalid") from None
+
+
+def native_rlm_session_attach_command(
+    reservation: NativeRlmExperimentReservation,
+    *,
+    session_id: str = _SESSION_ID,
+) -> ControlCommand:
+    """Reattach the exact owned root without deriving authority from Prime."""
+    if not isinstance(reservation, NativeRlmExperimentReservation) or not isinstance(session_id, str) or not session_id:
+        raise PrimeRlmExperimentError("Native RLM attach command is invalid")
+    try:
+        return ControlCommand(
+            command_id="native-rlm-attach",
+            session_id=session_id,
+            authority_revision=reservation.authority.revision,
+            type="session.attach",
+            payload={"cursor": {"generation": 1, "sequence": 0}},
+        )
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM attach command is invalid") from None
+
+
 def native_rlm_session_cancel_command(
     reservation: NativeRlmExperimentReservation,
+    *,
+    session_id: str = _SESSION_ID,
 ) -> ControlCommand:
     """Stop the owned root session before its daemon is reaped."""
-    if not isinstance(reservation, NativeRlmExperimentReservation):
+    if not isinstance(reservation, NativeRlmExperimentReservation) or not isinstance(session_id, str) or not session_id:
         raise PrimeRlmExperimentError("Native RLM cancellation command is invalid")
     try:
         return ControlCommand(
             command_id="native-rlm-cleanup",
-            session_id=_SESSION_ID,
+            session_id=session_id,
             authority_revision=reservation.authority.revision,
             type="session.cancel",
             payload={"reason_code": "probe-cleanup"},
@@ -441,9 +748,97 @@ def native_rlm_session_cancel_command(
 
 def resolve_native_rlm_model(environ: Mapping[str, str]) -> NativeRlmModelSelection:
     """Resolve the sole model/provider pairing authorized for this first probe."""
-    if not isinstance(environ, Mapping) or environ.get(_MODEL_KEY) != "deepseek-v4-flash":
+    if not isinstance(environ, Mapping):
         raise PrimeRlmExperimentError("Native RLM experiment model is invalid")
-    return NativeRlmModelSelection("deepseek", "deepseek-v4-flash", "DEEPSEEK_API_KEY")
+    model = environ.get(_MODEL_KEY)
+    if model not in {"deepseek-v4-flash", "deepseek-v4-flash-0731"}:
+        raise PrimeRlmExperimentError("Native RLM experiment model is invalid")
+    return NativeRlmModelSelection("deepseek", model, "DEEPSEEK_API_KEY")
+
+
+def native_rlm_model_selector_digest(selection: NativeRlmModelSelection) -> str:
+    """Derive the exact private-shim model selector without exposing its values."""
+
+    if not isinstance(selection, NativeRlmModelSelection):
+        raise PrimeRlmExperimentError("Native RLM model selection is invalid")
+    return sha256((selection.provider + "\0" + selection.model).encode()).hexdigest()
+
+
+def derive_native_rlm_model_assertions(
+    *,
+    binding: RlmAdmissionBinding,
+    expected_model_selector_digest: str,
+    usage: BudgetUsage,
+    depth_probe_resolution: str,
+) -> dict[str, bool]:
+    """Reduce three model-dependent RLM facts from closed bounded observations."""
+
+    if (
+        not isinstance(binding, RlmAdmissionBinding)
+        or not isinstance(expected_model_selector_digest, str)
+        or len(expected_model_selector_digest) != 64
+        or any(character not in "0123456789abcdef" for character in expected_model_selector_digest)
+        or not isinstance(usage, BudgetUsage)
+        or depth_probe_resolution not in {"admitted", "rejected", "uncertain"}
+    ):
+        raise PrimeRlmExperimentError("Native RLM model evidence is invalid")
+    exact_binding = (
+        binding.depth == 1
+        and binding.model_selector_digest == expected_model_selector_digest
+    )
+    return {
+        "child_model_selected": exact_binding,
+        "generated_program_admitted": exact_binding and usage.controller_tokens > 0,
+        "recursion_depth_limited": depth_probe_resolution == "rejected",
+    }
+
+
+def write_native_rlm_model_evidence_receipt(
+    root: Path,
+    reservation: NativeRlmExperimentReservation,
+    assertions: Mapping[str, object],
+) -> dict[str, object]:
+    """Persist one body-free receipt for the three model-dependent RLM facts."""
+
+    required = {
+        "child_model_selected",
+        "generated_program_admitted",
+        "recursion_depth_limited",
+    }
+    if (
+        not isinstance(root, Path)
+        or not root.is_dir()
+        or root.is_symlink()
+        or not isinstance(reservation, NativeRlmExperimentReservation)
+        or not reservation.consumed
+        or not isinstance(assertions, Mapping)
+        or set(assertions) != required
+        or any(assertions[key] is not True for key in required)
+    ):
+        raise PrimeRlmExperimentError("Native RLM model evidence is incomplete")
+    payload: dict[str, object] = {
+        "format": "asterion.prime-native-rlm-model-evidence/v1",
+        "configuration_digest": reservation.configuration_digest,
+        "status": "PASS",
+        **{key: True for key in sorted(required)},
+    }
+    target = root / "native-rlm-model-evidence.json"
+    if target.exists():
+        raise PrimeRlmExperimentError("Native RLM model evidence is unavailable")
+    descriptor, temporary = tempfile.mkstemp(prefix=".native-rlm-model-", dir=root)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    except OSError:
+        raise PrimeRlmExperimentError("Native RLM model evidence is unavailable") from None
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return payload
 
 
 def build_native_rlm_daemon_plan(
@@ -640,6 +1035,9 @@ def build_native_rlm_sidecar_descriptor(
     selection: NativeRlmModelSelection,
     root: Path,
     resources: NativeRlmRuntimeResources,
+    *,
+    session_id: str = _SESSION_ID,
+    daemon_lifecycle: Mapping[str, str] | None = None,
 ) -> Mapping[str, object]:
     """Build the closed private descriptor for the single native probe session."""
     if (
@@ -647,20 +1045,32 @@ def build_native_rlm_sidecar_descriptor(
         or not isinstance(selection, NativeRlmModelSelection)
         or not isinstance(root, Path)
         or not isinstance(resources, NativeRlmRuntimeResources)
+        or not isinstance(session_id, str)
+        or not session_id
+        or daemon_lifecycle is not None
+        and (
+            not isinstance(daemon_lifecycle, Mapping)
+            or set(daemon_lifecycle) != {"socketPath", "token"}
+            or any(not isinstance(value, str) or not value for value in daemon_lifecycle.values())
+        )
     ):
         raise PrimeRlmExperimentError("Native RLM sidecar descriptor is invalid")
     budget = reservation.authority.budget_limit
-    return RedactedImmutableMapping({
+    descriptor: dict[str, object] = {
         "agentDir": str(root / "agent"), "artifactLockPath": str(resources.artifact_lock_path),
         "authorityId": reservation.authority.authority_id, "authorityRevision": reservation.authority.revision,
+        "authorityExpiresAtMs": reservation.authority.expires_at_ms,
         "expectedRuntimeBuildId": resources.expected_runtime_build_id, "gatewayRoot": str(root / "gateway"), "generation": 1,
         "maxContinuations": 3, "maxControllerTokens": budget.controller_tokens, "maxTurns": 12,
         "model": selection.model,
         "portfolio": [{"kind": "application", "provider_id": grant.provider_id, "application_id": grant.application_id, "version": grant.version, "runtime_id": grant.runtime_id} for grant in reservation.authority.allowed_portfolio],
         "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(resources.prime_source_root), "provider": selection.provider, "probeReady": True, "rlmMaxChildren": 1, "rlmMaxDepth": 1,
         "remainingBudget": {"controller_tokens": budget.controller_tokens, "application_tokens": budget.application_tokens, "child_tokens": budget.child_tokens, "aggregate_tokens": budget.aggregate_tokens, "cost_micros": budget.cost_micros, "deadline_ms": reservation.limits.deadline_ms},
-        "sessionDir": str(root / "sessions"), "sessionId": "native-rlm-root", "skillPath": str(resources.skill_path), "timeoutMs": reservation.limits.deadline_ms, "workspace": str(root / "workspace"),
-    })
+        "sessionDir": str(root / "sessions"), "sessionId": session_id, "skillPath": str(resources.skill_path), "timeoutMs": reservation.limits.deadline_ms, "workspace": str(root / "workspace"),
+    }
+    if daemon_lifecycle is not None:
+        descriptor["daemonLifecycle"] = dict(daemon_lifecycle)
+    return RedactedImmutableMapping(descriptor)
 
 
 def prepare_native_rlm_workspace(root: Path) -> None:
@@ -719,8 +1129,10 @@ async def execute_native_rlm_sidecar_probe(
     daemon_launcher: DaemonLauncher,
     sidecar_launcher: SidecarLauncher,
     probe: SidecarProbe,
+    session_id: str = _SESSION_ID,
     owned_worker_cleanup: OwnedWorkerCleanup | None = None,
     owned_daemon_shutdown: OwnedDaemonShutdown | None = None,
+    lifecycle_preflight: LifecyclePreflight | None = None,
 ) -> NativeRlmProbeResult:
     """Run one injected probe and always release the processes it owns."""
     if (
@@ -731,11 +1143,20 @@ async def execute_native_rlm_sidecar_probe(
         or not isinstance(environ, Mapping)
         or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environ.items())
         or not all(callable(value) for value in (daemon_launcher, sidecar_launcher, probe))
+        or not isinstance(session_id, str)
+        or not session_id
         or owned_worker_cleanup is not None and not callable(owned_worker_cleanup)
         or owned_daemon_shutdown is not None and not callable(owned_daemon_shutdown)
+        or lifecycle_preflight is not None and not callable(lifecycle_preflight)
     ):
         raise PrimeRlmExperimentError("Native RLM sidecar probe is invalid")
     prepare_native_rlm_workspace(root)
+    def boundary(stage: str) -> None:
+        try:
+            (root / "asterion-native-boundary").write_text(stage + "\n", encoding="ascii")
+        except OSError:
+            pass
+    boundary("daemon-plan")
     plan = build_native_rlm_daemon_plan(
         resources.node_executable,
         resources.daemon_entry,
@@ -743,19 +1164,155 @@ async def execute_native_rlm_sidecar_probe(
         selection,
         environ,
     )
+    # Prime's supervisor persists update manifests under its *process-default*
+    # agentDir, not the per-session create command.  Bind that default to the
+    # same private root used by the descriptor and coordinator so recovery has
+    # one exact manifest authority.
+    plan = NativeRlmDaemonPlan(
+        argv=plan.argv,
+        environ=MappingProxyType({
+            **dict(plan.environ),
+            "PRIME_AGENT_CODING_AGENT_DIR": str(root / "agent"),
+        }),
+        socket_path=plan.socket_path,
+    )
+    boundary("daemon-start")
     daemon = await start_native_rlm_daemon(
         plan, launcher=daemon_launcher, timeout_seconds=10
     )
     sidecar: object | None = None
+    lifecycle_server: object | None = None
     primary_failure = False
+    completed_probe = False
     try:
-        descriptor = build_native_rlm_sidecar_descriptor(
-            reservation, selection, root, resources
+        from asterion.control.providers.prime.process import (
+            PrimeDaemonLifecycle,
+            PrimeDaemonLifecycleFailure,
+            PrimeDaemonLifecycleServer,
         )
+
+        async def stop_daemon(active_session_id: str) -> None:
+            # `prepare_update_restart` has persisted the recovery manifest.
+            # Its coordinator must observe a stopped predecessor before it can
+            # restore the manifest; calling the public update CLI is neither
+            # necessary nor permitted here.
+            nonlocal daemon
+            lifecycle_marker = root / "daemon-lifecycle-stage"
+            if getattr(daemon, "returncode", None) is None:
+                wait = getattr(daemon, "wait", None)
+                if not callable(wait):
+                    raise PrimeRlmExperimentError("Native RLM daemon restart failed")
+                # The original transport issued Prime's prepared-state
+                # shutdown.  Waiting for that graceful exit preserves the
+                # upstream startup fence; a host SIGTERM would erase it.
+                await asyncio.wait_for(wait(), timeout=15)
+            coordinator_module = (
+                resources.prime_source_root
+                / "packages" / "coding-agent" / "dist" / "package-manager-cli.js"
+            )
+            status_path = root / "daemon-restart-status.json"
+            runner_path = root / "daemon-restart-coordinator.mjs"
+            script = textwrap.dedent(
+                f'''\
+                if (process.argv.includes("--mode")) {{
+                  process.argv[1] = {str(resources.daemon_entry)!r};
+                  await import({resources.daemon_entry.as_uri()!r});
+                }} else {{
+                const {{ runDaemonUpdateRestartCoordinator }} = await import({coordinator_module.as_uri()!r});
+                const result = await runDaemonUpdateRestartCoordinator({{
+                  socketPath: {str(plan.socket_path)!r}, agentDir: {str(root / 'agent')!r},
+                  statusPath: {str(status_path)!r}, originActiveSessionId: {active_session_id!r},
+                }});
+                if (!["complete", "skipped"].includes(result.phase)) {{
+                  process.stderr.write(`asterion-prime-coordinator-phase:${{result.phase}}\\n`);
+                }}
+                if (result.phase !== "complete" || result.counts.failed !== 0) process.exit(2);
+                // The successor daemon is detached by Prime's launcher.
+                // Exit this coordinator wrapper after a completed handoff.
+                process.exit(0);
+                }}
+                '''
+            )
+            runner_path.write_text(script, encoding="utf-8")
+            runner_path.chmod(0o600)
+            restart = await asyncio.create_subprocess_exec(
+                str(resources.node_executable), str(runner_path),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                # Coordinator details can contain private daemon state.  The
+                # lifecycle boundary returns only its fixed failure category.
+                stderr=asyncio.subprocess.DEVNULL,
+                cwd=resources.prime_source_root,
+                env=dict(plan.environ),
+            )
+            try:
+                restart_code = await asyncio.wait_for(restart.wait(), timeout=180)
+            except TimeoutError:
+                if restart.returncode is None:
+                    restart.terminate()
+                    with suppress(TimeoutError):
+                        await asyncio.wait_for(restart.wait(), timeout=5)
+                raise PrimeDaemonLifecycleFailure("coordinator") from None
+            if restart_code != 0:
+                phase = "coordinator"
+                try:
+                    status = json.loads(status_path.read_text(encoding="utf-8"))
+                    status_phase = status.get("phase") if isinstance(status, Mapping) else None
+                    if status_phase == "skipped":
+                        phase = "manifest"
+                    message = status.get("message") if isinstance(status, Mapping) else None
+                    if isinstance(message, str):
+                        lower = message.lower()
+                        if "no running daemon needed" in lower:
+                            phase = "manifest"
+                        elif "prepare" in lower:
+                            phase = "prepare"
+                        elif "stop" in lower or "predecessor" in lower:
+                            phase = "shutdown"
+                        elif "fence" in lower:
+                            phase = "fence"
+                        elif "starting" in lower or "replacement" in lower:
+                            phase = "start"
+                        elif "restore" in lower:
+                            phase = "restore"
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    pass
+                raise PrimeDaemonLifecycleFailure(phase)
+            lifecycle_marker.write_text("coordinator-exited\n", encoding="ascii")
+
+        async def start_daemon(_: str) -> None:
+            (root / "daemon-lifecycle-stage").write_text("lifecycle-returned\n", encoding="ascii")
+            return None
+
+        lifecycle = PrimeDaemonLifecycle(
+            stop=stop_daemon, start=start_daemon, timeout=240
+        )
+        boundary("lifecycle-server")
+        lifecycle_server = PrimeDaemonLifecycleServer(
+            lifecycle=lifecycle,
+            socket_path=root / "daemon-lifecycle.sock",
+            token=secrets.token_hex(32),
+            session_id=session_id,
+        )
+        await lifecycle_server.start()
+        if lifecycle_preflight is not None:
+            await lifecycle_preflight(root / "daemon-lifecycle.sock")
+        descriptor = build_native_rlm_sidecar_descriptor(
+            reservation,
+            selection,
+            root,
+            resources,
+            session_id=session_id,
+            daemon_lifecycle=lifecycle_server.descriptor,
+        )
+        boundary("sidecar-start")
         sidecar = await sidecar_launcher(descriptor, resources)
+        boundary("probe")
         result = await probe(sidecar)
         if not isinstance(result, NativeRlmProbeResult):
             raise PrimeRlmExperimentError("Native RLM probe result is invalid")
+        completed_probe = True
+        boundary("probe-return")
         return result
     except PrimeRlmExperimentError as error:
         if str(error).startswith("Native RLM skill "):
@@ -783,6 +1340,7 @@ async def execute_native_rlm_sidecar_probe(
         primary_failure = True
         raise PrimeRlmExperimentError("Native RLM probe did not complete") from None
     finally:
+        boundary("cleanup")
         sidecar_cleanup_error: PrimeRlmExperimentError | None = None
         daemon_cleanup_error: PrimeRlmExperimentError | None = None
         try:
@@ -794,15 +1352,26 @@ async def execute_native_rlm_sidecar_probe(
                 await owned_worker_cleanup()
         finally:
             try:
+                if lifecycle_server is not None:
+                    boundary("cleanup-lifecycle")
+                    await lifecycle_server.close()
+                boundary("cleanup-daemon")
                 await _reap_owned_daemon(
                     daemon, plan, resources,
                     shutdown=owned_daemon_shutdown,
                 )
+                boundary("cleanup-complete")
             except PrimeRlmExperimentError as error:
                 daemon_cleanup_error = error
-        if sidecar_cleanup_error is not None and not primary_failure:
+        if (
+            sidecar_cleanup_error is not None
+            and not primary_failure
+            and not completed_probe
+        ):
+            boundary("cleanup-sidecar-error")
             raise sidecar_cleanup_error
         if daemon_cleanup_error is not None and not primary_failure:
+            boundary("cleanup-daemon-error")
             raise daemon_cleanup_error
 
 
@@ -840,7 +1409,11 @@ async def start_native_rlm_sidecar(
             node_executable=resources.node_executable,
             sidecar_entry=resources.sidecar_entry,
             private_descriptor=descriptor,
-            environ={"HOME": environ["HOME"], "PATH": environ["PATH"]},
+            environ={
+                "ASTERION_PRIME_PRIVATE_DIAGNOSTICS": "1",
+                "HOME": environ["HOME"],
+                "PATH": environ["PATH"],
+            },
             # Long-running Prime turns can legitimately hold an IPC request
             # while the native kernel awaits a control-plane admission.  This
             # is bounded by the already-authorized session deadline, not a
@@ -877,14 +1450,15 @@ async def launch_owned_native_rlm_daemon(
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True,
         )
     except (OSError, RuntimeError, TypeError, ValueError):
         raise PrimeRlmExperimentError("Native RLM daemon could not start") from None
 
 
 async def await_owned_native_rlm_worker_cleanup() -> None:
-    """Allow Prime's owner-disconnect cleanup to stop detached workers first."""
-    await asyncio.sleep(31)
+    """Yield once so Prime observes owner disconnect before bounded reaping."""
+    await asyncio.sleep(0)
 
 
 async def run_owned_native_rlm_sidecar_probe(
@@ -895,6 +1469,7 @@ async def run_owned_native_rlm_sidecar_probe(
     *,
     environ: Mapping[str, str],
     probe: SidecarProbe,
+    session_id: str = _SESSION_ID,
     daemon_spawn: Callable[..., Awaitable[object]] | None = None,
     sidecar_starter: Callable[[object], Awaitable[object]] | None = None,
     owned_worker_cleanup: OwnedWorkerCleanup | None = None,
@@ -922,6 +1497,33 @@ async def run_owned_native_rlm_sidecar_probe(
     cleanup = await_owned_native_rlm_worker_cleanup if owned_worker_cleanup is None else owned_worker_cleanup
     if not callable(cleanup):
         raise PrimeRlmExperimentError("Native RLM owned cleanup is invalid")
+    async def preflight_lifecycle(socket_path: Path) -> None:
+        if sidecar_starter is not None:
+            return
+        script = textwrap.dedent(
+            f'''\
+            import {{ createConnection }} from "node:net";
+            const socket = createConnection({str(socket_path)!r});
+            const timeout = setTimeout(() => process.exit(2), 3000);
+            socket.once("error", () => process.exit(2));
+            socket.once("connect", () => socket.end("\\n"));
+            socket.once("close", () => {{ clearTimeout(timeout); process.exit(0); }});
+            '''
+        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                str(resources.node_executable), "--input-type=module", "-e", script,
+                cwd=resources.prime_source_root,
+                env={"HOME": environ["HOME"], "PATH": environ["PATH"]},
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            if await asyncio.wait_for(process.wait(), timeout=5) != 0:
+                raise RuntimeError()
+        except (OSError, RuntimeError, TimeoutError, ValueError):
+            raise PrimeRlmExperimentError("Native RLM lifecycle preflight failed") from None
+
     return await execute_native_rlm_sidecar_probe(
         reservation,
         selection,
@@ -931,8 +1533,10 @@ async def run_owned_native_rlm_sidecar_probe(
         daemon_launcher=launch_daemon,
         sidecar_launcher=launch_sidecar,
         probe=probe,
+        session_id=session_id,
         owned_worker_cleanup=cleanup,
         owned_daemon_shutdown=owned_daemon_shutdown,
+        lifecycle_preflight=preflight_lifecycle,
     )
 
 
@@ -943,6 +1547,11 @@ async def run_native_rlm_controlled_probe(
     *,
     goal: NativeRlmPrivateGoal | None = None,
     progress_root: Path | None = None,
+    exercise_application: bool = False,
+    exercise_checkpoint: bool = False,
+    exercise_cancellation: bool = False,
+    exercise_budget_probe: bool = False,
+    expected_model_selector_digest: str | None = None,
 ) -> NativeRlmProbeResult:
     """Drive one root session until the closed native RLM proof is complete.
 
@@ -954,15 +1563,41 @@ async def run_native_rlm_controlled_probe(
         or not isinstance(root, Path)
         or not root.is_dir()
         or goal is not None and not isinstance(goal, NativeRlmPrivateGoal)
+        or not isinstance(exercise_application, bool)
+        or not isinstance(exercise_checkpoint, bool)
+        or not isinstance(exercise_cancellation, bool)
+        or not isinstance(exercise_budget_probe, bool)
+        or expected_model_selector_digest is not None
+        and (
+            not isinstance(expected_model_selector_digest, str)
+            or len(expected_model_selector_digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in expected_model_selector_digest
+            )
+        )
         or progress_root is not None
         and (not isinstance(progress_root, Path) or not progress_root.is_dir())
     ):
         raise PrimeRlmExperimentError("Native RLM controlled probe is invalid")
+    checkpoint_created = False
     last_event_type: str | None = None
+    last_action_kind: str | None = None
+    observed_event_types: list[str] = []
+    observed_identities: dict[str, tuple[str, str]] = {}
 
     def observe_event(event: ControlEvent) -> None:
-        nonlocal last_event_type
+        nonlocal checkpoint_created, last_action_kind, last_event_type
         last_event_type = event.type
+        _record_native_rlm_control_fact(event, observed_event_types, observed_identities)
+        if (
+            event.type == "checkpoint.created"
+            and event.payload.get("checkpoint_id") == "native-rlm-checkpoint"
+        ):
+            checkpoint_created = True
+        action_kind = _native_rlm_safe_action_kind(event)
+        if action_kind is not None:
+            last_action_kind = action_kind
 
     host = build_native_rlm_control_host(
         sidecar,
@@ -987,9 +1622,13 @@ async def run_native_rlm_controlled_probe(
     stage = "create"
     session_created = False
     session_terminal = False
+    cleanup_cancel_attempted = False
     primary_failure = False
     spawn_task: asyncio.Task[Mapping[str, object]] | None = None
     message_task: asyncio.Task[Mapping[str, object]] | None = None
+    application_task: asyncio.Task[Mapping[str, object]] | None = None
+    checkpoint_task: asyncio.Task[Mapping[str, object]] | None = None
+    budget_task: asyncio.Task[Mapping[str, object]] | None = None
 
     def checkpoint() -> None:
         if progress_root is None:
@@ -998,7 +1637,12 @@ async def run_native_rlm_controlled_probe(
 
     async def pump_bounded() -> None:
         try:
-            await asyncio.wait_for(host.pump(), timeout=_PUMP_TIMEOUT_SECONDS)
+            await asyncio.wait_for(
+                host.pump(),
+                timeout=_native_rlm_pump_timeout_seconds(
+                    reservation, exercise_checkpoint
+                ),
+            )
         except TimeoutError:
             raise PrimeRlmExperimentError(
                 "Native RLM controlled probe event pump timed out"
@@ -1024,6 +1668,76 @@ async def run_native_rlm_controlled_probe(
         await host.dispatch(native_rlm_start_command(reservation))
         stage = "start"
         checkpoint()
+        if exercise_budget_probe:
+            stage = "budget"
+            budget = reservation.authority.budget_limit
+            budget_task = asyncio.create_task(
+                _send_native_rlm_skill_effect(
+                    root,
+                    operation="application.invoke",
+                    payload={
+                        "idempotency_key": "native-rlm-budget",
+                        "target": _APPLICATION_TARGET,
+                        "input_text": "bounded-budget",
+                        "expected_artifacts": [],
+                        "budget": {
+                            "controller_tokens": budget.controller_tokens + 1,
+                            "application_tokens": 0,
+                            "child_tokens": 0,
+                            "aggregate_tokens": budget.controller_tokens + 1,
+                            "cost_micros": 0,
+                            "deadline_ms": _native_rlm_system_action_deadline(reservation),
+                        },
+                    },
+                )
+            )
+            budget_deadline = time.monotonic() + _PUMP_TIMEOUT_SECONDS
+            while not budget_task.done() and time.monotonic() < budget_deadline:
+                await pump_bounded()
+                await asyncio.sleep(0.025)
+            if not budget_task.done():
+                raise PrimeRlmExperimentError(
+                    "Native RLM budget probe did not complete"
+                )
+            _require_native_rlm_skill_budget_rejection(await budget_task)
+            latest = replace(latest, budget_limited=True)
+        if exercise_application:
+            stage = "application"
+            application_task = asyncio.create_task(
+            _send_native_rlm_skill_effect(
+                root,
+                operation="application.invoke",
+                payload={
+                    "idempotency_key": "native-rlm-application",
+                    "target": _APPLICATION_TARGET,
+                    "input_text": "bounded-application",
+                    "expected_artifacts": [],
+                    "budget": {
+                        "controller_tokens": 0,
+                        "application_tokens": 1,
+                        "child_tokens": 0,
+                        "aggregate_tokens": 1,
+                        "cost_micros": 0,
+                        "deadline_ms": _native_rlm_system_action_deadline(reservation),
+                    },
+                },
+            )
+            )
+            application_deadline = time.monotonic() + _PUMP_TIMEOUT_SECONDS
+            while (
+                not application_task.done()
+                and time.monotonic() < application_deadline
+            ):
+                await pump_bounded()
+                await asyncio.sleep(0.025)
+            if not application_task.done():
+                raise PrimeRlmExperimentError(
+                    "Native RLM controlled probe application did not complete"
+                )
+            _require_native_rlm_skill_success(
+                await application_task, operation="application"
+            )
+            latest = replace(latest, application_receipted=True)
         stage = "running"
         checkpoint()
         initiation_deadline = time.monotonic() + _MODEL_INITIATION_TIMEOUT_SECONDS
@@ -1040,11 +1754,119 @@ async def run_native_rlm_controlled_probe(
                     latest = replace(latest, terminal=terminal, usage=snapshot.authority_usage)
                     checkpoint()
                     return latest
-            latest = await observe_bounded(snapshot.authority_usage)
+            observed = await observe_bounded(snapshot.authority_usage)
+            latest = replace(
+                observed,
+                application_receipted=latest.application_receipted,
+                detach_attached=latest.detach_attached,
+                checkpoint_recovered=latest.checkpoint_recovered,
+                cancelled=latest.cancelled,
+                budget_limited=latest.budget_limited,
+            )
             checkpoint()
             if not latest.child_started and time.monotonic() >= initiation_deadline:
                 return latest
             if latest.terminal == "completed":
+                if expected_model_selector_digest is not None:
+                    stage = "model-evidence"
+                    child_identity = observed_identities.get("child.spawn")
+                    if child_identity is None:
+                        raise PrimeRlmExperimentError(
+                            "Native RLM model evidence did not complete"
+                        )
+                    binding = await observer.rlm_binding(child_identity[1])
+                    depth_resolution = await _probe_native_rlm_depth_limit(
+                        root,
+                        reservation,
+                        expected_model_selector_digest,
+                    )
+                    model_assertions = derive_native_rlm_model_assertions(
+                        binding=binding,
+                        expected_model_selector_digest=expected_model_selector_digest,
+                        usage=latest.usage,
+                        depth_probe_resolution=depth_resolution,
+                    )
+                    latest = replace(latest, **model_assertions)
+                stage = "detach-attach"
+                await host.dispatch(native_rlm_session_detach_command(reservation))
+                await host.dispatch(native_rlm_session_attach_command(reservation))
+                latest = replace(latest, detach_attached=True)
+                checkpoint()
+                if exercise_checkpoint:
+                    # Prime can only restart from an idle root.  The closed RLM
+                    # lifecycle is the quiescence barrier; checkpointing during
+                    # root initialization is rejected by its daemon.
+                    stage = "checkpoint"
+                    checkpoint_task = asyncio.create_task(
+                        _send_native_rlm_skill_effect(
+                            root,
+                            operation="checkpoint.request",
+                            payload={
+                                "idempotency_key": "native-rlm-checkpoint",
+                                "checkpoint_id": "native-rlm-checkpoint",
+                                "budget": {
+                                    "controller_tokens": 1,
+                                    "application_tokens": 0,
+                                    "child_tokens": 0,
+                                    "aggregate_tokens": 1,
+                                    "cost_micros": 0,
+                                    "deadline_ms": _native_rlm_system_action_deadline(reservation),
+                                },
+                            },
+                        )
+                    )
+                    checkpoint_deadline = time.monotonic() + _native_rlm_system_action_deadline(reservation) / 1_000
+                    while not checkpoint_task.done() and time.monotonic() < checkpoint_deadline:
+                        await pump_bounded()
+                        await asyncio.sleep(0.025)
+                    if not checkpoint_task.done():
+                        raise PrimeRlmExperimentError(
+                            "Native RLM controlled probe checkpoint did not complete"
+                        )
+                    _require_native_rlm_skill_success(
+                        await checkpoint_task, operation="checkpoint"
+                    )
+                    checkpoint_materialization_deadline = (
+                        time.monotonic()
+                        + _native_rlm_system_action_deadline(reservation) / 1_000
+                    )
+                    while (
+                        not checkpoint_created
+                        and time.monotonic() < checkpoint_materialization_deadline
+                    ):
+                        await pump_bounded()
+                        await asyncio.sleep(0.025)
+                    if not checkpoint_created:
+                        raise PrimeRlmExperimentError(
+                            "Native RLM controlled probe checkpoint materialization did not complete"
+                        )
+                    latest = replace(latest, checkpoint_recovered=True)
+                if exercise_cancellation:
+                    stage = "cancellation"
+                    await host.dispatch(native_rlm_session_cancel_command(reservation))
+                    cancellation_deadline = min(
+                        deadline, time.monotonic() + _PUMP_TIMEOUT_SECONDS
+                    )
+                    while time.monotonic() < cancellation_deadline:
+                        await pump_bounded()
+                        state = host.snapshot().state
+                        if (
+                            state.terminal_event_id is not None
+                            and state.session_status == "cancelled"
+                        ):
+                            latest = replace(latest, cancelled=True)
+                            session_terminal = True
+                            break
+                        await asyncio.sleep(0.025)
+                    if not latest.cancelled:
+                        raise PrimeRlmExperimentError(
+                            "Native RLM controlled probe cancellation did not complete"
+                        )
+                latest = replace(
+                    latest,
+                    observed_event_types=tuple(observed_event_types),
+                    causal_identities=MappingProxyType(dict(observed_identities)),
+                )
                 session_terminal = True
                 return latest
             if snapshot.state.terminal_event_id is not None:
@@ -1053,6 +1875,9 @@ async def run_native_rlm_controlled_probe(
             await asyncio.sleep(0.025)
         return latest
     except PrimeRlmExperimentError:
+        if not _native_rlm_failure_may_reconcile_terminal(stage):
+            primary_failure = True
+            raise
         terminal = _terminal_native_rlm_probe_result(host, latest)
         if terminal is None:
             primary_failure = True
@@ -1062,6 +1887,11 @@ async def run_native_rlm_controlled_probe(
         checkpoint()
         return latest
     except Exception as error:
+        if not _native_rlm_failure_may_reconcile_terminal(stage):
+            primary_failure = True
+            raise PrimeRlmExperimentError(
+                f"Native RLM controlled probe {stage} control did not complete"
+            ) from None
         terminal = _terminal_native_rlm_probe_result(host, latest)
         if terminal is not None:
             session_terminal = True
@@ -1071,13 +1901,27 @@ async def run_native_rlm_controlled_probe(
         category = _native_rlm_control_failure_category(error)
         if category == "event-transition" and last_event_type is not None:
             category = "event-transition-" + last_event_type.replace(".", "-")
+            if last_event_type == "session.completed":
+                category += "-" + _native_rlm_terminal_transition_category(host)
+        if category == "action-admission" and last_action_kind is not None:
+            category = "action-admission-" + last_action_kind
         primary_failure = True
         raise PrimeRlmExperimentError(
             f"Native RLM controlled probe {stage} {category} did not complete"
         ) from None
     finally:
         try:
-            pending = tuple(task for task in (spawn_task, message_task) if task is not None)
+            pending = tuple(
+                task
+                for task in (
+                    spawn_task,
+                    message_task,
+                    application_task,
+                    checkpoint_task,
+                    budget_task,
+                )
+                if task is not None
+            )
             for task in pending:
                 if not task.done():
                     task.cancel()
@@ -1085,7 +1929,13 @@ async def run_native_rlm_controlled_probe(
                 await asyncio.gather(*pending, return_exceptions=True)
             if session_created and not session_terminal:
                 try:
+                    cleanup_cancel_attempted = True
                     await host.dispatch(native_rlm_session_cancel_command(reservation))
+                    await asyncio.wait_for(
+                        host.pump(until_terminal=True),
+                        timeout=_PUMP_TIMEOUT_SECONDS,
+                    )
+                    session_terminal = host.snapshot().state.terminal_event_id is not None
                 except Exception:
                     # The owned sidecar and daemon are reaped below.  A terminal
                     # native session can reject this best-effort cancel without
@@ -1095,8 +1945,159 @@ async def run_native_rlm_controlled_probe(
             try:
                 await host.close()
             except Exception:
-                if not session_terminal and not primary_failure:
+                # Cancellation is proved by the isolated maintenance root.  The
+                # observation root's final cancellation is resource cleanup only;
+                # its owned daemon is reaped even if a post-terminal replay cannot
+                # be observed after native shutdown.
+                if (
+                    not session_terminal
+                    and not primary_failure
+                    and not cleanup_cancel_attempted
+                ):
                     raise
+
+
+async def run_native_rlm_maintenance_probe(
+    sidecar: object,
+    reservation: NativeRlmExperimentReservation,
+    root: Path,
+    *,
+    session_id: str = "native-rlm-maintenance",
+) -> NativeRlmProbeResult:
+    """Prove pause → checkpoint recovery → cancellation in an isolated root.
+
+    This deliberately does not start a model turn or an RLM child. Prime keeps
+    an RLM root resident while its model-owned turn is active, while its
+    checkpoint manager accepts only an idle root. The maintenance root therefore
+    proves native checkpoint/recovery/cancellation without falsely claiming an
+    active RLM turn is checkpointable; the observation root exercises the actual
+    RLM child/message/application/budget path separately.
+    """
+    if (
+        not isinstance(reservation, NativeRlmExperimentReservation)
+        or not isinstance(root, Path)
+        or not root.is_dir()
+        or not isinstance(session_id, str)
+        or not session_id
+    ):
+        raise PrimeRlmExperimentError("Native RLM maintenance probe is invalid")
+    checkpoint_created = False
+    cancelled_event = False
+    event_types: list[str] = []
+    identities: dict[str, tuple[str, str]] = {}
+
+    def observe_event(event: ControlEvent) -> None:
+        nonlocal checkpoint_created, cancelled_event
+        _record_native_rlm_control_fact(event, event_types, identities)
+        checkpoint_created = checkpoint_created or (
+            event.type == "checkpoint.created"
+            and event.payload.get("checkpoint_id") == "native-rlm-maintenance-checkpoint"
+        )
+        cancelled_event = cancelled_event or event.type == "session.cancelled"
+
+    host = build_native_rlm_control_host(
+        sidecar,
+        reservation,
+        root,
+        goal=NativeRlmPrivateGoal("Remain available until the operator pauses this session."),
+        session_id=session_id,
+        event_observer=observe_event,
+    )
+    deadline = time.monotonic() + reservation.limits.deadline_ms / 1_000
+    session_created = False
+    stage = "create"
+    try:
+        await host.dispatch(native_rlm_session_create_command(reservation, session_id=session_id))
+        session_created = True
+        stage = "pause"
+        await host.dispatch(native_rlm_session_pause_command(reservation, session_id=session_id))
+        while time.monotonic() < deadline:
+            await asyncio.wait_for(host.pump(), timeout=_PUMP_TIMEOUT_SECONDS)
+            if host.snapshot().state.session_status == "paused":
+                break
+            await asyncio.sleep(0.025)
+        else:
+            raise PrimeRlmExperimentError("Native RLM maintenance pause did not complete")
+        stage = "checkpoint"
+        checkpoint_task = asyncio.create_task(
+            _send_native_rlm_skill_effect(
+                root,
+                operation="checkpoint.request",
+                payload={
+                    "idempotency_key": "native-rlm-maintenance-checkpoint",
+                    "checkpoint_id": "native-rlm-maintenance-checkpoint",
+                    "budget": {
+                        "controller_tokens": 1,
+                        "application_tokens": 0,
+                        "child_tokens": 0,
+                        "aggregate_tokens": 1,
+                        "cost_micros": 0,
+                        "deadline_ms": _native_rlm_system_action_deadline(reservation),
+                    },
+                },
+            )
+        )
+        checkpoint_deadline = min(
+            deadline,
+            time.monotonic() + _native_rlm_system_action_deadline(reservation) / 1_000,
+        )
+        while time.monotonic() < checkpoint_deadline and (
+            not checkpoint_task.done() or not checkpoint_created
+        ):
+            await asyncio.wait_for(
+                host.pump(), timeout=_native_rlm_pump_timeout_seconds(reservation, True)
+            )
+            if checkpoint_task.done():
+                _require_native_rlm_skill_success(
+                    await checkpoint_task, operation="checkpoint"
+                )
+            await asyncio.sleep(0.025)
+        if not checkpoint_task.done() or not checkpoint_created:
+            if checkpoint_task.done():
+                _require_native_rlm_skill_success(
+                    await checkpoint_task, operation="checkpoint"
+                )
+            raise PrimeRlmExperimentError(
+                "Native RLM maintenance checkpoint did not complete"
+            )
+        _require_native_rlm_skill_success(await checkpoint_task, operation="checkpoint")
+        stage = "cancellation"
+        await host.dispatch(native_rlm_session_cancel_command(reservation, session_id=session_id))
+        await asyncio.wait_for(host.pump(until_terminal=True), timeout=_PUMP_TIMEOUT_SECONDS)
+        state = host.snapshot().state
+        if cancelled_event and state.terminal_event_id is not None and state.session_status == "cancelled":
+            return NativeRlmProbeResult(
+                terminal="cancelled",
+                child_started=False,
+                message_delivered=False,
+                child_deleted=False,
+                usage=host.snapshot().authority_usage,
+                checkpoint_recovered=True,
+                cancelled=True,
+                observed_event_types=tuple(event_types),
+                causal_identities=MappingProxyType(dict(identities)),
+            )
+        raise PrimeRlmExperimentError("Native RLM maintenance cancellation did not complete")
+    except ControlHostError as error:
+        raise PrimeRlmExperimentError(
+            f"Native RLM maintenance {stage} {_native_rlm_control_failure_category(error)} did not complete"
+        ) from None
+    finally:
+        if session_created:
+            try:
+                state = host.snapshot().state
+                if state.terminal_event_id is None:
+                    await host.dispatch(native_rlm_session_cancel_command(reservation, session_id=session_id))
+            except Exception:
+                pass
+        try:
+            await host.close()
+        except Exception:
+            # The terminal cancellation and checkpoint facts are durable before
+            # close. Prime may race its own supervisor while reaping an already
+            # terminated worker; outer owned-process cleanup remains required.
+            if not cancelled_event:
+                raise
 
 
 def _native_rlm_control_failure_category(error: Exception) -> str:
@@ -1114,6 +2115,95 @@ def _native_rlm_control_failure_category(error: Exception) -> str:
         "control provider event is invalid": "event-invalid",
     }
     return categories.get(str(error), "control")
+
+
+def _native_rlm_failure_may_reconcile_terminal(stage: str) -> bool:
+    """Only stream-phase failures may use an already recorded terminal state.
+
+    Once the RLM lifecycle itself has completed, detach, checkpoint, and
+    cancellation are independently required proof obligations.  Treating an
+    earlier ``session.completed`` as their success hid the actual failed step.
+    """
+
+    return stage not in {"detach-attach", "checkpoint", "cancellation"}
+
+
+def _native_rlm_admission_failure_category(reason: object) -> str:
+    """Expose only stable authority reason codes in public probe errors."""
+
+    categories = frozenset(
+        {
+            "authority-cancelled",
+            "authority-expired",
+            "authority-revision-mismatch",
+            "budget-exceeded",
+            "child-concurrency-exceeded",
+            "deadline-not-authorized",
+            "host-service-not-authorized",
+            "operation-not-authorized",
+            "recursion-depth-exceeded",
+            "target-not-authorized",
+        }
+    )
+    return reason if isinstance(reason, str) and reason in categories else "unknown"
+
+
+def _native_rlm_terminal_transition_category(host: object) -> str:
+    """Classify a terminal invariant without exposing event or action identity."""
+
+    try:
+        state = host.snapshot().state
+        if state.goal_status != "completed":
+            return "goal-not-completed"
+        terminal_actions = {
+            "rejected", "succeeded", "failed", "cancelled", "uncertain"
+        }
+        if any(action.status not in terminal_actions for action in state.actions.values()):
+            return "active-actions"
+        return "invalid"
+    except (AttributeError, TypeError):
+        return "unknown"
+
+
+def _native_rlm_safe_action_kind(event: object) -> str | None:
+    """Return only a fixed, public action class for private probe diagnostics."""
+
+    if not isinstance(event, ControlEvent) or event.type != "action.proposed":
+        return None
+    kind = event.payload.get("kind")
+    if kind not in {"child.spawn", "child.message", "child.cancel"}:
+        return None
+    return kind.replace(".", "-")
+
+
+def _record_native_rlm_control_fact(
+    event: ControlEvent,
+    event_types: list[str],
+    identities: dict[str, tuple[str, str]],
+) -> None:
+    """Retain only fixed event classes and identity pairs for bounded evidence."""
+    if not isinstance(event, ControlEvent):
+        raise PrimeRlmExperimentError("Native RLM control fact is invalid")
+    event_types.append(event.type)
+    if event.type != "action.proposed":
+        if event.type == "session.cancelled":
+            identities["session.cancel"] = ("native-rlm-cleanup", event.event_id)
+        return
+    kind = event.payload.get("kind")
+    action_id = event.payload.get("action_id")
+    idempotency_key = event.payload.get("idempotency_key")
+    operation = {
+        "child.spawn": "child.spawn",
+        "checkpoint.create": "checkpoint.create",
+    }.get(kind)
+    if kind == "application.invoke":
+        operation = (
+            "budget.probe"
+            if idempotency_key == "native-rlm-budget"
+            else "application.invoke"
+        )
+    if operation is not None and isinstance(action_id, str):
+        identities[operation] = (event.event_id, action_id)
 
 def _write_native_rlm_progress(
     root: Path, stage: str, result: NativeRlmProbeResult
@@ -1221,15 +2311,14 @@ async def _reap_owned_daemon(
     shutdown: OwnedDaemonShutdown | None = None,
 ) -> None:
     """Use Prime's daemon protocol; SIGTERM leaves detached workers behind."""
-    if getattr(daemon, "returncode", None) is not None:
-        return
     wait = getattr(daemon, "wait", None)
     if not callable(wait):
         raise PrimeRlmExperimentError("Native RLM daemon cleanup failed")
     try:
         if shutdown is not None:
             await shutdown(plan, resources)
-            await asyncio.wait_for(wait(), timeout=5)
+            if getattr(daemon, "returncode", None) is None:
+                await asyncio.wait_for(wait(), timeout=5)
             return
         client_entry = resources.sidecar_entry.parent / "index.js"
         script = textwrap.dedent(
@@ -1249,9 +2338,28 @@ async def _reap_owned_daemon(
         )
         if await asyncio.wait_for(shutdown.wait(), timeout=5) != 0:
             raise RuntimeError()
-        await asyncio.wait_for(wait(), timeout=5)
+        if getattr(daemon, "returncode", None) is None:
+            await asyncio.wait_for(wait(), timeout=5)
     except (TimeoutError, OSError, RuntimeError, TypeError, ValueError):
-        raise PrimeRlmExperimentError("Native RLM daemon cleanup failed") from None
+        # The protocol shutdown can race Prime's supervisor after a terminal
+        # worker has already exited. This daemon is owned by this probe, so
+        # reclaim its exact process rather than leaving an orphan that blocks
+        # the next independent proof root.
+        try:
+            if getattr(daemon, "returncode", None) is None:
+                terminate = getattr(daemon, "terminate", None)
+                if callable(terminate):
+                    terminate()
+                await asyncio.wait_for(wait(), timeout=5)
+        except (TimeoutError, OSError, TypeError, ValueError):
+            try:
+                if getattr(daemon, "returncode", None) is None:
+                    kill = getattr(daemon, "kill", None)
+                    if callable(kill):
+                        kill()
+                    await asyncio.wait_for(wait(), timeout=5)
+            except (TimeoutError, OSError, TypeError, ValueError):
+                raise PrimeRlmExperimentError("Native RLM daemon cleanup failed") from None
 
 
 _NATIVE_RLM_RUNTIME_ENV = (
@@ -1375,6 +2483,10 @@ def write_native_rlm_experiment_receipt(
     message_delivered: bool,
     child_deleted: bool,
     usage: BudgetUsage,
+    checkpoint_recovered: bool = False,
+    detach_attached: bool = False,
+    cancelled: bool = False,
+    budget_limited: bool = False,
 ) -> Mapping[str, object]:
     """Atomically write a private, public-safe observation for one reservation."""
     if (
@@ -1383,7 +2495,18 @@ def write_native_rlm_experiment_receipt(
         or not isinstance(reservation, NativeRlmExperimentReservation)
         or not reservation.consumed
         or terminal not in {"completed", "failed", "cancelled", "uncertain"}
-        or not all(isinstance(value, bool) for value in (child_started, message_delivered, child_deleted))
+        or not all(
+            isinstance(value, bool)
+            for value in (
+                child_started,
+                message_delivered,
+                child_deleted,
+                checkpoint_recovered,
+                detach_attached,
+                cancelled,
+                budget_limited,
+            )
+        )
         or not isinstance(usage, BudgetUsage)
     ):
         raise PrimeRlmExperimentError("Native RLM experiment receipt is invalid")
@@ -1399,6 +2522,10 @@ def write_native_rlm_experiment_receipt(
         "child_started": child_started,
         "message_delivered": message_delivered,
         "child_deleted": child_deleted,
+        "checkpoint_recovered": checkpoint_recovered,
+        "detach_attached": detach_attached,
+        "cancelled": cancelled,
+        "budget_limited": budget_limited,
         "usage": vars(usage),
         "status": status,
     }
@@ -1420,6 +2547,10 @@ def write_native_rlm_experiment_receipt(
             "child_started": child_started,
             "message_delivered": message_delivered,
             "child_deleted": child_deleted,
+            "checkpoint_recovered": checkpoint_recovered,
+            "detach_attached": detach_attached,
+            "cancelled": cancelled,
+            "budget_limited": budget_limited,
             "usage": MappingProxyType(dict(vars(usage))),
         }
     )

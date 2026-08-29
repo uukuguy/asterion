@@ -474,8 +474,18 @@ export class PrimeDaemonClient {
   }
 
   private suspendPendingRequests(): void {
-    for (const pending of this.pending.values()) {
+    for (const [commandId, pending] of this.pending) {
       this.clearRequestTimeout(pending);
+      // A deferred request is a mutating operation whose terminal result has
+      // deliberately not yet been acknowledged.  Replaying it after a broken
+      // transport can duplicate an in-flight provider action; Prime correctly
+      // reports that situation as uncertain.  Surface uncertainty locally and
+      // let the durable session/context recovery path resolve it instead.
+      if (pending.deferAcknowledgement) {
+        this.pending.delete(commandId);
+        pending.reject(new PrimeDaemonUncertainError(commandId));
+        continue;
+      }
       pending.awaitingReconnect = true;
     }
   }

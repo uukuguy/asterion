@@ -310,6 +310,7 @@ export type ControlCommandType =
   | "session.attach"
   | "session.cancel"
   | "session.create"
+  | "session.detach"
   | "session.pause"
   | "session.resume";
 
@@ -375,6 +376,7 @@ export type ControlCommand =
       "session.attach",
       { readonly cursor: { readonly generation: number; readonly sequence: number } }
     >
+  | ControlCommandBase<"session.detach", ReasonPayload>
   | ControlCommandBase<
       "input.submit",
       {

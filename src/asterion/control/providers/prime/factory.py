@@ -64,6 +64,7 @@ _COMMANDS = (
     "session.attach",
     "session.cancel",
     "session.create",
+    "session.detach",
     "session.pause",
     "session.resume",
 )

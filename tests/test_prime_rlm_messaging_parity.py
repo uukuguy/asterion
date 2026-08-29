@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ from asterion.control.parity_testing import ParityScenarioRegistry
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
 from asterion.control.providers.prime.parity_testing import (
     PRIME_RLM_BOUNDED_SCENARIO_IDS,
+    PRIME_RLM_BOUNDED_VERIFICATION_COMMAND_ID,
     PRIME_RLM_PROVIDER_FREE_SCENARIO_IDS,
     PRIME_RLM_REQUIRED_CHECK_IDS,
     PRIME_RLM_SCENARIO_IDS,
@@ -44,7 +46,15 @@ LEDGER = (
     / "v1"
     / "prime-agent-0.7.1.json"
 )
-PINNED_SOURCE = ROOT / "3th-party" / "prime-agent"
+
+def _pinned_prime_source_root() -> Path:
+    configured = os.environ.get("ASTERION_PRIME_SOURCE_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (ROOT / "3th-party" / "prime-agent").resolve()
+
+
+PINNED_SOURCE = _pinned_prime_source_root()
 RLM_HARNESS = (
     ROOT
     / "tests"
@@ -138,7 +148,14 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                         if time.monotonic() >= deadline:
                             self.fail("the pinned Prime daemon did not become ready")
                         await asyncio.sleep(0.025)
-                    authority = _envelope(execution_domain="trusted-local")
+                    authority = _envelope(
+                        allowed_operations=(
+                            "application.invoke",
+                            "child.message",
+                            "child.spawn",
+                        ),
+                        execution_domain="trusted-local",
+                    )
                     descriptor = {
                         "agentDir": str(agent_dir),
                         "artifactLockPath": str(ARTIFACT_LOCK),
@@ -322,25 +339,25 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                     "rlm.child.terminal",
                     "rlm.child.deleted",
                 ],
-                "message_delivered": False,
+                "message_delivered": True,
                 "teardown_recorded": True,
             },
         )
 
-    def test_rlm_adapter_registers_only_provider_free_evidence_as_pass(self) -> None:
+    def test_rlm_adapter_registers_provider_free_and_exact_bounded_evidence(self) -> None:
         observations = tuple(
             build_prime_rlm_observation(
                 scenario_id=scenario_id,
-                status=(
-                    "EXTERNAL-LIMITED"
-                    if scenario_id in PRIME_RLM_BOUNDED_SCENARIO_IDS
-                    else "PASS"
-                ),
-                checks=PRIME_RLM_REQUIRED_CHECK_IDS.get(scenario_id, ()),
+                status="PASS",
+                checks=PRIME_RLM_REQUIRED_CHECK_IDS[scenario_id],
                 real_prime_runtime=True,
                 fake_daemon=False,
-                provider_operations=0,
-                model_credential_reads=0,
+                provider_operations=(
+                    1 if scenario_id in PRIME_RLM_BOUNDED_SCENARIO_IDS else 0
+                ),
+                model_credential_reads=(
+                    1 if scenario_id in PRIME_RLM_BOUNDED_SCENARIO_IDS else 0
+                ),
             )
             for scenario_id in PRIME_RLM_SCENARIO_IDS
         )
@@ -357,8 +374,8 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
         report = asyncio.run(registry.run(PRIME_RLM_SCENARIO_IDS))
 
         self.assertEqual(registry.registered_scenario_ids, PRIME_RLM_SCENARIO_IDS)
-        self.assertEqual(report.passed_scenario_ids, PRIME_RLM_PROVIDER_FREE_SCENARIO_IDS)
-        self.assertEqual(report.blocking_scenario_ids, PRIME_RLM_BOUNDED_SCENARIO_IDS)
+        self.assertEqual(report.passed_scenario_ids, PRIME_RLM_SCENARIO_IDS)
+        self.assertEqual(report.blocking_scenario_ids, ())
 
     def test_rlm_observation_only_issues_evidence_for_real_provider_free_runs(self) -> None:
         provider_free = build_prime_rlm_observation(
@@ -393,6 +410,45 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                 provider_operations=0,
                 model_credential_reads=0,
             )
+
+    def test_bounded_rlm_observation_requires_the_exact_model_receipt(self) -> None:
+        observation = build_prime_rlm_observation(
+            scenario_id="prime-parity.rlm.child-model",
+            status="PASS",
+            checks=PRIME_RLM_REQUIRED_CHECK_IDS["prime-parity.rlm.child-model"],
+            real_prime_runtime=True,
+            fake_daemon=False,
+            provider_operations=1,
+            model_credential_reads=1,
+        )
+
+        self.assertIsNotNone(observation.evidence_id)
+        self.assertEqual(
+            observation.command_id,
+            PRIME_RLM_BOUNDED_VERIFICATION_COMMAND_ID,
+        )
+        for changes in (
+            {"provider_operations": 0},
+            {"model_credential_reads": 0},
+            {"checks": ()},
+        ):
+            with self.subTest(changes=changes):
+                values = {
+                    "scenario_id": "prime-parity.rlm.child-model",
+                    "status": "PASS",
+                    "checks": PRIME_RLM_REQUIRED_CHECK_IDS[
+                        "prime-parity.rlm.child-model"
+                    ],
+                    "real_prime_runtime": True,
+                    "fake_daemon": False,
+                    "provider_operations": 1,
+                    "model_credential_reads": 1,
+                }
+                values.update(changes)
+                with self.assertRaisesRegex(
+                    Exception, "Prime RLM observation is invalid"
+                ):
+                    build_prime_rlm_observation(**values)
 
     def test_provider_free_rlm_evidence_contract_distinguishes_native_paths(self) -> None:
         self.assertEqual(
@@ -471,6 +527,64 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                 self.assertEqual(contract["feature_ids"], rows[scenario_id]["feature_ids"])
                 self.assertEqual(contract["assertion_ids"], rows[scenario_id]["assertion_ids"])
                 self.assertEqual(contract["fault_ids"], rows[scenario_id]["fault_ids"])
+
+    def test_ledger_binds_six_provider_free_and_three_bounded_rlm_results(self) -> None:
+        ledger = validate_parity_ledger(json.loads(LEDGER.read_text(encoding="utf-8")))
+        expected = {
+            "rlm.cancellation-teardown": "evidence.rlm.3be52858774220c8a7ba9a9a561895292bece505a6b282da243996ac3a52b687",
+            "rlm.child-model": "evidence.rlm.d3eb0f5bd584f109988294073a2c554b2f98047253894c3a62e2e76cb38ae9f8",
+            "rlm.environment": "evidence.rlm.4befbd6e0288efcf04a9a50fc12aaa7620e2c126f13c75b0c3c331770afe9b53",
+            "rlm.generated-program": "evidence.rlm.3c7ff625c8f42358623d2c52d84e465116fe3cde63d1c861cce68909cd39d9db",
+            "rlm.messaging": "evidence.rlm.fd98de641ce90ea6657295f8f492092c28dca490e849ab00438ec3d3f8d3000c",
+            "rlm.recovery": "evidence.rlm.e638c9f2992708cb9dd980a7f6bd2b792a787d4f0f1f5116e3e4d50738d8b6bf",
+            "rlm.recursion-depth": "evidence.rlm.ff6a84e3bdfb5ae9b3980c9b887e94264afa34eabc0185f205448dcb1cc12806",
+            "rlm.registry-lifecycle": "evidence.rlm.7be120a547f5969762d773ba7bbe122a29ab87b89f67931b9c22e09008fe8f29",
+            "rlm.usage-cost": "evidence.rlm.0b41ebbc26f1d298358bae1052fcf47154bbd1f044b82789ac1d1c1a0d40cbfe",
+        }
+        features = {
+            str(row["feature_id"]): row
+            for row in ledger["features"]
+            if str(row["feature_id"]).startswith("rlm.")
+        }
+        for feature_id, row in features.items():
+            with self.subTest(feature_id=feature_id):
+                result = next(
+                    item
+                    for item in row["provider_results"]
+                    if item["provider_id"] == "asterion.prime-gateway"
+                )
+                expected_status = (
+                    "bounded-pass"
+                    if feature_id
+                    in {"rlm.child-model", "rlm.generated-program", "rlm.recursion-depth"}
+                    else "provider-free-pass"
+                )
+                self.assertEqual(result["status"], expected_status)
+                self.assertEqual(result["evidence_ids"], (expected[feature_id],))
+        evidence = tuple(
+            row for row in ledger["evidence"] if str(row["evidence_id"]).startswith("evidence.rlm.")
+        )
+        self.assertEqual(
+            tuple(row["evidence_id"] for row in evidence),
+            tuple(sorted(expected.values())),
+        )
+        for row in evidence:
+            bounded = row["feature_ids"][0] in {
+                "rlm.child-model",
+                "rlm.generated-program",
+                "rlm.recursion-depth",
+            }
+            self.assertEqual(
+                row["boundary"],
+                "bounded-provider" if bounded else "real-prime-provider-free",
+            )
+            self.assertEqual(
+                row["command_id"],
+                PRIME_RLM_BOUNDED_VERIFICATION_COMMAND_ID
+                if bounded
+                else PRIME_RLM_VERIFICATION_COMMAND_ID,
+            )
+            self.assertEqual(row["status"], "pass")
 
 
 if __name__ == "__main__":

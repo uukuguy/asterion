@@ -118,7 +118,6 @@ export class PrimeEventMapper {
         activeSessionId !== undefined &&
         activeSessionId !== this.options.activeSessionId
       ) {
-        this.advanceCursor(outbound);
         return Object.freeze([]);
       }
       if (this.advanceCursor(outbound) === "duplicate") {

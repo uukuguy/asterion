@@ -47,6 +47,8 @@ from asterion.control.providers.prime.factory import (
     prime_control_plane_binding,
 )
 from asterion.control.providers.prime.process import (
+    PrimeDaemonLifecycle,
+    PrimeDaemonLifecycleServer,
     PrimeSidecarLaunchOptions,
     PrimeSidecarProcess,
 )
@@ -546,6 +548,7 @@ async def _run_python_prime_scenario(
         gateway_stderr_sinks: list[IO[bytes]] = []
         exception_observations: list[str] = []
         client: PrimeControlPlaneClient | None = None
+        lifecycle_server: PrimeDaemonLifecycleServer | None = None
 
         def private_stderr_sink() -> IO[bytes]:
             sink = cast(IO[bytes], tempfile.TemporaryFile(mode="w+b"))
@@ -638,6 +641,35 @@ async def _run_python_prime_scenario(
                 "timeoutMs": 2_000,
                 "workspace": str(root / "workspace"),
             }
+            if scenario_id == "prime-loop-checkpoint":
+                async def stop_daemon(_active_session_id: str) -> None:
+                    daemon_observation_segments.append(
+                        cast(
+                            Mapping[str, object],
+                            json.loads(observations_path.read_text()),
+                        )
+                    )
+                    await _stop_process(daemon)
+
+                async def start_daemon(_active_session_id: str) -> None:
+                    nonlocal daemon, socket_path, observations_path, daemon_starts
+                    daemon, socket_path, observations_path = await _start_fake_daemon(
+                        root, scenario_id
+                    )
+                    daemon_starts += 1
+
+                lifecycle_server = PrimeDaemonLifecycleServer(
+                    lifecycle=PrimeDaemonLifecycle(
+                        stop=stop_daemon,
+                        start=start_daemon,
+                        timeout=5,
+                    ),
+                    socket_path=root / "daemon-lifecycle.sock",
+                    token="a" * 64,
+                    session_id="session-1",
+                )
+                await lifecycle_server.start()
+                descriptor["daemonLifecycle"] = dict(lifecycle_server.descriptor)
             (root / "skill.md").write_text("# provider-free skill\n")
             process = await PrimeSidecarProcess.start(
                 PrimeSidecarLaunchOptions(
@@ -863,6 +895,17 @@ async def _run_python_prime_scenario(
                     expected_count=2 if scenario_id == "prime-loop-application" else 1,
                     until_terminal=scenario_id == "prime-loop-application",
                 )
+                if scenario_id == "prime-loop-checkpoint":
+                    checkpoint_deadline = asyncio.get_running_loop().time() + 5
+                    while "checkpoint.created" not in {
+                        entry.record.payload["event"]["type"]
+                        for entry in journal.replay(JournalCursor(0))
+                        if entry.record.kind == "event.accepted"
+                    }:
+                        if asyncio.get_running_loop().time() >= checkpoint_deadline:
+                            raise AssertionError("checkpoint receipt did not materialize")
+                        await asyncio.sleep(0.025)
+                        await host.pump()
             elif scenario_id == "prime-loop-detach-attach":
                 await host.pump()
                 await close_host_for_restart(crashed=False)
@@ -926,7 +969,23 @@ async def _run_python_prime_scenario(
             else:
                 actual_action_statuses = tuple(action.status for action in actions)
                 if actual_action_statuses != expected_action_statuses:
-                    raise AssertionError(f"{scenario_id} action count is invalid")
+                    journal_kinds = tuple(
+                        entry.record.kind
+                        for entry in journal.replay(JournalCursor(0))
+                    )
+                    daemon_observations = json.loads(observations_path.read_text())
+                    gateway_stderr = []
+                    for sink in gateway_stderr_sinks:
+                        sink.seek(0)
+                        gateway_stderr.append(
+                            sink.read().decode("utf-8", errors="replace")
+                        )
+                    raise AssertionError(
+                        f"{scenario_id} action statuses are invalid: "
+                        f"{actual_action_statuses!r}; actions={actions!r}; "
+                        f"journal={journal_kinds!r}; daemon={daemon_observations!r}; "
+                        f"gateway_stderr={gateway_stderr!r}"
+                    )
             journal_entries = tuple(journal.replay(JournalCursor(0)))
             journal_kinds = tuple(entry.record.kind for entry in journal_entries)
             if (
@@ -946,6 +1005,8 @@ async def _run_python_prime_scenario(
                 raise AssertionError("budget rejection executed unexpectedly")
             final_host_snapshot = host.snapshot()
             await host.close()
+            if lifecycle_server is not None:
+                await lifecycle_server.close()
             evidence_gaps.update(final_host_snapshot.evidence_gaps)
             final_graph = recorder.snapshot()
             if final_graph is not None:

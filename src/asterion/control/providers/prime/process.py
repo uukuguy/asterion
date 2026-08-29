@@ -7,7 +7,7 @@ import json
 import math
 import os
 import re
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,10 +18,12 @@ from asterion.immutable import RedactedImmutableMapping
 
 
 PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1"
+PRIME_DAEMON_LIFECYCLE_PROTOCOL = "asterion.prime-daemon-lifecycle/v1"
 _MAX_FRAME_BYTES = 1024 * 1024
 _MAX_PRIVATE_ATTACHMENT_FRAME_BYTES = 12 * 1024 * 1024
 _PRIVATE_PROCESS_UMASK = 0o077
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_LIFECYCLE_TOKEN = re.compile(r"^[0-9a-f]{64}$")
 _PUBLIC_ENV_ALLOWLIST = frozenset(
     {
         "HOME",
@@ -39,6 +41,216 @@ class PrimeSidecarProcessError(RuntimeError):
 
     def __init__(self, message: str = "Prime sidecar process failed") -> None:
         super().__init__(message)
+
+
+class PrimeDaemonLifecycleFailure(PrimeSidecarProcessError):
+    """A fixed, safe host lifecycle failure category."""
+
+    _PHASES = frozenset({"coordinator", "manifest", "prepare", "shutdown", "fence", "start", "restore"})
+
+    def __init__(self, phase: str = "coordinator") -> None:
+        if phase not in self._PHASES:
+            phase = "coordinator"
+        super().__init__()
+        self.phase = phase
+
+
+class PrimeDaemonLifecycle:
+    """Host-injected, serialized restart boundary for one owned Prime daemon."""
+
+    def __init__(
+        self,
+        *,
+        stop: Callable[[str], Awaitable[None]],
+        start: Callable[[str], Awaitable[None]],
+        timeout: float,
+    ) -> None:
+        if not callable(stop) or not callable(start) or not _positive_finite(timeout):
+            raise PrimeSidecarProcessError()
+        self._stop = stop
+        self._start = start
+        self._timeout = float(timeout)
+        self._lock = asyncio.Lock()
+
+    async def restart(self, active_session_id: str) -> None:
+        if not isinstance(active_session_id, str) or _REQUEST_ID.fullmatch(active_session_id) is None:
+            raise PrimeSidecarProcessError()
+        async with self._lock:
+            try:
+                await asyncio.wait_for(self._stop(active_session_id), timeout=self._timeout)
+                await asyncio.wait_for(self._start(active_session_id), timeout=self._timeout)
+            except PrimeDaemonLifecycleFailure:
+                raise
+            except (OSError, RuntimeError, TimeoutError, ValueError):
+                raise PrimeSidecarProcessError() from None
+
+
+class PrimeDaemonLifecycleServer:
+    """Private, single-purpose restart endpoint injected by the host.
+
+    The Node gateway receives only this socket address and an opaque bearer
+    token.  The owned daemon argv, environment, and process handles remain in
+    the Python host, so a checkpoint cannot turn into arbitrary process
+    execution.
+    """
+
+    def __init__(
+        self,
+        *,
+        lifecycle: PrimeDaemonLifecycle,
+        socket_path: Path,
+        token: str,
+        session_id: str,
+    ) -> None:
+        if (
+            not isinstance(lifecycle, PrimeDaemonLifecycle)
+            or not isinstance(socket_path, Path)
+            or not isinstance(token, str)
+            or _LIFECYCLE_TOKEN.fullmatch(token) is None
+            or not isinstance(session_id, str)
+            or _REQUEST_ID.fullmatch(session_id) is None
+        ):
+            raise PrimeSidecarProcessError()
+        self._lifecycle = lifecycle
+        self._socket_path = socket_path
+        self._token = token
+        self._session_id = session_id
+        self._server: asyncio.AbstractServer | None = None
+        self._restart_tasks: set[asyncio.Task[None]] = set()
+
+    @property
+    def descriptor(self) -> Mapping[str, str]:
+        return MappingProxyType({
+            "socketPath": str(self._socket_path),
+            "token": self._token,
+        })
+
+    async def start(self) -> None:
+        if self._server is not None:
+            raise PrimeSidecarProcessError()
+        parent = self._socket_path.parent
+        try:
+            if not parent.is_dir() or parent.is_symlink():
+                raise OSError
+            if self._socket_path.exists() or self._socket_path.is_symlink():
+                raise OSError
+            self._server = await asyncio.start_unix_server(
+                self._handle_client, path=str(self._socket_path)
+            )
+            self._socket_path.chmod(0o600)
+        except (OSError, ValueError):
+            await self.close()
+            raise PrimeSidecarProcessError() from None
+
+    async def close(self) -> None:
+        server, self._server = self._server, None
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+        tasks, self._restart_tasks = self._restart_tasks, set()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            if self._socket_path.exists() and not self._socket_path.is_symlink():
+                self._socket_path.unlink()
+        except OSError:
+            raise PrimeSidecarProcessError() from None
+
+    async def _handle_client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            frame = await asyncio.wait_for(reader.readline(), timeout=5)
+            request = self._validated_restart_request(frame)
+            if request is not None:
+                request_id, active_session_id = request
+                # This connection belongs to the predecessor gateway.  Prime
+                # deliberately tears it down during its prepared shutdown, so
+                # only acknowledge admission here; the successor observes the
+                # durable, request-id-bound completion receipt.
+                task = asyncio.create_task(
+                    self._restart_and_record(request_id, active_session_id)
+                )
+                self._restart_tasks.add(task)
+                task.add_done_callback(self._restart_tasks.discard)
+                writer.write(_encode_frame({
+                    "protocol": PRIME_DAEMON_LIFECYCLE_PROTOCOL,
+                    "id": request_id,
+                    "type": "accepted",
+                }))
+                await writer.drain()
+        except (OSError, TimeoutError, ValueError, PrimeSidecarProcessError):
+            pass
+        finally:
+            writer.close()
+            with suppress(OSError):
+                await writer.wait_closed()
+
+    async def _restart_and_record(self, request_id: str, active_session_id: str) -> None:
+        response: Mapping[str, object]
+        try:
+            await self._lifecycle.restart(active_session_id)
+            response = {
+                "protocol": PRIME_DAEMON_LIFECYCLE_PROTOCOL,
+                "id": request_id,
+                "type": "restarted",
+            }
+        except PrimeDaemonLifecycleFailure as error:
+            response = {
+                "protocol": PRIME_DAEMON_LIFECYCLE_PROTOCOL,
+                "id": request_id,
+                "type": "error",
+                "phase": error.phase,
+            }
+        except PrimeSidecarProcessError:
+            response = {
+                "protocol": PRIME_DAEMON_LIFECYCLE_PROTOCOL,
+                "id": request_id,
+                "type": "error",
+                "phase": "coordinator",
+            }
+        self._write_restart_receipt(request_id, response)
+
+    def _write_restart_receipt(self, request_id: str, response: Mapping[str, object]) -> None:
+        """Durably publish only the fixed lifecycle outcome for its requester."""
+        target = self._socket_path.parent / f".asterion-lifecycle-{request_id}.json"
+        temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        try:
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
+                os.fchmod(handle.fileno(), 0o600)
+                handle.write(_encode_frame(response))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, target)
+        except OSError:
+            with suppress(OSError):
+                temporary.unlink()
+            raise PrimeSidecarProcessError() from None
+
+    def _validated_restart_request(self, frame: bytes) -> tuple[str, str] | None:
+        if not frame or len(frame) > 4096:
+            return None
+        try:
+            request = _decode_frame(frame)
+        except PrimeSidecarProcessError:
+            return None
+        request_id = request.get("id")
+        if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
+            return None
+        if (
+            set(request) != {"protocol", "id", "type", "token", "session_id", "active_session_id"}
+            or request.get("protocol") != PRIME_DAEMON_LIFECYCLE_PROTOCOL
+            or request.get("type") != "restart"
+            or request.get("token") != self._token
+            or request.get("session_id") != self._session_id
+            or not isinstance(request.get("active_session_id"), str)
+            or _REQUEST_ID.fullmatch(request["active_session_id"]) is None
+        ):
+            return None
+        return request_id, request["active_session_id"]
 
 
 @dataclass(frozen=True, repr=False)
@@ -381,6 +593,7 @@ class PrimeSidecarProcess:
                 pass_fds=plan.pass_fds,
                 umask=_PRIVATE_PROCESS_UMASK,
                 limit=_MAX_FRAME_BYTES + 1,
+                start_new_session=True,
             )
             return self._process
         except (OSError, ValueError):
@@ -528,6 +741,7 @@ def _validate_response(
         "events.stream": "events.batch",
         "private.read": "private.value",
         "rlm.binding.read": "rlm.binding.value",
+        "rlm.message.binding.read": "rlm.message.binding.value",
         "rlm.lifecycle.read": "rlm.lifecycle.batch",
         "session-context.cancel": "session-context.cancel.accepted",
         "session-context.execute": "session-context.receipt",
@@ -544,6 +758,7 @@ def _validate_response(
             "events.batch",
             "private.value",
             "rlm.binding.value",
+            "rlm.message.binding.value",
             "rlm.lifecycle.batch",
             "session-context.cancel.accepted",
             "session-context.receipt",
@@ -557,7 +772,10 @@ def _validate_response(
         expected = expected | {"lifecycle"}
         if not isinstance(response.get("lifecycle"), list):
             raise PrimeSidecarProcessError()
-    if response.get("type") == "rlm.binding.value":
+    if response.get("type") in {
+        "rlm.binding.value",
+        "rlm.message.binding.value",
+    }:
         expected = expected | {"binding"}
         if not isinstance(response.get("binding"), Mapping):
             raise PrimeSidecarProcessError()

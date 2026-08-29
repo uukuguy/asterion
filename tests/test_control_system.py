@@ -104,6 +104,7 @@ def _control_factories(calls: list[str], *, capabilities: tuple[str, ...] | None
                     "session.attach",
                     "session.cancel",
                     "session.create",
+                    "session.detach",
                     "session.pause",
                     "session.resume",
                 ),

@@ -268,7 +268,31 @@ export async function startFakePrimeDaemon(options = {}) {
       cost_micros: 0,
       deadline_ms: 10_000,
     };
+    const childSpawnBudget = {
+      controller_tokens: 1,
+      application_tokens: 10,
+      child_tokens: 10,
+      aggregate_tokens: 21,
+      cost_micros: 0,
+      deadline_ms: 10_000,
+    };
     const scenarioId = options.scenarioId ?? "embedded";
+    const applicationRequest = (id) => ({
+      operation: "application.invoke",
+      payload: {
+        target: {
+          kind: "application",
+          provider_id: "example.provider",
+          application_id: "alpha",
+          version: "1.0.0",
+          runtime_id: "fake.runtime",
+        },
+        input_text: `SENTINEL_TOKEN ${id}`,
+        expected_artifacts: ["report.alpha"],
+        idempotency_key: `${id}-application`,
+        budget,
+      },
+    });
     if (
       scenarioId === "prime-loop-application" ||
       scenarioId === "prime-loop-gateway-crash" ||
@@ -277,31 +301,19 @@ export async function startFakePrimeDaemon(options = {}) {
       scenarioId === "prime-loop-cancel" ||
       scenarioId === "prime-loop-budget"
     ) {
-      return {
-        operation: "application.invoke",
-        payload: {
-          target: {
-            kind: "application",
-            provider_id: "example.provider",
-            application_id: "alpha",
-            version: "1.0.0",
-            runtime_id: "fake.runtime",
-          },
-          input_text: `SENTINEL_TOKEN ${scenarioId}`,
-          expected_artifacts: ["report.alpha"],
-          idempotency_key: `${scenarioId}-application`,
-          budget,
-        },
-      };
+      return applicationRequest(scenarioId);
     }
     if (scenarioId === "prime-loop-child") {
+      if (createCount > 1) {
+        return applicationRequest(`${scenarioId}-child`);
+      }
       return {
         operation: "child.spawn",
         payload: {
           child_id: "child-1",
           goal_text: "SENTINEL_PATH child goal",
           idempotency_key: `${scenarioId}-child`,
-          budget,
+          budget: childSpawnBudget,
         },
       };
     }
@@ -316,13 +328,16 @@ export async function startFakePrimeDaemon(options = {}) {
       };
     }
     if (scenarioId === "prime-loop-redaction") {
+      if (createCount > 1) {
+        return applicationRequest(`${scenarioId}-child`);
+      }
       return {
         operation: "child.spawn",
         payload: {
           child_id: "child-1",
           goal_text: "SENTINEL_PATH SENTINEL_OUTPUT child goal",
           idempotency_key: `${scenarioId}-child`,
-          budget,
+          budget: childSpawnBudget,
         },
       };
     }
@@ -538,6 +553,7 @@ export async function startFakePrimeDaemon(options = {}) {
               createCount += 1;
               command.fakeActiveSessionId = `prime-root-${createCount}`;
               command.fakeTranscriptSessionId = `prime-transcript-${createCount}`;
+              activeSessionSockets.set(command.fakeActiveSessionId, socket);
               transcriptByActiveSession.set(
                 command.fakeActiveSessionId,
                 command.fakeTranscriptSessionId,
@@ -601,6 +617,14 @@ export async function startFakePrimeDaemon(options = {}) {
                     }
                   })
                   .finally(() => {
+                    if (
+                      ["prime-loop-child", "prime-loop-redaction"].includes(
+                        options.scenarioId ?? "embedded",
+                      ) &&
+                      command.fakeActiveSessionId !== "prime-root-1"
+                    ) {
+                      emitGoalUpdate(command.fakeActiveSessionId);
+                    }
                     void persistObservations();
                   });
               }, 0);

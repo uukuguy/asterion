@@ -10,7 +10,13 @@ import type {
   PrimeDaemonCursor,
   PrimeDaemonHello,
   PrimeDaemonResponse,
+  PrimeHeartbeatCommand,
 } from "./daemon-wire.js";
+import { validatePrimeHeartbeatCommand } from "./daemon-wire.js";
+import type {
+  GatewayLongRunningCommandBinding,
+  GatewayLongRunningResult,
+} from "./durable-store.js";
 import {
   projectPrimeSessionTree,
 } from "./session-tree.js";
@@ -82,6 +88,7 @@ export interface PrimeSessionCreateOptions {
   readonly sessionId: string;
   readonly privateConfig: PrimePrivateSessionConfig;
   readonly bindIdentity: (identity: PrimeSessionInitialBinding) => Promise<void>;
+  readonly longRunningStore?: PrimeLongRunningStore;
 }
 
 export interface PrimeSessionRestoreOptions {
@@ -91,6 +98,20 @@ export interface PrimeSessionRestoreOptions {
   readonly transcriptSessionId: string;
   readonly continuationId?: string;
   readonly sessionPath?: string;
+  readonly longRunningStore?: PrimeLongRunningStore;
+}
+
+export interface PrimeLongRunningStore {
+  bindLongRunningCommand(
+    commandId: string,
+    command: unknown,
+  ): Promise<GatewayLongRunningCommandBinding>;
+  commitLongRunningResult(
+    commandId: string,
+    status: GatewayLongRunningResult["status"],
+  ): Promise<GatewayLongRunningResult>;
+  longRunningBinding(commandId: string): GatewayLongRunningCommandBinding | undefined;
+  longRunningResult(commandId: string): GatewayLongRunningResult | undefined;
 }
 
 export type PrimeInputDelivery = "direct" | "steer" | "follow_up";
@@ -701,6 +722,23 @@ function validateStats(
   });
 }
 
+function treeEntryIsOnActivePath(
+  tree: PrimeSessionTreeProjection,
+  entryId: string,
+): boolean {
+  const parents = new Map(
+    tree.nodes.map((node) => [node.entry_id, node.parent_id]),
+  );
+  let current = tree.leafId;
+  while (current !== null) {
+    if (current === entryId) {
+      return true;
+    }
+    current = parents.get(current) ?? null;
+  }
+  return false;
+}
+
 function validateState(
   response: PrimeDaemonResponse,
   activeSessionId: string,
@@ -708,6 +746,7 @@ function validateState(
   sessionPath: string,
 ): Readonly<{
   active: boolean;
+  idle: boolean;
   messageCount: number;
   nameSha256: string | null;
 }> {
@@ -733,6 +772,13 @@ function validateState(
       response.data.isSessionActive ||
       response.data.isStreaming ||
       response.data.isCompacting,
+    // `isSessionActive` means that the resident Prime root exists.  It stays
+    // true for a paused root, so it must not prevent a checkpoint after the
+    // daemon has reported the root quiescent.
+    idle:
+      response.data.activity === "idle" &&
+      !response.data.isStreaming &&
+      !response.data.isCompacting,
     messageCount: response.data.messageCount,
     nameSha256:
       response.data.sessionName === undefined
@@ -817,6 +863,7 @@ export class PrimeSession {
     sessionPath: string | undefined,
     supervisorGeneration: string,
     nativeChildConfig?: PrimePrivateSessionConfig,
+    private readonly longRunningStore?: PrimeLongRunningStore,
   ) {
     this.transport = transport;
     this.currentSupervisorGeneration = supervisorGeneration;
@@ -946,6 +993,7 @@ export class PrimeSession {
         sessionPath,
         generation,
         privateConfig,
+        options.longRunningStore,
       );
       await session.ensureManualCompactionOnly("initial-policy");
       await session.request(
@@ -992,6 +1040,8 @@ export class PrimeSession {
         options.continuationId ?? continuationIdFor(options.sessionId),
         options.sessionPath,
         generation,
+        undefined,
+        options.longRunningStore,
       );
     } catch (error) {
       if (error instanceof PrimeSessionError) {
@@ -1005,6 +1055,56 @@ export class PrimeSession {
     try {
       return this.transport.subscribe(listener);
     } catch {
+      throw new PrimeSessionError();
+    }
+  }
+
+  async executeLongRunningCommand(
+    commandId: string,
+    command: unknown,
+  ): Promise<GatewayLongRunningResult> {
+    try {
+      const store = this.longRunningStore;
+      const validated = validatePrimeHeartbeatCommand(command);
+      if (
+        store === undefined ||
+        !OPAQUE_ID.test(commandId) ||
+        (
+          validated.type !== "heartbeats_list" &&
+          validated.activeSessionId !== this.activeSessionId
+        )
+      ) {
+        throw new PrimeSessionError();
+      }
+      const recoveredBinding = store.longRunningBinding(commandId);
+      await store.bindLongRunningCommand(commandId, validated);
+      const committed = store.longRunningResult(commandId);
+      if (committed !== undefined) {
+        return committed;
+      }
+      if (recoveredBinding !== undefined) {
+        return await store.commitLongRunningResult(commandId, "uncertain");
+      }
+
+      let status: GatewayLongRunningResult["status"];
+      try {
+        const response = await this.transport.request(
+          validated as PrimeHeartbeatCommand,
+          this.longRunningCommandId(commandId),
+        );
+        status = response.command !== validated.type
+          ? "uncertain"
+          : response.success
+            ? "succeeded"
+            : "failed";
+      } catch {
+        status = "uncertain";
+      }
+      return await store.commitLongRunningResult(commandId, status);
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
       throw new PrimeSessionError();
     }
   }
@@ -1351,6 +1451,26 @@ export class PrimeSession {
     if (admissionUncertain) {
       throw new PrimePromptAdmissionUncertainError();
     }
+    await this.request({
+      type: "wait_for_idle",
+      activeSessionId: this.activeSessionId,
+    }, `${commandId}-idle`);
+  }
+
+  async isIdle(): Promise<boolean> {
+    if (this.currentSessionPath === undefined) {
+      throw new PrimeSessionError();
+    }
+    const state = validateState(
+      await this.request({
+        type: "get_state",
+        activeSessionId: this.activeSessionId,
+      }, "checkpoint-state"),
+      this.activeSessionId,
+      this.transcriptSessionId,
+      this.currentSessionPath,
+    );
+    return state.idle;
   }
 
   async resume(commandId: string): Promise<void> {
@@ -1434,14 +1554,23 @@ export class PrimeSession {
       }
     }
     try {
+      privateDiagnosticCancellationStage("abort");
       await this.request({
         type: "abort_and_clear_queue",
         activeSessionId: this.activeSessionId,
       }, `${commandId}-abort`);
+    } catch {
+      // The recovered daemon can reject a cooperative abort after it has already
+      // restored the resident session.  The terminal kill remains required and
+      // is the authoritative cancellation boundary.
+    }
+    try {
+      privateDiagnosticCancellationStage("kill");
       await this.request({
         type: "kill",
         activeSessionId: this.activeSessionId,
       }, `${commandId}-kill`);
+      privateDiagnosticCancellationStage("kill-confirmed");
     } catch {
       throw new PrimeSessionError();
     }
@@ -1661,13 +1790,15 @@ export class PrimeSession {
         const afterTree = await this.readSessionTree(
           `context-${commandId}-compact-after-tree`,
         );
-        const leaf = afterTree.nodes.find(
-          (node) => node.entry_id === afterTree.leafId,
+        const compactionNodes = afterTree.nodes.filter(
+          (node) =>
+            node.kind === "compaction" &&
+            node.parent_id === baseline.leafId &&
+            node.token_count === data.tokensBefore,
         );
         if (
-          leaf?.kind !== "compaction" ||
-          leaf.parent_id !== baseline.leafId ||
-          leaf.token_count !== data.tokensBefore ||
+          compactionNodes.length !== 1 ||
+          !treeEntryIsOnActivePath(afterTree, compactionNodes[0]!.entry_id) ||
           !afterTree.nodes.some(
             (node) => node.entry_id === data.firstKeptEntryId,
           ) ||
@@ -1769,13 +1900,13 @@ export class PrimeSession {
         const afterTree = await this.readSessionTree(
           `context-${commandId}-branch-summary-after-tree`,
         );
-        const leaf = afterTree.nodes.find(
-          (node) => node.entry_id === afterTree.leafId,
+        const summaryNode = afterTree.nodes.find(
+          (node) => node.entry_id === summary.id,
         );
         if (
-          afterTree.leafId !== summary.id ||
-          leaf?.kind !== "summary" ||
-          leaf.parent_id !== summary.parentId ||
+          summaryNode?.kind !== "summary" ||
+          summaryNode.parent_id !== summary.parentId ||
+          !treeEntryIsOnActivePath(afterTree, summary.id) ||
           summary.fromId !== (summary.parentId ?? "root")
         ) {
           throw new PrimeSessionError();
@@ -2565,6 +2696,11 @@ export class PrimeSession {
     return `${this.sessionId}-context-${commandId}-${purpose}`;
   }
 
+  private longRunningCommandId(commandId: string): string {
+    const digest = createHash("sha256").update(commandId, "utf8").digest("hex");
+    return `${this.sessionId}-long-running-${digest.slice(0, 32)}`;
+  }
+
   private validateContinuationTarget(
     commandId: string,
     value: PrimeContinuationLocator,
@@ -2600,5 +2736,11 @@ export class PrimeSession {
       supervisorGeneration: value.supervisorGeneration,
       sessionPath: value.sessionPath,
     });
+  }
+}
+
+function privateDiagnosticCancellationStage(stage: "abort" | "kill" | "kill-confirmed"): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+    process.stderr.write(`asterion-prime-cancel-stage:${stage}\n`);
   }
 }

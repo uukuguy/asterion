@@ -53,6 +53,19 @@ const client = new PrimeDaemonClient({
   connectTimeoutMs: 5_000,
   requestTimeoutMs: 15_000,
 });
+const boundedModel = process.env.ASTERION_PRIME_SESSION_CONTEXT_BOUNDED_MODEL;
+const bounded = typeof boundedModel === "string" && boundedModel.length > 0;
+const primeBoundedModel = boundedModel === "deepseek-v4-flash-0731"
+  ? "deepseek-v4-flash"
+  : boundedModel;
+const modelBudget = Object.freeze({
+  controller_tokens: 50_000,
+  application_tokens: 0,
+  child_tokens: 0,
+  aggregate_tokens: 50_000,
+  cost_micros: 500_000,
+  deadline_ms: 90_000,
+});
 
 function requireRecord(value, label) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -96,8 +109,9 @@ async function createResident(commandId, name, sessionPath, lifecycle = "residen
       cwd: workspace,
       agentDir,
       sessionDir,
-      provider: "anthropic",
-      model: "claude-sonnet-4-5",
+      provider: bounded ? "deepseek" : "anthropic",
+      model: bounded ? primeBoundedModel : "claude-sonnet-4-5",
+      ...(bounded ? { models: [`deepseek/${primeBoundedModel}`] } : {}),
       skills: [],
       autonomous: {
         enabled: false,
@@ -121,6 +135,22 @@ async function createResident(commandId, name, sessionPath, lifecycle = "residen
   };
   if (!isAbsolute(identity.createSessionPath) || !deferred.acknowledge()) {
     throw new Error("real Prime resident identity failed");
+  }
+  if (bounded) {
+    let selected;
+    try {
+      selected = await client.request({
+        type: "set_model",
+        activeSessionId: identity.activeSessionId,
+        provider: "deepseek",
+        modelId: primeBoundedModel,
+      }, `${commandId}-bounded-model`);
+    } catch {
+      throw new Error("real Prime bounded model selection failed");
+    }
+    if (!selected.success || selected.command !== "set_model") {
+      throw new Error("real Prime bounded model selection failed");
+    }
   }
   const headerResponse = await client.request({
     type: "get_session_header",
@@ -195,6 +225,16 @@ function createFixtureSession() {
     ],
     true,
   );
+  if (bounded) {
+    const syntheticHistory = "context-history ".repeat(320);
+    for (let index = 0; index < 32; index += 1) {
+      manager.appendMessage({
+        role: "user",
+        content: syntheticHistory,
+        timestamp: 10 + index,
+      });
+    }
+  }
   manager.flushNow();
   const sessionPath = manager.getSessionFile();
   if (typeof sessionPath !== "string" || !isAbsolute(sessionPath)) {
@@ -307,6 +347,44 @@ try {
   );
   if (!label.acknowledge() || label.result.labelSha256 !== sha256("PRIVATE_UPDATED_LABEL")) {
     throw new Error("real Prime label projection failed");
+  }
+  if (bounded) {
+    const compactBaseline = await session.measureContextModelBaseline(
+      "bounded-compact",
+      session.continuationId,
+    );
+    const compacted = await session.compactContext(
+      "bounded-compact",
+      session.continuationId,
+      "Preserve the active task context concisely.",
+      modelBudget,
+      compactBaseline,
+    );
+    if (compacted.status !== "succeeded") {
+      throw new Error(`real Prime bounded compaction failed-${compacted.status}`);
+    }
+    if (!compacted.acknowledge()) {
+      throw new Error("real Prime bounded compaction unacknowledged");
+    }
+    const summaryBaseline = await session.measureContextModelBaseline(
+      "bounded-summary",
+      session.continuationId,
+      branchEntryId,
+    );
+    const summarized = await session.summarizeContextBranch(
+      "bounded-summary",
+      session.continuationId,
+      branchEntryId,
+      "Summarize this branch without exposing private content.",
+      modelBudget,
+      summaryBaseline,
+    );
+    if (summarized.status !== "succeeded") {
+      throw new Error(`real Prime bounded branch summary failed-${summarized.status}`);
+    }
+    if (!summarized.acknowledge()) {
+      throw new Error("real Prime bounded branch summary unacknowledged");
+    }
   }
   const beforeNavigation = await session.readContextTree(
     "tree-before-navigation",
@@ -456,8 +534,8 @@ try {
     daemon_protocol: hello.protocolVersion,
     daemon_schema_revision: hello.schemaRevision,
     fake_daemon: false,
-    model_credential_reads: 0,
-    provider_operations: 0,
+    model_credential_reads: bounded ? 1 : 0,
+    provider_operations: bounded ? 2 : 0,
     runtime_build_id: hello.runtimeBuildId,
     scenario_checks: {
       "prime-parity.session.delivery": [
@@ -488,6 +566,14 @@ try {
         "prime-status-roundtrip-passed",
         "status-private-fields-redacted",
       ],
+      ...(bounded ? {
+        "prime-parity.session.branch-summaries-labels": [
+          "bounded-summary-model-operation-passed",
+        ],
+        "prime-parity.session.compaction": [
+          "bounded-compaction-model-operation-passed",
+        ],
+      } : {}),
     },
   })}\n`);
 } finally {

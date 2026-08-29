@@ -10,6 +10,8 @@ import {
   PrimeGatewaySidecar,
   PRIME_GATEWAY_IPC_PROTOCOL,
   loadPrimeEcosystemModule,
+  boundedRlmActionBudget,
+  mayAdmitProviderOwnedRlmDeletion,
   servePrimeGatewaySidecar,
 } from "../dist/src/main.js";
 import { PRIME_ECOSYSTEM_LOCK_CONTRACT } from "../dist/src/ecosystem.js";
@@ -200,6 +202,40 @@ test("main resolves the exact ecosystem lock contract before importing its bundl
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+});
+
+test("native RLM actions reserve a bounded slice and use the unexpired child deadline", () => {
+  const budget = boundedRlmActionBudget({
+    controller_tokens: 50_000,
+    application_tokens: 50_000,
+    child_tokens: 50_000,
+    aggregate_tokens: 150_000,
+    cost_micros: 500_000,
+    deadline_ms: 600_000,
+  }, 1_025_000, 1_000_000);
+
+  assert.equal(budget.deadline_ms, 25_000);
+  assert.equal(budget.controller_tokens, 10_000);
+  assert.equal(budget.application_tokens, 10_000);
+  assert.equal(budget.child_tokens, 10_000);
+  assert.equal(budget.aggregate_tokens, 30_000);
+  assert.equal(budget.cost_micros, 100_000);
+});
+
+test("native RLM deletion is provider-owned only for one started, non-deleted child", () => {
+  const started = [{
+    type: "rlm.child.started",
+    child_id: "child-1",
+    native_identity_digest: "a".repeat(64),
+  }];
+
+  assert.equal(mayAdmitProviderOwnedRlmDeletion(started, "child-1"), true);
+  assert.equal(mayAdmitProviderOwnedRlmDeletion([], "child-1"), false);
+  assert.equal(mayAdmitProviderOwnedRlmDeletion([
+    ...started,
+    { type: "rlm.child.terminal", child_id: "child-1", status: "completed" },
+    { type: "rlm.child.deleted", child_id: "child-1" },
+  ], "child-1"), false);
 });
 
 class FakePrivateValues {
@@ -395,12 +431,14 @@ test("private ecosystem activation reaches the injected adapter and projects the
     });
     gateway.activateEcosystem = (frame) => adapter.activate(frame);
     const { sidecar } = createSidecar({ gateway });
+
     const response = await sidecar.handleEnvelope({
       protocol: PRIME_GATEWAY_IPC_PROTOCOL,
       id: "ecosystem-request-1",
       type: "ecosystem_activate",
       frame: state.frame,
     });
+
     assert.deepEqual(response, {
       protocol: PRIME_GATEWAY_IPC_PROTOCOL,
       id: "ecosystem-request-1",

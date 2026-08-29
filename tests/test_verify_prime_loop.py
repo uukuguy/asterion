@@ -88,6 +88,97 @@ def _authorization(**authority_changes: object) -> dict[str, object]:
 
 
 class TestVerifyPrimeLoop(unittest.TestCase):
+    def test_native_rlm_public_usage_exposes_only_finite_counts(self) -> None:
+        usage = prime_loop._native_rlm_public_usage(
+            {"aggregate_tokens": 9_000, "cost_micros": 0}
+        )
+
+        self.assertEqual(
+            usage,
+            {"aggregate_tokens": 9_000, "cost_micros": 0},
+        )
+        self.assertEqual(
+            prime_loop._native_rlm_public_usage(
+                {
+                    "controller_tokens": 9_000,
+                    "application_tokens": 0,
+                    "child_tokens": 0,
+                    "aggregate_tokens": 9_000,
+                    "cost_micros": 0,
+                }
+            ),
+            {"aggregate_tokens": 9_000, "cost_micros": 0},
+        )
+        for invalid in (
+            {"aggregate_tokens": 0, "cost_micros": 0},
+            {"aggregate_tokens": 9_000, "cost_micros": -1},
+            {
+                "aggregate_tokens": 9_000,
+                "cost_micros": 0,
+                "raw_output": "SENTINEL_PRIVATE_OUTPUT",
+            },
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                PrimeVerificationError,
+                "usage is invalid",
+            ):
+                prime_loop._native_rlm_public_usage(invalid)
+
+    def test_bounded_environment_uses_only_the_selected_private_model_credential(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text(
+                "ASTERION_PRIME_EXPERIMENT_MODEL=deepseek-v4-flash\n"
+                "DEEPSEEK_API_KEY=current-private-key\n"
+                "UNRELATED_SECRET=must-not-cross-boundary\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(prime_loop.Path, "cwd", return_value=root),
+                mock.patch.dict(os.environ, {"HOME": "/private/home", "PATH": "/private/bin"}, clear=True),
+            ):
+                environment = prime_loop.resolve_bounded_prime_environment()
+
+        self.assertEqual(environment["ASTERION_PRIME_EXPERIMENT_MODEL"], "deepseek-v4-flash")
+        self.assertEqual(environment["DEEPSEEK_API_KEY"], "current-private-key")
+        self.assertNotIn("UNRELATED_SECRET", environment)
+
+    def test_bounded_environment_rejects_missing_selected_credential_without_rendering_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text(
+                "ASTERION_PRIME_EXPERIMENT_MODEL=deepseek-v4-flash\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(prime_loop.Path, "cwd", return_value=root),
+                mock.patch.dict(os.environ, {"HOME": "/private/home", "PATH": "/private/bin"}, clear=True),
+                self.assertRaises(prime_loop.PrimeExternalLimit) as raised,
+            ):
+                prime_loop.resolve_bounded_prime_environment()
+
+        self.assertNotIn("DEEPSEEK_API_KEY", str(raised.exception))
+
+    def test_bounded_environment_rejects_unsupported_model_as_external_limited(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text(
+                "ASTERION_PRIME_EXPERIMENT_MODEL=unsupported-private-model\n"
+                "DEEPSEEK_API_KEY=current-private-key\n"
+            )
+            with (
+                mock.patch.object(prime_loop.Path, "cwd", return_value=root),
+                mock.patch.dict(
+                    os.environ,
+                    {"HOME": "/private/home", "PATH": "/private/bin"},
+                    clear=True,
+                ),
+                self.assertRaises(prime_loop.PrimeExternalLimit) as raised,
+            ):
+                prime_loop.resolve_bounded_prime_environment()
+
+        self.assertNotIn("unsupported-private-model", str(raised.exception))
+
     def test_native_rlm_environment_prefers_explicit_dotenv_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -144,6 +235,45 @@ class TestVerifyPrimeLoop(unittest.TestCase):
                 (root / ".asterion-private" / "prime-rlm").stat().st_mode & 0o777,
                 0o700,
             )
+
+    def test_bounded_uses_ephemeral_authority_and_default_limits(self) -> None:
+        source_root = Path("/private/prime-source")
+        with (
+            mock.patch.object(
+                prime_loop, "_native_rlm_bounded_external_limit",
+                return_value={"status": "PASS"},
+            ) as native,
+            mock.patch.object(
+                prime_loop, "_default_native_rlm_evidence_root",
+                return_value=Path("/private/evidence"),
+            ),
+        ):
+            report = prime_loop._bounded_external_limit(source_root, None, None)
+
+        self.assertEqual(report["status"], "PASS")
+        native.assert_called_once_with(
+            source_root, None, None, Path("/private/evidence")
+        )
+
+    def test_bounded_validates_explicit_authority_against_default_limit(self) -> None:
+        source_root = Path("/private/prime-source")
+        authority = Path("/private/authority.json")
+        with (
+            mock.patch.object(prime_loop, "load_bounded_rlm_authority") as load,
+            mock.patch.object(
+                prime_loop, "_native_rlm_bounded_external_limit",
+                return_value={"status": "PASS"},
+            ),
+            mock.patch.object(
+                prime_loop, "_default_native_rlm_evidence_root",
+                return_value=Path("/private/evidence"),
+            ),
+        ):
+            prime_loop._bounded_external_limit(source_root, authority, None)
+
+        load.assert_called_once_with(
+            authority, max_cost_micros=prime_loop._DEFAULT_BOUNDED_MAX_COST_MICROS
+        )
 
     def test_native_rlm_bounded_requires_exact_opt_in_before_preflight(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -426,6 +556,36 @@ class TestVerifyPrimeLoop(unittest.TestCase):
         self.assertFalse(any("shutdown" in command for command in commands))
 
 class TestNativeRlmFailureEvidence(unittest.TestCase):
+    def test_failure_evidence_distinguishes_confirmed_hard_kill(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-cancel-stage:abort\n"
+                "asterion-prime-cancel-stage:kill-confirmed\n"
+                "asterion-prime-sidecar-failed:session-cancel\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "cancel_kill_confirmed",
+            )
+
+    def test_failure_evidence_distinguishes_terminal_ledger_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-gateway-cancel-stage:goal-updated\n"
+                "asterion-prime-gateway-cancel-stage:terminal-appended\n"
+                "asterion-prime-sidecar-failed:session-cancel\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "gateway_cancel_terminal_appended",
+            )
+
     def test_failure_evidence_classifies_private_stderr_without_retaining_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -453,6 +613,160 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
 
             self.assertEqual(prime_loop._native_rlm_failure_class(stderr), "sidecar")
 
+    def test_failure_evidence_classifies_checkpoint_request_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-sidecar-failed:checkpoint-request\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(
+                    stderr,
+                    safe_error=(
+                        "Native RLM controlled probe running event-transport "
+                        "did not complete"
+                    ),
+                ),
+                "sidecar_checkpoint_request",
+            )
+
+    def test_failure_evidence_classifies_private_read_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-sidecar-failed:private.read\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "sidecar_private_read",
+            )
+
+    def test_failure_evidence_classifies_action_resolution_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-sidecar-failed:action-resolve\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "sidecar_action_resolve",
+            )
+
+    def test_failure_evidence_classifies_checkpoint_prepare_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-checkpoint-stage:prepare\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(
+                    stderr,
+                    safe_error=(
+                        "Native RLM controlled probe running event-transport "
+                        "did not complete"
+                    ),
+                ),
+                "checkpoint_prepare",
+            )
+
+    def test_failure_evidence_prefers_checkpoint_attach_failure_over_prior_stages(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-checkpoint-stage:idle\n"
+                "asterion-prime-checkpoint-stage:prepare\n"
+                "asterion-prime-checkpoint-stage:attach\n"
+                "asterion-prime-checkpoint-attach-failed:validation\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "checkpoint_attach_validation",
+            )
+
+    def test_failure_evidence_classifies_checkpoint_lifecycle_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-checkpoint-stage:stop\n"
+                "asterion-prime-checkpoint-lifecycle-failed\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "checkpoint_lifecycle",
+            )
+
+    def test_failure_evidence_classifies_checkpoint_runtime_stop_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-checkpoint-stage:stop\n"
+                "asterion-prime-checkpoint-runtime-stop-failed\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "checkpoint_runtime_stop",
+            )
+
+    def test_failure_evidence_classifies_checkpoint_lifecycle_stage_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-checkpoint-stage:stop\n"
+                "asterion-prime-checkpoint-lifecycle:request\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "checkpoint_lifecycle_request",
+            )
+
+    def test_failure_evidence_classifies_checkpoint_recovery_field_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-checkpoint-stage:attach\n"
+                "asterion-prime-checkpoint-recovery-invalid:summary\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "checkpoint_recovery_summary",
+            )
+
+    def test_failure_evidence_classifies_skill_dispatch_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-skill-request:dispatch\n", encoding="utf-8"
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(
+                    stderr,
+                    safe_error=(
+                        "Native RLM controlled probe checkpoint request "
+                        "did not complete"
+                    ),
+                ),
+                "skill_dispatch",
+            )
+
     def test_failure_evidence_classifies_fixed_event_transport(self) -> None:
         self.assertEqual(
             prime_loop._native_rlm_failure_class(
@@ -462,6 +776,19 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
             "event_transport",
         )
 
+    def test_failure_evidence_does_not_misclassify_completed_maintenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-checkpoint-stage:capsule\n"
+                "asterion-prime-gateway-cancel-stage:terminal-appended\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "observation_unclassified",
+            )
+
     def test_failure_evidence_classifies_fixed_control_transition(self) -> None:
         self.assertEqual(
             prime_loop._native_rlm_failure_class(
@@ -469,6 +796,18 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
                 safe_error="Native RLM controlled probe running event-transition did not complete",
             ),
             "event_transition",
+        )
+
+    def test_failure_evidence_classifies_safe_action_admission_kind(self) -> None:
+        self.assertEqual(
+            prime_loop._native_rlm_failure_class(
+                None,
+                safe_error=(
+                    "Native RLM controlled probe running action-admission-child-message "
+                    "did not complete"
+                ),
+            ),
+            "action_admission_child_message",
         )
 
 

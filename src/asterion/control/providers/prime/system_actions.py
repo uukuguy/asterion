@@ -18,7 +18,7 @@ class PrimeSystemCommandClient(Protocol):
 
 
 class PrimeSystemActionService:
-    """Execute checkpoint and goal intents without application discovery."""
+    """Validate checkpoint and goal intents for gateway terminal materialization."""
 
     def __init__(self, client: PrimeSystemCommandClient) -> None:
         if not callable(getattr(client, "send", None)):
@@ -28,23 +28,10 @@ class PrimeSystemActionService:
     async def execute(
         self, proposal: ControlEvent, signal: CancellationSignal
     ) -> ActionExecutionReceipt:
-        action_id, authority_revision, kind, target = _proposal_fields(proposal)
+        action_id, _authority_revision, kind, target = _proposal_fields(proposal)
         _raise_if_cancelled(action_id, signal)
         if kind == "checkpoint.create":
-            checkpoint_id = _target_id(target, "checkpoint", "checkpoint_id")
-            command = ControlCommand(
-                command_id=f"system-checkpoint-{action_id}",
-                session_id=proposal.session_id,
-                authority_revision=authority_revision,
-                type="checkpoint.request",
-                payload={"checkpoint_id": checkpoint_id},
-            )
-            try:
-                await self._client.send(command)
-            except Exception:
-                raise ActionExecutionFailure(
-                    "uncertain", "checkpoint-progress-unknown", None
-                ) from None
+            _target_id(target, "checkpoint", "checkpoint_id")
         elif kind in {"goal.complete", "goal.fail"}:
             _target_id(target, "goal", "goal_id")
         else:

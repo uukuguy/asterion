@@ -190,8 +190,10 @@ class PrimeRlmAdmissionPreparer:
         gateway = await self._client.rlm_message_binding(action_id)
         if (
             gateway.action_id != action_id
-            or gateway.recipient_id != target["child_id"]
             or gateway.authority_revision != payload["authority_revision"]
+            or not self._is_bound_family_message(
+                gateway.sender_id, gateway.recipient_id, target["child_id"]
+            )
         ):
             raise RlmError("Prime RLM binding conflicts")
         binding = RlmMessageBinding(
@@ -201,11 +203,29 @@ class PrimeRlmAdmissionPreparer:
             gateway.body_digest,
             gateway.authority_revision,
         )
-        self._children.admit_message(binding)
+        self._children.admit_message(
+            binding,
+            allow_terminal_sender_to_parent=(
+                gateway.sender_id == target["child_id"]
+                and gateway.recipient_id == self._parent_session_id
+            ),
+        )
         existing = self._messages.get(action_id)
         if existing is not None and existing != binding:
             raise RlmError("Prime RLM binding conflicts")
         self._messages[action_id] = binding
+
+    def _is_bound_family_message(
+        self, sender_id: str, recipient_id: str, child_id: object
+    ) -> bool:
+        """Accept exactly one direct parent↔bound-child direction."""
+
+        if not isinstance(child_id, str):
+            return False
+        return (
+            (sender_id == self._parent_session_id and recipient_id == child_id)
+            or (sender_id == child_id and recipient_id == self._parent_session_id)
+        )
 
     async def reconcile_lifecycle(self) -> None:
         """Apply the complete Gateway lifecycle history monotonically."""

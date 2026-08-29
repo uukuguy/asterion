@@ -132,8 +132,8 @@ class FakeCheckpointTransport {
     return true;
   }
 
-  async request(command, commandId) {
-    this.commands.push({ command, commandId });
+  async request(command, commandId, timeoutMs) {
+    this.commands.push({ command, commandId, timeoutMs });
     if (command.type === "attach") {
       return {
         id: commandId,
@@ -152,8 +152,8 @@ class FakeCheckpointTransport {
     };
   }
 
-  async requestDeferred(command, commandId) {
-    this.commands.push({ command, commandId });
+  async requestDeferred(command, commandId, timeoutMs) {
+    this.commands.push({ command, commandId, timeoutMs });
     return {
       response: {
         id: commandId,
@@ -196,6 +196,7 @@ async function fixture({
   relaunched = new FakeCheckpointTransport(),
   privateValues,
   privateValueOptions,
+  onStage,
 } = {}) {
   const parent = await mkdtemp(join(tmpdir(), "asterion-prime-checkpoint-"));
   const root = join(parent, "gateway");
@@ -216,6 +217,7 @@ async function fixture({
     transport: initial,
     runtime,
     primeCursor: PRIME_CURSOR,
+    onStage,
   });
   return {
     parent,
@@ -257,7 +259,10 @@ test("checkpoint restarts the dedicated daemon and reattaches exact identity", a
     ]);
     assert.deepEqual(state.relaunched.commands.map(({ command }) => command.type), ["attach"]);
     assert.equal(state.relaunched.commands[0].command.activeSessionId, "prime-root-1");
-    assert.deepEqual(state.relaunched.commands[0].command.resumeCursor, PRIME_CURSOR);
+    assert.deepEqual(state.relaunched.commands[0].command.resumeCursor, {
+      activeSessionId: "prime-root-1",
+      ...PRIME_CURSOR,
+    });
     assert.deepEqual(state.initial.acknowledgements, []);
 
     const capsuleBytes = await state.values.readCapsule(created.storageRef);
@@ -275,6 +280,34 @@ test("checkpoint restarts the dedicated daemon and reattaches exact identity", a
     assert.deepEqual(state.relaunched.acknowledgements, [
       "session-1-checkpoint-checkpoint-1-prepare",
     ]);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("checkpoint exposes only fixed lifecycle stages to its private observer", async () => {
+  const stages = [];
+  const state = await fixture({ onStage: (stage) => stages.push(stage) });
+  try {
+    await state.create();
+    assert.deepEqual(stages, ["idle", "prepare", "stop", "relaunch", "attach", "recover", "capsule"]);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("checkpoint caps all daemon requests at its action deadline", async () => {
+  const state = await fixture();
+  try {
+    await state.manager.create("checkpoint-deadline", 8, async () => undefined, 4_000);
+    assert.deepEqual(
+      state.initial.commands.map((entry) => entry.timeoutMs),
+      [4_000, 4_000],
+    );
+    assert.deepEqual(
+      state.relaunched.commands.map((entry) => entry.timeoutMs),
+      [4_000],
+    );
   } finally {
     await state.cleanup();
   }
@@ -331,6 +364,27 @@ test("checkpoint reports paused only from a validated paused snapshot", async ()
     await assert.rejects(rejected.create(), PrimeCheckpointError);
   } finally {
     await rejected.cleanup();
+  }
+});
+
+test("checkpoint maps a quiescent Prime root with no goal to paused", async () => {
+  const idleAttach = coherentAttach({
+    snapshot: {
+      ...coherentAttach().snapshot,
+      state: { goal: { status: "idle" } },
+    },
+  });
+  const state = await fixture({
+    relaunched: new FakeCheckpointTransport({ attach: idleAttach }),
+  });
+  try {
+    let recovery;
+    await state.manager.create("checkpoint-idle", 8, async (value) => {
+      recovery = value;
+    });
+    assert.equal(recovery.sessionStatus, "paused");
+  } finally {
+    await state.cleanup();
   }
 });
 

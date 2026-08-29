@@ -21,7 +21,16 @@ from tools.setup_prime_agent import resolve_prime_harness_module
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PINNED_SOURCE = ROOT / "3th-party/prime-agent"
+
+
+def _pinned_prime_source_root() -> Path:
+    configured = os.environ.get("ASTERION_PRIME_SOURCE_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (ROOT / "3th-party/prime-agent").resolve()
+
+
+PINNED_SOURCE = _pinned_prime_source_root()
 HARNESS_LOCK = (
     ROOT
     / "packages/typescript/prime-gateway/resources/prime-harness-module-lock.json"

@@ -37,7 +37,15 @@ ECOSYSTEM_BUNDLE_PATH = (
     PROJECT
     / "packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs"
 )
-PINNED_SOURCE = PROJECT / "3th-party/prime-agent"
+
+def _pinned_prime_source_root() -> Path:
+    configured = os.environ.get("ASTERION_PRIME_SOURCE_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (PROJECT / "3th-party/prime-agent").resolve()
+
+
+PINNED_SOURCE = _pinned_prime_source_root()
 PINNED_COMMIT = "a18809e00ea30638584d87b3afea7285a9d7296c"
 EXPECTED_ECOSYSTEM_MODULE_IDS = (
     "diagnostics",
@@ -704,7 +712,7 @@ class TestSetupPrimeAgent(unittest.TestCase):
         message_replacement = patches[1]["replacement"]
         self.assertIn("waitForAgentMessagePromptDelivery(payload.id)", message_replacement)
         self.assertIn("admitNativeRlmMessage", message_replacement)
-        self.assertIn("recordNativeRlmMessageDelivered", message_replacement)
+        self.assertIn("trackNativeRlmMessageDelivery", message_replacement)
         self.assertLess(
             message_replacement.index("admitNativeRlmMessage"),
             message_replacement.index("withAgentMessageTargetLock"),

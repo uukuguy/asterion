@@ -648,6 +648,7 @@ async function closedFailureMatrix({ frame, gateway, storeRoot }) {
   const fixedOutputDigest = sha256("Prime ecosystem harness failed\n");
   const cases = [];
   const closed = async (caseId, run) => {
+    let status = "failed-closed";
     let rejected = false;
     try {
       await run();
@@ -661,7 +662,7 @@ async function closedFailureMatrix({ frame, gateway, storeRoot }) {
       model_credential_reads: 0,
       owned_process_count_after_close: 0,
       provider_operations: 0,
-      status: "failed-closed",
+      status,
     }));
   };
   await closed("duplicate-registrations", async () => {

@@ -22,6 +22,7 @@ export {
   cursorFromPrimeDaemonOutbound,
   decodePrimeDaemonLine,
   encodePrimeDaemonCommand,
+  validatePrimeHeartbeatCommand,
 } from "./daemon-wire.js";
 export type {
   PrimeDaemonCommand,
@@ -31,6 +32,7 @@ export type {
   PrimeDaemonHello,
   PrimeDaemonOutbound,
   PrimeDaemonResponse,
+  PrimeHeartbeatCommand,
 } from "./daemon-wire.js";
 export {
   PrimeDaemonClient,
@@ -63,6 +65,8 @@ export type {
   GatewayEventReceipt,
   GatewayInputAttachment,
   GatewayInputDelivery,
+  GatewayLongRunningCommandBinding,
+  GatewayLongRunningResult,
   GatewayRecordReceipt,
   GatewayRlmBinding,
   GatewayRlmLifecycleObservation,
@@ -186,6 +190,7 @@ export type {
   PrimeInputDelivery,
   PrimeInputAttachment,
   PrimeInputSubmission,
+  PrimeLongRunningStore,
   PrimePrivateSessionConfig,
   PrimePromptCancellation,
   PrimeSessionCreateOptions,

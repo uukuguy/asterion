@@ -9,6 +9,8 @@ from pathlib import Path
 from unittest import mock
 
 from asterion.control.authority import BudgetUsage
+from asterion.control.host import ControlEvent
+from asterion.control.providers.prime.client import RlmAdmissionBinding
 import tools.prime_native_rlm_experiment as native_rlm
 from tools.prime_native_rlm_experiment import (
     build_native_rlm_daemon_environment,
@@ -34,6 +36,7 @@ from tools.prime_native_rlm_experiment import (
     prepare_native_rlm_experiment,
     prepare_native_rlm_workspace,
     native_rlm_session_create_command,
+    native_rlm_session_pause_command,
     native_rlm_start_command,
     run_native_rlm_experiment,
     write_native_rlm_experiment_receipt,
@@ -84,6 +87,237 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_bounded_model_assertions_require_exact_binding_model_work_and_depth_rejection(self) -> None:
+        selection = resolve_native_rlm_model(
+            {"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}
+        )
+        expected_digest = native_rlm.native_rlm_model_selector_digest(selection)
+        binding = RlmAdmissionBinding(
+            "action-child",
+            "child-1",
+            1,
+            1,
+            expected_digest,
+        )
+
+        self.assertEqual(
+            native_rlm.derive_native_rlm_model_assertions(
+                binding=binding,
+                expected_model_selector_digest=expected_digest,
+                usage=BudgetUsage(1, 0, 1, 2, 1),
+                depth_probe_resolution="rejected",
+            ),
+            {
+                "child_model_selected": True,
+                "generated_program_admitted": True,
+                "recursion_depth_limited": True,
+            },
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=500_000,
+                deadline_ms=600_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                now_ms=1_000,
+            ).consume()
+            assertions = native_rlm.derive_native_rlm_model_assertions(
+                binding=binding,
+                expected_model_selector_digest=expected_digest,
+                usage=BudgetUsage(1, 0, 1, 2, 1),
+                depth_probe_resolution="rejected",
+            )
+            receipt = native_rlm.write_native_rlm_model_evidence_receipt(
+                Path(directory), reservation, assertions
+            )
+            self.assertEqual(
+                receipt,
+                {
+                    "format": "asterion.prime-native-rlm-model-evidence/v1",
+                    "configuration_digest": reservation.configuration_digest,
+                    "status": "PASS",
+                    **assertions,
+                },
+            )
+            self.assertNotIn(
+                "deepseek-v4-flash",
+                (Path(directory) / "native-rlm-model-evidence.json").read_text(),
+            )
+        for changes in (
+            {"binding": RlmAdmissionBinding("action-child", "child-1", 1, 1, "b" * 64)},
+            {"usage": BudgetUsage(0, 1, 1, 2, 1)},
+            {"depth_probe_resolution": "admitted"},
+        ):
+            with self.subTest(changes=changes):
+                values = {
+                    "binding": binding,
+                    "expected_model_selector_digest": expected_digest,
+                    "usage": BudgetUsage(1, 0, 1, 2, 1),
+                    "depth_probe_resolution": "rejected",
+                }
+                values.update(changes)
+                self.assertIn(
+                    False,
+                    native_rlm.derive_native_rlm_model_assertions(**values).values(),
+                )
+
+    def test_post_lifecycle_verification_failures_are_not_reconciled_as_success(self) -> None:
+        self.assertFalse(native_rlm._native_rlm_failure_may_reconcile_terminal("checkpoint"))
+        self.assertFalse(native_rlm._native_rlm_failure_may_reconcile_terminal("cancellation"))
+        self.assertTrue(native_rlm._native_rlm_failure_may_reconcile_terminal("running"))
+
+    def test_checkpoint_pump_timeout_covers_its_authorized_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            authority = Path(directory) / "authority.json"
+            authority.write_text(json.dumps(_authority()), encoding="utf-8")
+            reservation = prepare_native_rlm_experiment(
+                authority,
+                max_cost_micros=500_000,
+                deadline_ms=600_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "private-model"},
+                now_ms=1_000,
+            )
+            self.assertEqual(native_rlm._native_rlm_pump_timeout_seconds(reservation, True), 305)
+            self.assertEqual(native_rlm._native_rlm_pump_timeout_seconds(reservation, False), 10)
+
+    def test_system_action_deadline_uses_bounded_default_and_authority_cap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            authority = Path(directory) / "authority.json"
+            authority.write_text(json.dumps(_authority()), encoding="utf-8")
+            reservation = prepare_native_rlm_experiment(
+                authority,
+                max_cost_micros=500_000,
+                deadline_ms=600_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "private-model"},
+                now_ms=1_000,
+            )
+            self.assertEqual(native_rlm._native_rlm_system_action_deadline(reservation), 300_000)
+
+            capped_authority = Path(directory) / "capped-authority.json"
+            capped_authority.write_text(
+                json.dumps(_authority(max_action_deadline_ms=20_000)), encoding="utf-8"
+            )
+            capped = prepare_native_rlm_experiment(
+                capped_authority,
+                max_cost_micros=500_000,
+                deadline_ms=20_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "private-model"},
+                now_ms=1_000,
+            )
+            self.assertEqual(native_rlm._native_rlm_system_action_deadline(capped), 20_000)
+
+    def test_skill_effect_requires_admitted_successful_terminal(self) -> None:
+        native_rlm._require_native_rlm_skill_success(
+            {
+                "admission": {"resolution": "admitted"},
+                "terminal": {"resolution": "succeeded"},
+            },
+            operation="checkpoint",
+        )
+        with self.assertRaisesRegex(
+            PrimeRlmExperimentError,
+            "checkpoint admission was rejected deadline-not-authorized",
+        ):
+            native_rlm._require_native_rlm_skill_success(
+                {
+                    "admission": {
+                        "resolution": "rejected",
+                        "reason_code": "deadline-not-authorized",
+                    },
+                    "terminal": {"resolution": "failed"},
+                },
+                operation="checkpoint",
+            )
+
+    def test_terminal_transition_diagnostic_exposes_only_goal_or_action_state(self) -> None:
+        active = type(
+            "Host",
+            (),
+            {
+                "snapshot": lambda self: type(
+                    "Snapshot",
+                    (),
+                    {
+                        "state": type(
+                            "State",
+                            (),
+                            {
+                                "goal_status": "completed",
+                                "actions": {
+                                    "action-1": type("Action", (), {"status": "running"})()
+                                },
+                            },
+                        )()
+                    },
+                )()
+            },
+        )()
+        incomplete_goal = type(
+            "Host",
+            (),
+            {
+                "snapshot": lambda self: type(
+                    "Snapshot",
+                    (),
+                    {
+                        "state": type(
+                            "State", (), {"goal_status": "active", "actions": {}}
+                        )()
+                    },
+                )()
+            },
+        )()
+
+        self.assertEqual(
+            native_rlm._native_rlm_terminal_transition_category(active),
+            "active-actions",
+        )
+        self.assertEqual(
+            native_rlm._native_rlm_terminal_transition_category(incomplete_goal),
+            "goal-not-completed",
+        )
+
+    def test_application_admission_projects_all_public_authority_rejections(self) -> None:
+        for reason in (
+            "authority-cancelled",
+            "authority-expired",
+            "authority-revision-mismatch",
+            "budget-exceeded",
+            "child-concurrency-exceeded",
+            "deadline-not-authorized",
+            "host-service-not-authorized",
+            "operation-not-authorized",
+            "recursion-depth-exceeded",
+            "target-not-authorized",
+        ):
+            with self.subTest(reason=reason):
+                self.assertEqual(
+                    native_rlm._native_rlm_admission_failure_category(reason), reason
+                )
+        self.assertEqual(
+            native_rlm._native_rlm_admission_failure_category("private-detail"),
+            "unknown",
+        )
+
+    def test_skill_socket_accepts_all_bounded_control_effect_kinds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for operation in (
+                "application.invoke",
+                "child.cancel",
+                "checkpoint.request",
+                "goal.complete",
+            ):
+                with self.subTest(operation=operation), self.assertRaisesRegex(
+                    native_rlm.PrimeRlmExperimentError,
+                    "skill discovery did not complete",
+                ):
+                    asyncio.run(
+                        native_rlm._send_native_rlm_skill_effect(
+                            root, operation=operation, payload={}
+                        )
+                    )
+
     def test_controlled_probe_cancels_created_root_before_closing_after_failure(self) -> None:
         class Host:
             def __init__(self) -> None:
@@ -134,6 +368,198 @@ class TestNativeRlmExperiment(unittest.TestCase):
         self.assertEqual(host.commands[-1].payload, {"reason_code": "probe-cleanup"})
         self.assertTrue(host.closed)
 
+    def test_controlled_probe_records_a_real_detach_attach_after_rlm_closes(self) -> None:
+        class Host:
+            def __init__(self) -> None:
+                self.commands = []
+
+            async def dispatch(self, command) -> None:
+                self.commands.append(command)
+
+            async def pump(self) -> None:
+                return None
+
+            def snapshot(self):
+                return type(
+                    "Snapshot",
+                    (),
+                    {
+                        "authority_usage": BudgetUsage.zero(),
+                        "state": type(
+                            "State",
+                            (),
+                            {"terminal_event_id": None, "session_status": "running"},
+                        )(),
+                    },
+                )()
+
+            async def close(self) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=None,
+                deadline_ms=None,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                now_ms=1_000,
+            )
+            host = Host()
+            with (
+                mock.patch.object(
+                    native_rlm, "build_native_rlm_control_host", return_value=host
+                ),
+                mock.patch.object(
+                    native_rlm,
+                    "observe_native_rlm_gateway_probe",
+                    new_callable=mock.AsyncMock,
+                    return_value=NativeRlmProbeResult(
+                        "completed", True, True, True, BudgetUsage.zero()
+                    ),
+                ),
+            ):
+                result = asyncio.run(
+                    run_native_rlm_controlled_probe(object(), reservation, root)
+                )
+
+        self.assertTrue(result.detach_attached)
+        self.assertEqual(
+            [command.type for command in host.commands],
+            ["session.create", "input.submit", "session.detach", "session.attach"],
+        )
+
+    def test_controlled_probe_records_root_cancellation_after_closed_rlm(self) -> None:
+        class Host:
+            def __init__(self) -> None:
+                self.commands = []
+
+            async def dispatch(self, command) -> None:
+                self.commands.append(command)
+
+            async def pump(self) -> None:
+                return None
+
+            def snapshot(self):
+                cancelled = bool(self.commands) and self.commands[-1].type == "session.cancel"
+                return type(
+                    "Snapshot",
+                    (),
+                    {
+                        "authority_usage": BudgetUsage.zero(),
+                        "state": type(
+                            "State",
+                            (),
+                            {
+                                "terminal_event_id": "event-cancelled" if cancelled else None,
+                                "session_status": "cancelled" if cancelled else "running",
+                            },
+                        )(),
+                    },
+                )()
+
+            async def close(self) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=None,
+                deadline_ms=None,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                now_ms=1_000,
+            )
+            host = Host()
+            with (
+                mock.patch.object(
+                    native_rlm, "build_native_rlm_control_host", return_value=host
+                ),
+                mock.patch.object(
+                    native_rlm,
+                    "observe_native_rlm_gateway_probe",
+                    new_callable=mock.AsyncMock,
+                    return_value=NativeRlmProbeResult(
+                        "completed", True, True, True, BudgetUsage.zero()
+                    ),
+                ),
+            ):
+                result = asyncio.run(
+                    run_native_rlm_controlled_probe(
+                        object(), reservation, root, exercise_cancellation=True
+                    )
+                )
+
+        self.assertTrue(result.cancelled)
+        self.assertEqual(host.commands[-1].type, "session.cancel")
+
+    def test_controlled_probe_requires_host_budget_rejection_before_model_work(self) -> None:
+        class Host:
+            async def dispatch(self, _command) -> None:
+                return None
+
+            async def pump(self) -> None:
+                return None
+
+            def snapshot(self):
+                return type(
+                    "Snapshot",
+                    (),
+                    {
+                        "authority_usage": BudgetUsage.zero(),
+                        "state": type(
+                            "State",
+                            (),
+                            {"terminal_event_id": None, "session_status": "running"},
+                        )(),
+                    },
+                )()
+
+            async def close(self) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=None,
+                deadline_ms=None,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                now_ms=1_000,
+            )
+            with (
+                mock.patch.object(
+                    native_rlm, "build_native_rlm_control_host", return_value=Host()
+                ),
+                mock.patch.object(
+                    native_rlm,
+                    "_send_native_rlm_skill_effect",
+                    new_callable=mock.AsyncMock,
+                    return_value={
+                        "admission": {
+                            "resolution": "rejected",
+                            "reason_code": "budget-exceeded",
+                        }
+                    },
+                ) as effect,
+                mock.patch.object(
+                    native_rlm,
+                    "observe_native_rlm_gateway_probe",
+                    new_callable=mock.AsyncMock,
+                    return_value=NativeRlmProbeResult(
+                        "completed", True, True, True, BudgetUsage.zero()
+                    ),
+                ),
+            ):
+                result = asyncio.run(
+                    run_native_rlm_controlled_probe(
+                        object(), reservation, root, exercise_budget_probe=True
+                    )
+                )
+
+        self.assertTrue(result.budget_limited)
+        self.assertEqual(effect.await_args.kwargs["operation"], "application.invoke")
+
     def test_controlled_probe_classifies_event_transport_without_details(self) -> None:
         class Host:
             def __init__(self) -> None:
@@ -171,6 +597,78 @@ class TestNativeRlmExperiment(unittest.TestCase):
             ),
             "event-transition",
         )
+
+    def test_controlled_probe_keeps_only_the_safe_native_action_kind(self) -> None:
+        event = ControlEvent(
+            protocol="asterion.agent-control/v1",
+            event_id="event-action-kind",
+            session_id="native-rlm-root",
+            generation=1,
+            sequence=1,
+            emitted_at="2026-08-17T00:00:00Z",
+            type="action.proposed",
+            payload={
+                "action_id": "action-1",
+                "authority_revision": 1,
+                "idempotency_key": "key-1",
+                "kind": "child.message",
+                "target": {"kind": "child", "child_id": "child-1"},
+                "input_ref": "private:input-1",
+                "expected_artifacts": [],
+                "budget": {
+                    "controller_tokens": 1,
+                    "application_tokens": 0,
+                    "child_tokens": 0,
+                    "aggregate_tokens": 1,
+                    "cost_micros": 0,
+                    "deadline_ms": 1,
+                },
+                "causal_parent_ids": [],
+            },
+        )
+        self.assertEqual(native_rlm._native_rlm_safe_action_kind(event), "child-message")
+
+    def test_control_fact_observer_keeps_only_required_identity_pairs(self) -> None:
+        identities: dict[str, tuple[str, str]] = {}
+        event_types: list[str] = []
+        event = ControlEvent(
+            protocol="asterion.agent-control/v1",
+            event_id="event-application",
+            session_id="native-rlm-root",
+            generation=1,
+            sequence=1,
+            emitted_at="2026-08-17T00:00:00Z",
+            type="action.proposed",
+            payload={
+                "action_id": "action-application",
+                "authority_revision": 1,
+                "idempotency_key": "key-application",
+                "kind": "application.invoke",
+                "target": native_rlm._APPLICATION_TARGET,
+                "input_ref": "private:input-1",
+                "expected_artifacts": [],
+                "budget": {"controller_tokens": 0, "application_tokens": 1, "child_tokens": 0, "aggregate_tokens": 1, "cost_micros": 0, "deadline_ms": 1},
+                "causal_parent_ids": [],
+            },
+        )
+        native_rlm._record_native_rlm_control_fact(event, event_types, identities)
+        self.assertEqual(event_types, ["action.proposed"])
+        self.assertEqual(identities, {"application.invoke": ("event-application", "action-application")})
+
+        budget_event = ControlEvent.from_mapping({
+            **event.to_mapping(),
+            "event_id": "event-budget",
+            "sequence": 2,
+            "payload": {
+                **event.payload,
+                "action_id": "action-budget",
+                "idempotency_key": "native-rlm-budget",
+                "expected_artifacts": [],
+                "causal_parent_ids": [],
+            },
+        })
+        native_rlm._record_native_rlm_control_fact(budget_event, event_types, identities)
+        self.assertEqual(identities["budget.probe"], ("event-budget", "action-budget"))
 
     def test_controlled_probe_projects_a_recorded_terminal_after_stream_failure(self) -> None:
         class Host:
@@ -306,6 +804,13 @@ class TestNativeRlmExperiment(unittest.TestCase):
             self.assertEqual(start.type, "input.submit")
             self.assertEqual(start.payload["delivery"], "direct")
             self.assertEqual(start.payload["content_ref"], "native-rlm-start-input")
+            pause = native_rlm_session_pause_command(reservation)
+            self.assertEqual(pause.type, "session.pause")
+            self.assertEqual(pause.payload["reason_code"], "checkpoint-boundary")
+            isolated = native_rlm_session_create_command(
+                reservation, session_id="native-maintenance"
+            )
+            self.assertEqual(isolated.session_id, "native-maintenance")
 
     def test_private_goal_resolves_only_the_root_reference(self) -> None:
         goal = NativeRlmPrivateGoal("private native instruction")
@@ -477,7 +982,14 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 return daemon
 
             async def start_sidecar(options):
-                self.assertEqual(set(options.environ), {"HOME", "PATH"})
+                self.assertEqual(
+                    options.environ,
+                    {
+                        "ASTERION_PRIME_PRIVATE_DIAGNOSTICS": "1",
+                        "HOME": str(root),
+                        "PATH": "/bin",
+                    },
+                )
                 return Sidecar()
 
             async def probe(_sidecar):
@@ -529,6 +1041,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
             self.assertEqual(calls[0][0], plan.argv)
             self.assertEqual(calls[0][1]["cwd"], resources.prime_source_root)
             self.assertEqual(calls[0][1]["env"], dict(plan.environ))
+            self.assertTrue(calls[0][1]["start_new_session"])
             self.assertNotIn("secret", repr(plan))
 
     def test_sidecar_start_excludes_model_credential(self) -> None:
@@ -559,7 +1072,10 @@ class TestNativeRlmExperiment(unittest.TestCase):
                     str(resources.sidecar_entry.resolve(strict=False)),
                 ),
             )
-            self.assertEqual(set(seen[0].environ), {"HOME", "PATH"})
+            self.assertEqual(
+                set(seen[0].environ),
+                {"ASTERION_PRIME_PRIVATE_DIAGNOSTICS", "HOME", "PATH"},
+            )
             self.assertEqual(seen[0].request_timeout, 600)
             self.assertIs(seen[0].private_stderr_sink, stderr_sink)
             self.assertNotIn("secret", repr(seen[0]))
@@ -843,7 +1359,9 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}),
                 root,
                 resources,
+                session_id="native-maintenance",
             )
+            self.assertEqual(descriptor["sessionId"], "native-maintenance")
             self.assertEqual(descriptor["provider"], "deepseek")
             self.assertEqual(descriptor["model"], "deepseek-v4-flash")
             self.assertEqual(descriptor["maxContinuations"], 3)
@@ -851,9 +1369,14 @@ class TestNativeRlmExperiment(unittest.TestCase):
             self.assertEqual(descriptor["remainingBudget"]["cost_micros"], 500_000)
             self.assertEqual(descriptor["rlmMaxChildren"], 1)
             self.assertEqual(descriptor["rlmMaxDepth"], 1)
+            self.assertEqual(
+                descriptor["authorityExpiresAtMs"],
+                reservation.authority.expires_at_ms,
+            )
             self.assertEqual(descriptor["artifactLockPath"], str(resources.artifact_lock_path))
             self.assertEqual(descriptor["primeSourceRoot"], str(resources.prime_source_root))
             self.assertEqual(descriptor["skillPath"], str(resources.skill_path))
+            self.assertEqual(resources.skill_path.name, "skill")
             self.assertEqual(descriptor["expectedRuntimeBuildId"], "build-1")
 
     def test_daemon_start_waits_for_owned_socket(self) -> None:
@@ -927,6 +1450,12 @@ class TestNativeRlmExperiment(unittest.TestCase):
         self.assertEqual(selection.provider, "deepseek")
         self.assertEqual(selection.model, "deepseek-v4-flash")
         self.assertEqual(selection.credential_env, "DEEPSEEK_API_KEY")
+        dated = resolve_native_rlm_model(
+            {"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash-0731"}
+        )
+        self.assertEqual(dated.provider, "deepseek")
+        self.assertEqual(dated.model, "deepseek-v4-flash-0731")
+        self.assertEqual(dated.credential_env, "DEEPSEEK_API_KEY")
         with self.assertRaises(PrimeRlmExperimentError):
             resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "other"})
 
@@ -1035,10 +1564,16 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 child_started=True,
                 message_delivered=True,
                 child_deleted=True,
+                checkpoint_recovered=True,
+                cancelled=True,
+                budget_limited=True,
                 usage=BudgetUsage(1, 1, 1, 3, 3),
             )
 
             self.assertEqual(report["status"], "PASS")
+            self.assertTrue(report["checkpoint_recovered"])
+            self.assertTrue(report["cancelled"])
+            self.assertTrue(report["budget_limited"])
             self.assertNotIn("private-model", repr(report))
             receipt = root / "native-rlm-experiment-receipt.json"
             self.assertEqual(os.stat(receipt).st_mode & 0o777, 0o600)
@@ -1053,6 +1588,9 @@ class TestNativeRlmExperiment(unittest.TestCase):
                         "child_started": True,
                         "message_delivered": True,
                         "child_deleted": True,
+                        "checkpoint_recovered": True,
+                        "cancelled": True,
+                        "budget_limited": True,
                         "terminal": "completed",
                         "usage": BudgetUsage(1, 1, 1, 3, 3),
                     }
@@ -1063,6 +1601,34 @@ class TestNativeRlmExperiment(unittest.TestCase):
                         )["status"],
                         "PASS",
                     )
+
+    def test_phase1_receipt_does_not_claim_model_program_or_depth_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=500_000,
+                deadline_ms=600_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "private-model"},
+                now_ms=1_000,
+            ).consume()
+            report = write_native_rlm_experiment_receipt(
+                root,
+                reservation,
+                terminal="completed",
+                child_started=True,
+                message_delivered=True,
+                child_deleted=True,
+                usage=BudgetUsage(1, 1, 1, 3, 3),
+            )
+
+            self.assertTrue(
+                {
+                    "child_model_selected",
+                    "generated_program_admitted",
+                    "recursion_depth_limited",
+                }.isdisjoint(report)
+            )
 
     def test_runner_consumes_once_and_classifies_incomplete_probe(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

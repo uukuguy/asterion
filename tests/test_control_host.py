@@ -183,6 +183,97 @@ def _create_command() -> ControlCommand:
 
 
 class TestControlHost(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_owned_action_settles_before_provider_terminal_event(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            class DeferredLifecycle:
+                def __init__(self) -> None:
+                    self.action_id: str | None = None
+                    self.reconciliations = 0
+
+                def owns(self, proposal: ControlEvent) -> bool:
+                    self.action_id = str(proposal.payload["action_id"])
+                    return proposal.payload["kind"] == "child.spawn"
+
+                @property
+                def active_child_count(self) -> int:
+                    return 0
+
+                async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]:
+                    self.reconciliations += 1
+                    if self.reconciliations != 3 or self.action_id is None:
+                        return ()
+                    return (
+                        ProviderOwnedActionTerminal(
+                            self.action_id,
+                            "succeeded",
+                            ActionExecutionReceipt(
+                                action_id=self.action_id,
+                                receipt_ref=f"receipt:{self.action_id}",
+                                usage=BudgetUsage.zero(),
+                            ),
+                        ),
+                    )
+
+            proposal = ControlEvent.from_mapping(
+                {
+                    **_proposal(
+                        kind="child.spawn",
+                        target={"kind": "child", "child_id": "child-1"},
+                    ).to_mapping(),
+                    "sequence": 3,
+                }
+            )
+            created, running, _ = _session_events(proposal)
+            goal = ControlEvent.from_mapping(
+                {
+                    "protocol": "asterion.agent-control/v1",
+                    "event_id": "event-goal",
+                    "session_id": "session-1",
+                    "generation": 1,
+                    "sequence": 4,
+                    "emitted_at": "2026-08-09T15:00:03Z",
+                    "type": "goal.updated",
+                    "payload": {"goal_id": "goal-1", "status": "cancelled"},
+                }
+            )
+            terminal = ControlEvent.from_mapping(
+                {
+                    "protocol": "asterion.agent-control/v1",
+                    "event_id": "event-cancelled",
+                    "session_id": "session-1",
+                    "generation": 1,
+                    "sequence": 5,
+                    "emitted_at": "2026-08-09T15:00:04Z",
+                    "type": "session.cancelled",
+                    "payload": {"reason_code": "operator-request"},
+                }
+            )
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=MemoryCanonicalJournal("session-1"),
+                client=ScriptedClient(
+                    plan.control_binding.manifest,
+                    events=(created, running, proposal, goal, terminal),
+                ),
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+                provider_owned_actions=DeferredLifecycle(),
+            )
+
+            await host.pump()
+
+        self.assertEqual(host.snapshot().state.session_status, "cancelled")
+        self.assertEqual(host.snapshot().state.actions["action-1"].status, "succeeded")
+
     async def test_provider_owned_child_skips_generic_executor_and_settles_later(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(

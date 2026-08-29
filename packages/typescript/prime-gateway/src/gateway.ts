@@ -93,6 +93,7 @@ export interface PrimeGatewaySession {
   readonly lastAttachResponse: PrimeDaemonResponse | undefined;
   adoptRecovery(recovery: PrimeCheckpointRecovery): void;
   acknowledgeCheckpoint(checkpointId: string): boolean;
+  isIdle?(): Promise<boolean>;
   subscribe(listener: PrimeDaemonListener): () => void;
   submitInput(
     inputId: string,
@@ -219,6 +220,10 @@ export interface PrimeGatewayPrivateInputs {
     binding: GatewayContextBinding,
     allowMissing: boolean,
   ): Promise<PrivateContinuationLocator>;
+  rebindRecoveredContinuationLocator(
+    binding: GatewayContextBinding,
+    expected: Omit<PrivateContinuationLocator, "sessionPath">,
+  ): Promise<GatewayContextBinding>;
 }
 
 export interface PrimeGatewayPrivateResults {
@@ -269,6 +274,7 @@ export interface PrimeGatewayOptions {
     checkpointId: string,
     coveredSequence: number,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
+    deadlineMs?: number,
   ) => Promise<PrimeCheckpointCreated>;
   readonly sessionContext?: PrimeGatewaySessionContextExecutor;
   readonly onSessionReady?: (context: PrimeGatewayCreateContext) => void;
@@ -313,6 +319,7 @@ interface ActionRecord {
   status: GatewayActionStatus;
   kind: string;
   targetId: string;
+  deadlineMs: number;
   reasonCode?: string;
   resultRef?: PrivateValueRef;
   admissionPromise?: Promise<GatewayAdmissionResult>;
@@ -364,6 +371,7 @@ function isPrivateRef(value: string): value is PrivateValueRef {
 export class PrimeGateway {
   private readonly actions = new Map<string, ActionRecord>();
   private readonly checkpoints = new Set<string>();
+  private readonly checkpointTasks = new Map<string, Promise<void>>();
   private readonly pendingCheckpointAcknowledgements = new Set<string>();
   private readonly pendingInputAcknowledgements = new Map<string, string>();
   private readonly inputClaims = new Map<string, string>();
@@ -378,6 +386,9 @@ export class PrimeGateway {
   private session: PrimeGatewaySession | undefined;
   private mapper: PrimeEventMapper | undefined;
   private unsubscribe: (() => void) | undefined;
+  /** Monotonic source identity for callbacks from a daemon transport. */
+  private transportEpoch = 0;
+  private cancellationInProgress = false;
   private eventQueue: Promise<void> = Promise.resolve();
   private durableQueue: Promise<void> = Promise.resolve();
   private goalId: string | undefined;
@@ -406,6 +417,7 @@ export class PrimeGateway {
           status: "proposed",
           kind: event.payload.kind,
           targetId: this.actionTargetId(event),
+          deadlineMs: event.payload.budget.deadline_ms,
         });
       } else if (event.type === "checkpoint.created") {
         this.checkpoints.add(event.payload.checkpoint_id);
@@ -751,7 +763,9 @@ export class PrimeGateway {
       event.type !== "action.proposed" ||
       event.session_id !== this.options.sessionId ||
       event.generation !== this.options.generation ||
-      this.sessionStatus !== "running" ||
+      (this.sessionStatus !== "running" &&
+        !(this.sessionStatus === "paused" &&
+          event.payload.kind === "checkpoint.create")) ||
       !this.matchesReservation(event) ||
       this.actions.has(event.payload.action_id)
     ) {
@@ -770,6 +784,7 @@ export class PrimeGateway {
       status: "proposed",
       kind: event.payload.kind,
       targetId: this.actionTargetId(event),
+      deadlineMs: event.payload.budget.deadline_ms,
     });
   }
 
@@ -821,7 +836,7 @@ export class PrimeGateway {
 
   async detach(): Promise<void> {
     this.assertOpen();
-    if (this.session !== undefined) {
+    if (this.session !== undefined && this.sessionStatus !== "terminal") {
       await this.session.detach("asterion-detach");
     }
   }
@@ -829,6 +844,11 @@ export class PrimeGateway {
   async settle(): Promise<void> {
     await this.eventQueue;
     await this.durableQueue;
+    while (this.checkpointTasks.size > 0) {
+      await Promise.all(this.checkpointTasks.values());
+      await this.eventQueue;
+      await this.durableQueue;
+    }
   }
 
   async close(): Promise<void> {
@@ -1074,6 +1094,12 @@ export class PrimeGateway {
           this.mapper.noteExternalSessionStatus(restoredStatus);
         }
         return;
+      case "session.detach":
+        if (this.sessionStatus === undefined || this.sessionStatus === "terminal") {
+          throw new PrimeGatewayError();
+        }
+        await this.requireSession().detach(command.command_id);
+        return;
       case "session.cancel":
         if (
           this.sessionStatus === undefined ||
@@ -1087,6 +1113,7 @@ export class PrimeGateway {
         if (
           !this.checkpoints.has(command.payload.checkpoint_id) &&
           this.sessionStatus !== "running" &&
+          this.sessionStatus !== "paused" &&
           this.sessionStatus !== "recovery_required"
         ) {
           throw new PrimeGatewayError();
@@ -2115,26 +2142,63 @@ export class PrimeGateway {
       session.continuationId,
     );
     if (current === undefined || !OPAQUE_ID.test(supervisorGeneration)) {
+      privateDiagnosticContextRefresh("current");
       throw new PrimeGatewayError();
     }
-    const locator = await this.options.privateValues.readContinuationLocator(current);
+    let locator: PrimeContinuationLocator;
+    try {
+      locator = await this.options.privateValues.readContinuationLocator(current);
+    } catch {
+      // A Prime checkpoint can append to the same trusted transcript while it
+      // prepares the successor. Re-pin only the already durable binding; the
+      // identity checks below still reject a substituted continuation.
+      try {
+        locator = await this.options.privateValues
+          .readPreparedContinuationLocator(current, false);
+      } catch {
+        try {
+          const rebound = await this.options.privateValues
+            .rebindRecoveredContinuationLocator(current, {
+              continuationId: session.continuationId,
+              activeSessionId: session.activeSessionId,
+              transcriptSessionId: session.transcriptSessionId,
+              supervisorGeneration,
+            });
+          await this.enqueueDurable(
+            () => this.options.store.rebindContextBinding(rebound),
+          );
+          locator = await this.options.privateValues.readContinuationLocator(rebound);
+        } catch {
+          privateDiagnosticContextRefresh("locator");
+          throw new PrimeGatewayError();
+        }
+      }
+    }
     if (
       locator.continuationId !== session.continuationId ||
       locator.activeSessionId !== session.activeSessionId ||
       locator.transcriptSessionId !== session.transcriptSessionId
     ) {
+      privateDiagnosticContextRefresh("identity");
       throw new PrimeGatewayError();
     }
     if (locator.supervisorGeneration === supervisorGeneration) {
+      privateDiagnosticContextRefresh("unchanged");
       return;
     }
-    const replacement = await this.options.privateValues.putContinuationLocator({
-      ...locator,
-      supervisorGeneration,
-    });
-    await this.enqueueDurable(
-      () => this.options.store.rebindContextBinding(replacement),
-    );
+    try {
+      const replacement = await this.options.privateValues.putContinuationLocator({
+        ...locator,
+        supervisorGeneration,
+      });
+      await this.enqueueDurable(
+        () => this.options.store.rebindContextBinding(replacement),
+      );
+    } catch {
+      privateDiagnosticContextRefresh("write");
+      throw new PrimeGatewayError();
+    }
+    privateDiagnosticContextRefresh("rebound");
   }
 
   private async create(
@@ -2247,34 +2311,73 @@ export class PrimeGateway {
     }));
     await this.append(this.reasonEvent("session.running", "prime-resident-started"));
     this.options.onSessionReady?.(createContext);
-    this.unsubscribe = session.subscribe((outbound) => this.enqueue(outbound));
+    this.subscribeToSession(session);
   }
 
   private async cancel(
     command: Extract<ControlCommand, { type: "session.cancel" }>,
   ): Promise<void> {
-    await this.requireSession().cancel(command.command_id);
-    const goalId = this.requireGoalId();
-    await this.append(this.event("goal.updated", {
-      goal_id: goalId,
-      status: "cancelled",
-    }));
-    await this.append(this.reasonEvent("session.cancelled", command.payload.reason_code));
-    this.mapper?.noteExternalGoalStatus("cancelled");
-    this.mapper?.noteExternalTerminal();
-    this.terminal = true;
+    this.cancellationInProgress = true;
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+    try {
+      await this.eventQueue;
+      if (this.sessionStatus === undefined || this.sessionStatus === "terminal") {
+        throw new PrimeGatewayError();
+      }
+      await this.requireSession().cancel(command.command_id);
+      privateDiagnosticGatewayCancelStage("native-returned");
+      const goalId = this.requireGoalId();
+      await this.append(this.event("goal.updated", {
+        goal_id: goalId,
+        status: "cancelled",
+      }));
+      privateDiagnosticGatewayCancelStage("goal-updated");
+      await this.append(this.reasonEvent("session.cancelled", command.payload.reason_code));
+      privateDiagnosticGatewayCancelStage("terminal-appended");
+      this.mapper?.noteExternalGoalStatus("cancelled");
+      this.mapper?.noteExternalTerminal();
+      this.terminal = true;
+    } catch {
+      if (!this.terminal && !this.closed) {
+        this.cancellationInProgress = false;
+        this.subscribeToSession(this.requireSession());
+      }
+      throw new PrimeGatewayError();
+    }
   }
 
-  private async checkpoint(checkpointId: string): Promise<void> {
+  private async checkpoint(checkpointId: string, deadlineMs?: number): Promise<void> {
     if (this.checkpoints.has(checkpointId)) {
       this.retryCheckpointAcknowledgements();
       return;
+    }
+    const session = this.requireSession();
+    const deadlineAt = Date.now() + (deadlineMs ?? 120_000);
+    // PrimeSession.pause() does not return until native `wait_for_idle`
+    // succeeds.  A paused resident root can still report itself as active
+    // because it exists, so probing it again here can turn that completed
+    // quiescence barrier into a false checkpoint timeout.
+    while (
+      this.sessionStatus !== "paused" &&
+      typeof session.isIdle === "function" &&
+      !await session.isIdle()
+    ) {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) {
+        throw new PrimeGatewayError();
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(50, remainingMs)));
+    }
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      throw new PrimeGatewayError();
     }
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     try {
       await this.eventQueue;
-      if (this.sessionStatus === "running") {
+      if (this.sessionStatus === "running" || this.sessionStatus === "paused") {
         await this.append(this.reasonEvent(
           "session.recovery-required",
           "prime-checkpoint-restart",
@@ -2284,17 +2387,23 @@ export class PrimeGateway {
         throw new PrimeGatewayError();
       }
     } catch {
-      this.unsubscribe = this.requireSession().subscribe(
-        (outbound) => this.enqueue(outbound),
-      );
+      this.subscribeToSession(this.requireSession());
       throw new PrimeGatewayError();
     }
 
-    const runningEvent = this.reasonEvent(
-      "session.running",
+    // The queue above drains every event accepted before the checkpoint
+    // boundary.  Callbacks retained by the retired transport can still fire
+    // later, so invalidate only that source before the recovered mapper exists.
+    this.transportEpoch += 1;
+
+    const expectedRecoveryStatus = this.recoveryBaseStatus === "paused"
+      ? "paused"
+      : "running";
+    const restoredEvent = this.reasonEvent(
+      expectedRecoveryStatus === "paused" ? "session.paused" : "session.running",
       "prime-checkpoint-restored",
     );
-    const coveredSequence = runningEvent.sequence;
+    const coveredSequence = restoredEvent.sequence;
     let recovered: PrimeCheckpointRecovery | undefined;
     let adopted = false;
     let created: PrimeCheckpointCreated;
@@ -2303,14 +2412,30 @@ export class PrimeGateway {
         checkpointId,
         coveredSequence,
         async (recovery) => {
-          if (
-            recovered !== undefined ||
-            this.sessionStatus !== "recovery_required" ||
-            !this.validRecovery(recovery) ||
-            recovery.sessionStatus !== "running"
-          ) {
+          if (recovered !== undefined) {
+            privateDiagnosticCheckpointRecovery("duplicate");
             throw new PrimeGatewayError();
           }
+          if (this.sessionStatus !== "recovery_required") {
+            privateDiagnosticCheckpointRecovery("state");
+            throw new PrimeGatewayError();
+          }
+          if (!this.validRecovery(recovery)) {
+            privateDiagnosticCheckpointRecovery("invalid");
+            throw new PrimeGatewayError();
+          }
+          // Prime reports a resident root's goal as active after reattach even
+          // when the operator had already paused Asterion at the checkpoint
+          // boundary. Preserve that external pause; a running Asterion session
+          // still requires a running native recovery.
+          if (
+            expectedRecoveryStatus === "running" &&
+            recovery.sessionStatus !== "running"
+          ) {
+            privateDiagnosticCheckpointRecovery("status");
+            throw new PrimeGatewayError();
+          }
+          privateDiagnosticCheckpointRecovery("validated");
           const session = this.requireSession();
           const identity = this.options.store.snapshot().primeIdentity;
           if (
@@ -2320,17 +2445,26 @@ export class PrimeGateway {
             session.supervisorGeneration !== identity.supervisorGeneration ||
             recovery.transcriptSessionId !== identity.transcriptSessionId
           ) {
+            privateDiagnosticCheckpointRecovery("identity");
             throw new PrimeGatewayError();
           }
           session.adoptRecovery(recovery);
           if (session.supervisorGeneration !== recovery.supervisorGeneration) {
+            privateDiagnosticCheckpointRecovery("adopt");
             throw new PrimeGatewayError();
           }
           adopted = true;
-          await this.refreshContextBinding(
-            session,
-            recovery.supervisorGeneration,
-          );
+          privateDiagnosticCheckpointRecovery("adopted");
+          try {
+            await this.refreshContextBinding(
+              session,
+              recovery.supervisorGeneration,
+            );
+          } catch {
+            privateDiagnosticCheckpointRecovery("context-failed");
+            throw new PrimeGatewayError();
+          }
+          privateDiagnosticCheckpointRecovery("context");
           await this.enqueueDurable(() => this.options.store.bindPrimeIdentity({
             activeSessionId: session.activeSessionId,
             transcriptSessionId: recovery.transcriptSessionId,
@@ -2339,11 +2473,15 @@ export class PrimeGateway {
           await this.enqueueDurable(
             () => this.options.store.recordPrimeCursor(recovery.primeCursor),
           );
+          privateDiagnosticCheckpointRecovery("cursor");
           this.mapper = this.recoveredMapper(recovery.primeCursor);
-          await this.append(runningEvent);
-          this.mapper.noteExternalSessionStatus("running");
+          await this.append(restoredEvent);
+          privateDiagnosticCheckpointRecovery("event");
+          this.mapper.noteExternalSessionStatus(expectedRecoveryStatus);
           recovered = recovery;
+          privateDiagnosticCheckpointRecovery("complete");
         },
+        remainingMs,
       );
       if (
         recovered === undefined ||
@@ -2361,12 +2499,10 @@ export class PrimeGateway {
       }
     } catch {
       if (recovered === undefined) {
-        this.releaseReservedEvent(runningEvent);
+        this.releaseReservedEvent(restoredEvent);
       }
       if (recovered !== undefined || adopted) {
-        this.unsubscribe = this.requireSession().subscribe(
-          (outbound) => this.enqueue(outbound),
-        );
+        this.subscribeToSession(this.requireSession());
       }
       throw new PrimeGatewayError();
     }
@@ -2391,9 +2527,7 @@ export class PrimeGateway {
         // The durable checkpoint remains authoritative; retry is idempotent.
       }
     } finally {
-      this.unsubscribe = this.requireSession().subscribe(
-        (outbound) => this.enqueue(outbound),
-      );
+      this.subscribeToSession(this.requireSession());
     }
   }
 
@@ -2619,7 +2753,7 @@ export class PrimeGateway {
       );
       await this.append(restoredEvent);
       this.mapper.noteExternalSessionStatus(restoredStatus);
-      this.unsubscribe = session.subscribe((outbound) => this.enqueue(outbound));
+      this.subscribeToSession(session);
       this.retryCheckpointAcknowledgements();
     } catch (error) {
       if (restoredEvent !== undefined) {
@@ -2818,6 +2952,33 @@ export class PrimeGateway {
     }
     action.resolveTerminal?.(this.terminalResult(action));
     delete action.resolveTerminal;
+    if (resolution === "succeeded" && action.kind === "checkpoint.create") {
+      this.scheduleCheckpoint(action.targetId, action.deadlineMs);
+    }
+  }
+
+  private scheduleCheckpoint(checkpointId: string, deadlineMs: number): void {
+    if (this.checkpoints.has(checkpointId) || this.checkpointTasks.has(checkpointId)) {
+      return;
+    }
+    privateDiagnosticCheckpointStage("scheduled");
+    const task = new Promise<void>((resolve) => setTimeout(resolve, 0))
+      .then(() => {
+        privateDiagnosticCheckpointStage("started");
+        return this.checkpoint(checkpointId, deadlineMs);
+      })
+      .catch(async () => {
+        privateDiagnosticCheckpointStage("failed");
+        await this.append(this.event("fault.raised", {
+          code: "prime-checkpoint-failed",
+          recoverable: true,
+          evidence_ref: null,
+        }));
+      })
+      .finally(() => {
+        this.checkpointTasks.delete(checkpointId);
+      });
+    this.checkpointTasks.set(checkpointId, task);
   }
 
   private async restoreGoalTerminals(): Promise<void> {
@@ -2889,9 +3050,21 @@ export class PrimeGateway {
     }
   }
 
-  private enqueue(outbound: PrimeDaemonOutbound): void {
+  private subscribeToSession(session: PrimeGatewaySession): void {
+    this.unsubscribe?.();
+    const epoch = this.transportEpoch + 1;
+    this.transportEpoch = epoch;
+    this.unsubscribe = session.subscribe((outbound) => this.enqueue(outbound, epoch));
+  }
+
+  private enqueue(outbound: PrimeDaemonOutbound, epoch = this.transportEpoch): void {
+    if (this.cancellationInProgress) {
+      return;
+    }
     this.eventQueue = this.eventQueue
-      .then(() => this.handlePrimeOutbound(outbound))
+      .then(() => epoch === this.transportEpoch
+        ? this.handlePrimeOutbound(outbound)
+        : undefined)
       .catch((error: unknown) => this.raiseMappingFault(error));
   }
 
@@ -2924,11 +3097,13 @@ export class PrimeGateway {
         recoverable: true,
         evidence_ref: null,
       }));
-      await this.append(this.reasonEvent(
-        "session.recovery-required",
-        "prime-event-invalid",
-      ));
-      this.mapper?.noteExternalRecoveryRequired();
+      if (this.sessionStatus !== "recovery_required") {
+        await this.append(this.reasonEvent(
+          "session.recovery-required",
+          "prime-event-invalid",
+        ));
+        this.mapper?.noteExternalRecoveryRequired();
+      }
     } catch (error) {
       if (!(error instanceof PrimeEventMappingError)) {
         this.terminal = true;
@@ -3049,5 +3224,37 @@ export class PrimeGateway {
     if (this.closed) {
       throw new PrimeGatewayError();
     }
+  }
+}
+
+function privateDiagnosticGatewayCancelStage(
+  stage: "native-returned" | "goal-updated" | "terminal-appended",
+): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+    process.stderr.write(`asterion-prime-gateway-cancel-stage:${stage}\n`);
+  }
+}
+
+function privateDiagnosticCheckpointStage(
+  stage: "scheduled" | "started" | "failed",
+): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+    process.stderr.write(`asterion-prime-gateway-checkpoint-stage:${stage}\n`);
+  }
+}
+
+function privateDiagnosticCheckpointRecovery(
+  stage: "duplicate" | "state" | "invalid" | "status" | "validated" | "identity" | "adopt" | "adopted" | "context" | "context-failed" | "cursor" | "event" | "complete",
+): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+    process.stderr.write(`asterion-prime-gateway-checkpoint-recovery:${stage}\n`);
+  }
+}
+
+function privateDiagnosticContextRefresh(
+  stage: "current" | "locator" | "identity" | "unchanged" | "write" | "rebound",
+): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+    process.stderr.write(`asterion-prime-context-refresh:${stage}\n`);
   }
 }

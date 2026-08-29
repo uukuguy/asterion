@@ -64,6 +64,7 @@ CONTROL_COMMAND_TYPES = frozenset(
         "session.attach",
         "session.cancel",
         "session.create",
+        "session.detach",
         "session.pause",
         "session.resume",
     }
@@ -346,7 +347,12 @@ def _validate_command_payload(command_type: str, value: object) -> None:
             raise ControlProtocolError("input submit delivery is invalid")
         _require_opaque_id(payload.get("content_ref"), "input submit content reference")
         return
-    if command_type in {"session.pause", "session.resume", "session.cancel"}:
+    if command_type in {
+        "session.detach",
+        "session.pause",
+        "session.resume",
+        "session.cancel",
+    }:
         payload = _closed_mapping(value, {"reason_code"}, f"{command_type} payload")
         _require_identifier(payload.get("reason_code"), f"{command_type} reason")
         return

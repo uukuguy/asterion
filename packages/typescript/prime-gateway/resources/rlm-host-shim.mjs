@@ -157,6 +157,31 @@ export async function recordNativeRlmMessageDelivered(client, messageId) {
   await client.recordMessageDelivered(Object.freeze({ message_id: messageId }));
 }
 
+const pendingNativeMessageDeliveries = new Map();
+
+export function trackNativeRlmMessageDelivery(client, childId, messageId, delivery) {
+  if (!validChildId(childId) || !validChildId(messageId) || !delivery || typeof delivery.then !== "function") {
+    throw new TypeError("Prime RLM message delivery is invalid");
+  }
+  const pending = pendingNativeMessageDeliveries.get(childId) ?? new Set();
+  pendingNativeMessageDeliveries.set(childId, pending);
+  const tracked = Promise.resolve(delivery)
+    .then(() => recordNativeRlmMessageDelivered(client, messageId))
+    .catch(() => undefined)
+    .finally(() => {
+      pending.delete(tracked);
+      if (pending.size === 0) pendingNativeMessageDeliveries.delete(childId);
+    });
+  pending.add(tracked);
+  return tracked;
+}
+
+export async function settleNativeRlmMessageDeliveries(childId) {
+  if (!validChildId(childId)) throw new TypeError("Prime RLM child is invalid");
+  const pending = pendingNativeMessageDeliveries.get(childId);
+  if (pending !== undefined) await Promise.all([...pending]);
+}
+
 export async function createRlmHostClient(discoveryPath) {
   let discovery;
   try { discovery = JSON.parse(await readFile(discoveryPath, "utf8")); } catch { throw new Error("Prime RLM host discovery is unavailable"); }
@@ -273,6 +298,7 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
       if (typeof delegate.releaseRlmSubagentRuntime !== "function" || !isRecord(options) || !validChildId(options.id)) throw new Error("Prime RLM release is invalid");
       const terminalStatus = status === "done" ? "completed" : status === "error" ? "failed" : status === "cancelled" ? "cancelled" : null;
       if (terminalStatus === null) throw new Error("Prime RLM release is invalid");
+      await settleNativeRlmMessageDeliveries(options.id);
       await client.recordLifecycle(Object.freeze({ type: "rlm.child.terminal", child_id: options.id, status: terminalStatus }));
       return delegate.releaseRlmSubagentRuntime(runtime, options, status);
     },
@@ -287,6 +313,7 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
                 await client.recordLifecycle(Object.freeze({ type: "rlm.child.started", child_id: childId, native_identity_digest: nativeIdentityDigest({ session }) }));
                 startedChildren.add(childId);
               }
+              await settleNativeRlmMessageDeliveries(childId);
               await client.recordLifecycle(Object.freeze({ type: "rlm.child.terminal", child_id: childId, status: "completed" }));
             })
             .catch(() => undefined);

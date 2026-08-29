@@ -247,6 +247,75 @@ test("daemon wire admits metadata-only daemon list reads", () => {
   });
 });
 
+test("daemon wire admits only the pinned heartbeat command names and shapes", () => {
+  const commands = [
+    { type: "heartbeats_list" },
+    { type: "heartbeat_get", activeSessionId: "prime-root" },
+    {
+      type: "heartbeat_set",
+      activeSessionId: "prime-root",
+      schedule: "0 * * * *",
+      prompt: "private heartbeat body",
+      deliveryMode: "followUp",
+    },
+    {
+      type: "heartbeat_update",
+      activeSessionId: "prime-root",
+      action: "pause",
+    },
+    {
+      type: "heartbeat_manage",
+      activeSessionId: "prime-root",
+      jobId: "heartbeat-job-1",
+      action: "cancel",
+    },
+  ];
+
+  for (const [index, command] of commands.entries()) {
+    const encoded = encodePrimeDaemonCommand(
+      command,
+      `heartbeat-command-${index}`,
+      "asterion-client-1",
+    );
+    assert.equal(JSON.parse(encoded).command.type, command.type);
+  }
+
+  for (const command of [
+    { type: "list_heartbeats" },
+    { type: "get_heartbeat", activeSessionId: "prime-root" },
+    {
+      type: "set_heartbeat",
+      activeSessionId: "prime-root",
+      schedule: "0 * * * *",
+      prompt: "SENTINEL",
+    },
+    {
+      type: "heartbeat_set",
+      activeSessionId: "prime-root",
+      schedule: "0 * * * *",
+      prompt: "SENTINEL",
+      command: "SENTINEL_PRIVATE_COMMAND",
+    },
+    {
+      type: "heartbeat_update",
+      activeSessionId: "prime-root",
+      action: "delete",
+    },
+    {
+      type: "heartbeat_manage",
+      activeSessionId: "prime-root",
+      jobId: "",
+      action: "pause",
+    },
+  ]) {
+    assertFixedProtocolError(() => encodePrimeDaemonCommand(
+      command,
+      "heartbeat-invalid",
+      "asterion-client-1",
+    ));
+  }
+});
+
 test("daemon wire admits only the pinned session command shapes", () => {
   const commands = [
     { type: "abort_branch_summary", activeSessionId: "prime-root" },
@@ -275,6 +344,12 @@ test("daemon wire admits only the pinned session command shapes", () => {
     { type: "get_session_stats", activeSessionId: "prime-root" },
     { type: "get_session_tree", activeSessionId: "prime-root" },
     { type: "get_state", activeSessionId: "prime-root" },
+    {
+      type: "set_model",
+      activeSessionId: "prime-root",
+      provider: "deepseek",
+      modelId: "deepseek-v4-flash",
+    },
     {
       type: "navigate_tree",
       activeSessionId: "prime-root",
@@ -322,6 +397,11 @@ test("daemon wire admits only the pinned session command shapes", () => {
       type: "set_auto_compaction",
       activeSessionId: "prime-root",
       enabled: true,
+    },
+    {
+      type: "set_model",
+      activeSessionId: "prime-root",
+      provider: "deepseek",
     },
     { type: "toString", activeSessionId: "prime-root" },
     {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -17,6 +18,8 @@ from asterion.control.parity_testing import ParityScenarioRegistryError
 from asterion.control.providers.prime.parity_testing import (
     PRIME_SESSION_CONTEXT_ARTIFACT_LOCK,
     PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS,
+    PRIME_SESSION_CONTEXT_BOUNDED_PASS_CHECK_IDS,
+    PRIME_SESSION_CONTEXT_BOUNDED_VERIFICATION_COMMAND_ID,
     PRIME_SESSION_CONTEXT_PROVIDER_FREE_SCENARIO_IDS,
     PRIME_SESSION_CONTEXT_SCENARIO_IDS,
     PRIME_SESSION_CONTEXT_SCENARIO_MATRIX,
@@ -26,6 +29,7 @@ from asterion.control.providers.prime.parity_testing import (
     build_prime_session_context_observation,
     register_prime_session_context_scenarios,
 )
+from tools.verify_prime_loop import resolve_bounded_prime_environment
 from asterion.control.parity_testing import ParityScenarioRegistry
 from tools.setup_prime_agent import verify_prime_source
 
@@ -40,7 +44,16 @@ LEDGER = (
     / "prime-agent-0.7.1.json"
 )
 PROVIDER_ID = "asterion.prime-gateway"
-PINNED_SOURCE = ROOT / "3th-party" / "prime-agent"
+
+
+def _pinned_prime_source_root() -> Path:
+    configured = os.environ.get("ASTERION_PRIME_SOURCE_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (ROOT / "3th-party" / "prime-agent").resolve()
+
+
+PINNED_SOURCE = _pinned_prime_source_root()
 REAL_HARNESS = (
     ROOT
     / "tests"
@@ -271,16 +284,24 @@ def _observations() -> tuple[PrimeSessionContextScenarioObservation, ...]:
     return tuple(
         build_prime_session_context_observation(
             scenario_id=scenario_id,
-            status=(
-                "EXTERNAL-LIMITED"
+            status="PASS",
+            checks=(
+                PRIME_SESSION_CONTEXT_BOUNDED_PASS_CHECK_IDS[scenario_id]
                 if scenario_id in PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS
-                else "PASS"
+                else SAFE_CHECKS[scenario_id]
             ),
-            checks=SAFE_CHECKS[scenario_id],
             real_prime_runtime=True,
             fake_daemon=False,
-            provider_operations=0,
-            model_credential_reads=0,
+            provider_operations=(
+                2
+                if scenario_id in PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS
+                else 0
+            ),
+            model_credential_reads=(
+                1
+                if scenario_id in PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS
+                else 0
+            ),
         )
         for scenario_id in PRIME_SESSION_CONTEXT_SCENARIO_IDS
     )
@@ -349,7 +370,91 @@ def _node_22() -> Path | None:
     return None
 
 
+def _safe_command_journal_state(agent_dir: Path, socket_path: Path) -> str:
+    """Reduce one private command journal to a fixed diagnostic category."""
+    try:
+        key = hashlib.sha256(str(socket_path).encode("utf-8")).hexdigest()[:12]
+        journal = agent_dir / "daemon-workers" / key / "command-journal.jsonl"
+        records = [
+            json.loads(line)
+            for line in journal.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        command_id = "asterion-session-context-context-bounded-compact-compact"
+        target_key = next(
+            (
+                record.get("key")
+                for record in records
+                if isinstance(record, dict)
+                and record.get("type") == "received"
+                and record.get("commandId") == command_id
+                and isinstance(record.get("key"), str)
+            ),
+            None,
+        )
+        if target_key is None:
+            return "absent"
+        types = {
+            record.get("type")
+            for record in records
+            if isinstance(record, dict) and record.get("key") == target_key
+        }
+        if "acknowledged" in types:
+            return "acknowledged"
+        if "result" in types:
+            return "complete"
+        if "received" in types:
+            return "pending"
+        return "absent"
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return "unavailable"
+
+
 class TestPrimeSessionContextParity(unittest.TestCase):
+    def test_safe_command_journal_state_follows_the_durable_key(self) -> None:
+        command_id = (
+            "asterion-session-context-context-bounded-compact-compact"
+        )
+        client_id = "bounded-test-client"
+        key = json.dumps([client_id, command_id], separators=(",", ":"))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            socket_path = root / "prime.sock"
+            digest = hashlib.sha256(str(socket_path).encode("utf-8")).hexdigest()[:12]
+            journal = (
+                root / "agent" / "daemon-workers" / digest / "command-journal.jsonl"
+            )
+            journal.parent.mkdir(parents=True)
+            records = [
+                {
+                    "version": 1,
+                    "type": "received",
+                    "key": key,
+                    "clientId": client_id,
+                    "commandId": command_id,
+                    "commandType": "compact",
+                },
+                {
+                    "version": 1,
+                    "type": "result",
+                    "key": key,
+                    "response": {"type": "response"},
+                },
+                {"version": 1, "type": "acknowledged", "key": key},
+            ]
+            expected = ("pending", "complete", "acknowledged")
+            for size, category in enumerate(expected, start=1):
+                with self.subTest(category=category):
+                    journal.write_text(
+                        "\n".join(json.dumps(record) for record in records[:size])
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    self.assertEqual(
+                        _safe_command_journal_state(root / "agent", socket_path),
+                        category,
+                    )
+
     def test_ledger_and_runner_matrix_are_the_exact_approved_contract(self) -> None:
         ledger = _ledger()
         scenarios = {
@@ -369,7 +474,7 @@ class TestPrimeSessionContextParity(unittest.TestCase):
         self.assertEqual(len(PRIME_SESSION_CONTEXT_PROVIDER_FREE_SCENARIO_IDS), 7)
         self.assertEqual(len(PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS), 2)
 
-    def test_all_nine_runners_register_but_only_seven_provider_free_pass(
+    def test_all_nine_runners_register_with_their_exact_verified_boundaries(
         self,
     ) -> None:
         registry = ParityScenarioRegistry(_ledger(), provider_id=PROVIDER_ID)
@@ -386,14 +491,8 @@ class TestPrimeSessionContextParity(unittest.TestCase):
             registry.registered_scenario_ids,
             PRIME_SESSION_CONTEXT_SCENARIO_IDS,
         )
-        self.assertEqual(
-            report.passed_scenario_ids,
-            PRIME_SESSION_CONTEXT_PROVIDER_FREE_SCENARIO_IDS,
-        )
-        self.assertEqual(
-            report.blocking_scenario_ids,
-            PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS,
-        )
+        self.assertEqual(report.passed_scenario_ids, PRIME_SESSION_CONTEXT_SCENARIO_IDS)
+        self.assertEqual(report.blocking_scenario_ids, ())
         result_by_id = {result.scenario_id: result for result in report.results}
         for observation in observations:
             with self.subTest(scenario_id=observation.scenario_id):
@@ -403,32 +502,80 @@ class TestPrimeSessionContextParity(unittest.TestCase):
                 )
         self.assertEqual(
             {result.status for result in report.results},
-            {"external-limited", "pass"},
+            {"pass"},
         )
+
+    def test_bounded_evidence_can_pass_only_after_a_real_provider_operation(
+        self,
+    ) -> None:
+        scenario_id = "prime-parity.session.compaction"
+        observation = build_prime_session_context_observation(
+            scenario_id=scenario_id,
+            status="PASS",
+            checks=PRIME_SESSION_CONTEXT_BOUNDED_PASS_CHECK_IDS[scenario_id],
+            real_prime_runtime=True,
+            fake_daemon=False,
+            provider_operations=1,
+            model_credential_reads=0,
+        )
+        self.assertEqual(
+            observation.command_id,
+            PRIME_SESSION_CONTEXT_BOUNDED_VERIFICATION_COMMAND_ID,
+        )
+        registry = ParityScenarioRegistry(_ledger(), provider_id=PROVIDER_ID)
+        observations = tuple(
+            observation if item.scenario_id == scenario_id else item
+            for item in _observations()
+        )
+        register_prime_session_context_scenarios(
+            registry,
+            observations,
+            provider_factory=lambda: object(),
+        )
+        report = asyncio.run(registry.run((scenario_id,)))
+        self.assertEqual(report.passed_scenario_ids, (scenario_id,))
+
+        with self.assertRaises(ParityScenarioRegistryError):
+            build_prime_session_context_observation(
+                scenario_id=scenario_id,
+                status="PASS",
+                checks=PRIME_SESSION_CONTEXT_BOUNDED_PASS_CHECK_IDS[scenario_id],
+                real_prime_runtime=True,
+                fake_daemon=False,
+                provider_operations=0,
+                model_credential_reads=0,
+            )
 
     def test_evidence_binds_source_lock_scenario_provider_matrix_and_command(
         self,
     ) -> None:
-        observation = _observations()[0]
-        payload = json.loads(observation.serialized_observations)
-
-        self.assertEqual(payload["artifact_lock"], PRIME_SESSION_CONTEXT_ARTIFACT_LOCK)
-        self.assertEqual(payload["source_commit"], PRIME_SESSION_CONTEXT_SOURCE_COMMIT)
-        self.assertEqual(payload["scenario_id"], observation.scenario_id)
-        self.assertEqual(payload["provider_id"], PROVIDER_ID)
-        self.assertEqual(
-            payload["command_id"],
-            PRIME_SESSION_CONTEXT_VERIFICATION_COMMAND_ID,
-        )
-        self.assertEqual(
-            tuple(payload["assertion_ids"]),
-            EXPECTED_MATRIX[observation.scenario_id]["assertion_ids"],
-        )
-        self.assertEqual(
-            tuple(payload["fault_ids"]),
-            EXPECTED_MATRIX[observation.scenario_id]["fault_ids"],
-        )
-        self.assertNotIn(str(ROOT), observation.serialized_observations)
+        for observation in _observations():
+            payload = json.loads(observation.serialized_observations)
+            expected_command = (
+                PRIME_SESSION_CONTEXT_BOUNDED_VERIFICATION_COMMAND_ID
+                if observation.scenario_id
+                in PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS
+                else PRIME_SESSION_CONTEXT_VERIFICATION_COMMAND_ID
+            )
+            with self.subTest(scenario_id=observation.scenario_id):
+                self.assertEqual(
+                    payload["artifact_lock"], PRIME_SESSION_CONTEXT_ARTIFACT_LOCK
+                )
+                self.assertEqual(
+                    payload["source_commit"], PRIME_SESSION_CONTEXT_SOURCE_COMMIT
+                )
+                self.assertEqual(payload["scenario_id"], observation.scenario_id)
+                self.assertEqual(payload["provider_id"], PROVIDER_ID)
+                self.assertEqual(payload["command_id"], expected_command)
+                self.assertEqual(
+                    tuple(payload["assertion_ids"]),
+                    EXPECTED_MATRIX[observation.scenario_id]["assertion_ids"],
+                )
+                self.assertEqual(
+                    tuple(payload["fault_ids"]),
+                    EXPECTED_MATRIX[observation.scenario_id]["fault_ids"],
+                )
+                self.assertNotIn(str(ROOT), observation.serialized_observations)
 
     def test_named_verification_command_is_an_executable_make_target(self) -> None:
         makefile = MAKEFILE.read_text(encoding="utf-8")
@@ -441,6 +588,11 @@ class TestPrimeSessionContextParity(unittest.TestCase):
         )
         self.assertIn("tests.test_prime_session_context_parity", makefile)
         self.assertIn("npm --prefix packages/typescript/prime-gateway test", makefile)
+
+    def test_bounded_model_alias_is_normalized_only_at_the_prime_boundary(self) -> None:
+        source = REAL_HARNESS.read_text(encoding="utf-8")
+        self.assertIn('boundedModel === "deepseek-v4-flash-0731"', source)
+        self.assertIn('"deepseek-v4-flash"', source)
 
     def test_fake_daemon_is_diagnostic_only_and_has_no_evidence_id(self) -> None:
         first = _observations()[0]
@@ -469,8 +621,8 @@ class TestPrimeSessionContextParity(unittest.TestCase):
         base = _observations()
         mutations = (
             base[:-1],
-            (replace(base[0], provider_operations=1), *base[1:]),
-            (replace(base[0], model_credential_reads=1), *base[1:]),
+            (replace(base[0], provider_operations=3), *base[1:]),
+            (replace(base[0], model_credential_reads=2), *base[1:]),
             (replace(base[0], source_commit="0" * 40), *base[1:]),
             (replace(base[0], evidence_id="evidence.session-context.forged"), *base[1:]),
             (
@@ -501,6 +653,7 @@ class TestPrimeSessionContextParity(unittest.TestCase):
     def test_real_prime_provider_free_scenarios_match_committed_evidence(
         self,
     ) -> None:
+        bounded = os.environ.get("ASTERION_PRIME_SESSION_CONTEXT_BOUNDED") == "1"
         node = _node_22()
         if node is None:
             self.skipTest("an offline pinned Node 22 executable is unavailable")
@@ -523,6 +676,16 @@ class TestPrimeSessionContextParity(unittest.TestCase):
                 directory.mkdir(mode=0o700)
             socket_path = private_root / "prime.sock"
             environment = _closed_environment(home)
+            if bounded:
+                try:
+                    environment.update(resolve_bounded_prime_environment())
+                except Exception:
+                    self.fail("the bounded Prime session/context environment is unavailable")
+                environment["HOME"] = str(home)
+                model = environment.get("ASTERION_PRIME_EXPERIMENT_MODEL")
+                if not isinstance(model, str) or not model:
+                    self.fail("the bounded Prime session/context model is unavailable")
+                environment["ASTERION_PRIME_SESSION_CONTEXT_BOUNDED_MODEL"] = model
             daemon = subprocess.Popen(
                 (
                     str(node),
@@ -589,7 +752,7 @@ class TestPrimeSessionContextParity(unittest.TestCase):
                     check=False,
                     capture_output=True,
                     text=True,
-                    timeout=60,
+                    timeout=180 if bounded else 60,
                 )
                 safe_harness_reasons = tuple(
                     reason
@@ -598,6 +761,7 @@ class TestPrimeSessionContextParity(unittest.TestCase):
                         "real Prime resident identity failed",
                         "real Prime resident identity read failed",
                         "real Prime resident identity disagreement",
+                        "real Prime bounded model selection failed",
                         "real Prime fixture open path mismatched",
                         "real Prime fixture open transcript mismatched",
                         "real Prime fixture identity read failed",
@@ -638,6 +802,16 @@ class TestPrimeSessionContextParity(unittest.TestCase):
                         "real Prime image fixture resume failed",
                         "real Prime image projection failed",
                         "real Prime prompt cancellation failed",
+                        "real Prime bounded compaction failed-failed",
+                        "real Prime bounded compaction failed-cancelled",
+                        "real Prime bounded compaction failed-rejected",
+                        "real Prime bounded compaction failed-uncertain",
+                        "real Prime bounded compaction unacknowledged",
+                        "real Prime bounded branch summary failed-failed",
+                        "real Prime bounded branch summary failed-cancelled",
+                        "real Prime bounded branch summary failed-rejected",
+                        "real Prime bounded branch summary failed-uncertain",
+                        "real Prime bounded branch summary unacknowledged",
                     )
                     if reason in completed.stderr
                 )
@@ -667,7 +841,12 @@ class TestPrimeSessionContextParity(unittest.TestCase):
                     0,
                     "the real Prime session/context harness failed: "
                     + (safe_harness_reasons[0] if safe_harness_reasons else "unknown")
-                    + safe_location,
+                    + safe_location
+                    + (
+                        " journal=" + _safe_command_journal_state(agent_dir, socket_path)
+                        if bounded
+                        else ""
+                    ),
                 )
                 payload = json.loads(completed.stdout)
             finally:
@@ -701,8 +880,8 @@ class TestPrimeSessionContextParity(unittest.TestCase):
         self.assertEqual(payload["daemon_protocol"], 7)
         self.assertEqual(payload["daemon_schema_revision"], 14)
         self.assertIs(payload["fake_daemon"], False)
-        self.assertEqual(payload["model_credential_reads"], 0)
-        self.assertEqual(payload["provider_operations"], 0)
+        self.assertEqual(payload["model_credential_reads"], 1 if bounded else 0)
+        self.assertEqual(payload["provider_operations"], 2 if bounded else 0)
         self.assertIsInstance(payload["runtime_build_id"], str)
         self.assertTrue(payload["runtime_build_id"])
         self.assertNotIn(str(PINNED_SOURCE), completed.stdout)
@@ -715,17 +894,27 @@ class TestPrimeSessionContextParity(unittest.TestCase):
             self.assertNotIn(sentinel, completed.stdout)
 
         observed_checks = payload["scenario_checks"]
-        self.assertEqual(
-            tuple(observed_checks),
-            PRIME_SESSION_CONTEXT_PROVIDER_FREE_SCENARIO_IDS,
+        expected_scenario_ids = (
+            (*PRIME_SESSION_CONTEXT_PROVIDER_FREE_SCENARIO_IDS,
+             *PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS)
+            if bounded
+            else PRIME_SESSION_CONTEXT_PROVIDER_FREE_SCENARIO_IDS
         )
-        for scenario_id in PRIME_SESSION_CONTEXT_PROVIDER_FREE_SCENARIO_IDS:
+        self.assertEqual(tuple(observed_checks), expected_scenario_ids)
+        for scenario_id in expected_scenario_ids:
             with self.subTest(scenario_id=scenario_id):
                 self.assertTrue(
                     set(observed_checks[scenario_id]).issubset(
-                        SAFE_CHECKS[scenario_id]
+                        (
+                            PRIME_SESSION_CONTEXT_BOUNDED_PASS_CHECK_IDS[scenario_id]
+                            if scenario_id in PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS
+                            else SAFE_CHECKS[scenario_id]
+                        )
                     )
                 )
+
+        if bounded:
+            return
 
         observations = _observations()
         ledger = _ledger()
@@ -778,7 +967,7 @@ class TestPrimeSessionContextParity(unittest.TestCase):
                 if item["provider_id"] == PROVIDER_ID
             )
             expected_status = (
-                "external-limited"
+                "bounded-pass"
                 if scenario_id in PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS
                 else "provider-free-pass"
             )

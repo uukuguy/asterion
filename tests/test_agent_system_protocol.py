@@ -78,6 +78,7 @@ class TestAgentSystemProtocol(unittest.TestCase):
                 "session.attach",
                 "session.cancel",
                 "session.create",
+                "session.detach",
                 "session.pause",
                 "session.resume",
             ),

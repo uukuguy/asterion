@@ -82,6 +82,7 @@ class FakeControlPlaneClient:
                 "session.attach",
                 "session.cancel",
                 "session.create",
+                "session.detach",
                 "session.pause",
                 "session.resume",
             ),
@@ -159,6 +160,8 @@ class FakeControlPlaneClient:
             self._emit("session.paused", {"reason_code": command.payload["reason_code"]})
         elif command.type == "session.resume":
             self._emit("session.running", {"reason_code": command.payload["reason_code"]})
+        elif command.type == "session.detach":
+            return
         elif command.type == "session.cancel":
             self._emit(
                 "session.cancelled", {"reason_code": command.payload["reason_code"]}

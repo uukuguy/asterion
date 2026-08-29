@@ -115,6 +115,67 @@ def _running_state() -> ControlState:
 
 
 class TestControlState(unittest.TestCase):
+    def test_paused_session_allows_only_checkpoint_proposals(self) -> None:
+        paused = reduce_control_event(
+            _running_state(),
+            _event("session.paused", 3, {"reason_code": "checkpoint-boundary"}),
+        )
+        application = _proposal(4)
+        with self.assertRaises(ControlStateError):
+            reduce_control_event(paused, application)
+        checkpoint = _event(
+            "action.proposed",
+            4,
+            {
+                "action_id": "checkpoint-action-1",
+                "authority_revision": 1,
+                "idempotency_key": "checkpoint-boundary-1",
+                "kind": "checkpoint.create",
+                "target": {
+                    "kind": "checkpoint",
+                    "checkpoint_id": "checkpoint-1",
+                },
+                "input_ref": "input-ref-1",
+                "expected_artifacts": [],
+                "budget": {
+                    "controller_tokens": 1,
+                    "application_tokens": 0,
+                    "child_tokens": 0,
+                    "aggregate_tokens": 1,
+                    "cost_micros": 0,
+                    "deadline_ms": 10000,
+                },
+                "causal_parent_ids": ["goal-1", "task-1"],
+            },
+        )
+        proposed = reduce_control_event(paused, checkpoint)
+        self.assertIn("checkpoint-action-1", proposed.actions)
+        admitted = apply_action_admission(
+            proposed,
+            AdmissionDecision(
+                action_id="checkpoint-action-1",
+                authority_id="authority-1",
+                authority_revision=1,
+                proposal_digest=_digest(checkpoint),
+                status="admitted",
+                reason="authorized",
+                reservation=BudgetRequest(
+                    controller_tokens=1,
+                    application_tokens=0,
+                    child_tokens=0,
+                    aggregate_tokens=1,
+                    cost_micros=0,
+                    deadline_ms=10000,
+                ),
+            ),
+        )
+        self.assertEqual(
+            mark_action_running(admitted, "checkpoint-action-1").actions[
+                "checkpoint-action-1"
+            ].status,
+            "running",
+        )
+
     def test_pause_recovery_goal_and_completion_sequence(self) -> None:
         state = _running_state()
         events = (
@@ -140,6 +201,128 @@ class TestControlState(unittest.TestCase):
         self.assertEqual(state.goal_status, "completed")
         self.assertEqual(state.next_sequence, 9)
         self.assertEqual(state.terminal_event_id, "event-8")
+
+    def test_paused_checkpoint_may_enter_recovery_required(self) -> None:
+        state = reduce_control_event(
+            _running_state(),
+            _event("session.paused", 3, {"reason_code": "checkpoint-boundary"}),
+        )
+
+        recovered = reduce_control_event(
+            state,
+            _event(
+                "session.recovery-required", 4,
+                {"reason_code": "prime-checkpoint-restart"},
+            ),
+        )
+
+        self.assertEqual(recovered.session_status, "recovery_required")
+
+    def test_paused_session_accepts_its_checkpoint_receipt(self) -> None:
+        """A checkpoint deliberately preserves an operator pause boundary."""
+
+        paused = reduce_control_event(
+            _running_state(),
+            _event("session.paused", 3, {"reason_code": "checkpoint-boundary"}),
+        )
+        received = reduce_control_event(
+            paused,
+            _event(
+                "checkpoint.created",
+                4,
+                {
+                    "checkpoint_id": "checkpoint-1",
+                    "capsule_id": "capsule-1",
+                    "capsule_digest": "a" * 64,
+                    "control_plane_id": "prime.gateway",
+                    "control_plane_version": "0.1.0",
+                    "checkpoint_version": "1.0.0",
+                    "covered_sequence": 3,
+                    "storage_ref": "checkpoint-store-1",
+                },
+            ),
+        )
+
+        self.assertEqual(received.session_status, "paused")
+        self.assertEqual(received.next_sequence, 5)
+
+    def test_paused_checkpoint_recovery_restores_the_pause_boundary(self) -> None:
+        """Recovery must not turn an operator pause into an implicit resume."""
+
+        state = reduce_control_event(
+            _running_state(),
+            _event("session.paused", 3, {"reason_code": "checkpoint-boundary"}),
+        )
+        state = reduce_control_event(
+            state,
+            _event(
+                "session.recovery-required", 4,
+                {"reason_code": "prime-checkpoint-restart"},
+            ),
+        )
+        restored = reduce_control_event(
+            state,
+            _event("session.paused", 5, {"reason_code": "prime-checkpoint-restored"}),
+        )
+
+        self.assertEqual(restored.session_status, "paused")
+
+    def test_paused_session_accepts_cancellation_goal_before_terminal_event(self) -> None:
+        """Gateway cancellation records the goal outcome before the terminal."""
+
+        paused = reduce_control_event(
+            _running_state(),
+            _event("session.paused", 3, {"reason_code": "checkpoint-boundary"}),
+        )
+        cancelled_goal = reduce_control_event(
+            paused,
+            _event("goal.updated", 4, {"goal_id": "goal-1", "status": "cancelled"}),
+        )
+        terminal = reduce_control_event(
+            cancelled_goal,
+            _event("session.cancelled", 5, {"reason_code": "operator-request"}),
+        )
+
+        self.assertEqual(terminal.goal_status, "cancelled")
+        self.assertEqual(terminal.session_status, "cancelled")
+
+    def test_recovery_required_session_accepts_recoverable_fault(self) -> None:
+        state = reduce_control_event(
+            _running_state(),
+            _event("session.recovery-required", 3, {"reason_code": "restart"}),
+        )
+        observed = reduce_control_event(
+            state,
+            _event("fault.raised", 4, {"code": "prime-checkpoint-failed", "recoverable": True, "evidence_ref": None}),
+        )
+        self.assertEqual(observed.session_status, "recovery_required")
+
+    def test_recovery_required_session_accepts_provider_terminal_completion(self) -> None:
+        state = _running_state()
+        state = reduce_control_event(
+            state,
+            _event(
+                "session.recovery-required",
+                3,
+                {"reason_code": "provider-disconnected"},
+            ),
+        )
+        state = reduce_control_event(
+            state,
+            _event(
+                "goal.updated",
+                4,
+                {"goal_id": "goal-1", "status": "completed"},
+            ),
+        )
+
+        completed = reduce_control_event(
+            state,
+            _event("session.completed", 5, {"reason_code": "provider-recovered"}),
+        )
+
+        self.assertEqual(completed.session_status, "completed")
+        self.assertEqual(completed.terminal_event_id, "event-5")
 
     def test_action_admission_running_uncertain_and_reconciliation_are_explicit(self) -> None:
         state = _running_state()

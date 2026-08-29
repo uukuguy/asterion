@@ -18,7 +18,7 @@ from asterion.control.providers.prime.client import RlmMessageAdmissionBinding
 from asterion.control.providers.prime.rlm import PrimeRlmAdmissionPreparer
 from asterion.control.providers.prime.rlm import PrimeRlmActionLifecycle
 from asterion.control.providers.prime.rlm import build_prime_rlm_host_components
-from asterion.control.rlm import RlmChildService, RlmError
+from asterion.control.rlm import RlmChildService, RlmError, RlmMessageBinding
 from asterion.control.authority import BudgetUsage
 from asterion.control.authority import AuthorityLedger
 from asterion.control.execution import ActionExecutionReceipt
@@ -264,6 +264,111 @@ class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
             "rlm-message-" + sha256(b"message-action").hexdigest(),
         )
         self.assertEqual(service.public_messages()[0].status, "delivered")
+
+    async def test_prepares_child_to_parent_message_against_the_bound_child(self) -> None:
+        service = RlmChildService(_authority())
+        client = _Client(
+            RlmAdmissionBinding("spawn-action", "child-1", 1, 1, "a" * 64)
+        )
+        client.message_binding = RlmMessageAdmissionBinding(
+            "message-action", "message-1", "child-1", "session-1", 1,
+            "c" * 64, False,
+        )
+        preparer = PrimeRlmAdmissionPreparer(
+            client=client, children=service, parent_session_id="session-1"
+        )
+        await preparer.prepare(_proposal(action_id="spawn-action"))
+        message = ControlEvent.from_mapping(
+            {
+                "protocol": "asterion.agent-control/v1",
+                "event_id": "event-child-reply",
+                "session_id": "session-1",
+                "generation": 1,
+                "sequence": 2,
+                "emitted_at": "2026-08-12T10:00:01Z",
+                "type": "action.proposed",
+                "payload": {
+                    "action_id": "message-action",
+                    "authority_revision": 1,
+                    "idempotency_key": "message-1",
+                    "kind": "child.message",
+                    "target": {"kind": "child", "child_id": "child-1"},
+                    "input_ref": "input-2",
+                    "expected_artifacts": [],
+                    "budget": {
+                        "controller_tokens": 0,
+                        "application_tokens": 0,
+                        "child_tokens": 0,
+                        "aggregate_tokens": 0,
+                        "cost_micros": 0,
+                        "deadline_ms": 1,
+                    },
+                    "causal_parent_ids": [],
+                },
+            }
+        )
+
+        await preparer.prepare(message)
+
+        self.assertTrue(PrimeRlmActionLifecycle(preparer).owns(message))
+        self.assertEqual(service.public_messages()[0].recipient_id, "session-1")
+
+    async def test_prepares_terminal_child_final_message_to_its_bound_parent(self) -> None:
+        service = RlmChildService(_authority())
+        client = _Client(
+            RlmAdmissionBinding("spawn-action", "child-1", 1, 1, "a" * 64)
+        )
+        client.lifecycle = (
+            RlmLifecycleObservation("rlm.child.started", "child-1", native_identity_digest="b" * 64),
+            RlmLifecycleObservation("rlm.child.terminal", "child-1", "completed"),
+        )
+        client.message_binding = RlmMessageAdmissionBinding(
+            "message-action", "message-1", "child-1", "session-1", 1,
+            "c" * 64, False,
+        )
+        preparer = PrimeRlmAdmissionPreparer(
+            client=client, children=service, parent_session_id="session-1"
+        )
+        await preparer.prepare(_proposal(action_id="spawn-action"))
+        await preparer.reconcile_lifecycle()
+        message = ControlEvent.from_mapping(
+            {
+                "protocol": "asterion.agent-control/v1",
+                "event_id": "event-terminal-child-reply",
+                "session_id": "session-1",
+                "generation": 1,
+                "sequence": 2,
+                "emitted_at": "2026-08-12T10:00:01Z",
+                "type": "action.proposed",
+                "payload": {
+                    "action_id": "message-action",
+                    "authority_revision": 1,
+                    "idempotency_key": "message-1",
+                    "kind": "child.message",
+                    "target": {"kind": "child", "child_id": "child-1"},
+                    "input_ref": "input-2",
+                    "expected_artifacts": [],
+                    "budget": {
+                        "controller_tokens": 0,
+                        "application_tokens": 0,
+                        "child_tokens": 0,
+                        "aggregate_tokens": 0,
+                        "cost_micros": 0,
+                        "deadline_ms": 1,
+                    },
+                    "causal_parent_ids": [],
+                },
+            }
+        )
+
+        await preparer.prepare(message)
+        self.assertEqual(service.public_messages()[0].sender_id, "child-1")
+        with self.assertRaisesRegex(RlmError, "message target is unavailable"):
+            service.admit_message(
+                RlmMessageBinding(
+                    "message-2", "session-1", "child-1", "d" * 64, 1
+                )
+            )
     async def test_builds_one_consistent_prime_rlm_host_component_set(self) -> None:
         client = _Client(
             RlmAdmissionBinding("action-1", "child-1", 1, 1, "a" * 64)

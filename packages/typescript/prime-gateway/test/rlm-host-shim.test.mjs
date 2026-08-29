@@ -9,6 +9,7 @@ import {
   admitNativeRlmMessage,
   createRlmHostClient,
   recordNativeRlmMessageDelivered,
+  trackNativeRlmMessageDelivery,
   wrapSubagentRuntimeHost,
 } from "../resources/rlm-host-shim.mjs";
 import { RlmHostBridge, listenRlmHostBridge } from "../dist/src/index.js";
@@ -48,6 +49,37 @@ test("admits a native RLM child before creating it exactly once", async () => {
   ]);
 });
 
+test("delays native child terminal recording until its admitted message is delivered", async () => {
+  const order = [];
+  let settleDelivery;
+  const delivery = new Promise((resolve) => { settleDelivery = resolve; });
+  const client = {
+    async proposeSpawn() { return { resolution: "admitted", child_id: "child-delivery-1" }; },
+    async recordMessageDelivered(event) { order.push(`delivered:${event.message_id}`); },
+    async recordLifecycle(event) { order.push(`lifecycle:${event.type}:${event.child_id}`); },
+  };
+  const wrapped = wrapSubagentRuntimeHost({
+    async createRlmSubagentRuntime() {},
+    async deleteRlmSubagentRuntime() {},
+    async releaseRlmSubagentRuntime(_runtime, options, status) {
+      order.push(`native-release:${options.id}:${status}`);
+    },
+  }, client, hostContext());
+
+  trackNativeRlmMessageDelivery(client, "child-delivery-1", "agentmsg-delivery-1", delivery);
+  const release = wrapped.releaseRlmSubagentRuntime({}, { id: "child-delivery-1" }, "done");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, []);
+
+  settleDelivery();
+  await release;
+  assert.deepEqual(order, [
+    "delivered:agentmsg-delivery-1",
+    "lifecycle:rlm.child.terminal:child-delivery-1",
+    "native-release:child-delivery-1:done",
+  ]);
+});
+
 test("preserves Prime's synchronous completion while recording the completed observation", async () => {
   const order = [];
   const childSession = Object.freeze({ sessionId: "native-session-1" });
@@ -70,6 +102,43 @@ test("preserves Prime's synchronous completion while recording the completed obs
     "native-complete:child-1:native-session-1",
     "lifecycle:rlm.child.started:child-1:",
     "lifecycle:rlm.child.terminal:child-1:completed",
+  ]);
+});
+
+test("delays synchronous native completion terminal recording until its message delivery settles", async () => {
+  const order = [];
+  let settleDelivery;
+  const delivery = new Promise((resolve) => { settleDelivery = resolve; });
+  const childSession = Object.freeze({ sessionId: "native-session-delayed" });
+  const client = {
+    async proposeSpawn() { return { resolution: "admitted", child_id: "child-completion-1" }; },
+    async recordMessageDelivered(event) { order.push(`delivered:${event.message_id}`); },
+    async recordLifecycle(event) { order.push(`lifecycle:${event.type}:${event.child_id}`); },
+  };
+  const wrapped = wrapSubagentRuntimeHost({
+    async createRlmSubagentRuntime() { return { session: childSession }; },
+    async deleteRlmSubagentRuntime() {},
+    completeRlmSubagentRuntime(childId) {
+      order.push(`native-complete:${childId}`);
+      return true;
+    },
+  }, client, hostContext());
+
+  trackNativeRlmMessageDelivery(client, "child-completion-1", "agentmsg-completion-1", delivery);
+  assert.equal(wrapped.completeRlmSubagentRuntime("child-completion-1", childSession), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, [
+    "native-complete:child-completion-1",
+    "lifecycle:rlm.child.started:child-completion-1",
+  ]);
+
+  settleDelivery();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, [
+    "native-complete:child-completion-1",
+    "lifecycle:rlm.child.started:child-completion-1",
+    "delivered:agentmsg-completion-1",
+    "lifecycle:rlm.child.terminal:child-completion-1",
   ]);
 });
 

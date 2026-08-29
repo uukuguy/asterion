@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
+from unittest import mock
 
 from asterion.control.authority import AuthorityEnvelope
 from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFactoryError
@@ -695,6 +696,49 @@ class TestPrimeEcosystemFactoryIntegration(unittest.IsolatedAsyncioTestCase):
 
 
 class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
+    async def test_sidecar_launches_in_its_own_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            node = root / "node"
+            entry = root / "sidecar.mjs"
+            node.write_text("#!/bin/sh\n", encoding="utf-8")
+            node.chmod(0o700)
+            entry.write_text("export {};\n", encoding="utf-8")
+            sidecar = PrimeSidecarProcess(
+                PrimeSidecarLaunchOptions(
+                    node_executable=node,
+                    sidecar_entry=entry,
+                    private_descriptor={},
+                    environ={"PATH": "/bin"},
+                )
+            )
+            fake_process = object()
+            with mock.patch.object(
+                asyncio,
+                "create_subprocess_exec",
+                new_callable=mock.AsyncMock,
+                return_value=fake_process,
+            ) as spawn:
+                self.assertIs(await sidecar._ensure_started(), fake_process)
+
+        self.assertTrue(spawn.call_args.kwargs["start_new_session"])
+
+    def test_accepts_exact_native_rlm_message_binding_response(self) -> None:
+        request = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "rlm-message-binding-1",
+            "type": "rlm.message.binding.read",
+            "action_id": "action-1",
+        }
+        response = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "rlm-message-binding-1",
+            "type": "rlm.message.binding.value",
+            "binding": {},
+        }
+
+        self.assertEqual(_validate_response(response, request), response)
+
     async def test_sidecar_creates_private_files_with_owner_only_permissions(
         self,
     ) -> None:

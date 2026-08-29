@@ -81,6 +81,8 @@ class FakePrimeSession {
     this.checkpointAcknowledgements = [];
     this.checkpointAcknowledger = () => true;
     this.listener = undefined;
+    this.emitOnCancel = undefined;
+    this.inFlightCancelListener = undefined;
     this.pauseError = undefined;
     this.contextCalls = [];
     this.contextBackend = contextBackend ?? {
@@ -171,6 +173,9 @@ class FakePrimeSession {
 
   async cancel(commandId) {
     this.calls.push(["cancel", commandId]);
+    if (this.emitOnCancel !== undefined) {
+      (this.inFlightCancelListener ?? this.listener)?.(this.emitOnCancel);
+    }
   }
 
   async describeContext(commandId, status) {
@@ -674,6 +679,7 @@ async function fixture({
   checkpointAckFailures = 0,
   ecosystemAdapter = undefined,
   failCheckpointEvent = false,
+  checkpointRecoveryStatus = "running",
 } = {}) {
   const parent = await mkdtemp(join(tmpdir(), "asterion-prime-gateway-"));
   const root = join(parent, "gateway");
@@ -713,6 +719,7 @@ async function fixture({
   const session = new FakePrimeSession(sessionPath);
   const createdGoals = [];
   const checkpointAcknowledgements = [];
+  const checkpointDeadlines = [];
   const checkpointAcknowledgementAttempts = [];
   const attemptCheckpointAcknowledgement = (checkpointId) => {
     checkpointAcknowledgementAttempts.push(checkpointId);
@@ -743,7 +750,8 @@ async function fixture({
       });
       return session;
     },
-    async createCheckpoint(checkpointId, coveredSequence, onRecovered) {
+    async createCheckpoint(checkpointId, coveredSequence, onRecovered, deadlineMs) {
+      checkpointDeadlines.push(deadlineMs);
       await onRecovered({
         transport: recoveryTransport(
           "supervisor-generation-2",
@@ -752,7 +760,7 @@ async function fixture({
         primeCursor: { generation: "prime-events-2", sequence: 11 },
         transcriptSessionId: "transcript-1",
         supervisorGeneration: "supervisor-generation-2",
-        sessionStatus: "running",
+        sessionStatus: checkpointRecoveryStatus,
       });
       failNextWrite = failCheckpointEvent;
       return {
@@ -787,6 +795,7 @@ async function fixture({
     gateway,
     createdGoals,
     checkpointAcknowledgements,
+    checkpointDeadlines,
     checkpointAcknowledgementAttempts,
     failNextGoalEventWrite() {
       failAfterResultLookup = true;
@@ -951,6 +960,25 @@ function goalProposal(identity, actionId, inputRef, kind) {
       ...proposal(identity, actionId, inputRef).payload,
       kind,
       target: { kind: "goal", goal_id: "goal-1" },
+      budget: {
+        controller_tokens: 0,
+        application_tokens: 0,
+        child_tokens: 0,
+        aggregate_tokens: 0,
+        cost_micros: 0,
+        deadline_ms: 1_000,
+      },
+    },
+  };
+}
+
+function checkpointProposal(identity, actionId, inputRef) {
+  return {
+    ...proposal(identity, actionId, inputRef),
+    payload: {
+      ...proposal(identity, actionId, inputRef).payload,
+      kind: "checkpoint.create",
+      target: { kind: "checkpoint", checkpoint_id: "checkpoint-action-1" },
       budget: {
         controller_tokens: 0,
         application_tokens: 0,
@@ -2400,20 +2428,22 @@ test("gateway handles input pause resume attach checkpoint and detach", async ()
     await state.gateway.accept(command("session.resume", {
       reason_code: "operator-request",
     }, "command-resume"));
+    await state.gateway.accept(command("session.detach", {
+      reason_code: "bounded-receipt",
+    }, "command-detach"));
     await state.gateway.accept(command("session.attach", {
       cursor: { generation: 1, sequence: 2 },
     }, "command-attach"));
     await state.gateway.accept(command("checkpoint.request", {
       checkpoint_id: "checkpoint-1",
     }, "command-checkpoint"));
-    await state.gateway.detach();
 
     assert.deepEqual(state.session.calls, [
       ["input", "input-1", "steer", "SENTINEL_PRIVATE_INPUT"],
       ["pause", "command-pause"],
       ["resume", "command-resume"],
+      ["detach", "command-detach"],
       ["attach", "command-attach", undefined],
-      ["detach", "asterion-detach"],
     ]);
     assert.deepEqual(eventTypes(state.store), [
       "session.created",
@@ -3121,7 +3151,134 @@ test("gateway drains an already queued Prime event before checkpoint recovery", 
   }
 });
 
-test("gateway resubscribes when a queued pause rejects checkpoint", async () => {
+test("gateway preserves a paused checkpoint when Prime recovery reports running", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    state.session.emit({
+      type: "session_event",
+      activeSessionId: "prime-root-1",
+      event: {
+        type: "goal_update",
+        goal: {
+          active: false,
+          status: "paused",
+          tokensUsed: 0,
+          timeUsedSeconds: 1,
+          continuationsUsed: 0,
+        },
+      },
+      meta: {
+        id: "prime-event-paused-recovery",
+        protocol: { name: "prime-agent.daemon", version: 7 },
+        sequence: 1,
+        cursor: { generation: "worker-generation-1", sequence: 1 },
+        emittedAt: "2026-08-10T03:20:00Z",
+      },
+    });
+    await state.gateway.settle();
+
+    await state.gateway.accept(command("checkpoint.request", {
+      checkpoint_id: "checkpoint-paused-restored",
+    }, "command-checkpoint-paused-restored"));
+
+    assert.deepEqual(eventTypes(state.store).slice(-3), [
+      "session.recovery-required",
+      "session.paused",
+      "checkpoint.created",
+    ]);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway refreshes a checkpointed continuation binding after its transcript changes", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    await writeFile(state.session.sessionPath, "checkpoint transcript update\n", {
+      flag: "a",
+      mode: 0o600,
+    });
+
+    await state.gateway.accept(command("checkpoint.request", {
+      checkpoint_id: "checkpoint-refresh-continuation",
+    }, "command-checkpoint-refresh-continuation"));
+
+    assert.equal(eventTypes(state.store).at(-1), "checkpoint.created");
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway discards an old subscription callback queued across checkpoint recovery", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const staleListener = state.session.listener;
+    assert.equal(typeof staleListener, "function");
+    const adoptRecovery = state.session.adoptRecovery.bind(state.session);
+    state.session.adoptRecovery = (recovery) => {
+      adoptRecovery(recovery);
+      staleListener({
+        type: "session_event",
+        activeSessionId: "prime-root-1",
+        event: {
+          type: "goal_update",
+          goal: {
+            active: true,
+            status: "active",
+            tokensUsed: 5,
+            timeUsedSeconds: 1,
+            continuationsUsed: 0,
+          },
+        },
+        meta: {
+          id: "prime-event-stale-before-recovery",
+          protocol: { name: "prime-agent.daemon", version: 7 },
+          sequence: 1,
+          cursor: { generation: "worker-generation-1", sequence: 1 },
+          emittedAt: "2026-08-10T03:20:00Z",
+        },
+      });
+    };
+
+    await state.gateway.accept(command("checkpoint.request", {
+      checkpoint_id: "checkpoint-stale-subscription",
+    }, "command-checkpoint-stale-subscription"));
+    await state.gateway.settle();
+
+    assert.deepEqual(eventTypes(state.store), [
+      "session.created",
+      "session.running",
+      "session.recovery-required",
+      "session.running",
+      "checkpoint.created",
+    ]);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway preserves a queued pause across checkpoint recovery", async () => {
   const state = await fixture();
   try {
     const goalRef = await state.privateValues.putInput("goal");
@@ -3152,36 +3309,16 @@ test("gateway resubscribes when a queued pause rejects checkpoint", async () => 
         emittedAt: "2026-08-10T03:21:00Z",
       },
     });
-    await assert.rejects(state.gateway.accept(command("checkpoint.request", {
+    await state.gateway.accept(command("checkpoint.request", {
       checkpoint_id: "checkpoint-paused-race",
-    }, "command-checkpoint-paused-race")));
-    state.session.emit({
-      type: "session_event",
-      activeSessionId: "prime-root-1",
-      event: {
-        type: "goal_update",
-        goal: {
-          active: true,
-          status: "active",
-          tokensUsed: 0,
-          timeUsedSeconds: 2,
-          continuationsUsed: 0,
-        },
-      },
-      meta: {
-        id: "prime-event-resume",
-        protocol: { name: "prime-agent.daemon", version: 7 },
-        sequence: 2,
-        cursor: { generation: "worker-generation-1", sequence: 2 },
-        emittedAt: "2026-08-10T03:22:00Z",
-      },
-    });
+    }, "command-checkpoint-paused-race"));
     await state.gateway.settle();
 
-    assert.deepEqual(eventTypes(state.store).slice(-3), [
+    assert.deepEqual(eventTypes(state.store).slice(-4), [
       "session.paused",
-      "session.running",
-      "goal.updated",
+      "session.recovery-required",
+      "session.paused",
+      "checkpoint.created",
     ]);
   } finally {
     await state.cleanup();
@@ -3512,6 +3649,41 @@ test("gateway maps daemon completion cursor and cancellation to unique terminals
   }
 });
 
+test("gateway records operator cancellation ahead of a synchronous native close", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    state.session.emitOnCancel = {
+      type: "session_closed",
+      activeSessionId: "prime-root-1",
+      reason: "private-close-body",
+    };
+    state.session.inFlightCancelListener = state.session.listener;
+
+    await state.gateway.accept(command("session.cancel", {
+      reason_code: "operator-request",
+    }, "command-cancel"));
+    await state.gateway.detach();
+    await state.gateway.settle();
+
+    assert.deepEqual(eventTypes(state.store), [
+      "session.created",
+      "session.running",
+      "goal.updated",
+      "session.cancelled",
+    ]);
+    assert.deepEqual(state.session.calls, [["cancel", "command-cancel"]]);
+  } finally {
+    await state.cleanup();
+  }
+});
+
 test("gateway resolves admitted actions and preserves uncertain transport state", async () => {
   const state = await fixture();
   try {
@@ -3679,6 +3851,208 @@ test("successful goal action resolution applies one canonical session terminal",
     } finally {
       await state.cleanup();
     }
+  }
+});
+
+test("successful checkpoint action materializes its checkpoint before terminal", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const actionId = "action-checkpoint";
+    const inputRef = await state.privateValues.putInput("checkpoint");
+    await state.gateway.emitActionProposal(checkpointProposal(
+      state.gateway.nextEventIdentity(), actionId, inputRef,
+    ));
+    await state.gateway.accept(command("action.resolve", {
+      action_id: actionId,
+      resolution: "admitted",
+      reason_code: "authorized",
+      receipt_ref: null,
+    }, "command-admit"));
+    const receiptRef = `system-checkpoint.create-${actionId}`;
+    await state.privateValues.bindResultReference(
+      "command-terminal", actionId, receiptRef,
+      { receiptRef, artifactIds: [], mediaTypes: [] },
+    );
+
+    await state.gateway.accept(command("action.resolve", {
+      action_id: actionId,
+      resolution: "succeeded",
+      reason_code: "executed",
+      receipt_ref: receiptRef,
+    }, "command-terminal"));
+
+    await state.gateway.settle();
+
+    const events = state.store.eventsAfter(0).map(({ event }) => event);
+    assert.equal(events.at(-1).type, "checkpoint.created");
+    assert.equal(events.at(-1).payload.checkpoint_id, "checkpoint-action-1");
+    assert.deepEqual(state.checkpointDeadlines, [1_000]);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway admits a checkpoint action from a paused session only", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    state.session.emit({
+      type: "session_event",
+      activeSessionId: "prime-root-1",
+      event: {
+        type: "goal_update",
+        goal: {
+          active: false,
+          status: "paused",
+          tokensUsed: 0,
+          timeUsedSeconds: 1,
+          continuationsUsed: 0,
+        },
+      },
+      meta: {
+        id: "prime-event-paused-action",
+        protocol: { name: "prime-agent.daemon", version: 7 },
+        sequence: 1,
+        cursor: { generation: "worker-generation-1", sequence: 1 },
+        emittedAt: "2026-08-10T03:21:00Z",
+      },
+    });
+    await state.gateway.settle();
+    const inputRef = await state.privateValues.putInput("checkpoint");
+    await state.gateway.emitActionProposal(checkpointProposal(
+      state.gateway.nextEventIdentity(), "action-paused-checkpoint", inputRef,
+    ));
+
+    await assert.rejects(
+      state.gateway.emitActionProposal(proposal(
+        state.gateway.nextEventIdentity(), "action-paused-application", inputRef,
+      )),
+    );
+    assert.equal(
+      eventTypes(state.store).filter((type) => type === "action.proposed").length,
+      1,
+    );
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("paused checkpoint action trusts the native pause quiescence barrier", async () => {
+  const state = await fixture();
+  try {
+    state.session.isIdle = async () => false;
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    state.session.emit({
+      type: "session_event",
+      activeSessionId: "prime-root-1",
+      event: {
+        type: "goal_update",
+        goal: { active: false, status: "paused", tokensUsed: 0, timeUsedSeconds: 1, continuationsUsed: 0 },
+      },
+      meta: {
+        id: "prime-event-paused-checkpoint-barrier",
+        protocol: { name: "prime-agent.daemon", version: 7 },
+        sequence: 1,
+        cursor: { generation: "worker-generation-1", sequence: 1 },
+        emittedAt: "2026-08-10T03:21:00Z",
+      },
+    });
+    await state.gateway.settle();
+    const actionId = "action-paused-checkpoint-barrier";
+    const inputRef = await state.privateValues.putInput("checkpoint");
+    await state.gateway.emitActionProposal(checkpointProposal(
+      state.gateway.nextEventIdentity(), actionId, inputRef,
+    ));
+    await state.gateway.accept(command("action.resolve", {
+      action_id: actionId,
+      resolution: "admitted",
+      reason_code: "authorized",
+      receipt_ref: null,
+    }, "command-admit"));
+    const receiptRef = `system-checkpoint.create-${actionId}`;
+    await state.privateValues.bindResultReference(
+      "command-terminal", actionId, receiptRef,
+      { receiptRef, artifactIds: [], mediaTypes: [] },
+    );
+    await state.gateway.accept(command("action.resolve", {
+      action_id: actionId,
+      resolution: "succeeded",
+      reason_code: "executed",
+      receipt_ref: receiptRef,
+    }, "command-terminal"));
+    await state.gateway.settle();
+
+    assert.equal(eventTypes(state.store).at(-1), "checkpoint.created");
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("checkpoint action fails closed when Prime never becomes idle before its deadline", async () => {
+  const state = await fixture();
+  try {
+    state.session.isIdle = async () => false;
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const actionId = "action-checkpoint-timeout";
+    const inputRef = await state.privateValues.putInput("checkpoint");
+    const event = checkpointProposal(state.gateway.nextEventIdentity(), actionId, inputRef);
+    event.payload.budget.deadline_ms = 1;
+    await state.gateway.emitActionProposal(event);
+    await state.gateway.accept(command("action.resolve", {
+      action_id: actionId,
+      resolution: "admitted",
+      reason_code: "authorized",
+      receipt_ref: null,
+    }, "command-admit"));
+    const receiptRef = `system-checkpoint.create-${actionId}`;
+    await state.privateValues.bindResultReference(
+      "command-terminal", actionId, receiptRef,
+      { receiptRef, artifactIds: [], mediaTypes: [] },
+    );
+    await state.gateway.accept(command("action.resolve", {
+      action_id: actionId,
+      resolution: "succeeded",
+      reason_code: "executed",
+      receipt_ref: receiptRef,
+    }, "command-terminal"));
+
+    await state.gateway.settle();
+
+    const events = state.store.eventsAfter(0).map(({ event: recorded }) => recorded);
+    assert.equal(state.checkpointDeadlines.length, 0);
+    assert.equal(events.at(-1).type, "fault.raised");
+    assert.deepEqual(events.at(-1).payload, {
+      code: "prime-checkpoint-failed",
+      recoverable: true,
+      evidence_ref: null,
+    });
+  } finally {
+    await state.cleanup();
   }
 });
 

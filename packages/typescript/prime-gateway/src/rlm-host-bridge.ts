@@ -58,6 +58,7 @@ export interface RlmDeleteResolution {
 
 export interface RlmHostBridgeOptions {
   readonly sessionId: string;
+  readonly maxDepth?: number;
   readonly maxSpawnCount?: number;
   readonly admitSpawn: (proposal: RlmSpawnProposal) => Promise<RlmSpawnResolution>;
   readonly admitDelete?: (proposal: RlmDeleteProposal) => Promise<RlmDeleteResolution>;
@@ -147,6 +148,8 @@ export class RlmHostBridge {
   constructor(private readonly options: RlmHostBridgeOptions) {
     if (
       options.sessionId.length === 0
+      || (options.maxDepth !== undefined
+        && (!Number.isSafeInteger(options.maxDepth) || options.maxDepth < 0))
       || (options.maxSpawnCount !== undefined
         && (!Number.isSafeInteger(options.maxSpawnCount) || options.maxSpawnCount < 0))
     ) throw new TypeError("RLM bridge is invalid");
@@ -174,6 +177,11 @@ export class RlmHostBridge {
     const priorRequestId = this.spawnRequestsByChildId.get(proposal.childId);
     if (priorRequestId !== undefined && priorRequestId !== proposal.requestId) {
       throw new TypeError("RLM proposal conflicts");
+    }
+    if (this.options.maxDepth !== undefined && proposal.rlmDepth > this.options.maxDepth) {
+      const promise = Promise.resolve(Object.freeze({ resolution: "rejected" as const, childId: proposal.childId }));
+      this.spawns.set(proposal.requestId, { digest, promise });
+      return promise;
     }
     if (
       this.options.maxSpawnCount !== undefined
@@ -299,9 +307,13 @@ export async function listenRlmHostBridge(
           if (!authenticated) return socket.destroy();
           continue;
         }
+        let diagnosticKind = "invalid";
         try {
         const value: unknown = JSON.parse(line.toString("utf8"));
         if (!isRecord(value) || typeof value.type !== "string") throw new TypeError();
+        if (["rlm.spawn.propose", "rlm.message.propose", "rlm.message.delivered", "rlm.child.started", "rlm.child.terminal", "rlm.child.deleted"].includes(value.type)) {
+          diagnosticKind = value.type.replaceAll(".", "-");
+        }
         if (value.type === "rlm.spawn.propose") {
           if (!hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "rlm_depth", "model_selector_digest", "budget"]) || typeof value.request_id !== "string" || typeof value.child_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !Number.isSafeInteger(value.rlm_depth) || Number(value.rlm_depth) < 0 || !validDigest(value.model_selector_digest) || !validBudget(value.budget)) throw new TypeError();
           void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id, idempotencyKey: value.idempotency_key, goalText: value.goal_text, rlmDepth: Number(value.rlm_depth), modelSelectorDigest: value.model_selector_digest, budget: value.budget }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
@@ -326,7 +338,12 @@ export async function listenRlmHostBridge(
         } else {
           throw new TypeError();
         }
-        } catch { socket.destroy(); }
+        } catch {
+          if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+            process.stderr.write(`asterion-prime-rlm-host-frame:${diagnosticKind}\n`);
+          }
+          socket.destroy();
+        }
         return;
       }
     });

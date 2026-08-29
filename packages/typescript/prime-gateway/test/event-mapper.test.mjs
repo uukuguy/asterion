@@ -151,6 +151,11 @@ test("mapping ignores a foreign session while preserving its cursor", () => {
   assert.deepEqual(mapper.map({
     ...primeEvent({ type: "message_update", text: "private" }, 1),
     activeSessionId: "prime-child-1",
+    meta: {
+      ...primeEvent({ type: "message_update" }, 1).meta,
+      activeSessionId: "prime-child-1",
+      cursor: { generation: "worker-generation-child-1", sequence: 1 },
+    },
   }), []);
   assert.deepEqual(mapper.map(primeEvent({ type: "message_update" }, 2)), []);
 });

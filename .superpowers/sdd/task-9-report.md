@@ -1,128 +1,177 @@
-# Task 9 report: prepare the DCI coverage diagnosis closure
+# Task 9 report: execute admitted control actions once
 
 ## Result
 
-Implemented the provider-free diagnosis boundary that can merge one immutable,
-content-free aggregate from the finite Task 8 coverage experiment. The aggregate
-binds the exact plan/proposal/scope/variant/registry/authorization/receipt
-digests, exact ordered five-dataset cohort, safe counts and microunit metrics,
-zero Judge operations, the cost ceiling, the infrastructure-failure limit, and
-a derived canonical digest.
+Implemented the provider-free action execution and settlement lifecycle behind
+the host-owned admission boundary. `ActionExecutionReceipt` is a frozen,
+closed, canonical and body-safe result carrying only action/receipt identity,
+five validated usage counters, sorted unique artifact IDs and sorted unique
+media types. `ActionExecutionFailure` is the controlled exception protocol for
+proved `failed`, `cancelled` and `uncertain` outcomes; returning it as a value,
+returning another object, raising an unknown exception, or returning an invalid
+receipt fails closed as `uncertain`.
 
-A complete aggregate requires all five datasets at 10/10, 50 Agent operations,
-zero integrity failures, zero Judge operations, no more than 5,000,000 microusd,
-and fewer than two infrastructure failures. Only then does diagnosis remove the
-`retrieval-coverage` gap and mark query decomposition
-`ready-for-authorization`. Every proposal remains
-`execution_authorized=False`; no evidence automatically grants authority.
-Partial or integrity-failed aggregates keep the gate blocked.
+The host now persists and successfully sends admission before execution. It
+then appends `action.running` as the durable executor-contact fence, calls the
+executor once with the read-only cancellation signal, previews exact authority
+settlement before journaling a receipt, appends `action.receipted`, settles the
+reservation once, transitions canonical state, projects only safe Pathlight
+digests/counts/usage, persists one stable terminal command and finally sends
+it. Rejection and pre-start cancellation never contact the executor. Unknown
+progress preserves the reservation and never writes an invalid receipt.
 
-The Chinese renderer exposes only the safe aggregate fields and explicitly
-states that the relation between coverage and historical scores is observational
-and does not establish causality. The DCI Pathlight CLI accepts this aggregate
-only through in-process dependency injection; it has no raw-artifact flag or
-reader and does not invent an artifact contract before real immutable evidence
-exists.
+Recovery exposes only proposals, admission commands, terminal commands and
+running fences reconstructed from the fully validated journal. A persisted
+admission without a running fence is resent and can execute once. A running
+fence without a receipt is never re-executed and becomes stable `uncertain`.
+A durable receipt is settled exactly once and completes with the same receipt
+reference. A persisted terminal command is resent idempotently; terminal
+transport failure does not roll back usage, receipt or state. Different
+terminal command identities/semantics fail closed. Both a failed admission send
+and a failed terminal send can be retried on the same live host with the exact
+persisted command; the executor is contacted only after successful admission
+delivery and is never contacted again for terminal retry. Commands enter the
+admission retry set only after successful journal persistence. Constructed
+terminal commands are retained across persistence failure, but a separate
+durability marker prevents delivery until journal persistence succeeds;
+recovered terminal commands initialize with that marker.
 
-The pre-execution-configuration plan digest
-`e845f41bb1fa7e81857f12244cc5053393df861bc7b25e815dfb4a5126f00e90`
-is obsolete and must not be authorized or executed. A new provider-free
-`prepare` produced plan digest
-`75689698a526d66735b67fa9d8df91f15e92187d230feb5066dc80c15213f202`,
-bound to execution configuration digest
-`1bd1d4e218984b9ae567bca23710e9b772477e3240a78aa7106f867d13171fa2`.
-These are prepared-plan evidence only.
+Recovery now accepts only exact `admission:{action_id}` and
+`terminal:{action_id}` command identities. A terminal requires the durable
+admission and running fences, except for the exact admitted
+`cancelled-before-start` transition. Success requires the exact durable
+receipt; terminal commands cannot synthesize running state. Task 8 journals
+whose durable receipt predates the explicit running record remain recoverable.
 
-## External execution status
-
-**NOT RUN.** Task 9 stopped before Step 3. No provider, Agent, Judge, model,
-network, or external experiment operation ran, and no observed coverage result
-was produced, estimated, or published. Repository documentation therefore keeps
-the query-decomposition gate `blocked-by-coverage`.
-
-Before a finite run, the operator must verify that a private 0600 authorization
-matches the prepared plan's exact:
-
-- `plan_sha256` (currently
-  `75689698a526d66735b67fa9d8df91f15e92187d230feb5066dc80c15213f202`)
-- `proposal_sha256`
-- `scope_sha256`
-- `variant_sha256`
-- `registry_set_sha256`
-- `source_lock_sha256`
-- `execution_config_sha256` (currently
-  `1bd1d4e218984b9ae567bca23710e9b772477e3240a78aa7106f867d13171fa2`)
-- all five `registry_sha256` values
-- 50 Agent operations and zero Judge operations
-- 5,000,000-microusd ceiling
-- stop before a third launch after two infrastructure failures
-- independent `operator_approval_sha256`
-- `execution_authorized=true`
-
-Configuration, caches, old evidence, and the prepared plan itself do not grant
-execution authority. After checking the exact private documents, the operator's
-finite foreground command is:
-
-```bash
-env -i HOME="$HOME" PATH="$PATH" SHELL="$SHELL" zsh -lc '
-  set -a
-  source .env
-  set +a
-  uv run asterion-dci pathlight experiment execute \
-    --plan-file "$ASTERION_PATHLIGHT_COVERAGE_PLAN" \
-    --authorization-file "$ASTERION_PATHLIGHT_COVERAGE_AUTHORIZATION" \
-    --output-root "$ASTERION_PATHLIGHT_COVERAGE_OUTPUT"
-'
-```
+No TypeScript or Rust execution implementation changed. No provider, model,
+Agent, Judge or network operation was run.
 
 ## TDD evidence
 
-The first focused diagnosis run failed because the coverage aggregate types and
-keyword boundary did not exist. Renderer and CLI tests then failed before
-conditional rendering and injection were implemented. A later contradictory
-partial-metric test failed against the first validator and passed after the
-availability/metric invariant was tightened.
+The required command was first run before production implementation:
 
-The resulting matrix covers complete, partial, integrity-failed, reordered,
-subclassed, digest-tampered, and contradictory aggregates; legacy serialization;
-correlation-only Chinese output; private sentinel redaction; and provider-free
-CLI publication with an injected aggregate.
+```text
+uv run python -m unittest -v \
+  tests.test_control_execution tests.test_control_host tests.test_control_pathlight
+
+RED: exit 1
+- tests.test_control_execution could not import asterion.control.execution.
+- tests.test_control_pathlight failed for the same missing contract.
+- the updated host success lifecycle test failed for the same missing feature.
+```
+
+After implementation and crash/recovery refinement:
+
+```text
+uv run python -m unittest -v \
+  tests.test_control_execution tests.test_control_host tests.test_control_pathlight
+GREEN: 23 tests, PASS
+```
+
+Independent review identified two gaps and drove a second RED/GREEN cycle:
+
+```text
+uv run python -m unittest -v \
+  tests.test_control_execution tests.test_control_host \
+  tests.test_control_pathlight tests.test_control_recovery \
+  tests.test_control_file_journal
+RED: exit 1
+- same-host admission and terminal transport retries were lost
+- malformed terminal prefixes could synthesize running/terminal state
+
+GREEN: 54 tests, PASS
+```
+
+A second review found that terminal persistence failure occurred after state
+transition but before the command entered the pending map. The same host then
+discarded the terminal on its next pump. A focused RED test reproduced this
+loss, including two consecutive persistence failures:
+
+```text
+uv run python -m unittest -v \
+  tests.test_control_execution.TestControlExecution.test_same_host_persists_terminal_before_sending_after_failures
+RED: exit 1; the second pump did not retry terminal persistence
+GREEN: 1 test, PASS
+```
+
+The terminal is now retained when constructed while durable send authority is
+tracked separately. Each failed persistence attempt sends nothing; a later
+pump persists and sends the same terminal once without executor re-entry.
+
+The Task 9 matrix covers strict receipt/failure construction and redaction,
+unauthorized no-contact, admission-before-executor ordering, cancellation
+before and during execution, controlled failure, unknown exception, malformed
+returned failure, wrong-action and over-budget receipts, persisted admission
+recovery, durable running recovery, durable receipt recovery with a real
+`FileCanonicalJournal` reopen, terminal-send failure/restart, equal terminal
+replay, divergent terminal rejection, same-host admission/terminal retry,
+repeated terminal-persistence failure with zero undurable sends,
+never-send-before-persistence, canonical recovery prefixes, and Pathlight
+safety/failure isolation.
 
 ## Verification
 
 ```text
 uv run python -m unittest -v \
-  tests.test_pathlight_runtime_observation \
-  tests.test_pi_pathlight_observation \
-  tests.test_claude_pathlight_observation \
-  tests.test_workflow_evidence_runtime \
-  tests.test_pathlight_flow \
-  tests.test_dci_pathlight_coverage \
-  tests.test_dci_pathlight_experiment_cli \
-  tests.test_dci_pathlight_diagnosis \
-  tests.test_dci_pathlight_cli
-  PASS: 103 tests
+  tests.test_control_execution tests.test_control_host \
+  tests.test_control_pathlight tests.test_control_recovery \
+  tests.test_control_file_journal
+PASS: 55 tests
 
-uv run pyright \
-  src/asterion/capabilities/dci/implementation/pathlight/diagnosis.py \
-  src/asterion/applications/dci_agent_lite/pathlight_cli.py \
-  tests/test_dci_pathlight_diagnosis.py \
-  tests/test_dci_pathlight_cli.py
-  PASS: 0 errors, 0 warnings
+uv run python -m unittest discover -v -s tests -p 'test_control*.py'
+PASS: 103 tests
 
-uv run ruff check \
-  src/asterion/capabilities/dci/implementation/pathlight/diagnosis.py \
-  src/asterion/applications/dci_agent_lite/pathlight_cli.py \
-  tests/test_dci_pathlight_diagnosis.py \
-  tests/test_dci_pathlight_cli.py
-  PASS
+uv run pyright [Task 9 control source and test files]
+PASS: 0 errors, 0 warnings
 
-make docs-check
-  PASS: checked 60 markdown files and 41 local links
+make lint
+PASS
+
+make check
+PASS: 1549 Python tests, lint, 85 Markdown files/54 links,
+      21 TypeScript runtime tests, 32 context-extension tests,
+      Rust tests/fmt/clippy, and wheel/sdist build
 
 git diff --check
-  PASS
+PASS
 ```
 
-The pre-existing dirty `docs/status/JOURNAL.md` and
-`docs/status/RESUME-NEXT-SESSION.md` are excluded from the Task 9 commit.
+## Self-review and remaining risks
+
+- Python remains the sole orchestration/runner owner; manifests gained no
+  authority, command, provider configuration, executable path or mutable state.
+- `action.running` is accepted only after the exact persisted admitted command
+  and before a receipt. Invalid receipts are preview-rejected before the
+  canonical prefix, leaving the reservation available for conservative
+  uncertain recovery.
+- Public errors, reprs, journal records and Pathlight projections do not retain
+  prompt, answer, provider body, private path or raw artifact identity.
+- Execution is deliberately sequential. The only cancellation channel is the
+  injected read-only signal; unknown task/process interruption after the
+  running fence relies on restart to project `uncertain`.
+- Proven failed/cancelled actions conservatively retain their unused budget
+  reservation because the authority contract has no separately durable
+  release receipt. This avoids fabricating usage or release authority.
+- Task 8's historical receipt-before-running prefix still establishes running
+  state through its durable `action.receipted` record. A terminal can no longer
+  create that fence or claim success without the exact receipt.
+
+## Files
+
+- `src/asterion/control/execution.py`
+- `src/asterion/control/manager.py`
+- `src/asterion/control/state.py`
+- `src/asterion/control/journal.py`
+- `src/asterion/control/evidence.py`
+- `src/asterion/control/recovery.py`
+- `src/asterion/control/authority.py`
+- `src/asterion/control/__init__.py`
+- `tests/test_control_execution.py`
+- `tests/test_control_host.py`
+- `tests/test_control_pathlight.py`
+- `tests/test_control_recovery.py`
+- `.superpowers/sdd/task-9-report.md` (ignored evidence only; not staged)
+
+The pre-existing dirty `.superpowers/sdd/task-8-report.md`,
+`docs/status/JOURNAL.md` and `docs/status/RESUME-NEXT-SESSION.md` were neither
+edited nor staged by Task 9.

@@ -11,6 +11,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import process from "node:process";
 import { dirname, isAbsolute, join } from "node:path";
+import { createConnection } from "node:net";
 import readline from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
@@ -38,6 +39,8 @@ import {
 import {
   PrimeDaemonClient,
 } from "./daemon-client.js";
+import { validatePrimeHeartbeatCommand } from "./daemon-wire.js";
+import type { PrimeHeartbeatCommand } from "./daemon-wire.js";
 import {
   canonicalJsonBytes,
   ensurePrivateDirectory,
@@ -62,6 +65,7 @@ import type {
   PrivateContinuationBinding,
 } from "./private-store.js";
 import type {
+  GatewayLongRunningResult,
   GatewayRlmBinding,
   GatewayRlmMessageBinding,
 } from "./durable-store.js";
@@ -102,6 +106,10 @@ import type {
 } from "./rlm-host-bridge.js";
 
 export const PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1";
+const PRIME_DAEMON_LIFECYCLE_PROTOCOL = "asterion.prime-daemon-lifecycle/v1";
+const PRIME_DAEMON_LIFECYCLE_FAILURE_PHASES = new Set([
+  "coordinator", "manifest", "prepare", "shutdown", "fence", "start", "restore",
+]);
 export const PRIME_GATEWAY_SKILL_DISCOVERY = "asterion.skill-control-discovery/v1";
 export const PRIME_GATEWAY_SKILL_DISCOVERY_FILE = "asterion-control.json";
 export const PRIME_GATEWAY_RLM_HOST_DISCOVERY = "asterion.prime-rlm-host-discovery/v1";
@@ -113,6 +121,7 @@ type SidecarEnvelopeType =
   | "command.accept"
   | "events.stream"
   | "ecosystem_activate"
+  | "long-running.execute"
   | "private.read"
   | "rlm.binding.read"
   | "rlm.message.binding.read"
@@ -125,6 +134,7 @@ const SIDE_CAR_ENVELOPE_TYPES: ReadonlySet<SidecarEnvelopeType> = new Set([
   "command.accept",
   "events.stream",
   "ecosystem_activate",
+  "long-running.execute",
   "private.read",
   "rlm.binding.read",
   "rlm.message.binding.read",
@@ -151,11 +161,15 @@ export interface PrimeGatewaySidecarOptions {
       preparePrivate: () => Promise<void>,
     ): Promise<SessionContextReceipt>;
     cancelSessionContext?(commandId: string): Promise<void>;
+    executeLongRunning?(
+      commandId: string,
+      command: PrimeHeartbeatCommand,
+    ): Promise<GatewayLongRunningResult>;
     rlmLifecycle?(): readonly RlmLifecycleObservation[];
     rlmBinding?(actionId: string): GatewayRlmBinding | undefined;
     rlmMessageBinding?(actionId: string): GatewayRlmMessageBinding | undefined;
-    activateEcosystem?(frame: PrimeEcosystemFrame): Promise<GatewayEcosystemEffectResult>;
     rlmMessageDelivered?(): readonly string[];
+    activateEcosystem?(frame: PrimeEcosystemFrame): Promise<GatewayEcosystemEffectResult>;
     close(): Promise<void>;
   };
   readonly privateValues: Pick<
@@ -174,6 +188,8 @@ interface PrimeSidecarDescriptor {
   readonly artifactLockPath: string;
   readonly authorityId: string;
   readonly authorityRevision: number;
+  readonly authorityExpiresAtMs?: number;
+  readonly daemonLifecycle?: Readonly<{ readonly socketPath: string; readonly token: string }>;
   readonly expectedRuntimeBuildId: string;
   readonly gatewayRoot: string;
   readonly generation: number;
@@ -195,6 +211,185 @@ interface PrimeSidecarDescriptor {
   readonly skillPath: string;
   readonly timeoutMs: number;
   readonly workspace: string;
+}
+
+class PrimeDaemonLifecycleClient {
+  constructor(
+    private readonly descriptor: Readonly<{ readonly socketPath: string; readonly token: string }>,
+    private readonly sessionId: string,
+    private readonly timeoutMs: number,
+  ) {}
+
+  async beginRestart(activeSessionId: string): Promise<string> {
+    if (!REQUEST_ID.test(activeSessionId)) throw new PrimeGatewayError();
+    const id = `checkpoint-restart-${randomUUID()}`;
+    const diagnose = (stage: "connect" | "request" | "accepted" | "unavailable" | "refused" | "denied" | "failed") => {
+      if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+        process.stderr.write(`asterion-prime-checkpoint-lifecycle:${stage}\n`);
+      }
+    };
+    diagnose("connect");
+    await new Promise<void>((resolve, reject) => {
+      const socket = createConnection(this.descriptor.socketPath);
+      let frame = "";
+      let settled = false;
+      const timeout = setTimeout(() => fail(), this.timeoutMs);
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        try {
+          const line = frame.indexOf("\n") === -1 ? frame : frame.slice(0, frame.indexOf("\n"));
+          const response = JSON.parse(line);
+          if (!isRecord(response)
+            || !hasExactKeys(response, ["id", "protocol", "type"])
+            || response.protocol !== PRIME_DAEMON_LIFECYCLE_PROTOCOL
+            || response.id !== id || response.type !== "accepted") {
+            diagnose("failed");
+            reject(new PrimeGatewayError());
+            return;
+          }
+          diagnose("accepted");
+          resolve();
+        } catch {
+          diagnose("failed");
+          reject(new PrimeGatewayError());
+        } finally {
+          socket.destroy();
+        }
+      };
+      const fail = (error?: NodeJS.ErrnoException) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        diagnose(
+          error?.code === "ENOENT" ? "unavailable"
+            : error?.code === "ECONNREFUSED" ? "refused"
+              : error?.code === "EACCES" ? "denied" : "failed",
+        );
+        reject(new PrimeGatewayError());
+      };
+      socket.once("error", fail);
+      socket.once("connect", () => {
+        diagnose("request");
+        socket.write(`${JSON.stringify({
+          protocol: PRIME_DAEMON_LIFECYCLE_PROTOCOL,
+          id,
+          type: "restart",
+          token: this.descriptor.token,
+          session_id: this.sessionId,
+          active_session_id: activeSessionId,
+        })}\n`);
+      });
+      socket.on("data", (chunk: Buffer) => {
+        frame += chunk.toString("utf8");
+        if (frame.includes("\n")) finish();
+      });
+      socket.once("close", () => {
+        if (!settled) fail();
+      });
+    });
+    return id;
+  }
+
+  async waitForRestart(id: string): Promise<void> {
+    if (!REQUEST_ID.test(id)) throw new PrimeGatewayError();
+    const receiptPath = join(dirname(this.descriptor.socketPath), `.asterion-lifecycle-${id}.json`);
+    const deadline = Date.now() + this.timeoutMs;
+    if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+      process.stderr.write("asterion-prime-checkpoint-lifecycle:wait\n");
+    }
+    while (Date.now() < deadline) {
+      try {
+        const frame = await readFile(receiptPath, "utf8");
+        if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+          process.stderr.write("asterion-prime-checkpoint-lifecycle:receipt\n");
+        }
+        const response = JSON.parse(frame);
+        if (!isRecord(response) || !(
+          hasExactKeys(response, ["id", "protocol", "type"])
+          || hasExactKeys(response, ["id", "phase", "protocol", "type"])
+        )
+          || response.protocol !== PRIME_DAEMON_LIFECYCLE_PROTOCOL
+          || response.id !== id) {
+          throw new PrimeGatewayError();
+        }
+        await unlink(receiptPath).catch(() => undefined);
+        if (response.type === "restarted") {
+          if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+            process.stderr.write("asterion-prime-checkpoint-lifecycle:complete\n");
+          }
+          return;
+        }
+        if (
+          process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1"
+          && typeof response.phase === "string"
+          && PRIME_DAEMON_LIFECYCLE_FAILURE_PHASES.has(response.phase)
+        ) process.stderr.write(`asterion-prime-checkpoint-coordinator-failed:${response.phase}\n`);
+        throw new PrimeGatewayError();
+      } catch (error) {
+        if (error instanceof PrimeGatewayError) throw error;
+        if (!(error instanceof Error) || (error as NodeJS.ErrnoException).code !== "ENOENT") {
+          if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+            process.stderr.write("asterion-prime-checkpoint-lifecycle:receipt-error\n");
+          }
+          throw new PrimeGatewayError();
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+      process.stderr.write("asterion-prime-checkpoint-lifecycle:timeout\n");
+    }
+    throw new PrimeGatewayError();
+  }
+}
+
+const NATIVE_RLM_ACTION_DEADLINE_MS = 300_000;
+const NATIVE_RLM_ACTION_TOKEN_CAP = 10_000;
+const NATIVE_RLM_ACTION_AGGREGATE_TOKEN_CAP = 30_000;
+const NATIVE_RLM_ACTION_COST_CAP = 100_000;
+
+export function boundedRlmActionBudget(
+  budget: SkillBudget,
+  authorityExpiresAtMs: number,
+  nowMs = Date.now(),
+): SkillBudget {
+  if (
+    !positiveInteger(authorityExpiresAtMs)
+    || !nonNegativeInteger(nowMs)
+  ) {
+    throw new PrimeGatewayError();
+  }
+  const remaining = authorityExpiresAtMs - nowMs;
+  const deadlineMs = Math.min(
+    budget.deadline_ms,
+    NATIVE_RLM_ACTION_DEADLINE_MS,
+    remaining,
+  );
+  if (deadlineMs < 1) throw new PrimeGatewayError();
+  return Object.freeze({
+    controller_tokens: Math.min(budget.controller_tokens, NATIVE_RLM_ACTION_TOKEN_CAP),
+    application_tokens: Math.min(budget.application_tokens, NATIVE_RLM_ACTION_TOKEN_CAP),
+    child_tokens: Math.min(budget.child_tokens, NATIVE_RLM_ACTION_TOKEN_CAP),
+    aggregate_tokens: Math.min(budget.aggregate_tokens, NATIVE_RLM_ACTION_AGGREGATE_TOKEN_CAP),
+    cost_micros: Math.min(budget.cost_micros, NATIVE_RLM_ACTION_COST_CAP),
+    deadline_ms: deadlineMs,
+  });
+}
+
+export function mayAdmitProviderOwnedRlmDeletion(
+  lifecycle: readonly RlmLifecycleObservation[],
+  childId: string,
+): boolean {
+  if (!OPAQUE_IDENTIFIER_PATTERN.test(childId) || !Array.isArray(lifecycle)) return false;
+  let started = false;
+  for (const observation of lifecycle) {
+    if (observation.child_id !== childId) continue;
+    if (observation.type === "rlm.child.started") started = true;
+    if (observation.type === "rlm.child.deleted") return false;
+  }
+  return started;
 }
 
 interface SidecarEnvelope {
@@ -279,6 +474,12 @@ type SidecarResponse =
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
     readonly id: string;
+    readonly type: "long-running.receipt";
+    readonly receipt: GatewayLongRunningResult;
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
     readonly type: "ecosystem_receipt";
     readonly receipt: PrimeEcosystemReceipt;
   }
@@ -294,6 +495,7 @@ const MAX_PRIVATE_TEXT_BYTES = 1024 * 1024;
 const MAX_PRIVATE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MAX_PRIVATE_FRAME_BYTES = 12 * 1024 * 1024;
 const IDENTIFIER_PATTERN = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u;
+const OPAQUE_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const VERSION_PATTERN = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/u;
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
 const MEDIA_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u;
@@ -573,6 +775,25 @@ function validatePortfolio(value: unknown): readonly SkillApplicationTarget[] {
 }
 
 function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
+  if (isRecord(value) && Object.hasOwn(value, "daemonLifecycle")) {
+    const lifecycle = value.daemonLifecycle;
+    const { daemonLifecycle: _ignored, ...base } = value;
+    if (
+      !isRecord(lifecycle)
+      || !hasExactKeys(lifecycle, ["socketPath", "token"])
+      || !validText(lifecycle.socketPath)
+      || !TOKEN_PATTERN.test(String(lifecycle.token))
+    ) {
+      throw new PrimeGatewayError();
+    }
+    return Object.freeze({
+      ...validateDescriptor(base),
+      daemonLifecycle: Object.freeze({
+        socketPath: lifecycle.socketPath,
+        token: lifecycle.token as string,
+      }),
+    });
+  }
   if (
     !isRecord(value) ||
     !(hasExactKeys(value, [
@@ -580,6 +801,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       "artifactLockPath",
       "authorityId",
       "authorityRevision",
+      "authorityExpiresAtMs",
       "expectedRuntimeBuildId",
       "gatewayRoot",
       "generation",
@@ -600,6 +822,20 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       "sessionId",
       "skillPath",
       "timeoutMs",
+      "workspace",
+    ]) || hasExactKeys(value, [
+      "agentDir", "artifactLockPath", "authorityId", "authorityRevision",
+      "authorityExpiresAtMs",
+      "expectedRuntimeBuildId", "gatewayRoot", "generation", "maxContinuations",
+      "maxControllerTokens", "maxTurns", "model", "portfolio", "primeSocketPath",
+      "primeSourceRoot", "provider", "probeReady", "rlmMaxChildren", "rlmMaxDepth",
+      "remainingBudget", "sessionDir", "sessionId", "skillPath", "timeoutMs", "workspace",
+    ]) || hasExactKeys(value, [
+      "agentDir", "artifactLockPath", "authorityId", "authorityRevision",
+      "expectedRuntimeBuildId", "gatewayRoot", "generation", "maxContinuations",
+      "maxControllerTokens", "maxTurns", "model", "portfolio", "primeSocketPath",
+      "primeSourceRoot", "provider", "probeReady", "recoveryReadOnly", "rlmMaxChildren",
+      "rlmMaxDepth", "remainingBudget", "sessionDir", "sessionId", "skillPath", "timeoutMs",
       "workspace",
     ]) || hasExactKeys(value, [
       "agentDir", "artifactLockPath", "authorityId", "authorityRevision",
@@ -626,6 +862,8 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
     (value.recoveryReadOnly !== undefined && typeof value.recoveryReadOnly !== "boolean") ||
     !positiveInteger(value.generation) ||
     !positiveInteger(value.authorityRevision) ||
+    (value.authorityExpiresAtMs !== undefined && !positiveInteger(value.authorityExpiresAtMs)) ||
+    (value.rlmMaxDepth === 1 && !positiveInteger(value.authorityExpiresAtMs)) ||
     !positiveInteger(value.maxContinuations) ||
     !positiveInteger(value.maxControllerTokens) ||
     !positiveInteger(value.maxTurns) ||
@@ -644,6 +882,9 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
     maxTurns: Number(value.maxTurns),
     rlmMaxChildren: Number(value.rlmMaxChildren),
     rlmMaxDepth: value.rlmMaxDepth as 0 | 1,
+    ...(value.authorityExpiresAtMs === undefined ? {} : {
+      authorityExpiresAtMs: Number(value.authorityExpiresAtMs),
+    }),
     recoveryReadOnly: value.recoveryReadOnly === true,
     probeReady: value.probeReady === true,
     portfolio: validatePortfolio(value.portfolio),
@@ -662,6 +903,7 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
       value.type !== "command.accept" &&
       value.type !== "events.stream" &&
       value.type !== "ecosystem_activate" &&
+      value.type !== "long-running.execute" &&
       value.type !== "private.read" &&
       value.type !== "rlm.binding.read" &&
       value.type !== "rlm.message.binding.read" &&
@@ -676,6 +918,12 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
   if (
     value.type === "ecosystem_activate" &&
     !hasExactKeys(value, ["protocol", "id", "type", "frame"])
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    value.type === "long-running.execute" &&
+    !hasExactKeys(value, ["protocol", "id", "type", "command_id", "command"])
   ) {
     throw new PrimeGatewayError();
   }
@@ -730,6 +978,31 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
     throw new PrimeGatewayError();
   }
   return value as unknown as SidecarEnvelope;
+}
+
+function validateLongRunningReceipt(
+  value: unknown,
+  commandId: string,
+): GatewayLongRunningResult {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["commandId", "commandDigest", "status"]) ||
+    value.commandId !== commandId ||
+    typeof value.commandDigest !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(value.commandDigest) ||
+    (
+      value.status !== "succeeded" &&
+      value.status !== "failed" &&
+      value.status !== "uncertain"
+    )
+  ) {
+    throw new PrimeGatewayError();
+  }
+  return Object.freeze({
+    commandId,
+    commandDigest: value.commandDigest,
+    status: value.status,
+  });
 }
 
 function validateRlmLifecycle(value: unknown): readonly RlmLifecycleObservation[] {
@@ -1010,6 +1283,28 @@ export class PrimeGatewaySidecar {
           receipt,
         });
       }
+      if (envelope.type === "long-running.execute") {
+        const commandId = envelope.command_id;
+        const execute = this.options.gateway.executeLongRunning;
+        if (
+          typeof commandId !== "string" ||
+          !REQUEST_ID.test(commandId) ||
+          execute === undefined
+        ) {
+          throw new PrimeGatewayError();
+        }
+        const command = validatePrimeHeartbeatCommand(envelope.command);
+        const receipt = validateLongRunningReceipt(
+          await execute.call(this.options.gateway, commandId, command),
+          commandId,
+        );
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "long-running.receipt",
+          receipt,
+        });
+      }
       if (envelope.type === "session-context.cancel") {
         const commandId = envelope.command_id;
         const cancel = this.options.gateway.cancelSessionContext;
@@ -1196,7 +1491,13 @@ function privateDiagnosticEnvelopeFailure(value: unknown): void {
     : "invalid";
   const commandType = type === "command.accept" && isRecord(value)
     && isRecord(value.command) && typeof value.command.type === "string"
-    && new Set(["session.create", "input.submit", "action.resolve", "session.cancel"])
+    && new Set([
+      "session.create",
+      "input.submit",
+      "action.resolve",
+      "checkpoint.request",
+      "session.cancel",
+    ])
       .has(value.command.type)
     ? value.command.type.replace(".", "-")
     : undefined;
@@ -1274,6 +1575,16 @@ export class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
     return this.privateValues.readPreparedContinuationLocator(
       binding as PrivateContinuationBinding,
       allowMissing,
+    );
+  }
+
+  rebindRecoveredContinuationLocator(
+    binding: import("./durable-store.js").GatewayContextBinding,
+    expected: Omit<import("./private-store.js").PrivateContinuationLocator, "sessionPath">,
+  ): ReturnType<PrivateValueStore["rebindRecoveredContinuationLocator"]> {
+    return this.privateValues.rebindRecoveredContinuationLocator(
+      binding as PrivateContinuationBinding,
+      expected,
     );
   }
 }
@@ -1429,14 +1740,19 @@ async function removeSkillDiscovery(descriptor: PrimeSidecarDescriptor): Promise
 
 async function removeRlmHostDiscovery(descriptor: PrimeSidecarDescriptor): Promise<void> {
   try {
-    await Promise.all([
-      unlink(join(descriptor.agentDir, PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE)),
-      unlink(join(descriptor.agentDir, PRIME_GATEWAY_RLM_HOST_SHIM_FILE)),
-    ]);
+    await unlink(join(descriptor.agentDir, PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE));
     await syncPrivateDirectory(descriptor.agentDir);
   } catch {
-    // Nothing was published, or cleanup is already in progress.
+    // Nothing was published, or cleanup is already in progress.  Keep the
+    // immutable shim until sidecar shutdown: Prime's update manifest can
+    // restore a quiescent RLM root after its live bridge has been closed.
   }
+}
+
+async function removeRlmHostShim(descriptor: PrimeSidecarDescriptor): Promise<void> {
+  await unlink(join(descriptor.agentDir, PRIME_GATEWAY_RLM_HOST_SHIM_FILE))
+    .catch(() => undefined);
+  await syncPrivateDirectory(descriptor.agentDir).catch(() => undefined);
 }
 
 function restoredBridgeContext(
@@ -1535,6 +1851,14 @@ async function createSidecarFromDescriptor(
       return (await ecosystemAdapterPromise).activate(frame);
     },
   });
+  let pendingDaemonRestart: string | undefined;
+  const daemonLifecycle = descriptor.daemonLifecycle === undefined
+    ? undefined
+    : new PrimeDaemonLifecycleClient(
+      descriptor.daemonLifecycle,
+      descriptor.sessionId,
+      descriptor.timeoutMs,
+    );
   let gateway: PrimeGateway;
   let skillBridge: AsterionSkillBridge | undefined;
   let skillBridgeRoot: string | undefined;
@@ -1603,12 +1927,27 @@ async function createSidecarFromDescriptor(
     }>,
     ready: Promise<void>,
   ) => {
+    const authorityExpiresAtMs = descriptor.authorityExpiresAtMs;
+    if (descriptor.rlmMaxDepth === 1 && authorityExpiresAtMs === undefined) {
+      throw new PrimeGatewayError();
+    }
+    const actionBudget = () => authorityExpiresAtMs === undefined
+      ? Object.freeze({
+        controller_tokens: Math.floor(currentRemainingBudget.controller_tokens / 2),
+        application_tokens: Math.floor(currentRemainingBudget.application_tokens / 2),
+        child_tokens: Math.floor(currentRemainingBudget.child_tokens / 2),
+        aggregate_tokens: Math.floor(currentRemainingBudget.aggregate_tokens / 2),
+        cost_micros: Math.floor(currentRemainingBudget.cost_micros / 2),
+        deadline_ms: Math.min(currentRemainingBudget.deadline_ms, NATIVE_RLM_ACTION_DEADLINE_MS),
+      })
+      : boundedRlmActionBudget(currentRemainingBudget, authorityExpiresAtMs);
     const token = generateSkillBridgeToken();
     await ensurePrivateDirectory(descriptor.agentDir);
     await writeRlmHostShim(descriptor);
     const socketPath = join(descriptor.agentDir, "r.sock");
     const bridge = new RlmHostBridge({
       sessionId: descriptor.sessionId,
+      maxDepth: descriptor.rlmMaxDepth,
       maxSpawnCount: descriptor.rlmMaxChildren,
       admitSpawn: async (proposal: RlmSpawnProposal) => {
         try {
@@ -1659,6 +1998,12 @@ async function createSidecarFromDescriptor(
       admitMessage: async (proposal: RlmMessageProposal) => {
         try {
           await ready;
+          const childId = proposal.senderId === descriptor.sessionId
+            ? proposal.recipientId
+            : proposal.recipientId === descriptor.sessionId
+              ? proposal.senderId
+              : undefined;
+          if (childId === undefined) throw new PrimeGatewayError();
           const inputRef = await privateValues.putInput(proposal.bodyText);
           const identity = gateway.nextEventIdentity();
           const actionId = deriveControlActionId(
@@ -1686,11 +2031,11 @@ async function createSidecarFromDescriptor(
               authority_revision: context.authorityRevision,
               idempotency_key: proposal.requestId,
               kind: "child.message",
-              target: { kind: "child", child_id: proposal.recipientId },
+              target: { kind: "child", child_id: childId },
               input_ref: inputRef,
               expected_artifacts: [],
               budget: {
-                ...currentRemainingBudget,
+                ...actionBudget(),
               },
               causal_parent_ids: context.causalParentIds,
             },
@@ -1706,23 +2051,14 @@ async function createSidecarFromDescriptor(
         }
       },
       admitDelete: async (proposal) => {
-        try {
-          await ready;
-          const identity = gateway.nextEventIdentity();
-          const actionId = deriveControlActionId(descriptor.sessionId, proposal.requestId);
-          const event = validateControlEvent({
-            protocol: "asterion.agent-control/v1", event_id: identity.eventId, session_id: descriptor.sessionId,
-            generation: descriptor.generation, sequence: identity.sequence, emitted_at: identity.emittedAt,
-            type: "action.proposed", payload: {
-              action_id: actionId, authority_revision: context.authorityRevision, idempotency_key: proposal.requestId,
-              kind: "child.cancel", target: { kind: "child", child_id: proposal.childId },
-              expected_artifacts: [], budget: { ...currentRemainingBudget }, causal_parent_ids: context.causalParentIds,
-            },
-          });
-          await gateway.emitActionProposal(event);
-          const admission = await gateway.waitForAdmission(actionId);
-          return Object.freeze({ resolution: admission.resolution, childId: proposal.childId });
-        } catch { return Object.freeze({ resolution: "uncertain" as const, childId: proposal.childId }); }
+        await ready;
+        return Object.freeze({
+          resolution: mayAdmitProviderOwnedRlmDeletion(
+            store.rlmLifecycle(),
+            proposal.childId,
+          ) ? "admitted" : "rejected",
+          childId: proposal.childId,
+        });
       },
       recordMessageDelivered: async (event: RlmMessageDelivery) => {
         await store.recordRlmMessageDelivered(event.messageId);
@@ -1755,18 +2091,19 @@ async function createSidecarFromDescriptor(
     );
     rlmHostClose = listener.close;
     try {
-      const childDeadlineMs = Math.min(currentRemainingBudget.deadline_ms, 30_000);
+      const childDeadlineMs = Math.min(
+        currentRemainingBudget.deadline_ms,
+        NATIVE_RLM_ACTION_DEADLINE_MS,
+      );
       if (childDeadlineMs <= 0) {
         throw new PrimeGatewayError();
       }
-      await writeRlmHostDiscovery(descriptor, socketPath, token, {
-        controller_tokens: Math.floor(currentRemainingBudget.controller_tokens / 2),
-        application_tokens: Math.floor(currentRemainingBudget.application_tokens / 2),
-        child_tokens: Math.floor(currentRemainingBudget.child_tokens / 2),
-        aggregate_tokens: Math.floor(currentRemainingBudget.aggregate_tokens / 2),
-        cost_micros: Math.floor(currentRemainingBudget.cost_micros / 2),
-        deadline_ms: childDeadlineMs,
-      });
+      await writeRlmHostDiscovery(
+        descriptor,
+        socketPath,
+        token,
+        actionBudget(),
+      );
     } catch (error) {
       await closeRlmHostBridge();
       throw error;
@@ -1935,6 +2272,7 @@ async function createSidecarFromDescriptor(
             rlmMaxDepth: descriptor.rlmMaxDepth,
           },
           bindIdentity,
+          longRunningStore: store,
         });
         nativeRootSession = session;
         if (descriptor.probeReady) {
@@ -1957,6 +2295,7 @@ async function createSidecarFromDescriptor(
         transcriptSessionId: identity.transcriptSessionId,
         continuationId: identity.continuationId,
         sessionPath: identity.sessionPath,
+        longRunningStore: store,
       });
       nativeRootSession = session;
       return (async () => {
@@ -2003,11 +2342,14 @@ async function createSidecarFromDescriptor(
         return session;
       })();
     },
-    async createCheckpoint(checkpointId, coveredSequence, onRecovered) {
+    async createCheckpoint(checkpointId, coveredSequence, onRecovered, deadlineMs) {
       const identity = store.snapshot().primeIdentity;
       const cursor = store.snapshot().primeCursor;
-      if (identity === undefined || cursor === undefined) {
+      if (identity === undefined || cursor === undefined || daemonLifecycle === undefined) {
         throw new PrimeGatewayError();
+      }
+      if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+        process.stderr.write("asterion-prime-checkpoint-stage:manager-open\n");
       }
       checkpointManager ??= await PrimeCheckpointManager.open({
         sessionId: descriptor.sessionId,
@@ -2020,11 +2362,77 @@ async function createSidecarFromDescriptor(
         transport,
         runtime: {
           async stop() {
+            // `prepare_update_restart` stops the resident worker.  The host
+            // owns the exact daemon launch plan; this private capability
+            // restarts that daemon before the recovery client attaches.
+            // A prepared worker manifest can retain Prime's RLM host shim
+            // import even after its live bridge was quiesced.  Re-publish the
+            // immutable private shim at the checkpoint boundary so the
+            // successor never restores a manifest that references a missing
+            // module.
+            await writeRlmHostShim(descriptor);
+            if (rlmHostClose === undefined) {
+              const context = restoredBridgeContext(
+                store,
+                descriptor.generation,
+                descriptor,
+              );
+              if (context === undefined) {
+                throw new PrimeGatewayError();
+              }
+              // A detach may quiesce the live RLM bridge before checkpoint.
+              // Recreate the host service, rather than publishing a stale
+              // discovery record, so the restored worker gets a real bounded
+              // endpoint under the same authority revision.
+              await startSkillBridge(context, Promise.resolve());
+            }
+            let shutdown;
+            try {
+              shutdown = await transport.request(
+                { type: "shutdown" },
+                `checkpoint-shutdown-${checkpointId}`,
+                descriptor.timeoutMs,
+              );
+            } catch {
+              if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+                process.stderr.write("asterion-prime-checkpoint-shutdown-failed:connection\n");
+              }
+              throw new PrimeGatewayError();
+            }
+            if (!shutdown.success || shutdown.command !== "shutdown") {
+              if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+                process.stderr.write("asterion-prime-checkpoint-shutdown-failed:response\n");
+              }
+              throw new PrimeGatewayError();
+            }
+            // Prime schedules daemon shutdown immediately after replying.  The
+            // old client must be retired before that close is observed, or its
+            // transport teardown can interrupt the independent host lifecycle
+            // request below.  Recovery always creates a fresh client.
             transport.close();
+            try {
+              // Phase A ends once the host has durably admitted this exact
+              // restart request.  Do not make the predecessor transport wait
+              // through Prime's intentional daemon shutdown.
+              pendingDaemonRestart = await daemonLifecycle.beginRestart(identity.activeSessionId);
+            } catch {
+              if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+                process.stderr.write("asterion-prime-checkpoint-lifecycle-failed\n");
+              }
+              throw new PrimeGatewayError();
+            }
           },
           async relaunch() {
+            if (pendingDaemonRestart === undefined) throw new PrimeGatewayError();
+            // Phase B is owned by the fresh transport.  The host-published
+            // receipt proves the successor has restored before we attach it.
+            await daemonLifecycle.waitForRestart(pendingDaemonRestart);
+            pendingDaemonRestart = undefined;
             const relaunched = new PrimeDaemonClient({
-              clientId: `asterion-${descriptor.sessionId}-checkpoint`,
+              // Prime recovery is bound to the original client identity and
+              // replay cursor.  A checkpoint restart is a reconnect, not a
+              // second client attaching to a client-owned root.
+              clientId: `asterion-${descriptor.sessionId}`,
               connectTimeoutMs: descriptor.timeoutMs,
               requestTimeoutMs: descriptor.timeoutMs,
               expectedRuntimeBuildId: descriptor.expectedRuntimeBuildId,
@@ -2033,9 +2441,22 @@ async function createSidecarFromDescriptor(
             return relaunched;
           },
         },
+        onStage(stage) {
+          if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+            process.stderr.write(`asterion-prime-checkpoint-stage:${stage}\n`);
+          }
+        },
         primeCursor: cursor,
       });
-      return checkpointManager.create(checkpointId, coveredSequence, onRecovered);
+      if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+        process.stderr.write("asterion-prime-checkpoint-stage:manager-create\n");
+      }
+      return checkpointManager.create(
+        checkpointId,
+        coveredSequence,
+        onRecovered,
+        deadlineMs,
+      );
     },
     onSessionReady() {
       sessionReady?.();
@@ -2066,26 +2487,38 @@ async function createSidecarFromDescriptor(
       executeSessionContext: (command, preparePrivate) =>
         gateway.executeSessionContext(command, preparePrivate),
       cancelSessionContext: (commandId) => gateway.cancelSessionContext(commandId),
+      executeLongRunning: (commandId, command) => {
+        const root = nativeRootSession;
+        if (root === undefined) {
+          throw new PrimeGatewayError();
+        }
+        return root.executeLongRunningCommand(commandId, command);
+      },
       close: async () => {
         let failed = false;
         try {
           await closeSkillBridge();
         } catch {
+          privateDiagnosticCloseFailure("skill-bridge");
           failed = true;
         }
+        await removeRlmHostShim(descriptor);
         try {
           await gateway.detach();
         } catch {
+          privateDiagnosticCloseFailure("detach");
           failed = true;
         }
         try {
           await gateway.close();
         } catch {
+          privateDiagnosticCloseFailure("gateway");
           failed = true;
         }
         try {
           transport.close();
         } catch {
+          privateDiagnosticCloseFailure("transport");
           failed = true;
         }
         if (failed) {
@@ -2094,6 +2527,14 @@ async function createSidecarFromDescriptor(
       },
     },
   });
+}
+
+function privateDiagnosticCloseFailure(
+  stage: "skill-bridge" | "detach" | "gateway" | "transport",
+): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+    process.stderr.write(`asterion-prime-close-failed:${stage}\n`);
+  }
 }
 
 async function run(): Promise<void> {

@@ -780,11 +780,293 @@
 - 08:45 认证 Prime RLM lifecycle socket 帧，仅接受闭合 child 状态 [40a42f7]
 - 09:02 新增 admitted action 预备 hook，保证 provider binding 先于 Gateway 准入送达 [ad5f429]
 - 09:31 持久化并回读 RLM 生命周期，保持关闭状态和私有数据边界 [pending]
+- 09:32 持久化并回读 RLM 生命周期，保持关闭状态和私有数据边界 [7d134aa]
+- 09:36 Prime 客户端严格消费 RLM 生命周期 IPC，便于主机账本对齐 [a7fc3af]
+- 10:04 绑定 Prime RLM 深度与模型摘要，令主机准入无需推断 [2382bf8]
+- 10:11 Prime 准入前写入无原生身份 RLM 账本，阻止身份伪造 [e453cae]
+- 10:22 对齐 Prime 原生 RLM 生命周期摘要，支持幂等恢复 fence [7db5e0f]
+- 10:27 在 Prime 原生 release 前记录关闭 RLM 状态，避免正常结束误 fence [0f190ff]
+- 10:42 路由 provider-owned 原生 child，阻止 ChildSessionService 双创建 [23cb4a7]
+- 19:10 计入 Prime 原生 RLM child 并收窄接管动作，防止配额绕过与误拦截 [afbedab]
+- 19:18 补齐 provider-free Prime 伪锁的 RLM runtime，维持 artifact fail-closed 验证 [984b2ea]
+- 19:27 为真实 Prime context harness 提供私有 RLM bootstrap，保持锁定 daemon fail-closed [2207417]
+- 19:35 连续五次复验 provider-free Prime loop 通过；全量负载单次动作计数抖动待继续监测 [no code commit]
+- 19:41 串行化独立 Prime loop 场景，消除全量负载的 sidecar 资源竞争 [3e95082]
+- 19:45 修复 authority 模块 import 顺序，使全仓 Ruff 门恢复可执行 [d2d9181]
+- 19:49 全量 make check 通过：1747 Python、Ruff、TS、Rust 与 wheel 均成功 [d2d9181]
+- 20:08 保留 Prime 同步完成语义并异步记录 completed 生命周期；传输失败仍由 started 重启 fence 收敛为 uncertain [b6ec822]
+- 20:21 将 completed 账本投递隔离到微任务，避免私有传输异常破坏 Prime 同步完成语义 [bda494c]
+- 20:23 Prime 源码 RLM 同步完成回归通过（1 passed, 95 skipped）；仅作内核行为证据，非派生 daemon 证明 [no code commit]
+- 20:37 增加 RLM family message 持久账本与重启 uncertain fence，先闭合消息语义再接线 Prime [04565c0]
+- 20:46 增加 Prime RLM 私有消息准入/交付桥的双重幂等栅栏，防止重复 native delivery [e988ef6]
+- 20:55 兼容升级旧 RLM child-only 私有账本，保留恢复 fence 且不虚构消息状态 [b7dbb16]
+- 21:24 持久化并门控 Prime RLM 私有消息投递，防止未准入或重复送达 [7dcf39e]
+- 21:31 对齐 Prime parent/child/sibling roster 消息边，避免错误缩窄原生家族语义 [1924801]
+- 21:33 全量 make check 通过；消息控制器因无 pre-effect 稳定 ID 与终态观察暂不激活 [no code commit]
+- 21:38 持久化 child ID 唯一绑定，防止 bridge 重启重复创建 Prime 子会话 [f4dc6b0]
+- 21:42 生命周期仅接受已持久化 child 准入，防止孤立 Prime 子会话观察 [4020a66]
+- 21:48 锁定同一 Prime bundle chunk 的多精确锚点派生，预备原生消息投递插桩 [92fca4f]
+- 21:53 验证原生 message ID 的 pre-effect 私有准入 helper，拒绝不会触发 Prime 投递 [2cc94f7]
+- 22:09 原生 Prime RLM 消息先经私有准入并仅在实际投递后记账，避免拒绝泄漏等待项 [d4464fa]
+- 22:14 双锚点派生 Prime daemon preflight 与全仓检查通过，零 provider/application 操作 [no code commit]
+- 22:21 锁定 RLM 九场景与六项 provider-free 边界，防止尚未验证的特性膨胀为 PASS [d2334bb]
+- 22:28 回读 Prime RLM 消息绑定和持久投递状态，托管端只在已投递后结算 [590b562]
+- 22:35 Prime RLM Host 组件要求完整读取能力，阻止半接线托管被误启用 [9835bb5]
+- 22:44 Host 恢复期重建 provider 私有绑定后再接管，防止 RLM 重启丢失准入账本 [221b26a]
+- 22:49 全仓 make check 再次通过；确认 Prime 原生子运行时可无模型创建，但递归触发仍需独立有界授权 [no code commit]
+- 22:56 提供 Prime 专属 RLM Host 装配器，强制 child 账本、准入和 lifecycle 成组注入 [2670b78]
+- 23:12 定义 Prime RLM provider-free 观测与证据边界，禁止模型路径伪造 PASS [4614285]
+- 23:18 注册 Prime RLM 九场景并将模型路径保持 external-limited [90f3f20]
+- 22:41 验证真实 Prime daemon 的 RLM spawn 准入，禁止公开 metadata create 冒充原生 child [a892ae1]
+- 22:41 暴露可复现的 Prime RLM spawn 准入目标，固定 provider-free 验证边界 [efa614f]
+- 22:41 绑定 RLM 证据命令至 spawn 准入目标，防止命名暗示未验证消息闭环 [2cd29ad]
+- 22:41 清理 RLM 验证测试遗留导入，使全仓 Ruff 门重新通过 [cc3abdd]
+- 22:44 全仓 make check 通过；真实 RLM 证据仍仅覆盖 provider-free spawn 准入 [no code commit]
+- 2026-08-14 固化有界 Prime 原生 RLM 授权合同，防止授权前内核或模型启动 [2da5d55]
+- 2026-08-14 规划有界原生 RLM 授权测试与实现，确保先验证再接入 [e7c60e3]
+- 2026-08-14 锁定原生 RLM 授权能力与限额拒绝矩阵，约束实现边界 [26b173f]
+- 2026-08-14 新增原生 RLM 有界授权加载器，拒绝越界授权而不启动执行 [7a640b0]
+- 2026-08-15 定义单次原生 RLM 模型实验合同，固定成本、时限与证据边界 [4033bd0]
+- 2026-08-15 规划有界原生 RLM 实验实现与审计步骤，防止默认模型执行 [80667f6]
+- 2026-08-15 增加原生 RLM 实验纯预检和一次性预留，阻止授权前执行 [8f8c0ce]
+- 2026-08-15 将实验模块固定在验证工具边界，避免框架依赖工具层 [cc5fd60]
+- 2026-08-15 持久化有界原生 RLM 私有 receipt，阻止不完整生命周期升级 PASS [245a796]
+- 2026-08-15 增加默认关闭的原生 RLM CLI 闸门，要求显式实验授权 [920c97b]
+- 2026-08-15 增加原生 RLM probe 一次性执行分类，禁止不完整证据通过 [8d96a97]
+- 2026-08-15 记录私有原生 RLM 模型配置契约，避免默认模型执行 [a8ef57e]
+- 2026-08-15 隔离原生 RLM daemon 的单凭据环境，避免 sidecar 获得密钥 [6514c92]
+- 2026-08-15 固定首个原生 RLM 实验模型选择，绑定 DeepSeek 私有凭据名 [baa9d05]
+- 2026-08-15 规划有界原生 RLM daemon 直启参数，避免 shell 与环境泄漏 [064b210]
+- 2026-08-15 实现有界原生 RLM daemon 就绪等待，防止错误接管其他服务 [b867429]
+- 2026-08-15 回收未就绪的原生 RLM daemon，防止失败启动遗留进程 [0e9ddd0]
+- 2026-08-15 绑定原生 RLM sidecar 私有 descriptor，隔离凭据与预算证据 [03e0b9b]
+- 2026-08-15 规定原生 RLM 一次性默认授权，移除不必要的操作员内部配置 [c592216]
+- 2026-08-15 规划原生 RLM 默认输入的测试先行改动，保持显式实验闸门 [5a25fa2]
+- 2026-08-15 生成一次性原生 RLM 默认授权，免除操作员内部 JSON 配置 [6ec6b76]
+- 2026-08-15 默认原生 RLM CLI 输入与私有证据根，降低启动配置门槛 [51084c2]
+- 2026-08-15 将 Prime 原生 RLM 深度限定为私有会话开关，默认仍为零 [79081ed]
+- 2026-08-15 将单层原生 RLM 权限绑定进 sidecar 描述符，避免全局启用 [9ef0ff5]
+- 2026-08-15 补齐子 sidecar 的零深度描述符，修复闭合协议兼容回归 [f062d79]
+- 2026-08-15 绑定原生 RLM sidecar 的锁定运行资源，移除占位私有路径 [69132d3]
+- 2026-08-15 编排原生 RLM daemon 与 sidecar 生命周期，确保失败脱敏且进程回收 [243168e]
+- 2026-08-15 启动原生 RLM sidecar 时隔离模型凭据，限定凭据仅入 daemon [b5995d6]
+- 2026-08-15 直启受控原生 RLM daemon，锁定工作目录并关闭外部流 [a13af5c]
+- 2026-08-15 组合原生 RLM 受控启动器，统一 daemon/sidecar 生命周期回收 [1efb21e]
+- 2026-08-15 归约原生 RLM 生命周期证据，阻止不完整 child/message 升级成功 [1b2451c]
+- 2026-08-15 读取 Gateway 原生 RLM 闭合证据，保持消息与生命周期内容不可见 [b38f581]
+- 2026-08-15 从公开 action 流绑定原生 RLM 消息证据，避免正文参与关联 [a25cb16]
+- 2026-08-15 组合 Gateway 原生 RLM 闭环观察，统一只读证据归约 [31ab15a]
+- 2026-08-15 接通原生 RLM 受控 Host 实验入口与离线 Node 22 解析 [pending]
+- 2026-08-15 提交原生 RLM 受控 Host 与离线 Node 22 解析，支持真实闭环执行 [d145311]
+- 2026-08-15 统一直执行 Prime 验证器模块实例，消除运行态导入分歧 [68d0e14]
+- 2026-08-15 将 Prime socket 运行根移至短私有临时路径，修复 Unix 路径上限 [c1e2e70]
+- 2026-08-15 预创建并校验 Prime 会话私有目录，消除 create 的路径前置条件 [67f6ba9]
+- 2026-08-15 容忍 Prime transcript 短暂可见性延迟，保持确认前持久化验证 [8cd0371]
+- 2026-08-15 创建时物化并收紧 Prime transcript，解除持久化时序死锁 [pending]
+- 2026-08-15 提交 Prime transcript 物化与权限收紧，解除持久化时序死锁 [d408198]
+- 2026-08-15 分离 Prime 根目标与启动输入私有引用，恢复受控首回合 [pending]
+- 2026-08-15 提交独立 Prime 启动输入引用，避免私有绑定冲突 [7ce18e3]
+- 2026-08-15 提高受限 Prime 启动 token 额度，避免模型调用前预算终态 [pending]
+- 2026-08-15 提交受限 Prime 启动额度，提高首回合可执行性 [0544afe]
+- 2026-08-15 回收 5 轮孤儿 Prime 守护/内核与卡住 Gateway 测试，复核仓库残留进程为零
+- 2026-08-15 修正原生 RLM 以 .env 覆盖陈旧继承凭据，并归约终态证据 [pending]
+- 2026-08-15 提交原生 RLM .env 凭据优先与终态归约修复 [6643279]
+- 2026-08-15 在异常探针清理前取消 Prime 根会话，回收 detached worker [pending]
+- 2026-08-15 提交异常路径 Prime 根取消，确保 detached worker 受 supervisor 回收 [7dfebf5]
+- 2026-08-15 确认 Prime 进程归零，未占用运行目录已移入废纸篓
+- 2026-08-15 同最小环境 Pi SDK 成功调用 DeepSeek，排除凭据与网络链路
+- 2026-08-15 提高 Prime 受控探针回合配额，使创建、通信、删除可完整执行 [da12cdd]
+- 2026-08-15 关闭 sidecar 后等待 Prime owner 回收，避免 SIGTERM 遗留 detached worker [05a71dd]
+- 2026-08-15 sidecar 关闭失败仍执行 Prime owner 回收，封住异常路径孤儿 worker [3a9875f]
+- 2026-08-15 私有 sidecar 诊断定位 Prime 映射故障，保持公共协议不泄露 [1c3b2ef]
+- 2026-08-15 串行化 Prime Gateway 持久化追加，修复游标与 RLM 并发写冲突 [a12a383]
+- 2026-08-15 实测原生闭环抵达 child.spawn；shim 未注入 Prime runtime，根会话转为 needs_input
+- 2026-08-15 固化 Prime daemon 原生子会话适配计划，约束锁定协议与闭环验证 [66497b6]
+- 2026-08-15 拒绝畸形 Prime create 元数据，封住 native-child 配置穿透 [0049c51]
+- 2026-08-15 关闭 Prime native-child create 配置白名单，拒绝额外运行时字段 [0b327b8]
+- 2026-08-15 关闭 Prime native-child 元数据白名单，拒绝未验证字段 [ae7f122]
+- 2026-08-15 恢复深度校验的根 initialGoal 配置，避免协议白名单阻断根会话 [8fb922f]
+- 2026-08-15 增加 Prime 原生子会话创建与提示适配，摆脱未注入的 RLM shim [19b3ad2]
+- 2026-08-15 在 Skill Bridge 固定准入后副作用钩子，防止 native child 越权创建 [e197783]
+- 2026-08-15 将已准入一层 child.spawn 接入 native Prime 子会话并持久化启动观察 [29e21a8]
+- 2026-08-15 根取消前逐一回收 client-owned Prime children，防止后台 worker 残留 [75b13b5]
+- 2026-08-15 完成 native child 等待、回收与终态记录，闭合已准入 child.spawn 生命周期 [c75312a]
+- 2026-08-15 实测 native RLM 根仍以 shim 请求 child，身份未与新 adapter 绑定；已协议回收进程
+- 2026-08-15 修正 native RLM child deadline 投影，避免授权到期边界拒绝准入 [8c7acab]
+- 2026-08-15 实测 child 已创建完成但 shim 漏记 started，生命周期序列无法闭合
+- 2026-08-15 修复 shim 同步完成路径先记 started 再记 terminal，保持 RLM 生命周期有序 [892ec54]
+- 2026-08-15 忽略非根 Prime session 事件但保留游标，避免 child 事件污染根生命周期 [fe69ce8]
+- 2026-08-15 将 native RLM child 预算投影为授权半额，避免根耗用后请求超额 [51fdbe5]
+- 2026-08-15 用 daemon shutdown 替换探针 SIGTERM 回收，避免 Prime worker 残留 [4404918]
+- 2026-08-15 实测协议 shutdown 后 Prime 进程归零；probe 仍在 receipt 前失败待诊断
+- 2026-08-15 限定实验仅一个 RLM child，防止重复子任务干扰闭环验证 [4a88389]
+- 2026-08-15 等待 child 激活后再发消息，消除 native RLM 发送竞态 [055c116]
+- 2026-08-15 实测单 child 与消息均准入；宿主执行通道在回信删除前截断
+- 2026-08-15 将 Prime 原生 child 删除接入授权 child.cancel，拒绝时不执行原生删除 [212492e]
+- 2026-08-16 覆盖认证 socket 的 native RLM 删除准入协议 [4aed1c5]
+- 2026-08-16 收据要求独立 native RLM 删除证据，终态不再可伪造删除 [77d34ab]
+- 2026-08-16 仅在 Prime 原生删除成功后记录 RLM 删除生命周期 [19dc870]
+- 2026-08-16 持久化 native RLM 删除证据并支持重放，闭合删除审计链 [069e1b2]
+- 2026-08-16 为真实 RLM 准入 harness 声明单 child 上限，恢复 provider-free 验证 [4ee9af1]
+- 2026-08-16 定义 Prime climb 适配器，以证据驱动长期闭环迭代 [c876ad7]
+- 2026-08-16 规划 climb 状态与首个真实 RLM 生命周期验证周期 [9e997e3]
+- 2026-08-16 建立可恢复的 Prime climb 前台循环状态与 H-001 入口 [c3b305c]
+- 2026-08-16 实测真实 Prime RLM bridge 生命周期与删除记录链 [fd56c06]
+- 2026-08-16 用 Prime shutdown 协议替代 SIGTERM，消除 RLM daemon 孤儿 [ccdd9a3]
+- 2026-08-16 记录 H-001 通过并将 climb 游标推进到 RLM 恢复证据 [6a30b62]
+- 2026-08-16 公开并校验 native RLM 删除终态，为恢复读取闭合协议 [20745de]
+- 2026-08-16 关闭空闲 RLM socket 并优先侧车正常收尾，避免恢复端口残留 [f0a0e15]
+- 2026-08-16 对齐 H-001 假设状态与已生成研究树，恢复 climb 状态一致性 [3220f1d]
+- 2026-08-16 转发显式 Prime kernel 配置，避免原生子会话回退异步安装 [9e1cbc9]
+- 2026-08-16 为已验证的 operator kernel 提供私有默认预检，消除首次运行安装竞态 [e8aae36]
+- 2026-08-16 以只读恢复重放 Prime RLM 账本，避免活跃会话 attach 阻断审计 [3533723]
+- 2026-08-16 验证并登记 H-002 真实 RLM 只读恢复，climb 推进至有界模型收据 [4f7bd24]
+- 2026-08-16 持久化有界 Prime 探针的安全终态，消除调用窗口导致的验证盲区 [cf6b6c9]
+- 2026-08-16 检查点化有界 Prime 探针阶段，以定位外部受限执行停滞 [8541117]
+- 2026-08-16 保留已记录的 Prime 终态，使失败模型运行产生可审计收据 [2a80f5e]
+- 2026-08-16 将终态流关闭投影为探针收据，避免受限失败丢失状态 [ab0f2a6]
+- 2026-08-16 强制 Prime 探针首步调用 RLM，避免模型以文本空闲结束 [669bfc5]
+- 2026-08-16 修复 sidecar 编排异常边界，避免未定义 probe 状态掩盖真实 Prime 故障 [2eb3831]
+- 2026-08-16 将 sidecar 私有错误归类为安全枚举，为真实 Prime 故障提供可行动证据 [90d6a53]
+- 2026-08-16 输出固定 sidecar 失败阶段而非原始异常，定位真实 Prime 关闭断点 [1ccd428]
+- 2026-08-16 在生命周期读取前保留失败 Prime 终态，避免关闭后查询掩盖真实收据 [c4c535c]
+- 2026-08-16 保留终态跨越已关闭 sidecar 的清理异常，确保受限运行写入实际计量 [d4e0a5e]
+- 2026-08-16 断流后直接读取 Prime root 公开状态，避免瞬时事件流决定有界收据 [215b71c]
+- 2026-08-16 使用根会话身份恢复私有 Prime 状态，避免跨客户端查询失明 [246baf2]
+- 2026-08-16 将 Prime 事件传输故障归类为安全枚举，定位真实 RLM 控制断点 [9d9b9fa]
+- 2026-08-16 让 Prime IPC 沿用会话期限，避免 30 秒传输截断长时 RLM 授权 [b9f7be0]
+- 2026-08-16 保留 Prime 探针首要失败，避免 sidecar 清理异常掩盖真实断点 [d829930]
+- 2026-08-16 细分 Prime 控制闭环故障，定位真实事件归约拒绝点 [41d9383]
+- 2026-08-16 记录安全 Prime 事件类型，精确定位状态机拒绝的闭环边 [70fb20a]
+- 2026-08-16 保留 Prime 主失败跨守护回收，防止清理错误抹除状态机证据 [76a6ae6]
+- 2026-08-16 保留 Prime 主失败跨 Host 关闭，防止传输清理掩盖控制事件 [5051bb0]
+- 2026-08-16 接通 Prime 原生 child 私有消息协议，补齐闭环消息能力 [c4149e4]
+- 2026-08-16 接通原生 Prime 子消息与异步回收，支持可审计长期闭环 [9aee83e]
+- 2026-08-16 修正 Prime 单调游标与技能内核版本契约，消除错误故障关闭 [37774e1]
+- 2026-08-16 为 Prime 探针读取增加受控超时和取消回收，防止悬挂进程 [bdcb672]
+- 2026-08-16 让探针经同一私有控制套接字驱动原生 RLM，剥离模型服从性 [10ed3fe]
+- 2026-08-16 细化原生 RLM 私有技能阶段证据，定位根会话启动前置失败 [14e9a91]
+- 2026-08-16 探针根会话创建即开放私有控制桥，移除根模型生成前置条件 [0e577b3]
+- 2026-08-16 直驱控制技能并收敛 Prime 原生子会话返回兼容性，保留受控清理 [40b090d]
+- 2026-08-16 改由 Prime 内核执行原生 RLM，并为未发起调用设置短限时 [1a8003f]
+- 2026-08-16 探针切换 Prime 原生 RLM 入口并区分未绑定家族消息 [86b256c]
+- 2026-08-17 验证 Prime 原生 RLM 长期闭环：child spawn、双向消息投递、终态回复与 provider-owned delete 均完成；受控真实收据 PASS
+- 2026-08-17 修复 Prime descriptor 与 disabled-autonomy wire 契约缺口；真实 daemon 闭环回归及 make check PASS
+- 2026-08-17 建立正式 bounded verifier 的最小私有模型/凭据环境边界，并以缺凭据安全失败测试验证
+- 2026-08-17 修复 bounded 私有模型解析的未分类异常；不支持模型统一安全降级为 External-limited，且不回显配置值
+- 2026-08-17 将正式 bounded 收据断言收紧为由封闭会话事件与动作终态归约，拒绝不完整或伪造控制事实
+- 2026-08-17 真实 native RLM 重跑定位到恢复态收到 provider terminal 时状态机拒绝 goal/terminal；补齐恢复终态归约测试与迁移，外部试跑进程树已精确回收
+- 2026-08-17 以 115 秒硬期限复验真实 native RLM：root/child、消息投递与 provider-owned delete 全部 PASS，执行后无 Prime 进程残留
+- 2026-08-17 正式 bounded 收据加入每个有限控制动作的 SHA-256 因果摘要；PASS 不再仅依赖布尔断言且不公开原始身份
+- 2026-08-17 将 bounded 验证应用接入正常 ApplicationActionExecutor、Prime 系统动作与私有结果投影，为真实 application.invoke 收据链铺设执行边界
+- 2026-08-17 修复 Prime terminal 与异步 child 结算竞态：终态前有限 reconcile，真实 native RLM application/child/message/delete 闭环 PASS 且进程树回收完成
+- 2026-08-17 实测 checkpoint Skill Bridge 不能在 action terminal 等待期重入同一 sidecar 发送 checkpoint.request；会形成受控超时，正式 bounded runner 需采用两阶段命令/回执解耦
+- 2026-08-17 checkpoint 改为 Gateway 成功 action.resolve 时物化并移至模型启动前；单元路径通过，但真实 sidecar 在 checkpoint terminal 投影处断开，保留为 External-limited，未提升 bounded 结论
+- 2026-08-17 修复 checkpoint 空闲轮询未受总 deadline 约束的后台空耗；回归测试覆盖永不空闲的 fail-closed 收敛，真实 native RLM application/child/checkpoint 复验 PASS 且进程树归零
+- 2026-08-17 将 session.detach 提升为闭合、可审计控制命令；真实探针仅在 RLM 闭合后的空闲边界 detach/attach，避免启动前破坏 Prime 会话所有权，跨语言协议与 Gateway 回归通过
+- 2026-08-17 将真实 root cancellation 与 host budget-exceeded rejection 纳入 native 探针安全收据；拒绝发生在应用执行前，取消发生在已闭合 RLM 生命周期后，87 项 Python 与跨语言定向回归通过
+- 2026-08-19 H-004 证伪：提前确认 Prime prepare 会破坏崩溃窗口；真实 checkpoint 停于生命周期端点连接，未进入协调器请求
+- 2026-08-20 生命周期端点 Node 预检通过；关闭旧 daemon client 后真实 checkpoint 进入上游 coordinator，但 coordinator 仍失败
+- 2026-08-22 修复暂停态 checkpoint 的三处控制归约缺口（恢复回 paused、checkpoint receipt、取消目标终态）；99 项定向 Python 回归及真实 native RLM bounded receipt PASS，验证所有受控闭环断言
+- 2026-08-22 provider-free checkpoint 场景接入受控 daemon lifecycle restart；Pathlight checkpoint receipt 与精确双 daemon 计数均已验证，`make test` 1857 项通过
+- 2026-08-22 修正 Prime parity ledger：真实 bounded receipt 已证明 `Verified-loop` PASS；系统与原生全功能等价仍明确保留为后续阶段
+- 2026-08-22 修复 session/context 有界证据适配器的状态锁：真实模型操作现在可按专用命令与检查集提升为 PASS；伪 daemon、零 provider 调用和无模型检查集仍会被拒绝
+
+## 2026-08-22
+
+- 23:44 session/context provider-free 门禁通过：Python 42、runtime TS 22、Gateway 268
+
+## 2026-08-23
+
+- 00:20 修正真实 Prime 模型操作结果节点与原生 `ipython_state` 尾节点的不变量；compaction/branch-summary bounded 门禁通过
+- 00:27 两条 bounded session/context 场景以精确收据晋升 `bounded-pass`；climb H-006 标准周期复验通过并推进 H-007
+- 00:38 `make check`、`make promotion-check` 与 `git diff --check` 全部通过；climb H-007 晋级，按权威 Phase 2 顺序推进 H-008 `rlm.programmatic` provider-free 证据闭环
+- 01:02 补齐真实 Prime provider-free family-message admission/delivery authority；六项非模型 RLM 场景以精确证据晋级，三项 bounded 模型场景保持阻塞，climb H-008 通过并推进 H-009
+- 01:10 H-009 证伪：Phase 1 bounded 收据只有生命周期/应用/checkpoint/cancel/budget 事实，没有 child-model、generated-program、depth-limit 三条精确断言；推进 H-010 专用最小收据
+- 01:32 H-010 专用 bounded 收据通过：精确 child model selector、真实模型生成程序 admission、超深 spawn 预执行拒绝均 PASS；`rlm.programmatic` Prime Gateway 9/9 闭环，推进 H-011 `operation.long-running`
+- 01:33 H-011 清点并锁定 `operation.long-running` 十项闭集：九项 provider-free、一项 bounded；形成分阶段实施计划并推进 H-012
+- 01:34 H-012 精确矩阵与 Phase 1 适配通过：仅 detach/attach 与 goals 晋级，另外八项保持 blocking
+- 01:34 H-013 provider-neutral 长任务协调器通过：覆盖虚拟 24 小时 once/cron、user/agent heartbeat、persist-before-effect、取消、uncertain 防重试与文件 journal 重启
+- 01:35 H-014 pinned Prime heartbeat wire 通过：五个原生命令闭集可达，RPC 别名、额外字段和非法动作预发送拒绝
+- 01:35 H-015 durable heartbeat fencing 通过：精确命令 digest 先绑定，body-free terminal 后提交；重启不虚构成功，推进 H-016 session/private IPC bridge
+- 01:36 修正 H-012 账本闭环：以本轮 provider-free Phase 1 精确收据将 detach/attach 与 goals 晋级；`operation.long-running` 由 0/10 更新为 2/10，余八项继续阻塞
+- 02:02 H-016 PrimeSession/private IPC bridge 通过：命令 digest 先落盘、active session 精确匹配、崩溃窗口不重发，公开回执不含 heartbeat 正文
+- 02:08 H-017 selected-provider binding 通过：Python 仅翻译五个 pinned heartbeat shape，保留 host effect identity，并拒绝漂移回执
+- 02:18 H-018 residency/recovery 通过：controller lease 与 task authority 分离，重复 attach 幂等，durable eviction 用同一身份恢复，close 后 orphan audit 为零
+- 02:24 H-019 有限授权边界通过：autonomous-quality 仅接受真实 Prime 的恰好一次 provider operation/credential read 与三条固定检查；provider-free 证据不可跨界晋级
+- 03:18 H-016 至 H-019 收口验证：`make check`（1,885 Python + TS/Rust/lint/docs/build）、Prime Gateway 全包、`make promotion-check`（26 commands/0 provider operations）与 `git diff --check` 全部通过；H-020 因缺少显式有成本授权保持 pending
+- H-020 在显式授权下仅执行一次真实 Prime autonomous-quality：1 provider operation、1 credential read、8,203 aggregate tokens、0 recorded micro-cost，native lifecycle/model 断言全部 PASS；公开 usage 投影拒绝五字段收据导致包装命令后置失败，随后从同一已完成收据零 provider 恢复，未重跑模型
+- H-021 provider-free 晋级通过：heartbeat user/agent、once/cron、restart/update、resident worker/eviction 与 orphan cleanup 获得精确证据；与 Phase 1 两项合计九条 provider-free long-running 证据
+- H-022 闭环通过：`operation.long-running` Prime Gateway 精确 10/10 PASS，Asterion native 仍 Missing；`make check`（1,894 Python + TS/Rust/lint/docs/build）、`make promotion-check`（26 commands/0 provider operations）、域 reducer 与 `git diff --check` 全部通过，推进 H-023 continual harness inventory
+- H-023 初始清点确认 `harness.continual` 为八项闭集：prompt/memory/skill/subagent entries、history snapshots、rollback、scope isolation 共七项 real-Prime provider-free，evidence refinement 单独要求 bounded provider；当前 Asterion/Prime Gateway 为 0/8，尚未提升任何结果
+- 17:52 提交 continual-harness 设计，锁定宿主修订内核与七加一证据边界 [570b84b]
+- 18:01 提交 continual-harness 实施计划，固定八任务 TDD 与 bounded 授权断点 [7f006a6]
+- 19:36 提交闭合 harness 值契约，建立 scope、版本 edit 与脱敏 receipt 基线 [80f64ab]
+- 19:52 提交 append-only harness 修订内核，封住 effect、激活与重启崩溃窗 [7d21594]
+- 20:55 提交 Prime harness adapter，以显式 scope 与 delta receipt 隔离私密正文 [c69a5b9]
+- 21:03 提交 Gateway harness durable fence，保证 bind-before-effect 与重启不重放 [269b615]
+- 21:11 提交固定 Prime harness 模块与真实七场景离线观测，封闭源码和构建漂移 [461ab5e]
+- 21:26 提升七项 harness 离线证据，保留 evidence-refinement 唯一阻塞 [42e3ae5]
+- 21:31 提交 dormant bounded harness 门，固定单调用预算与恢复边界 [390969d]
+- 22:05 连接 Prime 原生 refine 与宿主激活，确保唯一 bounded 调用可恢复 [d17959e]
+- 22:22 延后模型解析并固化 selector 摘要，确保前置失败不耗调用且恢复免读凭据 [fab730a]
+- 22:31 安装锁定 RLM host shim，使真实 Prime resident 在 refine 前通过零 provider 预检 [9b53bf3]
+- 22:34 两次真实命令均在 refine 前失败；provider 为零，凭据读取按一次保守记账，禁止自动重跑
+- 22:36 假凭据 preflight 通过 resident 创建与模型选择，确认下一调用边界已到 before-refine
+- 23:03 规范短 socket 与绝对 result 路径，使完整 Python preflight 在 refine 前闭环 [6e42b26]
+- 23:18 唯一 Prime refine 调用通过：七证据 grounding、宿主准入和 snapshot 激活均 PASS
+- 23:21 晋升 bounded evidence-refinement，Prime Gateway continual harness 达到精确 8/8
+- 23:30 关闭 H-023 continual harness 8/8，为 H-024 ecosystem inventory 解锁 [da04e57]
+- 23:55 固化 H-024 sealed ecosystem portfolio，为 provider-free 十项闭环定界 [295e8d8]
+- 00:20 拆解 H-024 为十个 TDD 任务，为 provider-free 自主执行锁定边界 [f1316bb]
+
+## 2026-08-27
+
+- 16:35 封装生态私源与原子投影，阻断跟随、摘要漂移及替换清理竞态 [ec090c3]
+- 16:53 隔离生态投影清理并保留失败所有权，阻断替换竞态删除 [25b9065]
+- 17:13 H-024 Task 1 闭合生态契约经独立审查通过 [09082e1]
+- 17:14 Task 2 任意 retained-fd 删除保证在 Darwin/Python 不可实现，等待安全合同决策
+- 17:20 采用 quiescent host-owned cleanup；漂移 fail-closed，fd-close 终态不重试
+- 17:54 固化 quiescent cleanup 安全合同，解除 Darwin retained-fd 不可实现阻塞 [b5adc4f]
+- 18:33 对齐 ecosystem adapter 异步 client/process transport，补齐 selected-authority 绑定 [4bc47b0]
+- 19:44 补齐 ecosystem main IPC、并发 fence 与 durable 期望合同计划 [c3855c8]
+- 18:01 固化生态清理状态机，确保漂移拒绝、fsync 单独重试及 fd 终态不重试 [0e8e696]
+- 18:10 补齐生态回滚、隔离 close 终态及读取错误净化，闭合复审缺口 [ce3ce77]
+- 20:38 扩展 Task 5 真实锁绑定并登记 ecosystem artifact 文件 [cb3aa9a]
+- 21:12 锁定 Prime ecosystem 模块并通过独立审查与 wheel 回退验证 [a465bbb]
+- 21:13 登记 wheel 资源闭包，确保 Task 5 分发合同可恢复 [77570e3]
+- 21:47 证明 Prime 资源与碰撞诊断 provider-free 且可重复 [4a08f79]
+- 21:24 证明 Prime 资源加载与碰撞诊断 provider-free 收据 [4a08f79]
+- 21:47 绑定资源 descriptor 并固定 Prime collision digest [0245af0]
+- 22:03 证明 Prime extension lifecycle 四场景 provider-free 收据 [c6f0a12]
+- 22:10 证明 Prime package source exact selection provider-free 收据 [6ba791e]
+- 22:46 闭合 Task7 durability 与 failure matrix 复审缺口 [aff4c2c]
+- 22:55 闭合 Task8 package resolver/digest/build gate [1518b99]
+- 23:09 证明 Prime MCP 配置与一次刷新 provider-free 收据 [629f44a]
+- 23:48 贯通 owned MCP channel 并闭合非阻塞回收 [bf407a7]
+- 23:55 固化 package/MCP 真集成合同，为 Task 10 闭环 [04532ec]
+- 23:58 接入真实 Prime MCP manager/OAuth owned channel，修复 Task9 复审缺口 [bf407a7]
 
 ## 2026-08-28
 
-- 00:12 RED：干净 `04532ec` 上 `ecosystem.capabilities` Prime Gateway 精确十项均为 `result-missing`，provider/application operations 均为 0。
-- 00:12 Task10 reducer 将四个 provider-free ecosystem receipts 收敛为十条 immutable observations；真实 artifact lock 为 `c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3`，真实 module lock 为 `959989c9f6afb907db32bdef709cf19b45fa19421095f62714ff80b9a2c44cd6`。
-- 00:12 精确 `ecosystem.capabilities` domain checker PASS（10 selected / 10 passed / 0 blocking）；所有 native ecosystem rows 保持 `missing`，`Verified-system-parity` 仍阻塞于后续 domains。
-- 00:12 Climb H-028 至 H-033 provider-free ecosystem gates 通过；H-034 因 repository/promotion gates 未能产生 clean PASS 保持 pending，不提升 H-035。
-- 00:12 `make check` 的非 ecosystem 失败已在纯 `04532ec` 复现；`promotion-check` 在隔离副本缺少被排除的 external pinned Prime source，二者均记录为 concern 而非 PASS。
+- 00:16 296c633 closes ecosystem 10/10 evidence; keeps H-034 blockers explicit.
+- 01:49 显式绑定外部 Prime 并先构建 Gateway，闭合 promotion 隔离前置 [358d106]
+- 02:21 补齐 Prime sidecar descriptor 与子会话服务，恢复 verified-loop [d98d1b0]
+- 02:48 以锁定 clone 替代 symlink，恢复隔离 promotion 可验证性 [9d7cf94]
+- 03:06 在隔离 clone 重建 Prime 全部 workspace，闭合传递 dist 依赖 [ad99524]
+- 03:25 接受禁用态 autonomous descriptor，恢复真实 session/RLM 协议 [537a31a]
+- 03:42 将 promotion 子命令固定到隔离 Prime 根，消除路径身份漂移 [4ae65ab]
+- 03:55 隔离嵌套 promotion 测试环境，防止外部根泄漏 [28e29b6]
+- 02:44 补齐 verified-loop sidecar descriptor，恢复真实进程门禁 [ef685f4]
+- 03:08 H-034 清洁门禁全通过，推进 H-035 inventory [ef685f4]
+- 03:20 固化 H-034 durable state，恢复 H-035 接棒 [3db6685]
+- 04:05 固化共享客户端设计，锁定 H-035 实现边界 [7add4fb]
+- 04:12 更新恢复边界，等待客户端规格复核 [047308a]
+- 04:38 拆分 H-035 十项 TDD 任务，准备受控执行 [0880045]
+- 04:43 更新恢复边界，等待 H-035 执行方式选择 [3b2cd32]
+
+## 2026-08-30
+
+- 04:54 设计互补证据线合成，以完整闭合 Prime system parity [e6d072d]
+- 05:34 拆分 Prime system parity 合成与 Git 闭环任务 [2804dde]
+- 05:47 调整 RED 测试到合并前，确保失败原因可验证 [ad026b6]

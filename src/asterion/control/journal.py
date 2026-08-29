@@ -54,6 +54,14 @@ JOURNAL_RECORD_KINDS = frozenset(
         "harness.effect-terminal",
         "harness.snapshot-activated",
         "harness.effect-uncertain",
+        "long-running.registered",
+        "long-running.intent",
+        "long-running.receipted",
+        "long-running.controller-retained",
+        "long-running.controller-attached",
+        "long-running.controller-evicted",
+        "long-running.task-started",
+        "long-running.closed",
     }
 )
 JOURNAL_FILE_VERSION = "asterion.control-journal/v1"
@@ -1395,6 +1403,99 @@ def _validate_record_payload(kind: str, value: object) -> None:
         if value["status"] != "uncertain":
             raise JournalConflictError("journal harness uncertain status is invalid")
         return
+    if kind == "long-running.registered":
+        _require_fields(value, {"registered_at_ms", "spec"})
+        _require_nonnegative_integer(
+            value["registered_at_ms"], "journal long-running registration time"
+        )
+        _validate_long_running_spec(value["spec"])
+        return
+    if kind == "long-running.intent":
+        _require_fields(
+            value,
+            {"due_at_ms", "effect_id", "source_id", "source_kind"},
+        )
+        _require_nonnegative_integer(
+            value["due_at_ms"], "journal long-running due time"
+        )
+        _require_opaque_id(value["effect_id"], "journal long-running effect")
+        _require_opaque_id(value["source_id"], "journal long-running source")
+        if value["source_kind"] not in {"heartbeat", "schedule"}:
+            raise JournalConflictError("journal long-running source kind is invalid")
+        return
+    if kind == "long-running.receipted":
+        _require_fields(
+            value,
+            {
+                "due_at_ms",
+                "effect_id",
+                "source_id",
+                "source_kind",
+                "status",
+            },
+        )
+        _require_nonnegative_integer(
+            value["due_at_ms"], "journal long-running receipt time"
+        )
+        _require_opaque_id(value["effect_id"], "journal long-running receipt effect")
+        _require_opaque_id(value["source_id"], "journal long-running receipt source")
+        if value["source_kind"] not in {"heartbeat", "schedule"}:
+            raise JournalConflictError("journal long-running source kind is invalid")
+        if value["status"] not in {
+            "succeeded",
+            "failed",
+            "cancelled",
+            "uncertain",
+        }:
+            raise JournalConflictError("journal long-running receipt status is invalid")
+        return
+    if kind == "long-running.controller-retained":
+        _require_fields(
+            value,
+            {"controller_id", "acquired_at_ms", "expires_at_ms"},
+        )
+        _require_opaque_id(value["controller_id"], "journal resident controller")
+        _require_nonnegative_integer(
+            value["acquired_at_ms"], "journal resident acquisition time"
+        )
+        _require_nonnegative_integer(
+            value["expires_at_ms"], "journal resident expiry time"
+        )
+        if value["expires_at_ms"] <= value["acquired_at_ms"]:
+            raise JournalConflictError("journal resident lease is invalid")
+        return
+    if kind == "long-running.controller-attached":
+        _require_fields(value, {"controller_id", "attached_at_ms"})
+        _require_opaque_id(value["controller_id"], "journal attached controller")
+        _require_nonnegative_integer(
+            value["attached_at_ms"], "journal controller attach time"
+        )
+        return
+    if kind == "long-running.controller-evicted":
+        _require_fields(value, {"controller_id", "evicted_at_ms"})
+        _require_opaque_id(value["controller_id"], "journal evicted controller")
+        _require_nonnegative_integer(
+            value["evicted_at_ms"], "journal controller eviction time"
+        )
+        return
+    if kind == "long-running.task-started":
+        _require_fields(value, {"task_id", "started_at_ms", "expires_at_ms"})
+        _require_opaque_id(value["task_id"], "journal resident task")
+        _require_nonnegative_integer(
+            value["started_at_ms"], "journal task start time"
+        )
+        _require_nonnegative_integer(
+            value["expires_at_ms"], "journal task expiry time"
+        )
+        if value["expires_at_ms"] <= value["started_at_ms"]:
+            raise JournalConflictError("journal task authority is invalid")
+        return
+    if kind == "long-running.closed":
+        _require_fields(value, {"closed_at_ms"})
+        _require_nonnegative_integer(
+            value["closed_at_ms"], "journal long-running close time"
+        )
+        return
     raise JournalConflictError("journal record kind is invalid")
 
 
@@ -1468,6 +1569,54 @@ def _validate_harness_usage(value: object) -> None:
     )
     for item in value.values():
         _require_nonnegative_integer(item, "journal harness usage")
+
+
+def _validate_long_running_spec(value: object) -> None:
+    if not isinstance(value, Mapping):
+        raise JournalConflictError("journal long-running specification is invalid")
+    spec_type = value.get("spec_type")
+    if spec_type == "heartbeat":
+        _require_fields(
+            value,
+            {"interval_ms", "owner_id", "owner_kind", "source_id", "spec_type"},
+        )
+        _require_opaque_id(value["source_id"], "journal heartbeat identity")
+        _require_positive_integer(value["interval_ms"], "journal heartbeat interval")
+        if value["owner_kind"] == "user":
+            if value["owner_id"] is not None:
+                raise JournalConflictError("journal heartbeat owner is invalid")
+        elif value["owner_kind"] == "agent":
+            _require_opaque_id(value["owner_id"], "journal heartbeat owner")
+        else:
+            raise JournalConflictError("journal heartbeat owner is invalid")
+        return
+    if spec_type == "schedule":
+        _require_fields(
+            value,
+            {
+                "cron_expression",
+                "due_at_ms",
+                "schedule_kind",
+                "source_id",
+                "spec_type",
+            },
+        )
+        _require_opaque_id(value["source_id"], "journal schedule identity")
+        if value["schedule_kind"] == "once":
+            _require_nonnegative_integer(
+                value["due_at_ms"], "journal schedule due time"
+            )
+            if value["cron_expression"] is not None:
+                raise JournalConflictError("journal schedule expression is invalid")
+        elif value["schedule_kind"] == "cron":
+            if value["due_at_ms"] is not None or not isinstance(
+                value["cron_expression"], str
+            ):
+                raise JournalConflictError("journal schedule expression is invalid")
+        else:
+            raise JournalConflictError("journal schedule kind is invalid")
+        return
+    raise JournalConflictError("journal long-running specification is invalid")
 
 
 def _validate_usage(value: object) -> None:

@@ -39,6 +39,21 @@ class TestAgentControlProtocol(unittest.TestCase):
         create_source["command_id"] = "changed"
         self.assertEqual(create["command_id"], "command-1")
 
+    def test_detach_is_a_closed_auditable_session_command(self) -> None:
+        command = control_protocol.validate_control_command(
+            {
+                "protocol": "asterion.agent-control/v1",
+                "command_id": "command-detach",
+                "session_id": "session-1",
+                "authority_revision": 1,
+                "type": "session.detach",
+                "payload": {"reason_code": "bounded-receipt"},
+            }
+        )
+
+        self.assertEqual(command["type"], "session.detach")
+        self.assertEqual(command["payload"]["reason_code"], "bounded-receipt")
+
     def test_valid_events_are_discriminated_and_recursively_immutable(self) -> None:
         proposed_source = _fixture("valid-event-action-proposed.json")
         terminal_source = _fixture("valid-event-terminal.json")
@@ -194,7 +209,7 @@ class TestAgentControlProtocol(unittest.TestCase):
         self.assertFalse(event_schema["additionalProperties"])
         self.assertEqual(command_schema["properties"]["payload"], {})
         self.assertEqual(event_schema["properties"]["payload"], {})
-        self.assertEqual(len(command_schema["allOf"][0]["oneOf"]), 8)
+        self.assertEqual(len(command_schema["allOf"][0]["oneOf"]), 9)
         self.assertEqual(len(event_schema["allOf"][0]["oneOf"]), 13)
         rendered = json.dumps((command_schema, event_schema), sort_keys=True)
         for forbidden in ("prompt", "credentials", "provider_payload", "path"):

@@ -41,6 +41,10 @@ from asterion.control.session_context import (
     SessionContextReceipt,
 )
 from asterion.control.providers.prime.process import PRIME_GATEWAY_IPC_PROTOCOL
+from asterion.control.providers.prime.long_running import (
+    PrimeLongRunningIpcReceipt,
+    validate_prime_long_running_mapping,
+)
 
 
 MAX_PRIVATE_TEXT_BYTES = 1024 * 1024
@@ -478,6 +482,50 @@ class PrimeControlPlaneClient:
             or response.get("type") != "session-context.cancel.accepted"
         ):
             raise PrimeControlError()
+
+    async def execute_long_running(
+        self,
+        command_id: str,
+        command: Mapping[str, object],
+    ) -> PrimeLongRunningIpcReceipt:
+        """Send one host-authorized exact heartbeat command through private IPC."""
+
+        if (
+            self._closed
+            or not isinstance(command_id, str)
+            or OPAQUE_ID.fullmatch(command_id) is None
+        ):
+            raise PrimeControlError()
+        try:
+            validated = validate_prime_long_running_mapping(command)
+            envelope: dict[str, object] = {
+                "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+                "id": _request_id(),
+                "type": "long-running.execute",
+                "command_id": command_id,
+                "command": validated,
+            }
+            response = await self._process.request(envelope)
+            receipt = response.get("receipt")
+            if (
+                set(response) != {"protocol", "id", "type", "receipt"}
+                or response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
+                or response.get("id") != envelope["id"]
+                or response.get("type") != "long-running.receipt"
+                or not isinstance(receipt, Mapping)
+                or set(receipt) != {"commandId", "commandDigest", "status"}
+            ):
+                raise PrimeControlError()
+            result = PrimeLongRunningIpcReceipt(
+                receipt["commandId"],
+                receipt["commandDigest"],
+                receipt["status"],
+            )
+            if result.command_id != command_id:
+                raise PrimeControlError()
+            return result
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            raise PrimeControlError() from None
 
     async def rlm_lifecycle(self) -> tuple[RlmLifecycleObservation, ...]:
         """Read the closed, body-free native RLM child lifecycle."""

@@ -103,10 +103,7 @@ EXPECTED_EXCLUDED_FEATURE_IDS = (
     "excluded.hidden-reasoning-identity",
     "excluded.tui-pixel-identity",
 )
-EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS = (
-    "operation.detach-attach-replay",
-    "operation.goals",
-)
+EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS: tuple[str, ...] = ()
 EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
     "ecosystem.collision-diagnostics",
     "ecosystem.context-files",
@@ -125,6 +122,21 @@ EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
     "harness.scope-isolation",
     "harness.skill-descriptions",
     "harness.subagent-specifications",
+    "operation.detach-attach-replay",
+    "operation.goals",
+    "operation.heartbeat-agent",
+    "operation.heartbeat-user",
+    "operation.orphan-cleanup",
+    "operation.resident-workers",
+    "operation.restart-update-recovery",
+    "operation.schedule-once-cron",
+    "operation.worker-residency-eviction",
+    "rlm.cancellation-teardown",
+    "rlm.environment",
+    "rlm.messaging",
+    "rlm.recovery",
+    "rlm.registry-lifecycle",
+    "rlm.usage-cost",
     "session.delivery",
     "session.fork-clone",
     "session.persistence-naming",
@@ -135,11 +147,14 @@ EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
 )
 EXPECTED_BOUNDED_PRIME_FEATURE_IDS = (
     "harness.evidence-refinement",
-)
-EXPECTED_EXTERNAL_LIMITED_PRIME_FEATURE_IDS = (
+    "operation.autonomous-quality",
+    "rlm.child-model",
+    "rlm.generated-program",
+    "rlm.recursion-depth",
     "session.branch-summaries-labels",
     "session.compaction",
 )
+EXPECTED_EXTERNAL_LIMITED_PRIME_FEATURE_IDS: tuple[str, ...] = ()
 
 
 def _fixture(name: str = "valid-ledger-minimal.json") -> dict[str, object]:
@@ -443,22 +458,6 @@ class TestPrimeParityLedger(unittest.TestCase):
             for feature in features
             if isinstance(feature, Mapping)
             and feature["domain_id"] == "harness.continual"
-            for result in feature["provider_results"]
-            if isinstance(result, Mapping)
-            and result["provider_id"] == "asterion.native"
-        }
-
-        self.assertEqual(statuses, {"missing"})
-
-    def test_native_ecosystem_results_remain_missing(self) -> None:
-        ledger = validate_parity_ledger(_fixture("prime-agent-0.7.1.json"))
-        features = ledger["features"]
-        assert isinstance(features, tuple)
-        statuses = {
-            result["status"]
-            for feature in features
-            if isinstance(feature, Mapping)
-            and feature["domain_id"] == "ecosystem.capabilities"
             for result in feature["provider_results"]
             if isinstance(result, Mapping)
             and result["provider_id"] == "asterion.native"

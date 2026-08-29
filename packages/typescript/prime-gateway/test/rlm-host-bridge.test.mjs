@@ -100,6 +100,26 @@ test("rejects a second distinct RLM child when the private child cap is reached"
   assert.equal(proposed, 1);
 });
 
+test("rejects an over-depth RLM spawn before host admission or child-cap accounting", async () => {
+  let proposed = 0;
+  const bridge = new RlmHostBridge({
+    sessionId: "session-1",
+    maxDepth: 1,
+    maxSpawnCount: 1,
+    admitSpawn: async (request) => {
+      proposed += 1;
+      return { resolution: "admitted", childId: request.childId };
+    },
+  });
+
+  assert.deepEqual(
+    await bridge.proposeSpawn(proposal({ requestId: "depth-request", childId: "depth-child", idempotencyKey: "depth-spawn", rlmDepth: 2 })),
+    { resolution: "rejected", childId: "depth-child" },
+  );
+  assert.deepEqual(await bridge.proposeSpawn(proposal()), { resolution: "admitted", childId: "child-1" });
+  assert.equal(proposed, 1);
+});
+
 test("rejects an RLM spawn with an incomplete private effect payload", async () => {
   let proposed = 0;
   const bridge = new RlmHostBridge({

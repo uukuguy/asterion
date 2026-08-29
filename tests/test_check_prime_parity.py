@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -19,6 +20,13 @@ PINNED_SOURCE = ROOT / "3th-party" / "prime-agent"
 PINNED_COMMIT = "a18809e00ea30638584d87b3afea7285a9d7296c"
 
 
+def pinned_prime_source_root() -> Path:
+    configured = os.environ.get("ASTERION_PRIME_SOURCE_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return PINNED_SOURCE
+
+
 def _ledger(name: str = "prime-agent-0.7.1.json"):
     value = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
     return validate_parity_ledger(value)
@@ -26,12 +34,13 @@ def _ledger(name: str = "prime-agent-0.7.1.json"):
 
 class TestCheckPrimeParity(unittest.TestCase):
     @unittest.skipUnless(
-        PINNED_SOURCE.is_dir(),
+        pinned_prime_source_root().is_dir(),
         "external pinned Prime source checkout is unavailable",
     )
     def test_explicit_source_check_proves_every_declared_file_and_anchor(self) -> None:
+        prime_source = pinned_prime_source_root()
         report = parity_checker.verify_prime_source_evidence(
-            _ledger(), source_root=PINNED_SOURCE
+            _ledger(), source_root=prime_source
         )
 
         self.assertEqual(report.source_commit, PINNED_COMMIT)
@@ -39,7 +48,7 @@ class TestCheckPrimeParity(unittest.TestCase):
         self.assertEqual(report.evidence_record_count, 70)
         self.assertEqual(report.file_count, 48)
         self.assertEqual(report.anchor_count, 76)
-        self.assertNotIn(str(PINNED_SOURCE), repr(report))
+        self.assertNotIn(str(prime_source), repr(report))
 
     def test_inventory_without_source_root_is_metadata_only(self) -> None:
         output = io.StringIO()
@@ -75,16 +84,16 @@ class TestCheckPrimeParity(unittest.TestCase):
         report = json.loads(rendered)
         self.assertEqual(exit_code, 1)
         self.assertEqual(report["status"], "BLOCKED")
-        self.assertEqual(report["blocking_feature_count"], 36)
-        self.assertEqual(len(report["blocking_feature_ids"]), 36)
-        self.assertEqual(report["passed_feature_count"], 25)
-        self.assertIn("result-external-limited", report["reason_codes"])
+        self.assertEqual(report["blocking_feature_count"], 15)
+        self.assertEqual(len(report["blocking_feature_ids"]), 15)
+        self.assertEqual(report["passed_feature_count"], 46)
+        self.assertEqual(report["reason_codes"], ["result-missing"])
         self.assertNotIn("prime_evidence", rendered)
         self.assertNotIn("anchors", rendered)
         self.assertNotIn(str(ROOT), rendered)
         self.assertNotIn(PINNED_COMMIT, rendered)
 
-    def test_domain_report_is_provider_specific_and_fails_closed(self) -> None:
+    def test_domain_report_is_provider_specific_and_reports_closed_domain(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
             exit_code = parity_checker.main(
@@ -97,37 +106,14 @@ class TestCheckPrimeParity(unittest.TestCase):
             )
 
         report = json.loads(output.getvalue())
-        self.assertEqual(exit_code, 1)
+        self.assertEqual(exit_code, 0)
         self.assertEqual(report["claim"], "feature-parity")
         self.assertEqual(report["selection_kind"], "domain")
         self.assertEqual(report["selection_id"], "session.context")
         self.assertEqual(report["selected_feature_count"], 9)
-        self.assertEqual(report["blocking_feature_count"], 2)
-        self.assertEqual(
-            report["blocking_feature_ids"],
-            ["session.branch-summaries-labels", "session.compaction"],
-        )
-        self.assertEqual(report["passed_feature_count"], 7)
-        self.assertEqual(report["reason_codes"], ["result-external-limited"])
-        self.assertEqual(report["status"], "BLOCKED")
-
-    def test_ecosystem_domain_closes_only_prime_gateway_rows(self) -> None:
-        output = io.StringIO()
-        with redirect_stdout(output):
-            exit_code = parity_checker.main(
-                [
-                    "--domain",
-                    "ecosystem.capabilities",
-                    "--provider",
-                    "asterion.prime-gateway",
-                ]
-            )
-
-        report = json.loads(output.getvalue())
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(report["selected_feature_count"], 10)
-        self.assertEqual(report["passed_feature_count"], 10)
         self.assertEqual(report["blocking_feature_count"], 0)
+        self.assertEqual(report["blocking_feature_ids"], [])
+        self.assertEqual(report["passed_feature_count"], 9)
         self.assertEqual(report["reason_codes"], [])
         self.assertEqual(report["status"], "PASS")
 
@@ -150,7 +136,7 @@ class TestCheckPrimeParity(unittest.TestCase):
         self.assertEqual(report["blocking_feature_count"], 0)
         self.assertEqual(report["status"], "PASS")
 
-    def test_feature_report_canonicalizes_explicit_selection_without_passing(
+    def test_feature_report_canonicalizes_exact_phase1_passing_selection(
         self,
     ) -> None:
         output = io.StringIO()
@@ -165,7 +151,7 @@ class TestCheckPrimeParity(unittest.TestCase):
             )
 
         report = json.loads(output.getvalue())
-        self.assertEqual(exit_code, 1)
+        self.assertEqual(exit_code, 0)
         self.assertEqual(report["selection_kind"], "features")
         self.assertEqual(
             report["selected_feature_ids"],
@@ -174,9 +160,10 @@ class TestCheckPrimeParity(unittest.TestCase):
                 "operation.goals",
             ],
         )
-        self.assertEqual(report["blocking_feature_count"], 2)
-        self.assertEqual(report["passed_feature_count"], 0)
-        self.assertEqual(report["reason_codes"], ["result-implemented"])
+        self.assertEqual(report["blocking_feature_count"], 0)
+        self.assertEqual(report["passed_feature_count"], 2)
+        self.assertEqual(report["reason_codes"], [])
+        self.assertEqual(report["status"], "PASS")
 
     def test_invalid_feature_selection_returns_one_fixed_redacted_object(self) -> None:
         output = io.StringIO()
