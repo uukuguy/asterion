@@ -397,9 +397,38 @@ git commit -m "feat: integrate Prime system parity evidence"
 - Consumes: the approved integration spec, exact 61/0/2 checker, six domain gates, and zero-operation repository gates.
 - Produces: H-037 as one provider-free `prime-system-parity-integration` hypothesis and exactly one canonical transition to `phase-3-native-kernel-design`.
 
-- [ ] **Step 1: Write the failing H-037 state test**
+- [ ] **Step 1: Write failing H-037 registration and gate tests**
 
-Add an assertion that the closed state contains exactly one row:
+Add assertions that one pending H-037 hypothesis exists, that its cycle branch
+contains all named domain/system/repository gates, and that the branch rejects
+an existing H-037 row, a dirty tree, nonzero provider/application counts, a
+changed exclusion set, and any blocking result.
+
+Run `uv run python -m unittest -v tests.test_prime_climb`. Expected: FAIL
+because H-037 is not registered or implemented.
+
+- [ ] **Step 2: Implement and commit the dormant H-037 gate**
+
+Register one pending hypothesis whose command list includes the exact six
+domain checkers, the 61/0/2 system checker, focused ledger tests, `make check`,
+promotion, and `git diff --check`. Implement the transition guards without
+executing the transition. Run the focused tests GREEN, then commit:
+
+```bash
+git add docs/status/climb/hypotheses.yaml tools/climb tests/test_prime_climb.py
+git commit -m "climb: prepare Prime system parity integration gate"
+```
+
+- [ ] **Step 3: Independently verify before the unique transition**
+
+Run all H-037 commands from that clean commit in a disposable detached copy.
+Expected: every command exits 0, no canonical state file changes, and no
+provider/application operation is recorded. Remove the disposable copy after
+capturing its command results.
+
+- [ ] **Step 4: Prove the canonical closure assertion RED without dirtying the gate**
+
+Add this exact canonical-state assertion:
 
 ```python
 self.assertEqual(
@@ -416,34 +445,16 @@ self.assertEqual(
 )
 ```
 
-- [ ] **Step 2: Run the H-037 assertion RED**
-
-Run:
-
-```bash
-uv run python -m unittest -v tests.test_prime_climb
-```
-
-Expected: FAIL because H-037 is not yet registered or executed.
-
-- [ ] **Step 3: Implement the closed H-037 gate**
-
-Register one pending hypothesis whose command list includes the exact six
-domain checkers, the 61/0/2 system checker, focused ledger tests, `make check`,
-promotion, and `git diff --check`. The transition script must reject an existing
-H-037 row, nonzero provider/application counts, any blocking row, a changed
-exclusion set, or a dirty canonical ledger.
-
-- [ ] **Step 4: Independently verify before the unique transition**
-
-Run all H-037 commands in a clean detached copy. Expected: every command exits
-0, no canonical state file changes, and no provider/application operation is
-recorded.
+Run `uv run python -m unittest -v tests.test_prime_climb`. Expected: FAIL only
+because H-037 has not executed. Save the exact test diff and its digest in the
+task report, then remove that new assertion with an explicit inverse patch (not
+a Git reset/checkout) so the dormant gate commit is clean before execution.
 
 - [ ] **Step 5: Execute H-037 exactly once and commit**
 
-Run the approved transition once. Then run `regen-tree.py`, verify H-037 appears
-once, and commit:
+Run the approved transition once from the clean dormant-gate commit. Reapply
+the byte-identical closure assertion, run `regen-tree.py`, verify H-037 appears
+once, and run `tests.test_prime_climb` GREEN before committing:
 
 ```bash
 git add docs/status/climb tools/climb tests/test_prime_climb.py
@@ -462,7 +473,9 @@ git commit -m "climb: close Prime system parity integration"
 
 **Interfaces:**
 - Consumes: named passing H-037 and repository gates.
-- Produces: a structural snapshot with Phase 2 closed, canonical branch `main`, and Phase 3 design as the only next action.
+- Produces: a structural snapshot with Phase 2 closed, the verified integration
+  branch explicitly pending local-`main` promotion, and Phase 3 design as the
+  only next action.
 
 - [ ] **Step 1: Update the canonical program gates**
 
@@ -471,9 +484,9 @@ with their existing named evidence. Leave Phase 3 and Phase 4 unchecked.
 
 - [ ] **Step 2: Update structural and recovery state**
 
-`CURRENT-STATE.md` records `Active branch: main`, Phase 2 closed at 61/0/2, all
-native rows missing, and Phase 3 design as the open theme. It contains no
-session narration.
+`CURRENT-STATE.md` records the actual active integration branch, Phase 2 closed
+at 61/0/2, all native rows missing, local `main` promotion still pending Task 8,
+and Phase 3 design as the open theme. It contains no session narration.
 
 `RESUME-NEXT-SESSION.md` becomes a live checkpoint naming the Phase 3 native
 kernel design as the immediate next action. It must not claim native code or
@@ -506,7 +519,7 @@ git commit -m "docs: close Prime system parity phase"
 ### Task 7: Run full verification and independent review
 
 **Files:**
-- Create: `.superpowers/sdd/prime-system-parity-integration-report.md`
+- Create: `docs/status/PRIME-SYSTEM-PARITY-INTEGRATION-REPORT.md`
 - Modify: `docs/status/JOURNAL.md` by append only
 
 **Interfaces:**
@@ -547,7 +560,7 @@ Record exact commit IDs, commands, counts, Node/Prime versions, operation
 counts, review verdict, and nonclaims. Append a Journal line and commit:
 
 ```bash
-git add .superpowers/sdd/prime-system-parity-integration-report.md docs/status/JOURNAL.md
+git add docs/status/PRIME-SYSTEM-PARITY-INTEGRATION-REPORT.md docs/status/JOURNAL.md
 git commit -m "docs: verify Prime system parity integration"
 ```
 
@@ -555,11 +568,14 @@ git commit -m "docs: verify Prime system parity integration"
 
 **Files:**
 - Create outside tracked content: `.git/asterion-pre-phase3-recovery-20260830.bundle`
+- Create: `docs/status/GIT-RECOVERY-CLOSURE-20260830.md`
 - Remove after bundle verification: obsolete branch refs and registered non-primary worktrees
 
 **Interfaces:**
 - Consumes: verified integration HEAD, every named branch head, all detached worktree heads, and audited dirty worktree state.
-- Produces: local `main` at the verified integration commit, one clean primary worktree, a verified recovery bundle, and unchanged `origin/main`.
+- Produces: local `main` at the verified integration result plus its truthful
+  main-branch state update, one clean primary worktree, a verified recovery
+  bundle, and unchanged `origin/main`.
 
 - [ ] **Step 1: Audit every dirty worktree before removal**
 
@@ -567,20 +583,49 @@ For each registered worktree, record HEAD, status paths, and whether each change
 blob is already reachable. If a unique source blob is not generated test output,
 create a temporary recovery commit/ref after a sentinel/credential/path scan.
 Do not archive virtual environments, `node_modules`, compiler caches, or private
-runtime evidence.
+runtime evidence. Record the complete audit in
+`docs/status/GIT-RECOVERY-CLOSURE-20260830.md`.
 
 - [ ] **Step 2: Create temporary refs for all unique preserved heads**
 
 Create refs under `refs/recovery/pre-phase3/` for the archived ecosystem tip,
 the pre-integration snapshot, alternate H-035/H-036 heads, and every accepted
 dirty-worktree recovery commit. Record each ref and object ID in the verification
-report.
+recovery report.
 
-- [ ] **Step 3: Create and verify the Git bundle**
+- [ ] **Step 3: Promote the verified integration commit**
 
-Run:
+Confirm the old `main@262b2fd` is reachable from a recovery ref, move local
+`main` to the verified integration HEAD, switch the primary workspace to
+`main`, and verify its HEAD is the exact integration commit. Do not mutate
+`origin/main`.
+
+- [ ] **Step 4: Record and verify the truthful main-branch steady state**
+
+Update only the branch/recovery-boundary fields in `CURRENT-STATE.md` and
+`RESUME-NEXT-SESSION.md`, finish the worktree/ref audit portion of the recovery
+closure report, and append one Journal line. The next action remains Phase 3
+native-kernel design. Run `make docs-check`, the system checker, focused
+ledger/Climb tests, and `git diff --check`. Keep these documentation changes
+uncommitted until the provisional bundle in Step 5 is verified.
+
+- [ ] **Step 5: Create, record, and verify the Git bundle**
+
+First create and verify a provisional bundle at the exact temporary path
+`.git/asterion-pre-phase3-recovery-20260830.bundle.tmp`. Record its verified
+heads in the recovery closure report, commit the pending main-branch state and
+report, then create the final bundle from the now-final `main` plus recovery
+refs:
 
 ```bash
+git bundle create .git/asterion-pre-phase3-recovery-20260830.bundle.tmp \
+  main recovery/pre-consolidation-root-20260830 \
+  feature/prime-ecosystem-parity --glob='refs/recovery/pre-phase3/*'
+git bundle verify .git/asterion-pre-phase3-recovery-20260830.bundle.tmp
+git bundle list-heads .git/asterion-pre-phase3-recovery-20260830.bundle.tmp
+git add docs/status/CURRENT-STATE.md docs/status/RESUME-NEXT-SESSION.md \
+  docs/status/JOURNAL.md docs/status/GIT-RECOVERY-CLOSURE-20260830.md
+git commit -m "docs: record Git recovery closure"
 git bundle create .git/asterion-pre-phase3-recovery-20260830.bundle \
   main recovery/pre-consolidation-root-20260830 \
   feature/prime-ecosystem-parity --glob='refs/recovery/pre-phase3/*'
@@ -588,15 +633,11 @@ git bundle verify .git/asterion-pre-phase3-recovery-20260830.bundle
 git bundle list-heads .git/asterion-pre-phase3-recovery-20260830.bundle
 ```
 
-Expected: verification succeeds and every recorded recovery object appears.
+Expected: both provisional and final verification succeed, final `main`
+including the recovery report is bundled, and every recorded recovery object
+appears. Remove only the exact provisional bundle after final verification.
 
-- [ ] **Step 4: Promote the verified integration commit**
-
-Move local `main` to the verified integration HEAD only after confirming old
-`main@262b2fd` is in the bundle. Switch the primary workspace to `main` and
-verify its HEAD is the exact integration commit.
-
-- [ ] **Step 5: Close registered worktrees and obsolete branches**
+- [ ] **Step 6: Close registered worktrees and obsolete branches**
 
 Remove each audited non-primary worktree by exact absolute path, then prune.
 Delete `h024-ecosystem-capabilities`, `feature/prime-ecosystem-parity`, the
@@ -606,7 +647,7 @@ verification. Remove the exact literal `$(getconf DARWIN_USER_TEMP_DIR)/` and
 previously classified cache and temporary binary files. Do not delete the
 bundle.
 
-- [ ] **Step 6: Verify the steady state**
+- [ ] **Step 7: Verify the steady state**
 
 Run:
 
