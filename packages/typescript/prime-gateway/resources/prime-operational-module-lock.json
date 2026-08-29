@@ -13,7 +13,7 @@
   "dependency_lock_sha256": "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8",
   "dependency_tree_digest": "874f48a650a1ea7d12e4b9ecfc4ce750515c1ea0642e297f43cb2c8ea9dd4a76",
   "format": "asterion.prime-operational-module-lock/v1",
-  "module_digest": "a4f2b94a8a4216985aa5a073f879b44bf37bcac2484ceea03d0d186a7887b0c2",
+  "module_digest": "6326ee8a6433f52c78210297c6bf499ab561d171ce1caaf51a107216392be041",
   "node_runtime": "v22.23.2",
   "resource_digests": {
     "prime-settings-keybindings-request.schema.json": "24cf569b51f0e3c1cf54d8dc3898333ac80eb062ce0f10bffb6945e31d46760a",

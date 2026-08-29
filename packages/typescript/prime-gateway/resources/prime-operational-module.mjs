@@ -398,7 +398,7 @@ async function doctorScenario(root) {
     const result = observed.diagnostics[0];
     if (typeof result !== "object" || result === null || Array.isArray(result) || Object.keys(result).sort().join("\0") !== "message\0path\0type" || result.type !== "warning" || result.message !== "theme path does not exist" || result.path !== missingThemePath || ["fix", "install", "network", "restart", "write"].some((name) => name in result)) fail();
     const failure = assertRejected(() => { if (result.type === "warning") throw new Error("diagnostic inspection failed"); }, "diagnostic-inspection-failure");
-    return Object.freeze({ diagnostic: Object.freeze(["resource-loader.theme", result.type, "theme-path-missing", sha256(`${result.type}\0${result.message}\0${result.path}`)]), failureMatrix: Object.freeze([failure]) });
+    return Object.freeze({ diagnostic: Object.freeze(["resource-loader.theme", result.type, "theme-path-missing", sha256(`resource-loader.theme\0${result.type}\0theme-path-missing\0additionalThemePaths[0]`)]), failureMatrix: Object.freeze([failure]) });
   } finally {
     await rm(temporary, { force: true, recursive: true });
   }

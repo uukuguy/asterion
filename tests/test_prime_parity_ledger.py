@@ -134,6 +134,12 @@ EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
     "interface.sdk",
     "interface.tui-commands",
     "interface.tui-extension-ui",
+    "operation.auth",
+    "operation.controlled-update-restart",
+    "operation.doctor",
+    "operation.model-selection",
+    "operation.settings-keybindings",
+    "operation.telemetry-usage",
     "session.delivery",
     "session.fork-clone",
     "session.persistence-naming",
@@ -475,7 +481,7 @@ class TestPrimeParityLedger(unittest.TestCase):
 
         self.assertEqual(statuses, {"missing"})
 
-    def test_client_interface_promotion_leaves_native_and_operations_missing(self) -> None:
+    def test_interface_operations_promotion_leaves_native_rows_missing(self) -> None:
         ledger = validate_parity_ledger(_fixture("prime-agent-0.7.1.json"))
         features = ledger["features"]
         assert isinstance(features, tuple)
@@ -502,9 +508,12 @@ class TestPrimeParityLedger(unittest.TestCase):
                 feature["domain_id"] == "interfaces.operations"
                 and feature_id.startswith("operation.")
             ):
-                with self.subTest(feature_id=feature_id):
+                with self.subTest(feature_id=feature_id, provider="native"):
+                    self.assertEqual(results["asterion.native"]["status"], "missing")
+                with self.subTest(feature_id=feature_id, provider="prime"):
                     self.assertEqual(
-                        results["asterion.prime-gateway"]["status"], "missing"
+                        results["asterion.prime-gateway"]["status"],
+                        "provider-free-pass",
                     )
 
     def test_exhaustive_prime_inventory_is_exact_closed_and_honest(self) -> None:

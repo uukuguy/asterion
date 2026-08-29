@@ -1006,8 +1006,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.operation.b1ad7223aab563156d8991d97e8b216b33ce131fefdc5a4bbc976b2a867031e8"
+          ]
         }
       ]
     },
@@ -1072,8 +1074,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.operation.8d973b07690020955820347d724f1a609a808a01ca734fac9f30f56ca4837071"
+          ]
         }
       ]
     },
@@ -1139,8 +1143,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.operation.e51e972608257ddd54c7fb1835e08f4da361078d2c145c0f31bb04a5f9f79e02"
+          ]
         }
       ]
     },
@@ -1274,8 +1280,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.operation.d607c48b96afe83a2fc1346020dbf914ac40138c6ff04105a7daf06d8c85f92a"
+          ]
         }
       ]
     },
@@ -1451,8 +1459,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.operation.14ec3308d4c777eb349be8f8a79710301d8db0264f2013ad06fe0cbb9e83fe2e"
+          ]
         }
       ]
     },
@@ -1490,8 +1500,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.operation.84a78d29b2fc30cec854b81e32d95072a308d6eae98d7d7288c19b882a48f731"
+          ]
         }
       ]
     },
@@ -3515,6 +3527,90 @@
       ],
       "scenario_ids": [
         "prime-parity.harness.rollback"
+      ]
+    },
+    {
+      "evidence_id": "evidence.operation.14ec3308d4c777eb349be8f8a79710301d8db0264f2013ad06fe0cbb9e83fe2e",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-operational-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "operation.settings-keybindings"
+      ],
+      "scenario_ids": [
+        "prime-parity.operation.settings-keybindings"
+      ]
+    },
+    {
+      "evidence_id": "evidence.operation.84a78d29b2fc30cec854b81e32d95072a308d6eae98d7d7288c19b882a48f731",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-operational-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "operation.telemetry-usage"
+      ],
+      "scenario_ids": [
+        "prime-parity.operation.telemetry-usage"
+      ]
+    },
+    {
+      "evidence_id": "evidence.operation.8d973b07690020955820347d724f1a609a808a01ca734fac9f30f56ca4837071",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-operational-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "operation.controlled-update-restart"
+      ],
+      "scenario_ids": [
+        "prime-parity.operation.controlled-update-restart"
+      ]
+    },
+    {
+      "evidence_id": "evidence.operation.b1ad7223aab563156d8991d97e8b216b33ce131fefdc5a4bbc976b2a867031e8",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-operational-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "operation.auth"
+      ],
+      "scenario_ids": [
+        "prime-parity.operation.auth"
+      ]
+    },
+    {
+      "evidence_id": "evidence.operation.d607c48b96afe83a2fc1346020dbf914ac40138c6ff04105a7daf06d8c85f92a",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-operational-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "operation.model-selection"
+      ],
+      "scenario_ids": [
+        "prime-parity.operation.model-selection"
+      ]
+    },
+    {
+      "evidence_id": "evidence.operation.e51e972608257ddd54c7fb1835e08f4da361078d2c145c0f31bb04a5f9f79e02",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-operational-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "operation.doctor"
+      ],
+      "scenario_ids": [
+        "prime-parity.operation.doctor"
       ]
     },
     {

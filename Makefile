@@ -35,7 +35,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test.prime-client-export-share.provider-free
 .PHONY: test.prime-client-parity.provider-free
 .PHONY: test.prime-operational-auth.provider-free test.prime-operational-telemetry-usage.provider-free test.prime-operational-doctor.provider-free test.prime-operational-controlled-update-restart.provider-free
-.PHONY: test.prime-operational-harness.provider-free
+.PHONY: test.prime-operational-harness.provider-free test.prime-operational-parity.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -296,6 +296,15 @@ test.prime-operational-settings-keybindings.provider-free:
 		tests.test_prime_operational_settings
 	npm --prefix packages/typescript/asterion-runtime test
 	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
+
+test.prime-operational-parity.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_prime_operational_parity \
+		tests.test_prime_parity_ledger \
+		tests.test_check_prime_parity
+	$(UV_BIN) run python tools/check_prime_parity.py \
+		--features operation.auth,operation.model-selection,operation.settings-keybindings,operation.telemetry-usage,operation.doctor,operation.controlled-update-restart \
+		--provider asterion.prime-gateway
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"

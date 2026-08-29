@@ -36,6 +36,14 @@ from asterion.control.providers.prime.client_parity_testing import (  # noqa: F4
     build_prime_client_observations,
     register_prime_client_scenarios,
 )
+from asterion.control.providers.prime.operational_parity_testing import (  # noqa: F401
+    PRIME_OPERATION_FEATURES,
+    PRIME_OPERATION_SCENARIO_IDS,
+    PrimeOperationalParityError,
+    PrimeOperationalScenarioObservation,
+    build_prime_operational_observations,
+    register_prime_operational_scenarios,
+)
 
 
 PHASE1_PRIME_SCENARIO_IDS = (
