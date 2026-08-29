@@ -94,7 +94,8 @@ git diff --exit-code 6b6aa8b574a8431e6a1d726354c1b39d3dbbf30a HEAD -- . \
 ```
 
 Expected: no output. Verify separately that the diagnostic Journal bytes are an
-exact prefix of the new Journal; only the approved `e6d072d` entry may follow.
+exact prefix of the new Journal; only the approved design, implementation-plan,
+and Task 2 ordering-amendment entries may follow.
 
 - [ ] **Step 5: Verify the pre-merge claim remains 46/15/2**
 
@@ -124,20 +125,11 @@ Expected: exit 1 with `passed_feature_count=46`,
 
 **Interfaces:**
 - Consumes: the Task 1 snapshot and `main@262b2fdf0085294e89078a6311c9034d489e4667`.
-- Produces: one uncommitted three-way merge with exactly ten known conflicts and an explicit 61/0/2 acceptance test that fails until the ledger union is complete.
+- Produces: an explicit 61/0/2 acceptance test that first fails on the clean
+  46/15/2 snapshot, followed by one uncommitted three-way merge with exactly
+  ten known conflicts.
 
-- [ ] **Step 1: Start the three-way merge without committing**
-
-Run:
-
-```bash
-git merge --no-ff --no-commit main
-```
-
-Expected: exit 1 and exactly the ten conflict paths listed above. Any additional
-conflict stops the task for design review.
-
-- [ ] **Step 2: Add the failing combined-claim assertion**
+- [ ] **Step 1: Add the failing combined-claim assertion**
 
 In `tests/test_check_prime_parity.py`, replace the branch-specific blocked
 assertion with this exact acceptance shape while retaining redaction checks:
@@ -171,7 +163,7 @@ def test_verified_system_claim_passes_only_with_closed_union(self) -> None:
     self.assertNotIn(PINNED_COMMIT, rendered)
 ```
 
-- [ ] **Step 3: Run the new assertion RED**
+- [ ] **Step 2: Run the new assertion RED on the clean snapshot**
 
 Run:
 
@@ -179,8 +171,20 @@ Run:
 uv run python -m unittest -v tests.test_check_prime_parity.TestCheckPrimeParity.test_verified_system_claim_passes_only_with_closed_union
 ```
 
-Expected: FAIL until the conflict ledger contains the valid union of the 21
-earlier and fifteen later evidence rows.
+Expected: FAIL because the clean snapshot reports 46 passed and fifteen
+blocking features instead of the required 61/0 union. The failure must be the
+new assertion, not a syntax, import, or JSON parse error.
+
+- [ ] **Step 3: Start the three-way merge without committing**
+
+Run:
+
+```bash
+git merge --no-ff --no-commit main
+```
+
+Expected: exit 1 and exactly the ten conflict paths listed above. Any additional
+conflict stops the task for design review.
 
 ### Task 3: Resolve the ledger, checker, and canonical Climb state
 
