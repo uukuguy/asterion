@@ -13,7 +13,9 @@
     "resources/prime-ecosystem-module-lock.json",
     "resources/prime-ecosystem-module.mjs",
     "resources/prime-operational-module-lock.json",
-    "resources/prime-operational-module.mjs"
+    "resources/prime-operational-module.mjs",
+    "resources/prime-settings-keybindings-request.schema.json",
+    "resources/prime-settings-keybindings-validator.mjs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -27,6 +29,6 @@
     "typescript": "6.0.3"
   },
   "engines": {
-    "node": ">=22.8.0"
+    "node": ">=22.8.0 <23"
   }
 }

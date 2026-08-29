@@ -11,7 +11,10 @@ from unittest import mock
 from tools.check_promotion import (
     PromotionError,
     _default_runner,
+    _load_operational_package_receipt,
+    _prepare_external_operational_prime_checkout,
     _prepare_external_prime_checkout,
+    _run,
     run_promotion,
 )
 from tools.setup_prime_agent import PrimeSetupError
@@ -86,12 +89,176 @@ def completed(
 @mock.patch.dict(os.environ, {"ASTERION_PRIME_SOURCE_ROOT": ""})
 class PromotionCheckTests(unittest.TestCase):
     def test_wheel_resource_smoke_requires_the_locked_client_module(self) -> None:
-        from tools.check_promotion import WHEEL_PROTOCOL_RESOURCE_SMOKE
+        from tools.check_promotion import (
+            WHEEL_OPERATIONAL_RESOURCE_SMOKE,
+            WHEEL_PROTOCOL_RESOURCE_SMOKE,
+        )
 
         self.assertIn("prime-client-module-lock.json", WHEEL_PROTOCOL_RESOURCE_SMOKE)
         self.assertIn("prime-client-module.mjs", WHEEL_PROTOCOL_RESOURCE_SMOKE)
         self.assertIn("runClientPackage", WHEEL_PROTOCOL_RESOURCE_SMOKE)
         self.assertIn("external_prime_root", WHEEL_PROTOCOL_RESOURCE_SMOKE)
+        self.assertIn("prime-operational-harness.mjs", WHEEL_OPERATIONAL_RESOURCE_SMOKE)
+        self.assertIn(
+            "prime-operational-module-lock.json", WHEEL_OPERATIONAL_RESOURCE_SMOKE
+        )
+        self.assertIn(
+            "prime-settings-keybindings-validator.mjs",
+            WHEEL_OPERATIONAL_RESOURCE_SMOKE,
+        )
+        self.assertIn(
+            "ASTERION_OPERATIONAL_PRIME_SOURCE_ROOT",
+            WHEEL_OPERATIONAL_RESOURCE_SMOKE,
+        )
+
+    def test_operational_wheel_smoke_failure_is_redacted(self) -> None:
+        from tools.check_promotion import WHEEL_OPERATIONAL_RESOURCE_SMOKE
+
+        hostile_environment = {
+            "ANTHROPIC_API_KEY": "review-sentinel",
+            "ASTERION_REVIEW_SENTINEL": "private-host-value",
+            "NPM_TOKEN": "npm-secret",
+            "OPENAI_API_KEY": "review-sentinel",
+        }
+
+        def runner(
+            command: tuple[str, ...], _copy_root: Path
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stdout=(
+                    "/private/tmp/asterion-promotion/external-prime/prime-agent "
+                    "private-host-value"
+                ),
+                stderr="raw operational harness traceback review-sentinel npm-secret",
+            )
+
+        with (
+            mock.patch.dict(os.environ, hostile_environment, clear=False),
+            self.assertRaises(PromotionError) as raised,
+        ):
+            _run(
+                runner,
+                ("/venv/bin/python", "-c", WHEEL_OPERATIONAL_RESOURCE_SMOKE),
+                Path("/tmp/copy"),
+            )
+
+        message = str(raised.exception)
+        self.assertIn("installed Prime operational evidence is invalid", message)
+        self.assertNotIn("external-prime", message)
+        self.assertNotIn("raw operational harness traceback", message)
+        self.assertNotIn("prime-operational-harness.mjs", message)
+        self.assertNotIn("npm-secret", message)
+        self.assertNotIn("private-host-value", message)
+        self.assertNotIn("review-sentinel", message)
+
+    def test_operational_checkout_and_prepare_use_closed_environment(self) -> None:
+        hostile_environment = {
+            "ANTHROPIC_API_KEY": "review-sentinel",
+            "ASTERION_REVIEW_SENTINEL": "private-host-value",
+            "HTTPS_PROXY": "http://proxy.invalid",
+            "NODE_AUTH_TOKEN": "npm-secret",
+            "NPM_TOKEN": "npm-secret",
+            "OPENAI_API_KEY": "review-sentinel",
+        }
+        subprocess_environments: list[dict[str, str] | None] = []
+
+        def fake_run(
+            command: tuple[str, ...],
+            **kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            subprocess_environments.append(kwargs.get("env"))  # type: ignore[arg-type]
+            return completed(command)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            resource_root = temporary / "resources"
+            resource_root.mkdir()
+            target = temporary / "external-prime/prime-agent"
+            with (
+                mock.patch.dict(os.environ, hostile_environment, clear=False),
+                mock.patch(
+                    "tools.check_promotion._resolve_operational_node",
+                    return_value=Path("/node22/bin/node"),
+                ),
+                mock.patch(
+                    "tools.check_promotion.subprocess.run",
+                    side_effect=fake_run,
+                ),
+                mock.patch(
+                    "tools.check_promotion._materialize_operational_dependency_tree"
+                ),
+                mock.patch("tools.check_promotion.verify_operational_locks"),
+            ):
+                _prepare_external_operational_prime_checkout(
+                    Path("/external/prime-source"),
+                    target,
+                    "a" * 40,
+                    resource_root,
+                )
+
+        self.assertEqual(len(subprocess_environments), 7)
+        for index, environment in enumerate(subprocess_environments):
+            with self.subTest(call=index):
+                self.assertIsNotNone(environment)
+                assert environment is not None
+                self.assertEqual(environment["PATH"].split(os.pathsep)[0], "/node22/bin")
+                self.assertNotEqual(
+                    environment["NPM_CONFIG_GLOBALCONFIG"],
+                    environment["NPM_CONFIG_USERCONFIG"],
+                )
+                for key in hostile_environment:
+                    self.assertNotIn(key, environment)
+
+    def test_installed_operational_harness_uses_closed_environment(self) -> None:
+        hostile_environment = {
+            "ANTHROPIC_API_KEY": "review-sentinel",
+            "ASTERION_REVIEW_SENTINEL": "private-host-value",
+            "HTTP_PROXY": "http://proxy.invalid",
+            "NODE_AUTH_TOKEN": "npm-secret",
+            "NPM_TOKEN": "npm-secret",
+            "OPENAI_API_KEY": "review-sentinel",
+        }
+        captured: dict[str, str] | None = None
+
+        def fake_run(
+            command: tuple[str, ...],
+            **kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            nonlocal captured
+            captured = kwargs.get("env")  # type: ignore[assignment]
+            return subprocess.CompletedProcess(command, 0, stdout="{}\n", stderr="")
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            resource_root = temporary / "installed/resources"
+            external_prime_root = temporary / "external/prime-agent"
+            resource_root.mkdir(parents=True)
+            external_prime_root.mkdir(parents=True)
+            with (
+                mock.patch.dict(os.environ, hostile_environment, clear=False),
+                mock.patch(
+                    "tools.check_promotion._resolve_operational_node",
+                    return_value=Path("/node22/bin/node"),
+                ),
+                mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
+            ):
+                self.assertEqual(
+                    _load_operational_package_receipt(
+                        resource_root=resource_root,
+                        external_prime_root=external_prime_root,
+                        package="auth",
+                    ),
+                    {},
+                )
+
+        self.assertIsNotNone(captured)
+        assert captured is not None
+        self.assertEqual(captured["PATH"].split(os.pathsep)[0], "/node22/bin")
+        self.assertEqual(captured["TMPDIR"], str(temporary.resolve()))
+        for key in hostile_environment:
+            self.assertNotIn(key, captured)
 
     def test_default_runner_forces_sparse_cargo_registry_and_preserves_environment(self) -> None:
         result = completed(("cargo", "test"))
@@ -125,6 +292,10 @@ class PromotionCheckTests(unittest.TestCase):
             project = Path(temporary_directory) / "project"
             isolated_prime = project / "3th-party/prime-agent"
             isolated_prime.mkdir(parents=True)
+            operational_prime = (
+                Path(temporary_directory) / "external-prime/prime-agent"
+            )
+            operational_prime.mkdir(parents=True)
             result = completed(("uv", "run", "python"))
             with (
                 mock.patch.dict(
@@ -145,6 +316,10 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertEqual(
             run.call_args.kwargs["env"]["ASTERION_PRIME_SOURCE_ROOT"],
             str(isolated_prime.resolve()),
+        )
+        self.assertEqual(
+            run.call_args.kwargs["env"]["ASTERION_OPERATIONAL_PRIME_SOURCE_ROOT"],
+            str(operational_prime.resolve()),
         )
 
     def test_quick_copy_excludes_external_generated_and_cache_paths(self) -> None:
@@ -341,6 +516,14 @@ class PromotionCheckTests(unittest.TestCase):
             and "asterion.capability/v1" in command[2]
         )
         self.assertEqual(len(protocol_smokes), 1)
+        operational_smokes = tuple(
+            command
+            for command in commands
+            if len(command) == 3
+            and command[1] == "-c"
+            and "prime-operational-harness.mjs" in command[2]
+        )
+        self.assertEqual(len(operational_smokes), 1)
         smoke_source = protocol_smokes[0][2]
         self.assertIn("'applications/*/assemblies/*.json'", smoke_source)
         self.assertIn("'capabilities/*/capability-package.json'", smoke_source)

@@ -96,6 +96,15 @@ PRIME_DISTRIBUTION_MEMBERS = {
     "packages/typescript/prime-gateway/resources/prime-operational-module.mjs": (
         "asterion/control/providers/prime/resources/prime-operational-module.mjs"
     ),
+    "packages/typescript/prime-gateway/resources/prime-settings-keybindings-request.schema.json": (
+        "asterion/control/providers/prime/resources/prime-settings-keybindings-request.schema.json"
+    ),
+    "packages/typescript/prime-gateway/resources/prime-settings-keybindings-validator.mjs": (
+        "asterion/control/providers/prime/resources/prime-settings-keybindings-validator.mjs"
+    ),
+    "tests/fixtures/prime_gateway/v1/real-prime-operations.mjs": (
+        "asterion/control/providers/prime/resources/prime-operational-harness.mjs"
+    ),
     "src/asterion/control/providers/prime/resources/skills/asterion-control/SKILL.md": (
         "asterion/control/providers/prime/resources/skills/asterion-control/SKILL.md"
     ),
