@@ -126,8 +126,8 @@ Expected: exit 1 with `passed_feature_count=46`,
 **Interfaces:**
 - Consumes: the Task 1 snapshot and `main@262b2fdf0085294e89078a6311c9034d489e4667`.
 - Produces: an explicit 61/0/2 acceptance test that first fails on the clean
-  46/15/2 snapshot, followed by one uncommitted three-way merge with exactly
-  ten known conflicts.
+  46/15/2 snapshot, one clean RED-gate commit, followed by one uncommitted
+  three-way merge with exactly ten known conflicts.
 
 - [ ] **Step 1: Add the failing combined-claim assertion**
 
@@ -175,7 +175,21 @@ Expected: FAIL because the clean snapshot reports 46 passed and fifteen
 blocking features instead of the required 61/0 union. The failure must be the
 new assertion, not a syntax, import, or JSON parse error.
 
-- [ ] **Step 3: Start the three-way merge without committing**
+- [ ] **Step 3: Commit the RED gate and pending Journal bookkeeping**
+
+Stage only `tests/test_check_prime_parity.py` and the append-only Journal
+entries accumulated since Task 1, then commit:
+
+```bash
+git add tests/test_check_prime_parity.py docs/status/JOURNAL.md
+git commit -m "test: define Prime system parity union gate"
+```
+
+Expected: only the named acceptance test remains deliberately RED; the worktree
+retains only the two excluded artifact roots. Defer the new commit's own Journal
+line until resolving the merge Journal so the pre-merge tree stays clean.
+
+- [ ] **Step 4: Start the three-way merge without committing**
 
 Run:
 
