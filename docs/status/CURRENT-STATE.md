@@ -3,13 +3,14 @@
 ## Project Snapshot
 
 - Project: Asterion
-- Active branch: `h024-ecosystem-capabilities`
+- Active branch: `feature/prime-client-interfaces`
 - Theme-level focus: Prime system parity through closed, exact evidence
   packages, followed by Asterion-native kernel parity
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 2 — H-035 client-interface execution selection
+- Active work package: Phase 2 — H-036 operational surface closed; future
+  queue awaits a separately approved hypothesis
 
 ## Current Architecture
 
@@ -35,33 +36,34 @@
 
 ## Verified Boundary
 
-- Prime Gateway `ecosystem.capabilities` is PASS at 10/10 provider-free:
-  resources, extensions, packages, and MCP evidence reduce to ten immutable
-  evidence rows with zero provider/model operations.
-- The exact H-034 cycle passed at `ef685f4`: four ecosystem gates, exact 10/10
-  reduction, `make check`, isolated `make promotion-check`, and
-  `git diff --check` all passed.
-- `make check` passed 1,954 Python tests plus TypeScript, Ruff, docs, Rust
-  test/fmt/clippy, sdist, and wheel.
-- Promotion reported `promotion full PASS commands=27 provider_operations=0
-  full_dataset=no`.
-- Climb cycle 34 occurs exactly once. H-034 is passed and H-035 is pending.
-- Every Asterion-native ecosystem row remains `missing`.
-- `Verified-system-parity` remains `BLOCKED` on `interfaces.operations`;
-  ecosystem evidence does not imply client, operational, system, or native
-  parity.
-- The native RLM check remains `External-limited`; no provider operation ran in
-  the H-034 verification.
-- H-035 inventory and design are approved. The ten-task TDD implementation plan
-  is committed at `0880045`; no client implementation exists yet.
+- Prime Gateway `ecosystem.capabilities` remains PASS at 10/10 provider-free.
+- H-035 is PASS exactly once: its four provider-free client receipts cover nine
+  `interface.*` rows (9/9 selected/passed, zero blocking) with zero
+  provider/model/credential/network/upload operations.
+- H-036 is PASS exactly once: its six provider-free operational receipts cover
+  `operation.auth`, `operation.model-selection`,
+  `operation.settings-keybindings`, `operation.telemetry-usage`,
+  `operation.doctor`, and `operation.controlled-update-restart` (6/6
+  selected/passed, zero blocking) with zero provider/application operations.
+- The clean canonical H-036 closure used the pinned Prime source at
+  `a18809e00ea30638584d87b3afea7285a9d7296c`, rebuilt locked workspaces under
+  Node 22.23.2, then passed `make check`, `make promotion-check`, and
+  `git diff --check`. Promotion reported `commands=28`, zero provider
+  operations, and `full_dataset=no`.
+- Climb cycle 35 occurs exactly once with
+  `check.client-interfaces-closure`; climb cycle 36 occurs exactly once with
+  `check.operational-parity-closure`; `next_action` is `future-work-queue`.
+- `interfaces.operations` is PASS at exactly 15/15 Prime Gateway rows after
+  H-035 plus H-036.
+- Native rows remain missing. `Verified-system-parity` remains BLOCKED: the
+  exact checker reports 40 passed, 21 blocking, and two excluded rows with zero
+  provider/application operations. No client or operation evidence promotes a
+  broader system or native claim.
 
 ## Open Problems
 
-- Select subagent-driven or inline execution for
-  `docs/superpowers/plans/2026-08-10-asterion-prime-client-interfaces-parity.md`.
-- Design and verify six separate operational features after the client package:
-  auth, model selection, settings/keybindings, telemetry/usage, doctor, and
-  controlled update/restart.
+- No H-037 has been approved; the canonical queue is a future-work queue until
+  a separate hypothesis defines the next exact scope.
 - Keep every Asterion-native row missing until Phase 3 evidence exists.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
@@ -83,9 +85,11 @@
 - `docs/superpowers/plans/2026-08-10-asterion-prime-system-parity.md`
 - `docs/superpowers/plans/2026-08-10-asterion-prime-ecosystem-parity.md`
 - `docs/superpowers/plans/2026-08-10-asterion-prime-client-interfaces-parity.md`
+- `docs/superpowers/plans/2026-08-10-asterion-prime-operational-parity.md`
 - `docs/superpowers/specs/2026-08-28-asterion-prime-client-interfaces-design.md`
 - `docs/status/PRIME-PARITY-LEDGER.md`
-- `.superpowers/sdd/ecosystem-task-10-report.md`
+- `.superpowers/sdd/client-interfaces-task-10-report.md`
+- `.superpowers/sdd/operational-parity-task-16-report.md`
 
 ### Implementation entry points
 
@@ -103,7 +107,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Execute only the approved client-interface plan after an execution mode is
-   selected.
+4. Do not start H-037 without a separate approved hypothesis and evidence
+   boundary.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

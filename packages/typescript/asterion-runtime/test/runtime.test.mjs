@@ -5,6 +5,7 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import {
+  AGENT_CLIENT_PROTOCOL,
   AGENT_CONTROL_PROTOCOL,
   AGENT_SYSTEM_PROTOCOL,
   APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
@@ -14,11 +15,16 @@ import {
   CAPABILITY_PROTOCOL_VERSION,
   CAPABILITY_SOURCE_PROTOCOL_VERSION,
   CONTROL_PLANE_PROTOCOL,
+  OPERATION_PROTOCOL,
+  OperationProtocolError,
   SESSION_CONTEXT_PROTOCOL,
   ProtocolValidationError,
   RUNTIME_PROTOCOL_VERSION,
   validateAssemblyManifest,
   validateAgentSystemManifest,
+  validateClientEvent,
+  validateClientEventStream,
+  validateClientIntent,
   validateBenchmarkSuiteManifest,
   validateCapabilityPackageManifest,
   validateCapabilityManifest,
@@ -28,6 +34,15 @@ import {
   validateControlEvent,
   validateControlEventStream,
   validateControlPlaneManifest,
+  validateOperationReceipt,
+  validateOperationRequestDescriptor,
+  validateOperationTransaction,
+  validateAuthRequest,
+  validateModelSelectionRequest,
+  validateSettingsKeybindingsRequest,
+  validateTelemetryUsageRequest,
+  validateDoctorRequest,
+  validateControlledUpdateRestartRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
   validateEventStream,
@@ -74,8 +89,16 @@ const agentControlFixtures = new URL(
   "../../../../tests/fixtures/agent_control/v1/",
   import.meta.url,
 );
+const operationFixtures = new URL(
+  "../../../../tests/fixtures/operation/v1/",
+  import.meta.url,
+);
 const sessionContextFixtures = new URL(
   "../../../../tests/fixtures/session_context/v1/",
+  import.meta.url,
+);
+const agentClientFixtures = new URL(
+  "../../../../tests/fixtures/agent_client/v1/",
   import.meta.url,
 );
 const referenceAssemblyRoots = [
@@ -114,6 +137,180 @@ async function readJsonl(name) {
 
 test("uses the Asterion-owned runtime protocol identity", () => {
   assert.equal(RUNTIME_PROTOCOL_VERSION, "asterion.agent-runtime/v1");
+});
+
+test("validates the closed body-free agent client contract", async () => {
+  assert.equal(AGENT_CLIENT_PROTOCOL, "asterion.agent-client/v1");
+  const intent = await readFixture(agentClientFixtures, "valid-intent-input.json");
+  const message = await readFixture(agentClientFixtures, "valid-event-message.json");
+  const terminal = await readFixture(agentClientFixtures, "valid-event-terminal.json");
+
+  const validatedIntent = validateClientIntent(intent);
+  const validatedMessage = validateClientEvent(message);
+  assert.deepEqual(validatedIntent, intent);
+  assert.equal(validatedMessage.payload.content_ref, "private-message-1");
+  assert.ok(Object.isFrozen(validatedMessage.payload));
+  assert.deepEqual(validateClientEventStream([message, terminal]), [message, terminal]);
+
+  for (const name of [
+    "invalid-intent-secret.json",
+    "invalid-event-body.json",
+    "invalid-event-unknown.json",
+  ]) {
+    const value = await readFixture(agentClientFixtures, name);
+    const validate = name.startsWith("invalid-intent")
+      ? validateClientIntent
+      : validateClientEvent;
+    assert.throws(() => validate(value), ProtocolValidationError);
+  }
+  assert.throws(
+    () => validateClientEventStream([message, { ...terminal, sequence: 3 }]),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () => validateClientEventStream([message, { ...terminal, generation: 2 }]),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () => validateClientEventStream([message, { ...terminal, event_id: message.event_id }]),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateClientEventStream([
+        message,
+        {
+          ...message,
+          event_id: "event-2",
+          sequence: 2,
+          type: "tool.completed",
+          payload: {
+            call_id: "call-1",
+            is_error: false,
+            media_type: "application/json",
+            result_ref: "private-result-1",
+            sha256: "b".repeat(64),
+            size: 2,
+          },
+        },
+        { ...terminal, event_id: "event-3", sequence: 3 },
+      ]),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateClientEventStream([
+        message,
+        terminal,
+        { ...terminal, event_id: "event-3", sequence: 3 },
+      ]),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateClientEvent({
+        ...message,
+        emitted_at: "2026-02-30T15:00:00Z",
+      }),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateClientEvent({
+        ...message,
+        emitted_at: "0000-01-01T00:00:00Z",
+      }),
+    ProtocolValidationError,
+  );
+  for (const invalid of [
+    { ...intent, authority_revision: Number.MAX_SAFE_INTEGER + 1 },
+    {
+      ...intent,
+      type: "command.invoke",
+      payload: {
+        arguments_ref: "arguments-1",
+        command_name: "command",
+        command_revision: Number.MAX_SAFE_INTEGER + 1,
+      },
+    },
+    { ...message, generation: Number.MAX_SAFE_INTEGER + 1 },
+    {
+      ...message,
+      type: "usage.reported",
+      payload: {
+        aggregate_tokens: Number.MAX_SAFE_INTEGER + 1,
+        application_tokens: Number.MAX_SAFE_INTEGER + 1,
+        child_tokens: Number.MAX_SAFE_INTEGER + 1,
+        controller_tokens: Number.MAX_SAFE_INTEGER + 1,
+        cost_micros: Number.MAX_SAFE_INTEGER + 1,
+      },
+    },
+  ]) {
+    const validate = "intent_id" in invalid ? validateClientIntent : validateClientEvent;
+    assert.throws(() => validate(invalid), ProtocolValidationError);
+  }
+  const operationReceipt = validateClientEvent({
+    protocol: "asterion.agent-client/v1",
+    event_id: "event-operation-1",
+    session_id: "session-1",
+    generation: 1,
+    sequence: 1,
+    emitted_at: "2026-08-10T15:00:00Z",
+    type: "operation.receipted",
+    payload: {
+      effect_counts: {
+        credential_value_reads: 0,
+        external_telemetry_deliveries: 0,
+        network_operations: 0,
+        os_process_restart_operations: 0,
+        package_manager_operations: 0,
+        provider_model_requests: 0,
+        uploads: 0,
+      },
+      feature_id: "operation.auth",
+      operation_id: "operation-1",
+      reason_code: "operation-succeeded",
+      receipt_ref: "receipt-public-1",
+      status: "succeeded",
+    },
+  });
+  assert.deepEqual(Object.keys(operationReceipt.payload), [
+    "effect_counts", "feature_id", "operation_id", "reason_code", "receipt_ref", "status",
+  ]);
+  const toolStarted = {
+    ...message,
+    type: "tool.started",
+    payload: {
+      arguments_ref: "arguments-1",
+      call_id: "call-1",
+      name: "tool",
+      sha256: "a".repeat(64),
+      size: 1,
+    },
+  };
+  const toolCompleted = {
+    ...message,
+    type: "tool.completed",
+    payload: {
+      call_id: "call-1",
+      is_error: false,
+      media_type: "application/json",
+      result_ref: "result-1",
+      sha256: "b".repeat(64),
+      size: 1,
+    },
+  };
+  assert.throws(
+    () =>
+      validateClientEventStream([
+        { ...toolStarted, event_id: "event-1", sequence: 1 },
+        { ...toolCompleted, event_id: "event-2", sequence: 2 },
+        { ...toolStarted, event_id: "event-3", sequence: 3 },
+        { ...toolCompleted, event_id: "event-4", sequence: 4 },
+        { ...terminal, event_id: "event-5", sequence: 5 },
+      ]),
+    ProtocolValidationError,
+  );
 });
 
 test("validates the shared long-running control contracts", async () => {
@@ -169,6 +366,179 @@ test("validates the shared long-running control contracts", async () => {
   ]) {
     const invalid = await readFixture(root, name);
     assert.throws(() => validate(invalid), ProtocolValidationError);
+  }
+});
+
+test("validates the closed shared operation protocol fixtures", async () => {
+  assert.equal(OPERATION_PROTOCOL, "asterion.operation/v1");
+  assert.ok(OperationProtocolError.prototype instanceof ProtocolValidationError);
+  assert.throws(
+    () => validateOperationRequestDescriptor({}),
+    (error) =>
+      error instanceof OperationProtocolError &&
+      error instanceof ProtocolValidationError &&
+      error.name === "OperationProtocolError",
+  );
+  const descriptor = await readFixture(
+    operationFixtures,
+    "valid-request-descriptor.json",
+  );
+  const transaction = await readFixture(operationFixtures, "valid-transaction.json");
+  const receipt = await readFixture(operationFixtures, "valid-receipt.json");
+  assert.deepEqual(validateOperationRequestDescriptor(descriptor), descriptor);
+  assert.deepEqual(validateOperationTransaction(transaction), transaction);
+  const validatedReceipt = validateOperationReceipt(receipt);
+  assert.deepEqual(validatedReceipt, receipt);
+  assert.ok(Object.isFrozen(validatedReceipt.effect_counts));
+
+  const purposeTransaction = await readFixture(
+    operationFixtures,
+    "valid-purpose-feature-distinct.json",
+  );
+  const purposeReceipt = await readFixture(
+    operationFixtures,
+    "valid-receipt-purpose-feature-distinct.json",
+  );
+  assert.equal(
+    validateOperationTransaction(purposeTransaction).request.purpose,
+    "operation.auth.read",
+  );
+  assert.equal(
+    validateOperationReceipt(purposeReceipt).purpose,
+    "operation.auth.read",
+  );
+
+  for (const [name, validate] of [
+    ["invalid-protocol-missing.json", validateOperationRequestDescriptor],
+    ["invalid-identity-mismatch.json", validateOperationTransaction],
+    ["invalid-recursive-forbidden-key.json", validateOperationTransaction],
+    ["invalid-timestamp.json", validateOperationTransaction],
+    ["invalid-unsafe-integer.json", validateOperationRequestDescriptor],
+    ["invalid-nested-extra.json", validateOperationTransaction],
+    ["invalid-canonical-array.json", validateOperationReceipt],
+    ["invalid-transaction-secret.json", validateOperationTransaction],
+    ["invalid-transaction-unknown.json", validateOperationTransaction],
+    ["invalid-receipt-effect-counter.json", validateOperationReceipt],
+  ]) {
+    const invalid = await readFixture(operationFixtures, name);
+    assert.throws(() => validate(invalid), OperationProtocolError);
+  }
+});
+
+test("validates closed private auth request fixtures", async () => {
+  const valid = await readFixture(operationFixtures, "valid-auth-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-auth-request-secret.json");
+  const snapshot = validateAuthRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.throws(() => validateAuthRequest(invalid), OperationProtocolError);
+  assert.throws(
+    () => validateAuthRequest({ action: "auth.clear", refresh_ref: "refresh-ref-1" }),
+    OperationProtocolError,
+  );
+});
+
+test("validates the closed exact fixture model selection request", async () => {
+  const valid = await readFixture(operationFixtures, "valid-model-selection-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-model-selection-request-extra.json");
+  const snapshot = validateModelSelectionRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.throws(() => validateModelSelectionRequest(invalid), OperationProtocolError);
+  assert.throws(
+    () => validateModelSelectionRequest({ ...valid, model_id: "Fixture.Model.Small" }),
+    OperationProtocolError,
+  );
+});
+
+test("validates closed typed settings and keybindings without secret-shaped fields", async () => {
+  const valid = await readFixture(operationFixtures, "valid-settings-keybindings-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-settings-keybindings-secret.json");
+  const snapshot = validateSettingsKeybindingsRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.throws(() => validateSettingsKeybindingsRequest(invalid), OperationProtocolError);
+  assert.throws(
+    () => validateSettingsKeybindingsRequest({ type: "setting", name: "app.new_session", scope: "global", value: "SENTINEL_SECRET" }),
+    OperationProtocolError,
+  );
+  assert.throws(
+    () => validateSettingsKeybindingsRequest({ type: "setting", name: "theme", scope: "global", value: true }),
+    OperationProtocolError,
+  );
+  assert.throws(
+    () => validateSettingsKeybindingsRequest({ type: "setting", name: "telemetry.enabled", scope: "global", value: "dark" }),
+    OperationProtocolError,
+  );
+  for (const chord of ["Ctrl+Ctrl+N", "Alt+Ctrl+N", "Ctrl+Alt+Shift+Meta+Ctrl+N"]) {
+    assert.throws(
+      () => validateSettingsKeybindingsRequest({ type: "keybinding", name: "app.session.new", scope: "global", value: chord }),
+      OperationProtocolError,
+      chord,
+    );
+  }
+  for (const chord of ["Ctrl+N", "Ctrl+Alt+Shift+Meta+F12"]) {
+    assert.equal(
+      validateSettingsKeybindingsRequest({ type: "keybinding", name: "app.session.new", scope: "global", value: chord }).value,
+      chord,
+    );
+  }
+});
+
+test("validates closed immutable telemetry usage without bodies or forged attribution", async () => {
+  const valid = await readFixture(operationFixtures, "valid-telemetry-usage-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-telemetry-usage-request-body.json");
+  const snapshot = validateTelemetryUsageRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.ok(Object.isFrozen(snapshot.usage));
+  assert.throws(() => validateTelemetryUsageRequest(invalid), OperationProtocolError);
+  for (const value of [
+    { ...valid, event_count: true },
+    { ...valid, event_count: -1 },
+    { ...valid, result_sha256: "B".repeat(64) },
+    { ...valid, source_id: "unknown" },
+    { ...valid, event_name: "message.available" },
+    { ...valid, usage: { ...valid.usage, aggregate_tokens: 11 } },
+    { ...valid, usage: { ...valid.usage, child_tokens: 1 } },
+  ]) {
+    assert.throws(() => validateTelemetryUsageRequest(value), OperationProtocolError);
+  }
+});
+
+test("validates closed immutable doctor requests without probe selectors or repair fields", async () => {
+  const valid = await readFixture(operationFixtures, "valid-doctor-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-doctor-request-fix.json");
+  const snapshot = validateDoctorRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.throws(() => validateDoctorRequest(invalid), OperationProtocolError);
+  for (const value of [
+    { check_ids: ["storage.private", "clock.monotonic"] },
+    { check_ids: ["storage.private", "storage.private"] },
+    { check_ids: ["Storage.private"] },
+    { check_ids: [true] },
+    { check_ids: [] },
+    { fix: "repair" },
+  ]) {
+    assert.throws(() => validateDoctorRequest(value), OperationProtocolError);
+  }
+});
+
+test("validates closed immutable controlled update restart requests", async () => {
+  const valid = await readFixture(operationFixtures, "valid-controlled-update-restart-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-controlled-update-restart-request-path.json");
+  const snapshot = validateControlledUpdateRestartRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.ok(Object.isFrozen(snapshot.next_artifact));
+  assert.throws(() => validateControlledUpdateRestartRequest(invalid), OperationProtocolError);
+  for (const value of [
+    { ...valid, body: "SENTINEL_BODY" },
+    { ...valid, checkpoint_ref: ["checkpoint-1"] },
+    { ...valid, next_artifact: { artifact_id: "artifact-next-1" } },
+  ]) {
+    assert.throws(() => validateControlledUpdateRestartRequest(value), OperationProtocolError);
   }
 });
 

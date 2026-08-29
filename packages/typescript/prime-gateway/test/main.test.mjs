@@ -14,6 +14,7 @@ import {
   mayAdmitProviderOwnedRlmDeletion,
   servePrimeGatewaySidecar,
 } from "../dist/src/main.js";
+import { loadPrimeClientModule } from "../dist/src/main.js";
 import { PRIME_ECOSYSTEM_LOCK_CONTRACT } from "../dist/src/ecosystem.js";
 import {
   GatewayDurableStore,
@@ -120,14 +121,14 @@ async function ecosystemFrameFixture() {
   await chmod(projectionRoot, 0o700);
   return {
     frame: {
-      artifactLockDigest: "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3",
+      artifactLockDigest: "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d",
       authorityDigest: createHash("sha256").update("authority-1@7").digest("hex"),
       effectId: `ecosystem:sidecar:${portfolioDigest.slice(0, 32)}`,
       features: [],
       format: "asterion.prime-ecosystem-frame/v1",
       limits: { deadlineMs: 30_000, maxBytes: 8 * 1024 * 1024, maxEntries: 4096, maxProcesses: 1 },
       mcpCredentialLeaseId: "mcp-lease:SIDECAR_PRIVATE_LEASE",
-      moduleLockDigest: "959989c9f6afb907db32bdef709cf19b45fa19421095f62714ff80b9a2c44cd6",
+      moduleLockDigest: "4cee1b9e8a1292e92232f2cafe0872988658a27680bece3755f710ac1bad5dd2",
       portfolioDigest,
       projectionRoot,
       registrations: [],
@@ -238,6 +239,18 @@ test("native RLM deletion is provider-owned only for one started, non-deleted ch
   ], "child-1"), false);
 });
 
+test("main rejects a client module whose identity is not the checked-in lock", async () => {
+  const resources = new URL("../resources/", import.meta.url);
+  await assert.rejects(
+    loadPrimeClientModule({
+      artifactLockPath: await realpath(new URL("prime-artifact-lock.json", resources)),
+      bundlePath: await realpath(new URL("prime-client-module-lock.json", resources)),
+      moduleLockPath: await realpath(new URL("prime-client-module-lock.json", resources)),
+    }),
+    (error) => error.message === "Prime gateway operation failed",
+  );
+});
+
 class FakePrivateValues {
   constructor() {
     this.inputs = [];
@@ -311,6 +324,8 @@ class FakeGateway {
     this.knownGenerations = new Set(knownGenerations);
     this.eventsBySequence = [event(1, currentGeneration), event(2, currentGeneration)];
     this.cursorRequests = [];
+    this.clientCursorRequests = [];
+    this.clientObservations = [];
     this.contextExecutions = [];
     this.contextCancellations = [];
     this.closed = 0;
@@ -332,6 +347,16 @@ class FakeGateway {
     return this.eventsBySequence
       .filter((item) => item.generation === cursor.generation)
       .filter((item) => item.sequence > cursor.sequence);
+  }
+
+  clientObservationsAfterCursor(cursor) {
+    this.clientCursorRequests.push(cursor);
+    if (!this.knownGenerations.has(cursor.generation)) {
+      throw new Error("unknown generation");
+    }
+    return this.clientObservations.filter((item) =>
+      item.generation === cursor.generation && item.source_sequence > cursor.sequence
+    );
   }
 
   async close() {
@@ -406,6 +431,7 @@ function createSidecar(options = {}) {
     privateValues,
     sidecar: new PrimeGatewaySidecar({
       currentGeneration: options.currentGeneration ?? gateway.currentGeneration ?? 1,
+      sessionId: "session-1",
       gateway,
       privateValues,
     }),
@@ -958,6 +984,99 @@ test("sidecar null event cursor succeeds for an explicitly empty current generat
   assert.equal(response.type, "events.batch");
   assert.deepEqual(response.events, []);
   assert.deepEqual(gateway.cursorRequests, [{ generation: 3, sequence: 0 }]);
+});
+
+test("sidecar replays only the requested body-free client observation suffix", async () => {
+  const gateway = new FakeGateway();
+  gateway.clientObservations = [
+    {
+      observation_id: "prime-client-1-1",
+      active_session_id: "session-1",
+      generation: 1,
+      source_sequence: 1,
+      emitted_at: "2026-08-10T03:00:01.000Z",
+      kind: "message.available",
+      payload: {
+        content_ref: "private:00000000-0000-4000-8000-000000000001",
+        media_type: "text/plain",
+        message_id: "message-1",
+        role: "assistant",
+        sha256: "a".repeat(64),
+        size: 7,
+      },
+    },
+    {
+      observation_id: "prime-client-1-2",
+      active_session_id: "session-1",
+      generation: 1,
+      source_sequence: 2,
+      emitted_at: "2026-08-10T03:00:02.000Z",
+      kind: "message.available",
+      payload: {
+        content_ref: "private:00000000-0000-4000-8000-000000000002",
+        media_type: "text/plain",
+        message_id: "message-2",
+        role: "assistant",
+        sha256: "b".repeat(64),
+        size: 8,
+      },
+    },
+  ];
+  const { sidecar } = createSidecar({ gateway });
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "client-observations-replay",
+    type: "client_observations",
+    cursor: { generation: 1, sequence: 1 },
+  });
+  assert.equal(response.type, "client_observations.batch");
+  assert.deepEqual(response.observations, gateway.clientObservations.slice(1));
+  assert.deepEqual(gateway.clientCursorRequests, [{ generation: 1, sequence: 1 }]);
+  assert.equal(JSON.stringify(response).includes("SENTINEL_BODY"), false);
+});
+
+test("sidecar pages a large client observation suffix below the response frame cap", async () => {
+  const gateway = new FakeGateway();
+  gateway.clientObservations = Array.from({ length: 5_000 }, (_, index) => {
+    const sequence = index + 1;
+    return {
+      observation_id: `prime-client-1-${sequence}`, active_session_id: "session-1", generation: 1,
+      source_sequence: sequence, emitted_at: "2026-08-10T03:00:01.000Z", kind: "commands.changed",
+      payload: { commands: ["alpha", "beta", "gamma"], revision: sequence },
+    };
+  });
+  const { sidecar } = createSidecar({ gateway });
+  const received = [];
+  let cursor = { generation: 1, sequence: 0 };
+  for (;;) {
+    const response = await sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL, id: `client-page-${cursor.sequence}`,
+      type: "client_observations", cursor,
+    });
+    assert.equal(response.type, "client_observations.batch");
+    assert.ok(Buffer.byteLength(JSON.stringify(response), "utf8") < 1024 * 1024);
+    received.push(...response.observations);
+    if (response.next_cursor === null) break;
+    assert.equal(response.next_cursor.generation, 1);
+    assert.equal(response.next_cursor.sequence, received.length);
+    cursor = response.next_cursor;
+  }
+  assert.deepEqual(received, gateway.clientObservations);
+});
+
+test("sidecar rejects one client observation that cannot fit a response frame", async () => {
+  const gateway = new FakeGateway();
+  gateway.clientObservations = [{
+    observation_id: "prime-client-1-1", active_session_id: "session-1", generation: 1,
+    source_sequence: 1, emitted_at: "2026-08-10T03:00:01.000Z", kind: "commands.changed",
+    payload: { commands: [`a${"a".repeat(950 * 1024)}`], revision: 1 },
+  }];
+  const { sidecar } = createSidecar({ gateway });
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL, id: "client-observation-oversize",
+    type: "client_observations", cursor: { generation: 1, sequence: 0 },
+  });
+  assert.equal(response.type, "error");
 });
 
 test("sidecar rejects unknown generation cursors instead of returning empty batches", async () => {

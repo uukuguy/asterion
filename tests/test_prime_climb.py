@@ -9,6 +9,123 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_H036 = {
+    "hypothesis": "H-036",
+    "outcome": "passed",
+    "command_id": "check.operational-parity-closure",
+}
+
+
+def _seed_h035_state(state_dir: Path) -> None:
+    state_dir.mkdir()
+    canonical_rows = (ROOT / "docs" / "status" / "climb" / "runs.csv").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    h035_rows = [
+        row
+        for row in canonical_rows
+        if row.startswith("cycle,") or int(row.split(",", 1)[0]) <= 35
+    ]
+    (state_dir / "runs.csv").write_text("\n".join(h035_rows) + "\n", encoding="utf-8")
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o700)
+
+
+def _fake_h036_path(bin_dir: Path, log_path: Path, *, dirty: bool = False) -> str:
+    dirty_status = "printf ' M docs/status/JOURNAL.md\\n'" if dirty else ":"
+    _write_executable(
+        bin_dir / "make",
+        "#!/bin/sh\n"
+        "printf 'make %s\\n' \"$*\" >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "exit 0\n",
+    )
+    _write_executable(
+        bin_dir / "uv",
+        "#!/bin/sh\n"
+        "printf 'uv %s\\n' \"$*\" >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "exit 0\n",
+    )
+    _write_executable(
+        bin_dir / "git",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"status\" ]; then\n"
+        f"  {dirty_status}\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"diff\" ] && [ \"$2\" = \"--check\" ]; then\n"
+        "  printf 'git diff --check\\n' >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 2\n",
+    )
+    _write_executable(
+        bin_dir / "node",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"-v\" ]; then\n"
+        "  printf 'v22.23.2\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n",
+    )
+    return str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+
+
+def _run_h036_cycle(state_dir: Path, path: str, log_path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(ROOT / "tools" / "climb" / "cycle.sh"), "H-036"],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "ASTERION_CLIMB_STATE_DIR": str(state_dir),
+            "ASTERION_TEST_COMMAND_LOG": str(log_path),
+            "PATH": path,
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _latest_cycle_result(state_dir: Path) -> dict[str, str]:
+    rows = (state_dir / "runs.csv").read_text(encoding="utf-8").splitlines()
+    _, hypothesis, outcome, command_id = rows[-1].split(",")
+    return {
+        "hypothesis": hypothesis,
+        "outcome": outcome,
+        "command_id": command_id,
+    }
+
+
+def _new_hypothesis_ids(state_dir: Path) -> tuple[str, ...]:
+    rendered = (state_dir / "research-tree.md").read_text(encoding="utf-8")
+    ids = tuple(
+        token.rstrip(":")
+        for token in rendered.replace("—", " ").split()
+        if token.startswith("H-")
+    )
+    return tuple(hypothesis_id for hypothesis_id in ids if hypothesis_id > "H-036")
+
+
+def _passed_ledger_claims() -> tuple[str, ...]:
+    claims: list[str] = []
+    table_started = False
+    for line in (ROOT / "docs" / "status" / "PRIME-PARITY-LEDGER.md").read_text(
+        encoding="utf-8"
+    ).splitlines():
+        if line.startswith("| Phase claim |"):
+            table_started = True
+            continue
+        if table_started and not line.startswith("|"):
+            break
+        if not table_started or line.startswith("|---"):
+            continue
+        columns = [column.strip(" `") for column in line.strip("|").split("|")]
+        if len(columns) >= 2 and columns[1].startswith("PASS"):
+            claims.append(columns[0])
+    return tuple(claims)
 
 
 class TestPrimeClimb(unittest.TestCase):
@@ -45,250 +162,215 @@ class TestPrimeClimb(unittest.TestCase):
                 ],
             )
 
-    def test_verified_phase_transitions_render_the_current_successor(self) -> None:
+    def test_h035_closure_records_exact_transition_and_contiguous_cycles(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             state_dir = Path(temporary) / "climb"
-            environment = {
-                **os.environ,
-                "ASTERION_CLIMB_STATE_DIR": str(state_dir),
-            }
-            transitions = (
-                (
-                    "H-004",
-                    "falsified",
-                    "H-005",
-                    "make.prime-native-rlm-bounded",
-                ),
-                (
-                    "H-005",
-                    "passed",
-                    "H-006",
-                    "make.prime-native-rlm-bounded",
-                ),
-                (
-                    "H-006",
-                    "passed",
-                    "H-007",
-                    "test.prime-session-context-parity.bounded",
-                ),
-                (
-                    "H-007",
-                    "passed",
-                    "H-008",
-                    "check.phase2-session-context-closure",
-                ),
-                (
-                    "H-008",
-                    "passed",
-                    "H-009",
-                    "test.prime-rlm-spawn-admission.provider-free",
-                ),
-                (
-                    "H-009",
-                    "falsified",
-                    "H-010",
-                    "audit.prime-native-rlm-bounded-receipt",
-                ),
-                (
-                    "H-010",
-                    "passed",
-                    "H-011",
-                    "check.rlm-programmatic-closure",
-                ),
-                (
-                    "H-011",
-                    "passed",
-                    "H-012",
-                    "check.operation-long-running-inventory",
-                ),
-                (
-                    "H-012",
-                    "passed",
-                    "H-013",
-                    "test.prime-long-running-matrix.provider-free",
-                ),
-                (
-                    "H-013",
-                    "passed",
-                    "H-014",
-                    "test.control-long-running.provider-free",
-                ),
-                (
-                    "H-014",
-                    "passed",
-                    "H-015",
-                    "test.prime-heartbeat-wire.provider-free",
-                ),
-                (
-                    "H-015",
-                    "passed",
-                    "H-016",
-                    "test.prime-heartbeat-fencing.provider-free",
-                ),
-                (
-                    "H-016",
-                    "passed",
-                    "H-017",
-                    "test.prime-heartbeat-ipc.provider-free",
-                ),
-                (
-                    "H-017",
-                    "passed",
-                    "H-018",
-                    "test.prime-long-running-binding.provider-free",
-                ),
-                (
-                    "H-018",
-                    "passed",
-                    "H-019",
-                    "test.prime-residency-recovery.provider-free",
-                ),
-                (
-                    "H-019",
-                    "passed",
-                    "H-020",
-                    "test.prime-long-running-authority.provider-free",
-                ),
-                (
-                    "H-020",
-                    "passed",
-                    "H-021",
-                    "test.prime-long-running.bounded",
-                ),
-                (
-                    "H-021",
-                    "passed",
-                    "H-022",
-                    "test.prime-long-running.provider-free",
-                ),
-                (
-                    "H-022",
-                    "passed",
-                    "H-023",
-                    "check.operation-long-running-closure",
-                ),
-            )
-            for transition in transitions:
-                completed = subprocess.run(
-                    [
-                        "python3",
-                        str(ROOT / "tools" / "climb" / "regen-tree.py"),
-                        *transition,
-                    ],
-                    cwd=ROOT,
-                    env=environment,
-                    text=True,
-                    capture_output=True,
-                    check=False,
+            state_dir.mkdir()
+            (state_dir / "runs.csv").write_text(
+                "\n".join(
+                    (ROOT / "docs" / "status" / "climb" / "runs.csv")
+                    .read_text()
+                    .splitlines()[:35]
                 )
-                self.assertEqual(completed.returncode, 0, completed.stderr)
-
+                + "\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [
+                    "python3",
+                    str(ROOT / "tools" / "climb" / "regen-tree.py"),
+                    "H-035",
+                    "passed",
+                    "H-036",
+                    "check.client-interfaces-closure",
+                ],
+                cwd=ROOT,
+                env={**os.environ, "ASTERION_CLIMB_STATE_DIR": str(state_dir)},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(
                 json.loads((state_dir / "session-state.json").read_text()),
                 {
-                    "last_hypothesis": "H-022",
+                    "last_hypothesis": "H-035",
                     "last_outcome": "passed",
-                    "next_action": "H-023",
+                    "next_action": "H-036",
                 },
             )
+            rows = (state_dir / "runs.csv").read_text().splitlines()
             self.assertEqual(
-                (state_dir / "runs.csv").read_text().splitlines(),
+                rows[-1],
+                "35,H-035,passed,check.client-interfaces-closure",
+            )
+            self.assertEqual(
+                [int(row.split(",", 1)[0]) for row in rows[1:]],
+                list(range(1, 36)),
+            )
+            self.assertIn(
+                "- H-035: passed — client interface closure gates",
+                (state_dir / "research-tree.md").read_text(),
+            )
+            self.assertIn(
+                "- Next: H-036 — operational surface inventory",
+                (state_dir / "research-tree.md").read_text(),
+            )
+
+    def test_h035_transition_rejects_noncanonical_existing_cycles(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            state_dir = Path(temporary) / "climb"
+            state_dir.mkdir()
+            (state_dir / "runs.csv").write_text(
+                "cycle,hypothesis_id,outcome,command_id\n"
+                "34,H-034,passed,check.ecosystem-capabilities-closure\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
                 [
-                    "cycle,hypothesis_id,outcome,command_id",
-                    "4,H-004,falsified,make.prime-native-rlm-bounded",
-                    "5,H-005,passed,make.prime-native-rlm-bounded",
-                    "6,H-006,passed,test.prime-session-context-parity.bounded",
-                    "7,H-007,passed,check.phase2-session-context-closure",
-                    "8,H-008,passed,test.prime-rlm-spawn-admission.provider-free",
-                    "9,H-009,falsified,audit.prime-native-rlm-bounded-receipt",
-                    "10,H-010,passed,check.rlm-programmatic-closure",
-                    "11,H-011,passed,check.operation-long-running-inventory",
-                    "12,H-012,passed,test.prime-long-running-matrix.provider-free",
-                    "13,H-013,passed,test.control-long-running.provider-free",
-                    "14,H-014,passed,test.prime-heartbeat-wire.provider-free",
-                    "15,H-015,passed,test.prime-heartbeat-fencing.provider-free",
-                    "16,H-016,passed,test.prime-heartbeat-ipc.provider-free",
-                    "17,H-017,passed,test.prime-long-running-binding.provider-free",
-                    "18,H-018,passed,test.prime-residency-recovery.provider-free",
-                    "19,H-019,passed,test.prime-long-running-authority.provider-free",
-                    "20,H-020,passed,test.prime-long-running.bounded",
-                    "21,H-021,passed,test.prime-long-running.provider-free",
-                    "22,H-022,passed,check.operation-long-running-closure",
+                    "python3",
+                    str(ROOT / "tools" / "climb" / "regen-tree.py"),
+                    "H-035",
+                    "passed",
+                    "H-036",
+                    "check.client-interfaces-closure",
+                ],
+                cwd=ROOT,
+                env={**os.environ, "ASTERION_CLIMB_STATE_DIR": str(state_dir)},
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 2)
+
+    def test_h036_closure_declares_future_queue_without_successor(self) -> None:
+        hypotheses = (ROOT / "docs" / "status" / "climb" / "hypotheses.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "- id: H-035\n"
+            "  description: client interface closure inventory identifies exact shared-stream evidence packages\n"
+            "  parent_paradigm: interface-clients\n"
+            "  ranking: 0.7\n"
+            "  status: passed\n",
+            hypotheses,
+        )
+        self.assertIn(
+            "- id: H-036\n"
+            "  description: operational surface inventory identifies six host-owned authority packages\n"
+            "  parent_paradigm: interface-operations\n"
+            "  ranking: 0.7\n"
+            "  status: passed\n",
+            hypotheses,
+        )
+        rows = (ROOT / "docs" / "status" / "climb" / "runs.csv").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        run_rows = [row.split(",") for row in rows[1:]]
+        self.assertEqual(
+            [int(columns[0]) for columns in run_rows],
+            list(range(1, 37)),
+        )
+        self.assertEqual(
+            [columns[1] for columns in run_rows],
+            [f"H-{cycle:03d}" for cycle in range(1, 37)],
+        )
+        self.assertEqual(
+            rows[-2:],
+            [
+                "35,H-035,passed,check.client-interfaces-closure",
+                "36,H-036,passed,check.operational-parity-closure",
+            ],
+        )
+        self.assertEqual(
+            json.loads(
+                (ROOT / "docs" / "status" / "climb" / "session-state.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+            {
+                "last_hypothesis": "H-036",
+                "last_outcome": "passed",
+                "next_action": "future-work-queue",
+            },
+        )
+        research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("- H-036: passed — operational surface closure gates", research_tree)
+        self.assertIn("- Future: separately approved hypothesis required", research_tree)
+        self.assertNotIn("- H-037:", research_tree)
+        for excluded_hypothesis_id in ("H-044", "H-045"):
+            self.assertNotIn(excluded_hypothesis_id, hypotheses)
+            self.assertNotIn(excluded_hypothesis_id, "\n".join(rows))
+            self.assertNotIn(excluded_hypothesis_id, research_tree)
+
+    def test_h036_requires_all_six_receipts_and_does_not_invent_successor_or_native_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            state_dir = workspace / "climb"
+            command_log = workspace / "commands.log"
+            bin_dir = workspace / "bin"
+            bin_dir.mkdir()
+            _seed_h035_state(state_dir)
+
+            completed = _run_h036_cycle(
+                state_dir,
+                _fake_h036_path(bin_dir, command_log),
+                command_log,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(_latest_cycle_result(state_dir), EXPECTED_H036)
+            self.assertEqual(_new_hypothesis_ids(state_dir), ())
+            self.assertEqual(
+                json.loads((state_dir / "session-state.json").read_text()),
+                {
+                    "last_hypothesis": "H-036",
+                    "last_outcome": "passed",
+                    "next_action": "future-work-queue",
+                },
+            )
+            self.assertIn(
+                "- H-036: passed — operational surface closure gates",
+                (state_dir / "research-tree.md").read_text(encoding="utf-8"),
+            )
+            self.assertNotIn("Verified-native-parity", _passed_ledger_claims())
+            self.assertEqual(
+                command_log.read_text(encoding="utf-8").splitlines(),
+                [
+                    "make test.prime-operational-auth.provider-free",
+                    "make test.prime-operational-model-selection.provider-free",
+                    "make test.prime-operational-settings-keybindings.provider-free",
+                    "make test.prime-operational-telemetry-usage.provider-free",
+                    "make test.prime-operational-doctor.provider-free",
+                    "make test.prime-operational-controlled-update-restart.provider-free",
+                    "uv run python tools/check_prime_parity.py --features operation.auth,operation.model-selection,operation.settings-keybindings,operation.telemetry-usage,operation.doctor,operation.controlled-update-restart --provider asterion.prime-gateway",
+                    "make check",
+                    "make promotion-check",
+                    "git diff --check",
                 ],
             )
-            tree = (state_dir / "research-tree.md").read_text()
-            self.assertIn(
-                "H-006: passed — bounded session/context model evidence",
-                tree,
+
+    def test_h036_rejects_dirty_input_before_receipts_or_state_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            state_dir = workspace / "climb"
+            command_log = workspace / "commands.log"
+            bin_dir = workspace / "bin"
+            bin_dir.mkdir()
+            _seed_h035_state(state_dir)
+
+            completed = _run_h036_cycle(
+                state_dir,
+                _fake_h036_path(bin_dir, command_log, dirty=True),
+                command_log,
             )
-            self.assertIn(
-                "H-007: passed — Phase 2 session/context closure audit",
-                tree,
-            )
-            self.assertIn(
-                "H-008: passed — provider-free RLM evidence promotion",
-                tree,
-            )
-            self.assertIn(
-                "H-009: falsified — Phase 1 receipt lacks exact RLM model assertions",
-                tree,
-            )
-            self.assertIn(
-                "H-010: passed — exact bounded RLM model assertions",
-                tree,
-            )
-            self.assertIn(
-                "H-011: passed — operation/long-running closure inventory",
-                tree,
-            )
-            self.assertIn(
-                "H-012: passed — exact long-running scenario matrix and Phase 1 promotion",
-                tree,
-            )
-            self.assertIn(
-                "H-013: passed — host-owned heartbeat and schedule coordinator",
-                tree,
-            )
-            self.assertIn(
-                "H-014: passed — pinned Prime heartbeat command translation",
-                tree,
-            )
-            self.assertIn(
-                "H-015: passed — durable Prime heartbeat command fencing",
-                tree,
-            )
-            self.assertIn(
-                "H-016: passed — Prime heartbeat session and private IPC bridge",
-                tree,
-            )
-            self.assertIn(
-                "H-017: passed — selected-provider long-running binding",
-                tree,
-            )
-            self.assertIn(
-                "H-018: passed — residency recovery and orphan audit",
-                tree,
-            )
-            self.assertIn(
-                "H-019: passed — finite autonomous-quality evidence boundary",
-                tree,
-            )
-            self.assertIn(
-                "H-020: passed — authorized bounded autonomous-quality run",
-                tree,
-            )
-            self.assertIn(
-                "H-021: passed — provider-free long-running evidence promotion",
-                tree,
-            )
-            self.assertIn(
-                "H-022: passed — operation long-running closure gates",
-                tree,
-            )
-            self.assertIn(
-                "Next: H-023 — continual harness closure inventory",
-                tree,
-            )
+
+            self.assertEqual(completed.returncode, 2)
+            self.assertFalse(command_log.exists())
+            rows = (state_dir / "runs.csv").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(rows[-1], "35,H-035,passed,check.client-interfaces-closure")
 
 
 if __name__ == "__main__":

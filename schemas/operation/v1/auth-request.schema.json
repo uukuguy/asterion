@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/operation/v1/auth-request.schema.json",
+  "title": "Asterion Private Auth Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "action": {"enum": ["auth.status", "auth.store", "auth.clear", "auth.refresh"]},
+    "credential_ref": {"$ref": "#/$defs/opaque_id"},
+    "refresh_ref": {"$ref": "#/$defs/opaque_id"},
+    "subject_digest": {"$ref": "#/$defs/sha256"},
+    "precedence": {"$ref": "#/$defs/precedence"}
+  },
+  "oneOf": [
+    {"$ref": "#/$defs/status"},
+    {"$ref": "#/$defs/store"},
+    {"$ref": "#/$defs/clear"},
+    {"$ref": "#/$defs/refresh"}
+  ],
+  "$defs": {
+    "opaque_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "precedence": {"type": "integer", "minimum": 1, "maximum": 5},
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {"action": {"const": "auth.status"}}
+    },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "credential_ref", "subject_digest", "precedence"],
+      "properties": {
+        "action": {"const": "auth.store"},
+        "credential_ref": {"$ref": "#/$defs/opaque_id"},
+        "subject_digest": {"$ref": "#/$defs/sha256"},
+        "precedence": {"$ref": "#/$defs/precedence"}
+      }
+    },
+    "clear": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "credential_ref"],
+      "properties": {
+        "action": {"const": "auth.clear"},
+        "credential_ref": {"$ref": "#/$defs/opaque_id"}
+      }
+    },
+    "refresh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "refresh_ref", "subject_digest", "precedence"],
+      "properties": {
+        "action": {"const": "auth.refresh"},
+        "refresh_ref": {"$ref": "#/$defs/opaque_id"},
+        "subject_digest": {"$ref": "#/$defs/sha256"},
+        "precedence": {"$ref": "#/$defs/precedence"}
+      }
+    }
+  }
+}

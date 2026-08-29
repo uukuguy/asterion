@@ -33,3 +33,5 @@ cycle,hypothesis_id,outcome,command_id
 32,H-032,passed,test.prime-ecosystem-packages.provider-free
 33,H-033,passed,test.prime-ecosystem-mcp.provider-free
 34,H-034,passed,check.ecosystem-capabilities-closure
+35,H-035,passed,check.client-interfaces-closure
+36,H-036,passed,check.operational-parity-closure

@@ -1,67 +1,56 @@
-# Live Session Checkpoint
+# Resume Next Session
 
-> Updated: 2026-08-28. H-034 is closed. H-035 specification is approved and
-> its ten-task implementation plan is ready; execution mode is not selected.
+> Updated: 2026-08-29. H-036 is closed; no H-037 is approved.
 
 ## TL;DR
 
-- Ecosystem Task 10 closes at `3db6685`; independent re-review is clean.
-- Prime Gateway `ecosystem.capabilities` is exact 10/10 PASS with zero
-  provider/model operations; all native ecosystem rows remain missing.
-- H-034 passed one clean cycle. `runs.csv` contains cycle 34 exactly once and
-  session state points to H-035.
-- Full clean evidence passed: 1,954 Python tests, TypeScript, Ruff, docs, Rust,
-  sdist/wheel, and promotion 27/27 with no full dataset.
-- H-035 fixes nine client features and four shared-stream evidence packages.
-  Design `7add4fb` is approved; plan `0880045` is ready. No implementation or
-  system-parity claim exists.
+- H-036 closed exactly once with
+  `36,H-036,passed,check.operational-parity-closure`.
+- Canonical climb state now records
+  `{"last_hypothesis":"H-036","last_outcome":"passed","next_action":"future-work-queue"}`.
+- H-035 plus H-036 closes `interfaces.operations` at exactly 15/15 Prime
+  Gateway rows.
+- `Verified-system-parity` remains BLOCKED; `Verified-native-parity` remains
+  missing.
 
 ## Current work package
 
-- Branch: `h024-ecosystem-capabilities`.
-- Completed plan:
-  `docs/superpowers/plans/2026-08-10-asterion-prime-ecosystem-parity.md`.
-- Approved implementation plan:
-  `docs/superpowers/plans/2026-08-10-asterion-prime-client-interfaces-parity.md`.
-- Existing unrelated working-tree changes must remain untouched.
+- Worktree: `.worktrees/prime-client-interfaces`.
+- Branch: `feature/prime-client-interfaces`.
+- Approved plan:
+  `docs/superpowers/plans/2026-08-10-asterion-prime-operational-parity.md`.
+- Task report:
+  `.superpowers/sdd/operational-parity-task-16-report.md`.
 
 ## Verified work
 
-- Exact domain:
-  `uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway`
-  returned selected 10, passed 10, blocking 0.
-- Exact H-034 cycle passed four ecosystem evidence gates, the domain reducer,
+- H-036 consumed the six real provider-free Prime Gateway operational receipts:
+  `operation.auth`, `operation.model-selection`,
+  `operation.settings-keybindings`, `operation.telemetry-usage`,
+  `operation.doctor`, and `operation.controlled-update-restart`.
+- The exact six-feature checker passed with selected `6`, passed `6`,
+  blocking `0`, and zero provider/application operations.
+- The canonical clean cycle invoked the six receipt gates, exact checker,
   `make check`, `make promotion-check`, and `git diff --check`.
-- `make check`: 1,954 Python tests plus all cross-language, lint, docs, Rust,
-  and distribution checks passed.
-- Promotion: `promotion full PASS commands=27 provider_operations=0
+- Promotion reported `promotion full PASS commands=28 provider_operations=0
   full_dataset=no`.
-- Climb state: H-034 passed exactly once; next action H-035; generated tree and
-  session state agree.
-- Independent Task 10 re-review found no Critical, Important, or Minor issue.
-- Commit-state verification passed 46 focused tests with one expected external
-  source skip, exact ecosystem reduction 10/10, Climb cycles 1–34, and
-  `git diff --check`.
 
-## Next action
+## Recovery boundary
 
-1. Ask whether execution is subagent-driven or inline.
-2. Execute the ten tasks with TDD, atomic commits, and review gates.
-3. Preserve all unrelated dirty working-tree changes through exact staging.
-4. Keep H-035 pending until implementation and all four evidence packages pass.
+- Do not rerun H-036 against canonical climb state; a duplicate canonical row
+  would be wrong.
+- Do not invent H-037. Start only from a separately approved hypothesis and
+  evidence boundary.
+- Do not promote provider-free H-036 evidence to live OAuth/model selection,
+  live telemetry delivery, real update/restart effects, system parity, or
+  native parity.
+- Native rows stay `missing` until Phase 3 evidence exists.
 
-## Claim boundaries
-
-- `Verified-system-parity` remains BLOCKED on 15 `interfaces.operations` rows.
-- H-035 covers the nine `interface.*` rows; the six `operation.*` rows remain a
-  separate subsequent package.
-- Pixel-identical TUI and hidden reasoning identity remain the only exclusions.
-- No provider/model operation or full dataset run is authorized by this state.
-
-## Ready-to-paste verification
+## Ready-to-paste status checks
 
 ```bash
-uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway
-uv run python -m unittest -v tests.test_prime_ecosystem_parity tests.test_prime_parity_ledger tests.test_check_prime_parity tests.test_check_promotion
-git diff --check
+tail -n 3 docs/status/climb/runs.csv
+cat docs/status/climb/session-state.json
+uv run python tools/check_prime_parity.py --features operation.auth,operation.model-selection,operation.settings-keybindings,operation.telemetry-usage,operation.doctor,operation.controlled-update-restart --provider asterion.prime-gateway
+uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway
 ```

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, readdir, realpath } from "node:fs/promises";
+import { lstat, open, readdir, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
@@ -58,6 +58,14 @@ export interface PrivateContinuationBinding {
   readonly bindingDigest: string;
 }
 
+export interface PrivateClientValueDescriptor {
+  readonly reference: PrivateValueRef;
+  readonly kind: string;
+  readonly mediaType: string;
+  readonly size: number;
+  readonly sha256: string;
+}
+
 const PRIVATE_VALUE_FORMAT = "asterion.prime-private-value/v1";
 const PRIVATE_INPUT_BINDING_FORMAT = "asterion.prime-private-input-binding/v1";
 const PRIVATE_ATTACHMENT_BINDING_FORMAT = "asterion.prime-private-attachment-binding/v1";
@@ -73,13 +81,14 @@ const INPUT_LIMIT_BYTES = 1024 * 1024;
 const RESULT_LIMIT_BYTES = 64 * 1024;
 const CAPSULE_LIMIT_BYTES = 8 * 1024 * 1024;
 const ATTACHMENT_LIMIT_BYTES = 8 * 1024 * 1024;
+const CLIENT_VALUE_LIMIT_BYTES = 700 * 1024;
 const CONTINUATION_LIMIT_BYTES = 16 * 1024;
 const TRANSCRIPT_LIMIT_BYTES = 64 * 1024 * 1024;
 const CONTINUATION_READY_ATTEMPTS = 40;
 const CONTINUATION_READY_DELAY_MS = 25;
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
-type PrivateValueKind = "input" | "result" | "capsule" | "attachment" | "continuation";
+type PrivateValueKind = "input" | "result" | "capsule" | "attachment" | "continuation" | "client";
 
 interface PrivateValueHeader {
   readonly format: typeof PRIVATE_VALUE_FORMAT;
@@ -87,6 +96,9 @@ interface PrivateValueHeader {
   readonly kind: PrivateValueKind;
   readonly size: number;
   readonly digest: string;
+  readonly clientKind?: string;
+  readonly mediaType?: string;
+  readonly sessionId?: string;
 }
 
 interface PrivateInputBinding {
@@ -186,6 +198,9 @@ function limitForKind(kind: PrivateValueKind): number {
   }
   if (kind === "continuation") {
     return CONTINUATION_LIMIT_BYTES;
+  }
+  if (kind === "client") {
+    return CLIENT_VALUE_LIMIT_BYTES;
   }
   return CAPSULE_LIMIT_BYTES;
 }
@@ -433,9 +448,12 @@ async function regularPathExists(path: string): Promise<boolean> {
 }
 
 function parseHeader(value: unknown, reference: PrivateValueRef): PrivateValueHeader {
+  const client = isRecord(value) && value.kind === "client";
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["format", "reference", "kind", "size", "digest"]) ||
+    !hasExactKeys(value, client
+      ? ["format", "reference", "kind", "size", "digest", "clientKind", "mediaType", "sessionId"]
+      : ["format", "reference", "kind", "size", "digest"]) ||
     value.format !== PRIVATE_VALUE_FORMAT ||
     value.reference !== reference ||
     typeof value.kind !== "string" ||
@@ -443,6 +461,7 @@ function parseHeader(value: unknown, reference: PrivateValueRef): PrivateValueHe
       "attachment",
       "capsule",
       "continuation",
+      "client",
       "input",
       "result",
     ].includes(String(value.kind)) ||
@@ -450,6 +469,11 @@ function parseHeader(value: unknown, reference: PrivateValueRef): PrivateValueHe
     Number(value.size) < 0 ||
     typeof value.digest !== "string" ||
     !DIGEST_PATTERN.test(value.digest)
+    || (client && (
+      typeof value.clientKind !== "string" || !OPAQUE_ID_PATTERN.test(value.clientKind) ||
+      typeof value.mediaType !== "string" || !MEDIA_TYPE_PATTERN.test(value.mediaType) ||
+      typeof value.sessionId !== "string" || !OPAQUE_ID_PATTERN.test(value.sessionId)
+    ))
   ) {
     throw new PrivateValueInvalidError();
   }
@@ -459,6 +483,11 @@ function parseHeader(value: unknown, reference: PrivateValueRef): PrivateValueHe
     kind: value.kind as PrivateValueKind,
     size: Number(value.size),
     digest: value.digest,
+    ...(client ? {
+      clientKind: value.clientKind as string,
+      mediaType: value.mediaType as string,
+      sessionId: value.sessionId as string,
+    } : {}),
   });
 }
 
@@ -1093,6 +1122,95 @@ export class PrivateValueStore {
     return this.put("capsule", Buffer.from(value));
   }
 
+  async putClientValue(
+    sessionId: string,
+    kind: string,
+    mediaType: string,
+    value: Uint8Array,
+    reference?: PrivateValueRef,
+  ): Promise<PrivateClientValueDescriptor> {
+    if (
+      !OPAQUE_ID_PATTERN.test(sessionId) ||
+      !OPAQUE_ID_PATTERN.test(kind) ||
+      !MEDIA_TYPE_PATTERN.test(mediaType) ||
+      !(value instanceof Uint8Array)
+    ) {
+      throw new PrivateValueInvalidError();
+    }
+    if (reference !== undefined && typeof reference !== "string") {
+      throw new PrivateValueInvalidError();
+    }
+    const expectedDigest = sha256(value);
+    if (reference !== undefined) {
+      try {
+        const existing = await this.describeClientValue(reference, sessionId);
+        if (existing.kind !== kind || existing.mediaType !== mediaType || existing.size !== value.byteLength || existing.sha256 !== expectedDigest) {
+          throw new PrivateValueInvalidError();
+        }
+        return existing;
+      } catch (error) {
+        if (!(error instanceof PrivateValueInvalidError)) throw error;
+      }
+    }
+    const written = await this.put("client", Buffer.from(value), {
+      clientKind: kind,
+      mediaType,
+      sessionId,
+    }, reference);
+    return this.describeClientValue(written, sessionId);
+  }
+
+  async describeClientValue(
+    reference: string,
+    sessionId?: string,
+  ): Promise<PrivateClientValueDescriptor> {
+    const header = await this.clientHeader(reference, sessionId);
+    return Object.freeze({
+      reference: header.reference,
+      kind: header.clientKind!,
+      mediaType: header.mediaType!,
+      size: header.size,
+      sha256: header.digest,
+    });
+  }
+
+  async readClientValue(
+    reference: string,
+    maxBytes: number,
+    sessionId?: string,
+  ): Promise<Buffer> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+      throw new PrivateValueInvalidError();
+    }
+    const header = await this.clientHeader(reference, sessionId);
+    if (header.size > maxBytes) {
+      throw new PrivateValueInvalidError();
+    }
+    return this.read(header.reference, "client");
+  }
+
+  async deleteClientValue(reference: string, sessionId: string): Promise<void> {
+    try {
+      const identifier = parseReference(reference);
+      const path = join(this.valuesRoot, `${identifier}.value`);
+      const metadata = await lstat(path);
+      const header = await this.clientHeader(reference, sessionId);
+      if (metadata.isSymbolicLink() || !metadata.isFile()) {
+        throw new PrivateValueInvalidError();
+      }
+      await unlink(path);
+      await syncPrivateDirectory(this.valuesRoot);
+    } catch (error) {
+      if (isRecord(error) && "code" in error && error.code === "ENOENT") {
+        return;
+      }
+      if (error instanceof PrivateValueInvalidError) {
+        throw error;
+      }
+      throw new PrivateValueInvalidError();
+    }
+  }
+
   async readCapsule(reference: PrivateValueRef): Promise<Buffer> {
     return Buffer.from(await this.read(reference, "capsule"));
   }
@@ -1104,17 +1222,21 @@ export class PrivateValueStore {
   private async put(
     kind: PrivateValueKind,
     body: Buffer,
+    client?: Readonly<{ readonly clientKind: string; readonly mediaType: string; readonly sessionId: string }>,
+    requestedReference?: PrivateValueRef,
   ): Promise<PrivateValueRef> {
     if (body.byteLength > limitForKind(kind)) {
       throw new PrivateValueInvalidError();
     }
-    const reference = `private:${randomUUID()}` as PrivateValueRef;
+    const reference = requestedReference ?? `private:${randomUUID()}` as PrivateValueRef;
+    parseReference(reference);
     const header: PrivateValueHeader = {
       format: PRIVATE_VALUE_FORMAT,
       reference,
       kind,
       size: body.byteLength,
       digest: sha256(body),
+      ...(kind === "client" && client !== undefined ? client : {}),
     };
     const bytes = Buffer.concat([
       canonicalJsonBytes(header),
@@ -1339,6 +1461,35 @@ export class PrivateValueStore {
       if (error instanceof PrivateValueInvalidError) {
         throw error;
       }
+      throw new PrivateValueInvalidError();
+    }
+  }
+
+  private async clientHeader(
+    reference: string,
+    sessionId?: string,
+  ): Promise<PrivateValueHeader> {
+    try {
+      if (typeof reference !== "string" || (sessionId !== undefined && !OPAQUE_ID_PATTERN.test(sessionId))) {
+        throw new PrivateValueInvalidError();
+      }
+      const identifier = parseReference(reference);
+      await this.ensureRoots();
+      const path = join(this.valuesRoot, `${identifier}.value`);
+      const bytes = await readPrivateRegularFile(
+        path,
+        HEADER_LIMIT_BYTES + limitForKind("client") + 1,
+      );
+      const newline = bytes.indexOf(0x0a);
+      if (newline < 1 || newline > HEADER_LIMIT_BYTES) throw new PrivateValueInvalidError();
+      const headerValue = JSON.parse(bytes.subarray(0, newline).toString("utf8"));
+      if (!canonicalJsonBytes(headerValue).equals(bytes.subarray(0, newline))) throw new PrivateValueInvalidError();
+      const header = parseHeader(headerValue, reference as PrivateValueRef);
+      if (header.kind !== "client" || (sessionId !== undefined && header.sessionId !== sessionId)) {
+        throw new PrivateValueInvalidError();
+      }
+      return header;
+    } catch {
       throw new PrivateValueInvalidError();
     }
   }

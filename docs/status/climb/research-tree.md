@@ -34,4 +34,6 @@
 - H-032: passed — exact package evidence
 - H-033: passed — local MCP evidence
 - H-034: passed — ecosystem closure gates
-- Next: H-035 — client interface closure inventory
+- H-035: passed — client interface closure gates
+- H-036: passed — operational surface closure gates
+- Future: separately approved hypothesis required

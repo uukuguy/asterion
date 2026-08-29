@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/agent-client/v1/intent.schema.json",
+  "title": "Asterion Agent Client Intent v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "intent_id", "client_id", "session_id", "authority_revision", "type", "payload"],
+  "properties": {
+    "protocol": {"const": "asterion.agent-client/v1"},
+    "intent_id": {"$ref": "#/$defs/opaque_id"},
+    "client_id": {"$ref": "#/$defs/opaque_id"},
+    "session_id": {"$ref": "#/$defs/opaque_id"},
+    "authority_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "type": {"enum": ["command.invoke", "export.request", "extension-ui.respond", "input.submit", "session.attach", "session.cancel", "session.create", "session.detach", "session.pause", "session.resume", "share.request"]},
+    "payload": {}
+  },
+  "allOf": [{"oneOf": [
+    {"properties": {"type": {"const": "command.invoke"}, "payload": {"$ref": "#/$defs/command_invoke"}}},
+    {"properties": {"type": {"const": "export.request"}, "payload": {"$ref": "#/$defs/export_request"}}},
+    {"properties": {"type": {"const": "extension-ui.respond"}, "payload": {"$ref": "#/$defs/extension_response"}}},
+    {"properties": {"type": {"const": "input.submit"}, "payload": {"$ref": "#/$defs/input_submit"}}},
+    {"properties": {"type": {"const": "session.attach"}, "payload": {"$ref": "#/$defs/session_attach"}}},
+    {"properties": {"type": {"const": "session.cancel"}, "payload": {"$ref": "#/$defs/reason"}}},
+    {"properties": {"type": {"const": "session.create"}, "payload": {"$ref": "#/$defs/session_create"}}},
+    {"properties": {"type": {"const": "session.detach"}, "payload": {"$ref": "#/$defs/reason"}}},
+    {"properties": {"type": {"const": "session.pause"}, "payload": {"$ref": "#/$defs/reason"}}},
+    {"properties": {"type": {"const": "session.resume"}, "payload": {"$ref": "#/$defs/reason"}}},
+    {"properties": {"type": {"const": "share.request"}, "payload": {"$ref": "#/$defs/share_request"}}}
+  ]}],
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
+    "opaque_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "media_type": {"type": "string", "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"},
+    "opaque_ids": {"type": "array", "items": {"$ref": "#/$defs/opaque_id"}, "uniqueItems": true},
+    "reason": {"type": "object", "additionalProperties": false, "required": ["reason_code"], "properties": {"reason_code": {"$ref": "#/$defs/identifier"}}},
+    "command_invoke": {"type": "object", "additionalProperties": false, "required": ["arguments_ref", "command_name", "command_revision"], "properties": {"arguments_ref": {"$ref": "#/$defs/opaque_id"}, "command_name": {"$ref": "#/$defs/identifier"}, "command_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}},
+    "export_request": {"type": "object", "additionalProperties": false, "required": ["destination_ref", "expires_at_ms", "export_id", "max_bytes", "media_type", "reference_ids", "visibility"], "properties": {"destination_ref": {"$ref": "#/$defs/opaque_id"}, "expires_at_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "export_id": {"$ref": "#/$defs/opaque_id"}, "max_bytes": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "media_type": {"$ref": "#/$defs/media_type"}, "reference_ids": {"$ref": "#/$defs/opaque_ids"}, "visibility": {"enum": ["private", "public"]}}},
+    "extension_response": {"type": "object", "additionalProperties": false, "required": ["cancelled", "request_id", "response_ref"], "properties": {"cancelled": {"type": "boolean"}, "request_id": {"$ref": "#/$defs/opaque_id"}, "response_ref": {"$ref": "#/$defs/opaque_id"}}},
+    "input_submit": {"type": "object", "additionalProperties": false, "required": ["content_ref", "delivery", "input_id"], "properties": {"content_ref": {"$ref": "#/$defs/opaque_id"}, "delivery": {"enum": ["direct", "steer", "follow_up"]}, "input_id": {"$ref": "#/$defs/opaque_id"}}},
+    "session_attach": {"type": "object", "additionalProperties": false, "required": ["cursor"], "properties": {"cursor": {"type": "object", "additionalProperties": false, "required": ["generation", "sequence"], "properties": {"generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "sequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}}}},
+    "session_create": {"type": "object", "additionalProperties": false, "required": ["goal_id", "goal_ref"], "properties": {"goal_id": {"$ref": "#/$defs/opaque_id"}, "goal_ref": {"$ref": "#/$defs/opaque_id"}}},
+    "share_request": {"type": "object", "additionalProperties": false, "required": ["expires_at_ms", "export_id", "share_id"], "properties": {"expires_at_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "export_id": {"$ref": "#/$defs/opaque_id"}, "share_id": {"$ref": "#/$defs/opaque_id"}}}
+  }
+}

@@ -30,6 +30,13 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test.prime-ecosystem-extensions.provider-free
 .PHONY: test.prime-ecosystem-packages.provider-free
 .PHONY: test.prime-ecosystem-mcp.provider-free
+.PHONY: test.prime-client-core.provider-free
+.PHONY: test.prime-client-protocols.provider-free
+.PHONY: test.prime-client-interactive.provider-free
+.PHONY: test.prime-client-export-share.provider-free
+.PHONY: test.prime-client-parity.provider-free
+.PHONY: test.prime-operational-auth.provider-free test.prime-operational-telemetry-usage.provider-free test.prime-operational-doctor.provider-free test.prime-operational-controlled-update-restart.provider-free
+.PHONY: test.prime-operational-harness.provider-free test.prime-operational-parity.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -223,6 +230,97 @@ test.prime-ecosystem-mcp.provider-free:
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_control_ecosystem_mcp \
 		tests.test_prime_ecosystem_mcp
+
+test.prime-client-core.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_client_sdk_jsonl \
+		tests.test_prime_client_core
+
+test.prime-client-protocols.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_client_rpc_acp \
+		tests.test_prime_client_protocols
+
+test.prime-client-interactive.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_client_interactive \
+		tests.test_asterion_cli \
+		tests.test_prime_client_interactive
+
+test.prime-client-export-share.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_client_export_share \
+		tests.test_prime_client_export_share
+
+test.prime-client-parity.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_prime_client_parity \
+		tests.test_prime_parity_ledger \
+		tests.test_check_prime_parity
+	$(UV_BIN) run python tools/check_prime_parity.py \
+		--features interface.sdk,interface.cli-interactive,interface.rpc,interface.acp,interface.json-stream,interface.headless-print,interface.tui-commands,interface.tui-extension-ui,interface.export-share \
+		--provider asterion.prime-gateway
+
+test.prime-operational-auth.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_operation_auth \
+		tests.test_prime_operational_auth
+	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
+
+test.prime-operational-harness.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_prime_operation_bridge \
+		tests.test_prime_operational_harness
+	npm --prefix packages/typescript/prime-gateway test -- \
+		test/operational-interface.test.mjs \
+		test/main.test.mjs
+
+test.prime-operational-telemetry-usage.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_operation_telemetry \
+		tests.test_prime_operational_telemetry
+	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
+
+test.prime-operational-doctor.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_operation_doctor \
+		tests.test_prime_operational_doctor
+	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
+
+test.prime-operational-controlled-update-restart.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_operation_update_restart \
+		tests.test_prime_operational_update_restart
+	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
+
+.PHONY: test.prime-operational-model-selection.provider-free
+test.prime-operational-model-selection.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_operation_model_selection \
+		tests.test_prime_operational_model_selection
+	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
+
+.PHONY: test.prime-operational-settings-keybindings.provider-free
+test.prime-operational-settings-keybindings.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_operation_settings \
+		tests.test_prime_operational_settings
+	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
+
+test.prime-operational-parity.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_prime_operational_parity \
+		tests.test_prime_parity_ledger \
+		tests.test_check_prime_parity
+	$(UV_BIN) run python tools/check_prime_parity.py \
+		--features operation.auth,operation.model-selection,operation.settings-keybindings,operation.telemetry-usage,operation.doctor,operation.controlled-update-restart \
+		--provider asterion.prime-gateway
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" $(if $(ASTERION_PRIME_AUTHORITY),--authority "$(ASTERION_PRIME_AUTHORITY)") $(if $(ASTERION_PRIME_MAX_COST_MICROS),--max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)")

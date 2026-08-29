@@ -124,6 +124,64 @@ class TestCheckPrimeParity(unittest.TestCase):
         self.assertEqual(report["reason_codes"], [])
         self.assertEqual(report["status"], "PASS")
 
+    def test_interface_operation_features_close_without_system_parity(self) -> None:
+        selected = (
+            "interface.sdk,interface.cli-interactive,interface.rpc,interface.acp,"
+            "interface.json-stream,interface.headless-print,interface.tui-commands,"
+            "interface.tui-extension-ui,interface.export-share"
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = parity_checker.main(
+                ["--features", selected, "--provider", "asterion.prime-gateway"]
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["selected_feature_count"], 9)
+        self.assertEqual(report["passed_feature_count"], 9)
+        self.assertEqual(report["blocking_feature_count"], 0)
+        self.assertEqual(report["provider_operations"], 0)
+        self.assertEqual(report["application_operations"], 0)
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = parity_checker.main(
+                [
+                    "--domain",
+                    "interfaces.operations",
+                    "--provider",
+                    "asterion.prime-gateway",
+                ]
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["selected_feature_count"], 15)
+        self.assertEqual(report["passed_feature_count"], 15)
+        self.assertEqual(report["blocking_feature_count"], 0)
+        self.assertEqual(report["blocking_feature_ids"], [])
+        self.assertEqual(report["reason_codes"], [])
+        self.assertEqual(report["status"], "PASS")
+
+        selected = (
+            "operation.auth,operation.model-selection,"
+            "operation.settings-keybindings,operation.telemetry-usage,"
+            "operation.doctor,operation.controlled-update-restart"
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = parity_checker.main(
+                ["--features", selected, "--provider", "asterion.prime-gateway"]
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["selected_feature_count"], 6)
+        self.assertEqual(report["passed_feature_count"], 6)
+        self.assertEqual(report["blocking_feature_count"], 0)
+        self.assertEqual(report["status"], "PASS")
+
     def test_continual_harness_domain_closes_only_with_seven_plus_one(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):

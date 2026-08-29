@@ -1,0 +1,6 @@
+{
+  "type": "setting",
+  "name": "theme",
+  "scope": "global",
+  "value": "dark"
+}

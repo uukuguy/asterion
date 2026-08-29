@@ -56,9 +56,13 @@ const RECORD_NAME_PATTERN = /^(?<position>[0-9]{12})\.json$/u;
 const ATOMIC_TEMP_PATTERN = /^\.asterion-[0-9a-f-]{36}\.tmp$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const MEDIA_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u;
+const CLIENT_IDENTIFIER_PATTERN = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u;
+const CLIENT_MEDIA_TYPE_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u;
 const PRIVATE_REF_PATTERN = /^private:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const RECORD_KINDS = new Set([
   "command.accepted",
+  "client.observation.progress",
+  "client.observation.staged",
   "context.binding.initialized",
   "context.binding.rebound",
   "context.command.accepted",
@@ -215,6 +219,35 @@ export interface GatewayDurableSnapshot {
 export interface GatewayEventCursor {
   readonly generation: number;
   readonly sequence: number;
+}
+
+export type GatewayClientObservationKind =
+  | "artifact.available" | "commands.changed" | "extension-ui.requested"
+  | "message.available" | "tool.completed" | "tool.started";
+
+export interface GatewayClientObservation {
+  readonly observation_id: string;
+  readonly active_session_id: string;
+  readonly generation: number;
+  readonly source_sequence: number;
+  readonly emitted_at: string;
+  readonly kind: GatewayClientObservationKind;
+  readonly payload: Readonly<Record<string, unknown>>;
+}
+
+export interface GatewayClientObservationProgress {
+  readonly nativeSequence: number;
+  readonly observationSequence: number;
+}
+
+export interface GatewayClientObservationStage {
+  readonly generation: number;
+  readonly nativeSequence: number;
+  readonly reference: string;
+  readonly kind: string;
+  readonly mediaType: string;
+  readonly size: number;
+  readonly sha256: string;
 }
 
 interface StoredRecordBody {
@@ -610,6 +643,141 @@ function validateCursorPayload(value: unknown): PrimeDaemonCursor {
     throw new GatewayStoreConflictError();
   }
   return Object.freeze({ generation: value.generation, sequence: value.sequence });
+}
+
+function canonicalTimestamp(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value)) &&
+    new Date(value).toISOString() === value;
+}
+
+function sortedUniqueClientIdentifiers(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every(
+    (item, index) => typeof item === "string" && CLIENT_IDENTIFIER_PATTERN.test(item) &&
+      (index === 0 || String(value[index - 1]) < item),
+  );
+}
+
+function validateClientObservationPayload(
+  value: unknown,
+): GatewayClientObservation {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "active_session_id",
+      "emitted_at",
+      "generation",
+      "kind",
+      "observation_id",
+      "payload",
+      "source_sequence",
+    ]) ||
+    !nonEmptyIdentifier(value.active_session_id) ||
+    !positiveInteger(value.generation) ||
+    !positiveInteger(value.source_sequence) ||
+    !canonicalTimestamp(value.emitted_at) ||
+    !isRecord(value.payload) ||
+    typeof value.observation_id !== "string" ||
+    value.observation_id !== `prime-client-${value.generation}-${value.source_sequence}` ||
+    typeof value.kind !== "string"
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  const payload = value.payload;
+  const descriptor = (
+    reference: unknown,
+    mediaType: unknown,
+    digest: unknown,
+    size: unknown,
+  ): boolean =>
+    typeof reference === "string" && PRIVATE_REF_PATTERN.test(reference) &&
+    typeof mediaType === "string" && CLIENT_MEDIA_TYPE_PATTERN.test(mediaType) &&
+    typeof digest === "string" && DIGEST_PATTERN.test(digest) &&
+    nonNegativeInteger(size);
+  const kind = value.kind as GatewayClientObservationKind;
+  if (kind === "message.available") {
+    if (!hasExactKeys(payload, ["content_ref", "media_type", "message_id", "role", "sha256", "size"]) ||
+      !nonEmptyIdentifier(payload.message_id) ||
+      (payload.role !== "assistant" && payload.role !== "user") ||
+      !descriptor(payload.content_ref, payload.media_type, payload.sha256, payload.size)) throw new GatewayStoreConflictError();
+  } else if (kind === "tool.started") {
+    if (!hasExactKeys(payload, ["arguments_ref", "call_id", "name", "sha256", "size"]) ||
+      !nonEmptyIdentifier(payload.call_id) || typeof payload.name !== "string" || !CLIENT_IDENTIFIER_PATTERN.test(payload.name) ||
+      !descriptor(payload.arguments_ref, "application/json", payload.sha256, payload.size)) throw new GatewayStoreConflictError();
+  } else if (kind === "tool.completed") {
+    if (!hasExactKeys(payload, ["call_id", "is_error", "media_type", "result_ref", "sha256", "size"]) ||
+      !nonEmptyIdentifier(payload.call_id) || typeof payload.is_error !== "boolean" ||
+      !descriptor(payload.result_ref, payload.media_type, payload.sha256, payload.size)) throw new GatewayStoreConflictError();
+  } else if (kind === "artifact.available") {
+    if (!hasExactKeys(payload, ["artifact_id", "artifact_ref", "media_type", "sha256", "size"]) ||
+      !nonEmptyIdentifier(payload.artifact_id) ||
+      !descriptor(payload.artifact_ref, payload.media_type, payload.sha256, payload.size)) throw new GatewayStoreConflictError();
+  } else if (kind === "commands.changed") {
+    if (!hasExactKeys(payload, ["commands", "revision"]) || !sortedUniqueClientIdentifiers(payload.commands) || !positiveInteger(payload.revision)) throw new GatewayStoreConflictError();
+  } else if (kind === "extension-ui.requested") {
+    if (!hasExactKeys(payload, ["deadline_ms", "method", "payload_ref", "request_id"]) ||
+      !Number.isSafeInteger(payload.deadline_ms) || Number(payload.deadline_ms) < 1 ||
+      typeof payload.method !== "string" || !CLIENT_IDENTIFIER_PATTERN.test(payload.method) || !nonEmptyIdentifier(payload.request_id) ||
+      typeof payload.payload_ref !== "string" || !PRIVATE_REF_PATTERN.test(payload.payload_ref)) throw new GatewayStoreConflictError();
+  } else {
+    throw new GatewayStoreConflictError();
+  }
+  return deepFreeze({
+    observation_id: value.observation_id,
+    active_session_id: value.active_session_id,
+    generation: value.generation,
+    source_sequence: value.source_sequence,
+    emitted_at: value.emitted_at,
+    kind,
+    payload: { ...payload },
+  });
+}
+
+function validateClientObservationProgressPayload(value: unknown): Readonly<{
+  nativeSequence: number;
+  observation: GatewayClientObservation | null;
+  stagedReference: string | null;
+  stagedSha256: string | null;
+  stagedSize: number | null;
+}> {
+  if (!isRecord(value) || !hasExactKeys(value, ["native_sequence", "observation", "staged_reference", "staged_sha256", "staged_size"]) || !positiveInteger(value.native_sequence) ||
+    (value.staged_reference !== null && (typeof value.staged_reference !== "string" || !PRIVATE_REF_PATTERN.test(value.staged_reference))) ||
+    (value.staged_sha256 !== null && (typeof value.staged_sha256 !== "string" || !DIGEST_PATTERN.test(value.staged_sha256))) ||
+    (value.staged_size !== null && !nonNegativeInteger(value.staged_size)) ||
+    (value.staged_reference === null && (value.staged_sha256 !== null || value.staged_size !== null)) ||
+    (value.observation !== null && !isRecord(value.observation))) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({
+    nativeSequence: value.native_sequence,
+    observation: value.observation === null ? null : validateClientObservationPayload(value.observation),
+    stagedReference: value.staged_reference,
+    stagedSha256: value.staged_sha256,
+    stagedSize: value.staged_size,
+  });
+}
+
+function clientObservationBodyBinding(observation: GatewayClientObservation | null): Readonly<{
+  reference: string; kind: string; mediaType: string; sha256?: string; size?: number;
+}> | null {
+  if (observation === null || observation.kind === "commands.changed") return null;
+  const payload = observation.payload;
+  if (observation.kind === "message.available") return { reference: String(payload.content_ref), kind: "message", mediaType: String(payload.media_type), sha256: String(payload.sha256), size: Number(payload.size) };
+  if (observation.kind === "tool.started") return { reference: String(payload.arguments_ref), kind: "tool-arguments", mediaType: "application/json", sha256: String(payload.sha256), size: Number(payload.size) };
+  if (observation.kind === "tool.completed") return { reference: String(payload.result_ref), kind: "tool-result", mediaType: String(payload.media_type), sha256: String(payload.sha256), size: Number(payload.size) };
+  if (observation.kind === "artifact.available") return { reference: String(payload.artifact_ref), kind: "artifact", mediaType: String(payload.media_type), sha256: String(payload.sha256), size: Number(payload.size) };
+  return { reference: String(payload.payload_ref), kind: "extension-ui", mediaType: "application/json" };
+}
+
+function validateClientObservationStagePayload(value: unknown): GatewayClientObservationStage {
+  if (!isRecord(value) || !hasExactKeys(value, ["generation", "kind", "media_type", "native_sequence", "reference", "sha256", "size"]) ||
+    !positiveInteger(value.generation) || !positiveInteger(value.native_sequence) ||
+    typeof value.reference !== "string" || !PRIVATE_REF_PATTERN.test(value.reference) ||
+    typeof value.kind !== "string" || !nonEmptyIdentifier(value.kind) ||
+    typeof value.media_type !== "string" || !CLIENT_MEDIA_TYPE_PATTERN.test(value.media_type) ||
+    typeof value.sha256 !== "string" || !DIGEST_PATTERN.test(value.sha256) || !nonNegativeInteger(value.size)) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({ generation: value.generation, nativeSequence: value.native_sequence, reference: value.reference, kind: value.kind, mediaType: value.media_type, size: value.size, sha256: value.sha256 });
 }
 
 function validateRlmLifecycleObservation(
@@ -1166,6 +1334,15 @@ export class GatewayDurableStore {
   private readonly recordsById = new Map<string, LoadedRecord>();
   private readonly eventCounts = new Map<number, number>();
   private readonly knownEventGenerations = new Set<number>();
+  private readonly clientObservationsByGeneration = new Map<
+    number,
+    GatewayClientObservation[]
+  >();
+  private readonly clientObservationProgressByGeneration = new Map<
+    number,
+    GatewayClientObservationProgress
+  >();
+  private readonly clientObservationStages = new Map<string, GatewayClientObservationStage>();
   private readonly contextCommands = new Map<string, SessionContextCommand>();
   private readonly controlCommands = new Map<string, ControlCommand>();
   private readonly inputDeliveryValues = new Map<string, GatewayInputDelivery>();
@@ -1695,6 +1872,117 @@ export class GatewayDurableStore {
       { event: validated },
     );
     return Object.freeze({ ...receipt, event: validated });
+  }
+
+  async recordClientObservationProgress(
+    generation: number,
+    nativeSequence: number,
+    observation: GatewayClientObservation | null,
+    authoritativeStage: GatewayClientObservationStage | null = null,
+  ): Promise<GatewayRecordReceipt> {
+    if (!positiveInteger(generation)) {
+      throw new GatewayStoreConflictError();
+    }
+    const binding = clientObservationBodyBinding(observation);
+    const supplied = authoritativeStage === null ? null : validateClientObservationStagePayload({
+      generation: authoritativeStage.generation, native_sequence: authoritativeStage.nativeSequence,
+      reference: authoritativeStage.reference, kind: authoritativeStage.kind, media_type: authoritativeStage.mediaType,
+      size: authoritativeStage.size, sha256: authoritativeStage.sha256,
+    });
+    if ((binding === null) !== (supplied === null) || (supplied !== null &&
+      (supplied.generation !== generation || supplied.nativeSequence !== nativeSequence || supplied.reference !== binding!.reference ||
+        supplied.kind !== binding!.kind || supplied.mediaType !== binding!.mediaType ||
+        (binding!.sha256 !== undefined && (supplied.sha256 !== binding!.sha256 || supplied.size !== binding!.size))))) {
+      throw new GatewayStoreConflictError();
+    }
+    const progress = validateClientObservationProgressPayload({
+      native_sequence: nativeSequence, observation,
+      staged_reference: supplied?.reference ?? null,
+      staged_sha256: supplied?.sha256 ?? null,
+      staged_size: supplied?.size ?? null,
+    });
+    const previous = this.clientObservationProgressByGeneration.get(generation);
+    const recordId = `client-observation:${generation}:${nativeSequence}`;
+    const payload = {
+      native_sequence: progress.nativeSequence,
+      observation: progress.observation,
+      staged_reference: progress.stagedReference,
+      staged_sha256: progress.stagedSha256,
+      staged_size: progress.stagedSize,
+    };
+    if (
+      previous !== undefined &&
+      progress.nativeSequence <= previous.nativeSequence
+    ) {
+      return this.appendRecord(
+        "client.observation.progress",
+        recordId,
+        payload,
+      );
+    }
+    const staged = binding === null ? undefined : this.clientObservationStages.get(`${generation}:${progress.nativeSequence}`);
+    if (binding !== null && (
+      staged === undefined || progress.stagedReference !== staged.reference ||
+      staged.reference !== binding.reference || staged.kind !== binding.kind || staged.mediaType !== binding.mediaType ||
+      staged.sha256 !== progress.stagedSha256 || staged.size !== progress.stagedSize ||
+      (binding.sha256 !== undefined && (staged.sha256 !== binding.sha256 || staged.size !== binding.size))
+    )) throw new GatewayStoreConflictError();
+    const expectedNative = (previous?.nativeSequence ?? 0) + 1;
+    const expectedObservation = (previous?.observationSequence ?? 0) + 1;
+    if (
+      progress.nativeSequence !== expectedNative ||
+      (progress.observation !== null &&
+        (progress.observation.active_session_id !== this.sessionId ||
+          progress.observation.generation !== generation ||
+          progress.observation.source_sequence !== expectedObservation))
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.appendRecord(
+      "client.observation.progress",
+      recordId,
+      payload,
+    );
+  }
+
+  async stageClientObservationValue(stage: GatewayClientObservationStage): Promise<GatewayRecordReceipt> {
+    const validated = validateClientObservationStagePayload({
+      generation: stage?.generation,
+      native_sequence: stage?.nativeSequence,
+      reference: stage?.reference,
+      kind: stage?.kind,
+      media_type: stage?.mediaType,
+      size: stage?.size,
+      sha256: stage?.sha256,
+    });
+    const progress = this.clientObservationProgressByGeneration.get(validated.generation);
+    if (validated.nativeSequence <= (progress?.nativeSequence ?? 0)) throw new GatewayStoreConflictError();
+    return this.appendRecord("client.observation.staged", `client-observation-stage:${validated.generation}:${validated.nativeSequence}`, {
+      generation: validated.generation, native_sequence: validated.nativeSequence, reference: validated.reference,
+      kind: validated.kind, media_type: validated.mediaType, size: validated.size, sha256: validated.sha256,
+    });
+  }
+
+  stagedClientObservationValues(generation: number): readonly GatewayClientObservationStage[] {
+    if (!positiveInteger(generation)) throw new GatewayStoreConflictError();
+    return Object.freeze([...this.clientObservationStages.values()].filter((stage) => stage.generation === generation));
+  }
+
+  clientObservations(generation: number): readonly GatewayClientObservation[] {
+    if (!positiveInteger(generation)) {
+      throw new GatewayStoreConflictError();
+    }
+    return Object.freeze([
+      ...(this.clientObservationsByGeneration.get(generation) ?? []),
+    ]);
+  }
+
+  clientObservationProgress(generation: number): GatewayClientObservationProgress {
+    if (!positiveInteger(generation)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.clientObservationProgressByGeneration.get(generation) ??
+      Object.freeze({ nativeSequence: 0, observationSequence: 0 });
   }
 
   registerEventGeneration(generation: number): void {
@@ -2250,6 +2538,44 @@ export class GatewayDurableStore {
         }
         return Object.freeze({ event });
       }
+      if (kind === "client.observation.progress") {
+        const match = /^client-observation:(?<generation>[1-9][0-9]*):(?<native>[1-9][0-9]*)$/u.exec(recordId);
+        const progress = validateClientObservationProgressPayload(payload);
+        const generation = Number(match?.groups?.generation);
+        const nativeSequence = Number(match?.groups?.native);
+        const previous = this.clientObservationProgressByGeneration.get(generation);
+        if (
+          match === null ||
+          !positiveInteger(generation) ||
+          !positiveInteger(nativeSequence) ||
+          progress.nativeSequence !== nativeSequence ||
+          nativeSequence !== (previous?.nativeSequence ?? 0) + 1 ||
+          (progress.observation !== null &&
+            (progress.observation.active_session_id !== this.sessionId ||
+              progress.observation.generation !== generation ||
+              progress.observation.source_sequence !==
+                (previous?.observationSequence ?? 0) + 1))
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
+        const binding = clientObservationBodyBinding(progress.observation);
+        const staged = binding === null ? undefined : this.clientObservationStages.get(`${generation}:${nativeSequence}`);
+        if (binding === null ? (progress.stagedReference !== null || progress.stagedSha256 !== null || progress.stagedSize !== null) : (
+          staged === undefined || progress.stagedReference !== staged.reference || staged.reference !== binding.reference ||
+          staged.kind !== binding.kind || staged.mediaType !== binding.mediaType || staged.sha256 !== progress.stagedSha256 || staged.size !== progress.stagedSize ||
+          (binding.sha256 !== undefined && (staged.sha256 !== binding.sha256 || staged.size !== binding.size))
+        )) throw new GatewayStoreCorruptionError();
+        return progress as unknown as Record<string, unknown>;
+      }
+      if (kind === "client.observation.staged") {
+        const match = /^client-observation-stage:(?<generation>[1-9][0-9]*):(?<native>[1-9][0-9]*)$/u.exec(recordId);
+        const stage = validateClientObservationStagePayload(payload);
+        if (match === null || stage.generation !== Number(match.groups?.generation) || stage.nativeSequence !== Number(match.groups?.native) ||
+          stage.nativeSequence <= (this.clientObservationProgressByGeneration.get(stage.generation)?.nativeSequence ?? 0)) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return stage as unknown as Record<string, unknown>;
+      }
       if (kind === "input.delivery.committed") {
         if (this.inputDeliveryProtocolRecordPosition === undefined) {
           throw new GatewayStoreCorruptionError();
@@ -2687,6 +3013,64 @@ export class GatewayDurableStore {
         throw new GatewayStoreCorruptionError();
       }
       this.eventCounts.set(event.generation, count);
+    } else if (record.stored.kind === "client.observation.progress") {
+      const match = /^client-observation:(?<generation>[1-9][0-9]*):[1-9][0-9]*$/u.exec(record.stored.record_id);
+      const generation = Number(match?.groups?.generation);
+      const persisted = record.payload as unknown as Readonly<{
+        native_sequence?: number;
+        nativeSequence?: number;
+        observation: GatewayClientObservation | null;
+        staged_reference?: string | null;
+        stagedReference?: string | null;
+        staged_sha256?: string | null;
+        stagedSha256?: string | null;
+        staged_size?: number | null;
+        stagedSize?: number | null;
+      }>;
+      const progress = Object.freeze({
+        nativeSequence: persisted.nativeSequence ?? persisted.native_sequence,
+        observation: persisted.observation,
+        stagedReference: persisted.stagedReference ?? persisted.staged_reference,
+        stagedSha256: persisted.stagedSha256 ?? persisted.staged_sha256,
+        stagedSize: persisted.stagedSize ?? persisted.staged_size,
+      });
+      const previous = this.clientObservationProgressByGeneration.get(generation);
+      if (match === null || !positiveInteger(generation) ||
+        !positiveInteger(progress.nativeSequence) ||
+        progress.nativeSequence !== (previous?.nativeSequence ?? 0) + 1) {
+        throw new GatewayStoreCorruptionError();
+      }
+      const observationSequence = previous?.observationSequence ?? 0;
+      const binding = clientObservationBodyBinding(progress.observation);
+      const staged = binding === null ? undefined : this.clientObservationStages.get(`${generation}:${progress.nativeSequence}`);
+      if (binding === null ? (progress.stagedReference !== null || progress.stagedSha256 !== null || progress.stagedSize !== null) : (
+        staged === undefined || progress.stagedReference !== staged.reference || staged.reference !== binding.reference ||
+        staged.kind !== binding.kind || staged.mediaType !== binding.mediaType || staged.sha256 !== progress.stagedSha256 || staged.size !== progress.stagedSize ||
+        (binding.sha256 !== undefined && (staged.sha256 !== binding.sha256 || staged.size !== binding.size))
+      )) throw new GatewayStoreCorruptionError();
+      if (progress.observation !== null) {
+        if (progress.observation.source_sequence !== observationSequence + 1) {
+          throw new GatewayStoreCorruptionError();
+        }
+        const observations = this.clientObservationsByGeneration.get(generation) ?? [];
+        observations.push(progress.observation);
+        this.clientObservationsByGeneration.set(generation, observations);
+      }
+      this.clientObservationProgressByGeneration.set(generation, Object.freeze({
+        nativeSequence: progress.nativeSequence,
+        observationSequence: observationSequence + (progress.observation === null ? 0 : 1),
+      }));
+      this.clientObservationStages.delete(`${generation}:${progress.nativeSequence}`);
+    } else if (record.stored.kind === "client.observation.staged") {
+      const stage = "nativeSequence" in record.payload
+        ? record.payload as unknown as GatewayClientObservationStage
+        : validateClientObservationStagePayload(record.payload);
+      const key = `${stage.generation}:${stage.nativeSequence}`;
+      const previous = this.clientObservationStages.get(key);
+      if (previous !== undefined && (previous.reference !== stage.reference || previous.kind !== stage.kind || previous.mediaType !== stage.mediaType || previous.size !== stage.size || previous.sha256 !== stage.sha256)) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.clientObservationStages.set(key, stage);
     } else if (record.stored.kind === "input.delivery.committed") {
       const delivery = record.payload as unknown as GatewayInputDelivery;
       if (this.inputDeliveryValues.has(delivery.commandId)) {

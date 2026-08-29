@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from asterion.control.authority import (
     ActionReceipt,
@@ -30,6 +30,7 @@ from asterion.control.journal import (
     CanonicalJournal,
     JournalConflictError,
     JournalCursor,
+    JournalEntry,
     JournalRecord,
 )
 from asterion.control.recovery import recover_control_host_state
@@ -57,6 +58,15 @@ from asterion.pathlight.recorder import (
     PathlightRecorder,
 )
 
+if TYPE_CHECKING:
+    from asterion.operation.manager import OperationManager
+    from asterion.operation.protocol import OperationReceipt, OperationTransaction
+    from asterion.operation.services import (
+        OperationPrivateRequestResolver,
+        OperationPrivateRequestStore,
+        OperationService,
+    )
+
 
 class ControlHostError(RuntimeError):
     """Raised when canonical host processing cannot continue safely."""
@@ -64,6 +74,35 @@ class ControlHostError(RuntimeError):
 
 class ControlHostTransportError(ControlHostError):
     """Raised when a persisted provider operation has uncertain transport state."""
+
+
+class _OperationExecutionManager(Protocol):
+    async def execute(self, transaction: OperationTransaction) -> OperationReceipt: ...
+
+    async def reconcile(
+        self, transaction: OperationTransaction
+    ) -> OperationReceipt: ...
+
+
+class _RecoveredOperationHost:
+    """Narrow recovery facade; the operation manager remains private."""
+
+    def __init__(self, manager: _OperationExecutionManager) -> None:
+        self._manager = manager
+
+    async def execute_operation(self, transaction: OperationTransaction) -> OperationReceipt:
+        try:
+            return await self._manager.execute(transaction)
+        except Exception:
+            raise ControlHostError("control operation failed") from None
+
+    async def reconcile_operation(
+        self, transaction: OperationTransaction
+    ) -> OperationReceipt:
+        try:
+            return await self._manager.reconcile(transaction)
+        except Exception:
+            raise ControlHostError("control operation reconciliation failed") from None
 
 
 class ActionExecutor(Protocol):
@@ -77,8 +116,7 @@ class ActionExecutor(Protocol):
 class AdmittedActionPreparer(Protocol):
     """Persist provider-specific binding before an admitted action is delivered."""
 
-    async def prepare(self, proposal: ControlEvent) -> None:
-        ...
+    async def prepare(self, proposal: ControlEvent) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -93,7 +131,8 @@ class ProviderOwnedActionTerminal:
         if (
             not isinstance(self.action_id, str)
             or self.status not in {"succeeded", "failed", "cancelled", "uncertain"}
-            or (self.status == "succeeded") != isinstance(self.receipt, ActionExecutionReceipt)
+            or (self.status == "succeeded")
+            != isinstance(self.receipt, ActionExecutionReceipt)
             or (self.receipt is not None and self.receipt.action_id != self.action_id)
         ):
             raise ValueError("provider-owned action terminal is invalid")
@@ -102,16 +141,14 @@ class ProviderOwnedActionTerminal:
 class ProviderOwnedActionLifecycle(Protocol):
     """Observe actions whose selected provider, rather than host executor, runs them."""
 
-    def owns(self, proposal: ControlEvent) -> bool:
-        ...
+    def owns(self, proposal: ControlEvent) -> bool: ...
 
     @property
     def active_child_count(self) -> int:
         """Return provider-owned children currently consuming child capacity."""
         ...
 
-    async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]:
-        ...
+    async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]: ...
 
 
 class ActionResultBinder(Protocol):
@@ -160,6 +197,42 @@ class _NeverCancelled:
         return False
 
 
+class _UnavailableOperationResolver:
+    def resolve(
+        self,
+        descriptor: object,
+        *,
+        purpose: str,
+        max_bytes: int,
+        deadline_ms: int,
+        authority_revision: int,
+        cancelled: bool,
+    ) -> bytes:
+        del (
+            descriptor,
+            purpose,
+            max_bytes,
+            deadline_ms,
+            authority_revision,
+            cancelled,
+        )
+        raise RuntimeError("private operation request unavailable")
+
+
+class _UnavailableOperationStore:
+    def put(self, transaction: OperationTransaction, typed_request: object) -> str:
+        del transaction, typed_request
+        raise RuntimeError("private operation request unavailable")
+
+    def get(self, transaction: OperationTransaction) -> None:
+        del transaction
+        return None
+
+    def get_digest(self, transaction: OperationTransaction) -> None:
+        del transaction
+        return None
+
+
 _TERMINAL_POLL_INTERVAL_SECONDS = 0.01
 _TERMINAL_MAX_EMPTY_POLLS = 100
 
@@ -192,6 +265,7 @@ class ControlHost:
         session_context_client: SessionContextClient | None = None,
         admitted_action_preparer: AdmittedActionPreparer | None = None,
         provider_owned_actions: ProviderOwnedActionLifecycle | None = None,
+        operation_manager: OperationManager | None = None,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
@@ -217,12 +291,15 @@ class ControlHost:
             )
             or not _valid_provider_owned_actions(provider_owned_actions)
             or (
+                operation_manager is not None
+                and not _valid_operation_manager(operation_manager)
+            )
+            or (
                 session_context_client is not None
                 and (
                     session_context_client is not client
                     or not isinstance(session_context_client, SessionContextClient)
-                    or SESSION_CONTEXT_CAPABILITY
-                    not in client.manifest.capabilities
+                    or SESSION_CONTEXT_CAPABILITY not in client.manifest.capabilities
                 )
             )
         ):
@@ -247,6 +324,7 @@ class ControlHost:
         self._child_service = child_service
         self._admitted_action_preparer = admitted_action_preparer
         self._provider_owned_actions = provider_owned_actions
+        self._operation_manager = operation_manager
         self._provider_bindings_rebuilt = False
         self._children_closed = False
         self._cancellation_signal = cancellation_signal or _NeverCancelled()
@@ -375,6 +453,68 @@ class ControlHost:
 
         return self._session_context_manager
 
+    @property
+    def session_id(self) -> str:
+        """Return the host-bound session identity without exposing provider state."""
+
+        return self._state.session_id
+
+    @property
+    def generation(self) -> int:
+        """Return the current host-owned control generation."""
+
+        return self._state.generation
+
+    @property
+    def authority_revision(self) -> int:
+        """Return the current host-authoritative revision."""
+
+        return self._authority.envelope.revision
+
+    @property
+    def operation_authority_id(self) -> str:
+        """Return only the authority identity required by a bound operation transaction."""
+
+        return self._authority.envelope.authority_id
+
+    def client_command(
+        self,
+        *,
+        command_id: str,
+        command_type: str,
+        payload: Mapping[str, object],
+    ) -> ControlCommand:
+        """Build one existing control command from a body-free client intent."""
+
+        if command_type not in {
+            "input.submit",
+            "session.attach",
+            "session.cancel",
+            "session.create",
+            "session.pause",
+            "session.resume",
+        } or not isinstance(payload, Mapping):
+            raise ControlHostError("client control command is invalid")
+        command_payload: Mapping[str, object] = dict(payload)
+        if command_type == "session.create":
+            if set(command_payload) != {"goal_id", "goal_ref"}:
+                raise ControlHostError("client control command is invalid")
+            command_payload = {
+                "system_id": self._plan.system_id,
+                "system_version": self._plan.version,
+                **command_payload,
+            }
+        try:
+            return ControlCommand(
+                command_id=command_id,
+                session_id=self._state.session_id,
+                authority_revision=self._authority.envelope.revision,
+                type=command_type,
+                payload=command_payload,
+            )
+        except (TypeError, ValueError):
+            raise ControlHostError("client control command is invalid") from None
+
     async def dispatch(self, command: ControlCommand) -> None:
         if (
             not isinstance(command, ControlCommand)
@@ -392,10 +532,13 @@ class ControlHost:
         if command.type == "session.cancel":
             await self._close_children()
         try:
+            journal_position = self._journal.position
+            if journal_position != self._journal_position:
+                raise JournalConflictError("control journal changed")
             entry = self._journal.accept_command(
                 command, expected_position=self._journal_position
             )
-            self._journal_position = max(self._journal_position, entry.position)
+            self._journal_position = entry.position
         except (JournalConflictError, TypeError, ValueError):
             raise ControlHostError("control command journal admission failed") from None
         try:
@@ -463,10 +606,77 @@ class ControlHost:
             evidence_gaps=self._evidence.gaps,
         )
 
+    async def execute_operation(self, transaction: OperationTransaction):
+        """Delegate only validated operation work to the injected durable manager."""
+        if self._operation_manager is None:
+            raise ControlHostError("control operation manager is unavailable")
+        from asterion.operation.manager import OperationManagerError
+
+        try:
+            return await self._operation_manager.execute(transaction)
+        except OperationManagerError:
+            raise ControlHostError("control operation failed") from None
+        finally:
+            self._journal_position = self._journal.position
+
+    async def reconcile_operation(self, transaction: OperationTransaction):
+        if self._operation_manager is None:
+            raise ControlHostError("control operation manager is unavailable")
+        from asterion.operation.manager import OperationManagerError
+
+        try:
+            return await self._operation_manager.reconcile(transaction)
+        except OperationManagerError:
+            raise ControlHostError("control operation reconciliation failed") from None
+        finally:
+            self._journal_position = self._journal.position
+
+    @classmethod
+    def recover_operation_host(
+        cls,
+        journal: CanonicalJournal,
+        envelope: object,
+        *,
+        services: Mapping[str, OperationService],
+        resolver: OperationPrivateRequestResolver | None = None,
+        private_store: OperationPrivateRequestStore | None = None,
+        now_ms: Callable[[], int] | None = None,
+    ) -> _RecoveredOperationHost:
+        """Recover operation state without loading a provider or private values."""
+
+        from asterion.control.authority import AuthorityEnvelope
+        from asterion.operation.manager import OperationManager, OperationManagerError
+        from asterion.operation.protocol import OperationTransaction
+
+        if not isinstance(envelope, AuthorityEnvelope):
+            raise ControlHostError("control operation recovery failed")
+        try:
+            transactions: list[OperationTransaction] = []
+            for entry in journal.replay(JournalCursor(0)):
+                if entry.record.kind == "operation.transaction.accepted":
+                    value = entry.record.payload["transaction"]
+                    if not isinstance(value, Mapping):
+                        raise TypeError
+                    transactions.append(OperationTransaction.from_mapping(value))
+            if not transactions:
+                raise TypeError
+            transaction = transactions[0]
+            manager = OperationManager(
+                authority=AuthorityLedger(envelope),
+                journal=journal,
+                resolver=_validated_operation_resolver(resolver),
+                private_store=_validated_operation_store(private_store),
+                services=_validated_operation_services(services),
+                now_ms=now_ms or (lambda: 0),
+                session_id=transaction.session_id,
+                generation=transaction.generation,
+            )
+            return _RecoveredOperationHost(manager)
+        except (OperationManagerError, TypeError, ValueError):
+            raise ControlHostError("control operation recovery failed") from None
+
     async def close(self) -> None:
-        self._evidence.complete_open_spans(
-            timestamp_ns=self._clock_ms() * 1_000_000
-        )
+        self._evidence.complete_open_spans(timestamp_ns=self._clock_ms() * 1_000_000)
         await self._close_children()
         journal_close = getattr(self._journal, "close", None)
         try:
@@ -507,7 +717,9 @@ class ControlHost:
                 )
                 self._journal_position = max(self._journal_position, entry.position)
             except (JournalConflictError, TypeError, ValueError):
-                raise ControlHostError("control provider event journal failed") from None
+                raise ControlHostError(
+                    "control provider event journal failed"
+                ) from None
             return
         report: ProviderUsageReport | None = None
         if event.type == "budget.reported":
@@ -533,7 +745,9 @@ class ControlHost:
                 )
                 self._authority.preview_provider_usage(report)
             except (AuthorityError, TypeError, ValueError):
-                raise ControlHostError("control provider budget report failed") from None
+                raise ControlHostError(
+                    "control provider budget report failed"
+                ) from None
         try:
             entry = self._journal.accept_event(
                 event, expected_position=self._journal_position
@@ -550,7 +764,9 @@ class ControlHost:
             try:
                 self._authority.record_provider_usage(report)
             except AuthorityError:
-                raise ControlHostError("control provider budget report failed") from None
+                raise ControlHostError(
+                    "control provider budget report failed"
+                ) from None
             await self._sync_authority_snapshot()
         self._evidence.project_event(
             event,
@@ -586,7 +802,10 @@ class ControlHost:
                 journal_position=entry.position,
                 timestamp_ns=self._clock_ms() * 1_000_000,
             )
-            if decision.status == "admitted" and self._admitted_action_preparer is not None:
+            if (
+                decision.status == "admitted"
+                and self._admitted_action_preparer is not None
+            ):
                 await self._admitted_action_preparer.prepare(proposal)
         except (JournalConflictError, ControlStateError, TypeError, ValueError):
             raise ControlHostError("control action admission failed") from None
@@ -824,7 +1043,9 @@ class ControlHost:
         try:
             return self._provider_owned_actions.owns(proposal)
         except Exception:
-            raise ControlHostError("provider-owned action ownership is invalid") from None
+            raise ControlHostError(
+                "provider-owned action ownership is invalid"
+            ) from None
 
     async def _reconcile_provider_owned_actions(self) -> None:
         lifecycle = self._provider_owned_actions
@@ -853,7 +1074,9 @@ class ControlHost:
         except ControlHostError:
             raise
         except Exception:
-            raise ControlHostError("provider-owned action lifecycle is invalid") from None
+            raise ControlHostError(
+                "provider-owned action lifecycle is invalid"
+            ) from None
 
     async def _settle_provider_owned_actions_before_terminal(self) -> None:
         """Give one bounded provider lifecycle window before a root terminal."""
@@ -1016,7 +1239,9 @@ class ControlHost:
         try:
             await cast(Callable[[str], Awaitable[None]], preparer)(reference)
         except Exception:
-            raise ControlHostError("control action private input is unavailable") from None
+            raise ControlHostError(
+                "control action private input is unavailable"
+            ) from None
         return reference
 
     def _release_action_input(self, reference: str) -> None:
@@ -1026,7 +1251,9 @@ class ControlHost:
         try:
             cast(Callable[[str], None], releaser)(reference)
         except Exception:
-            raise ControlHostError("control action private input release failed") from None
+            raise ControlHostError(
+                "control action private input release failed"
+            ) from None
 
     async def _sync_authority_snapshot(self) -> None:
         sink = getattr(self._client, "sync_authority_snapshot", None)
@@ -1052,14 +1279,47 @@ class ControlHost:
             raise ControlHostError("control child cascade is unavailable") from None
         self._children_closed = True
 
+    def advance_client_record(self, entry: JournalEntry) -> None:
+        """Accept exactly one endpoint-verified client record into this host cursor."""
+
+        if (
+            not isinstance(entry, JournalEntry)
+            or entry.position != self._journal_position + 1
+            or entry.position != self._journal.position
+            or entry.record.kind
+            not in {
+                "client.intent.accepted",
+                "client.observation.accepted",
+                "client.event.accepted",
+            }
+        ):
+            raise ControlHostError("control client journal handoff conflicts")
+        try:
+            suffix = self._journal.replay(JournalCursor(self._journal_position))
+            if suffix != (entry,):
+                raise JournalConflictError("control journal changed")
+            field = {
+                "client.intent.accepted": "intent",
+                "client.observation.accepted": "observation",
+                "client.event.accepted": "event",
+            }[entry.record.kind]
+            value = entry.record.payload[field]
+            if (
+                not isinstance(value, Mapping)
+                or value.get("session_id") != self._state.session_id
+            ):
+                raise JournalConflictError("control client record identity mismatches")
+        except (JournalConflictError, KeyError, TypeError, ValueError):
+            raise ControlHostError("control client journal handoff conflicts") from None
+        self._journal_position = entry.position
+
     def _active_child_count(self) -> int:
         try:
             generic_children = 0
             if self._child_service is not None:
                 active_ids = self._child_service.active_ids
-                if (
-                    not isinstance(active_ids, tuple)
-                    or any(not isinstance(child_id, str) for child_id in active_ids)
+                if not isinstance(active_ids, tuple) or any(
+                    not isinstance(child_id, str) for child_id in active_ids
                 ):
                     raise TypeError
                 generic_children = len(active_ids)
@@ -1096,11 +1356,52 @@ def _valid_child_service(value: object) -> bool:
     try:
         active_ids = getattr(type(value), "active_ids", None)
         return all(
-            callable(getattr(value, method, None))
-            for method in ("cancel_all", "close")
+            callable(getattr(value, method, None)) for method in ("cancel_all", "close")
         ) and (isinstance(active_ids, property) or isinstance(active_ids, tuple))
     except Exception:
         return False
+
+
+def _valid_operation_manager(value: object) -> bool:
+    return value is None or (
+        callable(getattr(value, "execute", None))
+        and callable(getattr(value, "reconcile", None))
+        and callable(getattr(value, "cancel", None))
+    )
+
+
+def _validated_operation_resolver(
+    value: OperationPrivateRequestResolver | None,
+) -> OperationPrivateRequestResolver:
+    if value is None:
+        return _UnavailableOperationResolver()
+    if not callable(getattr(value, "resolve", None)):
+        raise TypeError
+    return value
+
+
+def _validated_operation_store(
+    value: OperationPrivateRequestStore | None,
+) -> OperationPrivateRequestStore:
+    if value is None:
+        return _UnavailableOperationStore()
+    if not all(callable(getattr(value, method, None)) for method in ("put", "get", "get_digest")):
+        raise TypeError
+    return value
+
+
+def _validated_operation_services(
+    value: Mapping[str, OperationService],
+) -> Mapping[str, OperationService]:
+    if not all(
+        isinstance(feature_id, str)
+        and callable(getattr(service, "execute", None))
+        and callable(getattr(service, "cancel", None))
+        and callable(getattr(service, "reconcile", None))
+        for feature_id, service in value.items()
+    ):
+        raise TypeError
+    return dict(value)
 
 
 def _valid_provider_owned_actions(value: object) -> bool:

@@ -50,6 +50,11 @@ import {
 import {
   PrimeGateway,
   PrimeGatewayError,
+  PRIME_CLIENT_ARTIFACT_LOCK_DIGEST,
+  PRIME_CLIENT_BUNDLE_DIGEST,
+  PRIME_CLIENT_MODULE_LOCK_DIGEST,
+  PRIME_OPERATIONAL_BUNDLE_DIGEST,
+  PRIME_OPERATIONAL_MODULE_LOCK_DIGEST,
 } from "./gateway.js";
 import type {
   PrimeGatewayPrivateInputs,
@@ -64,6 +69,7 @@ import type {
   PrivateResultProjection,
   PrivateContinuationBinding,
 } from "./private-store.js";
+import type { PrimeClientObservation } from "./client-observation.js";
 import type {
   GatewayLongRunningResult,
   GatewayRlmBinding,
@@ -104,6 +110,8 @@ import type {
   RlmMessageProposal,
   RlmSpawnProposal,
 } from "./rlm-host-bridge.js";
+import { PrimeOperationGateway } from "./operation.js";
+import type { OperationReceipt } from "@dci/agent-runtime";
 
 export const PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1";
 const PRIME_DAEMON_LIFECYCLE_PROTOCOL = "asterion.prime-daemon-lifecycle/v1";
@@ -115,13 +123,19 @@ export const PRIME_GATEWAY_SKILL_DISCOVERY_FILE = "asterion-control.json";
 export const PRIME_GATEWAY_RLM_HOST_DISCOVERY = "asterion.prime-rlm-host-discovery/v1";
 export const PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE = "asterion-rlm-host.json";
 export const PRIME_GATEWAY_RLM_HOST_SHIM_FILE = "asterion-rlm-host-shim.mjs";
+const MAX_CLIENT_OBSERVATION_RESPONSE_BYTES = 900 * 1024;
 
 type SidecarEnvelopeType =
   | "authority.update"
   | "command.accept"
+  | "client_observations"
+  | "client_value_read"
   | "events.stream"
   | "ecosystem_activate"
   | "long-running.execute"
+  | "operation.cancel"
+  | "operation.execute"
+  | "operation.reconcile"
   | "private.read"
   | "rlm.binding.read"
   | "rlm.message.binding.read"
@@ -132,9 +146,14 @@ type SidecarEnvelopeType =
 const SIDE_CAR_ENVELOPE_TYPES: ReadonlySet<SidecarEnvelopeType> = new Set([
   "authority.update",
   "command.accept",
+  "client_observations",
+  "client_value_read",
   "events.stream",
   "ecosystem_activate",
   "long-running.execute",
+  "operation.cancel",
+  "operation.execute",
+  "operation.reconcile",
   "private.read",
   "rlm.binding.read",
   "rlm.message.binding.read",
@@ -152,10 +171,12 @@ type SessionContextPrivateValues =
 
 export interface PrimeGatewaySidecarOptions {
   readonly currentGeneration: number;
+  readonly sessionId?: string;
   readonly gateway: {
     accept(command: ControlCommand): Promise<void>;
     updateRemainingBudget(budget: SkillBudget): void;
     eventsAfterCursor(cursor: { readonly generation: number; readonly sequence: number }): readonly ControlEvent[];
+    clientObservationsAfterCursor?(cursor: { readonly generation: number; readonly sequence: number }): readonly PrimeClientObservation[];
     executeSessionContext?(
       command: SessionContextCommand,
       preparePrivate: () => Promise<void>,
@@ -180,7 +201,11 @@ export interface PrimeGatewaySidecarOptions {
     | "readInput"
     | "readBoundInputReference"
     | "readBoundResultReference"
+    | "describeClientValue"
+    | "readClientValue"
   >;
+  /** Production composition deliberately supplies no feature-specific dispatcher. */
+  readonly operation?: PrimeOperationGateway;
 }
 
 interface PrimeSidecarDescriptor {
@@ -403,7 +428,11 @@ interface SidecarEnvelope {
   readonly budget?: unknown;
   readonly command_id?: unknown;
   readonly action_id?: unknown;
+  readonly max_bytes?: unknown;
   readonly frame?: unknown;
+  readonly transaction?: unknown;
+  readonly operation_id?: unknown;
+  readonly authority_revision?: unknown;
 }
 
 export type RlmLifecycleObservation =
@@ -435,6 +464,26 @@ type SidecarResponse =
     readonly id: string;
     readonly type: "events.batch";
     readonly events: readonly ControlEvent[];
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "client_observations.batch";
+    readonly observations: readonly PrimeClientObservation[];
+    readonly next_cursor: Readonly<{ readonly generation: number; readonly sequence: number }> | null;
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "client_value";
+    readonly descriptor: Readonly<{
+      readonly reference: string;
+      readonly kind: string;
+      readonly media_type: string;
+      readonly size: number;
+      readonly sha256: string;
+    }>;
+    readonly body_base64: string;
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -482,6 +531,12 @@ type SidecarResponse =
     readonly id: string;
     readonly type: "ecosystem_receipt";
     readonly receipt: PrimeEcosystemReceipt;
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "operation.receipt";
+    readonly receipt: OperationReceipt;
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -539,6 +594,73 @@ const PRIME_ECOSYSTEM_BUNDLE_EXPORTS = Object.freeze([
   "runExtensionLifecycle",
   "runMcpFixture",
 ]);
+const PRIME_CLIENT_MODULE_EXPORTS = Object.freeze(["runClientPackage"]);
+const PRIME_OPERATIONAL_MODULE_EXPORTS = Object.freeze([
+  "runOperationalPackage",
+  "verifyOperationalLocks",
+]);
+
+export async function loadPrimeClientModule(paths: Readonly<{
+  artifactLockPath: string;
+  bundlePath: string;
+  moduleLockPath: string;
+}>): Promise<Readonly<{ module: Readonly<{ runClientPackage: (frame: object) => Promise<unknown> }> }>> {
+  try {
+    if (!isRecord(paths) || !hasExactKeys(paths, ["artifactLockPath", "bundlePath", "moduleLockPath"])) throw new PrimeGatewayError();
+    const [artifact, lock, bundle] = await Promise.all([
+      readLockedEcosystemFile(paths.artifactLockPath), readLockedEcosystemFile(paths.moduleLockPath), readLockedEcosystemFile(paths.bundlePath),
+    ]);
+    if (createHash("sha256").update(artifact).digest("hex") !== PRIME_CLIENT_ARTIFACT_LOCK_DIGEST || createHash("sha256").update(lock).digest("hex") !== PRIME_CLIENT_MODULE_LOCK_DIGEST || createHash("sha256").update(bundle).digest("hex") !== PRIME_CLIENT_BUNDLE_DIGEST) throw new PrimeGatewayError();
+    const parsed = JSON.parse(lock.toString("utf8"));
+    if (!isRecord(parsed) || parsed.format !== "asterion.prime-client-module-lock/v1" || parsed.bundle_sha256 !== PRIME_CLIENT_BUNDLE_DIGEST || parsed.artifact_lock_sha256 !== PRIME_CLIENT_ARTIFACT_LOCK_DIGEST || parsed.source_commit !== "a18809e00ea30638584d87b3afea7285a9d7296c") throw new PrimeGatewayError();
+    const loaded = await import(`${pathToFileURL(paths.bundlePath).href}?sha256=${PRIME_CLIENT_BUNDLE_DIGEST}`) as Record<string, unknown>;
+    if (Object.keys(loaded).join("\0") !== PRIME_CLIENT_MODULE_EXPORTS.join("\0") || typeof loaded.runClientPackage !== "function") throw new PrimeGatewayError();
+    return Object.freeze({ module: Object.freeze({ runClientPackage: loaded.runClientPackage as (frame: object) => Promise<unknown> }) });
+  } catch { throw new PrimeGatewayError(); }
+}
+
+/** Load only the exact checked-in operational resource before any Prime import. */
+export async function loadPrimeOperationalModule(paths: Readonly<{
+  bundlePath: string;
+  moduleLockPath: string;
+}>): Promise<Readonly<{
+  module: Readonly<{
+    runOperationalPackage: (frame: object) => Promise<unknown>;
+    verifyOperationalLocks: (sourceRoot: string, resourceRoot: string) => Promise<unknown>;
+  }>;
+}>> {
+  try {
+    if (!isRecord(paths) || !hasExactKeys(paths, ["bundlePath", "moduleLockPath"])) {
+      throw new PrimeGatewayError();
+    }
+    const [lock, bundle] = await Promise.all([
+      readLockedEcosystemFile(paths.moduleLockPath),
+      readLockedEcosystemFile(paths.bundlePath),
+    ]);
+    if (
+      createHash("sha256").update(lock).digest("hex") !== PRIME_OPERATIONAL_MODULE_LOCK_DIGEST ||
+      createHash("sha256").update(bundle).digest("hex") !== PRIME_OPERATIONAL_BUNDLE_DIGEST
+    ) throw new PrimeGatewayError();
+    const parsed = JSON.parse(lock.toString("utf8"));
+    if (
+      !isRecord(parsed) ||
+      parsed.format !== "asterion.prime-operational-module-lock/v1" ||
+      parsed.module_digest !== PRIME_OPERATIONAL_BUNDLE_DIGEST ||
+      parsed.source_commit !== "a18809e00ea30638584d87b3afea7285a9d7296c"
+    ) throw new PrimeGatewayError();
+    const loaded = await import(
+      `${pathToFileURL(paths.bundlePath).href}?sha256=${PRIME_OPERATIONAL_BUNDLE_DIGEST}`,
+    ) as Record<string, unknown>;
+    if (
+      Object.keys(loaded).sort().join("\0") !== PRIME_OPERATIONAL_MODULE_EXPORTS.join("\0") ||
+      PRIME_OPERATIONAL_MODULE_EXPORTS.some((name) => typeof loaded[name] !== "function")
+    ) throw new PrimeGatewayError();
+    return Object.freeze({ module: Object.freeze({
+      runOperationalPackage: loaded.runOperationalPackage as (frame: object) => Promise<unknown>,
+      verifyOperationalLocks: loaded.verifyOperationalLocks as (sourceRoot: string, resourceRoot: string) => Promise<unknown>,
+    }) });
+  } catch { throw new PrimeGatewayError(); }
+}
 
 export interface PrimeEcosystemModuleBinding {
   readonly lock: PrimeEcosystemLockContract;
@@ -901,9 +1023,14 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
     !REQUEST_ID.test(value.id) ||
     (
       value.type !== "command.accept" &&
+      value.type !== "client_observations" &&
+      value.type !== "client_value_read" &&
       value.type !== "events.stream" &&
       value.type !== "ecosystem_activate" &&
       value.type !== "long-running.execute" &&
+      value.type !== "operation.cancel" &&
+      value.type !== "operation.execute" &&
+      value.type !== "operation.reconcile" &&
       value.type !== "private.read" &&
       value.type !== "rlm.binding.read" &&
       value.type !== "rlm.message.binding.read" &&
@@ -916,6 +1043,20 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
     throw new PrimeGatewayError();
   }
   if (
+    value.type === "client_observations" &&
+    !hasExactKeys(value, ["protocol", "id", "type", "cursor"])
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    value.type === "client_value_read" &&
+    (!hasExactKeys(value, ["protocol", "id", "type", "reference", "max_bytes"]) ||
+      typeof value.reference !== "string" ||
+      !Number.isSafeInteger(value.max_bytes) || Number(value.max_bytes) < 1 || Number(value.max_bytes) > MAX_PRIVATE_ATTACHMENT_BYTES)
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
     value.type === "ecosystem_activate" &&
     !hasExactKeys(value, ["protocol", "id", "type", "frame"])
   ) {
@@ -924,6 +1065,20 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
   if (
     value.type === "long-running.execute" &&
     !hasExactKeys(value, ["protocol", "id", "type", "command_id", "command"])
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    (value.type === "operation.execute" || value.type === "operation.reconcile") &&
+    (!hasExactKeys(value, ["protocol", "id", "type", "transaction", "private"]) ||
+      !isRecord(value.private) || !hasExactKeys(value.private, []))
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    value.type === "operation.cancel" &&
+    (!hasExactKeys(value, ["protocol", "id", "type", "operation_id", "authority_revision", "private"]) ||
+      !isRecord(value.private) || !hasExactKeys(value.private, []))
   ) {
     throw new PrimeGatewayError();
   }
@@ -1189,12 +1344,57 @@ export class PrimeGatewaySidecar {
           receipt,
         });
       }
+      if (envelope.type === "operation.execute" || envelope.type === "operation.reconcile") {
+        const operation = this.options.operation;
+        if (operation === undefined) throw new PrimeGatewayError();
+        const receipt = envelope.type === "operation.execute"
+          ? await operation.execute(envelope.transaction)
+          : await operation.reconcile(envelope.transaction);
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "operation.receipt",
+          receipt,
+        });
+      }
+      if (envelope.type === "operation.cancel") {
+        const operation = this.options.operation;
+        if (operation === undefined) throw new PrimeGatewayError();
+        const receipt = await operation.cancel(
+          envelope.operation_id,
+          envelope.authority_revision,
+        );
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "operation.receipt",
+          receipt,
+        });
+      }
       if (envelope.type === "command.accept") {
         await this.accept(envelope);
         return Object.freeze({
           protocol: PRIME_GATEWAY_IPC_PROTOCOL,
           id: envelope.id,
           type: "command.accepted",
+        });
+      }
+      if (envelope.type === "client_observations") {
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "client_observations.batch",
+          ...this.clientObservations(envelope),
+        });
+      }
+      if (envelope.type === "client_value_read") {
+        const value = await this.readClientValue(envelope);
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "client_value",
+          descriptor: value.descriptor,
+          body_base64: value.body_base64,
         });
       }
       if (envelope.type === "private.read") {
@@ -1415,6 +1615,68 @@ export class PrimeGatewaySidecar {
       return validated;
     });
     return Object.freeze(events);
+  }
+
+  private clientObservations(envelope: SidecarEnvelope): Readonly<{
+    observations: readonly PrimeClientObservation[];
+    next_cursor: Readonly<{ readonly generation: number; readonly sequence: number }> | null;
+  }> {
+    const cursor = validateCursor(envelope.cursor);
+    const replayCursor = cursor ?? { generation: this.options.currentGeneration, sequence: 0 };
+    const observations = this.options.gateway.clientObservationsAfterCursor;
+    if (observations === undefined) throw new PrimeGatewayError();
+    const batch = observations.call(this.options.gateway, replayCursor);
+    let expected = replayCursor.sequence + 1;
+    const selected: PrimeClientObservation[] = [];
+    for (const [index, observation] of batch.entries()) {
+      if (
+        observation.active_session_id !== this.options.sessionId ||
+        observation.generation !== replayCursor.generation ||
+        observation.source_sequence !== expected ||
+        JSON.stringify(observation).includes("SENTINEL_BODY")
+      ) throw new PrimeGatewayError();
+      expected += 1;
+      const next_cursor = index + 1 === batch.length ? null : Object.freeze({
+        generation: replayCursor.generation,
+        sequence: observation.source_sequence,
+      });
+      const candidate = [...selected, observation];
+      if (Buffer.byteLength(JSON.stringify({
+        protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+        id: envelope.id,
+        type: "client_observations.batch",
+        observations: candidate,
+        next_cursor,
+      }), "utf8") > MAX_CLIENT_OBSERVATION_RESPONSE_BYTES) {
+        if (selected.length === 0) throw new PrimeGatewayError();
+        return Object.freeze({
+          observations: Object.freeze(selected),
+          next_cursor: Object.freeze({
+            generation: replayCursor.generation,
+            sequence: selected.at(-1)!.source_sequence,
+          }),
+        });
+      }
+      selected.push(observation);
+    }
+    return Object.freeze({ observations: Object.freeze(selected), next_cursor: null });
+  }
+
+  private async readClientValue(envelope: SidecarEnvelope): Promise<Readonly<{
+    descriptor: Readonly<{ reference: string; kind: string; media_type: string; size: number; sha256: string }>;
+    body_base64: string;
+  }>> {
+    if (typeof envelope.reference !== "string" || !Number.isSafeInteger(envelope.max_bytes)) throw new PrimeGatewayError();
+    const descriptor = await this.options.privateValues.describeClientValue(envelope.reference, this.options.sessionId);
+    const body = await this.options.privateValues.readClientValue(envelope.reference, Number(envelope.max_bytes), this.options.sessionId);
+    if (
+      body.byteLength !== descriptor.size ||
+      createHash("sha256").update(body).digest("hex") !== descriptor.sha256
+    ) throw new PrimeGatewayError();
+    return Object.freeze({
+      descriptor: Object.freeze({ reference: descriptor.reference, kind: descriptor.kind, media_type: descriptor.mediaType, size: descriptor.size, sha256: descriptor.sha256 }),
+      body_base64: body.toString("base64"),
+    });
   }
 
   private async readPrivate(envelope: SidecarEnvelope): Promise<string> {
@@ -2241,6 +2503,7 @@ async function createSidecarFromDescriptor(
     ecosystem,
     restoreExistingSession: !descriptor.recoveryReadOnly,
     store,
+    clientObservationValues: privateValues,
     privateValues: boundPrivateInputs,
     privateResults: privateValues,
     async createSession(goal, bindIdentity, context) {
@@ -2470,6 +2733,7 @@ async function createSidecarFromDescriptor(
 
   return new PrimeGatewaySidecar({
     currentGeneration: descriptor.generation,
+    sessionId: descriptor.sessionId,
     privateValues,
     gateway: {
       accept: (command) => gateway.accept(command),
@@ -2479,6 +2743,8 @@ async function createSidecarFromDescriptor(
       },
       eventsAfterCursor: (cursor) =>
         store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
+      clientObservationsAfterCursor: (cursor) =>
+        gateway.clientObservationsAfterCursor(cursor),
       rlmLifecycle: () => store.rlmLifecycle(),
       rlmBinding: (actionId) => store.rlmBinding(actionId),
       rlmMessageBinding: (actionId) => store.rlmMessageBinding(actionId),

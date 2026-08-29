@@ -1,0 +1,21 @@
+{
+  "artifact_lock_sha256": "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d",
+  "bundle_sha256": "5ada8386371b8b68bf2bf34b892fdee1b93ad936dfa906110901b14141b63e86",
+  "format": "asterion.prime-client-module-lock/v1",
+  "modules": [
+    {"built_path": "packages/coding-agent/dist/core/sdk.js", "module_id": "sdk", "sha256": "16f6d32a79af61e7be0557f53ed6968b2102ddbb141bf45cb4059a1bce6dc0bc", "source_path": "packages/coding-agent/src/core/sdk.ts"},
+    {"built_path": "packages/coding-agent/dist/cli-main.js", "module_id": "cli", "sha256": "9a10343ae1b5c01861e26c365386127acfa2bf4bd490a5a06673dde746446716", "source_path": "packages/coding-agent/src/cli-main.ts"},
+    {"built_path": "packages/coding-agent/dist/modes/rpc/rpc-client.js", "module_id": "rpc", "sha256": "c0a6d77886f1ed0cbf8c2dbb818fc703fffb5cb30d6cd974f4a4e8a0d371c529", "source_path": "packages/coding-agent/src/modes/rpc/rpc-client.ts"},
+    {"built_path": "packages/coding-agent/dist/modes/acp/acp-mode.js", "module_id": "acp", "sha256": "dcc7a8a7f1a052fb93bffe5fbeb691502e13ca360c8539ea761078c6fcce0e39", "source_path": "packages/coding-agent/src/modes/acp/acp-mode.ts"},
+    {"built_path": "packages/coding-agent/dist/modes/rpc/jsonl.js", "module_id": "jsonl", "sha256": "fb50c89be8f71253439778398431b05ab0ab5003423a65d2803d1e564c068272", "source_path": "packages/coding-agent/src/modes/rpc/jsonl.ts"},
+    {"built_path": "packages/coding-agent/dist/modes/print-mode.js", "module_id": "print", "sha256": "5805a38946d3eb78d17d77b51d3a4502512da198cf01c439943c05b050833d08", "source_path": "packages/coding-agent/src/modes/print-mode.ts"},
+    {"built_path": "packages/coding-agent/dist/core/slash-commands.js", "module_id": "slash-command", "sha256": "ef96e6bb524adc70a72af594f570afc16e7feb734e6872636b2f65427c2665ba", "source_path": "packages/coding-agent/src/core/slash-commands.ts"},
+    {"built_path": "packages/coding-agent/dist/modes/interactive/components/extension-input.js", "module_id": "extension-ui", "sha256": "3bf770d6d27d1bee0ec8fbce3afdc458a4302233bcf10c3a43ad2e1fdad9413c", "source_path": "packages/coding-agent/src/modes/interactive/components/extension-input.ts"},
+    {"built_path": "packages/coding-agent/dist/modes/interactive/theme/theme.js", "module_id": "extension-ui-theme", "sha256": "085158cba0ba80a9d3ff22b6e1f29e4c4586ffe5be4e223631428cd4e3484c1e", "source_path": "packages/coding-agent/src/modes/interactive/theme/theme.ts"},
+    {"built_path": "packages/coding-agent/dist/core/export-html/index.js", "module_id": "export-share", "sha256": "4dd3fde2e199fbac771c72d23a355eab79d78daae3e47aa22782bcfdee9aaa44", "source_path": "packages/coding-agent/src/core/export-html/index.ts"}
+  ],
+  "node_floor": "22.8.0",
+  "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+  "transitive_lock_sha256": "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d",
+  "zero_effect_expectations": {"credential_reads": 0, "network_requests": 0, "provider_operations": 0}
+}

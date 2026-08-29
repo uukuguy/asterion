@@ -8,6 +8,12 @@ import {
 
 import type {
   ActionKind,
+  AuthRequest,
+  ModelSelectionRequest,
+  SettingsKeybindingsRequest,
+  TelemetryUsageRequest,
+  DoctorRequest,
+  ControlledUpdateRestartRequest,
   AgentSystemManifest,
   AssemblyManifest,
   BenchmarkSuiteManifest,
@@ -18,9 +24,14 @@ import type {
   ControlCommand,
   ControlEvent,
   ControlPlaneManifest,
+  ClientEvent,
+  ClientIntent,
   RunEvent,
   RunRequest,
   RuntimeManifest,
+  OperationReceipt,
+  OperationRequestDescriptor,
+  OperationTransaction,
   SessionContextCommand,
   SessionContextReceipt,
 } from "./types.js";
@@ -31,7 +42,11 @@ function readSchema(name: string): object {
   ) as object;
 }
 
-const ajv = new Ajv2020({ allErrors: true, strictTypes: false });
+const ajv = new Ajv2020({
+  allErrors: true,
+  formats: { "date-time": { type: "string", validate: isValidClientUtcTimestamp } },
+  strictTypes: false,
+});
 const manifestValidator = ajv.compile(readSchema("runtime-manifest.schema.json"));
 const capabilityManifestValidator = ajv.compile(
   readSchema("capability-manifest.schema.json"),
@@ -69,6 +84,49 @@ const sessionContextCommandValidator = ajv.compile(
 const sessionContextReceiptValidator = ajv.compile(
   readSchema("session-context-receipt.schema.json"),
 );
+const clientIntentValidator = ajv.compile(
+  readSchema("agent-client-intent.schema.json"),
+);
+const clientEventValidator = ajv.compile(
+  readSchema("agent-client-event.schema.json"),
+);
+const operationRequestDescriptorValidator = ajv.compile(
+  readSchema("operation-request-descriptor.schema.json"),
+);
+const operationTransactionValidator = ajv.compile(
+  readSchema("operation-transaction.schema.json"),
+);
+const operationReceiptValidator = ajv.compile(
+  readSchema("operation-receipt.schema.json"),
+);
+const authRequestValidator = ajv.compile(readSchema("auth-request.schema.json"));
+const modelSelectionRequestValidator = ajv.compile(
+  readSchema("model-selection-request.schema.json"),
+);
+const settingsKeybindingsRequestValidator = ajv.compile(
+  readSchema("settings-keybindings-request.schema.json"),
+);
+const telemetryUsageRequestValidator = ajv.compile(
+  readSchema("telemetry-usage-request.schema.json"),
+);
+const doctorRequestValidator = ajv.compile(readSchema("doctor-request.schema.json"));
+const controlledUpdateRestartRequestValidator = ajv.compile(
+  readSchema("controlled-update-restart-request.schema.json"),
+);
+
+const EFFECT_COUNTERS = [
+  "credential_value_reads",
+  "provider_model_requests",
+  "network_operations",
+  "package_manager_operations",
+  "os_process_restart_operations",
+  "external_telemetry_deliveries",
+  "uploads",
+] as const;
+const FORBIDDEN_OPERATION_KEYS = new Set([
+  "api_key", "authorization", "body", "credential", "destination", "path",
+  "prompt", "refresh_token", "text", "token",
+]);
 
 export class ProtocolValidationError extends Error {
   constructor(label: string, errors: readonly ErrorObject[] | null | undefined) {
@@ -77,6 +135,13 @@ export class ProtocolValidationError extends Error {
     const reason = first?.message || "violates Asterion Agent Runtime Protocol v1";
     super(`${label} ${location} ${reason}`);
     this.name = "ProtocolValidationError";
+  }
+}
+
+export class OperationProtocolError extends ProtocolValidationError {
+  constructor(label: string, errors: readonly ErrorObject[] | null | undefined) {
+    super(label, errors);
+    this.name = "OperationProtocolError";
   }
 }
 
@@ -105,6 +170,53 @@ function requireValid<T>(
   return immutableSnapshot(value as T);
 }
 
+function requireOperationValid<T>(
+  label: string,
+  validator: ValidateFunction,
+  value: unknown,
+): T {
+  if (!validator(value)) {
+    throw new OperationProtocolError(label, validator.errors);
+  }
+  return immutableSnapshot(value as T);
+}
+
+function requireNoForbiddenOperationKeys(value: unknown): void {
+  if (value === null || typeof value !== "object") {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const child of value) requireNoForbiddenOperationKeys(child);
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (FORBIDDEN_OPERATION_KEYS.has(key)) {
+      throw new OperationProtocolError("operation value", null);
+    }
+    requireNoForbiddenOperationKeys(child);
+  }
+}
+
+function requireOperationIdentity(value: OperationTransaction): void {
+  const request = value.request;
+  if (
+    request.client_id !== value.client_id ||
+    request.session_id !== value.session_id ||
+    request.generation !== value.generation ||
+    request.authority_revision !== value.authority_revision
+  ) {
+    throw new OperationProtocolError("operation transaction identity", null);
+  }
+}
+
+function requireOperationReceipt(value: OperationReceipt): void {
+  for (const counter of EFFECT_COUNTERS) {
+    if (value.effect_counts[counter] !== 0) {
+      throw new OperationProtocolError("operation receipt effect counts", null);
+    }
+  }
+}
+
 function requireSortedUnique(
   label: string,
   values: readonly string[],
@@ -118,6 +230,30 @@ function requireSortedUnique(
     )
   ) {
     throw new ProtocolValidationError(label, null);
+  }
+}
+
+function isValidClientUtcTimestamp(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?Z$/.exec(value);
+  if (match === null || match[1] === "0000") {
+    return false;
+  }
+  const [, year, month, day, hour, minute, second] = match;
+  const timestamp = new Date(value);
+  return !(
+    Number.isNaN(timestamp.getTime()) ||
+    timestamp.getUTCFullYear() !== Number(year) ||
+    timestamp.getUTCMonth() + 1 !== Number(month) ||
+    timestamp.getUTCDate() !== Number(day) ||
+    timestamp.getUTCHours() !== Number(hour) ||
+    timestamp.getUTCMinutes() !== Number(minute) ||
+    timestamp.getUTCSeconds() !== Number(second)
+  );
+}
+
+function requireClientUtcTimestamp(value: string): void {
+  if (!isValidClientUtcTimestamp(value)) {
+    throw new ProtocolValidationError("client event timestamp", null);
   }
 }
 
@@ -189,6 +325,111 @@ export function validateRuntimeManifest(value: unknown): RuntimeManifest {
   );
   requireSortedUnique("runtime manifest capabilities", manifest.capabilities);
   return manifest;
+}
+
+export function validateOperationRequestDescriptor(
+  value: unknown,
+): OperationRequestDescriptor {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<OperationRequestDescriptor>(
+    "operation request descriptor",
+    operationRequestDescriptorValidator,
+    value,
+  );
+}
+
+export function validateOperationTransaction(value: unknown): OperationTransaction {
+  requireNoForbiddenOperationKeys(value);
+  const transaction = requireOperationValid<OperationTransaction>(
+    "operation transaction",
+    operationTransactionValidator,
+    value,
+  );
+  requireOperationIdentity(transaction);
+  return transaction;
+}
+
+export function validateOperationReceipt(value: unknown): OperationReceipt {
+  requireNoForbiddenOperationKeys(value);
+  const receipt = requireOperationValid<OperationReceipt>(
+    "operation receipt",
+    operationReceiptValidator,
+    value,
+  );
+  requireOperationReceipt(receipt);
+  return receipt;
+}
+
+export function validateAuthRequest(value: unknown): AuthRequest {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<AuthRequest>(
+    "auth request",
+    authRequestValidator,
+    value,
+  );
+}
+
+export function validateModelSelectionRequest(value: unknown): ModelSelectionRequest {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<ModelSelectionRequest>(
+    "model selection request",
+    modelSelectionRequestValidator,
+    value,
+  );
+}
+
+export function validateSettingsKeybindingsRequest(
+  value: unknown,
+): SettingsKeybindingsRequest {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<SettingsKeybindingsRequest>(
+    "settings keybindings request",
+    settingsKeybindingsRequestValidator,
+    value,
+  );
+}
+
+export function validateTelemetryUsageRequest(
+  value: unknown,
+): TelemetryUsageRequest {
+  requireNoForbiddenOperationKeys(value);
+  const request = requireOperationValid<TelemetryUsageRequest>(
+    "telemetry usage request",
+    telemetryUsageRequestValidator,
+    value,
+  );
+  const { aggregate_tokens, application_tokens, child_tokens, controller_tokens } = request.usage;
+  if (
+    aggregate_tokens !== application_tokens + child_tokens + controller_tokens ||
+    (request.source_id !== "application" && application_tokens !== 0) ||
+    (request.source_id !== "child" && child_tokens !== 0) ||
+    (request.source_id !== "controller" && controller_tokens !== 0) ||
+    aggregate_tokens !== request.usage[`${request.source_id}_tokens`]
+  ) {
+    throw new OperationProtocolError("telemetry usage attribution", null);
+  }
+  return request;
+}
+
+export function validateDoctorRequest(value: unknown): DoctorRequest {
+  requireNoForbiddenOperationKeys(value);
+  const request = requireOperationValid<DoctorRequest>(
+    "doctor request",
+    doctorRequestValidator,
+    value,
+  );
+  return request;
+}
+
+export function validateControlledUpdateRestartRequest(
+  value: unknown,
+): ControlledUpdateRestartRequest {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<ControlledUpdateRestartRequest>(
+    "controlled update restart request",
+    controlledUpdateRestartRequestValidator,
+    value,
+  );
 }
 
 export function validateAgentSystemManifest(
@@ -381,6 +622,78 @@ export function validateControlEventStream(
     terminalIndexes[0] !== events.length - 1
   ) {
     throw new ProtocolValidationError("control event stream terminal", null);
+  }
+  return immutableSnapshot(events);
+}
+
+export function validateClientIntent(value: unknown): ClientIntent {
+  const intent = requireValid<ClientIntent>(
+    "client intent",
+    clientIntentValidator,
+    value,
+  );
+  if (intent.type === "export.request") {
+    requireSortedUnique("client export references", intent.payload.reference_ids);
+  }
+  return intent;
+}
+
+export function validateClientEvent(value: unknown): ClientEvent {
+  const event = requireValid<ClientEvent>(
+    "client event",
+    clientEventValidator,
+    value,
+  );
+  if (event.type === "commands.changed") {
+    requireSortedUnique("client commands", event.payload.commands);
+  }
+  requireClientUtcTimestamp(event.emitted_at);
+  return event;
+}
+
+export function validateClientEventStream(
+  value: unknown,
+): readonly ClientEvent[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ProtocolValidationError("client event stream", null);
+  }
+  const events = value.map((event) => validateClientEvent(event));
+  const sessionId = events[0]!.session_id;
+  const generation = events[0]!.generation;
+  const eventIds = new Set<string>();
+  const activeCalls = new Set<string>();
+  const seenCalls = new Set<string>();
+  let terminalSeen = false;
+  for (const [index, event] of events.entries()) {
+    if (
+      event.session_id !== sessionId ||
+      event.generation !== generation ||
+      event.sequence !== index + 1 ||
+      eventIds.has(event.event_id) ||
+      terminalSeen
+    ) {
+      throw new ProtocolValidationError("client event stream sequence", null);
+    }
+    eventIds.add(event.event_id);
+    if (event.type === "tool.started") {
+      if (seenCalls.has(event.payload.call_id)) {
+        throw new ProtocolValidationError("client event stream tool call", null);
+      }
+      activeCalls.add(event.payload.call_id);
+      seenCalls.add(event.payload.call_id);
+    } else if (event.type === "tool.completed") {
+      if (!activeCalls.delete(event.payload.call_id)) {
+        throw new ProtocolValidationError("client event stream tool call", null);
+      }
+    } else if (event.type === "session.terminal") {
+      if (index !== events.length - 1 || activeCalls.size !== 0) {
+        throw new ProtocolValidationError("client event stream terminal", null);
+      }
+      terminalSeen = true;
+    }
+  }
+  if (!terminalSeen) {
+    throw new ProtocolValidationError("client event stream terminal", null);
   }
   return immutableSnapshot(events);
 }

@@ -10,11 +10,14 @@ from pathlib import Path
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import fcntl
 
-from asterion.control.authority import SessionContextDecision
+from asterion.control.authority import OperationDecision, SessionContextDecision
+
+if TYPE_CHECKING:
+    from asterion.operation.protocol import OperationReceipt, OperationTransaction
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.protocol import (
     IDENTIFIER,
@@ -41,12 +44,26 @@ JOURNAL_RECORD_KINDS = frozenset(
         "authority.revised",
         "command.accepted",
         "event.accepted",
+        "client.intent.accepted",
+        "client.observation.accepted",
+        "client.event.accepted",
+        "client.export.receipted",
+        "client.share.receipted",
         "action.decided",
         "action.running",
         "action.receipted",
         "context.command.accepted",
         "context.operation.decided",
         "context.operation.receipted",
+        "operation.transaction.accepted",
+        "operation.admitted",
+        "operation.reserved",
+        "operation.dispatch.started",
+        "operation.handoff.prepared",
+        "operation.handoff.entered",
+        "operation.handoff.fenced",
+        "operation.receipted",
+        "operation.reconciliation.recorded",
         "checkpoint.sealed",
         "fault.projected",
         "harness.proposed",
@@ -103,7 +120,12 @@ class JournalRecord:
             or self.kind not in JOURNAL_RECORD_KINDS
         ):
             raise JournalConflictError("journal record identity is invalid")
-        _validate_record_payload(self.kind, self.payload)
+        try:
+            _validate_record_payload(self.kind, self.payload)
+        except JournalConflictError:
+            raise
+        except (TypeError, ValueError):
+            raise JournalConflictError("journal record payload is invalid") from None
         object.__setattr__(self, "payload", _freeze_mapping(self.payload))
 
     @property
@@ -178,6 +200,98 @@ class JournalRecord:
                 "code": code,
                 "recoverable": recoverable,
                 "evidence_ref": evidence_ref,
+            },
+        )
+
+    @classmethod
+    def client_intent_accepted(cls, intent: object) -> JournalRecord:
+        from asterion.client.protocol import validate_client_intent
+
+        accepted = validate_client_intent(intent)
+        return cls(
+            record_id=f"client-intent:{accepted.intent_id}",
+            kind="client.intent.accepted",
+            payload={"intent": accepted.to_mapping()},
+        )
+
+    @classmethod
+    def client_observation_accepted(
+        cls, observation: Mapping[str, object]
+    ) -> JournalRecord:
+        try:
+            accepted = _canonical_client_observation(observation)
+        except (TypeError, ValueError):
+            raise JournalConflictError(
+                "journal client observation is invalid"
+            ) from None
+        return cls(
+            record_id=f"client-observation:{accepted['observation_id']}",
+            kind="client.observation.accepted",
+            payload={"observation": accepted},
+        )
+
+    @classmethod
+    def client_event_accepted(cls, event: object) -> JournalRecord:
+        from asterion.client.protocol import validate_client_event
+
+        accepted = validate_client_event(event)
+        return cls(
+            record_id=f"client-event:{accepted.event_id}",
+            kind="client.event.accepted",
+            payload={"event": accepted.to_mapping()},
+        )
+
+    @classmethod
+    def client_export_receipted(
+        cls,
+        *,
+        client_id: str,
+        session_id: str,
+        generation: int,
+        artifact: object,
+        visibility: str,
+    ) -> JournalRecord:
+        values = _client_artifact_receipt_values(artifact)
+        return cls(
+            record_id=f"client-export:{values['artifact_id']}",
+            kind="client.export.receipted",
+            payload={
+                "artifact_id": values["artifact_id"],
+                "client_id": client_id,
+                "generation": generation,
+                "media_type": values["media_type"],
+                "sha256": values["sha256"],
+                "size": values["size"],
+                "storage_ref": values["storage_ref"],
+                "session_id": session_id,
+                "visibility": visibility,
+            },
+        )
+
+    @classmethod
+    def client_share_receipted(
+        cls,
+        *,
+        client_id: str,
+        session_id: str,
+        generation: int,
+        artifact: object,
+        share: object,
+    ) -> JournalRecord:
+        artifact_values = _client_artifact_receipt_values(artifact)
+        share_values = _client_share_receipt_values(share)
+        return cls(
+            record_id=f"client-share:{share_values['share_id']}",
+            kind="client.share.receipted",
+            payload={
+                "artifact_id": artifact_values["artifact_id"],
+                "client_id": client_id,
+                "generation": generation,
+                "media_type": artifact_values["media_type"],
+                "session_id": session_id,
+                "sha256": artifact_values["sha256"],
+                "share_id": share_values["share_id"],
+                "share_ref": share_values["share_ref"],
             },
         )
 
@@ -273,6 +387,149 @@ class JournalRecord:
                 "receipt": receipt.to_mapping(),
                 "usage": None if usage is None else _public_usage(usage),
             },
+        )
+
+    @classmethod
+    def operation_transaction_accepted(
+        cls, transaction: OperationTransaction
+    ) -> JournalRecord:
+        from asterion.operation.protocol import OperationTransaction
+
+        if not isinstance(transaction, OperationTransaction):
+            raise JournalConflictError("journal operation transaction is invalid")
+        return cls(
+            record_id=f"operation-transaction:{transaction.operation_id}",
+            kind="operation.transaction.accepted",
+            payload={"transaction": transaction.to_mapping()},
+        )
+
+    @classmethod
+    def operation_admitted(cls, decision: OperationDecision) -> JournalRecord:
+        return cls(
+            record_id=f"operation-decision:{decision.operation_id}",
+            kind="operation.admitted",
+            payload={
+                "operation_id": decision.operation_id,
+                "authority_id": decision.authority_id,
+                "authority_revision": decision.authority_revision,
+                "transaction_digest": decision.transaction_digest,
+                "feature_id": decision.feature_id,
+                "status": decision.status,
+                "reason": decision.reason,
+            },
+        )
+
+    @classmethod
+    def operation_reserved(cls, decision: OperationDecision) -> JournalRecord:
+        return cls(
+            record_id=f"operation-reservation:{decision.operation_id}",
+            kind="operation.reserved",
+            payload={
+                "operation_id": decision.operation_id,
+                "transaction_digest": decision.transaction_digest,
+            },
+        )
+
+    @classmethod
+    def operation_dispatch_started(
+        cls, transaction: OperationTransaction
+    ) -> JournalRecord:
+        from asterion.operation.protocol import OperationTransaction
+
+        if not isinstance(transaction, OperationTransaction):
+            raise JournalConflictError("journal operation transaction is invalid")
+        return cls(
+            record_id=f"operation-dispatch:{transaction.operation_id}",
+            kind="operation.dispatch.started",
+            payload={
+                "operation_id": transaction.operation_id,
+                "transaction_digest": _operation_digest(transaction),
+            },
+        )
+
+    @classmethod
+    def operation_handoff_fenced(
+        cls, transaction: OperationTransaction
+    ) -> JournalRecord:
+        from asterion.operation.protocol import OperationTransaction
+
+        if not isinstance(transaction, OperationTransaction):
+            raise JournalConflictError("journal operation transaction is invalid")
+        return cls(
+            record_id=f"operation-handoff:{transaction.operation_id}",
+            kind="operation.handoff.fenced",
+            payload={
+                "operation_id": transaction.operation_id,
+                "transaction_digest": _operation_digest(transaction),
+            },
+        )
+
+    @classmethod
+    def operation_handoff_prepared(
+        cls, transaction: OperationTransaction, *, handoff_proof_digest: str
+    ) -> JournalRecord:
+        return cls._operation_handoff_proof_record(
+            transaction,
+            kind="operation.handoff.prepared",
+            record_id_prefix="operation-handoff-prepared",
+            handoff_proof_digest=handoff_proof_digest,
+        )
+
+    @classmethod
+    def operation_handoff_entered(
+        cls, transaction: OperationTransaction, *, handoff_proof_digest: str
+    ) -> JournalRecord:
+        return cls._operation_handoff_proof_record(
+            transaction,
+            kind="operation.handoff.entered",
+            record_id_prefix="operation-handoff-entered",
+            handoff_proof_digest=handoff_proof_digest,
+        )
+
+    @classmethod
+    def _operation_handoff_proof_record(
+        cls,
+        transaction: OperationTransaction,
+        *,
+        kind: str,
+        record_id_prefix: str,
+        handoff_proof_digest: str,
+    ) -> JournalRecord:
+        from asterion.operation.protocol import OperationTransaction
+
+        if not isinstance(transaction, OperationTransaction):
+            raise JournalConflictError("journal operation transaction is invalid")
+        _require_digest(handoff_proof_digest, "journal handoff proof digest")
+        return cls(
+            record_id=f"{record_id_prefix}:{transaction.operation_id}",
+            kind=kind,
+            payload={
+                "operation_id": transaction.operation_id,
+                "transaction_digest": _operation_digest(transaction),
+                "handoff_proof_digest": handoff_proof_digest,
+            },
+        )
+
+    @classmethod
+    def operation_receipted(cls, receipt: OperationReceipt) -> JournalRecord:
+        from asterion.operation.protocol import OperationReceipt
+
+        if not isinstance(receipt, OperationReceipt):
+            raise JournalConflictError("journal operation receipt is invalid")
+        return cls(
+            record_id=f"operation-receipt:{receipt.operation_id}:{receipt.status}",
+            kind="operation.receipted",
+            payload={"receipt": receipt.to_mapping()},
+        )
+
+    @classmethod
+    def operation_reconciliation_recorded(
+        cls, *, operation_id: str, attempt: int
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"operation-reconcile:{operation_id}:{attempt}",
+            kind="operation.reconciliation.recorded",
+            payload={"operation_id": operation_id, "attempt": attempt},
         )
 
     @classmethod
@@ -464,6 +721,24 @@ class CanonicalJournal(Protocol):
         """Append one validated event record."""
         ...
 
+    def accept_client_intent(
+        self, intent: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        """Append one body-free client intent before dispatch."""
+        ...
+
+    def accept_client_observation(
+        self, observation: Mapping[str, object], *, expected_position: int | None = None
+    ) -> JournalEntry:
+        """Append one body-free provider observation before projection."""
+        ...
+
+    def accept_client_event(
+        self, event: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        """Append one body-free projected client event."""
+        ...
+
     def accept_session_context_command(
         self,
         command: SessionContextCommand,
@@ -546,6 +821,26 @@ class MemoryCanonicalJournal:
             ),
         )
 
+    def accept_client_intent(
+        self, intent: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(position, JournalRecord.client_intent_accepted(intent))
+
+    def accept_client_observation(
+        self, observation: Mapping[str, object], *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(
+            position, JournalRecord.client_observation_accepted(observation)
+        )
+
+    def accept_client_event(
+        self, event: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(position, JournalRecord.client_event_accepted(event))
+
     def accept_session_context_command(
         self,
         command: SessionContextCommand,
@@ -575,6 +870,9 @@ class MemoryCanonicalJournal:
         field = {
             "command.accepted": "command",
             "event.accepted": "event",
+            "client.intent.accepted": "intent",
+            "client.observation.accepted": "observation",
+            "client.event.accepted": "event",
             "context.command.accepted": "command",
             "context.operation.receipted": "receipt",
         }.get(record.kind)
@@ -780,6 +1078,26 @@ class FileCanonicalJournal:
                 payload={"event": event.to_mapping()},
             ),
         )
+
+    def accept_client_intent(
+        self, intent: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(position, JournalRecord.client_intent_accepted(intent))
+
+    def accept_client_observation(
+        self, observation: Mapping[str, object], *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(
+            position, JournalRecord.client_observation_accepted(observation)
+        )
+
+    def accept_client_event(
+        self, event: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(position, JournalRecord.client_event_accepted(event))
 
     def accept_session_context_command(
         self,
@@ -1171,10 +1489,17 @@ def _validate_session(session_id: str, record: JournalRecord) -> None:
     field = {
         "command.accepted": "command",
         "event.accepted": "event",
+        "client.intent.accepted": "intent",
+        "client.observation.accepted": "observation",
+        "client.event.accepted": "event",
         "checkpoint.sealed": "checkpoint_event",
         "context.command.accepted": "command",
         "context.operation.receipted": "receipt",
     }.get(record.kind)
+    if record.kind in {"client.export.receipted", "client.share.receipted"}:
+        if record.payload.get("session_id") != session_id:
+            raise JournalConflictError("journal record session identity mismatches")
+        return
     if field is None:
         return
     value = record.payload[field]
@@ -1204,6 +1529,78 @@ def _validate_record_payload(kind: str, value: object) -> None:
     if kind == "event.accepted":
         _require_fields(value, {"event"})
         validate_control_event(value["event"])
+        return
+    if kind == "client.intent.accepted":
+        _require_fields(value, {"intent"})
+        from asterion.client.protocol import validate_client_intent
+
+        validate_client_intent(value["intent"])
+        return
+    if kind == "client.observation.accepted":
+        _require_fields(value, {"observation"})
+        _validate_client_observation(value["observation"])
+        return
+    if kind == "client.event.accepted":
+        _require_fields(value, {"event"})
+        from asterion.client.protocol import validate_client_event
+
+        validate_client_event(value["event"])
+        return
+    if kind == "client.export.receipted":
+        _require_fields(
+            value,
+            {
+                "artifact_id",
+                "client_id",
+                "generation",
+                "media_type",
+                "session_id",
+                "sha256",
+                "size",
+                "storage_ref",
+                "visibility",
+            },
+        )
+        _require_opaque_id(value["artifact_id"], "journal client export artifact")
+        _require_opaque_id(value["client_id"], "journal client export client")
+        _require_opaque_id(value["session_id"], "journal client export session")
+        _require_safe_positive_integer(
+            value["generation"], "journal client export generation"
+        )
+        _require_one_media_type(value["media_type"], "journal client export media type")
+        _require_digest(value["sha256"], "journal client export digest")
+        _require_safe_nonnegative_integer(value["size"], "journal client export size")
+        _require_opaque_id(value["storage_ref"], "journal client export storage")
+        if value["visibility"] not in {"private", "public"}:
+            raise JournalConflictError("journal client export visibility is invalid")
+        return
+    if kind == "client.share.receipted":
+        _require_fields(
+            value,
+            {
+                "artifact_id",
+                "client_id",
+                "generation",
+                "media_type",
+                "session_id",
+                "sha256",
+                "share_id",
+                "share_ref",
+            },
+        )
+        for field in (
+            "artifact_id",
+            "client_id",
+            "session_id",
+            "share_id",
+            "share_ref",
+        ):
+            _require_opaque_id(value[field], f"journal client share {field}")
+        _require_safe_positive_integer(
+            value["generation"], "journal client share generation"
+        )
+        _require_one_media_type(value["media_type"], "journal client share media type")
+        _require_digest(value["sha256"], "journal client share digest")
         return
     if kind == "action.decided":
         _require_fields(
@@ -1251,6 +1648,66 @@ def _validate_record_payload(kind: str, value: object) -> None:
         _require_fields(value, {"command"})
         validate_session_context_command(value["command"])
         return
+    if kind == "operation.transaction.accepted":
+        from asterion.operation.protocol import OperationTransaction
+
+        _require_fields(value, {"transaction"})
+        if not isinstance(value["transaction"], Mapping):
+            raise JournalConflictError("journal operation transaction is invalid")
+        OperationTransaction.from_mapping(value["transaction"])
+        return
+    if kind == "operation.admitted":
+        _require_fields(
+            value,
+            {
+                "operation_id",
+                "authority_id",
+                "authority_revision",
+                "transaction_digest",
+                "feature_id",
+                "status",
+                "reason",
+            },
+        )
+        OperationDecision(**value)  # type: ignore[arg-type]
+        return
+    if kind == "operation.reserved":
+        _require_fields(value, {"operation_id", "transaction_digest"})
+        _require_opaque_id(value["operation_id"], "journal operation identity")
+        _require_digest(value["transaction_digest"], "journal operation digest")
+        return
+    if kind == "operation.dispatch.started":
+        _require_fields(value, {"operation_id", "transaction_digest"})
+        _require_opaque_id(value["operation_id"], "journal operation identity")
+        _require_digest(value["transaction_digest"], "journal operation digest")
+        return
+    if kind == "operation.handoff.fenced":
+        _require_fields(value, {"operation_id", "transaction_digest"})
+        _require_opaque_id(value["operation_id"], "journal operation identity")
+        _require_digest(value["transaction_digest"], "journal operation digest")
+        return
+    if kind in {"operation.handoff.prepared", "operation.handoff.entered"}:
+        _require_fields(
+            value,
+            {"operation_id", "transaction_digest", "handoff_proof_digest"},
+        )
+        _require_opaque_id(value["operation_id"], "journal operation identity")
+        _require_digest(value["transaction_digest"], "journal operation digest")
+        _require_digest(value["handoff_proof_digest"], "journal handoff proof digest")
+        return
+    if kind == "operation.receipted":
+        from asterion.operation.protocol import OperationReceipt
+
+        _require_fields(value, {"receipt"})
+        if not isinstance(value["receipt"], Mapping):
+            raise JournalConflictError("journal operation receipt is invalid")
+        OperationReceipt.from_mapping(value["receipt"])
+        return
+    if kind == "operation.reconciliation.recorded":
+        _require_fields(value, {"operation_id", "attempt"})
+        _require_opaque_id(value["operation_id"], "journal operation identity")
+        _require_positive_integer(value["attempt"], "journal reconciliation attempt")
+        return
     if kind == "context.operation.decided":
         _require_fields(
             value,
@@ -1265,9 +1722,7 @@ def _validate_record_payload(kind: str, value: object) -> None:
             },
         )
         _require_opaque_id(value["command_id"], "journal context command")
-        _require_opaque_id(
-            value["idempotency_key"], "journal context idempotency key"
-        )
+        _require_opaque_id(value["idempotency_key"], "journal context idempotency key")
         _require_positive_integer(
             value["authority_revision"], "journal context authority revision"
         )
@@ -1499,6 +1954,110 @@ def _validate_record_payload(kind: str, value: object) -> None:
     raise JournalConflictError("journal record kind is invalid")
 
 
+def _operation_digest(transaction: OperationTransaction) -> str:
+    encoded = json.dumps(
+        _json_value(transaction.to_mapping()),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validate_client_observation(value: object) -> None:
+    _canonical_client_observation(value)
+
+
+def _canonical_client_observation(value: object) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise JournalConflictError("journal client observation is invalid")
+    _require_fields(
+        value,
+        {
+            "observation_id",
+            "session_id",
+            "generation",
+            "source_sequence",
+            "emitted_at",
+            "kind",
+            "payload",
+        },
+    )
+    from asterion.client.protocol import ClientEvent
+
+    event = ClientEvent(
+        protocol="asterion.agent-client/v1",
+        event_id=value["observation_id"],  # type: ignore[arg-type]
+        session_id=value["session_id"],  # type: ignore[arg-type]
+        generation=value["generation"],  # type: ignore[arg-type]
+        sequence=value["source_sequence"],  # type: ignore[arg-type]
+        emitted_at=value["emitted_at"],  # type: ignore[arg-type]
+        type=value["kind"],  # type: ignore[arg-type]
+        payload=value["payload"],  # type: ignore[arg-type]
+    )
+    return MappingProxyType(
+        {
+            "observation_id": event.event_id,
+            "session_id": event.session_id,
+            "generation": event.generation,
+            "source_sequence": event.sequence,
+            "emitted_at": event.emitted_at,
+            "kind": event.type,
+            "payload": event.payload,
+        }
+    )
+
+
+def _client_artifact_receipt_values(value: object) -> Mapping[str, object]:
+    try:
+        values = {
+            "artifact_id": getattr(value, "artifact_id"),
+            "sha256": getattr(value, "sha256"),
+            "media_type": getattr(value, "media_type"),
+            "size": getattr(value, "size"),
+            "storage_ref": getattr(value, "storage_ref"),
+        }
+        _require_opaque_id(values["artifact_id"], "journal client artifact")
+        _require_digest(values["sha256"], "journal client artifact digest")
+        if (
+            not isinstance(values["media_type"], str)
+            or MEDIA_TYPE.fullmatch(values["media_type"]) is None
+        ):
+            raise JournalConflictError("journal client artifact media type is invalid")
+        _require_safe_nonnegative_integer(
+            values["size"], "journal client artifact size"
+        )
+        _require_opaque_id(values["storage_ref"], "journal client artifact storage")
+        return MappingProxyType(values)
+    except (AttributeError, TypeError, ValueError):
+        raise JournalConflictError(
+            "journal client artifact receipt is invalid"
+        ) from None
+
+
+def _client_share_receipt_values(value: object) -> Mapping[str, object]:
+    try:
+        values = {
+            "share_id": getattr(value, "share_id"),
+            "artifact_id": getattr(value, "artifact_id"),
+            "sha256": getattr(value, "sha256"),
+            "media_type": getattr(value, "media_type"),
+            "share_ref": getattr(value, "share_ref"),
+        }
+        _require_opaque_id(values["share_id"], "journal client share")
+        _require_opaque_id(values["artifact_id"], "journal client share artifact")
+        _require_digest(values["sha256"], "journal client share digest")
+        if (
+            not isinstance(values["media_type"], str)
+            or MEDIA_TYPE.fullmatch(values["media_type"]) is None
+        ):
+            raise JournalConflictError("journal client share media type is invalid")
+        _require_opaque_id(values["share_ref"], "journal client share reference")
+        return MappingProxyType(values)
+    except (AttributeError, TypeError, ValueError):
+        raise JournalConflictError("journal client share receipt is invalid") from None
+
+
 def _validate_harness_effect_identity(value: Mapping[str, object]) -> None:
     _validate_harness_scope(value["scope"])
     _require_opaque_id(value["proposal_id"], "journal harness proposal")
@@ -1699,6 +2258,29 @@ def _require_media_types(value: object, label: str) -> None:
 
 def _require_positive_integer(value: object, label: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise JournalConflictError(f"{label} is invalid")
+
+
+def _require_one_media_type(value: object, label: str) -> None:
+    if not isinstance(value, str) or MEDIA_TYPE.fullmatch(value) is None:
+        raise JournalConflictError(f"{label} is invalid")
+
+
+def _require_safe_positive_integer(value: object, label: str) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= 9_007_199_254_740_991
+    ):
+        raise JournalConflictError(f"{label} is invalid")
+
+
+def _require_safe_nonnegative_integer(value: object, label: str) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= 9_007_199_254_740_991
+    ):
         raise JournalConflictError(f"{label} is invalid")
 
 

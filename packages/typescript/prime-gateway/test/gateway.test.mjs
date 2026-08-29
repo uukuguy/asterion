@@ -677,6 +677,7 @@ class FakePrimeSession {
 
 async function fixture({
   checkpointAckFailures = 0,
+  clientObservations = false,
   ecosystemAdapter = undefined,
   failCheckpointEvent = false,
   checkpointRecoveryStatus = "running",
@@ -738,6 +739,7 @@ async function fixture({
     store,
     privateValues,
     privateResults,
+    ...(clientObservations ? { clientObservationValues: privateValues } : {}),
     ...(ecosystemAdapter === undefined ? {} : { ecosystem: ecosystemAdapter }),
     async createSession(goal, bindIdentity) {
       createdGoals.push(goal);
@@ -3097,6 +3099,147 @@ test("gateway rejects checkpoint when the live supervisor identity drifted", asy
     assert.equal(eventTypes(state.store).includes("checkpoint.created"), false);
   } finally {
     await state.cleanup();
+  }
+});
+
+test("gateway persists body-free client observations across reopen and resumes their native sequence", async () => {
+  const state = await fixture({ clientObservations: true });
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    for (const [sequence, content] of [[1, "first private body"], [2, "second private body"]]) {
+      state.session.emit({
+        type: "session_event",
+        activeSessionId: "prime-root-1",
+        event: { type: "message_end", role: "assistant", content },
+        meta: {
+          id: `prime-client-event-${sequence}`,
+          protocol: { name: "prime-agent.daemon", version: 7 },
+          sequence,
+          cursor: { generation: "worker-generation-1", sequence },
+          emittedAt: `2026-08-10T03:30:0${sequence}Z`,
+        },
+      });
+    }
+    await state.gateway.settle();
+    const original = state.gateway.clientObservationsAfterCursor({
+      generation: 1,
+      sequence: 0,
+    });
+    assert.deepEqual(eventTypes(state.store), ["session.created", "session.running"]);
+    assert.equal(original.length, 2);
+    assert.equal(JSON.stringify(original).includes("private body"), false);
+    await state.gateway.close();
+
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    const privateValues = await PrivateValueStore.open(state.root, {
+      continuationRoot: state.sessionRoot,
+    });
+    const restoredSession = new FakePrimeSession(state.session.sessionPath);
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store,
+      privateValues,
+      clientObservationValues: privateValues,
+      async createSession() {
+        throw new Error("must restore");
+      },
+      async restoreSession(_identity, onRecovered) {
+        await onRecovered({
+          transport: recoveryTransport("supervisor-generation-1", "client-observation-recovery"),
+          primeCursor: { generation: "worker-generation-1", sequence: 2 },
+          transcriptSessionId: "transcript-1",
+          supervisorGeneration: "supervisor-generation-1",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("not used");
+      },
+    });
+    assert.deepEqual(
+      reopened.clientObservationsAfterCursor({ generation: 1, sequence: 1 }),
+      original.slice(1),
+    );
+    restoredSession.emit({
+      type: "session_event",
+      activeSessionId: "prime-root-1",
+      event: { type: "message_end", role: "assistant", content: "third private body" },
+      meta: {
+        id: "prime-client-event-3",
+        protocol: { name: "prime-agent.daemon", version: 7 },
+        sequence: 3,
+        cursor: { generation: "worker-generation-1", sequence: 3 },
+        emittedAt: "2026-08-10T03:30:03Z",
+      },
+    });
+    await reopened.settle();
+    const all = reopened.clientObservationsAfterCursor({ generation: 1, sequence: 0 });
+    assert.deepEqual(all.slice(0, 2), original);
+    assert.equal(all[2].source_sequence, 3);
+    assert.equal(all[2].observation_id, "prime-client-1-3");
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway cleans a staged-only client body before reopen can replay it", async () => {
+  const state = await fixture({ clientObservations: true });
+  let reopened;
+  const reference = "private:00000000-0000-4000-8000-000000000099";
+  const body = Buffer.from("SENTINEL_STAGED_ONLY_BODY");
+  try {
+    await state.store.stageClientObservationValue({
+      generation: 1, nativeSequence: 1, reference, kind: "message", mediaType: "text/plain",
+      size: body.byteLength, sha256: createHash("sha256").update(body).digest("hex"),
+    });
+    await state.privateValues.putClientValue("session-1", "message", "text/plain", body, reference);
+    await state.gateway.close();
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1", generation: 1, authorityId: "authority-1", store,
+      privateValues: state.privateValues, clientObservationValues: state.privateValues,
+      restoreExistingSession: false,
+      async createSession() { throw new Error("not used"); },
+      async createCheckpoint() { throw new Error("not used"); },
+    });
+    await assert.rejects(state.privateValues.describeClientValue(reference, "session-1"));
+    assert.deepEqual(store.clientObservations(1), []);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway preserves daemon control mapping with client observations enabled or disabled", async () => {
+  for (const clientObservations of [false, true]) {
+    const state = await fixture({ clientObservations });
+    try {
+      const goalRef = await state.privateValues.putInput("goal");
+      await state.gateway.accept(command("session.create", {
+        system_id: "research.system", system_version: "1.0.0", goal_id: "goal-1", goal_ref: goalRef,
+      }, `command-create-daemon-${clientObservations}`));
+      state.session.emit({ type: "heartbeats_changed" });
+      state.session.emit({ type: "daemon_closing", reason: "shutdown" });
+      await state.gateway.settle();
+      assert.deepEqual(
+        eventTypes(state.store).slice(-2),
+        ["fault.raised", "session.recovery-required"],
+      );
+      assert.deepEqual(state.gateway.clientObservationsAfterCursor({ generation: 1, sequence: 0 }), []);
+    } finally {
+      await state.cleanup();
+    }
   }
 });
 

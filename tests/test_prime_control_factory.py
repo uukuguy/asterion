@@ -10,6 +10,7 @@ import unittest
 from collections.abc import Mapping
 from pathlib import Path
 from unittest import mock
+from typing import cast
 
 from asterion.control.authority import AuthorityEnvelope
 from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFactoryError
@@ -65,6 +66,14 @@ class FakeResolver:
 
 
 class FakeProcess:
+    def __init__(self, options: PrimeSidecarLaunchOptions) -> None:
+        self.options = options
+
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
+        raise AssertionError(envelope)
+
+
+class NoRequestProcess:
     def __init__(self, options: PrimeSidecarLaunchOptions) -> None:
         self.options = options
 
@@ -290,6 +299,8 @@ class TestPrimeControlFactory(unittest.TestCase):
         )
         self.assertIn("session.context-v1", manifest.capabilities)
         self.assertIn("ecosystem.portfolio", manifest.capabilities)
+        self.assertIn("client-observations-v1", manifest.capabilities)
+        self.assertIn("operations-v1", manifest.capabilities)
 
     def test_factory_requires_ecosystem_services_before_process_creation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -481,9 +492,12 @@ class TestPrimeControlFactory(unittest.TestCase):
                 seen.append(options)
                 return FakeProcess(options)
 
-            client = build_prime_control_plane_client(
-                context,
-                process_factory=process_factory,
+            client = cast(
+                PrimeControlPlaneClient,
+                build_prime_control_plane_client(
+                    context,
+                    process_factory=process_factory,
+                ),
             )
 
             self.assertIsInstance(client, PrimeControlPlaneClient)
@@ -493,6 +507,19 @@ class TestPrimeControlFactory(unittest.TestCase):
             self.assertFalse(seen[0].private_descriptor["probeReady"])
             self.assertEqual(seen[0].private_descriptor["rlmMaxChildren"], 0)
             self.assertNotIn("SENTINEL_SECRET", repr(seen[0]))
+
+    def test_factory_rejects_operations_v1_sidecar_without_request(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_paths(root)
+
+            with self.assertRaisesRegex(
+                ControlPlaneFactoryError, "^Prime control plane is unavailable$"
+            ):
+                build_prime_control_plane_client(
+                    make_context(root),
+                    process_factory=NoRequestProcess,
+                )
 
     def test_process_preflight_uses_direct_argv_no_shell_and_fixed_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -564,9 +591,12 @@ class TestPrimeEcosystemFactoryIntegration(unittest.IsolatedAsyncioTestCase):
                 processes.append(process)
                 return process
 
-            client = build_prime_control_plane_client(
-                context,
-                process_factory=process_factory,
+            client = cast(
+                PrimeControlPlaneClient,
+                build_prime_control_plane_client(
+                    context,
+                    process_factory=process_factory,
+                ),
             )
             portfolio = build_ecosystem_portfolio(
                 portfolio_id="portfolio-1",
@@ -634,9 +664,12 @@ class TestPrimeEcosystemFactoryIntegration(unittest.IsolatedAsyncioTestCase):
                 processes.append(process)
                 return process
 
-            client = build_prime_control_plane_client(
-                context,
-                process_factory=process_factory,
+            client = cast(
+                PrimeControlPlaneClient,
+                build_prime_control_plane_client(
+                    context,
+                    process_factory=process_factory,
+                ),
             )
             portfolio = build_ecosystem_portfolio(
                 portfolio_id="portfolio-1",

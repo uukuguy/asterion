@@ -21,6 +21,7 @@ PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1"
 PRIME_DAEMON_LIFECYCLE_PROTOCOL = "asterion.prime-daemon-lifecycle/v1"
 _MAX_FRAME_BYTES = 1024 * 1024
 _MAX_PRIVATE_ATTACHMENT_FRAME_BYTES = 12 * 1024 * 1024
+_MAX_SAFE_INTEGER = 9_007_199_254_740_991
 _PRIVATE_PROCESS_UMASK = 0o077
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _LIFECYCLE_TOKEN = re.compile(r"^[0-9a-f]{64}$")
@@ -607,14 +608,84 @@ class PrimeSidecarProcess:
 async def _event_iterator(
     process: PrimeSidecarProcess, envelope: Mapping[str, object]
 ) -> AsyncIterator[Mapping[str, object]]:
-    response = await process.request(envelope)
-    events = response.get("events")
-    if not isinstance(events, list):
-        raise PrimeSidecarProcessError()
-    for event in events:
-        if not isinstance(event, Mapping):
+    request = dict(envelope)
+    if request.get("type") != "client_observations":
+        response = await process.request(request)
+        values = response.get("events")
+        if not isinstance(values, list):
             raise PrimeSidecarProcessError()
-        yield event
+        for event in values:
+            if not isinstance(event, Mapping):
+                raise PrimeSidecarProcessError()
+            yield event
+        return
+
+    cursor = request.get("cursor")
+    if cursor is None:
+        generation: int | None = None
+        sequence = 0
+    elif (
+        isinstance(cursor, Mapping)
+        and set(cursor) == {"generation", "sequence"}
+        and _safe_integer(cursor.get("generation"), minimum=1)
+        and _safe_integer(cursor.get("sequence"), minimum=0)
+    ):
+        generation = int(cursor["generation"])
+        sequence = int(cursor["sequence"])
+    else:
+        raise PrimeSidecarProcessError()
+
+    while True:
+        response = await process.request(request)
+        values = response.get("observations")
+        if not isinstance(values, list):
+            raise PrimeSidecarProcessError()
+
+        page_generation = generation
+        page_sequence = sequence
+        for event in values:
+            event_generation = event.get("generation") if isinstance(event, Mapping) else None
+            event_sequence = event.get("source_sequence") if isinstance(event, Mapping) else None
+            if (
+                not isinstance(event, Mapping)
+                or not _safe_integer(event_generation, minimum=1)
+                or not _safe_integer(event_sequence, minimum=1)
+                or not isinstance(event_generation, int)
+                or not isinstance(event_sequence, int)
+                or event_sequence != page_sequence + 1
+                or (page_generation is not None and event_generation != page_generation)
+            ):
+                raise PrimeSidecarProcessError()
+            page_generation = event_generation
+            page_sequence = event_sequence
+
+        next_cursor = response.get("next_cursor")
+        if next_cursor is None:
+            generation = page_generation
+            sequence = page_sequence
+            for event in values:
+                if not isinstance(event, Mapping):
+                    raise PrimeSidecarProcessError()
+                yield event
+            return
+        if (
+            not isinstance(next_cursor, Mapping)
+            or set(next_cursor) != {"generation", "sequence"}
+            or not _safe_integer(next_cursor.get("generation"), minimum=1)
+            or not _safe_integer(next_cursor.get("sequence"), minimum=1)
+            or not values
+            or page_generation is None
+            or next_cursor["generation"] != page_generation
+            or next_cursor["sequence"] != page_sequence
+        ):
+            raise PrimeSidecarProcessError()
+        generation = page_generation
+        sequence = page_sequence
+        request["cursor"] = dict(next_cursor)
+        for event in values:
+            if not isinstance(event, Mapping):
+                raise PrimeSidecarProcessError()
+            yield event
 
 
 def _positive_finite(value: object) -> bool:
@@ -623,6 +694,14 @@ def _positive_finite(value: object) -> bool:
         and isinstance(value, (int, float))
         and math.isfinite(float(value))
         and float(value) > 0
+    )
+
+
+def _safe_integer(value: object, *, minimum: int) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, int)
+        and minimum <= value <= _MAX_SAFE_INTEGER
     )
 
 
@@ -737,8 +816,13 @@ def _validate_response(
     expected_response_type = {
         "authority.update": "authority.accepted",
         "command.accept": "command.accepted",
+        "client_value_read": "client_value",
         "ecosystem_activate": "ecosystem_receipt",
+        "operation.cancel": "operation.receipt",
+        "operation.execute": "operation.receipt",
+        "operation.reconcile": "operation.receipt",
         "events.stream": "events.batch",
+        "client_observations": "client_observations.batch",
         "private.read": "private.value",
         "rlm.binding.read": "rlm.binding.value",
         "rlm.message.binding.read": "rlm.message.binding.value",
@@ -754,7 +838,10 @@ def _validate_response(
         not in {
             "authority.accepted",
             "command.accepted",
+            "client_value",
+            "client_observations.batch",
             "ecosystem_receipt",
+            "operation.receipt",
             "events.batch",
             "private.value",
             "rlm.binding.value",
@@ -768,6 +855,20 @@ def _validate_response(
     expected = {"protocol", "id", "type"}
     if response.get("type") == "events.batch":
         expected = expected | {"events"}
+    if response.get("type") == "client_observations.batch":
+        expected = expected | {"observations", "next_cursor"}
+        if not isinstance(response.get("observations"), list):
+            raise PrimeSidecarProcessError()
+        next_cursor = response.get("next_cursor")
+        if next_cursor is not None and not isinstance(next_cursor, Mapping):
+            raise PrimeSidecarProcessError()
+    if response.get("type") == "client_value":
+        expected = expected | {"descriptor", "body_base64"}
+        if (
+            not isinstance(response.get("descriptor"), Mapping)
+            or not isinstance(response.get("body_base64"), str)
+        ):
+            raise PrimeSidecarProcessError()
     if response.get("type") == "rlm.lifecycle.batch":
         expected = expected | {"lifecycle"}
         if not isinstance(response.get("lifecycle"), list):
@@ -785,6 +886,7 @@ def _validate_response(
             raise PrimeSidecarProcessError()
     if response.get("type") in {
         "ecosystem_receipt",
+        "operation.receipt",
         "session-context.receipt",
     }:
         expected = expected | {"receipt"}

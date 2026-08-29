@@ -17,6 +17,7 @@ import type {
   GatewayDurableStore,
   GatewayContextBinding,
   GatewayContextModelBaseline,
+  GatewayClientObservation,
   PrimeIdentityBinding,
 } from "./durable-store.js";
 import {
@@ -36,6 +37,11 @@ import type {
   PrivateBoundAttachment,
   PrivateValueRef,
 } from "./private-store.js";
+import type { PrivateValueStore } from "./private-store.js";
+import {
+  PrimeClientObservationMapper,
+} from "./client-observation.js";
+import type { PrimeClientObservation } from "./client-observation.js";
 import type {
   PrimeCheckpointCreated,
   PrimeCheckpointRecovery,
@@ -84,6 +90,38 @@ type CheckpointPayload = Extract<
   ControlEvent,
   { readonly type: "checkpoint.created" }
 >["payload"];
+
+/** Exact, body-free receipt contract emitted by the locked Prime client module. */
+export const PRIME_CLIENT_RECEIPT_FORMAT = "asterion.prime-client-receipt/v1";
+export const PRIME_CLIENT_ARTIFACT_LOCK_DIGEST =
+  "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d";
+export const PRIME_CLIENT_MODULE_LOCK_DIGEST =
+  "577f5ea261d515223d578673f7431fd12d141fb5160c1611315ab015892485a8";
+export const PRIME_CLIENT_BUNDLE_DIGEST =
+  "5ada8386371b8b68bf2bf34b892fdee1b93ad936dfa906110901b14141b63e86";
+
+/** Digests for the repository resource that gates real Prime operations. */
+export const PRIME_OPERATIONAL_MODULE_LOCK_DIGEST =
+  "51afa7c04e8dff80f72e6928df919a81e0c617d146549b34b54696cfb771cf9a";
+export const PRIME_OPERATIONAL_BUNDLE_DIGEST =
+  "6326ee8a6433f52c78210297c6bf499ab561d171ce1caaf51a107216392be041";
+
+export interface PrimeClientReceipt {
+  readonly artifact_lock_digest: string;
+  readonly credential_reads: 0;
+  readonly feature_count: number;
+  readonly feature_ids: readonly string[];
+  readonly module_digest: string;
+  readonly module_lock_digest: string;
+  readonly package: "core" | "protocols" | "interactive" | "export-share";
+  readonly provider_operations: 0;
+  readonly public_export_private_reads: 0;
+  readonly retained_processes: 0;
+  readonly scenario_count: number;
+  readonly scenario_ids: readonly string[];
+  readonly source_commit: "a18809e00ea30638584d87b3afea7285a9d7296c";
+  readonly unauthorized_uploads: 0;
+}
 
 export interface PrimeGatewaySession {
   readonly activeSessionId: string;
@@ -247,6 +285,10 @@ export interface PrimeGatewayOptions {
   readonly store: GatewayDurableStore;
   readonly privateValues: PrimeGatewayPrivateInputs;
   readonly privateResults?: PrimeGatewayPrivateResults;
+  readonly clientObservationValues?: Pick<
+    PrivateValueStore,
+    "putClientValue" | "describeClientValue" | "deleteClientValue"
+  >;
   readonly ecosystem?: Pick<PrimeEcosystemAdapter, "activate">;
   readonly createSession: (
     goal: string,
@@ -385,6 +427,8 @@ export class PrimeGateway {
   private lastAppendedSequence: number;
   private session: PrimeGatewaySession | undefined;
   private mapper: PrimeEventMapper | undefined;
+  private clientObservationMapper: PrimeClientObservationMapper | undefined;
+  private readonly clientObservations: PrimeClientObservation[] = [];
   private unsubscribe: (() => void) | undefined;
   /** Monotonic source identity for callbacks from a daemon transport. */
   private transportEpoch = 0;
@@ -406,6 +450,13 @@ export class PrimeGateway {
       .filter((event) => event.generation === options.generation);
     this.nextSequence = (events.at(-1)?.sequence ?? 0) + 1;
     this.lastAppendedSequence = this.nextSequence - 1;
+    try {
+      this.clientObservations.push(
+        ...options.store.clientObservations(options.generation) as readonly PrimeClientObservation[],
+      );
+    } catch {
+      throw new PrimeGatewayError();
+    }
     for (const event of events) {
       if (event.type === "session.created") {
         this.goalId = event.payload.goal_id;
@@ -523,6 +574,8 @@ export class PrimeGateway {
       throw new PrimeGatewayError();
     }
     const gateway = new PrimeGateway(options);
+    await gateway.cleanupStagedClientObservationValues();
+    await gateway.restoreClientObservationPrefix();
     await gateway.restoreActionCommands();
     if (options.restoreExistingSession !== false) {
       await gateway.restoreExistingSession();
@@ -562,6 +615,15 @@ export class PrimeGateway {
       generation: this.options.generation,
       status: this.sessionStatus ?? "uninitialized",
     });
+  }
+
+  clientObservationsAfterCursor(cursor: { readonly generation: number; readonly sequence: number }): readonly PrimeClientObservation[] {
+    this.assertOpen();
+    if (
+      !Number.isSafeInteger(cursor.generation) || cursor.generation !== this.options.generation ||
+      !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 0 || cursor.sequence > this.clientObservations.length
+    ) throw new PrimeGatewayError();
+    return Object.freeze(this.clientObservations.slice(cursor.sequence));
   }
 
   async activateEcosystem(value: unknown): Promise<GatewayEcosystemEffectResult> {
@@ -857,6 +919,7 @@ export class PrimeGateway {
     }
     await this.settle();
     this.closed = true;
+    await this.clientObservationMapper?.close();
     this.unsubscribe?.();
     this.unsubscribe = undefined;
   }
@@ -2304,6 +2367,9 @@ export class PrimeGateway {
         ? {}
         : { primeCursor: this.options.store.snapshot().primeCursor }),
     });
+    this.clientObservationMapper = this.newClientObservationMapper(
+      session.activeSessionId,
+    );
     await this.append(this.event("session.created", {
       goal_id: this.goalId,
       authority_id: this.options.authorityId,
@@ -2546,6 +2612,105 @@ export class PrimeGateway {
     return mapper;
   }
 
+  private newClientObservationMapper(
+    activeSessionId: string,
+  ): PrimeClientObservationMapper | undefined {
+    const values = this.options.clientObservationValues;
+    if (values === undefined) {
+      return undefined;
+    }
+    const progress = this.options.store.clientObservationProgress(
+      this.options.generation,
+    );
+    return new PrimeClientObservationMapper({
+      sessionId: this.options.sessionId,
+      generation: this.options.generation,
+      activeSessionId,
+      privateValues: values,
+      initialNativeSequence: progress.nativeSequence,
+      initialObservationSequence: progress.observationSequence,
+      commit: async (nativeSequence, observation, stage) => {
+        await this.options.store.recordClientObservationProgress(
+          this.options.generation,
+          nativeSequence,
+          observation,
+          stage ?? null,
+        );
+      },
+      stage: async (stage) => {
+        await this.options.store.stageClientObservationValue(stage);
+      },
+      now: this.now,
+    });
+  }
+
+  private async cleanupStagedClientObservationValues(): Promise<void> {
+    const stages = this.options.store.stagedClientObservationValues(
+      this.options.generation,
+    );
+    if (stages.length === 0) return;
+    const values = this.options.clientObservationValues;
+    if (values === undefined) throw new PrimeGatewayError();
+    try {
+      for (const stage of stages) {
+        await values.deleteClientValue(stage.reference, this.options.sessionId);
+      }
+    } catch {
+      throw new PrimeGatewayError();
+    }
+  }
+
+  private async restoreClientObservationPrefix(): Promise<void> {
+    if (this.clientObservations.length === 0) {
+      return;
+    }
+    const values = this.options.clientObservationValues;
+    if (values === undefined) {
+      throw new PrimeGatewayError();
+    }
+    try {
+      for (const observation of this.clientObservations) {
+        const payload = observation.payload;
+        const verify = async (
+          reference: unknown,
+          kind: string,
+          mediaType: string,
+          digest?: unknown,
+          size?: unknown,
+        ): Promise<void> => {
+          if (typeof reference !== "string") {
+            throw new PrimeGatewayError();
+          }
+          const descriptor = await values.describeClientValue(
+            reference,
+            this.options.sessionId,
+          );
+          if (
+            descriptor.kind !== kind ||
+            descriptor.mediaType !== mediaType ||
+            (digest !== undefined && descriptor.sha256 !== digest) ||
+            (size !== undefined && descriptor.size !== size)
+          ) {
+            throw new PrimeGatewayError();
+          }
+        };
+        if (observation.kind === "message.available") {
+          await verify(payload.content_ref, "message", String(payload.media_type), payload.sha256, payload.size);
+        } else if (observation.kind === "tool.started") {
+          await verify(payload.arguments_ref, "tool-arguments", "application/json", payload.sha256, payload.size);
+        } else if (observation.kind === "tool.completed") {
+          await verify(payload.result_ref, "tool-result", String(payload.media_type), payload.sha256, payload.size);
+        } else if (observation.kind === "artifact.available") {
+          await verify(payload.artifact_ref, "artifact", String(payload.media_type), payload.sha256, payload.size);
+        } else if (observation.kind === "extension-ui.requested") {
+          await verify(payload.payload_ref, "extension-ui", "application/json");
+        }
+      }
+    } catch {
+      throw new PrimeGatewayError();
+    }
+  }
+
   private async restoreExistingSession(): Promise<void> {
     if (this.sessionStatus === undefined || this.sessionStatus === "terminal") {
       return;
@@ -2744,6 +2909,9 @@ export class PrimeGateway {
       this.session = session;
       await this.recoverPreparedContextOperations();
       this.mapper = this.recoveredMapper(recovered.primeCursor);
+      this.clientObservationMapper = this.newClientObservationMapper(
+        session.activeSessionId,
+      );
       const restoredStatus = previousStatus === "paused"
         ? "paused"
         : recovered.sessionStatus;
@@ -3071,6 +3239,15 @@ export class PrimeGateway {
   private async handlePrimeOutbound(outbound: PrimeDaemonOutbound): Promise<void> {
     if (this.mapper === undefined || this.terminal) {
       return;
+    }
+    const observations = this.clientObservationMapper === undefined
+      ? []
+      : await this.clientObservationMapper.map(outbound);
+    for (const observation of observations) {
+      if (observation.source_sequence !== this.clientObservations.length + 1) {
+        throw new PrimeGatewayError();
+      }
+      this.clientObservations.push(observation);
     }
     const events = this.mapper.map(outbound);
     await Promise.all(events.map((event) => this.append(event)));

@@ -1,6 +1,8 @@
 import type {
   AgentSystemManifest,
   AgentRuntimeClient,
+  ClientEvent,
+  ClientIntent,
   AssemblyManifest,
   BenchmarkSuiteManifest,
   CapabilityPackageManifest,
@@ -10,12 +12,176 @@ import type {
   ControlCommand,
   ControlEvent,
   ControlPlaneManifest,
+  OperationReceipt,
+  OperationRequestDescriptor,
+  OperationTransaction,
+  AuthRequest,
+  ModelSelectionRequest,
+  SettingsKeybindingsRequest,
+  TelemetryUsageRequest,
+  DoctorRequest,
+  ControlledUpdateRestartRequest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
   SessionContextCommand,
   SessionContextReceipt,
 } from "../src/index.js";
+
+export const fixtureAuthRequest: AuthRequest = {
+  action: "auth.store",
+  credential_ref: "credential-ref-1",
+  subject_digest: "a".repeat(64),
+  precedence: 4,
+};
+
+export const fixtureModelSelectionRequest: ModelSelectionRequest = {
+  catalog_id: "fixture-catalog-1",
+  model_id: "fixture.model.small",
+  thinking_level: "low",
+  service_tier: "standard",
+  transport_id: "fixture.transport-1",
+};
+
+export const fixtureSettingsKeybindingsRequest: SettingsKeybindingsRequest = {
+  type: "setting",
+  name: "theme",
+  scope: "global",
+  value: "dark",
+};
+
+export const fixtureTelemetryUsageRequest: TelemetryUsageRequest = {
+  source_id: "application",
+  event_name: "usage.reported",
+  event_count: 1,
+  result_sha256: "b".repeat(64),
+  usage: {
+    aggregate_tokens: 12,
+    application_tokens: 12,
+    child_tokens: 0,
+    controller_tokens: 0,
+    cost_micros: 7,
+  },
+};
+
+export const fixtureDoctorRequest: DoctorRequest = {};
+
+export const fixtureControlledUpdateRestartRequest: ControlledUpdateRestartRequest = {
+  current_artifact: {
+    artifact_id: "artifact-current-1",
+    artifact_sha256: "a".repeat(64),
+    daemon_id: "prime-daemon-1",
+    protocol_compatibility_id: "asterion.agent-runtime.v1",
+  },
+  next_artifact: {
+    artifact_id: "artifact-next-1",
+    artifact_sha256: "b".repeat(64),
+    daemon_id: "prime-daemon-1",
+    protocol_compatibility_id: "asterion.agent-runtime.v1",
+  },
+  checkpoint_ref: "checkpoint-1",
+};
+
+export const invalidControlledUpdateRestartPath: ControlledUpdateRestartRequest = {
+  ...fixtureControlledUpdateRestartRequest,
+  // @ts-expect-error Controlled restart requests cannot disclose a path.
+  path: "/SENTINEL_PRIVATE_PATH",
+};
+
+// @ts-expect-error Doctor requests are compile-time closed.
+export const invalidDoctorFixRequest: DoctorRequest = { fix: "repair" };
+// @ts-expect-error Doctor requests cannot select probes.
+export const invalidDoctorCheckIdsRequest: DoctorRequest = { check_ids: [] };
+
+export const fixtureOperationRequestDescriptor: OperationRequestDescriptor = {
+  protocol: "asterion.operation/v1",
+  request_kind: "operation.auth-request",
+  request_ref: "request-1",
+  request_sha256: "a".repeat(64),
+  media_type: "application/json",
+  byte_count: 1,
+  purpose: "operation.auth.read",
+  client_id: "client-1",
+  session_id: "session-1",
+  generation: 1,
+  authority_revision: 1,
+};
+
+export const fixtureOperationTransaction: OperationTransaction = {
+  protocol: "asterion.operation/v1",
+  operation_id: "operation-1",
+  request: fixtureOperationRequestDescriptor,
+  session_id: "session-1",
+  client_id: "client-1",
+  generation: 1,
+  authority_revision: 1,
+  authority_id: "authority-1",
+  idempotency_key: "idempotency-1",
+  feature_id: "operation.auth",
+  requested_at: "2026-08-10T15:00:00Z",
+};
+
+export const fixtureOperationReceipt: OperationReceipt = {
+  protocol: "asterion.operation/v1",
+  receipt_id: "receipt-1",
+  operation_id: "operation-1",
+  request_ref: "request-1",
+  request_sha256: "a".repeat(64),
+  purpose: "operation.auth.read",
+  session_id: "session-1",
+  client_id: "client-1",
+  generation: 1,
+  authority_revision: 1,
+  authority_id: "authority-1",
+  idempotency_key: "idempotency-1",
+  feature_id: "operation.auth",
+  status: "succeeded",
+  reason_code: "operation-succeeded",
+  receipt_ref: "receipt-public-1",
+  reconciliation_ref: null,
+  effect_counts: {
+    credential_value_reads: 0,
+    provider_model_requests: 0,
+    network_operations: 0,
+    package_manager_operations: 0,
+    os_process_restart_operations: 0,
+    external_telemetry_deliveries: 0,
+    uploads: 0,
+  },
+  completed_at: "2026-08-10T15:00:01Z",
+};
+
+export const fixtureClientIntent: ClientIntent = {
+  protocol: "asterion.agent-client/v1",
+  intent_id: "intent-1",
+  client_id: "client-1",
+  session_id: "session-1",
+  authority_revision: 1,
+  type: "input.submit",
+  payload: {
+    content_ref: "private-input-1",
+    delivery: "direct",
+    input_id: "input-1",
+  },
+};
+
+export const fixtureClientEvent: ClientEvent = {
+  protocol: "asterion.agent-client/v1",
+  event_id: "event-1",
+  session_id: "session-1",
+  generation: 1,
+  sequence: 1,
+  emitted_at: "2026-08-10T15:00:00Z",
+  type: "message.available",
+  payload: {
+    content_ref: "private-message-1",
+    media_type: "text/plain",
+    message_id: "message-1",
+    role: "assistant",
+    sha256: "a".repeat(64),
+    size: 13,
+  },
+};
 
 export const fixtureSessionContextCommand: SessionContextCommand = {
   protocol: "asterion.session-context/v1",
@@ -176,6 +342,32 @@ export const fixtureCapabilityLock: CapabilitySourceLock = {
       source_id: "example.source",
     },
   ],
+};
+
+export const fixtureOperationReceiptEvent: ClientEvent = {
+  protocol: "asterion.agent-client/v1",
+  event_id: "event-operation-1",
+  session_id: "session-1",
+  generation: 1,
+  sequence: 1,
+  emitted_at: "2026-08-10T15:00:00Z",
+  type: "operation.receipted",
+  payload: {
+    effect_counts: {
+      credential_value_reads: 0,
+      external_telemetry_deliveries: 0,
+      network_operations: 0,
+      os_process_restart_operations: 0,
+      package_manager_operations: 0,
+      provider_model_requests: 0,
+      uploads: 0,
+    },
+    feature_id: "operation.auth",
+    operation_id: "operation-1",
+    reason_code: "operation-succeeded",
+    receipt_ref: "receipt-public-1",
+    status: "succeeded",
+  },
 };
 
 export class FixtureClient implements AgentRuntimeClient {

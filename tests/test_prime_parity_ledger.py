@@ -122,14 +122,29 @@ EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
     "harness.scope-isolation",
     "harness.skill-descriptions",
     "harness.subagent-specifications",
+    "interface.acp",
+    "interface.cli-interactive",
+    "interface.export-share",
+    "interface.headless-print",
+    "interface.json-stream",
+    "interface.rpc",
+    "interface.sdk",
+    "interface.tui-commands",
+    "interface.tui-extension-ui",
+    "operation.auth",
+    "operation.controlled-update-restart",
     "operation.detach-attach-replay",
+    "operation.doctor",
     "operation.goals",
     "operation.heartbeat-agent",
     "operation.heartbeat-user",
+    "operation.model-selection",
     "operation.orphan-cleanup",
     "operation.resident-workers",
     "operation.restart-update-recovery",
     "operation.schedule-once-cron",
+    "operation.settings-keybindings",
+    "operation.telemetry-usage",
     "operation.worker-residency-eviction",
     "rlm.cancellation-teardown",
     "rlm.environment",
@@ -465,6 +480,57 @@ class TestPrimeParityLedger(unittest.TestCase):
 
         self.assertEqual(statuses, {"missing"})
 
+    def test_native_ecosystem_results_remain_missing(self) -> None:
+        ledger = validate_parity_ledger(_fixture("prime-agent-0.7.1.json"))
+        features = ledger["features"]
+        assert isinstance(features, tuple)
+        statuses = {
+            result["status"]
+            for feature in features
+            if isinstance(feature, Mapping)
+            and feature["domain_id"] == "ecosystem.capabilities"
+            for result in feature["provider_results"]
+            if isinstance(result, Mapping)
+            and result["provider_id"] == "asterion.native"
+        }
+
+        self.assertEqual(statuses, {"missing"})
+
+    def test_interface_operations_promotion_leaves_native_rows_missing(self) -> None:
+        ledger = validate_parity_ledger(_fixture("prime-agent-0.7.1.json"))
+        features = ledger["features"]
+        assert isinstance(features, tuple)
+        for feature in features:
+            if not isinstance(feature, Mapping):
+                continue
+            feature_id = str(feature["feature_id"])
+            if not feature_id.startswith(("interface.", "operation.")):
+                continue
+            results = {
+                str(result["provider_id"]): result
+                for result in feature["provider_results"]
+                if isinstance(result, Mapping)
+            }
+            if feature_id.startswith("interface."):
+                with self.subTest(feature_id=feature_id, provider="native"):
+                    self.assertEqual(results["asterion.native"]["status"], "missing")
+                with self.subTest(feature_id=feature_id, provider="prime"):
+                    self.assertEqual(
+                        results["asterion.prime-gateway"]["status"],
+                        "provider-free-pass",
+                    )
+            if (
+                feature["domain_id"] == "interfaces.operations"
+                and feature_id.startswith("operation.")
+            ):
+                with self.subTest(feature_id=feature_id, provider="native"):
+                    self.assertEqual(results["asterion.native"]["status"], "missing")
+                with self.subTest(feature_id=feature_id, provider="prime"):
+                    self.assertEqual(
+                        results["asterion.prime-gateway"]["status"],
+                        "provider-free-pass",
+                    )
+
     def test_exhaustive_prime_inventory_is_exact_closed_and_honest(self) -> None:
         source = _fixture("prime-agent-0.7.1.json")
         ledger = validate_parity_ledger(source)
@@ -545,6 +611,17 @@ class TestPrimeParityLedger(unittest.TestCase):
             tuple(prime_features_by_status["external-limited"]),
             EXPECTED_EXTERNAL_LIMITED_PRIME_FEATURE_IDS,
         )
+        self.assertEqual(
+            tuple(
+                sorted(
+                    EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS
+                    + EXPECTED_BOUNDED_PRIME_FEATURE_IDS
+                )
+            ),
+            EXPECTED_MANDATORY_FEATURE_IDS,
+        )
+        self.assertEqual(EXPECTED_EXTERNAL_LIMITED_PRIME_FEATURE_IDS, ())
+        self.assertEqual(EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS, ())
 
         index = json.loads(
             (FIXTURES / "feature-index.json").read_text(encoding="utf-8")

@@ -12,21 +12,33 @@ import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from types import MappingProxyType
+
+from asterion.control.providers.prime.operational_parity_testing import (
+    PRIME_OPERATION_FEATURES,
+    build_prime_operational_observations,
+)
 
 if __package__:
     from tools.setup_prime_agent import (
         PrimeArtifactLock,
         PrimeSetupError,
+        OperationalHarnessError,
         load_prime_artifact_lock,
+        _resolve_operational_node,
         resolve_prime_ecosystem_module,
+        verify_operational_locks,
         verify_prime_checkout,
     )
 else:
     from setup_prime_agent import (
         PrimeArtifactLock,
         PrimeSetupError,
+        OperationalHarnessError,
         load_prime_artifact_lock,
+        _resolve_operational_node,
         resolve_prime_ecosystem_module,
+        verify_operational_locks,
         verify_prime_checkout,
     )
 
@@ -114,18 +126,32 @@ with tempfile.TemporaryDirectory() as temporary:
 """
 
 WHEEL_PROTOCOL_RESOURCE_SMOKE = r"""
+import hashlib
 import json
+import subprocess
 from importlib import resources
 from pathlib import Path
+from types import MappingProxyType
 
 root = Path(str(resources.files('asterion')))
 schema_paths = (
+    'asterion/schemas/agent-client/v1/intent.schema.json',
+    'asterion/schemas/agent-client/v1/event.schema.json',
     'asterion/schemas/agent-system/v1/agent-system.schema.json',
     'asterion/schemas/control-plane/v1/control-plane-manifest.schema.json',
     'asterion/schemas/agent-control/v1/command.schema.json',
     'asterion/schemas/agent-control/v1/event.schema.json',
     'asterion/schemas/session-context/v1/command.schema.json',
     'asterion/schemas/session-context/v1/receipt.schema.json',
+    'asterion/schemas/operation/v1/auth-request.schema.json',
+    'asterion/schemas/operation/v1/model-selection-request.schema.json',
+    'asterion/schemas/operation/v1/settings-keybindings-request.schema.json',
+    'asterion/schemas/operation/v1/telemetry-usage-request.schema.json',
+    'asterion/schemas/operation/v1/doctor-request.schema.json',
+    'asterion/schemas/operation/v1/controlled-update-restart-request.schema.json',
+    'asterion/schemas/operation/v1/operation-request-descriptor.schema.json',
+    'asterion/schemas/operation/v1/operation-transaction.schema.json',
+    'asterion/schemas/operation/v1/operation-receipt.schema.json',
 )
 for name in schema_paths:
     path = root.parent / name
@@ -137,6 +163,41 @@ prime_lock = json.loads(
 )
 assert prime_lock['format'] == 'asterion.prime-artifact-lock/v1'
 assert len(prime_lock['source_commit']) == 40
+client_lock = json.loads(
+    (prime_root / 'prime-client-module-lock.json').read_text(encoding='utf-8')
+)
+assert client_lock['format'] == 'asterion.prime-client-module-lock/v1'
+assert client_lock['source_commit'] == prime_lock['source_commit']
+assert (prime_root / 'prime-client-module.mjs').is_file()
+external_prime_root = (Path.cwd() / '3th-party/prime-agent').resolve()
+module_path = (prime_root / 'prime-client-module.mjs').resolve()
+frame = {
+    'artifactLockDigest': hashlib.sha256(
+        (prime_root / 'prime-artifact-lock.json').read_bytes()
+    ).hexdigest(),
+    'format': 'asterion.prime-client-frame/v1',
+    'moduleLockDigest': hashlib.sha256(
+        (prime_root / 'prime-client-module-lock.json').read_bytes()
+    ).hexdigest(),
+    'package': 'core',
+    'primeRoot': str(external_prime_root),
+    'sourceCommit': prime_lock['source_commit'],
+}
+module_smoke = (
+    "import {pathToFileURL} from 'node:url';"
+    f"const module = await import(pathToFileURL({str(module_path)!r}).href);"
+    f"const receipt = await module.runClientPackage(Object.freeze({json.dumps(frame)}));"
+    "if (receipt.package !== 'core' || receipt.providerOperations !== 0 || "
+    "receipt.credentialReads !== 0 || receipt.networkRequests !== 0 || "
+    "receipt.retainedProcesses !== 0 || receipt.privateReads !== 0 || "
+    "receipt.unauthorizedUploads !== 0 || receipt.stdoutWrites !== 0 || "
+    "receipt.scenarioEvidence.length !== 11) process.exit(1);"
+)
+module_result = subprocess.run(
+    ('node', '--input-type=module', '--eval', module_smoke),
+    cwd='/', capture_output=True, text=True, check=False,
+)
+assert module_result.returncode == 0
 assert (prime_root / 'control-plane.json').is_file()
 assert (prime_root / 'skills/asterion-control/SKILL.md').is_file()
 assert (prime_root / 'skills/asterion-control/pyproject.toml').is_file()
@@ -250,6 +311,77 @@ assert json.loads(template_descriptor.read_text()).get('protocol') == (
 )
 """
 
+WHEEL_OPERATIONAL_RESOURCE_SMOKE = r"""
+import json
+import os
+import subprocess
+from importlib import resources
+from pathlib import Path
+from types import MappingProxyType
+
+from asterion.control.providers.prime.operational_parity_testing import (
+    PRIME_OPERATION_FEATURES,
+    build_prime_operational_observations,
+)
+from tools.check_promotion import _closed_prime_subprocess_environment
+from tools.check_promotion import _operational_temporary_root
+
+source_root = os.environ.get('ASTERION_OPERATIONAL_PRIME_SOURCE_ROOT')
+assert source_root
+external_prime_root = Path(source_root).resolve(strict=True)
+assert not external_prime_root.is_relative_to(Path.cwd().resolve())
+root = Path(str(resources.files('asterion')))
+resource_root = root / 'control/providers/prime/resources'
+environment = _closed_prime_subprocess_environment(
+    temporary_root=_operational_temporary_root(resource_root, external_prime_root)
+)
+required_resources = (
+    'prime-operational-harness.mjs',
+    'prime-operational-module-lock.json',
+    'prime-operational-module.mjs',
+    'prime-settings-keybindings-request.schema.json',
+    'prime-settings-keybindings-validator.mjs',
+)
+for name in required_resources:
+    assert (resource_root / name).is_file(), name
+receipts = {}
+for package in sorted(PRIME_OPERATION_FEATURES):
+    completed = subprocess.run(
+        (
+            'node',
+            str(resource_root / 'prime-operational-harness.mjs'),
+            '--resource-root',
+            str(resource_root),
+            '--source-root',
+            str(external_prime_root),
+            '--package',
+            package,
+        ),
+        cwd='/',
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=900,
+        check=False,
+    )
+    assert completed.returncode == 0
+    assert str(external_prime_root) not in completed.stdout + completed.stderr
+    assert str(resource_root) not in completed.stdout + completed.stderr
+    receipts[package] = json.loads(completed.stdout)
+observations = build_prime_operational_observations(
+    MappingProxyType(receipts)
+)
+assert len(observations) == 6
+assert {observation.source_commit for observation in observations} == {
+    'a18809e00ea30638584d87b3afea7285a9d7296c'
+}
+assert all(observation.provider_operations == 0 for observation in observations)
+assert all(
+    all(value == 0 for value in observation.effect_counts.values())
+    for observation in observations
+)
+"""
+
 ROOT_EXCLUDED_NAMES = frozenset(
     {
         "3th-party",
@@ -329,7 +461,17 @@ FORBIDDEN = (
 DCI_PARENT_PATTERN = re.compile(r"\.\./src/dci(?=$|[/\s`'\"\)])")
 LOCAL_SDD_ARTIFACTS = (".superpowers", "sdd")
 PRIME_SOURCE_ENV = "ASTERION_PRIME_SOURCE_ROOT"
+OPERATIONAL_PRIME_SOURCE_ENV = "ASTERION_OPERATIONAL_PRIME_SOURCE_ROOT"
 DEFAULT_PRIME_SOURCE = Path("3th-party/prime-agent")
+OPERATIONAL_PRIME_SOURCE = Path("external-prime/prime-agent")
+PRIME_CLOSED_SYSTEM_PATHS = (
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+)
 PRIME_PREPARE_COMMANDS = (
     ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
     ("npm", "--prefix", "packages/tui", "run", "build"),
@@ -343,16 +485,95 @@ class PromotionError(RuntimeError):
     pass
 
 
+def _closed_prime_subprocess_environment(
+    workspace: Path | None = None,
+    *,
+    temporary_root: Path | None = None,
+) -> dict[str, str]:
+    node = _resolve_operational_node()
+    path_entries = dict.fromkeys(
+        (str(node.parent), *PRIME_CLOSED_SYSTEM_PATHS)
+    )
+    environment = {
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "NO_COLOR": "1",
+        "NPM_CONFIG_AUDIT": "false",
+        "NPM_CONFIG_FUND": "false",
+        "NPM_CONFIG_USERCONFIG": os.devnull,
+        "PATH": os.pathsep.join(path_entries),
+    }
+    if workspace is not None:
+        private_root = workspace / ".asterion-operational-env"
+        home = private_root / "home"
+        temporary = private_root / "tmp"
+        npm_cache = private_root / "npm-cache"
+        npm_global_config = private_root / "npm-globalconfig"
+        npm_user_config = private_root / "npm-userconfig"
+        for path in (home, temporary, npm_cache):
+            path.mkdir(parents=True, exist_ok=True)
+            path.chmod(0o700)
+        for path in (npm_global_config, npm_user_config):
+            path.touch(exist_ok=True)
+            path.chmod(0o600)
+        environment["HOME"] = str(home)
+        environment["NPM_CONFIG_CACHE"] = str(npm_cache)
+        environment["NPM_CONFIG_GLOBALCONFIG"] = str(npm_global_config)
+        environment["NPM_CONFIG_USERCONFIG"] = str(npm_user_config)
+        if temporary_root is None:
+            temporary_root = temporary
+    if temporary_root is not None:
+        environment["TMPDIR"] = str(temporary_root)
+    return environment
+
+
+def _operational_temporary_root(
+    resource_root: Path, external_prime_root: Path
+) -> Path:
+    try:
+        common = Path(
+            os.path.commonpath(
+                (
+                    str(resource_root.resolve(strict=True)),
+                    str(external_prime_root.resolve(strict=True)),
+                )
+            )
+        )
+        if common == common.parent or not common.is_dir() or common.is_symlink():
+            raise OSError
+        return common
+    except (OSError, RuntimeError, ValueError):
+        raise PromotionError("installed Prime operational evidence is invalid") from None
+
+
 def _default_runner(
     command: tuple[str, ...], cwd: Path
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
+    for name in (
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PYTHONUSERBASE",
+        "UV_NO_SYNC",
+        "UV_PROJECT_ENVIRONMENT",
+        "VIRTUAL_ENV",
+    ):
+        environment.pop(name, None)
     environment["CARGO_REGISTRIES_CRATES_IO_PROTOCOL"] = "sparse"
     environment["CARGO_HOME"] = str(cwd.parent / "cargo-home")
     environment.pop(PRIME_SOURCE_ENV, None)
+    environment.pop(OPERATIONAL_PRIME_SOURCE_ENV, None)
     isolated_prime = cwd / DEFAULT_PRIME_SOURCE
     if isolated_prime.is_dir() and not isolated_prime.is_symlink():
         environment[PRIME_SOURCE_ENV] = str(isolated_prime.resolve())
+    operational_prime = cwd.parent / OPERATIONAL_PRIME_SOURCE
+    if operational_prime.is_dir() and not operational_prime.is_symlink():
+        environment[OPERATIONAL_PRIME_SOURCE_ENV] = str(
+            operational_prime.resolve()
+        )
     return subprocess.run(
         command,
         cwd=cwd,
@@ -451,6 +672,14 @@ def _run(
     except OSError as error:
         raise PromotionError(f"promotion command could not start: {normalized[0]}") from error
     if completed.returncode != 0:
+        if (
+            len(normalized) == 3
+            and normalized[1] == "-c"
+            and normalized[2] == WHEEL_OPERATIONAL_RESOURCE_SMOKE
+        ):
+            raise PromotionError(
+                "promotion command failed: installed Prime operational evidence is invalid"
+            )
         tail = _bounded_tail(completed)
         message = f"promotion command failed: {shlex.join(normalized)}"
         if tail:
@@ -505,6 +734,28 @@ def _run_prime_binding_command(command: tuple[str, ...], cwd: Path) -> None:
         for key in ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "PATH", "TMPDIR")
         if (value := os.environ.get(key)) is not None
     }
+    node = _resolve_operational_node()
+    environment["PATH"] = f"{node.parent}:{environment.get('PATH', '')}"
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise PromotionError("external Prime checkout could not be created") from None
+    if completed.returncode != 0:
+        raise PromotionError("external Prime checkout could not be created")
+
+
+def _run_prime_operational_prepare_command(
+    command: tuple[str, ...], cwd: Path
+) -> None:
+    environment = _closed_prime_subprocess_environment(cwd.parent)
     try:
         completed = subprocess.run(
             command,
@@ -544,9 +795,132 @@ def _prepare_external_prime_checkout(
     )
     for command in PRIME_PREPARE_COMMANDS:
         _run_prime_binding_command(command, target)
+    _ignore_generated_prime_checkout_paths(target)
 
 
-def _bind_external_prime_source(copy_root: Path, source_root: Path) -> None:
+def _ignore_generated_prime_checkout_paths(target: Path) -> None:
+    try:
+        exclude = target / ".git/info/exclude"
+        if not exclude.parent.is_dir():
+            return
+        with exclude.open("a", encoding="utf-8") as handle:
+            handle.write("\n/node_modules/\n")
+    except OSError:
+        raise PromotionError("external Prime checkout could not be created") from None
+
+
+def _materialize_operational_dependency_tree(root: Path) -> None:
+    """Build the sealed sibling dependency mount expected by the operation lock."""
+
+    source = root / "node_modules"
+    mount = root.parent / "node_modules"
+    target = root.parent / "sealed-node-modules"
+    workspace_targets = {
+        "@earendil-works/pi-agent-core": root / "packages/agent",
+        "@earendil-works/pi-ai": root / "packages/ai",
+        "@earendil-works/pi-coding-agent": root / "packages/coding-agent",
+        "@earendil-works/pi-tui": root / "packages/tui",
+    }
+
+    try:
+        if not source.is_dir() or source.is_symlink():
+            raise OSError
+        for candidate in (mount, target):
+            if candidate.exists() or candidate.is_symlink():
+                if candidate.is_dir() and not candidate.is_symlink():
+                    shutil.rmtree(candidate)
+                else:
+                    candidate.unlink()
+
+        def clone_tree(origin: Path, destination: Path) -> None:
+            destination.mkdir()
+            for child in sorted(origin.iterdir(), key=lambda item: item.name):
+                if not child.name or "/" in child.name or "\\" in child.name:
+                    raise OSError
+                relative = (
+                    child.relative_to(source).as_posix()
+                    if child.is_relative_to(source)
+                    else ""
+                )
+                if relative == ".bin":
+                    continue
+                copied = destination / child.name
+                if child.is_symlink():
+                    resolved = child.resolve(strict=True)
+                    if relative in workspace_targets:
+                        clone_tree(workspace_targets[relative], copied)
+                    elif resolved.is_relative_to(source):
+                        copied.symlink_to(os.readlink(child))
+                elif child.is_dir():
+                    clone_tree(child, copied)
+                elif child.is_file():
+                    os.link(child, copied)
+                else:
+                    raise OSError
+
+        clone_tree(source, target)
+        mount.symlink_to(target, target_is_directory=True)
+    except (OSError, RuntimeError):
+        raise PromotionError(
+            "external Prime operational dependency mount could not be created"
+        ) from None
+
+
+def _prepare_external_operational_prime_checkout(
+    prime_source: Path,
+    target: Path,
+    source_commit: str,
+    resource_root: Path,
+) -> None:
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        environment = _closed_prime_subprocess_environment(target.parent)
+        clone = subprocess.run(
+            (
+                "git",
+                "clone",
+                "--no-hardlinks",
+                "--no-checkout",
+                str(prime_source),
+                str(target),
+            ),
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        checkout = subprocess.run(
+            ("git", "checkout", "--detach", source_commit),
+            cwd=target,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if clone.returncode != 0 or checkout.returncode != 0:
+            raise OSError
+    except (OSError, subprocess.SubprocessError):
+        raise PromotionError("external Prime checkout could not be created") from None
+    for command in PRIME_PREPARE_COMMANDS:
+        _run_prime_operational_prepare_command(command, target)
+    _ignore_generated_prime_checkout_paths(target)
+    _materialize_operational_dependency_tree(target)
+    try:
+        verify_operational_locks(target, resource_root)
+    except (OperationalHarnessError, OSError, RuntimeError):
+        raise PromotionError(
+            "external Prime operational source binding could not be created"
+        ) from None
+
+
+def _bind_external_prime_source(
+    copy_root: Path,
+    source_root: Path,
+    *,
+    operational_workspace: Path | None = None,
+) -> None:
     prime_source = _external_prime_source_root(source_root)
     if prime_source is None:
         return
@@ -568,8 +942,129 @@ def _bind_external_prime_source(copy_root: Path, source_root: Path) -> None:
             artifact_lock_path=artifact_lock_path,
             bundle_path=resource_root / "prime-ecosystem-module.mjs",
         )
+        operational_lock_path = resource_root / "prime-operational-module-lock.json"
+        if operational_lock_path.is_file():
+            _prepare_external_operational_prime_checkout(
+                prime_source,
+                (operational_workspace or copy_root.parent) / OPERATIONAL_PRIME_SOURCE,
+                lock.source_commit,
+                resource_root,
+            )
     except (OSError, RuntimeError, PrimeSetupError):
         raise PromotionError("external Prime source binding could not be created") from None
+
+
+def _package_resource_root() -> Path:
+    try:
+        from importlib import resources
+
+        root = Path(
+            str(
+                resources.files("asterion").joinpath(
+                    "control/providers/prime/resources"
+                )
+            )
+        )
+        if not root.is_dir() or root.is_symlink():
+            raise OSError
+        return root.resolve(strict=True)
+    except (ImportError, OSError, RuntimeError):
+        raise PromotionError("installed Prime operational resources are unavailable") from None
+
+
+def _operational_harness_command(
+    *,
+    resource_root: Path,
+    external_prime_root: Path,
+    package: str,
+) -> tuple[str, ...]:
+    return (
+        str(_resolve_operational_node()),
+        str(resource_root / "prime-operational-harness.mjs"),
+        "--resource-root",
+        str(resource_root),
+        "--source-root",
+        str(external_prime_root),
+        "--package",
+        package,
+    )
+
+
+def _load_operational_package_receipt(
+    *,
+    resource_root: Path,
+    external_prime_root: Path,
+    package: str,
+) -> dict[str, object]:
+    try:
+        completed = subprocess.run(
+            _operational_harness_command(
+                resource_root=resource_root,
+                external_prime_root=external_prime_root,
+                package=package,
+            ),
+            cwd="/",
+            env=_closed_prime_subprocess_environment(
+                temporary_root=_operational_temporary_root(
+                    resource_root, external_prime_root
+                )
+            ),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise PromotionError("installed Prime operational evidence is invalid") from None
+    if completed.returncode != 0:
+        raise PromotionError("installed Prime operational evidence is invalid")
+    try:
+        value = json.loads(completed.stdout)
+    except (json.JSONDecodeError, TypeError):
+        raise PromotionError("installed Prime operational evidence is invalid") from None
+    if type(value) is not dict:
+        raise PromotionError("installed Prime operational evidence is invalid")
+    return value
+
+
+def _promotion_report(*, external_prime_root: Path) -> dict[str, object]:
+    resource_root = _package_resource_root()
+    try:
+        root = external_prime_root.resolve(strict=True)
+        verify_operational_locks(root, resource_root)
+        receipts = {
+            package: _load_operational_package_receipt(
+                resource_root=resource_root,
+                external_prime_root=root,
+                package=package,
+            )
+            for package in sorted(PRIME_OPERATION_FEATURES)
+        }
+        observations = build_prime_operational_observations(
+            MappingProxyType(receipts)
+        )
+        source_commits = {observation.source_commit for observation in observations}
+        if len(source_commits) != 1:
+            raise ValueError
+        first = observations[0]
+        return {
+            "built_anchor_digests": dict(first.built_anchor_digests),
+            "effect_counts": dict(first.effect_counts),
+            "external_prime_root": True,
+            "node_runtime": first.node_runtime,
+            "package_count": len(observations),
+            "source_anchor_digests": dict(first.source_anchor_digests),
+            "source_commit": first.source_commit,
+        }
+    except (
+        IndexError,
+        OperationalHarnessError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ):
+        raise PromotionError("installed Prime operational evidence is invalid") from None
 
 
 def _assert_acceptance(stdout: str) -> None:
@@ -703,6 +1198,7 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
         ("uv", "pip", "install", "--python", str(python), str(wheels[0])),
         (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
         (str(python), "-c", WHEEL_PROTOCOL_RESOURCE_SMOKE),
+        (str(python), "-c", WHEEL_OPERATIONAL_RESOURCE_SMOKE),
         (str(asterion), "list"),
         (
             str(asterion),
@@ -786,10 +1282,15 @@ def run_promotion(
     if not source.is_dir():
         raise PromotionError("standalone source root is unavailable")
     with tempfile.TemporaryDirectory(prefix="asterion-promotion-") as temporary:
-        workspace = Path(temporary).resolve()
+        raw_workspace = Path(temporary)
+        workspace = raw_workspace.resolve()
         copy_root = workspace / "project"
         _copy_project(source, copy_root)
-        _bind_external_prime_source(copy_root, source)
+        _bind_external_prime_source(
+            copy_root,
+            source,
+            operational_workspace=raw_workspace,
+        )
         _audit_copy(copy_root)
         command_count = (
             _run_quick(copy_root, runner)

@@ -818,6 +818,170 @@ test("durable store reopens identity cursor and safe event suffix", async () => 
   }
 });
 
+test("durable store reopens only a contiguous canonical client observation prefix", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    const observation = (sequence) => ({
+      observation_id: `prime-client-1-${sequence}`,
+      active_session_id: "session-1",
+      generation: 1,
+      source_sequence: sequence,
+      emitted_at: `2026-08-10T03:00:0${sequence}.000Z`,
+      kind: "message.available",
+      payload: {
+        content_ref: `private:00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
+        media_type: "text/plain",
+        message_id: `message-${sequence}`,
+        role: "assistant",
+        sha256: "a".repeat(64),
+        size: sequence,
+      },
+    });
+    const stage = async (sequence) => {
+      const value = observation(sequence);
+      const descriptor = {
+        generation: 1, nativeSequence: sequence,
+        reference: value.payload.content_ref, kind: "message", mediaType: "text/plain",
+        size: value.payload.size, sha256: value.payload.sha256,
+      };
+      await store.stageClientObservationValue(descriptor);
+      return descriptor;
+    };
+    const first = await stage(1);
+    await store.recordClientObservationProgress(1, 1, observation(1), first);
+    const second = await stage(2);
+    await store.recordClientObservationProgress(1, 2, observation(2), second);
+    await store.recordClientObservationProgress(1, 2, observation(2), second);
+    await assert.rejects(
+      store.recordClientObservationProgress(1, 4, observation(3)),
+    );
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.clientObservations(1), [observation(1), observation(2)]);
+    assert.deepEqual(reopened.clientObservationProgress(1), {
+      nativeSequence: 2,
+      observationSequence: 2,
+    });
+    assert.equal(JSON.stringify(reopened.clientObservations(1)).includes("SENTINEL"), false);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable client observations reject non-closed public payloads before storage", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const base = {
+    observation_id: "prime-client-1-1",
+    active_session_id: "session-1",
+    generation: 1,
+    source_sequence: 1,
+    emitted_at: "2026-08-10T03:00:01.000Z",
+  };
+  try {
+    for (const payload of [
+      { commands: ["SENTINEL_BODY"], revision: 1 },
+      { commands: ["beta", "alpha"], revision: 1 },
+      { commands: ["alpha", "alpha"], revision: 1 },
+    ]) {
+      const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+      await assert.rejects(store.recordClientObservationProgress(1, 1, {
+        ...base, kind: "commands.changed", payload,
+      }));
+    }
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await assert.rejects(store.recordClientObservationProgress(1, 1, {
+      ...base,
+      kind: "tool.started",
+      payload: {
+        arguments_ref: "private:00000000-0000-4000-8000-000000000001",
+        call_id: "call-1",
+        name: "SENTINEL_BODY",
+        sha256: "a".repeat(64),
+        size: 0,
+      },
+    }));
+    await assert.rejects(store.recordClientObservationProgress(1, 1, {
+      ...base,
+      kind: "extension-ui.requested",
+      payload: {
+        deadline_ms: 1,
+        method: "SENTINEL_BODY",
+        payload_ref: "private:00000000-0000-4000-8000-000000000001",
+        request_id: "request-1",
+      },
+    }));
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable progress binds its staged private reference exactly", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.stageClientObservationValue({
+      generation: 1, nativeSequence: 1,
+      reference: "private:00000000-0000-4000-8000-000000000001",
+      kind: "message", mediaType: "text/plain", size: 1, sha256: "a".repeat(64),
+    });
+    await assert.rejects(store.recordClientObservationProgress(1, 1, {
+      observation_id: "prime-client-1-1", active_session_id: "session-1",
+      generation: 1, source_sequence: 1, emitted_at: "2026-08-10T03:00:01.000Z",
+      kind: "message.available",
+      payload: {
+        content_ref: "private:00000000-0000-4000-8000-000000000002",
+        media_type: "text/plain", message_id: "message-1", role: "assistant",
+        sha256: "a".repeat(64), size: 1,
+      },
+    }));
+    assert.equal(store.stagedClientObservationValues(1).length, 1);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable extension progress requires the authoritative staged digest and size", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const staged = {
+    generation: 1, nativeSequence: 1,
+    reference: "private:00000000-0000-4000-8000-000000000001",
+    kind: "extension-ui", mediaType: "application/json", size: 7, sha256: "a".repeat(64),
+  };
+  const observation = {
+    observation_id: "prime-client-1-1", active_session_id: "session-1", generation: 1,
+    source_sequence: 1, emitted_at: "2026-08-10T03:00:01.000Z", kind: "extension-ui.requested",
+    payload: { deadline_ms: 1, method: "extension-ui", payload_ref: staged.reference, request_id: "request-1" },
+  };
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.stageClientObservationValue(staged);
+    await assert.rejects(store.recordClientObservationProgress(1, 1, observation, {
+      ...staged, size: 8, sha256: "b".repeat(64),
+    }));
+    await assert.rejects(store.recordClientObservationProgress(1, 1, observation, {
+      ...staged, size: 8,
+    }));
+    assert.equal(store.stagedClientObservationValues(1).length, 1);
+    await store.recordClientObservationProgress(1, 1, observation, staged);
+    const records = (await readdir(join(fixtureRoot.root, "public", "records"))).sort();
+    const path = join(fixtureRoot.root, "public", "records", records.at(-1));
+    const forged = JSON.parse(await readFile(path, "utf8"));
+    forged.payload.staged_size = 8;
+    forged.payload_digest = sha256Hex(canonicalJsonBytes({
+      kind: forged.kind, record_id: forged.record_id, payload: forged.payload,
+    }));
+    forged.digest = sha256Hex(canonicalJsonBytes({
+      format: forged.format, position: forged.position, previous_digest: forged.previous_digest,
+      kind: forged.kind, record_id: forged.record_id, payload: forged.payload,
+      payload_digest: forged.payload_digest,
+    }));
+    await writeFile(path, Buffer.concat([canonicalJsonBytes(forged), Buffer.from("\n")]), { mode: 0o600 });
+    await assert.rejects(GatewayDurableStore.open(fixtureRoot.root, "session-1"));
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("durable store replays events by generation and sequence across mixed records", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   try {

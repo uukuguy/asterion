@@ -15,6 +15,8 @@ export const AGENT_SYSTEM_PROTOCOL = "asterion.agent-system/v1" as const;
 export const CONTROL_PLANE_PROTOCOL = "asterion.control-plane/v1" as const;
 export const AGENT_CONTROL_PROTOCOL = "asterion.agent-control/v1" as const;
 export const SESSION_CONTEXT_PROTOCOL = "asterion.session-context/v1" as const;
+export const AGENT_CLIENT_PROTOCOL = "asterion.agent-client/v1" as const;
+export const OPERATION_PROTOCOL = "asterion.operation/v1" as const;
 
 export type ProtocolVersion = typeof RUNTIME_PROTOCOL_VERSION;
 export type CapabilityProtocolVersion = typeof CAPABILITY_PROTOCOL_VERSION;
@@ -32,6 +34,298 @@ export type AgentSystemProtocolVersion = typeof AGENT_SYSTEM_PROTOCOL;
 export type ControlPlaneProtocolVersion = typeof CONTROL_PLANE_PROTOCOL;
 export type AgentControlProtocolVersion = typeof AGENT_CONTROL_PROTOCOL;
 export type SessionContextProtocolVersion = typeof SESSION_CONTEXT_PROTOCOL;
+export type AgentClientProtocolVersion = typeof AGENT_CLIENT_PROTOCOL;
+export type OperationProtocolVersion = typeof OPERATION_PROTOCOL;
+
+export type OperationFeatureId =
+  | "operation.auth"
+  | "operation.controlled-update-restart"
+  | "operation.doctor"
+  | "operation.model-selection"
+  | "operation.settings-keybindings"
+  | "operation.telemetry-usage";
+
+export interface OperationRequestDescriptor {
+  readonly protocol: OperationProtocolVersion;
+  readonly request_kind: string;
+  readonly request_ref: string;
+  readonly request_sha256: string;
+  readonly media_type: string;
+  readonly byte_count: number;
+  readonly purpose: string;
+  readonly client_id: string;
+  readonly session_id: string;
+  readonly generation: number;
+  readonly authority_revision: number;
+}
+
+export interface OperationTransaction {
+  readonly protocol: OperationProtocolVersion;
+  readonly operation_id: string;
+  readonly request: OperationRequestDescriptor;
+  readonly session_id: string;
+  readonly client_id: string;
+  readonly generation: number;
+  readonly authority_revision: number;
+  readonly authority_id: string;
+  readonly idempotency_key: string;
+  readonly feature_id: OperationFeatureId;
+  readonly requested_at: string;
+}
+
+export interface OperationEffectCounts {
+  readonly credential_value_reads: number;
+  readonly provider_model_requests: number;
+  readonly network_operations: number;
+  readonly package_manager_operations: number;
+  readonly os_process_restart_operations: number;
+  readonly external_telemetry_deliveries: number;
+  readonly uploads: number;
+}
+
+export interface OperationReceipt {
+  readonly protocol: OperationProtocolVersion;
+  readonly receipt_id: string;
+  readonly operation_id: string;
+  readonly request_ref: string;
+  readonly request_sha256: string;
+  readonly purpose: string;
+  readonly session_id: string;
+  readonly client_id: string;
+  readonly generation: number;
+  readonly authority_revision: number;
+  readonly authority_id: string;
+  readonly idempotency_key: string;
+  readonly feature_id: OperationFeatureId;
+  readonly status: "succeeded" | "rejected" | "failed" | "cancelled" | "uncertain";
+  readonly reason_code: string;
+  readonly receipt_ref: string;
+  readonly reconciliation_ref: string | null;
+  readonly effect_counts: OperationEffectCounts;
+  readonly completed_at: string;
+}
+
+export type AuthRequest =
+  | { readonly action: "auth.status" }
+  | {
+      readonly action: "auth.store";
+      readonly credential_ref: string;
+      readonly subject_digest: string;
+      readonly precedence: number;
+    }
+  | { readonly action: "auth.clear"; readonly credential_ref: string }
+  | {
+      readonly action: "auth.refresh";
+      readonly refresh_ref: string;
+      readonly subject_digest: string;
+      readonly precedence: number;
+    };
+
+export interface ModelSelectionRequest {
+  readonly catalog_id: string;
+  readonly model_id: string;
+  readonly thinking_level: string;
+  readonly service_tier: string;
+  readonly transport_id: string;
+}
+
+export type SettingsKeybindingsRequest =
+  | {
+      readonly type: "setting";
+      readonly name: "theme";
+      readonly scope: "global";
+      readonly value: "dark" | "light" | "system";
+    }
+  | {
+      readonly type: "setting";
+      readonly name: "theme";
+      readonly scope: "project";
+      readonly value: "dark" | "light" | "system";
+      readonly project_id: string;
+    }
+  | {
+      readonly type: "setting";
+      readonly name: "telemetry.enabled";
+      readonly scope: "global";
+      readonly value: boolean;
+    }
+  | {
+      readonly type: "setting";
+      readonly name: "telemetry.enabled";
+      readonly scope: "project";
+      readonly value: boolean;
+      readonly project_id: string;
+    }
+  | {
+      readonly type: "keybinding";
+      readonly name: "app.session.new" | "app.input.clear" | "app.interrupt";
+      readonly scope: "global";
+      readonly value: string;
+    }
+  | {
+      readonly type: "keybinding";
+      readonly name: "app.session.new" | "app.input.clear" | "app.interrupt";
+      readonly scope: "project";
+      readonly value: string;
+      readonly project_id: string;
+    };
+
+export interface TelemetryUsageSnapshot {
+  readonly aggregate_tokens: number;
+  readonly application_tokens: number;
+  readonly child_tokens: number;
+  readonly controller_tokens: number;
+  readonly cost_micros: number;
+}
+
+export interface TelemetryUsageRequest {
+  readonly source_id: "application" | "child" | "controller";
+  readonly event_name: "usage.reported";
+  readonly event_count: number;
+  readonly result_sha256: string;
+  readonly usage: TelemetryUsageSnapshot;
+}
+
+export type DoctorRequest = Readonly<Record<string, never>>;
+
+export interface ArtifactIdentity {
+  readonly artifact_id: string;
+  readonly artifact_sha256: string;
+  readonly daemon_id: string;
+  readonly protocol_compatibility_id: string;
+}
+
+export interface ControlledUpdateRestartRequest {
+  readonly current_artifact: ArtifactIdentity;
+  readonly next_artifact: ArtifactIdentity;
+  readonly checkpoint_ref: string;
+}
+
+export interface ClientCursor {
+  readonly generation: number;
+  readonly sequence: number;
+}
+
+export type ClientIntentType =
+  | "command.invoke"
+  | "export.request"
+  | "extension-ui.respond"
+  | "input.submit"
+  | "session.attach"
+  | "session.cancel"
+  | "session.create"
+  | "session.detach"
+  | "session.pause"
+  | "session.resume"
+  | "share.request";
+
+export interface ClientIntentBase<T extends string, P> {
+  readonly protocol: AgentClientProtocolVersion;
+  readonly intent_id: string;
+  readonly client_id: string;
+  readonly session_id: string;
+  readonly authority_revision: number;
+  readonly type: T;
+  readonly payload: P;
+}
+
+export type ClientIntent =
+  | ClientIntentBase<
+      "command.invoke",
+      {
+        readonly arguments_ref: string;
+        readonly command_name: string;
+        readonly command_revision: number;
+      }
+    >
+  | ClientIntentBase<
+      "export.request",
+      {
+        readonly destination_ref: string;
+        readonly expires_at_ms: number;
+        readonly export_id: string;
+        readonly max_bytes: number;
+        readonly media_type: string;
+        readonly reference_ids: readonly string[];
+        readonly visibility: "private" | "public";
+      }
+    >
+  | ClientIntentBase<
+      "extension-ui.respond",
+      {
+        readonly cancelled: boolean;
+        readonly request_id: string;
+        readonly response_ref: string;
+      }
+    >
+  | ClientIntentBase<
+      "input.submit",
+      {
+        readonly content_ref: string;
+        readonly delivery: "direct" | "steer" | "follow_up";
+        readonly input_id: string;
+      }
+    >
+  | ClientIntentBase<"session.attach", { readonly cursor: ClientCursor }>
+  | ClientIntentBase<"session.cancel", ReasonPayload>
+  | ClientIntentBase<
+      "session.create",
+      { readonly goal_id: string; readonly goal_ref: string }
+    >
+  | ClientIntentBase<"session.detach", ReasonPayload>
+  | ClientIntentBase<"session.pause", ReasonPayload>
+  | ClientIntentBase<"session.resume", ReasonPayload>
+  | ClientIntentBase<
+      "share.request",
+      { readonly expires_at_ms: number; readonly export_id: string; readonly share_id: string }
+    >;
+
+export type ClientEventType =
+  | "artifact.available"
+  | "commands.changed"
+  | "export.created"
+  | "extension-ui.requested"
+  | "fault.raised"
+  | "message.available"
+  | "operation.receipted"
+  | "session.state"
+  | "session.terminal"
+  | "share.created"
+  | "tool.completed"
+  | "tool.started"
+  | "usage.reported";
+
+export interface ClientEventBase<T extends string, P> {
+  readonly protocol: typeof AGENT_CLIENT_PROTOCOL;
+  readonly event_id: string;
+  readonly session_id: string;
+  readonly generation: number;
+  readonly sequence: number;
+  readonly emitted_at: string;
+  readonly type: T;
+  readonly payload: P;
+}
+
+export type ClientEvent =
+  | ClientEventBase<
+      "artifact.available",
+      { readonly artifact_id: string; readonly artifact_ref: string; readonly media_type: string; readonly sha256: string; readonly size: number }
+    >
+  | ClientEventBase<"commands.changed", { readonly commands: readonly string[]; readonly revision: number }>
+  | ClientEventBase<
+      "export.created",
+      { readonly artifact_id: string; readonly artifact_ref: string; readonly export_id: string; readonly media_type: string; readonly sha256: string; readonly size: number; readonly visibility: "private" | "public" }
+    >
+  | ClientEventBase<"extension-ui.requested", { readonly deadline_ms: number; readonly method: string; readonly payload_ref: string; readonly request_id: string }>
+  | ClientEventBase<"fault.raised", { readonly code: string; readonly evidence_ref: string; readonly recoverable: boolean }>
+  | ClientEventBase<"message.available", { readonly content_ref: string; readonly media_type: string; readonly message_id: string; readonly role: "assistant" | "system" | "tool" | "user"; readonly sha256: string; readonly size: number }>
+  | ClientEventBase<"operation.receipted", { readonly effect_counts: OperationEffectCounts; readonly feature_id: OperationFeatureId; readonly operation_id: string; readonly reason_code: string; readonly receipt_ref: string; readonly status: "succeeded" | "rejected" | "failed" | "cancelled" | "uncertain" }>
+  | ClientEventBase<"session.state", { readonly reason_code: string; readonly status: "budget_limited" | "cancelled" | "completed" | "creating" | "failed" | "idle" | "needs_input" | "paused" | "running" }>
+  | ClientEventBase<"session.terminal", { readonly reason_code: string; readonly status: "budget_limited" | "cancelled" | "completed" | "failed" }>
+  | ClientEventBase<"share.created", { readonly export_id: string; readonly share_id: string; readonly share_ref: string }>
+  | ClientEventBase<"tool.completed", { readonly call_id: string; readonly is_error: boolean; readonly media_type: string; readonly result_ref: string; readonly sha256: string; readonly size: number }>
+  | ClientEventBase<"tool.started", { readonly arguments_ref: string; readonly call_id: string; readonly name: string; readonly sha256: string; readonly size: number }>
+  | ClientEventBase<"usage.reported", { readonly aggregate_tokens: number; readonly application_tokens: number; readonly child_tokens: number; readonly controller_tokens: number; readonly cost_micros: number }>;
 
 export type SessionContextOperation =
   | "session.attachment.bind"

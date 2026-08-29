@@ -180,6 +180,137 @@ def _action_prefix() -> tuple[MemoryCanonicalJournal, ControlEvent]:
 
 
 class TestControlRecovery(unittest.TestCase):
+    def test_operation_recovery_allows_both_durable_rejected_shapes(self) -> None:
+        from tests.test_operation_manager import (
+            _append_records,
+            _manager,
+            _receipt,
+            _rejected,
+            _transaction,
+        )
+
+        transaction = _transaction()
+        cases = {
+            "prevalidation": [
+                JournalRecord.operation_transaction_accepted(transaction),
+                JournalRecord.operation_receipted(_receipt(transaction, "rejected")),
+            ],
+            "authority": [
+                JournalRecord.operation_transaction_accepted(transaction),
+                JournalRecord.operation_admitted(_rejected(transaction)),
+                JournalRecord.operation_receipted(_receipt(transaction, "rejected")),
+            ],
+        }
+        for name, records in cases.items():
+            with self.subTest(name=name):
+                _, _, _, _, journal = _manager()
+                _append_records(journal, records)
+                recovered = recover_control_host_state(
+                    journal.replay(JournalCursor(0)),
+                    _envelope(
+                        host_service_grants=("operation.auth",),
+                        allowed_operations=("operation.auth",),
+                    ),
+                    expected_session_id="session-1",
+                    expected_generation=1,
+                )
+                self.assertEqual(recovered.authority.operation_settlements, {})
+                self.assertEqual(recovered.authority.reserved_operation_ids, ())
+
+    def test_operation_recovery_rejects_invalid_phase_order_and_digests(self) -> None:
+        from tests.test_operation_manager import (
+            _admitted,
+            _append_records,
+            _manager,
+            _receipt,
+            _transaction,
+        )
+
+        transaction = _transaction()
+        decision = _admitted(transaction)
+        accepted = JournalRecord.operation_transaction_accepted(transaction)
+        admitted = JournalRecord.operation_admitted(decision)
+        reserved = JournalRecord.operation_reserved(decision)
+        dispatch = JournalRecord.operation_dispatch_started(transaction)
+        handoff = JournalRecord.operation_handoff_fenced(transaction)
+        uncertain = JournalRecord.operation_receipted(_receipt(transaction, "uncertain"))
+        terminal = JournalRecord.operation_receipted(_receipt(transaction))
+        cases = {
+            "dispatch-without-reservation": [accepted, admitted, dispatch],
+            "handoff-without-dispatch": [accepted, admitted, reserved, handoff],
+            "wrong-digest": [
+                accepted,
+                admitted,
+                reserved,
+                JournalRecord(
+                    "operation-dispatch-wrong-digest-recovery",
+                    "operation.dispatch.started",
+                    {
+                        "operation_id": transaction.operation_id,
+                        "transaction_digest": "a" * 64,
+                    },
+                ),
+            ],
+            "reconcile-without-uncertain": [
+                accepted,
+                admitted,
+                reserved,
+                dispatch,
+                handoff,
+                JournalRecord.operation_reconciliation_recorded(
+                    operation_id=transaction.operation_id, attempt=1
+                ),
+            ],
+            "attempt-gap": [
+                accepted,
+                admitted,
+                reserved,
+                dispatch,
+                uncertain,
+                JournalRecord.operation_reconciliation_recorded(
+                    operation_id=transaction.operation_id, attempt=2
+                ),
+            ],
+            "terminal-after-uncertain-without-reconcile": [
+                accepted,
+                admitted,
+                reserved,
+                dispatch,
+                uncertain,
+                terminal,
+            ],
+        }
+        for name, records in cases.items():
+            with self.subTest(name=name):
+                _, _, _, _, journal = _manager()
+                _append_records(journal, records)
+                with self.assertRaises(JournalConflictError):
+                    recover_control_host_state(
+                        journal.replay(JournalCursor(0)),
+                        _envelope(
+                            host_service_grants=("operation.auth",),
+                            allowed_operations=("operation.auth",),
+                        ),
+                        expected_session_id="session-1",
+                        expected_generation=1,
+                    )
+
+    def test_operation_prefix_recovers_reserved_authority(self) -> None:
+        from tests.test_operation_manager import _manager, _transaction
+
+        manager, _, _, _, journal = _manager()
+        asyncio.run(manager.execute(_transaction()))
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)),
+            _envelope(
+                host_service_grants=("operation.auth",),
+                allowed_operations=("operation.auth",),
+            ),
+            expected_session_id="session-1",
+            expected_generation=1,
+        )
+        self.assertEqual(recovered.authority.reserved_operation_ids, ())
+
     def test_live_terminal_delivery_binds_public_safe_result_projection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             proposal = _proposal_event()
@@ -306,12 +437,28 @@ class TestControlRecovery(unittest.TestCase):
 
     def test_budget_report_recovery_is_exact_and_frozen(self) -> None:
         journal = _journal()
-        _accept(journal, _created(), _running(), _event("budget.reported", 3, {
-            "controller_tokens": 20, "application_tokens": 0, "child_tokens": 0,
-            "aggregate_tokens": 20, "cost_micros": 3,
-        }))
-        recovered = recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
-        self.assertEqual(recovered.authority.reported_usage, BudgetUsage(20, 0, 0, 20, 3))
+        _accept(
+            journal,
+            _created(),
+            _running(),
+            _event(
+                "budget.reported",
+                3,
+                {
+                    "controller_tokens": 20,
+                    "application_tokens": 0,
+                    "child_tokens": 0,
+                    "aggregate_tokens": 20,
+                    "cost_micros": 3,
+                },
+            ),
+        )
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)), _envelope()
+        )
+        self.assertEqual(
+            recovered.authority.reported_usage, BudgetUsage(20, 0, 0, 20, 3)
+        )
         self.assertEqual(recovered.authority_usage, BudgetUsage(20, 0, 0, 20, 3))
         with self.assertRaises(AuthorityError):
             recovered.authority.record_provider_usage(object())  # type: ignore[arg-type]
@@ -325,12 +472,24 @@ class TestControlRecovery(unittest.TestCase):
                 journal = _journal()
                 _accept(journal, _created(), _running())
                 for sequence, (application, aggregate) in enumerate(reports, start=3):
-                    _accept(journal, _event("budget.reported", sequence, {
-                        "controller_tokens": 0, "application_tokens": application,
-                        "child_tokens": 0, "aggregate_tokens": aggregate, "cost_micros": 0,
-                    }))
+                    _accept(
+                        journal,
+                        _event(
+                            "budget.reported",
+                            sequence,
+                            {
+                                "controller_tokens": 0,
+                                "application_tokens": application,
+                                "child_tokens": 0,
+                                "aggregate_tokens": aggregate,
+                                "cost_micros": 0,
+                            },
+                        ),
+                    )
                 with self.assertRaises(JournalConflictError):
-                    recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
+                    recover_control_host_state(
+                        journal.replay(JournalCursor(0)), _envelope()
+                    )
 
     def test_reopen_reduces_receipt_usage_and_exact_cursor(self) -> None:
         journal, _ = _action_prefix()

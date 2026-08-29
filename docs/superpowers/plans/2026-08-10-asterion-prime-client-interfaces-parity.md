@@ -880,7 +880,7 @@ git commit -m "feat: close Prime client interface parity"
 - Consumes: Tasks 1–9 and four gates.
 - Produces: one H-035 PASS, pending H-036 operational inventory, and no broader claim.
 
-- [ ] **Step 1: Add deterministic transition tests**
+- [x] **Step 1: Add deterministic transition tests**
 
 ```python
 EXPECTED_H035 = {
@@ -893,11 +893,11 @@ EXPECTED_H035 = {
 
 H-036 description is `operational surface inventory identifies six host-owned authority packages`, parent `interface-operations`, ranking `0.7`, status `pending`. Require unique contiguous cycles.
 
-- [ ] **Step 2: Teach cycle/regen the exact gate**
+- [x] **Step 2: Teach cycle/regen the exact gate**
 
 `cycle.sh H-035` runs four client gates, exact nine-feature checker, `make check`, `make promotion-check`, and `git diff --check`, then records PASS. `regen-tree.py` derives H-035/H-036 only from canonical runs.
 
-- [ ] **Step 3: Run the clean closure**
+- [x] **Step 3: Run the clean closure**
 
 From a clean detached worktree with exact pinned Prime checkout/rebuilt workspaces:
 
@@ -907,11 +907,11 @@ tools/climb/cycle.sh H-035
 
 Expected: H-035 passed once, H-036 next, provider operations `0`, full dataset `no`. A skipped mandatory real-Prime gate is not PASS.
 
-- [ ] **Step 4: Record exact claims/non-claims**
+- [x] **Step 4: Record exact claims/non-claims**
 
 Record nine client PASS rows, four receipts, native/operational rows still missing, broader claims BLOCKED, zero provider/model/credential/upload operations, and H-035 exactly once.
 
-- [ ] **Step 5: Run final verification and commit**
+- [x] **Step 5: Run final verification and commit**
 
 ```bash
 uv run python -m unittest -v tests.test_agent_client_protocol tests.test_client_session tests.test_client_sdk_jsonl tests.test_client_rpc_acp tests.test_client_interactive tests.test_client_export_share tests.test_prime_client_observations tests.test_prime_client_core tests.test_prime_client_protocols tests.test_prime_client_interactive tests.test_prime_client_export_share tests.test_prime_client_parity tests.test_prime_climb tests.test_check_promotion tests.test_prime_parity_ledger tests.test_check_prime_parity
@@ -931,7 +931,7 @@ git commit -m "docs: close H035 client interfaces"
 - [ ] Prime Gateway exposes references, never public client bodies.
 - [ ] All adapters use one `AgentClient`; none selects execution dependencies.
 - [ ] Public export performs no private read; private export/share uses exact one-use authority.
-- [ ] Four gates repeat provider-free with exact locks and sentinel redaction.
-- [ ] Nine-feature checker is 9/9 while operational/native rows remain missing.
-- [ ] `make check`, `make promotion-check`, and clean H-035 cycle pass before promotion.
-- [ ] H-035 appears exactly once; H-036 is pending; no broader claim is recorded.
+- [x] Four gates repeat provider-free with exact locks and sentinel redaction.
+- [x] Nine-feature checker is 9/9 while operational/native rows remain missing.
+- [x] `make check`, `make promotion-check`, and clean H-035 cycle pass before promotion.
+- [x] H-035 appears exactly once; H-036 is pending; no broader claim is recorded.

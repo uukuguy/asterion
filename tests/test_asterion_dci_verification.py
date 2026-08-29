@@ -385,7 +385,8 @@ class FirstRunPreflightTests(unittest.TestCase):
         )
         with patch.dict(os.environ, {}, clear=True):
             paths = resolve_dci_paths(PROJECT)
-        self.assertEqual(paths.pi.agent_dir, Path("~/.pi/agent").expanduser())
+            expected_agent_dir = Path("~/.pi/agent").expanduser()
+        self.assertEqual(paths.pi.agent_dir, expected_agent_dir)
 
     def test_missing_first_run_prerequisites_have_stable_repairs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

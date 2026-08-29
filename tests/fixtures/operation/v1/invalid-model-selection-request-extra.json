@@ -1,0 +1,8 @@
+{
+  "catalog_id": "fixture-catalog-1",
+  "model_id": "fixture.model.small",
+  "thinking_level": "low",
+  "service_tier": "standard",
+  "transport_id": "fixture.transport-1",
+  "body": "SENTINEL_BODY"
+}

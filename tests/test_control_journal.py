@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from asterion.client.protocol import ClientIntent
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.journal import (
     FileCanonicalJournal,
@@ -14,6 +15,7 @@ from asterion.control.journal import (
     JournalRecord,
     MemoryCanonicalJournal,
 )
+from asterion.client.export import ClientArtifactReceipt, ClientShareReceipt
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +48,136 @@ def _journal() -> MemoryCanonicalJournal:
 
 
 class TestControlJournal(unittest.TestCase):
+    def test_operation_records_are_body_free_and_closed(self) -> None:
+        from tests.test_operation_manager import _transaction
+
+        transaction = _transaction()
+        record = JournalRecord.operation_transaction_accepted(transaction)
+        self.assertEqual(record.kind, "operation.transaction.accepted")
+        self.assertNotIn("SENTINEL_PRIVATE_BODY", repr(record))
+        with self.assertRaises(JournalConflictError):
+            JournalRecord(
+                record_id="operation-transaction:operation-2",
+                kind="operation.transaction.accepted",
+                payload={"transaction": {**transaction.to_mapping(), "body": "secret"}},
+            )
+        with self.assertRaises(JournalConflictError):
+            JournalRecord(
+                record_id="operation-handoff:operation-1",
+                kind="operation.handoff.fenced",
+                payload={
+                    "operation_id": transaction.operation_id,
+                    "transaction_digest": "a" * 64,
+                    "handoff_proof_digest": "b" * 64,
+                },
+            )
+
+    def test_client_export_and_share_receipts_are_closed_and_body_free(self) -> None:
+        artifact = ClientArtifactReceipt(
+            artifact_id="artifact-1",
+            sha256="a" * 64,
+            media_type="application/vnd.asterion.client-events+json",
+            size=1,
+            storage_ref="storage-1",
+        )
+        exported = JournalRecord.client_export_receipted(
+            client_id="client-1",
+            session_id="session-1",
+            generation=1,
+            artifact=artifact,
+            visibility="public",
+        )
+        shared = JournalRecord.client_share_receipted(
+            client_id="client-1",
+            session_id="session-1",
+            generation=1,
+            artifact=artifact,
+            share=ClientShareReceipt(
+                "share-1",
+                "artifact-1",
+                "a" * 64,
+                "application/vnd.asterion.client-events+json",
+                "destination-1",
+                "share-ref-1",
+            ),
+        )
+
+        self.assertEqual(exported.kind, "client.export.receipted")
+        self.assertEqual(shared.kind, "client.share.receipted")
+        self.assertNotIn("destination-1", repr(shared))
+        with self.assertRaises(JournalConflictError) as raised:
+            JournalRecord(
+                record_id="client-export:artifact-2",
+                kind="client.export.receipted",
+                payload={
+                    **exported.payload,
+                    "artifact_id": "artifact-2",
+                    "body": "SENTINEL_BODY",
+                },
+            )
+        self.assertNotIn("SENTINEL_BODY", str(raised.exception))
+
+    def test_client_observation_rejects_noncanonical_values_without_coercion(
+        self,
+    ) -> None:
+        with self.assertRaises(JournalConflictError):
+            JournalRecord.client_observation_accepted(
+                {
+                    "observation_id": 1,
+                    "session_id": "session-1",
+                    "generation": 1,
+                    "source_sequence": 1,
+                    "emitted_at": "2026-08-10T00:00:00Z",
+                    "kind": "message.available",
+                    "payload": {
+                        "content_ref": "private-message-1",
+                        "media_type": "text/plain",
+                        "message_id": "message-1",
+                        "role": "assistant",
+                        "sha256": "a" * 64,
+                        "size": 1,
+                    },
+                }
+            )
+
+    def test_client_intent_is_session_bound_and_body_free(self) -> None:
+        journal = _journal()
+        intent = ClientIntent(
+            protocol="asterion.agent-client/v1",
+            intent_id="intent-1",
+            client_id="client-1",
+            session_id="session-1",
+            authority_revision=1,
+            type="input.submit",
+            payload={
+                "content_ref": "private-input-1",
+                "delivery": "direct",
+                "input_id": "input-1",
+            },
+        )
+
+        entry = journal.accept_client_intent(intent, expected_position=2)
+
+        self.assertEqual(entry.record.kind, "client.intent.accepted")
+        self.assertNotIn("SENTINEL_PRIVATE_BODY", repr(entry.record))
+        with self.assertRaises(JournalConflictError) as raised:
+            JournalRecord(
+                record_id="client-intent:intent-2",
+                kind="client.intent.accepted",
+                payload={
+                    "intent": {
+                        **intent.to_mapping(),
+                        "payload": {
+                            "content_ref": "private-input-2",
+                            "delivery": "direct",
+                            "input_id": "input-2",
+                            "text": "SENTINEL_PRIVATE_BODY",
+                        },
+                    }
+                },
+            )
+        self.assertNotIn("SENTINEL_PRIVATE_BODY", str(raised.exception))
+
     def test_harness_record_factories_are_closed_and_body_free(self) -> None:
         scope = {"kind": "session", "scope_id": "session-1"}
         proposed = JournalRecord.harness_proposed(
@@ -164,7 +296,9 @@ class TestControlJournal(unittest.TestCase):
         with self.assertRaises(JournalConflictError):
             journal.accept_command(command, expected_position=system.position)
 
-    def test_rejects_private_or_unknown_record_payload_without_leaking_body(self) -> None:
+    def test_rejects_private_or_unknown_record_payload_without_leaking_body(
+        self,
+    ) -> None:
         with self.assertRaises(JournalConflictError) as raised:
             JournalRecord(
                 record_id="fault:fault-1",
@@ -195,7 +329,9 @@ class TestControlJournal(unittest.TestCase):
         with self.assertRaises(JournalConflictError):
             journal.accept_event(other, expected_position=3)
 
-    def test_file_journal_open_at_stays_on_pinned_root_after_ancestor_swap(self) -> None:
+    def test_file_journal_open_at_stays_on_pinned_root_after_ancestor_swap(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             children = root / "children"
@@ -242,7 +378,13 @@ class TestControlJournal(unittest.TestCase):
 
                 self.assertEqual(list(replacement_child.iterdir()), [])
                 self.assertEqual(
-                    len(list((root / "children-original" / "child-1").glob("journal-*.jsonl"))),
+                    len(
+                        list(
+                            (root / "children-original" / "child-1").glob(
+                                "journal-*.jsonl"
+                            )
+                        )
+                    ),
                     1,
                 )
                 journal.close()

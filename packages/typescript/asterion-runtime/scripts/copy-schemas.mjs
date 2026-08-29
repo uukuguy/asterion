@@ -77,6 +77,72 @@ const sessionContextReceiptSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const agentClientIntentSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/agent-client/v1/intent.schema.json",
+    import.meta.url,
+  ),
+);
+const agentClientEventSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/agent-client/v1/event.schema.json",
+    import.meta.url,
+  ),
+);
+const operationRequestDescriptorSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/operation-request-descriptor.schema.json",
+    import.meta.url,
+  ),
+);
+const operationTransactionSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/operation-transaction.schema.json",
+    import.meta.url,
+  ),
+);
+const operationReceiptSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/operation-receipt.schema.json",
+    import.meta.url,
+  ),
+);
+const authRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/auth-request.schema.json",
+    import.meta.url,
+  ),
+);
+const modelSelectionRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/model-selection-request.schema.json",
+    import.meta.url,
+  ),
+);
+const settingsKeybindingsRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/settings-keybindings-request.schema.json",
+    import.meta.url,
+  ),
+);
+const telemetryUsageRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/telemetry-usage-request.schema.json",
+    import.meta.url,
+  ),
+);
+const doctorRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/doctor-request.schema.json",
+    import.meta.url,
+  ),
+);
+const controlledUpdateRestartRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/controlled-update-restart-request.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -117,4 +183,30 @@ cpSync(
 cpSync(
   sessionContextReceiptSource,
   `${destination}/session-context-receipt.schema.json`,
+);
+cpSync(agentClientIntentSource, `${destination}/agent-client-intent.schema.json`);
+cpSync(agentClientEventSource, `${destination}/agent-client-event.schema.json`);
+cpSync(
+  operationRequestDescriptorSource,
+  `${destination}/operation-request-descriptor.schema.json`,
+);
+cpSync(operationTransactionSource, `${destination}/operation-transaction.schema.json`);
+cpSync(operationReceiptSource, `${destination}/operation-receipt.schema.json`);
+cpSync(authRequestSource, `${destination}/auth-request.schema.json`);
+cpSync(
+  modelSelectionRequestSource,
+  `${destination}/model-selection-request.schema.json`,
+);
+cpSync(
+  settingsKeybindingsRequestSource,
+  `${destination}/settings-keybindings-request.schema.json`,
+);
+cpSync(
+  telemetryUsageRequestSource,
+  `${destination}/telemetry-usage-request.schema.json`,
+);
+cpSync(doctorRequestSource, `${destination}/doctor-request.schema.json`);
+cpSync(
+  controlledUpdateRestartRequestSource,
+  `${destination}/controlled-update-restart-request.schema.json`,
 );

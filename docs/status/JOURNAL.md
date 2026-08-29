@@ -1074,3 +1074,63 @@
 - 05:53 修正 H-037、主线状态与恢复包闭环顺序 [e49add1]
 - 05:59 补齐 Prime 响应验证器测试导入，修复快照复审缺口 [7efce14]
 - 06:00 先提交 RED 门再合并，避免本地修改阻断三方合成 [e3869b4]
+
+## 2026-08-28
+
+- 08:10 Defined body-free cross-language agent client protocol with immutable stream validation [6380ea6]
+- 08:23 Closed agent-client validation gaps for cross-language protocol safety [1c9a004]
+- 00:12 RED：干净 `04532ec` 上 `ecosystem.capabilities` Prime Gateway 精确十项均为 `result-missing`，provider/application operations 均为 0。
+- 00:12 Task10 reducer 将四个 provider-free ecosystem receipts 收敛为十条 immutable observations；真实 artifact lock 为 `c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3`，真实 module lock 为 `959989c9f6afb907db32bdef709cf19b45fa19421095f62714ff80b9a2c44cd6`。
+- 00:12 精确 `ecosystem.capabilities` domain checker PASS（10 selected / 10 passed / 0 blocking）；所有 native ecosystem rows 保持 `missing`，`Verified-system-parity` 仍阻塞于后续 domains。
+- 00:12 Climb H-028 至 H-033 provider-free ecosystem gates 通过；H-034 因 repository/promotion gates 未能产生 clean PASS 保持 pending，不提升 H-035。
+- 00:12 `make check` 的非 ecosystem 失败已在纯 `04532ec` 复现；`promotion-check` 在隔离副本缺少被排除的 external pinned Prime source，二者均记录为 concern 而非 PASS。
+- 08:35 Added host client sessions and private-value boundary with journaled idempotency [2dea2a8]
+- 08:49 Hardened host client recovery prefixes, source cursors, and live authority checks [f454522]
+- 08:58 Serialized client submit/recovery effects and safe clocks [5d44173]
+- 09:06 Isolated client dispatch cancellation and redacted hostile cancellation signals [28bee67]
+- 09:09 correction: also redacted hostile CancelledError signal access [36d849c]
+- 09:16 Redacted private dependency cancellations at every client boundary; fixed errors preserve fail-closed resolution [5aa7d03]
+- 09:30 Bridged private Prime client observations with descriptor-verified reads [96af24f]
+- 09:47 Hardened Prime observation mapper, cancellation, frame limits, and extension descriptors [bebc648]
+- 10:01 Persisted Prime client observation prefix across restart with descriptor revalidation [d932759]
+- 10:19 Closed staged Prime observation transactions and public payload validation [9b40336]
+- 10:34 Bound staged observations and paged replay below IPC frame limits [b390971]
+- 10:41 Bound extension observation metadata to staged private descriptors [072e173]
+- 10:52 Validated Prime observation pages before descriptor effects to prevent malformed cursor replay [e3899e8]
+- 11:07 Accepted safe zero Prime replay cursors while retaining strict page progress validation [0bd6e33]
+- 10:58 Added injected client SDK and bounded JSONL core for provider-free interfaces [7242f06]
+- 11:08 Froze JSONL graphs and replaced literal core receipt with executable evidence [f4c809c]
+- 11:33 Added closed client RPC and ACP adapters with provider-free receipt [08a6521]
+- 11:44 Hardened client event revalidation and closed protocol receipt evidence [7a9902c]
+- 11:58 Added functional client views and provider-free interactive receipt [1814c7d]
+- 12:11 Hardened final-message validation and concurrent command admission [fca2f1b]
+- 12:18 Coordinated client command admission by stable identity and digest [3f7dd3e]
+- 12:31 Added safe client export and authority-scoped sharing receipts [55fc2ce]
+- 12:40 Fenced reconstructed export authority replay before effects [d4670eb]
+- 12:59 Proved pinned Prime client interfaces and packaged locked harness evidence [44675d0]
+- 13:22 Hardened client proof with external-root execution and wheel smoke [0481be7]
+- 14:02 Executed adversarial Prime client scenarios with observed body-free evidence [58eb26a]
+- 14:22 Executed locked UI timeout and public no-read export proof [93ce3d5]
+- 14:44 Closed nine Prime client parity rows with exact provider-free receipt reducer [26f4a9a]
+- 15:07 Bound Prime parity to emitted receipts and atomic registration [46c1bcb]
+- 15:24 Closed H-035 once after four provider-free client receipts, exact 9/9
+  checker, clean repository, and isolated promotion gates; H-036 remains
+  pending with no broader system/native claim [pending]
+- 15:33 Closed H-035 client interfaces; records exact one-cycle handoff to H-036 [c1fd976]
+- 17:02 Planned H-036 operational parity with approved authority and evidence boundaries [c719045]
+- 19:58 Added typed operational preferences without authority [b440f4f]
+- 21:43 Added read-only doctor diagnostics with redacted immutable reports [fdd2404]
+- 23:44 Added generic private Prime operation bridge and closed IPC fences [b05852f]
+
+## 2026-08-29
+- 06:38 Proved locked Prime telemetry, doctor, and restart receipts [15ff2ac]
+- 19:12 Added H-036 cycle gate and nonclaim tests to require exact operational closure [48ed2a6]
+- 20:33 Closed H-036 operational parity once; future queue preserves system/native nonclaims [pending]
+- 23:12 修正 HOME 隔离测试期望，确保闭环沙箱可重现 [45a5c04]
+- 23:39 修复 Python 3.10/3.11 ACP wheel 导入兼容性 [ca3270e]
+
+## 2026-08-30
+- 02:00 封闭 promotion 外层 Python/uv 路径注入，确保复制树独立验证 [c320747]
+- 03:29 完成 H-036 两次独立闭环确认，排除环境假阳性 [c320747]
+- 03:30 定稿 H-036 双确认报告，记录最终边界 [7d1fa34]
+- 06:01 Deferred RED commit e895ffb defines the Prime system parity union gate; Task 4 owns the merge commit.

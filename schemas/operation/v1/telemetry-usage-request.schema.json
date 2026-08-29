@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/operation/v1/telemetry-usage-request.schema.json",
+  "title": "Asterion Private Telemetry Usage Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_id", "event_name", "event_count", "result_sha256", "usage"],
+  "properties": {
+    "source_id": {"enum": ["application", "child", "controller"]},
+    "event_name": {"const": "usage.reported"},
+    "event_count": {"$ref": "#/$defs/nonnegative_integer"},
+    "result_sha256": {"$ref": "#/$defs/sha256"},
+    "usage": {"$ref": "#/$defs/usage"}
+  },
+  "$defs": {
+    "nonnegative_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aggregate_tokens",
+        "application_tokens",
+        "child_tokens",
+        "controller_tokens",
+        "cost_micros"
+      ],
+      "properties": {
+        "aggregate_tokens": {"$ref": "#/$defs/nonnegative_integer"},
+        "application_tokens": {"$ref": "#/$defs/nonnegative_integer"},
+        "child_tokens": {"$ref": "#/$defs/nonnegative_integer"},
+        "controller_tokens": {"$ref": "#/$defs/nonnegative_integer"},
+        "cost_micros": {"$ref": "#/$defs/nonnegative_integer"}
+      }
+    }
+  }
+}
