@@ -1205,3 +1205,4 @@
 - 04:28 Hardened native crash proof markers and hook redaction after review [70f9056]
 - 04:36 Required canonical native recovery stdout to reject hidden child noise [9df3e35]
 - 04:47 Gated Native controller core receipt so H-038 has exact preflight proof [de58460]
+- 05:16 Restored Prime source fixture helper so pre-H make check can import all tests [204fc99]
