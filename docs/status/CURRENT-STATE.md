@@ -9,9 +9,9 @@
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 2 production closure — approved Prime operation
-  host callback design through `8b7fb18`; exact implementation plan ready at
-  `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`
+- Active work package: Phase 2 production closure — callback Tasks 1 and 2 are
+  independently approved through `ef9808c`; Task 3 owns the TypeScript callback
+  client and sole production gateway assembly.
 
 ## Current Architecture
 
@@ -61,6 +61,11 @@
   operations, but `Verified-system-parity` remains BLOCKED because independent
   review proved the production TypeScript descriptor path does not yet inject
   an operator-owned operation dispatcher.
+- `OperationManager` now exposes immutable dispatcher identity, and the
+  reviewed Python callback server accepts only exact identity-bound frames over
+  a private `0600` Unix socket. This is a verified unit boundary only; it does
+  not close production system parity before the Node client, factory lifecycle,
+  root/child composition, and real-process path pass.
 
 ## Open Problems
 
@@ -68,6 +73,9 @@
   Python `OperationManager`, while Prime owns only a lifecycle-managed private
   callback transport. H-037 remains uncreated until implementation, real
   process verification, full gates, and independent review pass.
+- Task 3 must construct `PrimeOperationHostClient -> PrimeOperationGateway` on
+  the sole executable descriptor path and use `socket.end(frame)` to satisfy
+  the deterministic one-line-plus-write-EOF callback contract.
 - Keep every Asterion-native row missing until Phase 3 evidence exists.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
@@ -113,7 +121,8 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Execute the approved callback plan with RED -> GREEN SDD; do not create or
-   run H-037 before its real-process and independent-review prerequisites pass.
+4. Continue the approved callback plan at Task 3 with RED -> GREEN SDD; do not
+   create or run H-037 before its real-process and independent-review
+   prerequisites pass.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

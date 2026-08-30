@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-30 08:07 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-30 08:54 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -15,6 +15,11 @@
   is committed in `8b7fb18`: the operator injects the sole Python
   `OperationManager` for each session, while the Prime provider owns only a
   lifecycle-managed private callback transport.
+- Callback Tasks 1 and 2 are independently approved through `ef9808c`: the
+  manager exposes exact immutable identity and the Python private Unix server
+  validates, dispatches, redacts, drains, and removes its endpoint. Production
+  remains blocked because the TypeScript client and descriptor assembly are not
+  implemented yet.
 - The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
   provider/application operations, but Phase 2 must not close until the
   operation production-assembly gap is resolved and independently reverified.
@@ -40,9 +45,10 @@
 
 ## Immediate next action
 
-1. Commit and execute
+1. Continue Task 3 of
    `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md` with SDD
-   plus RED -> GREEN TDD, beginning at Task 1.
+   plus RED -> GREEN TDD: implement the TypeScript callback client and sole
+   production gateway assembly.
 2. Keep H-037 blocked until the real production callback round trip, full
    provider-free gates, and independent review all pass.
 
