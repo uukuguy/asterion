@@ -1183,3 +1183,8 @@
 - 22:06 Sealed native capsules with shared budgeted storage for checkpoint receipts [452fa65]
 - 22:17 Persisted capsule receipts to reject reopened metadata drift [a9cf0bd]
 - 22:23 Charged memory capsule receipts to match file budget accounting [5a82460]
+- 22:39 Drove deterministic native controller turns with budget-limited reducer closure [d91e17d]
+- 22:55 Closed native recovery/idempotency gaps for deterministic Task 5 replay [de5077f]
+- 23:25 Fenced native replay drift to protect Task 5 recovery determinism [0bc51c7]
+- 23:36 Sealed native capsules from replay prefixes for complete recovery coverage [8b2c11e]
+- 23:43 Rejected custom native turn script mappings to close hostile constructor execution [169113c]
