@@ -83,7 +83,7 @@ class NativeEntry:
         _require_positive_integer(self.position, "native entry position")
         if self.previous_digest is not None:
             _require_sha256(self.previous_digest, "native entry predecessor")
-        if not isinstance(self.record, NativeRecord):
+        if type(self.record) is not NativeRecord:
             raise ValueError("native entry record is invalid")
 
     @property
@@ -207,14 +207,14 @@ class NativeTurnRequest:
         ):
             raise ValueError("native turn causal commands are invalid")
         inputs = tuple(self.inputs)
-        if any(not isinstance(item, NativeInputReference) for item in inputs):
+        if any(type(item) is not NativeInputReference for item in inputs):
             raise ValueError("native turn inputs are invalid")
         action_results = tuple(self.action_results)
         if any(
-            not isinstance(item, NativeActionResultReference) for item in action_results
+            type(item) is not NativeActionResultReference for item in action_results
         ):
             raise ValueError("native turn action results are invalid")
-        if not isinstance(self.budget, RemainingBudget):
+        if type(self.budget) is not RemainingBudget:
             raise ValueError("native turn budget is invalid")
         _require_safe_budget(self.budget, "native turn budget")
         object.__setattr__(self, "causal_command_ids", command_ids)
@@ -237,9 +237,9 @@ class NativeTurnResult:
     def __post_init__(self) -> None:
         _require_opaque_id(self.turn_id, "native turn result identity")
         events = tuple(self.events)
-        if any(not isinstance(item, NativeEventDraft) for item in events):
+        if any(type(item) is not NativeEventDraft for item in events):
             raise ValueError("native turn result events are invalid")
-        if not isinstance(self.usage, BudgetUsage):
+        if type(self.usage) is not BudgetUsage:
             raise ValueError("native turn result usage is invalid")
         _require_safe_usage(self.usage, "native turn result usage")
         object.__setattr__(self, "events", events)
@@ -296,6 +296,7 @@ class NativeControllerState:
     goal_status: str | None
     authority_id: str | None
     authority_revision: int | None
+    initial_create_command_digest: str | None
     budget_authority_revision: int | None
     remaining_budget: RemainingBudget | None
     command_digests: Mapping[str, str]
@@ -355,6 +356,7 @@ class NativeControllerState:
             goal_status=None,
             authority_id=None,
             authority_revision=None,
+            initial_create_command_digest=None,
             budget_authority_revision=None,
             remaining_budget=None,
             command_digests={},

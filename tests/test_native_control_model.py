@@ -124,6 +124,7 @@ def _session_bound() -> NativeRecord:
         checkpoint_version="1.0.0",
         authority_id=AUTHORITY_ID,
         authority_revision=AUTHORITY_REVISION,
+        initial_create_command=_session_create_command(),
     )
 
 
@@ -264,6 +265,54 @@ def _budget_report(
     )
 
 
+class HostileControlCommand(ControlCommand):
+    mapping_calls: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mapping_calls", 0)
+
+    def to_mapping(self) -> Mapping[str, object]:
+        object.__setattr__(self, "mapping_calls", self.mapping_calls + 1)
+        raise AssertionError("SENTINEL_SECRET")
+
+
+class HostileControlEvent(ControlEvent):
+    mapping_calls: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mapping_calls", 0)
+
+    def to_mapping(self) -> Mapping[str, object]:
+        object.__setattr__(self, "mapping_calls", self.mapping_calls + 1)
+        raise AssertionError("SENTINEL_SECRET")
+
+
+class HostileNativeCapsuleMetadata(NativeCapsuleMetadata):
+    attribute_reads: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "attribute_reads", 0)
+
+    def __getattribute__(self, name: str) -> object:
+        if name in {
+            "capsule_id",
+            "capsule_digest",
+            "control_plane_id",
+            "control_plane_version",
+            "checkpoint_version",
+            "covered_position",
+            "covered_sequence",
+            "storage_ref",
+        }:
+            object.__setattr__(
+                self,
+                "attribute_reads",
+                object.__getattribute__(self, "attribute_reads") + 1,
+            )
+            raise AssertionError("SENTINEL_SECRET")
+        return super().__getattribute__(name)
+
+
 def _valid_records() -> tuple[NativeRecord, ...]:
     return (
         _session_bound(),
@@ -376,6 +425,122 @@ def _terminal_records() -> tuple[NativeRecord, ...]:
 
 
 class TestNativeControlModel(unittest.TestCase):
+    def test_record_constructors_exact_type_check_public_values_before_effects(
+        self,
+    ) -> None:
+        hostile_command = HostileControlCommand(
+            command_id="command-hostile",
+            session_id=SESSION_ID,
+            authority_revision=AUTHORITY_REVISION,
+            type="session.create",
+            payload=_session_create_command().payload,
+        )
+        with self.assertRaises(NativeStateError):
+            session_bound_record(
+                provider_id="native",
+                provider_version="0.1.0",
+                system_id="research.system",
+                system_version="1.0.0",
+                session_id=SESSION_ID,
+                generation=GENERATION,
+                checkpoint_version="1.0.0",
+                authority_id=AUTHORITY_ID,
+                authority_revision=AUTHORITY_REVISION,
+                initial_create_command=hostile_command,
+            )
+        with self.assertRaises(NativeStateError):
+            command_committed_record(hostile_command, ())
+        self.assertEqual(hostile_command.mapping_calls, 0)
+
+        hostile_event = HostileControlEvent(
+            event_id="event-hostile",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            sequence=1,
+            emitted_at=EMITTED_AT,
+            type="session.created",
+            payload=_session_created().payload,
+        )
+        with self.assertRaises(NativeStateError):
+            command_committed_record(_session_create_command(), (hostile_event,))
+        self.assertEqual(hostile_event.mapping_calls, 0)
+
+        hostile_metadata = HostileNativeCapsuleMetadata(
+            capsule_id="capsule-hostile",
+            capsule_digest="a" * 64,
+            control_plane_id="native",
+            control_plane_version="0.1.0",
+            checkpoint_version="1.0.0",
+            covered_position=3,
+            covered_sequence=2,
+            storage_ref="storage-hostile",
+        )
+        with self.assertRaises(NativeStateError):
+            checkpoint_committed_record(
+                hostile_metadata,
+                _event(
+                    "event-checkpoint",
+                    3,
+                    "checkpoint.created",
+                    {
+                        "checkpoint_id": "checkpoint-hostile",
+                        "capsule_id": "capsule-hostile",
+                        "capsule_digest": "a" * 64,
+                        "control_plane_id": "native",
+                        "control_plane_version": "0.1.0",
+                        "checkpoint_version": "1.0.0",
+                        "covered_sequence": 2,
+                        "storage_ref": "storage-hostile",
+                    },
+                ),
+            )
+        self.assertEqual(hostile_metadata.attribute_reads, 0)
+
+    def test_session_bound_persists_initial_create_digest_without_committing_command(
+        self,
+    ) -> None:
+        command = _session_create_command()
+        record = session_bound_record(
+            provider_id="native",
+            provider_version="0.1.0",
+            system_id="research.system",
+            system_version="1.0.0",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            checkpoint_version="1.0.0",
+            authority_id=AUTHORITY_ID,
+            authority_revision=AUTHORITY_REVISION,
+            initial_create_command=command,
+        )
+
+        self.assertEqual(
+            record.payload["initial_create_command_digest"],
+            _command_digest(command),
+        )
+        state = reduce_native_entries(_chain((record,)))
+        self.assertEqual(state.initial_create_command_digest, _command_digest(command))
+        self.assertEqual(state.command_digests, {})
+        self.assertEqual(state.events, ())
+
+        for label, payload in (
+            (
+                "missing",
+                {
+                    key: value
+                    for key, value in record.payload.items()
+                    if key != "initial_create_command_digest"
+                },
+            ),
+            (
+                "drift",
+                {**record.payload, "initial_create_command_digest": "0" * 64},
+            ),
+        ):
+            with self.subTest(label=label), self.assertRaises(NativeStateError):
+                reduce_native_entries(
+                    _chain((NativeRecord(record.record_id, record.kind, payload),))
+                )
+
     def test_record_digest_is_canonical_and_payload_is_frozen(self) -> None:
         payload: dict[str, object] = {
             "system_id": "research.system",
@@ -469,6 +634,7 @@ class TestNativeControlModel(unittest.TestCase):
                 "checkpoint_version",
                 "authority_id",
                 "authority_revision",
+                "initial_create_command_digest",
             },
         )
         self.assertEqual(set(records[1].payload), {"authority_revision", "budget"})
@@ -1714,6 +1880,17 @@ class TestNativeControlModel(unittest.TestCase):
                 checkpoint_version="1.0.0",
                 authority_id=MAX_PROTOCOL_ID,
                 authority_revision=AUTHORITY_REVISION,
+                initial_create_command=_command(
+                    "command-create",
+                    "session.create",
+                    {
+                        "system_id": "research.system",
+                        "system_version": "1.0.0",
+                        "goal_id": MAX_PROTOCOL_ID,
+                        "goal_ref": MAX_PROTOCOL_ID,
+                    },
+                    session_id=MAX_PROTOCOL_ID,
+                ),
             ),
             authority_synced_record(AUTHORITY_REVISION, _budget()),
             command_committed_record(

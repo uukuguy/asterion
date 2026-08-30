@@ -217,6 +217,86 @@ class FixedClock:
         return self.value
 
 
+class HostileControlCommand(ControlCommand):
+    mapping_calls: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mapping_calls", 0)
+
+    def to_mapping(self) -> Mapping[str, object]:
+        object.__setattr__(self, "mapping_calls", self.mapping_calls + 1)
+        raise AssertionError("SENTINEL_SECRET")
+
+
+class HostileEventCursor(EventCursor):
+    attribute_reads: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "attribute_reads", 0)
+
+    def __getattribute__(self, name: str) -> object:
+        if name in {"generation", "sequence"}:
+            object.__setattr__(
+                self,
+                "attribute_reads",
+                object.__getattribute__(self, "attribute_reads") + 1,
+            )
+            raise AssertionError("SENTINEL_SECRET")
+        return super().__getattribute__(name)
+
+
+class HostileTurnRequest(NativeTurnRequest):
+    comparisons: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "comparisons", 0)
+
+    def __eq__(self, other: object) -> bool:
+        object.__setattr__(self, "comparisons", self.comparisons + 1)
+        raise AssertionError("SENTINEL_SECRET")
+
+
+class HostileTurnResult(NativeTurnResult):
+    attribute_reads: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "attribute_reads", 0)
+
+    def __getattribute__(self, name: str) -> object:
+        if name in {"turn_id", "events", "usage"}:
+            object.__setattr__(
+                self,
+                "attribute_reads",
+                object.__getattribute__(self, "attribute_reads") + 1,
+            )
+            raise AssertionError("SENTINEL_SECRET")
+        return super().__getattribute__(name)
+
+
+class HostileRemainingBudget(RemainingBudget):
+    attribute_reads: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "attribute_reads", 0)
+
+    def __getattribute__(self, name: str) -> object:
+        if name in {
+            "controller_tokens",
+            "application_tokens",
+            "child_tokens",
+            "aggregate_tokens",
+            "cost_micros",
+            "deadline_ms",
+        }:
+            object.__setattr__(
+                self,
+                "attribute_reads",
+                object.__getattribute__(self, "attribute_reads") + 1,
+            )
+            raise AssertionError("SENTINEL_SECRET")
+        return super().__getattribute__(name)
+
+
 class CountingAdapter:
     adapter_id = "native.counting-turn/v1"
 
@@ -434,6 +514,14 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
                         checkpoint_version="1.0.0",
                         authority_id="authority-1",
                         authority_revision=AUTHORITY_REVISION,
+                        initial_create_command=replace(
+                            create_command(),
+                            payload={
+                                **create_command().payload,
+                                "system_id": bound_ids["system_id"],
+                                "system_version": bound_ids["system_version"],
+                            },
+                        ),
                     ),
                 )
                 if label == "controller-system":
@@ -485,6 +573,50 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
                     await matching.accept(bad)
                 with self.assertRaises(NativeControllerError):
                     await matching.accept(input_command("command-not-create", "ref"))
+
+    async def test_partial_first_create_binds_original_command_identity_before_retry(
+        self,
+    ) -> None:
+        for label, command in (
+            ("command-id", create_command("command-create-drift")),
+            (
+                "goal-id",
+                replace(
+                    create_command(),
+                    payload={**create_command().payload, "goal_id": "goal-2"},
+                ),
+            ),
+            (
+                "goal-ref",
+                replace(
+                    create_command(),
+                    payload={**create_command().payload, "goal_ref": "goal-ref-2"},
+                ),
+            ),
+            ("authority", replace(create_command(), authority_revision=2)),
+        ):
+            with self.subTest(label=label):
+                fixture = ControllerFixture(
+                    store_factory=lambda owner, order: FailOnceTrackingSessionStore(
+                        owner,
+                        order,
+                        "command.committed",
+                    )
+                )
+                with self.assertRaises(NativeStoreError):
+                    await fixture.controller.accept(create_command())
+                before = fixture.store.position
+
+                reopened = fixture.reopen()
+                with self.assertRaises(NativeControllerError):
+                    await reopened.accept(command)
+                self.assertEqual(fixture.store.position, before)
+                self.assertEqual(reopened.state.command_digests, {})
+
+                await reopened.accept(create_command())
+                self.assertEqual(fixture.store.position, before + 1)
+                await reopened.accept(create_command())
+                self.assertEqual(fixture.store.position, before + 1)
 
     async def test_turn_commits_result_and_events_before_replay(self) -> None:
         adapter = CountingAdapter(
@@ -751,6 +883,68 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(NativeControllerError):
             await drifted.accept(command)
 
+    async def test_checkpoint_request_rejects_poison_before_append_and_retry_survives(
+        self,
+    ) -> None:
+        unresolved = ControllerFixture(
+            event_ids=("event-created", "event-running", "event-unresolved"),
+            store_factory=lambda owner, order: FailOnceTrackingSessionStore(
+                owner,
+                order,
+                "checkpoint.committed",
+            ),
+        )
+        await unresolved.create()
+        original = checkpoint_command("command-checkpoint-original", "checkpoint-shared")
+        with self.assertRaises(NativeStoreError):
+            await unresolved.controller.accept(original)
+        before = unresolved.store.position
+
+        reopened = unresolved.reopen()
+        poison = checkpoint_command("command-checkpoint-poison", "checkpoint-shared")
+        with self.assertRaises(NativeControllerError):
+            await reopened.accept(poison)
+        self.assertEqual(unresolved.store.position, before)
+        self.assertNotIn(poison.command_id, reopened.state.command_digests)
+
+        await reopened.accept(original)
+        self.assertEqual(unresolved.store.position, before + 1)
+        self.assertIn(original.command_id, reopened.state.command_digests)
+
+        resolved = ControllerFixture(
+            event_ids=("event-created", "event-running", "event-resolved")
+        )
+        await resolved.create()
+        await resolved.controller.accept(original)
+        before_resolved = resolved.store.position
+        with self.assertRaises(NativeControllerError):
+            await resolved.controller.accept(poison)
+        self.assertEqual(resolved.store.position, before_resolved)
+        self.assertNotIn(poison.command_id, resolved.controller.state.command_digests)
+
+    async def test_checkpoint_command_replay_after_later_events_is_noop(self) -> None:
+        fixture = ControllerFixture(
+            event_ids=(
+                "event-created",
+                "event-running",
+                "event-checkpoint",
+                "event-paused",
+            )
+        )
+        await fixture.create()
+        command = checkpoint_command("command-checkpoint-replay", "checkpoint-replay")
+        await fixture.controller.accept(command)
+        checkpoint_event = fixture.controller.state.events[-1]
+        await fixture.controller.accept(
+            lifecycle_command("command-pause-after-checkpoint", "session.pause", "pause")
+        )
+        before = fixture.store.position
+
+        await fixture.controller.accept(command)
+
+        self.assertEqual(fixture.store.position, before)
+        self.assertIn(checkpoint_event, fixture.controller.state.events)
+
     async def test_replay_cursor_bounds_reopen_reducer_and_started_turn_recovery(self) -> None:
         fixture = ControllerFixture(turn_ids=("turn-stable",))
         await fixture.create()
@@ -852,6 +1046,53 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
                 clock=lambda: "2026-08-30T00:00:00Z",
             )
         self.assertNotIn("SENTINEL_SECRET", str(caught.exception))
+
+    async def test_public_values_are_exact_type_checked_before_effects(self) -> None:
+        fixture = ControllerFixture()
+        hostile_command = HostileControlCommand(
+            command_id="command-hostile",
+            session_id=SESSION_ID,
+            authority_revision=AUTHORITY_REVISION,
+            type="session.create",
+            payload=create_command().payload,
+        )
+        with self.assertRaises(NativeControllerError) as command_error:
+            await fixture.controller.accept(hostile_command)
+        self.assertEqual(hostile_command.mapping_calls, 0)
+        self.assertNotIn("SENTINEL_SECRET", str(command_error.exception))
+
+        await fixture.create()
+        hostile_budget = HostileRemainingBudget(1, 0, 0, 1, 0, 1)
+        with self.assertRaises(NativeControllerError):
+            fixture.controller.sync_authority(hostile_budget)
+        self.assertEqual(hostile_budget.attribute_reads, 0)
+
+        await fixture.controller.accept(input_command())
+        request = fixture.controller.begin_ready_turn()
+        assert request is not None
+        hostile_request = HostileTurnRequest(
+            turn_id=request.turn_id,
+            session_id=request.session_id,
+            generation=request.generation,
+            authority_revision=request.authority_revision,
+            causal_command_ids=request.causal_command_ids,
+            inputs=request.inputs,
+            action_results=request.action_results,
+            budget=request.budget,
+        )
+        with self.assertRaises(NativeControllerError):
+            fixture.controller.commit_budget_limited_turn(hostile_request)
+        self.assertEqual(hostile_request.comparisons, 0)
+
+        hostile_result = HostileTurnResult(request.turn_id, (), _usage())
+        with self.assertRaises(NativeControllerError):
+            fixture.controller.commit_turn(request, hostile_result)
+        self.assertEqual(hostile_result.attribute_reads, 0)
+
+        hostile_cursor = HostileEventCursor(GENERATION, 0)
+        with self.assertRaises(NativeControllerError):
+            fixture.controller.replay_events(hostile_cursor)
+        self.assertEqual(hostile_cursor.attribute_reads, 0)
 
 
 if __name__ == "__main__":

@@ -29,11 +29,12 @@ from asterion.control.providers.native.model import (
     _json_value,
 )
 from asterion.control.providers.native.state import (
+    _command_committed_record_from_mapping,
+    _metadata_from_mapping,
+    _session_bound_record_from_mapping,
     authority_synced_record,
     checkpoint_committed_record,
-    command_committed_record,
     reduce_native_entries,
-    session_bound_record,
     turn_committed_record,
     turn_recovery_required_record,
     turn_started_record,
@@ -137,7 +138,15 @@ class NativeController:
 
     async def accept(self, command: ControlCommand) -> None:
         try:
-            records = self._transition_command(self.state, command)
+            command_mapping = _control_command_mapping(command)
+            command_digest = _digest(command_mapping)
+            self._preflight_checkpoint_request(command, command_digest)
+            records = self._transition_command(
+                self.state,
+                command,
+                command_mapping,
+                command_digest,
+            )
             self._append_many(records)
             if command.type == "checkpoint.request":
                 self._ensure_checkpoint(str(command.payload["checkpoint_id"]))
@@ -148,6 +157,8 @@ class NativeController:
 
     def sync_authority(self, budget: RemainingBudget) -> None:
         try:
+            if type(budget) is not RemainingBudget:
+                raise NativeControllerError
             revision = self._require_bound_authority_revision()
             self._append_equal_or_new(authority_synced_record(revision, budget))
         except (NativeControllerError, NativeStoreError):
@@ -226,6 +237,8 @@ class NativeController:
             _raise_controller_error()
 
     def replay_events(self, cursor: EventCursor | None) -> tuple[ControlEvent, ...]:
+        if cursor is not None and type(cursor) is not EventCursor:
+            raise NativeControllerError
         entries = self._session_store.replay()
         self._state = reduce_native_entries(entries)
         return self._validated_event_suffix(self.state.events, cursor)
@@ -240,13 +253,13 @@ class NativeController:
                 self._owner.close()
 
     def _transition_command(
-        self, state: NativeControllerState, command: ControlCommand
+        self,
+        state: NativeControllerState,
+        command: ControlCommand,
+        command_mapping: Mapping[str, object],
+        command_digest: str,
     ) -> tuple[NativeRecord, ...]:
-        if not isinstance(command, ControlCommand):
-            raise NativeControllerError
-        validate_control_command(command.to_mapping())
         self._validate_command_identity(state, command)
-        command_digest = _digest(command.to_mapping())
         previous = state.command_digests.get(command.command_id)
         if previous is not None:
             if previous != command_digest:
@@ -257,7 +270,7 @@ class NativeController:
         if state.lifecycle == "empty":
             if command.type != "session.create":
                 raise NativeControllerError
-            bound = session_bound_record(
+            bound = _session_bound_record_from_mapping(
                 provider_id=self._provider_id,
                 provider_version=self._provider_version,
                 system_id=self._system_id,
@@ -267,18 +280,33 @@ class NativeController:
                 checkpoint_version=self._checkpoint_version,
                 authority_id=self._authority_id,
                 authority_revision=self._authority_revision,
+                initial_create_command_mapping=command_mapping,
             )
             return (
                 bound,
-                command_committed_record(command, self._command_events(state, command)),
+                _command_committed_record_from_mapping(
+                    command_mapping, self._command_events(state, command)
+                ),
             )
         if state.lifecycle == "bound":
-            if command.type != "session.create" or not _is_incomplete_create_state(state):
+            if (
+                command.type != "session.create"
+                or not _is_incomplete_create_state(state)
+                or state.initial_create_command_digest != command_digest
+            ):
                 raise NativeControllerError
-            return (command_committed_record(command, self._command_events(state, command)),)
+            return (
+                _command_committed_record_from_mapping(
+                    command_mapping, self._command_events(state, command)
+                ),
+            )
         if command.type == "session.create":
             raise NativeControllerError
-        return (command_committed_record(command, self._command_events(state, command)),)
+        return (
+            _command_committed_record_from_mapping(
+                command_mapping, self._command_events(state, command)
+            ),
+        )
 
     def _validate_command_identity(
         self, state: NativeControllerState, command: ControlCommand
@@ -501,7 +529,7 @@ class NativeController:
         return command_ids
 
     def _require_pending_turn(self, request: NativeTurnRequest) -> None:
-        if not isinstance(request, NativeTurnRequest):
+        if type(request) is not NativeTurnRequest:
             raise NativeControllerError
         if self.state.pending_turn != request or request.turn_id in self.state.fenced_turn_ids:
             raise NativeControllerError
@@ -535,7 +563,7 @@ class NativeController:
         self, request: NativeTurnRequest, result: NativeTurnResult
     ) -> tuple[ControlEvent, ...]:
         self._require_pending_turn(request)
-        if not isinstance(result, NativeTurnResult) or result.turn_id != request.turn_id:
+        if type(result) is not NativeTurnResult or result.turn_id != request.turn_id:
             raise NativeControllerError
         usage = result.usage
         _validate_native_usage(usage)
@@ -604,6 +632,8 @@ class NativeController:
             covered_position=covered_position,
             covered_sequence=covered_sequence,
         )
+        if type(metadata) is not NativeCapsuleMetadata:
+            raise NativeControllerError
         self._capsule_store.verify(metadata)
         return metadata
 
@@ -627,18 +657,12 @@ class NativeController:
 
     def _ensure_checkpoint(self, checkpoint_id: str) -> ControlEvent:
         _require_opaque(checkpoint_id)
+        existing = self._checkpoint_record_for(checkpoint_id)
+        if existing is not None:
+            metadata, event = existing
+            self._capsule_store.verify(metadata)
+            return event
         request_position = self._checkpoint_request_position(checkpoint_id)
-        matching_event = self._checkpoint_event_for(checkpoint_id)
-        if self.state.checkpoint is not None:
-            existing_event = self.state.events[-1]
-            if (
-                existing_event.type == "checkpoint.created"
-                and existing_event.payload["checkpoint_id"] == checkpoint_id
-            ):
-                self._capsule_store.verify(self.state.checkpoint)
-                return existing_event
-        if matching_event is not None:
-            raise NativeControllerError
         if request_position is not None and request_position != self._session_store.position:
             raise NativeControllerError
         if self.state.lifecycle not in {"running", "paused"}:
@@ -648,8 +672,30 @@ class NativeController:
         self._append(checkpoint_committed_record(metadata, event))
         return event
 
+    def _preflight_checkpoint_request(
+        self, command: ControlCommand, command_digest: str
+    ) -> None:
+        if command.type != "checkpoint.request":
+            return
+        checkpoint_id = str(command.payload["checkpoint_id"])
+        for _, existing, existing_digest in self._checkpoint_request_records(
+            checkpoint_id
+        ):
+            if existing.command_id != command.command_id or existing_digest != command_digest:
+                raise NativeControllerError
+
     def _checkpoint_request_position(self, checkpoint_id: str) -> int | None:
         result: int | None = None
+        for position, _, _ in self._checkpoint_request_records(checkpoint_id):
+            if result is not None:
+                raise NativeControllerError
+            result = position
+        return result
+
+    def _checkpoint_request_records(
+        self, checkpoint_id: str
+    ) -> tuple[tuple[int, ControlCommand, str], ...]:
+        result: list[tuple[int, ControlCommand, str]] = []
         for entry in self._session_store.replay():
             if entry.record.kind != "command.committed":
                 continue
@@ -660,19 +706,33 @@ class NativeController:
                 command.type == "checkpoint.request"
                 and command.payload["checkpoint_id"] == checkpoint_id
             ):
-                if result is not None:
-                    raise NativeControllerError
-                result = entry.position
-        return result
+                result.append(
+                    (entry.position, command, str(entry.record.payload["command_digest"]))
+                )
+        return tuple(result)
 
-    def _checkpoint_event_for(self, checkpoint_id: str) -> ControlEvent | None:
-        result: ControlEvent | None = None
+    def _checkpoint_record_for(
+        self, checkpoint_id: str
+    ) -> tuple[NativeCapsuleMetadata, ControlEvent] | None:
+        result: tuple[NativeCapsuleMetadata, ControlEvent] | None = None
         for event in self.state.events:
-            if (
-                event.type == "checkpoint.created"
-                and event.payload["checkpoint_id"] == checkpoint_id
-            ):
-                result = event
+            if event.type != "checkpoint.created":
+                continue
+            if event.payload["checkpoint_id"] != checkpoint_id:
+                continue
+            for entry in self._session_store.replay():
+                if entry.record.kind != "checkpoint.committed":
+                    continue
+                candidate = ControlEvent.from_mapping(
+                    _mapping_from_json(entry.record.payload["event"])
+                )
+                if candidate != event:
+                    continue
+                metadata = _metadata_from_mapping(entry.record.payload["metadata"])
+                current = (metadata, event)
+                if result is not None and result != current:
+                    raise NativeControllerError
+                result = current
         return result
 
     def _validated_event_suffix(
@@ -680,6 +740,8 @@ class NativeController:
     ) -> tuple[ControlEvent, ...]:
         if cursor is None:
             return events
+        if type(cursor) is not EventCursor:
+            raise NativeControllerError
         if cursor.generation != self._generation or cursor.sequence > len(events):
             raise NativeControllerError
         return events[cursor.sequence :]
@@ -783,6 +845,7 @@ def _require_positive(value: object) -> None:
 def _is_incomplete_create_state(state: NativeControllerState) -> bool:
     return (
         state.lifecycle == "bound"
+        and state.initial_create_command_digest is not None
         and state.goal_id is None
         and state.goal_status is None
         and state.budget_authority_revision is None
@@ -802,6 +865,14 @@ def _is_incomplete_create_state(state: NativeControllerState) -> bool:
         and state.checkpoint is None
         and state.terminal_event_id is None
     )
+
+
+def _control_command_mapping(command: ControlCommand) -> Mapping[str, object]:
+    if type(command) is not ControlCommand:
+        raise NativeControllerError
+    mapping = _mapping_from_json(command.to_mapping())
+    validate_control_command(mapping)
+    return mapping
 
 
 def _input_identity(value: NativeInputReference) -> Mapping[str, object]:

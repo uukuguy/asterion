@@ -46,7 +46,59 @@ def session_bound_record(
     checkpoint_version: str,
     authority_id: str,
     authority_revision: int,
+    initial_create_command: ControlCommand | None = None,
 ) -> NativeRecord:
+    if initial_create_command is None:
+        initial_create_command = ControlCommand(
+            command_id="command-create",
+            session_id=session_id,
+            authority_revision=authority_revision,
+            type="session.create",
+            payload={
+                "system_id": system_id,
+                "system_version": system_version,
+                "goal_id": "goal-validation",
+                "goal_ref": "goal-validation",
+            },
+        )
+    if type(initial_create_command) is not ControlCommand:
+        raise NativeStateError("native initial create command is invalid")
+    return _session_bound_record_from_mapping(
+        provider_id=provider_id,
+        provider_version=provider_version,
+        system_id=system_id,
+        system_version=system_version,
+        session_id=session_id,
+        generation=generation,
+        checkpoint_version=checkpoint_version,
+        authority_id=authority_id,
+        authority_revision=authority_revision,
+        initial_create_command_mapping=initial_create_command.to_mapping(),
+    )
+
+
+def _session_bound_record_from_mapping(
+    *,
+    provider_id: str,
+    provider_version: str,
+    system_id: str,
+    system_version: str,
+    session_id: str,
+    generation: int,
+    checkpoint_version: str,
+    authority_id: str,
+    authority_revision: int,
+    initial_create_command_mapping: Mapping[str, object],
+) -> NativeRecord:
+    command = ControlCommand.from_mapping(_mapping(initial_create_command_mapping))
+    if (
+        command.type != "session.create"
+        or command.session_id != session_id
+        or command.authority_revision != authority_revision
+        or command.payload["system_id"] != system_id
+        or command.payload["system_version"] != system_version
+    ):
+        raise NativeStateError("native initial create command identity mismatches")
     payload = {
         "provider_id": provider_id,
         "provider_version": provider_version,
@@ -57,6 +109,7 @@ def session_bound_record(
         "checkpoint_version": checkpoint_version,
         "authority_id": authority_id,
         "authority_revision": authority_revision,
+        "initial_create_command_digest": _digest(initial_create_command_mapping),
     }
     record = NativeRecord(
         _canonical_record_id("session.bound", payload),
@@ -70,6 +123,8 @@ def session_bound_record(
 def authority_synced_record(
     authority_revision: int, budget: RemainingBudget
 ) -> NativeRecord:
+    if type(budget) is not RemainingBudget:
+        raise NativeStateError("native authority budget is invalid")
     budget_payload = _remaining_budget_mapping(budget)
     payload = {
         "authority_revision": authority_revision,
@@ -87,11 +142,20 @@ def authority_synced_record(
 def command_committed_record(
     command: ControlCommand, events: Iterable[ControlEvent]
 ) -> NativeRecord:
+    if type(command) is not ControlCommand:
+        raise NativeStateError("native command is invalid")
     command_payload = command.to_mapping()
+    return _command_committed_record_from_mapping(command_payload, events)
+
+
+def _command_committed_record_from_mapping(
+    command_payload: Mapping[str, object], events: Iterable[ControlEvent]
+) -> NativeRecord:
+    event_mappings = tuple(_event_mapping(event) for event in events)
     payload = {
         "command_digest": _digest(command_payload),
         "command": command_payload,
-        "events": tuple(event.to_mapping() for event in events),
+        "events": event_mappings,
     }
     record = NativeRecord(
         _canonical_record_id("command.committed", payload),
@@ -103,6 +167,8 @@ def command_committed_record(
 
 
 def turn_started_record(request: NativeTurnRequest) -> NativeRecord:
+    if type(request) is not NativeTurnRequest:
+        raise NativeStateError("native turn request is invalid")
     payload = {"request": _turn_request_mapping(request)}
     record = NativeRecord(
         _canonical_record_id("turn.started", payload),
@@ -119,7 +185,9 @@ def turn_committed_record(
     *,
     adapter_invoked: bool = True,
 ) -> NativeRecord:
-    event_mappings = tuple(event.to_mapping() for event in events)
+    if type(result) is not NativeTurnResult:
+        raise NativeStateError("native turn result is invalid")
+    event_mappings = tuple(_event_mapping(event) for event in events)
     _validate_turn_usage(result.usage)
     if adapter_invoked or result.events:
         _validate_event_drafts(result.events, event_mappings)
@@ -144,7 +212,7 @@ def turn_recovery_required_record(
     payload = {
         "turn_id": turn_id,
         "reason_code": reason_code,
-        "events": tuple(event.to_mapping() for event in events),
+        "events": tuple(_event_mapping(event) for event in events),
     }
     record = NativeRecord(
         _canonical_record_id("turn.recovery-required", payload),
@@ -158,9 +226,13 @@ def turn_recovery_required_record(
 def checkpoint_committed_record(
     metadata: NativeCapsuleMetadata, event: ControlEvent
 ) -> NativeRecord:
+    if type(metadata) is not NativeCapsuleMetadata:
+        raise NativeStateError("native checkpoint metadata is invalid")
+    if type(event) is not ControlEvent:
+        raise NativeStateError("native checkpoint event is invalid")
     payload = {
         "metadata": _metadata_mapping(metadata),
-        "event": event.to_mapping(),
+        "event": _event_mapping(event),
     }
     record = NativeRecord(
         _canonical_record_id("checkpoint.committed", payload),
@@ -243,6 +315,7 @@ def _apply_session_bound(
         lifecycle="bound",
         authority_id=str(payload["authority_id"]),
         authority_revision=_int(payload["authority_revision"]),
+        initial_create_command_digest=str(payload["initial_create_command_digest"]),
     )
 
 
@@ -269,6 +342,12 @@ def _apply_command_committed(
     command_digest = str(record.payload["command_digest"])
     if command_digest != _digest(command.to_mapping()):
         raise NativeStateError("native command digest mismatches")
+    if (
+        state.lifecycle == "bound"
+        and command.type == "session.create"
+        and command_digest != state.initial_create_command_digest
+    ):
+        raise NativeStateError("native initial create command mismatches bound state")
     if command.session_id != state.session_id:
         raise NativeStateError("native command session mismatches")
     if (
@@ -629,8 +708,10 @@ def _validate_record(record: NativeRecord) -> None:
                     "checkpoint_version",
                     "authority_id",
                     "authority_revision",
+                    "initial_create_command_digest",
                 },
             )
+            _require_digest(record.payload["initial_create_command_digest"])
             validate_control_event(
                 {
                     "protocol": "asterion.agent-control/v1",
@@ -744,6 +825,8 @@ def _action_result_reference(
 
 
 def _turn_request_mapping(request: NativeTurnRequest) -> Mapping[str, object]:
+    if type(request) is not NativeTurnRequest:
+        raise NativeStateError("native turn request is invalid")
     return {
         "turn_id": request.turn_id,
         "session_id": request.session_id,
@@ -793,6 +876,8 @@ def _turn_request_from_mapping(value: object) -> NativeTurnRequest:
 
 
 def _input_reference_mapping(value: NativeInputReference) -> Mapping[str, object]:
+    if type(value) is not NativeInputReference:
+        raise NativeStateError("native input reference is invalid")
     return {
         "input_id": value.input_id,
         "delivery": value.delivery,
@@ -815,6 +900,8 @@ def _input_reference_from_mapping(value: object) -> NativeInputReference:
 def _action_result_reference_mapping(
     value: NativeActionResultReference,
 ) -> Mapping[str, object]:
+    if type(value) is not NativeActionResultReference:
+        raise NativeStateError("native action result reference is invalid")
     return {
         "action_id": value.action_id,
         "resolution": value.resolution,
@@ -844,6 +931,8 @@ def _action_result_reference_from_mapping(
 
 
 def _metadata_mapping(value: NativeCapsuleMetadata) -> Mapping[str, object]:
+    if type(value) is not NativeCapsuleMetadata:
+        raise NativeStateError("native checkpoint metadata is invalid")
     return {
         "capsule_id": value.capsule_id,
         "capsule_digest": value.capsule_digest,
@@ -883,6 +972,12 @@ def _metadata_from_mapping(value: object) -> NativeCapsuleMetadata:
     )
 
 
+def _event_mapping(value: ControlEvent) -> Mapping[str, object]:
+    if type(value) is not ControlEvent:
+        raise NativeStateError("native event is invalid")
+    return value.to_mapping()
+
+
 def _events_from_payload(value: object) -> tuple[ControlEvent, ...]:
     return tuple(
         ControlEvent.from_mapping(_mapping(_json_value(_mapping(item))))
@@ -891,7 +986,7 @@ def _events_from_payload(value: object) -> tuple[ControlEvent, ...]:
 
 
 def _remaining_budget_mapping(value: RemainingBudget) -> Mapping[str, object]:
-    if not isinstance(value, RemainingBudget):
+    if type(value) is not RemainingBudget:
         raise NativeStateError("native remaining budget is invalid")
     _validate_budget_bounds(value)
     return {
@@ -930,7 +1025,7 @@ def _remaining_budget_from_mapping(value: object) -> RemainingBudget:
 
 
 def _usage_mapping(value: BudgetUsage) -> Mapping[str, object]:
-    if not isinstance(value, BudgetUsage):
+    if type(value) is not BudgetUsage:
         raise NativeStateError("native usage is invalid")
     _validate_usage_bounds(value)
     return {field: getattr(value, field) for field in _USAGE_FIELDS}
