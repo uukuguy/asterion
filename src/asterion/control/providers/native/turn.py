@@ -39,13 +39,13 @@ class DeterministicNativeTurnAdapter:
         *,
         adapter_id: str = "native.fake-turn/v1",
     ) -> None:
-        if not isinstance(scripts, Mapping) or not isinstance(adapter_id, str):
+        if type(scripts) is not dict or type(adapter_id) is not str:
             raise NativeTurnError
         if not adapter_id:
             raise NativeTurnError
         frozen: dict[str, NativeTurnResult] = {}
-        for key, result in scripts.items():
-            if not isinstance(key, str) or type(result) is not NativeTurnResult:
+        for key, result in dict.items(scripts):
+            if type(key) is not str or type(result) is not NativeTurnResult:
                 raise NativeTurnError
             frozen[key] = result
         self._scripts = MappingProxyType(frozen)

@@ -18,6 +18,7 @@ from asterion.control.providers.native.model import (
     NativeCapsuleMetadata,
     NativeEntry,
     NativeEventDraft,
+    NativeInputReference,
     NativeRecord,
     NativeTurnRequest,
     NativeTurnResult,
@@ -317,6 +318,56 @@ class HostileRemainingBudget(RemainingBudget):
             )
             raise AssertionError("SENTINEL_SECRET")
         return super().__getattribute__(name)
+
+
+class HostileScriptsMapping(Mapping[str, NativeTurnResult]):
+    def __init__(self, result: NativeTurnResult) -> None:
+        self.result = result
+        self.items_calls = 0
+        self.iter_calls = 0
+        self.getitem_calls = 0
+        self.len_calls = 0
+
+    def items(self):  # type: ignore[no-untyped-def,override]
+        self.items_calls += 1
+        raise AssertionError("SENTINEL_SECRET")
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        self.iter_calls += 1
+        raise AssertionError("SENTINEL_SECRET")
+
+    def __getitem__(self, key: str) -> NativeTurnResult:
+        self.getitem_calls += 1
+        raise AssertionError("SENTINEL_SECRET")
+
+    def __len__(self) -> int:
+        self.len_calls += 1
+        raise AssertionError("SENTINEL_SECRET")
+
+
+class HostileScriptsDict(dict[str, NativeTurnResult]):
+    def __init__(self, result: NativeTurnResult) -> None:
+        super().__init__({"input:content-ref": result})
+        self.items_calls = 0
+        self.iter_calls = 0
+        self.getitem_calls = 0
+        self.len_calls = 0
+
+    def items(self):  # type: ignore[no-untyped-def,override]
+        self.items_calls += 1
+        raise AssertionError("SENTINEL_SECRET")
+
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        self.iter_calls += 1
+        raise AssertionError("SENTINEL_SECRET")
+
+    def __getitem__(self, key: str) -> NativeTurnResult:
+        self.getitem_calls += 1
+        raise AssertionError("SENTINEL_SECRET")
+
+    def __len__(self) -> int:
+        self.len_calls += 1
+        raise AssertionError("SENTINEL_SECRET")
 
 
 class CountingAdapter:
@@ -756,6 +807,69 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(NativeTurnError):
             await adapter.execute(hostile_request)
         self.assertEqual(hostile_request.attribute_reads, 0)
+
+    async def test_turn_adapter_requires_exact_script_dict_before_reads(self) -> None:
+        result = NativeTurnResult("turn-script", (), _usage())
+        request = NativeTurnRequest(
+            turn_id="turn-script",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(
+                NativeInputReference(
+                    "input-script",
+                    "direct",
+                    "content-ref",
+                    "a" * 64,
+                ),
+            ),
+            action_results=(),
+            budget=_budget(),
+        )
+        hostile_mapping = HostileScriptsMapping(result)
+        hostile_dict = HostileScriptsDict(result)
+
+        for label, scripts in (
+            ("mapping", hostile_mapping),
+            ("dict-subclass", hostile_dict),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaises(NativeTurnError) as caught:
+                    DeterministicNativeTurnAdapter(
+                        cast(Mapping[str, NativeTurnResult], scripts)
+                    )
+                self.assertIsNone(caught.exception.__context__)
+                self.assertIsNone(caught.exception.__cause__)
+                self.assertNotIn("SENTINEL_SECRET", str(caught.exception))
+
+        self.assertEqual(hostile_mapping.items_calls, 0)
+        self.assertEqual(hostile_mapping.iter_calls, 0)
+        self.assertEqual(hostile_mapping.getitem_calls, 0)
+        self.assertEqual(hostile_mapping.len_calls, 0)
+        self.assertEqual(hostile_dict.items_calls, 0)
+        self.assertEqual(hostile_dict.iter_calls, 0)
+        self.assertEqual(hostile_dict.getitem_calls, 0)
+        self.assertEqual(hostile_dict.len_calls, 0)
+
+        for label, scripts in (
+            ("bad-key", {1: result}),
+            ("bad-value", {"input:content-ref": cast(NativeTurnResult, object())}),
+            ("adapter-id-subclass", {"input:content-ref": result}),
+        ):
+            with self.subTest(label=label), self.assertRaises(NativeTurnError):
+                DeterministicNativeTurnAdapter(
+                    cast(Mapping[str, NativeTurnResult], scripts),
+                    adapter_id=cast(str, str("native.fake-turn/v1"))
+                    if label != "adapter-id-subclass"
+                    else cast(str, type("HostileAdapterId", (str,), {})("native.fake-turn/v1")),
+                )
+
+        scripts = {"input:content-ref": result}
+        adapter = DeterministicNativeTurnAdapter(scripts)
+        scripts["input:content-ref"] = NativeTurnResult("turn-mutated", (), _usage())
+
+        self.assertEqual(await adapter.execute(request), result)
 
     async def test_action_cannot_advance_without_host_terminal_resolution(self) -> None:
         fixture = ControllerFixture(
