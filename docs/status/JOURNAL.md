@@ -1208,3 +1208,4 @@
 - 05:16 Restored Prime source fixture helper so pre-H make check can import all tests [204fc99]
 - 06:52 Closed H-038 exactly once and routed Native work to Phase 3.2 verified-loop design [47a2839]
 - 07:11 Accepted generic awaitable Native observations to clear Task10 Pyright diagnostic [d748a57]
+- 07:49 Corrected Native core focused gate count after awaitable regression expanded it [1922969]
