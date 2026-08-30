@@ -627,11 +627,341 @@ class TestNativeControlStore(unittest.TestCase):
             second.append(1, bound_record_with_authority_revision(2))
         self.assert_redacted_store_error(raised.exception)
 
+    def test_file_close_waits_for_append_and_cannot_redirect_to_reused_fd(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            token = "1" * 32
+            expected = NativeEntry(1, None, bound_record())
+            attacker = session_child(root) / "attacker"
+            attacker.mkdir(mode=0o700)
+            attacker_temp = attacker / f".record-00000000000000000001-{token}.tmp"
+            attacker_temp.write_bytes(canonical_entry_bytes(expected))
+            attacker_temp.chmod(0o600)
+            entered = threading.Event()
+            release = threading.Event()
+            original_write_all = store_module._write_all
+
+            def blocked_write(descriptor: int, data: bytes) -> None:
+                entered.set()
+                self.assertTrue(release.wait(timeout=5))
+                original_write_all(descriptor, data)
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", blocked_write),
+            ):
+                append_results = run_threaded_call(
+                    lambda: store.append(0, bound_record())
+                )
+                self.assertTrue(entered.wait(timeout=5))
+                close_results = run_threaded_call(store.close)
+                attacker_fd = -1
+                try:
+                    close_results.thread.join(timeout=0.05)
+                    self.assertTrue(close_results.thread.is_alive())
+                    attacker_fd = os.open(str(attacker), os.O_RDONLY | os.O_DIRECTORY)
+                finally:
+                    release.set()
+                    append_results.thread.join(timeout=5)
+                    close_results.thread.join(timeout=5)
+                    if attacker_fd >= 0:
+                        os.close(attacker_fd)
+
+            self.assertFalse(append_results.thread.is_alive())
+            self.assertFalse(close_results.thread.is_alive())
+            self.assertEqual(append_results.value_or_raise(), expected)
+            close_results.value_or_raise()
+            self.assertEqual(list(attacker.iterdir()), [attacker_temp])
+            self.assertEqual(list(records.glob("*.record")), [records / final_name(expected)])
+            with self.assertRaises(NativeStoreError) as raised:
+                store.replay()
+            self.assert_redacted_store_error(raised.exception)
+
+    def test_file_close_waits_for_replay_then_post_close_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, _records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            entry = store.append(0, bound_record())
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            entered = threading.Event()
+            release = threading.Event()
+            original_read_child = store_module._read_child_file
+
+            def blocked_read(
+                parent_fd: int,
+                name: str,
+                mode: int,
+                max_bytes: int,
+            ) -> bytes:
+                entered.set()
+                self.assertTrue(release.wait(timeout=5))
+                return original_read_child(parent_fd, name, mode, max_bytes)
+
+            with patch.object(store_module, "_read_child_file", blocked_read):
+                replay_results = run_threaded_call(store.replay)
+                self.assertTrue(entered.wait(timeout=5))
+                close_results = run_threaded_call(store.close)
+                try:
+                    close_results.thread.join(timeout=0.05)
+                    self.assertTrue(close_results.thread.is_alive())
+                finally:
+                    release.set()
+                    replay_results.thread.join(timeout=5)
+                    close_results.thread.join(timeout=5)
+
+            self.assertEqual(replay_results.value_or_raise(), (entry,))
+            close_results.value_or_raise()
+            with self.assertRaises(NativeStoreError) as raised:
+                store.position
+            self.assert_redacted_store_error(raised.exception)
+
+    def test_memory_close_waits_for_append_then_post_close_fails(self) -> None:
+        owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)
+        store = MemoryNativeSessionStore(owner, max_record_bytes=65_536)
+        self.addCleanup(owner.close)
+        self.addCleanup(store.close)
+        expected = NativeEntry(1, None, bound_record())
+        entered = threading.Event()
+        release = threading.Event()
+        original_validate = store_module._validate_entries
+
+        def blocked_validate(entries: tuple[NativeEntry, ...]) -> None:
+            if entries == (expected,):
+                entered.set()
+                self.assertTrue(release.wait(timeout=5))
+            original_validate(entries)
+
+        with patch.object(store_module, "_validate_entries", blocked_validate):
+            append_results = run_threaded_call(lambda: store.append(0, bound_record()))
+            self.assertTrue(entered.wait(timeout=5))
+            close_results = run_threaded_call(store.close)
+            try:
+                close_results.thread.join(timeout=0.05)
+                self.assertTrue(close_results.thread.is_alive())
+            finally:
+                release.set()
+                append_results.thread.join(timeout=5)
+                close_results.thread.join(timeout=5)
+
+        self.assertEqual(append_results.value_or_raise(), expected)
+        close_results.value_or_raise()
+        with self.assertRaises(NativeStoreError) as raised:
+            store.replay()
+        self.assert_redacted_store_error(raised.exception)
+
+    def test_failed_publication_retains_reservation_when_temp_alias_survives(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            expected = NativeEntry(1, None, bound_record())
+            encoded = canonical_entry_bytes(expected)
+            token = "2" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+            alias = session_child(root) / "retained-temp-alias"
+
+            def alias_then_fail(_descriptor: int, _data: bytes) -> None:
+                os.link(temporary, alias)
+                raise OSError("SENTINEL_SECRET")
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", alias_then_fail),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assertFalse(temporary.exists())
+            self.assertTrue(alias.exists())
+            self.assertEqual(session.budget.used_bytes, len(encoded))
+
+    def test_failed_publication_releases_only_after_temp_inode_is_gone(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            token = "3" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+            retained = records / f".record-00000000000000000000-{'4' * 32}.tmp"
+            retained.write_bytes(b"foreign")
+            retained.chmod(0o600)
+            observed_unlinked_fd_nlinks: list[int] = []
+            original_fstat = os.fstat
+
+            def fail_write(_descriptor: int, _data: bytes) -> None:
+                raise OSError("SENTINEL_SECRET")
+
+            def recording_fstat(descriptor: int) -> os.stat_result:
+                result = original_fstat(descriptor)
+                if result.st_nlink == 0:
+                    observed_unlinked_fd_nlinks.append(result.st_nlink)
+                return result
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", fail_write),
+                patch.object(store_module.os, "fstat", recording_fstat),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assertIn(0, observed_unlinked_fd_nlinks)
+            self.assertFalse(temporary.exists())
+            self.assertTrue(retained.exists())
+            self.assertEqual(session.budget.used_bytes, 0)
+
+    def test_failed_publication_retains_reservation_when_cleanup_proof_fails(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            expected = NativeEntry(1, None, bound_record())
+            encoded = canonical_entry_bytes(expected)
+            token = "5" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+            original_fstat = os.fstat
+            original_unlink = os.unlink
+            cleanup_started = False
+
+            def fail_write(_descriptor: int, _data: bytes) -> None:
+                raise OSError("SENTINEL_SECRET")
+
+            def mark_cleanup_unlink(name: str, *, dir_fd: int | None = None) -> None:
+                nonlocal cleanup_started
+                original_unlink(name, dir_fd=dir_fd)
+                cleanup_started = True
+
+            def fail_cleanup_fstat(descriptor: int) -> os.stat_result:
+                if cleanup_started:
+                    raise OSError("SENTINEL_SECRET")
+                return original_fstat(descriptor)
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", fail_write),
+                patch.object(store_module.os, "unlink", mark_cleanup_unlink),
+                patch.object(store_module.os, "fstat", fail_cleanup_fstat),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assertFalse(temporary.exists())
+            self.assertEqual(session.budget.used_bytes, len(encoded))
+
+    def test_failed_publication_does_not_delete_replaced_temp_name(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            expected = NativeEntry(1, None, bound_record())
+            encoded = canonical_entry_bytes(expected)
+            token = "7" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+            replacement = b"foreign replacement"
+
+            def replace_name_then_fail(_descriptor: int, _data: bytes) -> None:
+                os.unlink(temporary)
+                temporary.write_bytes(replacement)
+                temporary.chmod(0o600)
+                raise OSError("SENTINEL_SECRET")
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", replace_name_then_fail),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assertEqual(temporary.read_bytes(), replacement)
+            self.assertEqual(session.budget.used_bytes, len(encoded))
+
+    def test_keyboard_interrupt_cleanup_proves_removed_temp_before_propagating(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            token = "6" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+            observed_unlinked_fd_nlinks: list[int] = []
+            original_fstat = os.fstat
+
+            def interrupt_write(_descriptor: int, _data: bytes) -> None:
+                raise KeyboardInterrupt
+
+            def recording_fstat(descriptor: int) -> os.stat_result:
+                result = original_fstat(descriptor)
+                if result.st_nlink == 0:
+                    observed_unlinked_fd_nlinks.append(result.st_nlink)
+                return result
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", interrupt_write),
+                patch.object(store_module.os, "fstat", recording_fstat),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                store.append(0, bound_record())
+
+            self.assertIn(0, observed_unlinked_fd_nlinks)
+            self.assertFalse(temporary.exists())
+            self.assertEqual(session.budget.used_bytes, 0)
+
 
 CorruptCase = Callable[[], None]
 EntryMutator = Callable[[Path, Path, NativeEntry, NativeEntry], None]
 AppendRequest = tuple[FileNativeSessionStore, int, NativeRecord]
 AppendResult = tuple[str, NativeEntry | BaseException]
+
+
+class ThreadedCallResult:
+    def __init__(self, call: Callable[[], object]) -> None:
+        self._results: queue.Queue[object] = queue.Queue()
+        self.thread = threading.Thread(target=self._run, args=(call,))
+        self.thread.start()
+
+    def value_or_raise(self) -> object:
+        result = self._results.get_nowait()
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    def _run(self, call: Callable[[], object]) -> None:
+        try:
+            self._results.put(call())
+        except BaseException as error:
+            self._results.put(error)
+
+
+def run_threaded_call(call: Callable[[], object]) -> ThreadedCallResult:
+    return ThreadedCallResult(call)
 
 
 def run_two_appends(left: AppendRequest, right: AppendRequest) -> list[AppendResult]:

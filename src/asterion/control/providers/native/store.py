@@ -148,7 +148,7 @@ class MemoryNativeStorageOwner:
 
     def __init__(self, *, maximum_bytes: int) -> None:
         self._budget = NativeStorageBudget(maximum_bytes)
-        self._operation_lock = threading.RLock()
+        self._operation_lock = threading.Lock()
         self._entries: list[NativeEntry] = []
         self._by_record_id: dict[str, NativeEntry] = {}
         self._closed = False
@@ -238,7 +238,8 @@ class MemoryNativeSessionStore:
             return entries[position:]
 
     def close(self) -> None:
-        self._closed = True
+        with self._owner.operation():
+            self._closed = True
 
     def _require_usable(self) -> None:
         if self._closed:
@@ -265,7 +266,7 @@ class NativeSessionDirectory:
         self._capsules_fd = capsules_fd
         self._lock_fd = lock_fd
         self._budget = budget
-        self._operation_lock = threading.RLock()
+        self._operation_lock = threading.Lock()
         self._closed = False
 
     @classmethod
@@ -460,8 +461,6 @@ class FileNativeSessionStore:
             temp_stat = _validate_fd(descriptor, 0o600, regular=True)
             if temp_stat.st_size != len(encoded):
                 raise NativeStoreError
-            os.close(descriptor)
-            descriptor = -1
             os.link(
                 temporary,
                 final_name,
@@ -473,35 +472,41 @@ class FileNativeSessionStore:
             _fsync_directory(self._records_fd)
             os.unlink(temporary, dir_fd=self._records_fd)
             _fsync_directory(self._records_fd)
+            temp_stat = _validate_fd(descriptor, 0o600, regular=True)
             final_stat = _validate_child_file(self._records_fd, final_name, 0o600)
             if not _same_trusted_file(temp_stat, final_stat):
                 raise NativeStoreError
-        except NativeStoreError:
-            if descriptor >= 0:
-                _close_fd_quietly(descriptor)
-            if not final_linked and _remove_unpublished_temp(
-                self._records_fd,
-                temporary,
-                temp_created=temp_created,
-            ):
-                self._owner.budget.release(len(encoded))
+        except BaseException as error:
+            should_release = False
+            if not final_linked:
+                should_release = _remove_unpublished_temp(
+                    self._records_fd,
+                    temporary,
+                    temp_fd=descriptor,
+                    temp_created=temp_created,
+                )
+            _close_fd_quietly(descriptor)
+            if should_release:
+                try:
+                    self._owner.budget.release(len(encoded))
+                except NativeStoreError:
+                    if isinstance(error, Exception):
+                        raise
+            if isinstance(error, NativeStoreError):
+                raise
+            if isinstance(error, Exception):
+                _raise_store_error()
             raise
-        except Exception:
-            if descriptor >= 0:
-                _close_fd_quietly(descriptor)
-            if not final_linked and _remove_unpublished_temp(
-                self._records_fd,
-                temporary,
-                temp_created=temp_created,
-            ):
-                self._owner.budget.release(len(encoded))
-            _raise_store_error()
+        _close_fd_quietly(descriptor)
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        _close_fd_quietly(self._records_fd)
+        with self._owner.operation():
+            if self._closed:
+                return
+            descriptor = self._records_fd
+            self._records_fd = -1
+            self._closed = True
+            _close_fd_quietly(descriptor)
 
     def _refresh(self) -> None:
         self._entries = self._load_entries()
@@ -989,18 +994,35 @@ def _remove_unpublished_temp(
     parent_fd: int,
     name: str,
     *,
+    temp_fd: int,
     temp_created: bool,
 ) -> bool:
     if not temp_created:
         return True
+    if temp_fd < 0:
+        return False
     try:
+        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        opened = os.fstat(temp_fd)
+        if (
+            current.st_uid != _current_uid()
+            or opened.st_uid != _current_uid()
+            or stat.S_IMODE(current.st_mode) != 0o600
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or not stat.S_ISREG(current.st_mode)
+            or not stat.S_ISREG(opened.st_mode)
+            or current.st_dev != opened.st_dev
+            or current.st_ino != opened.st_ino
+        ):
+            return False
         os.unlink(name, dir_fd=parent_fd)
         _fsync_directory(parent_fd)
-        return True
+        proof = os.fstat(temp_fd)
+        return proof.st_nlink == 0
     except FileNotFoundError:
         _fsync_directory_quietly(parent_fd)
-        return True
-    except OSError:
+        return False
+    except Exception:
         _fsync_directory_quietly(parent_fd)
         return False
 
