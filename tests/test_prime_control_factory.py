@@ -13,7 +13,10 @@ from unittest import mock
 from typing import cast
 
 from asterion.control.authority import AuthorityEnvelope
-from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFactoryError
+from asterion.control.factory import (
+    ControlPlaneFactoryContext,
+    ControlPlaneFactoryError,
+)
 from asterion.control.factory import bind_selected_session_context_client
 from asterion.control.host import ControlPlaneManifest
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
@@ -29,6 +32,10 @@ from asterion.control.providers.prime.factory import (
     derive_prime_child_control_options,
     prime_control_plane_binding,
 )
+from asterion.control.providers.prime.operation_host import (
+    PrimeManagedOperationTransport,
+)
+from asterion.operation.protocol import OperationReceipt, OperationTransaction
 from asterion.control.providers.prime.ecosystem import PrimeEcosystemService
 from tests.test_control_children import _child_envelope
 from asterion.control.providers.prime.process import (
@@ -68,9 +75,52 @@ class FakeResolver:
 class FakeProcess:
     def __init__(self, options: PrimeSidecarLaunchOptions) -> None:
         self.options = options
+        self.closed = False
 
     async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
         raise AssertionError(envelope)
+
+    def events(self, envelope: Mapping[str, object]):
+        del envelope
+
+        async def iterator():
+            if False:
+                yield {}
+
+        return iterator()
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class FactoryDispatcher:
+    session_id = "session-1"
+    generation = 1
+    authority_id = "authority-1"
+    authority_revision = 1
+
+    async def execute(self, transaction: OperationTransaction) -> OperationReceipt:
+        raise AssertionError(transaction)
+
+    async def cancel(
+        self, operation_id: str, *, authority_revision: int
+    ) -> OperationReceipt:
+        raise AssertionError((operation_id, authority_revision))
+
+    async def reconcile(self, transaction: OperationTransaction) -> OperationReceipt:
+        raise AssertionError(transaction)
+
+
+class ExplodingDispatcher:
+    @property
+    def session_id(self) -> str:
+        raise RuntimeError("SENTINEL_DISPATCHER_METHOD")
+
+
+class MismatchedDispatcher(FactoryDispatcher):
+    def __init__(self, **changes: object) -> None:
+        for key, value in changes.items():
+            setattr(self, key, value)
 
 
 class NoRequestProcess:
@@ -123,9 +173,7 @@ class EcosystemProcess:
         self.options = options
         self.requests: list[Mapping[str, object]] = []
 
-    async def request(
-        self, envelope: Mapping[str, object]
-    ) -> Mapping[str, object]:
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
         self.requests.append(envelope)
         frame = envelope["frame"]
         assert isinstance(frame, Mapping)
@@ -265,6 +313,7 @@ def make_context(
             "ecosystem-materializer": FakeEcosystemMaterializer(),
             "ecosystem-source-store": FakeEcosystemSourceStore(),
             "mcp-credential-refresh": FakeMcpCredentialRefresh(),
+            "operation-dispatcher": FactoryDispatcher(),
             "private-attachments": FakeResolver(),
             "private-content": FakeResolver(),
         },
@@ -327,8 +376,11 @@ class TestPrimeControlFactory(unittest.TestCase):
                 )
                 calls: list[object] = []
 
-                with self.subTest(service_name=service_name), self.assertRaisesRegex(
-                    ControlPlaneFactoryError, "host service is unavailable"
+                with (
+                    self.subTest(service_name=service_name),
+                    self.assertRaisesRegex(
+                        ControlPlaneFactoryError, "host service is unavailable"
+                    ),
                 ):
                     build_prime_control_plane_client(
                         context,
@@ -336,7 +388,9 @@ class TestPrimeControlFactory(unittest.TestCase):
                     )
                 self.assertEqual(calls, [])
 
-    def test_factory_rejects_wrong_ecosystem_protocol_objects_before_process(self) -> None:
+    def test_factory_rejects_wrong_ecosystem_protocol_objects_before_process(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             prepare_paths(root)
@@ -360,8 +414,11 @@ class TestPrimeControlFactory(unittest.TestCase):
                 )
                 calls: list[object] = []
 
-                with self.subTest(service_name=service_name), self.assertRaisesRegex(
-                    ControlPlaneFactoryError, "host service is unavailable"
+                with (
+                    self.subTest(service_name=service_name),
+                    self.assertRaisesRegex(
+                        ControlPlaneFactoryError, "host service is unavailable"
+                    ),
                 ):
                     build_prime_control_plane_client(
                         context,
@@ -423,7 +480,9 @@ class TestPrimeControlFactory(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 ControlPlaneManifest.from_mapping(candidate)
 
-    def test_factory_requires_trusted_local_authorization_and_exact_manifest(self) -> None:
+    def test_factory_requires_trusted_local_authorization_and_exact_manifest(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             prepare_paths(root)
@@ -434,8 +493,11 @@ class TestPrimeControlFactory(unittest.TestCase):
                 {"control_plane_id": "fake.control"},
                 {"control_plane_version": "9.0.0"},
             ):
-                with self.subTest(overrides=overrides), self.assertRaises(
-                    ControlPlaneFactoryError,
+                with (
+                    self.subTest(overrides=overrides),
+                    self.assertRaises(
+                        ControlPlaneFactoryError,
+                    ),
                 ):
                     build_prime_control_plane_client(
                         make_context(root, authority=None, **overrides),
@@ -473,8 +535,9 @@ class TestPrimeControlFactory(unittest.TestCase):
                     authority=context.authority,
                     host_services=services,
                 )
-                with self.subTest(services=tuple(services)), self.assertRaises(
-                    ControlPlaneFactoryError
+                with (
+                    self.subTest(services=tuple(services)),
+                    self.assertRaises(ControlPlaneFactoryError),
                 ):
                     build_prime_control_plane_client(
                         incomplete,
@@ -503,10 +566,117 @@ class TestPrimeControlFactory(unittest.TestCase):
             self.assertIsInstance(client, PrimeControlPlaneClient)
             self.assertIs(bind_selected_session_context_client(client), client)
             self.assertEqual(len(seen), 1)
-            self.assertEqual(seen[0].argv, (str((root / "node").resolve()), str((root / "main.js").resolve())))
+            self.assertEqual(
+                seen[0].argv,
+                (str((root / "node").resolve()), str((root / "main.js").resolve())),
+            )
             self.assertFalse(seen[0].private_descriptor["probeReady"])
             self.assertEqual(seen[0].private_descriptor["rlmMaxChildren"], 0)
             self.assertNotIn("SENTINEL_SECRET", repr(seen[0]))
+
+    def test_factory_requires_exact_operation_dispatcher_before_process_creation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_paths(root)
+            base = make_context(root)
+            cases: list[tuple[str, object | None]] = [
+                ("missing", None),
+                ("malformed", object()),
+                ("exploding", ExplodingDispatcher()),
+                ("session", MismatchedDispatcher(session_id="session-hostile")),
+                ("generation", MismatchedDispatcher(generation=2)),
+                ("authority", MismatchedDispatcher(authority_id="authority-hostile")),
+                ("revision", MismatchedDispatcher(authority_revision=2)),
+            ]
+            for label, dispatcher in cases:
+                services = dict(base.host_services)
+                if dispatcher is None:
+                    services.pop("operation-dispatcher")
+                else:
+                    services["operation-dispatcher"] = dispatcher
+                context = ControlPlaneFactoryContext(
+                    system_id=base.system_id,
+                    system_version=base.system_version,
+                    control_plane_id=base.control_plane_id,
+                    control_plane_version=base.control_plane_version,
+                    private_root=base.private_root,
+                    options=base.options,
+                    authority=base.authority,
+                    host_services=services,
+                )
+                calls: list[object] = []
+
+                with (
+                    self.subTest(label=label),
+                    self.assertRaisesRegex(
+                        ControlPlaneFactoryError,
+                        "^Prime operation dispatcher is unavailable$",
+                    ) as raised,
+                ):
+                    build_prime_control_plane_client(
+                        context,
+                        process_factory=lambda options: calls.append(options),
+                    )
+                self.assertEqual(calls, [])
+                for secret in (
+                    "SENTINEL_DISPATCHER_METHOD",
+                    str(root),
+                    "prime-operation.sock",
+                ):
+                    self.assertNotIn(secret, str(raised.exception))
+                    self.assertNotIn(secret, repr(context))
+
+    def test_factory_binds_one_managed_transport_and_fresh_private_callback_descriptor(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_paths(root)
+            context = make_context(root)
+            seen: list[PrimeSidecarLaunchOptions] = []
+            processes: list[FakeProcess] = []
+
+            def process_factory(options: PrimeSidecarLaunchOptions) -> FakeProcess:
+                seen.append(options)
+                process = FakeProcess(options)
+                processes.append(process)
+                return process
+
+            client = cast(
+                PrimeControlPlaneClient,
+                build_prime_control_plane_client(
+                    context,
+                    process_factory=process_factory,
+                ),
+            )
+
+            self.assertEqual(len(seen), 1)
+            descriptor = seen[0].private_descriptor["operationHost"]
+            self.assertIsInstance(descriptor, Mapping)
+            assert isinstance(descriptor, Mapping)
+            self.assertEqual(
+                set(descriptor),
+                {"socketPath", "token"},
+            )
+            self.assertEqual(
+                descriptor["socketPath"],
+                str(root.resolve() / "prime-operation.sock"),
+            )
+            self.assertFalse(Path(descriptor["socketPath"]).exists())
+            token = descriptor["token"]
+            self.assertIsInstance(token, str)
+            assert isinstance(token, str)
+            self.assertRegex(token, r"^[0-9a-f]{64}$")
+            self.assertNotIn(token, repr(seen[0]))
+            self.assertNotIn(
+                str(root.resolve() / "prime-operation.sock"), repr(seen[0])
+            )
+            self.assertIsInstance(client._process, PrimeManagedOperationTransport)
+            self.assertIs(client._process, client.operation_client._process)
+            self.assertIs(client.operation_client._process, client._process)
+            self.assertEqual(len(processes), 1)
 
     def test_factory_rejects_operations_v1_sidecar_without_request(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -521,7 +691,9 @@ class TestPrimeControlFactory(unittest.TestCase):
                     process_factory=NoRequestProcess,
                 )
 
-    def test_process_preflight_uses_direct_argv_no_shell_and_fixed_environment(self) -> None:
+    def test_process_preflight_uses_direct_argv_no_shell_and_fixed_environment(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             prepare_paths(root)
@@ -539,7 +711,10 @@ class TestPrimeControlFactory(unittest.TestCase):
 
             plan = build_prime_sidecar_spawn_plan(options, private_descriptor_fd=7)
 
-            self.assertEqual(plan.argv, (str((root / "node").resolve()), str((root / "main.js").resolve())))
+            self.assertEqual(
+                plan.argv,
+                (str((root / "node").resolve()), str((root / "main.js").resolve())),
+            )
             self.assertFalse(plan.shell)
             self.assertEqual(plan.pass_fds, (7,))
             self.assertEqual(plan.env["PATH"], "/bin")
@@ -547,7 +722,9 @@ class TestPrimeControlFactory(unittest.TestCase):
             self.assertNotIn("OPENAI_API_KEY", plan.env)
             self.assertNotIn("SENTINEL_SECRET", repr(plan))
 
-    def test_process_preflight_rejects_missing_executable_or_source_before_spawn(self) -> None:
+    def test_process_preflight_rejects_missing_executable_or_source_before_spawn(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             root.joinpath("node").write_text("#!/bin/sh\n")
@@ -620,6 +797,7 @@ class TestPrimeEcosystemFactoryIntegration(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(processes), 1)
             self.assertEqual(len(processes[0].requests), 1)
             self.assertEqual(processes[0].requests[0]["type"], "ecosystem_activate")
+            await client.close()
 
     async def test_factory_snapshots_one_shot_protocols_before_process_creation(
         self,
@@ -703,6 +881,7 @@ class TestPrimeEcosystemFactoryIntegration(unittest.IsolatedAsyncioTestCase):
                 {"materialize": 1, "close": 1},
             )
             self.assertEqual(credential_refresh.accesses, {"refresh": 1})
+            await client.close()
 
     async def test_binding_failure_is_fixed_and_precedes_process_creation(
         self,
@@ -715,11 +894,14 @@ class TestPrimeEcosystemFactoryIntegration(unittest.IsolatedAsyncioTestCase):
             context = make_context(root)
             processes: list[object] = []
 
-            with task3_mock.patch.object(
-                PrimeControlPlaneClient,
-                "bind_ecosystem_service",
-                side_effect=RuntimeError("SENTINEL_BINDING_EXCEPTION"),
-            ), self.assertRaises(ControlPlaneFactoryError) as raised:
+            with (
+                task3_mock.patch.object(
+                    PrimeControlPlaneClient,
+                    "bind_ecosystem_service",
+                    side_effect=RuntimeError("SENTINEL_BINDING_EXCEPTION"),
+                ),
+                self.assertRaises(ControlPlaneFactoryError) as raised,
+            ):
                 build_prime_control_plane_client(
                     context,
                     process_factory=lambda options: processes.append(options),
@@ -1058,13 +1240,21 @@ class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
                 writer.close()
                 await writer.wait_closed()
 
-            server = await asyncio.start_unix_server(on_connect, path=str(parent_socket))
+            server = await asyncio.start_unix_server(
+                on_connect, path=str(parent_socket)
+            )
             child_root = root / "children" / "child-1"
             child_root.mkdir(parents=True)
             options = derive_prime_child_control_options(
-                {"max_controller_tokens": "100", "timeout_ms": "1000", "prime_socket_path": str(parent_socket)},
-                child_root=child_root, child_session_id="child-session-child-1",
-                child_authority=_child_envelope(authority_id="child:child-1"), generation=1,
+                {
+                    "max_controller_tokens": "100",
+                    "timeout_ms": "1000",
+                    "prime_socket_path": str(parent_socket),
+                },
+                child_root=child_root,
+                child_session_id="child-session-child-1",
+                child_authority=_child_envelope(authority_id="child:child-1"),
+                generation=1,
             )
             script = root / "connect.py"
             script.write_text(
@@ -1073,10 +1263,14 @@ class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
                 "s=socket.socket(socket.AF_UNIX);s.connect(d['prime_socket_path']);s.send(b'x');s.close()\n"
                 "r=json.loads(sys.stdin.readline());print(json.dumps({'protocol':'asterion.prime-gateway-ipc/v1','id':r['id'],'type':'command.accepted'}),flush=True)\n"
             )
-            process = await PrimeSidecarProcess.start(PrimeSidecarLaunchOptions(
-                node_executable=Path(sys.executable), sidecar_entry=script,
-                private_descriptor=dict(options), environ={"PATH": os.environ.get("PATH", "")},
-            ))
+            process = await PrimeSidecarProcess.start(
+                PrimeSidecarLaunchOptions(
+                    node_executable=Path(sys.executable),
+                    sidecar_entry=script,
+                    private_descriptor=dict(options),
+                    environ={"PATH": os.environ.get("PATH", "")},
+                )
+            )
             try:
                 self.assertIsInstance(process.pid, int)
                 self.assertGreater(process.pid or 0, 0)
@@ -1086,14 +1280,15 @@ class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
                 server.close()
                 await server.wait_closed()
             self.assertFalse((child_root / "prime.sock").exists())
-    async def test_sidecar_eof_before_ack_fails_closed_and_close_is_bounded(self) -> None:
+
+    async def test_sidecar_eof_before_ack_fails_closed_and_close_is_bounded(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             script = root / "eof.py"
             script.write_text(
-                "import sys, time\n"
-                "sys.stdin.readline()\n"
-                "time.sleep(60)\n",
+                "import sys, time\nsys.stdin.readline()\ntime.sleep(60)\n",
             )
             process = await PrimeSidecarProcess.start(
                 PrimeSidecarLaunchOptions(
@@ -1303,7 +1498,9 @@ class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
         await process.close()
         self.assertTrue(process.closed)
 
-    async def test_sidecar_receives_private_descriptor_only_on_inherited_fd(self) -> None:
+    async def test_sidecar_receives_private_descriptor_only_on_inherited_fd(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             script = root / "descriptor.py"

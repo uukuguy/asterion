@@ -13,6 +13,7 @@ from asterion.control.providers.prime.operation import (
 )
 from asterion.control.providers.prime.operation_host import (
     PRIME_OPERATION_HOST_PROTOCOL,
+    PrimeManagedOperationTransport,
     PrimeOperationHostError,
     PrimeOperationHostServer,
 )
@@ -60,6 +61,7 @@ __all__ = (
     "PrimeOperationClient",
     "PrimeOperationError",
     "PRIME_OPERATION_HOST_PROTOCOL",
+    "PrimeManagedOperationTransport",
     "PrimeOperationHostError",
     "PrimeOperationHostServer",
     "PrimeContinualHarnessService",

@@ -7,13 +7,14 @@ import json
 import os
 import re
 import stat
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
 from types import MappingProxyType
 from typing import TypeGuard, cast
 
 from asterion.control.protocol import OPAQUE_ID
+from asterion.control.providers.prime.process import PrimeSidecarProcessError
 from asterion.operation.protocol import (
     MAX_SAFE_INTEGER,
     OperationReceipt,
@@ -54,6 +55,141 @@ class PrimeOperationHostError(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__("Prime operation host failed")
+
+
+class PrimeManagedOperationTransport:
+    """Lazily start one callback endpoint before the selected sidecar."""
+
+    def __init__(self, *, process: object, callback: object) -> None:
+        try:
+            request = object.__getattribute__(process, "request")
+            events = object.__getattribute__(process, "events")
+            close = object.__getattribute__(process, "close")
+            callback_start = object.__getattribute__(callback, "start")
+            callback_close = object.__getattribute__(callback, "close")
+        except Exception:
+            raise PrimeSidecarProcessError() from None
+        if not all(
+            callable(value)
+            for value in (request, events, close, callback_start, callback_close)
+        ):
+            raise PrimeSidecarProcessError()
+        self._process = process
+        self._callback = callback
+        self._start_lock = asyncio.Lock()
+        self._close_lock = asyncio.Lock()
+        self._callback_started = False
+        self._callback_closed = False
+        self._start_failed = False
+        self._closed = False
+
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
+        await self._start_callback()
+        initial_pid = self._process_pid()
+        try:
+            request = object.__getattribute__(self._process, "request")
+            returned = await request(envelope)
+            if not isinstance(returned, Mapping):
+                raise PrimeSidecarProcessError()
+            return returned
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await self._close_callback_after_failed_start(initial_pid)
+            raise PrimeSidecarProcessError() from None
+
+    def events(
+        self, envelope: Mapping[str, object]
+    ) -> AsyncIterator[Mapping[str, object]]:
+        return self._event_iterator(envelope)
+
+    async def _event_iterator(
+        self, envelope: Mapping[str, object]
+    ) -> AsyncIterator[Mapping[str, object]]:
+        await self._start_callback()
+        initial_pid = self._process_pid()
+        try:
+            events = object.__getattribute__(self._process, "events")(envelope)
+            async for event in events:
+                if not isinstance(event, Mapping):
+                    raise PrimeSidecarProcessError()
+                yield event
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await self._close_callback_after_failed_start(initial_pid)
+            raise PrimeSidecarProcessError() from None
+
+    async def _start_callback(self) -> None:
+        async with self._start_lock:
+            if self._closed or self._start_failed:
+                raise PrimeSidecarProcessError()
+            if self._callback_started:
+                return
+            try:
+                callback_start = object.__getattribute__(self._callback, "start")
+                await callback_start()
+            except asyncio.CancelledError:
+                self._start_failed = True
+                raise
+            except Exception:
+                self._start_failed = True
+                raise PrimeSidecarProcessError() from None
+            self._callback_started = True
+
+    def _process_pid(self) -> object | None:
+        try:
+            return object.__getattribute__(self._process, "pid")
+        except AttributeError:
+            return None
+        except Exception:
+            return None
+
+    async def _close_callback_after_failed_start(
+        self, initial_pid: object | None
+    ) -> None:
+        if initial_pid is not None or self._process_pid() is not None:
+            return
+        async with self._close_lock:
+            if self._callback_closed:
+                self._start_failed = True
+                return
+            self._callback_closed = True
+            self._start_failed = True
+            try:
+                callback_close = object.__getattribute__(self._callback, "close")
+                await callback_close()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                return
+
+    async def close(self) -> None:
+        async with self._close_lock:
+            if self._closed:
+                return
+            async with self._start_lock:
+                self._closed = True
+            process_error = False
+            callback_error = False
+            try:
+                process_close = object.__getattribute__(self._process, "close")
+                await process_close()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                process_error = True
+            if not self._callback_closed:
+                self._callback_closed = True
+                try:
+                    callback_close = object.__getattribute__(self._callback, "close")
+                    await callback_close()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    callback_error = True
+            if process_error or callback_error:
+                raise PrimeSidecarProcessError()
 
 
 class PrimeOperationHostServer:
@@ -267,7 +403,9 @@ class PrimeOperationHostServer:
 
         if operation == "operation.cancel":
             operation_id = request.get("operation_id")
-            if set(request) != _CANCEL_REQUEST_FIELDS or not _valid_opaque(operation_id):
+            if set(request) != _CANCEL_REQUEST_FIELDS or not _valid_opaque(
+                operation_id
+            ):
                 raise PrimeOperationHostError()
             return request_id, operation, operation_id
         raise PrimeOperationHostError()
@@ -338,9 +476,7 @@ class PrimeOperationHostServer:
         self, writer: asyncio.StreamWriter, response: Mapping[str, object]
     ) -> None:
         writer.write(
-            json.dumps(response, sort_keys=True, separators=(",", ":")).encode(
-                "utf-8"
-            )
+            json.dumps(response, sort_keys=True, separators=(",", ":")).encode("utf-8")
             + b"\n"
         )
         await asyncio.wait_for(writer.drain(), timeout=self._request_timeout)

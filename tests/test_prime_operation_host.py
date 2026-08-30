@@ -14,8 +14,10 @@ from typing import cast
 from asterion.control.providers.prime.operation_host import (
     PRIME_OPERATION_HOST_PROTOCOL,
     PrimeOperationHostError,
+    PrimeManagedOperationTransport,
     PrimeOperationHostServer,
 )
+from asterion.control.providers.prime.process import PrimeSidecarProcessError
 from asterion.operation.protocol import (
     EFFECT_COUNTERS,
     OperationReceipt,
@@ -200,16 +202,22 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
                     response["receipt"]["operation_id"],  # type: ignore[index]
                     "operation-1",
                 )
-        self.assertEqual([call[0] for call in self.dispatcher.calls], [
-            "execute", "reconcile", "cancel"
-        ])
+        self.assertEqual(
+            [call[0] for call in self.dispatcher.calls],
+            ["execute", "reconcile", "cancel"],
+        )
 
-    async def test_descriptor_is_immutable_and_socket_is_private_and_removed(self) -> None:
+    async def test_descriptor_is_immutable_and_socket_is_private_and_removed(
+        self,
+    ) -> None:
         descriptor = self.server.descriptor
-        self.assertEqual(descriptor, {
-            "socketPath": str(self.private_root.resolve() / "prime-operation.sock"),
-            "token": TOKEN,
-        })
+        self.assertEqual(
+            descriptor,
+            {
+                "socketPath": str(self.private_root.resolve() / "prime-operation.sock"),
+                "token": TOKEN,
+            },
+        )
         with self.assertRaises(TypeError):
             descriptor["token"] = "c" * 64  # type: ignore[index]
         self.assertNotIn(TOKEN, repr(self.server))
@@ -265,16 +273,24 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await self._exchange(invalid_id))
         self.assertEqual(self.dispatcher.calls, [])
 
-    async def test_duplicate_extra_trailing_and_oversized_frames_fail_closed(self) -> None:
+    async def test_duplicate_extra_trailing_and_oversized_frames_fail_closed(
+        self,
+    ) -> None:
         await self.server.start()
-        duplicate = json.dumps(_request("execute")).replace(
-            '"id": "request-1"', '"id": "request-1", "id": "request-2"'
-        ).encode() + b"\n"
+        duplicate = (
+            json.dumps(_request("execute"))
+            .replace('"id": "request-1"', '"id": "request-1", "id": "request-2"')
+            .encode()
+            + b"\n"
+        )
         self.assertIsNone(await self._exchange(duplicate))
         self.assertEqual(
-            (await self._exchange(
-                _request("execute", "request-extra"), extra=b"{}\n"
-            ) or {}).get("code"),
+            (
+                await self._exchange(
+                    _request("execute", "request-extra"), extra=b"{}\n"
+                )
+                or {}
+            ).get("code"),
             "operation-host-failed",
         )
         trailing = json.dumps(_request("execute", "request-trailing")).encode()
@@ -293,9 +309,7 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
         socket_path = str(self.server.descriptor["socketPath"])
 
         reader, writer = await asyncio.open_unix_connection(socket_path)
-        writer.write(
-            json.dumps(_request("execute", "request-open")).encode() + b"\n"
-        )
+        writer.write(json.dumps(_request("execute", "request-open")).encode() + b"\n")
         await writer.drain()
         response = json.loads((await reader.readline()).decode())
         self.assertEqual(response["code"], "operation-host-failed")
@@ -322,12 +336,15 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
         await self.server.start()
         self.dispatcher.wait = asyncio.Event()
         response = await self._exchange(_request("execute", "request-timeout"))
-        self.assertEqual(response, {
-            "protocol": PRIME_OPERATION_HOST_PROTOCOL,
-            "id": "request-timeout",
-            "type": "error",
-            "code": "operation-host-failed",
-        })
+        self.assertEqual(
+            response,
+            {
+                "protocol": PRIME_OPERATION_HOST_PROTOCOL,
+                "id": "request-timeout",
+                "type": "error",
+                "code": "operation-host-failed",
+            },
+        )
 
         self.dispatcher.wait = None
         self.dispatcher.error = RuntimeError(
@@ -376,7 +393,9 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
     async def test_preexisting_endpoint_is_rejected_without_unlinking_it(self) -> None:
         socket_path = self.private_root / "prime-operation.sock"
         socket_path.write_text("SENTINEL", encoding="utf-8")
-        with self.assertRaisesRegex(PrimeOperationHostError, "^Prime operation host failed$"):
+        with self.assertRaisesRegex(
+            PrimeOperationHostError, "^Prime operation host failed$"
+        ):
             await self.server.start()
         self.assertEqual(socket_path.read_text(encoding="utf-8"), "SENTINEL")
         await self.server.close()
@@ -417,7 +436,9 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
             await server.close()
             self.assertFalse((child / "prime-operation.sock").exists())
 
-    async def test_dispatcher_is_snapshotted_and_validated_at_construction(self) -> None:
+    async def test_dispatcher_is_snapshotted_and_validated_at_construction(
+        self,
+    ) -> None:
         class MutableDispatcher(RecordingDispatcher):
             pass
 
@@ -465,6 +486,181 @@ class ExplodingDispatcher:
     @property
     def session_id(self) -> str:
         raise RuntimeError(f"SENTINEL-{TOKEN}")
+
+
+class RecordingCallback:
+    def __init__(self, audit: list[str], *, fail_start: bool = False) -> None:
+        self.audit = audit
+        self.fail_start = fail_start
+        self.start_calls = 0
+        self.close_calls = 0
+        self.descriptor = {"socketPath": "/private/SENTINEL.sock", "token": TOKEN}
+
+    async def start(self) -> None:
+        self.start_calls += 1
+        self.audit.append("callback.start")
+        if self.fail_start:
+            raise RuntimeError("SENTINEL_CALLBACK_START")
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self.audit.append("callback.close")
+
+
+class RecordingProcess:
+    def __init__(
+        self,
+        audit: list[str],
+        *,
+        fail_request: bool = False,
+        request_gate: asyncio.Event | None = None,
+    ) -> None:
+        self.audit = audit
+        self.fail_request = fail_request
+        self.request_gate = request_gate
+        self.request_calls = 0
+        self.close_calls = 0
+        self.pid: int | None = None
+
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
+        del envelope
+        self.request_calls += 1
+        self.audit.append("process.request")
+        if self.fail_request:
+            raise RuntimeError("SENTINEL_PROCESS_START")
+        self.pid = 4242
+        if self.request_gate is not None:
+            await self.request_gate.wait()
+        return {"ok": True}
+
+    def events(self, envelope: Mapping[str, object]):
+        del envelope
+
+        async def iterator():
+            self.audit.append("process.events")
+            yield {"event": "ok"}
+
+        return iterator()
+
+    async def close(self) -> None:
+        self.close_calls += 1
+        self.audit.append("process.close")
+
+
+class NoPidProcess(RecordingProcess):
+    pid = None
+
+
+class ExplodingCallback(RecordingCallback):
+    async def close(self) -> None:
+        self.audit.append("callback.close")
+        raise RuntimeError("SENTINEL_CALLBACK_CLOSE")
+
+
+class TestPrimeManagedOperationTransport(unittest.IsolatedAsyncioTestCase):
+    async def test_starts_callback_once_before_event_iteration_and_request(
+        self,
+    ) -> None:
+        audit: list[str] = []
+        callback = RecordingCallback(audit)
+        process = RecordingProcess(audit)
+        transport = PrimeManagedOperationTransport(
+            process=process,
+            callback=callback,
+        )
+
+        events = [event async for event in transport.events({"id": "event-1"})]
+        self.assertEqual(await transport.request({"id": "request-1"}), {"ok": True})
+
+        self.assertEqual(events, [{"event": "ok"}])
+        self.assertEqual(callback.start_calls, 1)
+        self.assertEqual(
+            audit,
+            ["callback.start", "process.events", "process.request"],
+        )
+        await transport.close()
+
+    async def test_concurrent_first_requests_start_callback_once(self) -> None:
+        audit: list[str] = []
+        callback = RecordingCallback(audit)
+        gate = asyncio.Event()
+        process = RecordingProcess(audit, request_gate=gate)
+        transport = PrimeManagedOperationTransport(process=process, callback=callback)
+
+        first = asyncio.create_task(transport.request({"id": "request-1"}))
+        second = asyncio.create_task(transport.request({"id": "request-2"}))
+        for _ in range(20):
+            if process.request_calls == 2:
+                break
+            await asyncio.sleep(0)
+        gate.set()
+        self.assertEqual(
+            await asyncio.gather(first, second), [{"ok": True}, {"ok": True}]
+        )
+        self.assertEqual(callback.start_calls, 1)
+        await transport.close()
+
+    async def test_no_call_does_not_start_callback_or_create_endpoint(self) -> None:
+        audit: list[str] = []
+        callback = RecordingCallback(audit)
+        process = RecordingProcess(audit)
+        transport = PrimeManagedOperationTransport(process=process, callback=callback)
+
+        await transport.close()
+
+        self.assertEqual(callback.start_calls, 0)
+        self.assertEqual(process.request_calls, 0)
+        self.assertEqual(audit, ["process.close", "callback.close"])
+
+    async def test_callback_start_failure_never_calls_process(self) -> None:
+        audit: list[str] = []
+        callback = RecordingCallback(audit, fail_start=True)
+        process = RecordingProcess(audit)
+        transport = PrimeManagedOperationTransport(process=process, callback=callback)
+
+        with self.assertRaises(PrimeSidecarProcessError) as raised:
+            await transport.request({"id": "request-1"})
+
+        self.assertEqual(process.request_calls, 0)
+        self.assertNotIn("SENTINEL", str(raised.exception))
+        self.assertEqual(audit, ["callback.start"])
+
+    async def test_first_process_start_failure_closes_callback_and_redacts_error(
+        self,
+    ) -> None:
+        audit: list[str] = []
+        callback = RecordingCallback(audit)
+        process = RecordingProcess(audit, fail_request=True)
+        transport = PrimeManagedOperationTransport(process=process, callback=callback)
+
+        with self.assertRaises(PrimeSidecarProcessError) as raised:
+            await transport.request({"id": "request-1"})
+
+        self.assertEqual(audit, ["callback.start", "process.request", "callback.close"])
+        self.assertNotIn("SENTINEL", repr(raised.exception))
+        await transport.close()
+
+    async def test_close_is_process_then_callback_and_idempotent(self) -> None:
+        audit: list[str] = []
+        callback = RecordingCallback(audit)
+        process = RecordingProcess(audit)
+        transport = PrimeManagedOperationTransport(process=process, callback=callback)
+
+        await transport.request({"id": "request-1"})
+        await transport.close()
+        await transport.close()
+
+        self.assertEqual(
+            audit,
+            [
+                "callback.start",
+                "process.request",
+                "process.close",
+                "callback.close",
+            ],
+        )
+        self.assertEqual(process.close_calls, 1)
+        self.assertEqual(callback.close_calls, 1)
 
 
 if __name__ == "__main__":

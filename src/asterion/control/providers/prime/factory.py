@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Callable, Mapping
+import secrets
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AbstractContextManager
 from pathlib import Path
 from types import MappingProxyType
@@ -38,6 +39,11 @@ from asterion.control.providers.prime.operation import (
     PrimeOperationClient,
     PrimeOperationError,
 )
+from asterion.control.providers.prime.operation_host import (
+    PrimeManagedOperationTransport,
+    PrimeOperationHostError,
+    PrimeOperationHostServer,
+)
 from asterion.control.private_store import (
     PrivateAttachmentResolver,
     PrivateContentResolver,
@@ -47,6 +53,7 @@ from asterion.control.providers.prime.process import (
     PrimeSidecarProcess,
     PrimeSidecarProcessError,
 )
+from asterion.operation.protocol import OperationReceipt, OperationTransaction
 
 
 PRIME_CONTROL_PLANE_ID = "prime.gateway"
@@ -103,6 +110,7 @@ _ECOSYSTEM_MATERIALIZER_SERVICE = "ecosystem-materializer"
 _MCP_CREDENTIAL_REFRESH_SERVICE = "mcp-credential-refresh"
 _PRIVATE_CONTENT_SERVICE = "private-content"
 _PRIVATE_ATTACHMENT_SERVICE = "private-attachments"
+_OPERATION_DISPATCHER_SERVICE = "operation-dispatcher"
 _REQUIRED_OPTIONS = frozenset(
     {
         "agent_dir",
@@ -130,6 +138,56 @@ _REQUIRED_OPTIONS = frozenset(
 ProcessFactory = Callable[[PrimeSidecarLaunchOptions], object]
 
 
+class _OperationDispatcherSnapshot:
+    """Stable, identity-bound view of one operator-owned dispatcher."""
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        generation: int,
+        authority_id: str,
+        authority_revision: int,
+        execute: Callable[[OperationTransaction], Awaitable[OperationReceipt]],
+        cancel: Callable[..., Awaitable[OperationReceipt]],
+        reconcile: Callable[[OperationTransaction], Awaitable[OperationReceipt]],
+    ) -> None:
+        self._session_id = session_id
+        self._generation = generation
+        self._authority_id = authority_id
+        self._authority_revision = authority_revision
+        self._execute = execute
+        self._cancel = cancel
+        self._reconcile = reconcile
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    @property
+    def authority_id(self) -> str:
+        return self._authority_id
+
+    @property
+    def authority_revision(self) -> int:
+        return self._authority_revision
+
+    async def execute(self, transaction: OperationTransaction) -> OperationReceipt:
+        return await self._execute(transaction)
+
+    async def cancel(
+        self, operation_id: str, *, authority_revision: int
+    ) -> OperationReceipt:
+        return await self._cancel(operation_id, authority_revision=authority_revision)
+
+    async def reconcile(self, transaction: OperationTransaction) -> OperationReceipt:
+        return await self._reconcile(transaction)
+
+
 class _DeferredPrimeSidecarTransport:
     """Permit all selected-service binding to finish before process creation."""
 
@@ -137,11 +195,30 @@ class _DeferredPrimeSidecarTransport:
         self._process: PrimeSidecarTransport | None = None
 
     def bind(self, process: object) -> None:
+        try:
+            request = object.__getattribute__(process, "request")
+            events = object.__getattribute__(process, "events")
+            close = object.__getattribute__(process, "close")
+        except Exception:
+            raise PrimeSidecarProcessError() from None
+        if not all(callable(value) for value in (request, events, close)):
+            raise PrimeSidecarProcessError()
         self._process = cast(PrimeSidecarTransport, process)
 
-    async def request(
-        self, envelope: Mapping[str, object]
-    ) -> Mapping[str, object]:
+    @property
+    def pid(self) -> int | None:
+        process = self._process
+        if process is None:
+            return None
+        try:
+            value = object.__getattribute__(process, "pid")
+        except AttributeError:
+            return None
+        except Exception:
+            return None
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
         return await self._bound().request(envelope)
 
     def events(
@@ -224,7 +301,11 @@ def derive_prime_child_control_options(
         or not isinstance(child_authority, AuthorityEnvelope)
     ):
         raise ValueError("Prime child control options are invalid")
-    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+    if (
+        isinstance(generation, bool)
+        or not isinstance(generation, int)
+        or generation < 1
+    ):
         raise ValueError("Prime child control options are invalid")
     try:
         parent_controller_tokens = _positive_integer_option(
@@ -281,28 +362,46 @@ def build_prime_control_plane_client(
         missing = _REQUIRED_OPTIONS.difference(context.options)
         if missing:
             raise ControlPlaneFactoryError("Prime control plane options are invalid")
+        authority = context.authority
+        if authority is None:
+            raise ControlPlaneFactoryError("Prime authority snapshot is unavailable")
+        dispatcher = _snapshot_operation_dispatcher(context, authority)
         manifest = prime_control_plane_binding().manifest
         ecosystem_services = None
         if "ecosystem.portfolio" in manifest.capabilities:
             ecosystem_services = _require_ecosystem_services(context.host_services)
         resolver = context.host_services.get(_PRIVATE_CONTENT_SERVICE)
         if not _is_private_content_resolver(resolver):
-            raise ControlPlaneFactoryError("Prime private content service is unavailable")
+            raise ControlPlaneFactoryError(
+                "Prime private content service is unavailable"
+            )
         attachment_resolver = context.host_services.get(_PRIVATE_ATTACHMENT_SERVICE)
         if not _is_private_attachment_resolver(attachment_resolver):
             raise ControlPlaneFactoryError(
                 "Prime private attachment service is unavailable"
             )
+        node_executable = _path_option(context.options, "node_executable")
+        sidecar_entry = _path_option(context.options, "sidecar_entry")
+        operation_host = PrimeOperationHostServer(
+            dispatcher=dispatcher,
+            private_root=context.private_root,
+            token=secrets.token_hex(32),
+            request_timeout=_positive_integer_option(context.options, "timeout_ms")
+            / 1000,
+        )
         launch_options = PrimeSidecarLaunchOptions(
-            node_executable=_path_option(context.options, "node_executable"),
-            sidecar_entry=_path_option(context.options, "sidecar_entry"),
-            private_descriptor=_private_descriptor(context),
+            node_executable=node_executable,
+            sidecar_entry=sidecar_entry,
+            private_descriptor=_private_descriptor(
+                context, operation_host=operation_host.descriptor
+            ),
             environ=os.environ,
         )
-        authority = context.authority
-        if authority is None:
-            raise ControlPlaneFactoryError("Prime authority snapshot is unavailable")
-        transport = _DeferredPrimeSidecarTransport()
+        deferred = _DeferredPrimeSidecarTransport()
+        transport = PrimeManagedOperationTransport(
+            process=deferred,
+            callback=operation_host,
+        )
         client = PrimeControlPlaneClient(
             process=transport,
             private_content=resolver,
@@ -320,14 +419,15 @@ def build_prime_control_plane_client(
             )
             client.bind_ecosystem_service(service, credential_refresh)
         process = process_factory(launch_options)
-        operation_client = PrimeOperationClient(process)
-        transport.bind(process)
+        deferred.bind(process)
+        operation_client = PrimeOperationClient(transport)
         client.bind_operation_client(operation_client)
         return client
     except ControlPlaneFactoryError:
         raise
     except (
         OSError,
+        PrimeOperationHostError,
         PrimeOperationError,
         RuntimeError,
         TypeError,
@@ -358,6 +458,60 @@ def _is_private_attachment_resolver(
     value: object,
 ) -> TypeGuard[PrivateAttachmentResolver]:
     return callable(getattr(value, "resolve_bytes", None))
+
+
+def _snapshot_operation_dispatcher(
+    context: ControlPlaneFactoryContext,
+    authority: AuthorityEnvelope,
+) -> _OperationDispatcherSnapshot:
+    try:
+        expected_session_id = context.options["session_id"]
+        expected_generation = _positive_integer_option(context.options, "generation")
+        expected_authority_id = context.options["authority_id"]
+        expected_authority_revision = authority.revision
+        dispatcher = context.host_services.get(_OPERATION_DISPATCHER_SERVICE)
+        session_id = object.__getattribute__(dispatcher, "session_id")
+        generation = object.__getattribute__(dispatcher, "generation")
+        authority_id = object.__getattribute__(dispatcher, "authority_id")
+        authority_revision = object.__getattribute__(dispatcher, "authority_revision")
+        execute = object.__getattribute__(dispatcher, "execute")
+        cancel = object.__getattribute__(dispatcher, "cancel")
+        reconcile = object.__getattribute__(dispatcher, "reconcile")
+        if (
+            not isinstance(session_id, str)
+            or OPAQUE_ID.fullmatch(session_id) is None
+            or type(generation) is not int
+            or generation < 1
+            or not isinstance(authority_id, str)
+            or OPAQUE_ID.fullmatch(authority_id) is None
+            or type(authority_revision) is not int
+            or authority_revision < 1
+            or not all(callable(value) for value in (execute, cancel, reconcile))
+            or session_id != expected_session_id
+            or generation != expected_generation
+            or authority_id != expected_authority_id
+            or authority_revision != expected_authority_revision
+        ):
+            raise ValueError
+        return _OperationDispatcherSnapshot(
+            session_id=session_id,
+            generation=generation,
+            authority_id=authority_id,
+            authority_revision=authority_revision,
+            execute=cast(
+                Callable[[OperationTransaction], Awaitable[OperationReceipt]],
+                execute,
+            ),
+            cancel=cast(Callable[..., Awaitable[OperationReceipt]], cancel),
+            reconcile=cast(
+                Callable[[OperationTransaction], Awaitable[OperationReceipt]],
+                reconcile,
+            ),
+        )
+    except Exception:
+        raise ControlPlaneFactoryError(
+            "Prime operation dispatcher is unavailable"
+        ) from None
 
 
 def _require_ecosystem_services(
@@ -391,9 +545,7 @@ def _require_ecosystem_services(
     except Exception:
         valid = False
     if not valid:
-        raise ControlPlaneFactoryError(
-            "Prime ecosystem host service is unavailable"
-        )
+        raise ControlPlaneFactoryError("Prime ecosystem host service is unavailable")
     return (
         _EcosystemSourceStoreSnapshot(
             cast(Callable[[str], EcosystemPrivateResource], private_resource),
@@ -424,13 +576,19 @@ def _positive_integer_option(options: Mapping[str, str], key: str) -> int:
     try:
         value = int(options[key])
     except (KeyError, ValueError):
-        raise ControlPlaneFactoryError("Prime control plane options are invalid") from None
+        raise ControlPlaneFactoryError(
+            "Prime control plane options are invalid"
+        ) from None
     if value < 1:
         raise ControlPlaneFactoryError("Prime control plane options are invalid")
     return value
 
 
-def _private_descriptor(context: ControlPlaneFactoryContext) -> Mapping[str, object]:
+def _private_descriptor(
+    context: ControlPlaneFactoryContext,
+    *,
+    operation_host: Mapping[str, str],
+) -> Mapping[str, object]:
     options = context.options
     authority = context.authority
     if authority is None or authority.authority_id != options["authority_id"]:
@@ -451,6 +609,7 @@ def _private_descriptor(context: ControlPlaneFactoryContext) -> Mapping[str, obj
         ),
         "maxTurns": _positive_integer_option(options, "max_turns"),
         "model": options["model"],
+        "operationHost": dict(operation_host),
         "portfolio": [
             {
                 "kind": "application",
