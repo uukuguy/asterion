@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-30 15:30 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-30 15:36 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -35,6 +35,12 @@
 - The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
   provider/application operations. `Verified-system-parity` and Phase 2 are
   PASS; every native row remains missing.
+- Local `main` now points to verified integration head `6e43438`; `origin/main`
+  remains `f1316bb`. The provisional bundle covers 28 refs, while binary
+  patches and a 14-file source archive preserve dirty worktree state.
+- The remaining Git cleanup population is 53 obsolete worktrees and three
+  obsolete local branches. No removal occurs before the audit commit and final
+  bundle verification.
 
 ## Durable recovery boundary
 
@@ -59,11 +65,11 @@
 ## Immediate next action
 
 1. Continue Task 8 of
-   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`: archive
-   every unique committed and uncommitted worktree state behind verified
-   recovery artifacts.
-2. Promote the verified integration head to local `main`, remove all obsolete
-   worktrees/branches/artifact roots, and keep every native row missing.
+   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`: commit
+   the complete Git audit, then build and verify the final recovery bundle.
+2. Remove the 53 exact obsolete worktrees, three obsolete local branches,
+   temporary recovery refs, and two audited artifact roots; verify one clean
+   local-main worktree remains and keep every native row missing.
 
 ## Ready-to-paste verification
 

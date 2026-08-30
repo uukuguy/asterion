@@ -3,7 +3,8 @@
 ## Project Snapshot
 
 - Project: Asterion
-- Active branch: `recovery/pre-consolidation-root-20260830`
+- Active branch: local `main` at the verified integration head; `origin/main`
+  remains unchanged
 - Theme-level focus: Prime system parity through closed, exact evidence
   packages, followed by Asterion-native kernel parity
 - Project route: managed
@@ -13,6 +14,9 @@
   `Verified-system-parity` PASS. The callback plan's Task 8 now owns the
   bundle-backed promotion to local `main` and removal of obsolete branches,
   worktrees, and audited artifacts before Phase 3 design begins.
+- Git recovery audit: local `main` is promoted to `6e43438`; a verified
+  provisional bundle covers 28 refs, and separate patches/archive preserve all
+  accepted uncommitted source state. Destructive cleanup remains pending.
 
 ## Current Architecture
 
