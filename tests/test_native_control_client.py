@@ -30,6 +30,7 @@ from asterion.control.providers.native.model import (
 from asterion.control.providers.native.store import (
     MemoryNativeSessionStore,
     MemoryNativeStorageOwner,
+    NativeStoreError,
 )
 from asterion.control.providers.native.turn import NativeTurnAdapter
 
@@ -227,11 +228,14 @@ class BlockingAdapter:
     def __init__(self, result: NativeTurnResult) -> None:
         self.result = result
         self.started = asyncio.Event()
+        self.second_started = asyncio.Event()
         self.release = asyncio.Event()
         self.calls = 0
 
     async def execute(self, request: NativeTurnRequest) -> NativeTurnResult:
         self.calls += 1
+        if self.calls == 2:
+            self.second_started.set()
         self.started.set()
         await self.release.wait()
         if self.result.turn_id == "copy-request-turn":
@@ -307,6 +311,14 @@ class Fixture:
             capsule_id_factory=SequenceFactory(("capsule-1",)),
             clock=FixedClock(),
         )
+        self.close_calls = 0
+        close_controller = self.controller.close
+
+        def tracked_close() -> None:
+            self.close_calls += 1
+            close_controller()
+
+        self.controller.close = tracked_close  # type: ignore[method-assign]
         self.client = NativeControlPlaneClient(
             manifest=_manifest(),
             controller=self.controller,
@@ -421,6 +433,79 @@ class TestNativeControlClient(unittest.IsolatedAsyncioTestCase):
             ["session.created", "session.running", "session.cancelled"],
         )
 
+    async def test_concurrent_iterators_share_in_flight_turn_without_reexecution(
+        self,
+    ) -> None:
+        adapter = BlockingAdapter(
+            NativeTurnResult(
+                "copy-request-turn",
+                (
+                    NativeEventDraft(
+                        "budget.reported",
+                        {
+                            "controller_tokens": 0,
+                            "application_tokens": 0,
+                            "child_tokens": 0,
+                            "aggregate_tokens": 0,
+                            "cost_micros": 0,
+                        },
+                    ),
+                ),
+                _usage(),
+            )
+        )
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        first = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+
+        await asyncio.wait_for(adapter.started.wait(), timeout=1)
+        second = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+        second_events = await asyncio.wait_for(second, timeout=1)
+        self.assertEqual(second_events, ())
+        self.assertEqual(adapter.calls, 1)
+
+        adapter.release.set()
+        first_events = await asyncio.wait_for(first, timeout=1)
+
+        self.assertEqual([event.type for event in first_events], ["budget.reported"])
+        self.assertEqual(adapter.calls, 1)
+        self.assertFalse(adapter.second_started.is_set())
+        self.assertEqual(
+            [entry.record.kind for entry in fixture.store.replay()].count(
+                "turn.committed"
+            ),
+            1,
+        )
+
+    async def test_conflicting_cursor_iterator_does_not_duplicate_in_flight_turn(
+        self,
+    ) -> None:
+        adapter = BlockingAdapter(
+            NativeTurnResult("copy-request-turn", (), _usage())
+        )
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        first = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+
+        await asyncio.wait_for(adapter.started.wait(), timeout=1)
+        second_events = await asyncio.wait_for(
+            _collect_events(fixture.client, None),
+            timeout=1,
+        )
+        self.assertEqual([event.sequence for event in second_events], [1, 2])
+        self.assertEqual(adapter.calls, 1)
+
+        adapter.release.set()
+        await asyncio.wait_for(first, timeout=1)
+        self.assertEqual(
+            [entry.record.kind for entry in fixture.store.replay()].count(
+                "turn.committed"
+            ),
+            1,
+        )
+
     async def test_cancel_during_adapter_await_fences_late_result_without_recovery(
         self,
     ) -> None:
@@ -460,6 +545,98 @@ class TestNativeControlClient(unittest.IsolatedAsyncioTestCase):
             ),
             0,
         )
+
+    async def test_iterator_cancellation_clears_claim_and_publishes_recovery(
+        self,
+    ) -> None:
+        adapter = BlockingAdapter(
+            NativeTurnResult(
+                "copy-request-turn",
+                (proposal_draft(),),
+                _usage(controller_tokens=1, aggregate_tokens=1),
+            )
+        )
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        events_task = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+
+        await asyncio.wait_for(adapter.started.wait(), timeout=1)
+        events_task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await events_task
+        adapter.release.set()
+        recovery_events = await asyncio.wait_for(
+            _collect_events(fixture.client, EventCursor(1, 2)),
+            timeout=1,
+        )
+
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(
+            [event.type for event in recovery_events],
+            ["fault.raised", "session.recovery-required"],
+        )
+        self.assertEqual(
+            [entry.record.kind for entry in fixture.store.replay()].count(
+                "turn.recovery-required"
+            ),
+            1,
+        )
+
+    async def test_close_waits_for_in_flight_adapter_before_closing_resources(
+        self,
+    ) -> None:
+        adapter = BlockingAdapter(
+            NativeTurnResult("copy-request-turn", (), _usage())
+        )
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        events_task = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+
+        await asyncio.wait_for(adapter.started.wait(), timeout=1)
+        close_task = asyncio.create_task(fixture.client.close())
+        await asyncio.sleep(0)
+        with self.assertRaises(NativeControlError):
+            await fixture.client.send(
+                lifecycle_command("command-after-closing", "session.pause", "closing")
+            )
+        await asyncio.sleep(0.05)
+
+        self.assertFalse(close_task.done())
+        self.assertEqual(fixture.store.position, 5)
+        adapter.release.set()
+        with self.assertRaises(NativeControlError):
+            await asyncio.wait_for(events_task, timeout=1)
+        await asyncio.wait_for(close_task, timeout=1)
+
+        self.assertEqual(fixture.close_calls, 1)
+        with self.assertRaises(NativeStoreError):
+            _ = fixture.store.position
+
+    async def test_concurrent_closes_share_in_flight_completion_once(self) -> None:
+        adapter = BlockingAdapter(
+            NativeTurnResult("copy-request-turn", (), _usage())
+        )
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        events_task = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+
+        await asyncio.wait_for(adapter.started.wait(), timeout=1)
+        close_one = asyncio.create_task(fixture.client.close())
+        close_two = asyncio.create_task(fixture.client.close())
+        await asyncio.sleep(0.05)
+        self.assertFalse(close_one.done())
+        self.assertFalse(close_two.done())
+
+        adapter.release.set()
+        with self.assertRaises(NativeControlError):
+            await asyncio.wait_for(events_task, timeout=1)
+        await asyncio.wait_for(close_one, timeout=1)
+        await asyncio.wait_for(close_two, timeout=1)
+
+        self.assertEqual(fixture.close_calls, 1)
 
     async def test_budget_limited_turn_commits_without_invoking_adapter(self) -> None:
         adapter = CountingAdapter(NativeTurnResult("copy-request-turn", (), _usage()))

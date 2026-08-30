@@ -65,6 +65,9 @@ class NativeControlPlaneClient:
             self._max_turns_per_poll = max_turns_per_poll
             self._max_events_per_poll = max_events_per_poll
             self._lock = asyncio.Lock()
+            self._in_flight_turn: NativeTurnRequest | None = None
+            self._settled = asyncio.Condition(self._lock)
+            self._closing = False
             self._closed = False
         except NativeControlError:
             _raise_control_error()
@@ -111,6 +114,11 @@ class NativeControlPlaneClient:
         async with self._lock:
             if self._closed:
                 return
+            self._closing = True
+            while self._in_flight_turn is not None:
+                await self._settled.wait()
+            if self._closed:
+                return
             try:
                 self._controller.close()
             except (NativeControllerError, NativeStoreError):
@@ -118,6 +126,7 @@ class NativeControlPlaneClient:
             except Exception:
                 _raise_control_error()
             self._closed = True
+            self._settled.notify_all()
 
     async def _iterate(
         self, cursor: EventCursor | None
@@ -145,24 +154,39 @@ class NativeControlPlaneClient:
                 return
             turns_started += 1
 
-            if await self._commit_budget_limited_if_needed(request):
-                continue
+            try:
+                if await self._commit_budget_limited_if_needed(request):
+                    continue
+            except asyncio.CancelledError:
+                await self._recover_cancelled_turn(request)
+                raise
 
             result: NativeTurnResult | None = None
             failed = False
             try:
                 result = await self._controller.execute_turn(request)
+            except asyncio.CancelledError:
+                await self._recover_cancelled_turn(request)
+                raise
             except (NativeControllerError, NativeStoreError):
                 failed = True
             except Exception:
                 failed = True
             if failed:
-                await self._commit_failed_turn_or_discard_cancelled(
-                    request, "native-turn-failed"
-                )
+                try:
+                    await self._commit_failed_turn_or_discard_cancelled(
+                        request, "native-turn-failed"
+                    )
+                except asyncio.CancelledError:
+                    await self._recover_cancelled_turn(request)
+                    raise
                 continue
             assert result is not None
-            await self._commit_result_or_recover(request, result)
+            try:
+                await self._commit_result_or_recover(request, result)
+            except asyncio.CancelledError:
+                await self._recover_cancelled_turn(request)
+                raise
 
     async def _snapshot_events(
         self, cursor: EventCursor | None
@@ -179,6 +203,8 @@ class NativeControlPlaneClient:
     async def _begin_turn(self) -> NativeTurnRequest | None:
         async with self._lock:
             self._require_open()
+            if self._in_flight_turn is not None:
+                return None
             try:
                 request = self._controller.begin_ready_turn()
             except (NativeControllerError, NativeStoreError):
@@ -187,49 +213,80 @@ class NativeControlPlaneClient:
                 _raise_control_error()
             if request is not None and type(request) is not NativeTurnRequest:
                 _raise_control_error()
+            self._in_flight_turn = request
             return request
 
     async def _commit_budget_limited_if_needed(
         self, request: NativeTurnRequest
     ) -> bool:
+        clear_claim = True
         async with self._lock:
-            self._require_open()
+            self._require_not_closed()
             try:
                 if not self._controller.turn_is_budget_limited(request):
+                    clear_claim = False
                     return False
                 self._controller.commit_budget_limited_turn(request)
                 return True
+            except NativeControlError:
+                raise
             except (NativeControllerError, NativeStoreError):
                 _raise_control_error()
             except Exception:
                 _raise_control_error()
+            finally:
+                if clear_claim:
+                    self._clear_in_flight_claim(request)
 
     async def _commit_result_or_recover(
         self, request: NativeTurnRequest, result: NativeTurnResult
     ) -> None:
         async with self._lock:
-            self._require_open()
-            if self._discardable_fenced_terminal(request):
-                return
-            if self._controller.state.pending_turn != request:
-                _raise_control_error()
             try:
+                self._require_not_closed()
+                if self._discardable_fenced_terminal(request):
+                    return
+                if self._controller.state.pending_turn != request:
+                    _raise_control_error()
                 self._controller.commit_turn(request, result)
+            except NativeControlError:
+                raise
             except (NativeControllerError, NativeStoreError):
                 self._fail_pending_turn(request, "native-turn-result-invalid")
             except Exception:
                 self._fail_pending_turn(request, "native-turn-result-invalid")
+            finally:
+                self._clear_in_flight_claim(request)
 
     async def _commit_failed_turn_or_discard_cancelled(
         self, request: NativeTurnRequest, reason_code: str
     ) -> None:
         async with self._lock:
-            self._require_open()
-            if self._discardable_fenced_terminal(request):
-                return
-            if self._controller.state.pending_turn != request:
-                _raise_control_error()
-            self._fail_pending_turn(request, reason_code)
+            try:
+                self._require_not_closed()
+                if self._discardable_fenced_terminal(request):
+                    return
+                if self._controller.state.pending_turn != request:
+                    _raise_control_error()
+                self._fail_pending_turn(request, reason_code)
+            finally:
+                self._clear_in_flight_claim(request)
+
+    async def _recover_cancelled_turn(self, request: NativeTurnRequest) -> None:
+        async with self._lock:
+            try:
+                self._require_not_closed()
+                if self._discardable_fenced_terminal(request):
+                    return
+                if self._controller.state.pending_turn == request:
+                    try:
+                        self._controller.fail_turn(request, "native-turn-cancelled")
+                    except (NativeControllerError, NativeStoreError):
+                        pass
+                    except Exception:
+                        pass
+            finally:
+                self._clear_in_flight_claim(request)
 
     def _fail_pending_turn(
         self, request: NativeTurnRequest, reason_code: str
@@ -252,8 +309,17 @@ class NativeControlPlaneClient:
         )
 
     def _require_open(self) -> None:
+        if self._closed or self._closing:
+            _raise_control_error()
+
+    def _require_not_closed(self) -> None:
         if self._closed:
             _raise_control_error()
+
+    def _clear_in_flight_claim(self, request: NativeTurnRequest) -> None:
+        if self._in_flight_turn == request:
+            self._in_flight_turn = None
+            self._settled.notify_all()
 
 
 def _require_positive_safe_integer(value: object) -> None:
