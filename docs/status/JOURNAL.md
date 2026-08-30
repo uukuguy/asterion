@@ -1150,3 +1150,5 @@
 - 08:54 Checkpointed reviewed Python callback boundary so recovery resumes at TypeScript assembly [b63a9d6]
 - 09:07 Assembled Node callback client so production operation envelopes reach the Python host [76b448a]
 - 09:13 Enforced an absolute callback deadline so slow peers cannot extend operation requests [3e5872c]
+- 09:15 Checkpointed reviewed Node callback assembly so recovery resumes at lifecycle binding [9bb7b96]
+- 09:30 Bound callback and Prime process lifecycle so factory operations share one exact dispatcher [bd706a0]

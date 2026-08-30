@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-30 09:13 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-30 09:37 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -21,7 +21,11 @@
 - Callback Task 3 is independently approved through `3e5872c`: the TypeScript
   client enforces the exact framed callback protocol and absolute deadline, and
   the sole production descriptor path assembles it into the Prime operation
-  gateway. Production remains blocked at the Python factory/lifecycle binding.
+  gateway.
+- Callback Task 4 is independently approved through `bd706a0`: the Python
+  factory requires one identity-exact dispatcher and shares one callback-first,
+  process-then-callback managed transport across both Prime clients. Production
+  remains blocked at root/child composition and the real-process proof.
 - The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
   provider/application operations, but Phase 2 must not close until the
   operation production-assembly gap is resolved and independently reverified.
@@ -47,10 +51,10 @@
 
 ## Immediate next action
 
-1. Continue Task 4 of
+1. Continue Task 5 of
    `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md` with SDD
-   plus RED -> GREEN TDD: bind one operator dispatcher, callback server, and
-   lazy Prime process into one managed lifecycle.
+   plus RED -> GREEN TDD: bind exact root/child dispatchers and prove the real
+   Python -> Node -> Python operation round trip.
 2. Keep H-037 blocked until the real production callback round trip, full
    provider-free gates, and independent review all pass.
 
