@@ -70,6 +70,28 @@ def _raise_controller_error() -> NoReturn:
         raise
 
 
+def _raise_control_flow(error_type: type[BaseException]) -> NoReturn:
+    if error_type is KeyboardInterrupt:
+        try:
+            raise KeyboardInterrupt from None
+        except KeyboardInterrupt as error:
+            error.__context__ = None
+            raise
+    if error_type is SystemExit:
+        try:
+            raise SystemExit from None
+        except SystemExit as error:
+            error.__context__ = None
+            raise
+    if error_type is GeneratorExit:
+        try:
+            raise GeneratorExit from None
+        except GeneratorExit as error:
+            error.__context__ = None
+            raise
+    _raise_controller_error()
+
+
 def _no_crash(_point: str) -> None:
     return None
 
@@ -162,10 +184,10 @@ class NativeController:
                 command_digest,
             )
             if records:
-                self._crash_hook("command-before-publish")
+                self._invoke_crash_hook("command-before-publish")
             self._append_many(records)
             if records:
-                self._crash_hook("command-after-publish-before-ack")
+                self._invoke_crash_hook("command-after-publish-before-ack")
             if command.type == "checkpoint.request":
                 self._ensure_checkpoint(str(command.payload["checkpoint_id"]))
         except (NativeControllerError, NativeStoreError):
@@ -194,7 +216,7 @@ class NativeController:
             if request is None:
                 return None
             self._append(turn_started_record(request))
-            self._crash_hook("turn-after-start")
+            self._invoke_crash_hook("turn-after-start")
             return self.state.pending_turn
         except (NativeControllerError, NativeStoreError):
             raise
@@ -224,7 +246,7 @@ class NativeController:
         try:
             self._require_pending_turn(request)
             result = await self._turn_adapter.execute(request)
-            self._crash_hook("turn-after-adapter-before-commit")
+            self._invoke_crash_hook("turn-after-adapter-before-commit")
             return result
         except (NativeControllerError, NativeStoreError):
             raise
@@ -239,9 +261,9 @@ class NativeController:
             committed = _result_for_committed_events(result, events)
             self._append(turn_committed_record(committed, events))
             if any(event.type in _TERMINAL_EVENT_TYPES for event in events):
-                self._crash_hook("terminal-after-commit-before-host-receipt")
+                self._invoke_crash_hook("terminal-after-commit-before-host-receipt")
             else:
-                self._crash_hook("turn-after-commit-before-yield")
+                self._invoke_crash_hook("turn-after-commit-before-yield")
         except (NativeControllerError, NativeStoreError):
             raise
         except Exception:
@@ -281,6 +303,16 @@ class NativeController:
                 self._session_store.close()
             finally:
                 self._owner.close()
+
+    def _invoke_crash_hook(self, point: str) -> None:
+        try:
+            self._crash_hook(point)
+        except (KeyboardInterrupt, SystemExit, GeneratorExit) as error:
+            if type(error) in {KeyboardInterrupt, SystemExit, GeneratorExit}:
+                _raise_control_flow(type(error))
+            _raise_controller_error()
+        except BaseException:
+            _raise_controller_error()
 
     def _transition_command(
         self,
@@ -730,10 +762,10 @@ class NativeController:
         if self.state.lifecycle not in {"running", "paused"}:
             raise NativeControllerError
         metadata = self._seal_capsule(checkpoint_id)
-        self._crash_hook("capsule-after-write-before-checkpoint")
+        self._invoke_crash_hook("capsule-after-write-before-checkpoint")
         event = self._checkpoint_event(checkpoint_id, metadata)
         self._append(checkpoint_committed_record(metadata, event))
-        self._crash_hook("checkpoint-after-commit-before-yield")
+        self._invoke_crash_hook("checkpoint-after-commit-before-yield")
         return event
 
     def _preflight_checkpoint_request(

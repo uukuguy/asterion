@@ -21,6 +21,7 @@ from asterion.control.manager import ControlHost
 from asterion.control.providers.native.capsule import FileNativeCapsuleStore
 from asterion.control.providers.native.client import NativeControlPlaneClient
 from asterion.control.providers.native.controller import NativeController
+from asterion.control.providers.native.controller import NativeControllerError
 from asterion.control.providers.native.factory import (
     NATIVE_CHECKPOINT_VERSION,
     NATIVE_CONTROL_PLANE_VERSION,
@@ -136,8 +137,7 @@ def run_native_crash_observations() -> tuple[Mapping[str, object], ...]:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             first = run_worker(root, crash_point=crash_point)
-            if first.returncode == 0:
-                raise AssertionError(f"{crash_point} did not crash")
+            _assert_boundary_crash(root, crash_point, first)
             recovered = run_worker(root, crash_point=None, report_point=crash_point)
             if recovered.returncode != 0:
                 raise AssertionError(recovered.stderr)
@@ -158,7 +158,7 @@ class TestNativeControlProcessRecovery(unittest.TestCase):
     def test_observations_are_closed_and_provider_free(self) -> None:
         for observation in run_native_crash_observations():
             with self.subTest(crash_point=observation["crash_point"]):
-                self.assertEqual(frozenset(observation), _OBSERVATION_KEYS)
+                _assert_pass_observation(str(observation["crash_point"]), observation)
                 for key in (
                     "provider_operations",
                     "model_operations",
@@ -169,12 +169,155 @@ class TestNativeControlProcessRecovery(unittest.TestCase):
                 ):
                     self.assertEqual(observation[key], 0)
 
+    def test_boundary_crash_requires_exact_code_and_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wrong_code = subprocess.CompletedProcess(
+                args=(),
+                returncode=1,
+                stdout="",
+                stderr="",
+            )
+            with self.assertRaises(AssertionError):
+                _assert_boundary_crash(root, CRASH_POINTS[0], wrong_code)
+
+            right_code_missing_marker = subprocess.CompletedProcess(
+                args=(),
+                returncode=101,
+                stdout="",
+                stderr="",
+            )
+            with self.assertRaises(AssertionError):
+                _assert_boundary_crash(root, CRASH_POINTS[0], right_code_missing_marker)
+
+            _write_crash_marker(root, CRASH_POINTS[1])
+            with self.assertRaises(AssertionError):
+                _assert_boundary_crash(root, CRASH_POINTS[0], right_code_missing_marker)
+
+    def test_observation_rejects_bool_subclass_and_extra_fields(self) -> None:
+        report = {
+            "crash_point": CRASH_POINTS[0],
+            "status": "PASS",
+            "duplicate_commands": 0,
+            "duplicate_turns": 0,
+            "duplicate_actions": 0,
+            "sequence_gaps": 0,
+            "terminal_count": 1,
+            "owned_processes_after_close": 0,
+            "provider_operations": 0,
+            "model_operations": 0,
+            "credential_reads": 0,
+            "network_operations": 0,
+            "application_operations": 0,
+            "upload_operations": 0,
+        }
+        for key, value in (
+            ("duplicate_commands", False),
+            ("terminal_count", True),
+            ("status", _StrSubclass("PASS")),
+            ("crash_point", _StrSubclass(CRASH_POINTS[0])),
+        ):
+            with self.subTest(key=key), self.assertRaises(AssertionError):
+                tampered = dict(report)
+                tampered[key] = value
+                _assert_pass_observation(CRASH_POINTS[0], tampered)
+        with self.assertRaises(AssertionError):
+            _assert_pass_observation(CRASH_POINTS[0], {**report, "extra": 0})
+
+    def test_process_registry_counts_live_and_reaped_children(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            registry = _ProcessRegistry(Path(directory) / "processes.json")
+            sleeper = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(30)",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                registry.register(sleeper)
+                self.assertEqual(registry.active_count(), 1)
+                sleeper.terminate()
+                sleeper.wait(timeout=5)
+                registry.reap(sleeper)
+                self.assertEqual(registry.active_count(), 0)
+            finally:
+                if sleeper.poll() is None:
+                    sleeper.kill()
+                    sleeper.wait(timeout=5)
+
+    def test_crash_hook_exceptions_are_redacted_and_controlled(self) -> None:
+        async def run_case(
+            crash_hook: Callable[[str], None],
+            expected_type: type[BaseException],
+        ) -> None:
+            with tempfile.TemporaryDirectory() as directory:
+                controller = _open_native_controller(
+                    Path(directory) / "native",
+                    OperationRecorder(),
+                    crash_hook,
+                    scripts={"input:content-ref-step": (budget_draft(1),)},
+                )
+                try:
+                    with self.assertRaises(expected_type) as raised:
+                        await controller.accept(create_command())
+                    self.assertIsNone(raised.exception.__cause__)
+                    self.assertIsNone(raised.exception.__context__)
+                    if expected_type is NativeControllerError:
+                        self.assertEqual(
+                            raised.exception.args,
+                            ("native controller is unavailable",),
+                        )
+                    else:
+                        self.assertEqual(raised.exception.args, ())
+                    self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
+                finally:
+                    try:
+                        controller.close()
+                    except Exception:
+                        pass
+
+        for crash_hook, expected_type in (
+            (_raising_crash_hook(RuntimeError("SENTINEL_SECRET")), NativeControllerError),
+            (_raising_crash_hook(KeyboardInterrupt("SENTINEL_SECRET")), KeyboardInterrupt),
+            (_raising_crash_hook(SystemExit("SENTINEL_SECRET")), SystemExit),
+            (_raising_crash_hook(GeneratorExit("SENTINEL_SECRET")), GeneratorExit),
+            (_raising_crash_hook(_HostileBase("SENTINEL_SECRET")), NativeControllerError),
+        ):
+            with self.subTest(expected_type=expected_type.__name__):
+                asyncio.run(run_case(crash_hook, expected_type))
+
+
+class _StrSubclass(str):
+    pass
+
+
+class _HostileBase(BaseException):
+    pass
+
+
+def _raising_crash_hook(error: BaseException) -> Callable[[str], None]:
+    def hook(_point: str) -> None:
+        raise error
+
+    return hook
+
 
 def _assert_pass_observation(
     crash_point: str, report: Mapping[str, object]
 ) -> None:
     if frozenset(report) != _OBSERVATION_KEYS:
         raise AssertionError(f"{crash_point} emitted non-closed report")
+    if type(report["crash_point"]) is not str or report["crash_point"] != crash_point:
+        raise AssertionError(f"{crash_point} emitted invalid crash identity")
+    if type(report["status"]) is not str or report["status"] != "PASS":
+        raise AssertionError(f"{crash_point} emitted invalid status")
+    for key in _OBSERVATION_KEYS - {"crash_point", "status"}:
+        value = report[key]
+        if type(value) is not int:
+            raise AssertionError(f"{crash_point} emitted invalid counter")
     expected = {
         "crash_point": crash_point,
         "status": "PASS",
@@ -193,6 +336,22 @@ def _assert_pass_observation(
     }
     if dict(report) != expected:
         raise AssertionError(f"{crash_point} failed invariants: {report!r}")
+
+
+def _assert_boundary_crash(
+    root: Path, crash_point: str, first: subprocess.CompletedProcess[str]
+) -> None:
+    if first.returncode != 101:
+        raise AssertionError(f"{crash_point} did not exit at the injected boundary")
+    if first.stdout != "" or first.stderr != "":
+        raise AssertionError(f"{crash_point} emitted non-redacted crash output")
+    marker_path = _crash_marker_path(root)
+    if not marker_path.exists():
+        raise AssertionError(f"{crash_point} did not write a durable crash marker")
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    if marker != {"crash_point": crash_point}:
+        raise AssertionError(f"{crash_point} crash marker mismatches")
+    marker_path.unlink()
 
 
 def _worker_main() -> None:
@@ -215,9 +374,22 @@ def _crash_hook_from_env() -> Callable[[str], None]:
 
     def hook(point: str) -> None:
         if point == target:
+            _write_crash_marker(Path(sys.argv[1]), point)
             os._exit(101)
 
     return hook
+
+
+def _write_crash_marker(root: Path, crash_point: str) -> None:
+    marker_path = _crash_marker_path(root)
+    marker_path.write_text(
+        json.dumps({"crash_point": crash_point}, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _crash_marker_path(root: Path) -> Path:
+    return root / "crash-marker.json"
 
 
 async def _run_controller_worker(
@@ -315,6 +487,27 @@ def _open_native_client(
     *,
     scripts: Mapping[str, tuple[NativeEventDraft, ...] | BaseException] | None = None,
 ) -> NativeControlPlaneClient:
+    controller = _open_native_controller(
+        private_root,
+        recorder,
+        crash_hook,
+        scripts=scripts,
+    )
+    return NativeControlPlaneClient(
+        manifest=native_control_plane_binding().manifest,
+        controller=controller,
+        max_turns_per_poll=10,
+        max_events_per_poll=50,
+    )
+
+
+def _open_native_controller(
+    private_root: Path,
+    recorder: OperationRecorder,
+    crash_hook: Callable[[str], None],
+    *,
+    scripts: Mapping[str, tuple[NativeEventDraft, ...] | BaseException] | None = None,
+) -> NativeController:
     private_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     private_root.chmod(0o700)
     next_event_ordinal = _next_event_ordinal(private_root)
@@ -334,7 +527,7 @@ def _open_native_client(
         },
         recorder,
     )
-    controller = NativeController(
+    return NativeController(
         owner=owner,
         session_store=store,
         capsule_store=capsules,
@@ -353,12 +546,6 @@ def _open_native_client(
         capsule_id_factory=_DeterministicIdFactory("capsule"),
         clock=lambda: "2026-08-30T00:00:00Z",
         crash_hook=crash_hook,
-    )
-    return NativeControlPlaneClient(
-        manifest=native_control_plane_binding().manifest,
-        controller=controller,
-        max_turns_per_poll=10,
-        max_events_per_poll=50,
     )
 
 
@@ -458,7 +645,9 @@ def _build_report(
         + max(0, len(executor_calls) - 1),
         "sequence_gaps": _sequence_gaps(events, host_entries),
         "terminal_count": sum(1 for event in events if event.type in _TERMINAL_EVENTS),
-        "owned_processes_after_close": 0,
+        "owned_processes_after_close": _ProcessRegistry(
+            root / "processes.json"
+        ).active_count(),
         **recorder.closed_counts(),
     }
 
@@ -540,6 +729,42 @@ def _read_json_list(path: Path) -> list[str]:
     if not isinstance(loaded, list) or not all(isinstance(item, str) for item in loaded):
         raise AssertionError("durable executor call report is invalid")
     return loaded
+
+
+class _ProcessRegistry:
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def register(self, process: subprocess.Popen[bytes]) -> None:
+        self._write(tuple(sorted((*self._read(), process.pid))))
+
+    def reap(self, process: subprocess.Popen[bytes]) -> None:
+        self._write(tuple(pid for pid in self._read() if pid != process.pid))
+
+    def active_count(self) -> int:
+        live: list[int] = []
+        for pid in self._read():
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                continue
+            live.append(pid)
+        self._write(tuple(live))
+        return len(live)
+
+    def _read(self) -> tuple[int, ...]:
+        if not self._path.exists():
+            return ()
+        loaded = json.loads(self._path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(loaded, list)
+            or any(type(item) is not int or item < 1 for item in loaded)
+        ):
+            raise AssertionError("process registry is invalid")
+        return tuple(loaded)
+
+    def _write(self, pids: tuple[int, ...]) -> None:
+        self._path.write_text(json.dumps(list(pids), sort_keys=True), encoding="utf-8")
 
 
 if __name__ == "__main__":
