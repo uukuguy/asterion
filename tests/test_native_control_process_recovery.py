@@ -139,9 +139,7 @@ def run_native_crash_observations() -> tuple[Mapping[str, object], ...]:
             first = run_worker(root, crash_point=crash_point)
             _assert_boundary_crash(root, crash_point, first)
             recovered = run_worker(root, crash_point=None, report_point=crash_point)
-            if recovered.returncode != 0:
-                raise AssertionError(recovered.stderr)
-            report = json.loads(recovered.stdout)
+            report = _parse_recovered_report(crash_point, recovered)
             _assert_pass_observation(crash_point, report)
             observations.append(report)
     return tuple(observations)
@@ -194,23 +192,46 @@ class TestNativeControlProcessRecovery(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 _assert_boundary_crash(root, CRASH_POINTS[0], right_code_missing_marker)
 
+    def test_recovered_report_requires_empty_stderr_and_canonical_stdout(self) -> None:
+        report = _pass_report(CRASH_POINTS[0])
+        valid_stdout = json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n"
+        valid_process = subprocess.CompletedProcess(
+            args=(),
+            returncode=0,
+            stdout=valid_stdout,
+            stderr="",
+        )
+        self.assertEqual(_parse_recovered_report(CRASH_POINTS[0], valid_process), report)
+
+        noisy_stderr = subprocess.CompletedProcess(
+            args=(),
+            returncode=0,
+            stdout=valid_stdout,
+            stderr="SENTINEL_SECRET\n",
+        )
+        with self.assertRaises(AssertionError):
+            _parse_recovered_report(CRASH_POINTS[0], noisy_stderr)
+
+        noncanonical_stdout = subprocess.CompletedProcess(
+            args=(),
+            returncode=0,
+            stdout=json.dumps(report, sort_keys=True, indent=2) + "\n",
+            stderr="",
+        )
+        with self.assertRaises(AssertionError):
+            _parse_recovered_report(CRASH_POINTS[0], noncanonical_stdout)
+
+        extra_stdout = subprocess.CompletedProcess(
+            args=(),
+            returncode=0,
+            stdout=valid_stdout + valid_stdout,
+            stderr="",
+        )
+        with self.assertRaises(AssertionError):
+            _parse_recovered_report(CRASH_POINTS[0], extra_stdout)
+
     def test_observation_rejects_bool_subclass_and_extra_fields(self) -> None:
-        report = {
-            "crash_point": CRASH_POINTS[0],
-            "status": "PASS",
-            "duplicate_commands": 0,
-            "duplicate_turns": 0,
-            "duplicate_actions": 0,
-            "sequence_gaps": 0,
-            "terminal_count": 1,
-            "owned_processes_after_close": 0,
-            "provider_operations": 0,
-            "model_operations": 0,
-            "credential_reads": 0,
-            "network_operations": 0,
-            "application_operations": 0,
-            "upload_operations": 0,
-        }
+        report = _pass_report(CRASH_POINTS[0])
         for key, value in (
             ("duplicate_commands", False),
             ("terminal_count", True),
@@ -318,7 +339,13 @@ def _assert_pass_observation(
         value = report[key]
         if type(value) is not int:
             raise AssertionError(f"{crash_point} emitted invalid counter")
-    expected = {
+    expected = _pass_report(crash_point)
+    if dict(report) != expected:
+        raise AssertionError(f"{crash_point} failed invariants: {report!r}")
+
+
+def _pass_report(crash_point: str) -> dict[str, object]:
+    return {
         "crash_point": crash_point,
         "status": "PASS",
         "duplicate_commands": 0,
@@ -334,8 +361,29 @@ def _assert_pass_observation(
         "application_operations": 0,
         "upload_operations": 0,
     }
-    if dict(report) != expected:
-        raise AssertionError(f"{crash_point} failed invariants: {report!r}")
+
+
+def _parse_recovered_report(
+    crash_point: str, recovered: subprocess.CompletedProcess[str]
+) -> Mapping[str, object]:
+    if recovered.returncode != 0:
+        raise AssertionError(f"{crash_point} recovered child failed")
+    if recovered.stderr != "":
+        raise AssertionError(f"{crash_point} recovered child emitted stderr")
+    try:
+        loaded = json.loads(recovered.stdout)
+    except json.JSONDecodeError:
+        raise AssertionError(f"{crash_point} emitted non-json report") from None
+    canonical_stdout = json.dumps(
+        loaded,
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n"
+    if recovered.stdout != canonical_stdout:
+        raise AssertionError(f"{crash_point} emitted non-canonical report")
+    if not isinstance(loaded, Mapping):
+        raise AssertionError(f"{crash_point} emitted non-object report")
+    return loaded
 
 
 def _assert_boundary_crash(
