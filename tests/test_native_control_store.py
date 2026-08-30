@@ -152,6 +152,14 @@ def prepared_file_session(root: Path) -> tuple[NativeSessionDirectory, Path]:
 
 
 class TestNativeControlStore(unittest.TestCase):
+    def assert_redacted_store_error(self, error: BaseException) -> None:
+        self.assertIs(type(error), NativeStoreError)
+        self.assertEqual(str(error), "native session store is unavailable")
+        self.assertNotIn("SENTINEL_SECRET", str(error))
+        self.assertNotIn("SENTINEL_SECRET", repr(error))
+        self.assertIsNone(error.__cause__)
+        self.assertIsNone(error.__context__)
+
     def test_memory_store_deduplicates_conflicts_and_replays_slices(self) -> None:
         owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)
         store = MemoryNativeSessionStore(owner, max_record_bytes=65_536)
@@ -335,9 +343,265 @@ class TestNativeControlStore(unittest.TestCase):
             self.assertEqual(list(records.glob(".record-*.tmp")), [retained])
             self.assertEqual(store.append(0, bound_record()).position, 1)
 
+    def test_file_store_rejects_hardlinked_private_regular_files(self) -> None:
+        for label, builder in hardlink_cases():
+            with self.subTest(label=label):
+                with self.assertRaises(NativeStoreError) as raised:
+                    builder()
+                self.assert_redacted_store_error(raised.exception)
+
+    def test_file_store_rejects_hardlinked_publication_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            original_write_all = store_module._write_all
+            token = "c" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+            outside = session_child(root) / "publication-hardlink"
+
+            def hardlink_then_write(descriptor: int, data: bytes) -> None:
+                os.link(temporary, outside)
+                original_write_all(descriptor, data)
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", hardlink_then_write),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assertFalse(temporary.exists())
+            self.assertTrue(outside.exists())
+
+    def test_file_store_rejects_oversized_records_before_reading_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            entry = NativeEntry(1, None, bound_record())
+            payload = canonical_entry_bytes(entry) + (b"x" * 1024)
+            write_entry(records, entry, payload)
+            session.close()
+            reopened = NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+            self.addCleanup(reopened.close)
+            original_read = os.read
+            read_bytes = 0
+
+            def counting_read(descriptor: int, length: int) -> bytes:
+                nonlocal read_bytes
+                chunk = original_read(descriptor, length)
+                read_bytes += len(chunk)
+                return chunk
+
+            with (
+                patch.object(store_module.os, "read", counting_read),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                FileNativeSessionStore(
+                    reopened,
+                    max_record_bytes=len(canonical_entry_bytes(entry)) - 1,
+                )
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assertEqual(read_bytes, 0)
+
+    def test_file_store_rejects_record_growth_after_eof(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            entry = NativeEntry(1, None, bound_record())
+            record_path = records / final_name(entry)
+            write_entry(records, entry)
+            session.close()
+            reopened = NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+            self.addCleanup(reopened.close)
+            original_read = os.read
+            appended = False
+
+            def grow_after_eof(descriptor: int, length: int) -> bytes:
+                nonlocal appended
+                chunk = original_read(descriptor, length)
+                if chunk == b"" and not appended:
+                    appended = True
+                    with record_path.open("ab") as handle:
+                        handle.write(b" ")
+                return chunk
+
+            with (
+                patch.object(store_module.os, "read", grow_after_eof),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                FileNativeSessionStore(
+                    reopened,
+                    max_record_bytes=len(canonical_entry_bytes(entry)) + 10,
+                )
+
+            self.assert_redacted_store_error(raised.exception)
+
+    def test_memory_and_file_stores_reject_hostile_record_subclasses_redacted(self) -> None:
+        owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)
+        memory = MemoryNativeSessionStore(owner, max_record_bytes=65_536)
+        self.addCleanup(owner.close)
+        self.addCleanup(memory.close)
+
+        with self.assertRaises(NativeStoreError) as memory_error:
+            memory.append(0, hostile_record())
+        self.assert_redacted_store_error(memory_error.exception)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, _records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+
+            with self.assertRaises(NativeStoreError) as file_error:
+                store.append(0, hostile_record())
+            self.assert_redacted_store_error(file_error.exception)
+
 
 CorruptCase = Callable[[], None]
 EntryMutator = Callable[[Path, Path, NativeEntry, NativeEntry], None]
+
+
+class HostileNativeRecord(NativeRecord):
+    def __getattribute__(self, name: str) -> object:
+        armed = False
+        try:
+            armed = bool(object.__getattribute__(self, "_armed"))
+        except AttributeError:
+            pass
+        if armed and name in {"record_id", "kind", "payload", "digest"}:
+            raise RuntimeError("SENTINEL_SECRET")
+        return super().__getattribute__(name)
+
+
+def hostile_record() -> NativeRecord:
+    record = HostileNativeRecord(
+        "hostile-record",
+        "authority.synced",
+        {
+            "authority_revision": 1,
+            "budget": {
+                "controller_tokens": 100,
+                "application_tokens": 0,
+                "child_tokens": 0,
+                "aggregate_tokens": 100,
+                "cost_micros": 10_000,
+                "deadline_ms": 60_000,
+            },
+        },
+    )
+    object.__setattr__(record, "_armed", True)
+    return record
+
+
+def hardlink_cases() -> list[tuple[str, CorruptCase]]:
+    cases: list[tuple[str, CorruptCase]] = []
+
+    def add(label: str, builder: CorruptCase) -> None:
+        cases.append((label, builder))
+
+    def hardlinked_final_record() -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            entry = store.append(0, bound_record())
+            store.close()
+            session.close()
+            os.link(records / final_name(entry), session_child(root) / "record-hardlink")
+            reopened = NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+            try:
+                FileNativeSessionStore(reopened, max_record_bytes=65_536)
+            finally:
+                reopened.close()
+
+    add("final-record", hardlinked_final_record)
+
+    def hardlinked_record_temp() -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            session.close()
+            temp = records / f".record-00000000000000000000-{'d' * 32}.tmp"
+            temp.write_bytes(b"temporary")
+            temp.chmod(0o600)
+            os.link(temp, session_child(root) / "record-temp-hardlink")
+            NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+
+    add("record-temp", hardlinked_record_temp)
+
+    def hardlinked_capsule_file() -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, _records = prepared_file_session(root)
+            session.close()
+            capsules = session_child(root) / "capsules"
+            capsule = capsules / f"{'e' * 64}.capsule"
+            capsule.write_bytes(b"capsule")
+            capsule.chmod(0o600)
+            os.link(capsule, session_child(root) / "capsule-hardlink")
+            NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+
+    add("capsule-file", hardlinked_capsule_file)
+
+    def hardlinked_capsule_temp() -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, _records = prepared_file_session(root)
+            session.close()
+            capsules = session_child(root) / "capsules"
+            capsule = capsules / f".capsule-{'f' * 32}.tmp"
+            capsule.write_bytes(b"capsule")
+            capsule.chmod(0o600)
+            os.link(capsule, session_child(root) / "capsule-temp-hardlink")
+            NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+
+    add("capsule-temp", hardlinked_capsule_temp)
+
+    def hardlinked_lock() -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, _records = prepared_file_session(root)
+            session.close()
+            lock = session_child(root) / "lock"
+            os.link(lock, session_child(root) / "lock-hardlink")
+            NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+
+    add("lock", hardlinked_lock)
+    return cases
 
 
 def corruption_cases() -> list[tuple[str, CorruptCase]]:

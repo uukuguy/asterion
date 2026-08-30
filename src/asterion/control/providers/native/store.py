@@ -13,7 +13,7 @@ import stat
 import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 from asterion.control.protocol import OPAQUE_ID
 from asterion.control.providers.native.model import (
@@ -44,6 +44,14 @@ class NativeStoreError(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__(_ERROR)
+
+
+def _raise_store_error() -> NoReturn:
+    try:
+        raise NativeStoreError from None
+    except NativeStoreError as error:
+        error.__context__ = None
+        raise
 
 
 class NativeStorageBudget:
@@ -174,7 +182,7 @@ class MemoryNativeSessionStore:
     def append(self, expected_position: int, record: NativeRecord) -> NativeEntry:
         self._require_usable()
         _require_position_boundary(expected_position)
-        if not isinstance(record, NativeRecord):
+        if type(record) is not NativeRecord:
             raise NativeStoreError
         current = len(self._entries)
         existing = self._by_record_id.get(record.record_id)
@@ -264,10 +272,14 @@ class NativeSessionDirectory:
                 lock_fd=lock_fd,
                 budget=budget,
             )
-        except BaseException:
+        except NativeStoreError:
             for descriptor in (lock_fd, capsules_fd, records_fd, session_fd, root_fd):
                 _close_fd_quietly(descriptor)
-            raise NativeStoreError from None
+            raise
+        except Exception:
+            for descriptor in (lock_fd, capsules_fd, records_fd, session_fd, root_fd):
+                _close_fd_quietly(descriptor)
+            _raise_store_error()
 
     @property
     def budget(self) -> NativeStorageBudget:
@@ -283,14 +295,14 @@ class NativeSessionDirectory:
         try:
             return os.dup(self._records_fd)
         except OSError:
-            raise NativeStoreError from None
+            _raise_store_error()
 
     def duplicate_capsules_fd(self) -> int:
         self.require_open()
         try:
             return os.dup(self._capsules_fd)
         except OSError:
-            raise NativeStoreError from None
+            _raise_store_error()
 
     def close(self) -> None:
         if self._closed:
@@ -326,9 +338,12 @@ class FileNativeSessionStore:
         try:
             self._entries = self._load_entries()
             self._by_record_id = _index_by_record_id(self._entries)
-        except BaseException:
+        except NativeStoreError:
             self.close()
-            raise NativeStoreError from None
+            raise
+        except Exception:
+            self.close()
+            _raise_store_error()
 
     @property
     def position(self) -> int:
@@ -339,7 +354,7 @@ class FileNativeSessionStore:
     def append(self, expected_position: int, record: NativeRecord) -> NativeEntry:
         self._require_usable()
         _require_position_boundary(expected_position)
-        if not isinstance(record, NativeRecord):
+        if type(record) is not NativeRecord:
             raise NativeStoreError
         self._refresh()
         current = len(self._entries)
@@ -370,8 +385,12 @@ class FileNativeSessionStore:
                 dir_fd=self._records_fd,
             )
             os.fchmod(descriptor, 0o600)
+            _validate_fd(descriptor, 0o600, regular=True)
             _write_all(descriptor, encoded)
             os.fsync(descriptor)
+            written = _validate_fd(descriptor, 0o600, regular=True)
+            if written.st_size != len(encoded):
+                raise NativeStoreError
             os.close(descriptor)
             descriptor = -1
             os.rename(
@@ -382,14 +401,22 @@ class FileNativeSessionStore:
             )
             published = True
             _fsync_directory(self._records_fd)
-        except BaseException:
+        except NativeStoreError:
             if descriptor >= 0:
                 _close_fd_quietly(descriptor)
             if not published:
                 _unlink_child_quietly(self._records_fd, temporary)
                 _fsync_directory_quietly(self._records_fd)
                 self._owner.budget.release(len(encoded))
-            raise NativeStoreError from None
+            raise
+        except Exception:
+            if descriptor >= 0:
+                _close_fd_quietly(descriptor)
+            if not published:
+                _unlink_child_quietly(self._records_fd, temporary)
+                _fsync_directory_quietly(self._records_fd)
+                self._owner.budget.release(len(encoded))
+            _raise_store_error()
 
         self._entries = (*self._entries, entry)
         self._by_record_id[record.record_id] = entry
@@ -417,7 +444,7 @@ class FileNativeSessionStore:
         try:
             names = sorted(os.listdir(self._records_fd))
         except OSError:
-            raise NativeStoreError from None
+            _raise_store_error()
         for name in names:
             if _RECORD_TEMP.fullmatch(name):
                 _validate_child_file(self._records_fd, name, 0o600)
@@ -425,9 +452,12 @@ class FileNativeSessionStore:
             match = _RECORD_FILE.fullmatch(name)
             if match is None:
                 raise NativeStoreError
-            raw = _read_child_file(self._records_fd, name, 0o600)
-            if len(raw) > self._max_record_bytes:
-                raise NativeStoreError
+            raw = _read_child_file(
+                self._records_fd,
+                name,
+                0o600,
+                self._max_record_bytes,
+            )
             entry = _decode_entry(raw, name)
             entries.append(entry)
         result = tuple(entries)
@@ -499,7 +529,7 @@ def _open_root(path: Path) -> int:
             os.O_RDONLY | _DIRECTORY | _CLOEXEC | _nofollow(),
         )
     except OSError:
-        raise NativeStoreError from None
+        _raise_store_error()
 
 
 def _open_or_create_child_directory(parent_fd: int, name: str) -> int:
@@ -511,7 +541,7 @@ def _open_or_create_child_directory(parent_fd: int, name: str) -> int:
     except FileExistsError:
         pass
     except OSError:
-        raise NativeStoreError from None
+        _raise_store_error()
     try:
         child_fd = os.open(
             name,
@@ -519,16 +549,19 @@ def _open_or_create_child_directory(parent_fd: int, name: str) -> int:
             dir_fd=parent_fd,
         )
     except OSError:
-        raise NativeStoreError from None
+        _raise_store_error()
     try:
         if created:
             os.fchmod(child_fd, 0o700)
             _fsync_directory(child_fd)
         _validate_directory_fd(child_fd, 0o700)
         return child_fd
-    except BaseException:
+    except NativeStoreError:
         _close_fd_quietly(child_fd)
-        raise NativeStoreError from None
+        raise
+    except Exception:
+        _close_fd_quietly(child_fd)
+        _raise_store_error()
 
 
 def _open_lock(session_fd: int) -> int:
@@ -540,7 +573,7 @@ def _open_lock(session_fd: int) -> int:
             dir_fd=session_fd,
         )
     except OSError:
-        raise NativeStoreError from None
+        _raise_store_error()
     try:
         os.fchmod(descriptor, 0o600)
         _validate_fd(descriptor, 0o600, regular=True)
@@ -550,11 +583,14 @@ def _open_lock(session_fd: int) -> int:
     except OSError as exc:
         _close_fd_quietly(descriptor)
         if exc.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
-            raise NativeStoreError from None
-        raise NativeStoreError from None
-    except BaseException:
+            _raise_store_error()
+        _raise_store_error()
+    except NativeStoreError:
         _close_fd_quietly(descriptor)
-        raise NativeStoreError from None
+        raise
+    except Exception:
+        _close_fd_quietly(descriptor)
+        _raise_store_error()
 
 
 def _validate_directory_fd(descriptor: int, mode: int) -> None:
@@ -571,7 +607,7 @@ def _validate_fd(
     try:
         result = os.fstat(descriptor)
     except OSError:
-        raise NativeStoreError from None
+        _raise_store_error()
     _validate_stat(result, mode, directory=directory, regular=regular)
     return result
 
@@ -580,7 +616,7 @@ def _validate_child_file(parent_fd: int, name: str, mode: int) -> os.stat_result
     try:
         result = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     except OSError:
-        raise NativeStoreError from None
+        _raise_store_error()
     _validate_stat(result, mode, regular=True)
     return result
 
@@ -600,13 +636,15 @@ def _validate_stat(
         raise NativeStoreError
     if regular and not stat.S_ISREG(result.st_mode):
         raise NativeStoreError
+    if regular and result.st_nlink != 1:
+        raise NativeStoreError
 
 
 def _existing_storage_bytes(descriptor: int, child: str) -> int:
     try:
         names = os.listdir(descriptor)
     except OSError:
-        raise NativeStoreError from None
+        _raise_store_error()
     total = 0
     for name in names:
         if child == "records":
@@ -616,14 +654,19 @@ def _existing_storage_bytes(descriptor: int, child: str) -> int:
         if exact is None:
             raise NativeStoreError
         result = _validate_child_file(descriptor, name, 0o600)
-        if result.st_size > MAX_SAFE_JSON_INTEGER or total + result.st_size > MAX_SAFE_JSON_INTEGER:
+        if (
+            result.st_size > MAX_SAFE_JSON_INTEGER
+            or total + result.st_size > MAX_SAFE_JSON_INTEGER
+        ):
             raise NativeStoreError
         total += result.st_size
     return total
 
 
-def _read_child_file(parent_fd: int, name: str, mode: int) -> bytes:
+def _read_child_file(parent_fd: int, name: str, mode: int, max_bytes: int) -> bytes:
     before = _validate_child_file(parent_fd, name, mode)
+    if before.st_size > max_bytes:
+        raise NativeStoreError
     try:
         descriptor = os.open(
             name,
@@ -631,21 +674,44 @@ def _read_child_file(parent_fd: int, name: str, mode: int) -> bytes:
             dir_fd=parent_fd,
         )
     except OSError:
-        raise NativeStoreError from None
+        _raise_store_error()
     try:
         after = _validate_fd(descriptor, mode, regular=True)
-        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+        if not _same_trusted_file(before, after):
             raise NativeStoreError
         chunks: list[bytes] = []
+        total = 0
         while True:
-            chunk = os.read(descriptor, 65536)
+            remaining = max_bytes + 1 - total
+            if remaining <= 0:
+                raise NativeStoreError
+            chunk = os.read(descriptor, min(65536, remaining))
             if not chunk:
+                final = _validate_fd(descriptor, mode, regular=True)
+                if not _same_trusted_file(before, final) or total != final.st_size:
+                    raise NativeStoreError
                 return b"".join(chunks)
             chunks.append(chunk)
-    except BaseException:
-        raise NativeStoreError from None
+            total += len(chunk)
+            if total > max_bytes:
+                raise NativeStoreError
+    except NativeStoreError:
+        raise
+    except Exception:
+        _raise_store_error()
     finally:
         _close_fd_quietly(descriptor)
+
+
+def _same_trusted_file(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev == right.st_dev
+        and left.st_ino == right.st_ino
+        and left.st_mode == right.st_mode
+        and left.st_uid == right.st_uid
+        and left.st_nlink == right.st_nlink
+        and left.st_size == right.st_size
+    )
 
 
 def _index_by_record_id(entries: tuple[NativeEntry, ...]) -> dict[str, NativeEntry]:
@@ -662,7 +728,7 @@ def _validate_entries(entries: tuple[NativeEntry, ...]) -> None:
     try:
         reduce_native_entries(entries)
     except (NativeStateError, TypeError, ValueError):
-        raise NativeStoreError from None
+        _raise_store_error()
 
 
 def _encode_entry(entry: NativeEntry) -> bytes:
@@ -690,7 +756,7 @@ def _canonical_json(value: object) -> bytes:
             allow_nan=False,
         ).encode("utf-8")
     except (TypeError, ValueError):
-        raise NativeStoreError from None
+        _raise_store_error()
 
 
 def _decode_entry(raw: bytes, filename: str) -> NativeEntry:
@@ -700,7 +766,7 @@ def _decode_entry(raw: bytes, filename: str) -> NativeEntry:
         text = raw.decode("utf-8")
         document = json.loads(text, object_pairs_hook=_object_without_duplicates)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-        raise NativeStoreError from None
+        _raise_store_error()
     _assert_json_tree_safe(document)
     if _canonical_json(document) != raw:
         raise NativeStoreError
@@ -733,7 +799,7 @@ def _decode_entry(raw: bytes, filename: str) -> NativeEntry:
             record,
         )
     except (TypeError, ValueError):
-        raise NativeStoreError from None
+        _raise_store_error()
     if document["entry_digest"] != entry.digest:
         raise NativeStoreError
     if filename != _final_name(entry):
