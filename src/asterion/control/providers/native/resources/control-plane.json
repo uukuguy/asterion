@@ -1,0 +1,43 @@
+{
+  "protocol": "asterion.control-plane/v1",
+  "control_plane_id": "asterion.native",
+  "version": "0.1.0",
+  "commands": [
+    "action.resolve",
+    "checkpoint.request",
+    "input.submit",
+    "session.attach",
+    "session.cancel",
+    "session.create",
+    "session.detach",
+    "session.pause",
+    "session.resume"
+  ],
+  "events": [
+    "action.proposed",
+    "budget.reported",
+    "checkpoint.created",
+    "fault.raised",
+    "goal.updated",
+    "session.budget-limited",
+    "session.cancelled",
+    "session.completed",
+    "session.created",
+    "session.failed",
+    "session.paused",
+    "session.recovery-required",
+    "session.running"
+  ],
+  "capabilities": [
+    "action-proposals",
+    "checkpointing",
+    "event-replay",
+    "session-lifecycle"
+  ],
+  "continuation_media_type": "application/vnd.asterion.native-capsule",
+  "checkpoint_version": "1.0.0",
+  "compatibility_ids": [
+    "asterion.agent-control/v1",
+    "asterion.native-controller/v1"
+  ]
+}
