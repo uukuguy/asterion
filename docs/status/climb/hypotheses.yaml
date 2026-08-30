@@ -185,3 +185,8 @@
   parent_paradigm: system-parity
   ranking: 0.9
   status: passed
+- id: H-038
+  description: Native durable controller core survives exact provider-free crash and replay gates
+  parent_paradigm: native-controller-core
+  ranking: 0.9
+  status: pending

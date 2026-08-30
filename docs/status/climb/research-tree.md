@@ -37,4 +37,4 @@
 - H-035: passed — client interface closure gates
 - H-036: passed — operational surface closure gates
 - H-037: passed — Prime system parity production callback
-- Next: Phase 3 — Asterion-native kernel design
+- Next: H-038 — Native durable controller core

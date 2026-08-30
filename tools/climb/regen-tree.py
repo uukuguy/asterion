@@ -228,9 +228,15 @@ def main(arguments: list[str]) -> int:
         (
             "H-037",
             "passed",
-            "phase-3-native-kernel-design",
+            "H-038",
             "prime-system-parity-operation-host-callback",
         ): 37,
+        (
+            "H-038",
+            "passed",
+            "phase-3.2-native-verified-loop-design",
+            "check.native-controller-core-provider-free",
+        ): 38,
     }
     cycle = accepted.get((hypothesis_id, outcome, next_action, command_id))
     if cycle is None:
@@ -484,14 +490,25 @@ def main(arguments: list[str]) -> int:
                 "- Future: separately approved hypothesis required",
             )
         )
-    elif cycle >= 37:
+    elif cycle == 37:
         rendered.extend(
             (
                 "- H-034: passed — ecosystem closure gates",
                 "- H-035: passed — client interface closure gates",
                 "- H-036: passed — operational surface closure gates",
                 "- H-037: passed — Prime system parity production callback",
-                "- Next: Phase 3 — Asterion-native kernel design",
+                "- Next: H-038 — Native durable controller core",
+            )
+        )
+    elif cycle >= 38:
+        rendered.extend(
+            (
+                "- H-034: passed — ecosystem closure gates",
+                "- H-035: passed — client interface closure gates",
+                "- H-036: passed — operational surface closure gates",
+                "- H-037: passed — Prime system parity production callback",
+                "- H-038: passed — Native durable controller core",
+                "- Next: Phase 3.2 — Native Verified-loop",
             )
         )
     (root / "research-tree.md").write_text(

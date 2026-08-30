@@ -20,6 +20,11 @@ EXPECTED_H037 = {
     "outcome": "passed",
     "command_id": "prime-system-parity-operation-host-callback",
 }
+EXPECTED_H038 = {
+    "hypothesis": "H-038",
+    "outcome": "passed",
+    "command_id": "check.native-controller-core-provider-free",
+}
 
 
 def _seed_h035_state(state_dir: Path) -> None:
@@ -46,6 +51,19 @@ def _seed_h036_state(state_dir: Path) -> None:
         if row.startswith("cycle,") or int(row.split(",", 1)[0]) <= 36
     ]
     (state_dir / "runs.csv").write_text("\n".join(h036_rows) + "\n", encoding="utf-8")
+
+
+def _seed_h037_state(state_dir: Path) -> None:
+    state_dir.mkdir()
+    canonical_rows = (ROOT / "docs" / "status" / "climb" / "runs.csv").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    h037_rows = [
+        row
+        for row in canonical_rows
+        if row.startswith("cycle,") or int(row.split(",", 1)[0]) <= 37
+    ]
+    (state_dir / "runs.csv").write_text("\n".join(h037_rows) + "\n", encoding="utf-8")
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -179,6 +197,54 @@ def _run_h037_cycle(
     )
 
 
+def _fake_h038_path(bin_dir: Path, log_path: Path) -> str:
+    del log_path
+    _write_executable(
+        bin_dir / "make",
+        "#!/bin/sh\n"
+        "printf 'make %s\\n' \"$*\" >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "exit 0\n",
+    )
+    _write_executable(
+        bin_dir / "uv",
+        "#!/bin/sh\n"
+        "printf 'uv %s\\n' \"$*\" >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "exit 0\n",
+    )
+    _write_executable(
+        bin_dir / "git",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"status\" ]; then\n"
+        "  :\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"diff\" ] && [ \"$2\" = \"--check\" ]; then\n"
+        "  printf 'git diff --check\\n' >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 2\n",
+    )
+    return str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+
+
+def _run_h038_cycle(
+    state_dir: Path, path: str, log_path: Path
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(ROOT / "tools" / "climb" / "cycle.sh"), "H-038"],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "ASTERION_CLIMB_STATE_DIR": str(state_dir),
+            "ASTERION_TEST_COMMAND_LOG": str(log_path),
+            "PATH": path,
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def _latest_cycle_result(state_dir: Path) -> dict[str, str]:
     rows = (state_dir / "runs.csv").read_text(encoding="utf-8").splitlines()
     _, hypothesis, outcome, command_id = rows[-1].split(",")
@@ -219,6 +285,59 @@ def _passed_ledger_claims() -> tuple[str, ...]:
 
 
 class TestPrimeClimb(unittest.TestCase):
+    def test_h038_is_dormant_until_native_core_gate_passes(self) -> None:
+        hypotheses = (ROOT / "docs/status/climb/hypotheses.yaml").read_text()
+        self.assertIn(
+            "- id: H-038\n"
+            "  description: Native durable controller core survives exact provider-free crash and replay gates\n"
+            "  parent_paradigm: native-controller-core\n"
+            "  ranking: 0.9\n"
+            "  status: pending\n",
+            hypotheses,
+        )
+        rows = (ROOT / "docs/status/climb/runs.csv").read_text().splitlines()
+        self.assertEqual(sum(",H-038," in row for row in rows), 0)
+        state = json.loads((ROOT / "docs/status/climb/session-state.json").read_text())
+        self.assertEqual(state["next_action"], "H-038")
+        tree = (ROOT / "docs/status/climb/research-tree.md").read_text()
+        self.assertIn("- Next: H-038 — Native durable controller core", tree)
+
+    def test_h038_gate_is_exact_and_records_native_successor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            state_dir = workspace / "climb"
+            command_log = workspace / "commands.log"
+            bin_dir = workspace / "bin"
+            bin_dir.mkdir()
+            _seed_h037_state(state_dir)
+
+            completed = _run_h038_cycle(
+                state_dir,
+                _fake_h038_path(bin_dir, command_log),
+                command_log,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(_latest_cycle_result(state_dir), EXPECTED_H038)
+            self.assertEqual(
+                json.loads((state_dir / "session-state.json").read_text()),
+                {
+                    "last_hypothesis": "H-038",
+                    "last_outcome": "passed",
+                    "next_action": "phase-3.2-native-verified-loop-design",
+                },
+            )
+            self.assertEqual(
+                command_log.read_text().splitlines(),
+                [
+                    "make test.native-controller-core.provider-free",
+                    "uv run python tools/verify_native_controller_core.py",
+                    "make check",
+                    "make promotion-check",
+                    "git diff --check",
+                ],
+            )
+
     def test_h001_cycle_records_safe_provider_free_outcome(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             state_dir = Path(temporary) / "climb"
@@ -382,7 +501,7 @@ class TestPrimeClimb(unittest.TestCase):
             {
                 "last_hypothesis": "H-037",
                 "last_outcome": "passed",
-                "next_action": "phase-3-native-kernel-design",
+                "next_action": "H-038",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(
@@ -390,7 +509,7 @@ class TestPrimeClimb(unittest.TestCase):
         )
         self.assertIn("- H-036: passed — operational surface closure gates", research_tree)
         self.assertIn("- H-037: passed — Prime system parity production callback", research_tree)
-        self.assertIn("- Next: Phase 3 — Asterion-native kernel design", research_tree)
+        self.assertIn("- Next: H-038 — Native durable controller core", research_tree)
         self.assertNotIn("- Future: separately approved hypothesis required", research_tree)
         for excluded_hypothesis_id in ("H-044", "H-045"):
             self.assertNotIn(excluded_hypothesis_id, hypotheses)
@@ -497,7 +616,7 @@ class TestPrimeClimb(unittest.TestCase):
             {
                 "last_hypothesis": "H-037",
                 "last_outcome": "passed",
-                "next_action": "phase-3-native-kernel-design",
+                "next_action": "H-038",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(
@@ -509,7 +628,7 @@ class TestPrimeClimb(unittest.TestCase):
             ),
             1,
         )
-        self.assertIn("- Next: Phase 3 — Asterion-native kernel design", research_tree)
+        self.assertIn("- Next: H-038 — Native durable controller core", research_tree)
         self.assertNotIn("- Future: separately approved hypothesis required", research_tree)
 
     def test_h037_gate_is_exact_and_allows_only_audited_artifact_roots(self) -> None:
@@ -544,7 +663,7 @@ class TestPrimeClimb(unittest.TestCase):
                     {
                         "last_hypothesis": "H-037",
                         "last_outcome": "passed",
-                        "next_action": "phase-3-native-kernel-design",
+                        "next_action": "H-038",
                     },
                 )
                 self.assertEqual(

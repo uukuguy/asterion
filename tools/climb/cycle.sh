@@ -225,7 +225,17 @@ case "${1-}" in
     make promotion-check
     git diff --check
     require_h037_tree
-    python3 tools/climb/regen-tree.py H-037 passed phase-3-native-kernel-design prime-system-parity-operation-host-callback
+    python3 tools/climb/regen-tree.py H-037 passed H-038 prime-system-parity-operation-host-callback
+    ;;
+  H-038)
+    require_clean_tree
+    make test.native-controller-core.provider-free
+    uv run python tools/verify_native_controller_core.py
+    make check
+    make promotion-check
+    git diff --check
+    require_clean_tree
+    python3 tools/climb/regen-tree.py H-038 passed phase-3.2-native-verified-loop-design check.native-controller-core-provider-free
     ;;
   *) exit 2 ;;
 esac
