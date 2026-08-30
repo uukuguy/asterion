@@ -372,6 +372,8 @@ def _validate_prime_result_identity(
     identity: PrimeOracleLockIdentity,
 ) -> None:
     serialized = json.loads(result.serialized_observations)
+    if result.evidence_id != f"evidence.phase1.{_sha256_text(result.serialized_observations)}":
+        raise AssertionError("Prime result evidence digest diverged")
     identity_mapping = _prime_oracle_identity_mapping(identity)
     identity_digest = _prime_oracle_identity_digest(identity)
     if (
@@ -905,6 +907,10 @@ class TestNativePrimeDifferential(unittest.IsolatedAsyncioTestCase):
                 serialized = json.loads(result.serialized_observations)
                 self.assertEqual(serialized["execution_identity"], identity_mapping)
                 self.assertEqual(serialized["execution_identity_sha256"], identity_digest)
+                self.assertEqual(
+                    result.evidence_id,
+                    f"evidence.phase1.{_sha256_text(result.serialized_observations)}",
+                )
                 self.assertEqual(result.execution_identity_sha256, identity_digest)
                 _validate_prime_result_identity(result, identity)
                 with self.assertRaises(AssertionError):
@@ -920,6 +926,25 @@ class TestNativePrimeDifferential(unittest.IsolatedAsyncioTestCase):
                                 {
                                     **serialized,
                                     "execution_identity_sha256": "0" * 64,
+                                },
+                                sort_keys=True,
+                            ),
+                        ),
+                        identity,
+                    )
+                with self.assertRaises(AssertionError):
+                    _validate_prime_result_identity(
+                        replace(result, evidence_id="evidence.phase1." + ("0" * 64)),
+                        identity,
+                    )
+                with self.assertRaises(AssertionError):
+                    _validate_prime_result_identity(
+                        replace(
+                            result,
+                            serialized_observations=json.dumps(
+                                {
+                                    **serialized,
+                                    "otherwise_benign_top_level_tamper": True,
                                 },
                                 sort_keys=True,
                             ),
