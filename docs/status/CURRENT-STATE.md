@@ -9,9 +9,9 @@
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 2 production closure — callback Tasks 1 and 2 are
-  independently approved through `ef9808c`; Task 3 owns the TypeScript callback
-  client and sole production gateway assembly.
+- Active work package: Phase 2 production closure — callback Tasks 1 through 3
+  are independently approved through `3e5872c`; Task 4 owns the Python factory
+  and callback/process lifecycle binding.
 
 ## Current Architecture
 
@@ -63,9 +63,14 @@
   an operator-owned operation dispatcher.
 - `OperationManager` now exposes immutable dispatcher identity, and the
   reviewed Python callback server accepts only exact identity-bound frames over
-  a private `0600` Unix socket. This is a verified unit boundary only; it does
-  not close production system parity before the Node client, factory lifecycle,
-  root/child composition, and real-process path pass.
+  a private `0600` Unix socket.
+- The reviewed TypeScript callback client now issues one exact request per Unix
+  connection with write-side EOF, strict response validation, no retries, and
+  an absolute deadline. The sole production descriptor path assembles that
+  client into `PrimeOperationGateway`.
+- These are verified component boundaries only; they do not close production
+  system parity before the Python factory lifecycle, root/child composition,
+  and real-process path pass.
 
 ## Open Problems
 
@@ -73,9 +78,9 @@
   Python `OperationManager`, while Prime owns only a lifecycle-managed private
   callback transport. H-037 remains uncreated until implementation, real
   process verification, full gates, and independent review pass.
-- Task 3 must construct `PrimeOperationHostClient -> PrimeOperationGateway` on
-  the sole executable descriptor path and use `socket.end(frame)` to satisfy
-  the deterministic one-line-plus-write-EOF callback contract.
+- Task 4 must inject one exact-session `operation-dispatcher`, bind the callback
+  server and lazy Prime process to one managed transport, and close them in
+  process-then-callback order without leaking private descriptor values.
 - Keep every Asterion-native row missing until Phase 3 evidence exists.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
@@ -121,7 +126,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Continue the approved callback plan at Task 3 with RED -> GREEN SDD; do not
+4. Continue the approved callback plan at Task 4 with RED -> GREEN SDD; do not
    create or run H-037 before its real-process and independent-review
    prerequisites pass.
 5. Keep credentials, private configuration, and execution authority external.

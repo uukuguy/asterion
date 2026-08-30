@@ -1147,3 +1147,6 @@
 - 08:43 Served identity-bound Prime callbacks to connect Node operations to the operator dispatcher [ea85c18]
 - 08:49 Accepted newline frames and rejected symlink ancestry to close callback review findings [45847a4]
 - 08:52 Required callback write EOF to reject delayed trailing bytes before dispatch [ef9808c]
+- 08:54 Checkpointed reviewed Python callback boundary so recovery resumes at TypeScript assembly [b63a9d6]
+- 09:07 Assembled Node callback client so production operation envelopes reach the Python host [76b448a]
+- 09:13 Enforced an absolute callback deadline so slow peers cannot extend operation requests [3e5872c]
