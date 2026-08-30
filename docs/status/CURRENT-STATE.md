@@ -9,9 +9,9 @@
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 2 production closure — callback Tasks 1 through 4
-  are independently approved through `bd706a0`; Task 5 owns root/child session
-  composition and the real Python -> Node -> Python process proof.
+- Active work package: Phase 2 production closure — callback Tasks 1 through 5
+  are independently approved through `8204e6d`; Task 6 owns the complete
+  pre-promotion gate and cross-cutting review.
 
 ## Current Architecture
 
@@ -70,8 +70,11 @@
 - The reviewed Python factory now snapshots one exact injected dispatcher,
   supplies a fresh 256-bit callback descriptor, and shares one callback-first,
   process-then-callback managed transport across both Prime clients.
-- These are verified component boundaries only; they do not close production
-  system parity before root/child composition and the real-process path pass.
+- Root and nested child sessions now bind distinct identity-exact managers to
+  both provider context and `ControlHost`. The real Node sidecar proves
+  execute, reconcile, cancel, missing-callback, failure/no-retry, body-free
+  frames, cleanup, and zero Prime effects. Phase 2 still awaits Task 6 full
+  repository gates and the single H-037 closure.
 
 ## Open Problems
 
@@ -79,9 +82,8 @@
   Python `OperationManager`, while Prime owns only a lifecycle-managed private
   callback transport. H-037 remains uncreated until implementation, real
   process verification, full gates, and independent review pass.
-- Task 5 must derive an exact child dispatcher without inheriting the parent,
-  bind the same per-session manager to the factory and `ControlHost`, and prove
-  execute/reconcile/cancel through the real production Node sidecar.
+- Task 6 must pass the focused, repository, distribution, parity, and promotion
+  gates and close cross-cutting review before H-037 may be created or run.
 - Keep every Asterion-native row missing until Phase 3 evidence exists.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
@@ -127,8 +129,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Continue the approved callback plan at Task 5 with RED -> GREEN SDD; do not
-   create or run H-037 before its real-process and independent-review
-   prerequisites pass.
+4. Continue the approved callback plan at Task 6; do not create or run H-037
+   before every full gate and cross-cutting review prerequisite passes.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

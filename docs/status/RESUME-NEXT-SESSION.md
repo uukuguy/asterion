@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-30 09:37 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-30 10:31 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -22,13 +22,13 @@
   client enforces the exact framed callback protocol and absolute deadline, and
   the sole production descriptor path assembles it into the Prime operation
   gateway.
-- Callback Task 4 is independently approved through `bd706a0`: the Python
-  factory requires one identity-exact dispatcher and shares one callback-first,
-  process-then-callback managed transport across both Prime clients. Production
-  remains blocked at root/child composition and the real-process proof.
+- Callback Task 5 is independently approved through `8204e6d`: root and nested
+  child sessions share one exact manager between provider context and host, and
+  the real Node sidecar closes execute/reconcile/cancel, missing callback,
+  failure/no-retry, redaction, cleanup, and zero-effect proofs.
 - The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
   provider/application operations, but Phase 2 must not close until the
-  operation production-assembly gap is resolved and independently reverified.
+  complete Task 6 gate and cross-cutting review pass.
 
 ## Durable recovery boundary
 
@@ -51,12 +51,10 @@
 
 ## Immediate next action
 
-1. Continue Task 5 of
-   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md` with SDD
-   plus RED -> GREEN TDD: bind exact root/child dispatchers and prove the real
-   Python -> Node -> Python operation round trip.
-2. Keep H-037 blocked until the real production callback round trip, full
-   provider-free gates, and independent review all pass.
+1. Continue Task 6 of
+   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`: run the
+   complete focused, repository, distribution, parity, and promotion gates.
+2. Keep H-037 blocked until Task 6's cross-cutting independent review passes.
 
 ## Ready-to-paste verification
 

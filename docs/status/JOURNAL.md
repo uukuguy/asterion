@@ -1152,3 +1152,5 @@
 - 09:13 Enforced an absolute callback deadline so slow peers cannot extend operation requests [3e5872c]
 - 09:15 Checkpointed reviewed Node callback assembly so recovery resumes at lifecycle binding [9bb7b96]
 - 09:30 Bound callback and Prime process lifecycle so factory operations share one exact dispatcher [bd706a0]
+- 09:37 Checkpointed reviewed callback lifecycle so recovery resumes at real session composition [84a5c66]
+- 10:31 Closed root/child Prime operation composition so real callbacks share durable managers [8204e6d]
