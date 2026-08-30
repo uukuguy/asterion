@@ -1,0 +1,620 @@
+from __future__ import annotations
+
+import traceback
+import unittest
+from collections.abc import Iterable, Mapping
+from dataclasses import replace
+from typing import cast
+
+from asterion.control.authority import BudgetUsage, RemainingBudget
+from asterion.control.host import ControlCommand, EventCursor
+from asterion.control.providers.native.capsule import MemoryNativeCapsuleStore
+from asterion.control.providers.native.controller import (
+    NativeController,
+    NativeControllerError,
+)
+from asterion.control.providers.native.model import (
+    NativeCapsuleMetadata,
+    NativeEventDraft,
+    NativeTurnRequest,
+    NativeTurnResult,
+)
+from asterion.control.providers.native.state import reduce_native_entries
+from asterion.control.providers.native.store import (
+    MemoryNativeSessionStore,
+    MemoryNativeStorageOwner,
+    NativeStoreError,
+    NativeStorageOwner,
+)
+from asterion.control.providers.native.turn import (
+    DeterministicNativeTurnAdapter,
+    NativeTurnAdapter,
+    NativeTurnError,
+    _turn_script_key,
+)
+
+
+SESSION_ID = "session-1"
+GENERATION = 1
+AUTHORITY_REVISION = 1
+EMITTED_AT = "2026-08-30T00:00:00Z"
+
+
+def _budget(**overrides: int) -> RemainingBudget:
+    values = {
+        "controller_tokens": 100,
+        "application_tokens": 0,
+        "child_tokens": 0,
+        "aggregate_tokens": 100,
+        "cost_micros": 10_000,
+        "deadline_ms": 60_000,
+    }
+    values.update(overrides)
+    return RemainingBudget(**values)
+
+
+def _usage(**overrides: int) -> BudgetUsage:
+    values = {
+        "controller_tokens": 0,
+        "application_tokens": 0,
+        "child_tokens": 0,
+        "aggregate_tokens": 0,
+        "cost_micros": 0,
+    }
+    values.update(overrides)
+    return BudgetUsage(**values)
+
+
+def _command(
+    command_id: str,
+    command_type: str,
+    payload: Mapping[str, object],
+    *,
+    authority_revision: int = AUTHORITY_REVISION,
+) -> ControlCommand:
+    return ControlCommand(
+        command_id=command_id,
+        session_id=SESSION_ID,
+        authority_revision=authority_revision,
+        type=command_type,
+        payload=payload,
+    )
+
+
+def create_command(command_id: str = "command-create") -> ControlCommand:
+    return _command(
+        command_id,
+        "session.create",
+        {
+            "system_id": "research.system",
+            "system_version": "1.0.0",
+            "goal_id": "goal-1",
+            "goal_ref": "goal-ref-1",
+        },
+    )
+
+
+def input_command(
+    command_id: str = "command-input-1",
+    content_ref: str = "content-ref-1",
+    *,
+    input_id: str = "input-1",
+    delivery: str = "direct",
+) -> ControlCommand:
+    return _command(
+        command_id,
+        "input.submit",
+        {
+            "input_id": input_id,
+            "delivery": delivery,
+            "content_ref": content_ref,
+        },
+    )
+
+
+def lifecycle_command(command_id: str, command_type: str, reason: str) -> ControlCommand:
+    return _command(command_id, command_type, {"reason_code": reason})
+
+
+def attach_command(command_id: str, sequence: int = 0) -> ControlCommand:
+    return _command(
+        command_id,
+        "session.attach",
+        {"cursor": {"generation": GENERATION, "sequence": sequence}},
+    )
+
+
+def checkpoint_command(command_id: str, checkpoint_id: str) -> ControlCommand:
+    return _command(command_id, "checkpoint.request", {"checkpoint_id": checkpoint_id})
+
+
+def action_resolution_command(
+    command_id: str,
+    resolution: str,
+    *,
+    action_id: str = "action-1",
+    reason_code: str = "ok",
+    receipt_ref: str | None = None,
+) -> ControlCommand:
+    return _command(
+        command_id,
+        "action.resolve",
+        {
+            "action_id": action_id,
+            "resolution": resolution,
+            "reason_code": reason_code,
+            "receipt_ref": receipt_ref,
+        },
+    )
+
+
+def terminal_resolution_command(
+    action_id: str = "action-1",
+    receipt_ref: str = "receipt-1",
+) -> ControlCommand:
+    return action_resolution_command(
+        "command-action-terminal",
+        "succeeded",
+        action_id=action_id,
+        receipt_ref=receipt_ref,
+    )
+
+
+def proposal_draft(action_id: str = "action-1") -> NativeEventDraft:
+    return NativeEventDraft(
+        "action.proposed",
+        {
+            "action_id": action_id,
+            "authority_revision": AUTHORITY_REVISION,
+            "idempotency_key": f"idempotency-{action_id}",
+            "kind": "application.invoke",
+            "target": {
+                "kind": "application",
+                "provider_id": "example.provider",
+                "application_id": "alpha",
+                "version": "1.0.0",
+                "runtime_id": "fake.runtime",
+            },
+            "input_ref": "input-ref-1",
+            "expected_artifacts": ("report.alpha", "report.zeta"),
+            "budget": {
+                "controller_tokens": 0,
+                "application_tokens": 10,
+                "child_tokens": 0,
+                "aggregate_tokens": 10,
+                "cost_micros": 500,
+                "deadline_ms": 10_000,
+            },
+            "causal_parent_ids": ("goal-1", "task-1"),
+        },
+    )
+
+
+class SequenceFactory:
+    def __init__(self, values: Iterable[str]) -> None:
+        self._values = list(values)
+        self.calls = 0
+
+    def __call__(self) -> str:
+        self.calls += 1
+        if not self._values:
+            return f"generated-{self.calls}"
+        return self._values.pop(0)
+
+
+class FixedClock:
+    def __init__(self, value: str = EMITTED_AT) -> None:
+        self.value = value
+        self.calls = 0
+
+    def __call__(self) -> str:
+        self.calls += 1
+        return self.value
+
+
+class CountingAdapter:
+    adapter_id = "native.counting-turn/v1"
+
+    def __init__(self, result: NativeTurnResult | BaseException) -> None:
+        self.result = result
+        self.calls = 0
+
+    async def execute(self, request: NativeTurnRequest) -> NativeTurnResult:
+        self.calls += 1
+        if isinstance(self.result, BaseException):
+            raise self.result
+        if self.result.turn_id == "copy-request-turn":
+            return replace(self.result, turn_id=request.turn_id)
+        return self.result
+
+
+class TrackingSessionStore(MemoryNativeSessionStore):
+    def __init__(self, owner: MemoryNativeStorageOwner, close_order: list[str]) -> None:
+        super().__init__(owner, max_record_bytes=65_536)
+        self.close_order = close_order
+
+    def close(self) -> None:
+        self.close_order.append("journal")
+        super().close()
+
+
+class TrackingCapsuleStore(MemoryNativeCapsuleStore):
+    def __init__(self, owner: MemoryNativeStorageOwner, close_order: list[str]) -> None:
+        super().__init__(owner, max_capsule_bytes=65_536)
+        self.close_order = close_order
+
+    def close(self) -> None:
+        self.close_order.append("capsule")
+        super().close()
+
+
+class ControllerFixture:
+    def __init__(
+        self,
+        *,
+        adapter: NativeTurnAdapter | None = None,
+        event_ids: Iterable[str] = (
+            "event-created",
+            "event-running",
+            "event-budget",
+            "event-action",
+            "event-fault",
+            "event-recovery",
+            "event-terminal",
+            "event-checkpoint",
+        ),
+        turn_ids: Iterable[str] = ("turn-1", "turn-2", "turn-3"),
+        capsule_ids: Iterable[str] = ("capsule-1", "capsule-2"),
+    ) -> None:
+        self.close_order: list[str] = []
+        self.owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)
+        original_close = self.owner.close
+
+        def tracked_close() -> None:
+            self.close_order.append("owner")
+            original_close()
+
+        self.owner.close = tracked_close  # type: ignore[method-assign]
+        self.store = TrackingSessionStore(self.owner, self.close_order)
+        self.capsules = TrackingCapsuleStore(self.owner, self.close_order)
+        self.event_factory = SequenceFactory(event_ids)
+        self.turn_factory = SequenceFactory(turn_ids)
+        self.capsule_factory = SequenceFactory(capsule_ids)
+        self.clock = FixedClock()
+        self.adapter: NativeTurnAdapter = adapter if adapter is not None else CountingAdapter(
+            NativeTurnResult("copy-request-turn", (), _usage())
+        )
+        self.controller = NativeController(
+            owner=self.owner,
+            session_store=self.store,
+            capsule_store=self.capsules,
+            turn_adapter=self.adapter,
+            provider_id="native",
+            provider_version="0.1.0",
+            system_id="research.system",
+            system_version="1.0.0",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            checkpoint_version="1.0.0",
+            authority_id="authority-1",
+            authority_revision=AUTHORITY_REVISION,
+            event_id_factory=self.event_factory,
+            turn_id_factory=self.turn_factory,
+            capsule_id_factory=self.capsule_factory,
+            clock=self.clock,
+        )
+
+    async def create(self, budget: RemainingBudget | None = None) -> None:
+        await self.controller.accept(create_command())
+        self.controller.sync_authority(budget or _budget())
+
+    def reopen(self) -> NativeController:
+        return NativeController(
+            owner=self.owner,
+            session_store=self.store,
+            capsule_store=self.capsules,
+            turn_adapter=self.adapter,
+            provider_id="native",
+            provider_version="0.1.0",
+            system_id="research.system",
+            system_version="1.0.0",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            checkpoint_version="1.0.0",
+            authority_id="authority-1",
+            authority_revision=AUTHORITY_REVISION,
+            event_id_factory=self.event_factory,
+            turn_id_factory=self.turn_factory,
+            capsule_id_factory=self.capsule_factory,
+            clock=self.clock,
+        )
+
+
+class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
+    async def test_create_emits_exact_created_and_running_once_and_duplicate_is_idempotent(
+        self,
+    ) -> None:
+        fixture = ControllerFixture()
+        controller = fixture.controller
+
+        await controller.accept(create_command())
+        await controller.accept(create_command())
+        with self.assertRaises(NativeControllerError):
+            await controller.accept(
+                replace(
+                    create_command(),
+                    payload={**create_command().payload, "goal_id": "goal-2"},
+                )
+            )
+
+        state = controller.state
+        self.assertEqual(state.lifecycle, "running")
+        self.assertEqual(state.goal_status, "active")
+        self.assertEqual([event.type for event in state.events], ["session.created", "session.running"])
+        self.assertNotIn("goal.updated", [event.type for event in state.events])
+        self.assertEqual(fixture.store.position, 2)
+
+    async def test_turn_commits_result_and_events_before_replay(self) -> None:
+        adapter = CountingAdapter(
+            NativeTurnResult(
+                "copy-request-turn",
+                (
+                    NativeEventDraft(
+                        "budget.reported",
+                        {
+                            "controller_tokens": 3,
+                            "application_tokens": 0,
+                            "child_tokens": 0,
+                            "aggregate_tokens": 3,
+                            "cost_micros": 0,
+                        },
+                    ),
+                    proposal_draft(),
+                ),
+                _usage(controller_tokens=3, aggregate_tokens=3),
+            )
+        )
+        fixture = ControllerFixture(adapter=adapter)
+        controller = fixture.controller
+        await fixture.create()
+        await controller.accept(input_command())
+
+        request = controller.begin_ready_turn()
+        self.assertIsNotNone(request)
+        assert request is not None
+        result = await controller.execute_turn(request)
+        controller.commit_turn(request, result)
+
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(request.inputs[0].content_ref, "content-ref-1")
+        events = controller.replay_events(EventCursor(1, 2))
+        self.assertEqual(
+            [event.type for event in events],
+            ["budget.reported", "action.proposed"],
+        )
+        self.assertEqual(controller.state.action_statuses["action-1"], "proposed")
+
+    async def test_deterministic_adapter_uses_journal_ordered_turn_keys_and_redacts_refs(
+        self,
+    ) -> None:
+        fixture = ControllerFixture()
+        await fixture.create()
+        await fixture.controller.accept(input_command("command-input-2", "content-ref-2"))
+        request = fixture.controller.begin_ready_turn()
+        self.assertIsNotNone(request)
+        assert request is not None
+        result = NativeTurnResult(request.turn_id, (), _usage())
+        adapter = DeterministicNativeTurnAdapter({"input:content-ref-2": result})
+
+        self.assertEqual(_turn_script_key(request), "input:content-ref-2")
+        self.assertEqual(await adapter.execute(request), result)
+        self.assertNotIn("content-ref-2", repr(request))
+        self.assertNotIn("content-ref-2", repr(request.inputs[0]))
+        with self.assertRaises(NativeTurnError):
+            await DeterministicNativeTurnAdapter({}).execute(request)
+        with self.assertRaises(NativeTurnError):
+            _turn_script_key(replace(request, inputs=(), action_results=()))
+
+    async def test_action_cannot_advance_without_host_terminal_resolution(self) -> None:
+        fixture = ControllerFixture(
+            adapter=CountingAdapter(
+                NativeTurnResult("copy-request-turn", (proposal_draft(),), _usage())
+            )
+        )
+        await fixture.create()
+        await fixture.controller.accept(input_command())
+        request = fixture.controller.begin_ready_turn()
+        assert request is not None
+        fixture.controller.commit_turn(request, await fixture.controller.execute_turn(request))
+
+        self.assertIsNone(fixture.controller.begin_ready_turn())
+        await fixture.controller.accept(
+            action_resolution_command("command-action-admitted", "admitted")
+        )
+        self.assertIsNone(fixture.controller.begin_ready_turn())
+
+    async def test_terminal_host_resolution_becomes_next_durable_turn_input(self) -> None:
+        fixture = ControllerFixture(
+            adapter=CountingAdapter(
+                NativeTurnResult("copy-request-turn", (proposal_draft(),), _usage())
+            ),
+            turn_ids=("turn-propose", "turn-resolved"),
+        )
+        await fixture.create()
+        await fixture.controller.accept(input_command())
+        request = fixture.controller.begin_ready_turn()
+        assert request is not None
+        fixture.controller.commit_turn(request, await fixture.controller.execute_turn(request))
+
+        await fixture.controller.accept(terminal_resolution_command("action-1", "receipt-1"))
+        next_request = fixture.controller.begin_ready_turn()
+        self.assertIsNotNone(next_request)
+        assert next_request is not None
+        self.assertEqual(next_request.action_results[0].receipt_ref, "receipt-1")
+        self.assertEqual(_turn_script_key(next_request), "action:action-1:succeeded")
+
+    async def test_pause_resume_detach_attach_and_cancel_legality_matrix(self) -> None:
+        fixture = ControllerFixture()
+        controller = fixture.controller
+        await fixture.create()
+
+        await controller.accept(lifecycle_command("command-pause", "session.pause", "operator-request"))
+        self.assertEqual(controller.state.lifecycle, "paused")
+        self.assertIsNone(controller.begin_ready_turn())
+        await controller.accept(lifecycle_command("command-resume", "session.resume", "operator-return"))
+        self.assertEqual(controller.state.lifecycle, "running")
+        await controller.accept(attach_command("command-attach", sequence=2))
+        await controller.accept(lifecycle_command("command-detach", "session.detach", "operator-away"))
+        self.assertEqual(controller.state.lifecycle, "running")
+
+        await controller.accept(input_command("command-input-cancel", "content-ref-cancel"))
+        started = controller.begin_ready_turn()
+        self.assertIsNotNone(started)
+        assert started is not None
+        await controller.accept(lifecycle_command("command-cancel", "session.cancel", "operator-cancel"))
+        self.assertEqual(controller.state.lifecycle, "cancelled")
+        self.assertIn(started.turn_id, controller.state.fenced_turn_ids)
+        with self.assertRaises(NativeControllerError):
+            controller.commit_turn(started, NativeTurnResult(started.turn_id, (), _usage()))
+        with self.assertRaises(NativeControllerError):
+            await controller.accept(input_command("command-after-cancel", "content-ref-after"))
+
+    async def test_budget_limited_path_never_invokes_adapter_and_is_unique(self) -> None:
+        adapter = CountingAdapter(NativeTurnResult("copy-request-turn", (), _usage()))
+        fixture = ControllerFixture(adapter=adapter)
+        await fixture.create(_budget(controller_tokens=0, aggregate_tokens=0))
+        await fixture.controller.accept(input_command())
+
+        request = fixture.controller.begin_ready_turn()
+        self.assertIsNotNone(request)
+        assert request is not None
+        self.assertTrue(fixture.controller.turn_is_budget_limited(request))
+        fixture.controller.commit_budget_limited_turn(request)
+        with self.assertRaises(NativeControllerError):
+            fixture.controller.commit_budget_limited_turn(request)
+
+        self.assertEqual(adapter.calls, 0)
+        self.assertEqual(
+            [event.type for event in fixture.controller.state.events[-2:]],
+            ["budget.reported", "session.budget-limited"],
+        )
+        self.assertFalse(fixture.store.replay()[-1].record.payload["adapter_invoked"])
+
+    async def test_invalid_over_budget_and_exception_results_fence_through_recovery_only(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "wrong-turn",
+                NativeTurnResult("other-turn", (), _usage()),
+                "native-turn-result-invalid",
+            ),
+            (
+                "over-budget",
+                NativeTurnResult(
+                    "copy-request-turn",
+                    (),
+                    _usage(controller_tokens=101, aggregate_tokens=101),
+                ),
+                "native-turn-result-invalid",
+            ),
+            ("exception", NativeControllerError("SENTINEL_SECRET"), "native-turn-failed"),
+        )
+        for label, adapter_result, reason_code in cases:
+            with self.subTest(label=label):
+                fixture = ControllerFixture(adapter=CountingAdapter(adapter_result))
+                await fixture.create()
+                await fixture.controller.accept(input_command(f"command-input-{label}", f"content-ref-{label}"))
+                request = fixture.controller.begin_ready_turn()
+                assert request is not None
+
+                try:
+                    result = await fixture.controller.execute_turn(request)
+                    fixture.controller.commit_turn(request, result)
+                except NativeControllerError:
+                    fixture.controller.fail_turn(request, reason_code)
+
+                event_types = [event.type for event in fixture.controller.state.events]
+                self.assertEqual(event_types[-2:], ["fault.raised", "session.recovery-required"])
+                self.assertNotIn("budget.reported", event_types[2:])
+                self.assertNotIn("action.proposed", event_types[2:])
+                formatted = "".join(
+                    traceback.format_exception_only(
+                        NativeControllerError,
+                        NativeControllerError("SENTINEL_SECRET"),
+                    )
+                )
+                self.assertIn("native controller is unavailable", formatted)
+
+    async def test_checkpoint_seals_before_event_and_retries_close_once(self) -> None:
+        fixture = ControllerFixture(event_ids=("event-created", "event-running", "event-checkpoint"))
+        await fixture.create()
+
+        event = fixture.controller.checkpoint("checkpoint-1")
+        retry = fixture.controller.checkpoint("checkpoint-1")
+        self.assertEqual(event, retry)
+        self.assertEqual(event.type, "checkpoint.created")
+        self.assertEqual(event.sequence, 3)
+        self.assertEqual(fixture.store.position, 4)
+        self.assertNotIn("covered_position", event.payload)
+        self.assertRegex(str(event.payload["capsule_digest"]), r"^[0-9a-f]{64}$")
+        checkpoint = fixture.controller.state.checkpoint
+        self.assertIsNotNone(checkpoint)
+        fixture.capsules.verify(cast(NativeCapsuleMetadata, checkpoint))
+
+    async def test_replay_cursor_bounds_reopen_reducer_and_started_turn_recovery(self) -> None:
+        fixture = ControllerFixture(turn_ids=("turn-stable",))
+        await fixture.create()
+        await fixture.controller.accept(input_command())
+        request = fixture.controller.begin_ready_turn()
+        self.assertIsNotNone(request)
+        assert request is not None
+
+        reopened = fixture.reopen()
+        replayed = reopened.begin_ready_turn()
+        self.assertEqual(replayed, request)
+        self.assertEqual(
+            reduce_native_entries(fixture.store.replay()),
+            reopened.state,
+        )
+        self.assertEqual(
+            [event.type for event in reopened.replay_events(EventCursor(1, 1))],
+            ["session.running"],
+        )
+        for cursor in (EventCursor(2, 0), EventCursor(1, 99)):
+            with self.subTest(cursor=cursor), self.assertRaises(NativeControllerError):
+                reopened.replay_events(cursor)
+
+    async def test_close_order_use_after_close_redaction_and_hostile_types(self) -> None:
+        fixture = ControllerFixture()
+        await fixture.create()
+
+        fixture.controller.close()
+        self.assertEqual(fixture.close_order, ["capsule", "journal", "owner"])
+        with self.assertRaises(NativeStoreError):
+            fixture.controller.replay_events(None)
+        with self.assertRaises(NativeControllerError) as caught:
+            NativeController(
+                owner=cast(NativeStorageOwner, object()),
+                session_store=fixture.store,
+                capsule_store=fixture.capsules,
+                turn_adapter=fixture.adapter,
+                provider_id="native",
+                provider_version="0.1.0",
+                system_id="research.system",
+                system_version="1.0.0",
+                session_id=SESSION_ID,
+                generation=GENERATION,
+                checkpoint_version="1.0.0",
+                authority_id="authority-1",
+                authority_revision=AUTHORITY_REVISION,
+                event_id_factory=lambda: "/tmp/SENTINEL_SECRET",
+                turn_id_factory=lambda: "turn-1",
+                capsule_id_factory=lambda: "capsule-1",
+                clock=lambda: "2026-08-30T00:00:00Z",
+            )
+        self.assertNotIn("SENTINEL_SECRET", str(caught.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()  # pragma: no cover

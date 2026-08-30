@@ -1032,6 +1032,120 @@ class TestNativeControlModel(unittest.TestCase):
         self.assertEqual(state.usage.controller_tokens, 100)
         self.assertEqual(state.usage.aggregate_tokens, 100)
 
+    def test_pending_non_invoked_turn_commit_accepts_only_budget_limited_shape(
+        self,
+    ) -> None:
+        input_command = _input_command()
+        request = _turn_request(input_command=input_command)
+        budget_limited = _event(
+            "event-budget-limited",
+            4,
+            "session.budget-limited",
+            {"reason_code": "native-budget-limited"},
+        )
+        records = (
+            *_valid_records(),
+            command_committed_record(input_command, ()),
+            turn_started_record(request),
+            turn_committed_record(
+                NativeTurnResult("turn-1", (), _usage()),
+                (
+                    _budget_report("event-budget-before-limit", 3, _usage()),
+                    budget_limited,
+                ),
+                adapter_invoked=False,
+            ),
+        )
+
+        state = reduce_native_entries(_chain(records))
+
+        self.assertEqual(state.lifecycle, "budget_limited")
+        self.assertEqual(state.pending_turn, None)
+        self.assertEqual(state.pending_inputs, ())
+        self.assertEqual(state.remaining_budget, _budget())
+        self.assertFalse(
+            records[-1].payload["adapter_invoked"],
+        )
+
+    def test_pending_non_invoked_turn_commit_rejects_non_budget_limited_shapes(
+        self,
+    ) -> None:
+        input_command = _input_command()
+        request = _turn_request(input_command=input_command)
+        valid_budget = _budget_report("event-budget-before-limit", 3, _usage())
+        terminal = _event(
+            "event-budget-limited",
+            4,
+            "session.budget-limited",
+            {"reason_code": "native-budget-limited"},
+        )
+        cases = (
+            (
+                "nonzero-usage",
+                NativeTurnResult(
+                    "turn-1",
+                    (),
+                    _usage(controller_tokens=1, aggregate_tokens=1),
+                ),
+                (valid_budget, terminal),
+            ),
+            (
+                "normal-result",
+                NativeTurnResult(
+                    "turn-1",
+                    (NativeEventDraft("session.completed", {"reason_code": "done"}),),
+                    _usage(),
+                ),
+                (_event("event-completed", 3, "session.completed", {"reason_code": "done"}),),
+            ),
+            (
+                "budget-only",
+                NativeTurnResult("turn-1", (), _usage()),
+                (valid_budget,),
+            ),
+            (
+                "wrong-terminal",
+                NativeTurnResult("turn-1", (), _usage()),
+                (
+                    valid_budget,
+                    _event(
+                        "event-cancelled",
+                        4,
+                        "session.cancelled",
+                        {"reason_code": "cancelled"},
+                    ),
+                ),
+            ),
+            (
+                "absent-pending-turn",
+                NativeTurnResult("turn-1", (), _usage()),
+                (valid_budget, terminal),
+            ),
+        )
+        for label, result, events in cases:
+            with self.subTest(label=label), self.assertRaises(NativeStateError):
+                prefix = (
+                    (*_valid_records(), command_committed_record(input_command, ()))
+                    if label == "absent-pending-turn"
+                    else (
+                        *_valid_records(),
+                        command_committed_record(input_command, ()),
+                        turn_started_record(request),
+                    )
+                )
+                reduce_native_entries(
+                    _chain(
+                        (
+                            *prefix,
+                            turn_committed_record(
+                                result,
+                                events,
+                                adapter_invoked=False,
+                            ),
+                        )
+                    )
+                )
+
     def test_nonzero_turn_after_zero_budget_rejects_before_state_update(self) -> None:
         exhausted_prefix = (
             *_valid_records(),

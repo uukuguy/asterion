@@ -121,7 +121,8 @@ def turn_committed_record(
 ) -> NativeRecord:
     event_mappings = tuple(event.to_mapping() for event in events)
     _validate_turn_usage(result.usage)
-    _validate_event_drafts(result.events, event_mappings)
+    if adapter_invoked or result.events:
+        _validate_event_drafts(result.events, event_mappings)
     payload = {
         "turn_id": result.turn_id,
         "events": event_mappings,
@@ -337,8 +338,14 @@ def _apply_turn_committed(
     adapter_invoked = bool(record.payload["adapter_invoked"])
     if state.pending_turn is None and adapter_invoked:
         raise NativeStateError("native adapter turn commit requires pending turn")
+    if (
+        state.pending_turn is None
+        and not adapter_invoked
+        and _record_has_event_type(record, "session.budget-limited")
+    ):
+        raise NativeStateError("native budget-limited turn requires pending turn")
     if state.pending_turn is not None and not adapter_invoked:
-        raise NativeStateError("native pending turn commit requires adapter invocation")
+        _validate_budget_limited_pending_turn_commit(state, record, usage)
     if state.pending_turn is not None and state.pending_turn.turn_id != turn_id:
         raise NativeStateError("native pending turn identity mismatches")
     _validate_usage_fits_budget(usage, state.remaining_budget)
@@ -378,6 +385,42 @@ def _apply_turn_committed(
         pending_action_results=pending_action_results,
         pending_turn=None,
         committed_turn_digests=committed_turns,
+    )
+
+
+def _validate_budget_limited_pending_turn_commit(
+    state: NativeControllerState,
+    record: NativeRecord,
+    usage: BudgetUsage,
+) -> None:
+    request = state.pending_turn
+    if request is None:
+        raise NativeStateError("native budget-limited turn requires pending turn")
+    if (
+        usage != BudgetUsage.zero()
+        or request.turn_id != record.payload["turn_id"]
+        or not (
+            (request.inputs and not request.action_results)
+            or (request.action_results and not request.inputs)
+        )
+    ):
+        raise NativeStateError("native budget-limited turn commit is invalid")
+    events = _events_from_payload(record.payload["events"])
+    if len(events) != 2:
+        raise NativeStateError("native budget-limited events are invalid")
+    budget_report, terminal = events
+    if (
+        budget_report.type != "budget.reported"
+        or _usage_from_mapping(budget_report.payload) != state.usage
+        or terminal.type != "session.budget-limited"
+    ):
+        raise NativeStateError("native budget-limited events are invalid")
+
+
+def _record_has_event_type(record: NativeRecord, event_type: str) -> bool:
+    return any(
+        event.type == event_type
+        for event in _events_from_payload(record.payload["events"])
     )
 
 
@@ -465,6 +508,8 @@ def _apply_event(
     terminal_event_id = state.terminal_event_id
     action_statuses = dict(state.action_statuses)
     action_receipts = dict(state.action_receipt_refs)
+    pending_turn = state.pending_turn
+    fenced_turn_ids = state.fenced_turn_ids
 
     if event.type == "session.created":
         if lifecycle != "bound":
@@ -501,6 +546,9 @@ def _apply_event(
             "session.completed": "completed",
             "session.failed": "failed",
         }[event.type]
+        if event.type == "session.cancelled" and pending_turn is not None:
+            fenced_turn_ids = _append_unique(fenced_turn_ids, pending_turn.turn_id)
+            pending_turn = None
     elif event.type == "goal.updated":
         if goal_id is not None and event.payload["goal_id"] != goal_id:
             raise NativeStateError("native goal identity mismatches")
@@ -533,6 +581,8 @@ def _apply_event(
         authority_revision=authority_revision,
         action_statuses=action_statuses,
         action_receipt_refs=action_receipts,
+        pending_turn=pending_turn,
+        fenced_turn_ids=fenced_turn_ids,
         events=(*state.events, event),
         next_sequence=state.next_sequence + 1,
         terminal_event_id=terminal_event_id,
@@ -845,7 +895,10 @@ def _metadata_from_mapping(value: object) -> NativeCapsuleMetadata:
 
 
 def _events_from_payload(value: object) -> tuple[ControlEvent, ...]:
-    return tuple(ControlEvent.from_mapping(_mapping(item)) for item in _sequence(value))
+    return tuple(
+        ControlEvent.from_mapping(_mapping(_json_value(_mapping(item))))
+        for item in _sequence(value)
+    )
 
 
 def _remaining_budget_mapping(value: RemainingBudget) -> Mapping[str, object]:

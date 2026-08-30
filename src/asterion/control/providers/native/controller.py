@@ -1,0 +1,785 @@
+"""Durable native controller state machine."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Callable, Mapping
+from typing import NoReturn
+
+from asterion.control.authority import BudgetUsage, RemainingBudget
+from asterion.control.host import ControlCommand, ControlEvent, EventCursor
+from asterion.control.protocol import (
+    ACTION_RESOLUTIONS,
+    OPAQUE_ID,
+    SEMANTIC_VERSION,
+    UTC_TIMESTAMP,
+    validate_control_command,
+)
+from asterion.control.providers.native.capsule import NativeCapsuleStore
+from asterion.control.providers.native.model import (
+    MAX_SAFE_JSON_INTEGER,
+    NativeControllerState,
+    NativeRecord,
+    NativeTurnRequest,
+    NativeTurnResult,
+    _json_value,
+)
+from asterion.control.providers.native.state import (
+    authority_synced_record,
+    checkpoint_committed_record,
+    command_committed_record,
+    reduce_native_entries,
+    session_bound_record,
+    turn_committed_record,
+    turn_recovery_required_record,
+    turn_started_record,
+)
+from asterion.control.providers.native.store import (
+    NativeSessionStore,
+    NativeStorageOwner,
+    NativeStoreError,
+)
+from asterion.control.providers.native.turn import NativeTurnAdapter
+
+
+class NativeControllerError(RuntimeError):
+    """Raised when native controller state cannot be safely advanced."""
+
+    def __init__(self, *_: object) -> None:
+        super().__init__("native controller is unavailable")
+        self.__cause__ = None
+        self.__context__ = None
+
+
+def _raise_controller_error() -> NoReturn:
+    try:
+        raise NativeControllerError from None
+    except NativeControllerError as error:
+        error.__context__ = None
+        raise
+
+
+class NativeController:
+    def __init__(
+        self,
+        *,
+        owner: NativeStorageOwner,
+        session_store: NativeSessionStore,
+        capsule_store: NativeCapsuleStore,
+        turn_adapter: NativeTurnAdapter,
+        provider_id: str,
+        provider_version: str,
+        system_id: str,
+        system_version: str,
+        session_id: str,
+        generation: int,
+        checkpoint_version: str,
+        authority_id: str,
+        authority_revision: int,
+        event_id_factory: Callable[[], str],
+        turn_id_factory: Callable[[], str],
+        capsule_id_factory: Callable[[], str],
+        clock: Callable[[], str],
+    ) -> None:
+        try:
+            _require_owner(owner)
+            _require_store(session_store)
+            _require_capsule_store(capsule_store)
+            _require_adapter(turn_adapter)
+            _require_identifier(provider_id)
+            _require_semver(provider_version)
+            _require_identifier(system_id)
+            _require_semver(system_version)
+            _require_opaque(session_id)
+            _require_positive(generation)
+            _require_semver(checkpoint_version)
+            _require_opaque(authority_id)
+            _require_positive(authority_revision)
+            for factory in (
+                event_id_factory,
+                turn_id_factory,
+                capsule_id_factory,
+                clock,
+            ):
+                if not callable(factory):
+                    raise ValueError
+            self._owner = owner
+            self._session_store = session_store
+            self._capsule_store = capsule_store
+            self._turn_adapter = turn_adapter
+            self._provider_id = provider_id
+            self._provider_version = provider_version
+            self._system_id = system_id
+            self._system_version = system_version
+            self._session_id = session_id
+            self._generation = generation
+            self._checkpoint_version = checkpoint_version
+            self._authority_id = authority_id
+            self._authority_revision = authority_revision
+            self._event_id_factory = event_id_factory
+            self._turn_id_factory = turn_id_factory
+            self._capsule_id_factory = capsule_id_factory
+            self._clock = clock
+            self._state = self._reduce_store()
+            self._validate_recovered_identity()
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
+
+    @property
+    def state(self) -> NativeControllerState:
+        return self._state
+
+    async def accept(self, command: ControlCommand) -> None:
+        try:
+            records = self._transition_command(self.state, command)
+            self._append_many(records)
+            if command.type == "checkpoint.request":
+                self._ensure_checkpoint(str(command.payload["checkpoint_id"]))
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
+
+    def sync_authority(self, budget: RemainingBudget) -> None:
+        try:
+            revision = self._require_bound_authority_revision()
+            self._append_equal_or_new(authority_synced_record(revision, budget))
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
+
+    def begin_ready_turn(self) -> NativeTurnRequest | None:
+        try:
+            request = self._next_turn_request(self.state)
+            if request is None:
+                return None
+            self._append(turn_started_record(request))
+            return self.state.pending_turn
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
+
+    def turn_is_budget_limited(self, request: NativeTurnRequest) -> bool:
+        self._require_pending_turn(request)
+        return not self._has_admissible_turn_budget(request.budget)
+
+    def commit_budget_limited_turn(self, request: NativeTurnRequest) -> None:
+        try:
+            self._require_pending_turn(request)
+            if self._has_admissible_turn_budget(request.budget):
+                raise NativeControllerError
+            events = self._budget_limited_events(request)
+            result = NativeTurnResult(request.turn_id, events=(), usage=BudgetUsage.zero())
+            self._append(
+                turn_committed_record(result, events, adapter_invoked=False)
+            )
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
+
+    async def execute_turn(self, request: NativeTurnRequest) -> NativeTurnResult:
+        try:
+            self._require_pending_turn(request)
+            return await self._turn_adapter.execute(request)
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
+
+    def commit_turn(
+        self, request: NativeTurnRequest, result: NativeTurnResult
+    ) -> None:
+        try:
+            events = self._validated_turn_events(request, result)
+            self._append(turn_committed_record(result, events))
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
+
+    def fail_turn(self, request: NativeTurnRequest, reason_code: str) -> None:
+        try:
+            events = self._recovery_events(request, reason_code)
+            self._append(
+                turn_recovery_required_record(request.turn_id, reason_code, events)
+            )
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
+
+    def checkpoint(self, checkpoint_id: str) -> ControlEvent:
+        try:
+            return self._ensure_checkpoint(checkpoint_id)
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
+
+    def replay_events(self, cursor: EventCursor | None) -> tuple[ControlEvent, ...]:
+        entries = self._session_store.replay()
+        self._state = reduce_native_entries(entries)
+        return self._validated_event_suffix(self.state.events, cursor)
+
+    def close(self) -> None:
+        try:
+            self._capsule_store.close()
+        finally:
+            try:
+                self._session_store.close()
+            finally:
+                self._owner.close()
+
+    def _transition_command(
+        self, state: NativeControllerState, command: ControlCommand
+    ) -> tuple[NativeRecord, ...]:
+        if not isinstance(command, ControlCommand):
+            raise NativeControllerError
+        validate_control_command(command.to_mapping())
+        self._validate_command_identity(state, command)
+        command_digest = _digest(command.to_mapping())
+        previous = state.command_digests.get(command.command_id)
+        if previous is not None:
+            if previous != command_digest:
+                raise NativeControllerError
+            return ()
+        if state.terminal_event_id is not None:
+            raise NativeControllerError
+        if state.lifecycle == "empty":
+            if command.type != "session.create":
+                raise NativeControllerError
+            bound = session_bound_record(
+                provider_id=self._provider_id,
+                provider_version=self._provider_version,
+                system_id=self._system_id,
+                system_version=self._system_version,
+                session_id=self._session_id,
+                generation=self._generation,
+                checkpoint_version=self._checkpoint_version,
+                authority_id=self._authority_id,
+                authority_revision=self._authority_revision,
+            )
+            return (
+                bound,
+                command_committed_record(command, self._command_events(state, command)),
+            )
+        if command.type == "session.create":
+            raise NativeControllerError
+        return (command_committed_record(command, self._command_events(state, command)),)
+
+    def _validate_command_identity(
+        self, state: NativeControllerState, command: ControlCommand
+    ) -> None:
+        if command.session_id != self._session_id:
+            raise NativeControllerError
+        revision = self._authority_revision if state.lifecycle == "empty" else state.authority_revision
+        if revision is not None and command.authority_revision != revision:
+            raise NativeControllerError
+        if command.type == "session.create":
+            if (
+                command.payload["system_id"] != self._system_id
+                or command.payload["system_version"] != self._system_version
+            ):
+                raise NativeControllerError
+        if command.type == "session.attach":
+            cursor = command.payload["cursor"]
+            if not isinstance(cursor, Mapping):
+                raise NativeControllerError
+            if cursor["generation"] != self._generation or cursor["sequence"] > len(state.events):
+                raise NativeControllerError
+
+    def _command_events(
+        self, state: NativeControllerState, command: ControlCommand
+    ) -> tuple[ControlEvent, ...]:
+        if command.type == "session.create":
+            return (
+                self._event(
+                    state.next_sequence,
+                    "session.created",
+                    {
+                        "goal_id": command.payload["goal_id"],
+                        "authority_id": self._authority_id,
+                        "authority_revision": self._authority_revision,
+                    },
+                ),
+                self._event(
+                    state.next_sequence + 1,
+                    "session.running",
+                    {"reason_code": "started"},
+                ),
+            )
+        if command.type == "session.pause":
+            if state.lifecycle not in {"running", "recovery_required"}:
+                raise NativeControllerError
+            return (
+                self._event(
+                    state.next_sequence,
+                    "session.paused",
+                    {"reason_code": command.payload["reason_code"]},
+                ),
+            )
+        if command.type == "session.resume":
+            if state.lifecycle not in {"paused", "recovery_required"}:
+                raise NativeControllerError
+            return (
+                self._event(
+                    state.next_sequence,
+                    "session.running",
+                    {"reason_code": command.payload["reason_code"]},
+                ),
+            )
+        if command.type == "session.cancel":
+            if state.lifecycle not in {"created", "running", "paused", "recovery_required"}:
+                raise NativeControllerError
+            events = [
+                self._event(
+                    state.next_sequence,
+                    "session.cancelled",
+                    {"reason_code": command.payload["reason_code"]},
+                )
+            ]
+            return tuple(events)
+        if command.type in {"session.detach", "session.attach", "input.submit", "action.resolve", "checkpoint.request"}:
+            if state.lifecycle != "running":
+                raise NativeControllerError
+            if command.type == "action.resolve":
+                self._validate_action_resolution(state, command)
+            return ()
+        raise NativeControllerError
+
+    def _validate_action_resolution(
+        self, state: NativeControllerState, command: ControlCommand
+    ) -> None:
+        action_id = str(command.payload["action_id"])
+        resolution = str(command.payload["resolution"])
+        if resolution not in ACTION_RESOLUTIONS:
+            raise NativeControllerError
+        current = state.action_statuses.get(action_id)
+        if current is None:
+            raise NativeControllerError
+        if resolution == "admitted":
+            if current != "proposed":
+                raise NativeControllerError
+            return
+        if resolution in {"rejected", "succeeded", "failed", "cancelled", "uncertain"}:
+            if current not in {"proposed", "admitted"}:
+                raise NativeControllerError
+            return
+        raise NativeControllerError
+
+    def _append(self, record: NativeRecord) -> None:
+        expected = self._session_store.position
+        self._session_store.append(expected, record)
+        self._state = self._reduce_store()
+
+    def _append_many(self, records: tuple[NativeRecord, ...]) -> None:
+        for record in records:
+            self._append(record)
+
+    def _append_equal_or_new(self, record: NativeRecord) -> None:
+        entries = self._session_store.replay()
+        if entries and entries[-1].record == record:
+            self._state = reduce_native_entries(entries)
+            return
+        self._append(record)
+
+    def _require_bound_authority_revision(self) -> int:
+        revision = self.state.authority_revision
+        if self.state.session_id is None or revision is None:
+            raise NativeControllerError
+        return revision
+
+    def _next_turn_request(
+        self, state: NativeControllerState
+    ) -> NativeTurnRequest | None:
+        if state.pending_turn is not None:
+            if state.pending_turn.turn_id in state.fenced_turn_ids:
+                return None
+            return state.pending_turn
+        if (
+            state.lifecycle != "running"
+            or state.terminal_event_id is not None
+            or state.remaining_budget is None
+            or state.authority_revision is None
+            or state.session_id is None
+            or state.generation is None
+        ):
+            return None
+        terminal_results = tuple(
+            result
+            for result in state.pending_action_results
+            if result.resolution in {"rejected", "succeeded", "failed", "cancelled", "uncertain"}
+        )
+        if state.pending_inputs and terminal_results:
+            raise NativeControllerError
+        if state.pending_inputs:
+            inputs = (state.pending_inputs[0],)
+            command_ids = self._command_ids_for_digests(
+                {item.command_digest for item in inputs}
+            )
+            turn_id = self._stable_or_factory_turn_id(command_ids)
+            return NativeTurnRequest(
+                turn_id=turn_id,
+                session_id=state.session_id,
+                generation=state.generation,
+                authority_revision=state.authority_revision,
+                causal_command_ids=command_ids,
+                inputs=inputs,
+                action_results=(),
+                budget=state.remaining_budget,
+            )
+        if terminal_results:
+            action_results = (terminal_results[0],)
+            command_ids = self._command_ids_for_digests(
+                {item.command_digest for item in action_results}
+            )
+            turn_id = self._stable_or_factory_turn_id(command_ids)
+            return NativeTurnRequest(
+                turn_id=turn_id,
+                session_id=state.session_id,
+                generation=state.generation,
+                authority_revision=state.authority_revision,
+                causal_command_ids=command_ids,
+                inputs=(),
+                action_results=action_results,
+                budget=state.remaining_budget,
+            )
+        return None
+
+    def _stable_or_factory_turn_id(self, command_ids: tuple[str, ...]) -> str:
+        candidate = self._turn_id_factory()
+        _require_opaque(candidate)
+        return candidate
+
+    def _command_ids_for_digests(self, digests: set[str]) -> tuple[str, ...]:
+        command_ids = tuple(
+            sorted(
+                command_id
+                for command_id, digest in self.state.command_digests.items()
+                if digest in digests
+            )
+        )
+        if not command_ids or len(command_ids) != len(digests):
+            raise NativeControllerError
+        return command_ids
+
+    def _require_pending_turn(self, request: NativeTurnRequest) -> None:
+        if not isinstance(request, NativeTurnRequest):
+            raise NativeControllerError
+        if self.state.pending_turn != request or request.turn_id in self.state.fenced_turn_ids:
+            raise NativeControllerError
+
+    def _has_admissible_turn_budget(self, budget: RemainingBudget) -> bool:
+        return (
+            budget.deadline_ms > 0
+            and budget.controller_tokens > 0
+            and budget.aggregate_tokens > 0
+            and budget.cost_micros >= 0
+        )
+
+    def _budget_limited_events(
+        self, request: NativeTurnRequest
+    ) -> tuple[ControlEvent, ControlEvent]:
+        self._require_pending_turn(request)
+        return (
+            self._event(
+                self.state.next_sequence,
+                "budget.reported",
+                _usage_payload(self.state.usage),
+            ),
+            self._event(
+                self.state.next_sequence + 1,
+                "session.budget-limited",
+                {"reason_code": "native-budget-limited"},
+            ),
+        )
+
+    def _validated_turn_events(
+        self, request: NativeTurnRequest, result: NativeTurnResult
+    ) -> tuple[ControlEvent, ...]:
+        self._require_pending_turn(request)
+        if not isinstance(result, NativeTurnResult) or result.turn_id != request.turn_id:
+            raise NativeControllerError
+        usage = result.usage
+        _validate_native_usage(usage)
+        _require_usage_fits_budget(usage, request.budget)
+        current = self.state.remaining_budget
+        if current is None:
+            raise NativeControllerError
+        _require_usage_fits_budget(usage, current)
+        cumulative = _add_usage(self.state.usage, usage)
+        events: list[ControlEvent] = []
+        for offset, draft in enumerate(result.events):
+            payload: Mapping[str, object]
+            if draft.type == "budget.reported":
+                payload = _usage_payload(cumulative)
+            else:
+                payload = draft.payload
+            events.append(
+                self._event(self.state.next_sequence + offset, draft.type, payload)
+            )
+        return tuple(events)
+
+    def _recovery_events(
+        self, request: NativeTurnRequest, reason_code: str
+    ) -> tuple[ControlEvent, ControlEvent]:
+        self._require_pending_turn(request)
+        _require_identifier(reason_code)
+        return (
+            self._event(
+                self.state.next_sequence,
+                "fault.raised",
+                {"code": reason_code, "recoverable": True, "evidence_ref": None},
+            ),
+            self._event(
+                self.state.next_sequence + 1,
+                "session.recovery-required",
+                {"reason_code": reason_code},
+            ),
+        )
+
+    def _seal_capsule(self, checkpoint_id: str):
+        _require_opaque(checkpoint_id)
+        payload = _canonical_json(
+            {
+                "checkpoint_id": checkpoint_id,
+                "state": _state_capsule_payload(self.state),
+            }
+        )
+        capsule_id = self._capsule_id_factory()
+        _require_opaque(capsule_id)
+        metadata = self._capsule_store.seal(
+            capsule_id=capsule_id,
+            payload=payload,
+            covered_position=self._session_store.position,
+            covered_sequence=self.state.next_sequence - 1,
+        )
+        self._capsule_store.verify(metadata)
+        return metadata
+
+    def _checkpoint_event(self, checkpoint_id: str, metadata) -> ControlEvent:
+        return self._event(
+            self.state.next_sequence,
+            "checkpoint.created",
+            {
+                "checkpoint_id": checkpoint_id,
+                "capsule_id": metadata.capsule_id,
+                "capsule_digest": metadata.capsule_digest,
+                "control_plane_id": metadata.control_plane_id,
+                "control_plane_version": metadata.control_plane_version,
+                "checkpoint_version": metadata.checkpoint_version,
+                "covered_sequence": metadata.covered_sequence,
+                "storage_ref": metadata.storage_ref,
+            },
+        )
+
+    def _ensure_checkpoint(self, checkpoint_id: str) -> ControlEvent:
+        _require_opaque(checkpoint_id)
+        if self.state.checkpoint is not None:
+            existing_event = self.state.events[-1]
+            if (
+                existing_event.type == "checkpoint.created"
+                and existing_event.payload["checkpoint_id"] == checkpoint_id
+            ):
+                self._capsule_store.verify(self.state.checkpoint)
+                return existing_event
+        if self.state.lifecycle not in {"running", "paused"}:
+            raise NativeControllerError
+        metadata = self._seal_capsule(checkpoint_id)
+        event = self._checkpoint_event(checkpoint_id, metadata)
+        self._append(checkpoint_committed_record(metadata, event))
+        return event
+
+    def _validated_event_suffix(
+        self, events: tuple[ControlEvent, ...], cursor: EventCursor | None
+    ) -> tuple[ControlEvent, ...]:
+        if cursor is None:
+            return events
+        if cursor.generation != self._generation or cursor.sequence > len(events):
+            raise NativeControllerError
+        return events[cursor.sequence :]
+
+    def _event(
+        self,
+        sequence: int,
+        event_type: str,
+        payload: Mapping[str, object],
+    ) -> ControlEvent:
+        event_id = self._event_id_factory()
+        emitted_at = self._clock()
+        _require_opaque(event_id)
+        if not isinstance(emitted_at, str) or UTC_TIMESTAMP.fullmatch(emitted_at) is None:
+            raise NativeControllerError
+        return ControlEvent(
+            event_id=event_id,
+            session_id=self._session_id,
+            generation=self._generation,
+            sequence=sequence,
+            emitted_at=emitted_at,
+            type=event_type,
+            payload=payload,
+        )
+
+    def _reduce_store(self) -> NativeControllerState:
+        return reduce_native_entries(self._session_store.replay())
+
+    def _validate_recovered_identity(self) -> None:
+        state = self.state
+        if state.lifecycle == "empty":
+            return
+        if (
+            state.provider_id != self._provider_id
+            or state.provider_version != self._provider_version
+            or state.system_id != self._system_id
+            or state.system_version != self._system_version
+            or state.session_id != self._session_id
+            or state.generation != self._generation
+            or state.checkpoint_version != self._checkpoint_version
+            or state.authority_id != self._authority_id
+        ):
+            raise NativeControllerError
+
+
+def _require_owner(value: object) -> None:
+    for name in ("require_open", "operation", "close"):
+        if not callable(getattr(value, name, None)):
+            raise NativeControllerError
+    value.require_open()  # type: ignore[attr-defined]
+
+
+def _require_store(value: object) -> None:
+    for name in ("append", "replay", "close"):
+        if not callable(getattr(value, name, None)):
+            raise NativeControllerError
+
+
+def _require_capsule_store(value: object) -> None:
+    for name in ("seal", "verify", "close"):
+        if not callable(getattr(value, name, None)):
+            raise NativeControllerError
+
+
+def _require_adapter(value: object) -> None:
+    if not callable(getattr(value, "execute", None)) or not isinstance(
+        getattr(value, "adapter_id", None), str
+    ):
+        raise NativeControllerError
+
+
+def _require_identifier(value: object) -> None:
+    if not isinstance(value, str):
+        raise NativeControllerError
+    ControlEvent(
+        event_id="validation-event",
+        session_id="validation-session",
+        generation=1,
+        sequence=1,
+        emitted_at="2026-08-30T00:00:00Z",
+        type="session.running",
+        payload={"reason_code": value},
+    )
+
+
+def _require_semver(value: object) -> None:
+    if not isinstance(value, str) or SEMANTIC_VERSION.fullmatch(value) is None:
+        raise NativeControllerError
+
+
+def _require_opaque(value: object) -> None:
+    if not isinstance(value, str) or OPAQUE_ID.fullmatch(value) is None:
+        raise NativeControllerError
+
+
+def _require_positive(value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise NativeControllerError
+
+
+def _validate_native_usage(value: BudgetUsage) -> None:
+    if (
+        value.application_tokens != 0
+        or value.child_tokens != 0
+        or value.aggregate_tokens != value.controller_tokens
+    ):
+        raise NativeControllerError
+    for field in _USAGE_FIELDS:
+        current = getattr(value, field)
+        if current < 0 or current > MAX_SAFE_JSON_INTEGER:
+            raise NativeControllerError
+
+
+def _require_usage_fits_budget(usage: BudgetUsage, budget: RemainingBudget) -> None:
+    for field in _USAGE_FIELDS:
+        if getattr(usage, field) > getattr(budget, field):
+            raise NativeControllerError
+
+
+def _add_usage(previous: BudgetUsage, delta: BudgetUsage) -> BudgetUsage:
+    values = {
+        field: getattr(previous, field) + getattr(delta, field)
+        for field in _USAGE_FIELDS
+    }
+    if any(value < 0 or value > MAX_SAFE_JSON_INTEGER for value in values.values()):
+        raise NativeControllerError
+    return BudgetUsage(**values)
+
+
+def _usage_payload(value: BudgetUsage) -> Mapping[str, object]:
+    return {field: getattr(value, field) for field in _USAGE_FIELDS}
+
+
+def _digest(value: Mapping[str, object]) -> str:
+    return hashlib.sha256(_canonical_json(value)).hexdigest()
+
+
+def _canonical_json(value: object) -> bytes:
+    return json.dumps(
+        _json_value(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _state_capsule_payload(state: NativeControllerState) -> Mapping[str, object]:
+    return {
+        "provider_id": state.provider_id,
+        "provider_version": state.provider_version,
+        "checkpoint_version": state.checkpoint_version,
+        "system_id": state.system_id,
+        "system_version": state.system_version,
+        "session_id": state.session_id,
+        "generation": state.generation,
+        "lifecycle": state.lifecycle,
+        "goal_id": state.goal_id,
+        "goal_status": state.goal_status,
+        "authority_id": state.authority_id,
+        "authority_revision": state.authority_revision,
+        "budget_authority_revision": state.budget_authority_revision,
+        "usage": _usage_payload(state.usage),
+        "next_sequence": state.next_sequence,
+        "terminal_event_id": state.terminal_event_id,
+        "command_ids": tuple(sorted(state.command_digests)),
+        "pending_input_ids": tuple(item.input_id for item in state.pending_inputs),
+        "pending_action_ids": tuple(
+            item.action_id for item in state.pending_action_results
+        ),
+        "pending_turn_id": None if state.pending_turn is None else state.pending_turn.turn_id,
+        "fenced_turn_ids": state.fenced_turn_ids,
+    }
+
+
+_USAGE_FIELDS = (
+    "controller_tokens",
+    "application_tokens",
+    "child_tokens",
+    "aggregate_tokens",
+    "cost_micros",
+)
