@@ -5,14 +5,18 @@ import json
 import subprocess
 import sys
 import unittest
-from collections.abc import Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from asterion.control.parity import validate_parity_ledger
 import tools.check_prime_parity as parity_checker
 from tools.verify_native_controller_core import (
+    EXPECTED_CONFORMANCE_SCENARIOS,
+    EXPECTED_CRASH_POINTS,
+    EXPECTED_DIFFERENTIAL_CASES,
     EXPECTED_NATIVE_CONTROLLER_CORE_REPORT,
     NativeControllerCoreVerificationError,
     build_native_controller_core_report,
@@ -77,6 +81,52 @@ def _observations(
     }
 
 
+def _full_observations() -> Mapping[str, Sequence[Mapping[str, object]]]:
+    counters = {
+        "provider_operations": 0,
+        "model_operations": 0,
+        "credential_reads": 0,
+        "network_operations": 0,
+        "application_operations": 0,
+        "upload_operations": 0,
+    }
+    return {
+        "conformance": tuple(
+            {"scenario_id": scenario_id, "status": "PASS", **counters}
+            for scenario_id in EXPECTED_CONFORMANCE_SCENARIOS
+        ),
+        "differential": tuple(
+            {"case_id": case_id, "status": "PASS", **counters}
+            for case_id in EXPECTED_DIFFERENTIAL_CASES
+        ),
+        "crash": tuple(
+            {
+                "crash_point": crash_point,
+                "status": "PASS",
+                "duplicate_commands": 0,
+                "duplicate_turns": 0,
+                "duplicate_actions": 0,
+                "sequence_gaps": 0,
+                "terminal_count": 1,
+                "owned_processes_after_close": 0,
+                **counters,
+            }
+            for crash_point in EXPECTED_CRASH_POINTS
+        ),
+    }
+
+
+class _ImmediateAwaitable:
+    def __init__(self, value: object) -> None:
+        self._value = value
+
+    def __await__(self) -> Generator[object, None, object]:
+        async def resolve() -> object:
+            return self._value
+
+        return resolve().__await__()
+
+
 class TestNativeControllerCoreVerification(unittest.TestCase):
     def test_report_closes_only_core_and_keeps_all_native_rows_missing(self) -> None:
         report = build_native_controller_core_report(ROOT)
@@ -135,6 +185,37 @@ class TestNativeControllerCoreVerification(unittest.TestCase):
             )
             + "\n",
         )
+
+    def test_default_runner_accepts_custom_non_coroutine_awaitable_helpers(self) -> None:
+        observations = _full_observations()
+        modules = {
+            "tests.test_native_control_conformance": SimpleNamespace(
+                run_native_conformance_observations=lambda: _ImmediateAwaitable(
+                    observations["conformance"]
+                )
+            ),
+            "tests.test_native_prime_differential": SimpleNamespace(
+                run_native_prime_differential_observations=lambda: _ImmediateAwaitable(
+                    observations["differential"]
+                )
+            ),
+            "tests.test_native_control_process_recovery": SimpleNamespace(
+                run_native_crash_observations=lambda: _ImmediateAwaitable(
+                    observations["crash"]
+                )
+            ),
+        }
+
+        with mock.patch(
+            "tools.verify_native_controller_core.importlib.import_module",
+            side_effect=lambda module_name: modules[module_name],
+        ):
+            report = build_native_controller_core_report(
+                ROOT,
+                ledger_loader=_load_ledger,
+            )
+
+        self.assertEqual(report, EXPECTED_NATIVE_CONTROLLER_CORE_REPORT)
 
     def test_render_rejects_noncanonical_report_shape(self) -> None:
         with self.assertRaises(NativeControllerCoreVerificationError):

@@ -8,7 +8,7 @@ import importlib
 import inspect
 import json
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -227,8 +227,12 @@ def _call_observation_helper(
     function = getattr(module, function_name)
     result = function()
     if inspect.isawaitable(result):
-        result = asyncio.run(result)
+        result = asyncio.run(_await_any(cast(Awaitable[object], result)))
     return _observation_sequence(result)
+
+
+async def _await_any(value: Awaitable[object]) -> object:
+    return await value
 
 
 def _validate_observations(
