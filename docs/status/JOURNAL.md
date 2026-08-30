@@ -1137,3 +1137,4 @@
 - 06:36 Integrated Prime long-running, client, ecosystem, and operation parity surfaces to close verified system parity [0c40c85]
 - 06:56 Corrected the prior closure claim: production operation dispatch is not assembled, so H-037 remains blocked.
 - 06:56 Closed exact long-running response validation on the real Prime process path [a666f1c]
+- 08:04 Approved option 1A: keep OperationManager authority in Python and bind the selected Prime sidecar to one lifecycle-managed private callback transport [pending]
