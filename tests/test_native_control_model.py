@@ -268,15 +268,9 @@ def _valid_records() -> tuple[NativeRecord, ...]:
     return (
         _session_bound(),
         authority_synced_record(AUTHORITY_REVISION, _budget()),
-        command_committed_record(_session_create_command(), (_session_created(),)),
-        turn_committed_record(
-            NativeTurnResult(
-                turn_id="turn-bootstrap",
-                events=(NativeEventDraft("session.running", {"reason_code": "started"}),),
-                usage=_usage(),
-            ),
-            (_session_running(),),
-            adapter_invoked=False,
+        command_committed_record(
+            _session_create_command(),
+            (_session_created(), _session_running()),
         ),
     )
 
@@ -303,9 +297,20 @@ def invalid_prefixes() -> tuple[tuple[str, tuple[NativeEntry, ...]], ...]:
         "session.failed",
         {"reason_code": "failed"},
     )
+    terminal_request = NativeTurnRequest(
+        turn_id="turn-terminal",
+        session_id=SESSION_ID,
+        generation=GENERATION,
+        authority_revision=AUTHORITY_REVISION,
+        causal_command_ids=(),
+        inputs=(),
+        action_results=(),
+        budget=_budget(),
+    )
     duplicate_terminal = _chain(
         (
             *_valid_records(),
+            turn_started_record(terminal_request),
             turn_committed_record(
                 NativeTurnResult(
                     turn_id="turn-terminal",
@@ -334,8 +339,19 @@ def invalid_prefixes() -> tuple[tuple[str, tuple[NativeEntry, ...]], ...]:
 
 
 def _terminal_records() -> tuple[NativeRecord, ...]:
+    request = NativeTurnRequest(
+        turn_id="turn-terminal",
+        session_id=SESSION_ID,
+        generation=GENERATION,
+        authority_revision=AUTHORITY_REVISION,
+        causal_command_ids=(),
+        inputs=(),
+        action_results=(),
+        budget=_budget(),
+    )
     return (
         *_valid_records(),
+        turn_started_record(request),
         turn_committed_record(
             NativeTurnResult(
                 turn_id="turn-terminal",
@@ -355,7 +371,6 @@ def _terminal_records() -> tuple[NativeRecord, ...]:
                     {"reason_code": "done"},
                 ),
             ),
-            adapter_invoked=False,
         ),
     )
 
@@ -411,7 +426,7 @@ class TestNativeControlModel(unittest.TestCase):
             control_plane_id="native",
             control_plane_version="0.1.0",
             checkpoint_version="1.0.0",
-            covered_position=4,
+            covered_position=3,
             covered_sequence=2,
             storage_ref="storage-1",
         )
@@ -501,7 +516,7 @@ class TestNativeControlModel(unittest.TestCase):
             control_plane_id="native",
             control_plane_version="0.1.0",
             checkpoint_version="1.0.0",
-            covered_position=4,
+            covered_position=3,
             covered_sequence=2,
             storage_ref="storage-1",
         )
@@ -739,9 +754,30 @@ class TestNativeControlModel(unittest.TestCase):
     ) -> None:
         first_usage = _usage(controller_tokens=4, aggregate_tokens=4, cost_micros=10)
         second_usage = _usage(controller_tokens=6, aggregate_tokens=6, cost_micros=15)
+        first_request = NativeTurnRequest(
+            turn_id="turn-1",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+        second_request = NativeTurnRequest(
+            turn_id="turn-2",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(controller_tokens=96, aggregate_tokens=96, cost_micros=9_990),
+        )
         entries = _chain(
             (
                 *_valid_records(),
+                turn_started_record(first_request),
                 turn_committed_record(
                     NativeTurnResult(
                         "turn-1",
@@ -760,8 +796,8 @@ class TestNativeControlModel(unittest.TestCase):
                         first_usage,
                     ),
                     (_budget_report("event-budget-1", 3, first_usage),),
-                    adapter_invoked=False,
                 ),
+                turn_started_record(second_request),
                 turn_committed_record(
                     NativeTurnResult(
                         "turn-2",
@@ -790,7 +826,6 @@ class TestNativeControlModel(unittest.TestCase):
                             ),
                         ),
                     ),
-                    adapter_invoked=False,
                 ),
             )
         )
@@ -816,20 +851,9 @@ class TestNativeControlModel(unittest.TestCase):
         )
         missing_sync_prefix = (
             _session_bound(),
-            command_committed_record(_session_create_command(), (_session_created(),)),
-            turn_committed_record(
-                NativeTurnResult(
-                    turn_id="turn-bootstrap",
-                    events=(
-                        NativeEventDraft(
-                            "session.running",
-                            {"reason_code": "started"},
-                        ),
-                    ),
-                    usage=_usage(),
-                ),
-                (_session_running(),),
-                adapter_invoked=False,
+            command_committed_record(
+                _session_create_command(),
+                (_session_created(), _session_running()),
             ),
         )
         mismatch_budget = replace(
@@ -877,20 +901,9 @@ class TestNativeControlModel(unittest.TestCase):
             records = (
                 _session_bound(),
                 authority_synced_record(AUTHORITY_REVISION, budget),
-                command_committed_record(_session_create_command(), (_session_created(),)),
-                turn_committed_record(
-                    NativeTurnResult(
-                        turn_id="turn-bootstrap",
-                        events=(
-                            NativeEventDraft(
-                                "session.running",
-                                {"reason_code": "started"},
-                            ),
-                        ),
-                        usage=_usage(),
-                    ),
-                    (_session_running(),),
-                    adapter_invoked=False,
+                command_committed_record(
+                    _session_create_command(),
+                    (_session_created(), _session_running()),
                 ),
                 turn_started_record(request),
                 turn_committed_record(
@@ -921,15 +934,9 @@ class TestNativeControlModel(unittest.TestCase):
         records = (
             _session_bound(),
             authority_synced_record(AUTHORITY_REVISION, synced_budget),
-            command_committed_record(_session_create_command(), (_session_created(),)),
-            turn_committed_record(
-                NativeTurnResult(
-                    turn_id="turn-bootstrap",
-                    events=(NativeEventDraft("session.running", {"reason_code": "started"}),),
-                    usage=_usage(),
-                ),
-                (_session_running(),),
-                adapter_invoked=False,
+            command_committed_record(
+                _session_create_command(),
+                (_session_created(), _session_running()),
             ),
             turn_started_record(request),
             authority_synced_record(2, reduced_budget),
@@ -1414,6 +1421,60 @@ class TestNativeControlModel(unittest.TestCase):
                 _chain((*_valid_records(), turn_started_record(request), pending_commit))
             )
 
+    def test_reducer_rejects_every_non_invoked_turn_commit_without_pending_turn(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "empty",
+                NativeTurnResult("turn-empty", (), _usage()),
+                (),
+            ),
+            (
+                "budget",
+                NativeTurnResult(
+                    "turn-budget",
+                    (
+                        NativeEventDraft(
+                            "budget.reported",
+                            {
+                                "controller_tokens": 0,
+                                "application_tokens": 0,
+                                "child_tokens": 0,
+                                "aggregate_tokens": 0,
+                                "cost_micros": 0,
+                            },
+                        ),
+                    ),
+                    _usage(),
+                ),
+                (_budget_report("event-budget-orphan", 3, _usage()),),
+            ),
+            (
+                "terminal",
+                NativeTurnResult(
+                    "turn-terminal",
+                    (NativeEventDraft("session.completed", {"reason_code": "done"}),),
+                    _usage(),
+                ),
+                (_event("event-terminal-orphan", 3, "session.completed", {"reason_code": "done"}),),
+            ),
+        )
+        for label, result, events in cases:
+            with self.subTest(label=label), self.assertRaises(NativeStateError):
+                reduce_native_entries(
+                    _chain(
+                        (
+                            *_valid_records(),
+                            turn_committed_record(
+                                result,
+                                events,
+                                adapter_invoked=False,
+                            ),
+                        )
+                    )
+                )
+
     def test_reducer_rejects_start_or_commit_after_turn_is_fenced(self) -> None:
         request = NativeTurnRequest(
             turn_id="turn-fenced",
@@ -1679,15 +1740,6 @@ class TestNativeControlModel(unittest.TestCase):
                         },
                         session_id=MAX_PROTOCOL_ID,
                     ),
-                ),
-            ),
-            turn_committed_record(
-                NativeTurnResult(
-                    turn_id="turn-bootstrap",
-                    events=(NativeEventDraft("session.running", {"reason_code": "started"}),),
-                    usage=_usage(),
-                ),
-                (
                     _event(
                         "event-running-2",
                         2,
@@ -1696,7 +1748,6 @@ class TestNativeControlModel(unittest.TestCase):
                         session_id=MAX_PROTOCOL_ID,
                     ),
                 ),
-                adapter_invoked=False,
             ),
             command_committed_record(command, ()),
             command_committed_record(action_command, ()),
@@ -1737,7 +1788,7 @@ class TestNativeControlModel(unittest.TestCase):
             control_plane_id="native",
             control_plane_version="0.1.0",
             checkpoint_version="1.0.0",
-            covered_position=4,
+            covered_position=len(base),
             covered_sequence=2,
             storage_ref="storage-1",
         )

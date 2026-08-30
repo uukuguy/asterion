@@ -19,8 +19,11 @@ from asterion.control.protocol import (
 from asterion.control.providers.native.capsule import NativeCapsuleStore
 from asterion.control.providers.native.model import (
     MAX_SAFE_JSON_INTEGER,
+    NativeActionResultReference,
+    NativeCapsuleMetadata,
     NativeControllerState,
     NativeRecord,
+    NativeInputReference,
     NativeTurnRequest,
     NativeTurnResult,
     _json_value,
@@ -269,6 +272,10 @@ class NativeController:
                 bound,
                 command_committed_record(command, self._command_events(state, command)),
             )
+        if state.lifecycle == "bound":
+            if command.type != "session.create" or not _is_incomplete_create_state(state):
+                raise NativeControllerError
+            return (command_committed_record(command, self._command_events(state, command)),)
         if command.type == "session.create":
             raise NativeControllerError
         return (command_committed_record(command, self._command_events(state, command)),)
@@ -423,7 +430,11 @@ class NativeController:
             command_ids = self._command_ids_for_digests(
                 {item.command_digest for item in inputs}
             )
-            turn_id = self._stable_or_factory_turn_id(command_ids)
+            turn_id = self._stable_turn_id(
+                "input",
+                command_ids,
+                tuple(_input_identity(item) for item in inputs),
+            )
             return NativeTurnRequest(
                 turn_id=turn_id,
                 session_id=state.session_id,
@@ -439,7 +450,11 @@ class NativeController:
             command_ids = self._command_ids_for_digests(
                 {item.command_digest for item in action_results}
             )
-            turn_id = self._stable_or_factory_turn_id(command_ids)
+            turn_id = self._stable_turn_id(
+                "action",
+                command_ids,
+                tuple(_action_result_identity(item) for item in action_results),
+            )
             return NativeTurnRequest(
                 turn_id=turn_id,
                 session_id=state.session_id,
@@ -452,10 +467,26 @@ class NativeController:
             )
         return None
 
-    def _stable_or_factory_turn_id(self, command_ids: tuple[str, ...]) -> str:
-        candidate = self._turn_id_factory()
-        _require_opaque(candidate)
-        return candidate
+    def _stable_turn_id(
+        self,
+        kind: str,
+        command_ids: tuple[str, ...],
+        references: tuple[Mapping[str, object], ...],
+    ) -> str:
+        command_digests = tuple(self.state.command_digests[item] for item in command_ids)
+        return _bounded_hash_id(
+            "turn",
+            {
+                "domain": "asterion.native-turn/v1",
+                "kind": kind,
+                "session_id": self._session_id,
+                "generation": self._generation,
+                "authority_revision": self.state.authority_revision,
+                "causal_command_ids": command_ids,
+                "causal_command_digests": command_digests,
+                "references": references,
+            },
+        )
 
     def _command_ids_for_digests(self, digests: set[str]) -> tuple[str, ...]:
         command_ids = tuple(
@@ -544,26 +575,41 @@ class NativeController:
             ),
         )
 
-    def _seal_capsule(self, checkpoint_id: str):
+    def _seal_capsule(self, checkpoint_id: str) -> NativeCapsuleMetadata:
         _require_opaque(checkpoint_id)
+        covered_position = self._session_store.position
+        covered_sequence = self.state.next_sequence - 1
         payload = _canonical_json(
             {
                 "checkpoint_id": checkpoint_id,
                 "state": _state_capsule_payload(self.state),
             }
         )
-        capsule_id = self._capsule_id_factory()
-        _require_opaque(capsule_id)
+        capsule_id = _bounded_hash_id(
+            "capsule",
+            {
+                "domain": "asterion.native-capsule-id/v1",
+                "checkpoint_id": checkpoint_id,
+                "payload_digest": hashlib.sha256(payload).hexdigest(),
+                "covered_position": covered_position,
+                "covered_sequence": covered_sequence,
+                "control_plane_id": self._provider_id,
+                "control_plane_version": self._provider_version,
+                "checkpoint_version": self._checkpoint_version,
+            },
+        )
         metadata = self._capsule_store.seal(
             capsule_id=capsule_id,
             payload=payload,
-            covered_position=self._session_store.position,
-            covered_sequence=self.state.next_sequence - 1,
+            covered_position=covered_position,
+            covered_sequence=covered_sequence,
         )
         self._capsule_store.verify(metadata)
         return metadata
 
-    def _checkpoint_event(self, checkpoint_id: str, metadata) -> ControlEvent:
+    def _checkpoint_event(
+        self, checkpoint_id: str, metadata: NativeCapsuleMetadata
+    ) -> ControlEvent:
         return self._event(
             self.state.next_sequence,
             "checkpoint.created",
@@ -581,6 +627,8 @@ class NativeController:
 
     def _ensure_checkpoint(self, checkpoint_id: str) -> ControlEvent:
         _require_opaque(checkpoint_id)
+        request_position = self._checkpoint_request_position(checkpoint_id)
+        matching_event = self._checkpoint_event_for(checkpoint_id)
         if self.state.checkpoint is not None:
             existing_event = self.state.events[-1]
             if (
@@ -589,12 +637,43 @@ class NativeController:
             ):
                 self._capsule_store.verify(self.state.checkpoint)
                 return existing_event
+        if matching_event is not None:
+            raise NativeControllerError
+        if request_position is not None and request_position != self._session_store.position:
+            raise NativeControllerError
         if self.state.lifecycle not in {"running", "paused"}:
             raise NativeControllerError
         metadata = self._seal_capsule(checkpoint_id)
         event = self._checkpoint_event(checkpoint_id, metadata)
         self._append(checkpoint_committed_record(metadata, event))
         return event
+
+    def _checkpoint_request_position(self, checkpoint_id: str) -> int | None:
+        result: int | None = None
+        for entry in self._session_store.replay():
+            if entry.record.kind != "command.committed":
+                continue
+            command = ControlCommand.from_mapping(
+                _mapping_from_json(entry.record.payload["command"])
+            )
+            if (
+                command.type == "checkpoint.request"
+                and command.payload["checkpoint_id"] == checkpoint_id
+            ):
+                if result is not None:
+                    raise NativeControllerError
+                result = entry.position
+        return result
+
+    def _checkpoint_event_for(self, checkpoint_id: str) -> ControlEvent | None:
+        result: ControlEvent | None = None
+        for event in self.state.events:
+            if (
+                event.type == "checkpoint.created"
+                and event.payload["checkpoint_id"] == checkpoint_id
+            ):
+                result = event
+        return result
 
     def _validated_event_suffix(
         self, events: tuple[ControlEvent, ...], cursor: EventCursor | None
@@ -699,6 +778,63 @@ def _require_opaque(value: object) -> None:
 def _require_positive(value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise NativeControllerError
+
+
+def _is_incomplete_create_state(state: NativeControllerState) -> bool:
+    return (
+        state.lifecycle == "bound"
+        and state.goal_id is None
+        and state.goal_status is None
+        and state.budget_authority_revision is None
+        and state.remaining_budget is None
+        and not state.command_digests
+        and not state.pending_inputs
+        and not state.pending_action_results
+        and state.pending_turn is None
+        and not state.committed_turn_digests
+        and not state.recovery_required_turn_ids
+        and not state.fenced_turn_ids
+        and not state.action_statuses
+        and not state.action_receipt_refs
+        and state.usage == BudgetUsage.zero()
+        and not state.events
+        and state.next_sequence == 1
+        and state.checkpoint is None
+        and state.terminal_event_id is None
+    )
+
+
+def _input_identity(value: NativeInputReference) -> Mapping[str, object]:
+    return {
+        "input_id": value.input_id,
+        "delivery": value.delivery,
+        "content_ref": value.content_ref,
+        "command_digest": value.command_digest,
+    }
+
+
+def _action_result_identity(value: NativeActionResultReference) -> Mapping[str, object]:
+    return {
+        "action_id": value.action_id,
+        "resolution": value.resolution,
+        "reason_code": value.reason_code,
+        "receipt_ref": value.receipt_ref,
+        "command_digest": value.command_digest,
+    }
+
+
+def _bounded_hash_id(prefix: str, value: Mapping[str, object]) -> str:
+    digest = hashlib.sha256(_canonical_json(value)).hexdigest()
+    candidate = f"{prefix}:{digest}"
+    _require_opaque(candidate)
+    return candidate
+
+
+def _mapping_from_json(value: object) -> Mapping[str, object]:
+    converted = _json_value(value)
+    if not isinstance(converted, Mapping):
+        raise NativeControllerError
+    return converted
 
 
 def _validate_native_usage(value: BudgetUsage) -> None:

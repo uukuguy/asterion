@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import traceback
 import unittest
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from typing import cast
 
@@ -15,11 +15,16 @@ from asterion.control.providers.native.controller import (
 )
 from asterion.control.providers.native.model import (
     NativeCapsuleMetadata,
+    NativeEntry,
     NativeEventDraft,
+    NativeRecord,
     NativeTurnRequest,
     NativeTurnResult,
 )
-from asterion.control.providers.native.state import reduce_native_entries
+from asterion.control.providers.native.state import (
+    reduce_native_entries,
+    session_bound_record,
+)
 from asterion.control.providers.native.store import (
     MemoryNativeSessionStore,
     MemoryNativeStorageOwner,
@@ -238,6 +243,24 @@ class TrackingSessionStore(MemoryNativeSessionStore):
         super().close()
 
 
+class FailOnceTrackingSessionStore(TrackingSessionStore):
+    def __init__(
+        self,
+        owner: MemoryNativeStorageOwner,
+        close_order: list[str],
+        failing_kind: str,
+    ) -> None:
+        super().__init__(owner, close_order)
+        self.failing_kind = failing_kind
+        self.failures_remaining = 1
+
+    def append(self, expected_position: int, record: NativeRecord) -> NativeEntry:
+        if record.kind == self.failing_kind and self.failures_remaining:
+            self.failures_remaining -= 1
+            raise NativeStoreError
+        return super().append(expected_position, record)
+
+
 class TrackingCapsuleStore(MemoryNativeCapsuleStore):
     def __init__(self, owner: MemoryNativeStorageOwner, close_order: list[str]) -> None:
         super().__init__(owner, max_capsule_bytes=65_536)
@@ -265,6 +288,9 @@ class ControllerFixture:
         ),
         turn_ids: Iterable[str] = ("turn-1", "turn-2", "turn-3"),
         capsule_ids: Iterable[str] = ("capsule-1", "capsule-2"),
+        store_factory: Callable[
+            [MemoryNativeStorageOwner, list[str]], TrackingSessionStore
+        ] = TrackingSessionStore,
     ) -> None:
         self.close_order: list[str] = []
         self.owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)
@@ -275,7 +301,7 @@ class ControllerFixture:
             original_close()
 
         self.owner.close = tracked_close  # type: ignore[method-assign]
-        self.store = TrackingSessionStore(self.owner, self.close_order)
+        self.store = store_factory(self.owner, self.close_order)
         self.capsules = TrackingCapsuleStore(self.owner, self.close_order)
         self.event_factory = SequenceFactory(event_ids)
         self.turn_factory = SequenceFactory(turn_ids)
@@ -353,6 +379,112 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event.type for event in state.events], ["session.created", "session.running"])
         self.assertNotIn("goal.updated", [event.type for event in state.events])
         self.assertEqual(fixture.store.position, 2)
+
+    async def test_partial_first_create_retries_missing_command_without_duplicate_bound(
+        self,
+    ) -> None:
+        fixture = ControllerFixture(
+            store_factory=lambda owner, order: FailOnceTrackingSessionStore(
+                owner,
+                order,
+                "command.committed",
+            )
+        )
+        with self.assertRaises(NativeStoreError):
+            await fixture.controller.accept(create_command())
+        self.assertEqual(fixture.store.position, 1)
+        self.assertEqual(fixture.controller.state.lifecycle, "bound")
+
+        reopened = fixture.reopen()
+        with self.assertRaises(NativeControllerError):
+            await reopened.accept(input_command("command-not-create", "content-ref-x"))
+        await reopened.accept(create_command())
+
+        state = reopened.state
+        self.assertEqual(fixture.store.position, 2)
+        self.assertEqual([entry.record.kind for entry in fixture.store.replay()], ["session.bound", "command.committed"])
+        self.assertEqual([event.sequence for event in state.events], [1, 2])
+        self.assertEqual([event.type for event in state.events], ["session.created", "session.running"])
+
+    async def test_partial_first_create_mismatch_matrix_fails_closed(self) -> None:
+        cases = (
+            (
+                "controller-system",
+                {"system_id": "other.system", "system_version": "1.0.0"},
+                {"system_id": "research.system", "system_version": "1.0.0"},
+            ),
+            (
+                "command-system-version",
+                {"system_id": "research.system", "system_version": "1.0.0"},
+                {"system_id": "research.system", "system_version": "2.0.0"},
+            ),
+        )
+        for label, bound_ids, command_ids in cases:
+            with self.subTest(label=label):
+                fixture = ControllerFixture()
+                fixture.store.append(
+                    0,
+                    session_bound_record(
+                        provider_id="native",
+                        provider_version="0.1.0",
+                        system_id=str(bound_ids["system_id"]),
+                        system_version=str(bound_ids["system_version"]),
+                        session_id=SESSION_ID,
+                        generation=GENERATION,
+                        checkpoint_version="1.0.0",
+                        authority_id="authority-1",
+                        authority_revision=AUTHORITY_REVISION,
+                    ),
+                )
+                if label == "controller-system":
+                    with self.assertRaises(NativeControllerError):
+                        NativeController(
+                            owner=fixture.owner,
+                            session_store=fixture.store,
+                            capsule_store=fixture.capsules,
+                            turn_adapter=fixture.adapter,
+                            provider_id="native",
+                            provider_version="0.1.0",
+                            system_id="research.system",
+                            system_version="1.0.0",
+                            session_id=SESSION_ID,
+                            generation=GENERATION,
+                            checkpoint_version="1.0.0",
+                            authority_id="authority-1",
+                            authority_revision=AUTHORITY_REVISION,
+                            event_id_factory=fixture.event_factory,
+                            turn_id_factory=fixture.turn_factory,
+                            capsule_id_factory=fixture.capsule_factory,
+                            clock=fixture.clock,
+                        )
+                    continue
+                matching = NativeController(
+                    owner=fixture.owner,
+                    session_store=fixture.store,
+                    capsule_store=fixture.capsules,
+                    turn_adapter=fixture.adapter,
+                    provider_id="native",
+                    provider_version="0.1.0",
+                    system_id="research.system",
+                    system_version="1.0.0",
+                    session_id=SESSION_ID,
+                    generation=GENERATION,
+                    checkpoint_version="1.0.0",
+                    authority_id="authority-1",
+                    authority_revision=AUTHORITY_REVISION,
+                    event_id_factory=fixture.event_factory,
+                    turn_id_factory=fixture.turn_factory,
+                    capsule_id_factory=fixture.capsule_factory,
+                    clock=fixture.clock,
+                )
+                bad = replace(
+                    create_command(),
+                    payload={**create_command().payload, **command_ids},
+                )
+                with self.assertRaises(NativeControllerError):
+                    await matching.accept(bad)
+                with self.assertRaises(NativeControllerError):
+                    await matching.accept(input_command("command-not-create", "ref"))
 
     async def test_turn_commits_result_and_events_before_replay(self) -> None:
         adapter = CountingAdapter(
@@ -562,6 +694,63 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(checkpoint)
         fixture.capsules.verify(cast(NativeCapsuleMetadata, checkpoint))
 
+    async def test_checkpoint_retry_after_capsule_publish_is_deterministic_and_charged_once(
+        self,
+    ) -> None:
+        fixture = ControllerFixture(
+            event_ids=("event-created", "event-running", "event-failed", "event-retry"),
+            capsule_ids=("fresh-capsule-a", "fresh-capsule-b"),
+            store_factory=lambda owner, order: FailOnceTrackingSessionStore(
+                owner,
+                order,
+                "checkpoint.committed",
+            ),
+        )
+        await fixture.create()
+        before = fixture.owner.budget.used_bytes
+        with self.assertRaises(NativeStoreError):
+            fixture.controller.checkpoint("checkpoint-retry")
+        after_failed_publish = fixture.owner.budget.used_bytes
+        self.assertGreater(after_failed_publish, before)
+
+        reopened = fixture.reopen()
+        event = reopened.checkpoint("checkpoint-retry")
+        checkpoint = reopened.state.checkpoint
+        self.assertIsNotNone(checkpoint)
+        assert checkpoint is not None
+
+        self.assertEqual(event.payload["capsule_id"], checkpoint.capsule_id)
+        self.assertEqual(fixture.capsule_factory.calls, 0)
+        self.assertEqual(
+            [entry.record.kind for entry in fixture.store.replay()][-1],
+            "checkpoint.committed",
+        )
+        used_after_checkpoint_record = fixture.owner.budget.used_bytes
+        self.assertGreater(used_after_checkpoint_record, after_failed_publish)
+        self.assertEqual(reopened.checkpoint("checkpoint-retry"), event)
+        self.assertEqual(fixture.owner.budget.used_bytes, used_after_checkpoint_record)
+
+    async def test_checkpoint_request_retry_rejects_state_drift_after_command_commit(
+        self,
+    ) -> None:
+        fixture = ControllerFixture(
+            event_ids=("event-created", "event-running", "event-failed"),
+            store_factory=lambda owner, order: FailOnceTrackingSessionStore(
+                owner,
+                order,
+                "checkpoint.committed",
+            ),
+        )
+        await fixture.create()
+        command = checkpoint_command("command-checkpoint", "checkpoint-drift")
+        with self.assertRaises(NativeStoreError):
+            await fixture.controller.accept(command)
+
+        drifted = fixture.reopen()
+        await drifted.accept(input_command("command-after-checkpoint", "content-ref-after"))
+        with self.assertRaises(NativeControllerError):
+            await drifted.accept(command)
+
     async def test_replay_cursor_bounds_reopen_reducer_and_started_turn_recovery(self) -> None:
         fixture = ControllerFixture(turn_ids=("turn-stable",))
         await fixture.create()
@@ -584,6 +773,55 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
         for cursor in (EventCursor(2, 0), EventCursor(1, 99)):
             with self.subTest(cursor=cursor), self.assertRaises(NativeControllerError):
                 reopened.replay_events(cursor)
+
+    async def test_turn_id_is_stable_from_causal_identity_not_factory(self) -> None:
+        first = ControllerFixture(turn_ids=("factory-a",))
+        await first.create()
+        await first.controller.accept(input_command("command-input-stable", "content-ref-stable"))
+        first_request = first.controller.begin_ready_turn()
+        self.assertIsNotNone(first_request)
+        assert first_request is not None
+
+        reopened = first.reopen()
+        replayed = reopened.begin_ready_turn()
+        self.assertEqual(replayed, first_request)
+        self.assertEqual(first.turn_factory.calls, 0)
+
+        second = ControllerFixture(turn_ids=("factory-b",))
+        await second.create()
+        await second.controller.accept(input_command("command-input-stable", "content-ref-stable"))
+        second_request = second.controller.begin_ready_turn()
+        self.assertIsNotNone(second_request)
+        assert second_request is not None
+        self.assertEqual(second_request.turn_id, first_request.turn_id)
+        self.assertEqual(second.turn_factory.calls, 0)
+
+        changed = ControllerFixture(turn_ids=("factory-c",))
+        await changed.create()
+        await changed.controller.accept(input_command("command-input-other", "content-ref-stable"))
+        changed_request = changed.controller.begin_ready_turn()
+        self.assertIsNotNone(changed_request)
+        assert changed_request is not None
+        self.assertNotEqual(changed_request.turn_id, first_request.turn_id)
+
+        action_fixture = ControllerFixture(
+            adapter=CountingAdapter(
+                NativeTurnResult("copy-request-turn", (proposal_draft(),), _usage())
+            )
+        )
+        await action_fixture.create()
+        await action_fixture.controller.accept(input_command())
+        proposal_request = action_fixture.controller.begin_ready_turn()
+        assert proposal_request is not None
+        action_fixture.controller.commit_turn(
+            proposal_request,
+            await action_fixture.controller.execute_turn(proposal_request),
+        )
+        await action_fixture.controller.accept(terminal_resolution_command("action-1", "receipt-stable"))
+        action_request = action_fixture.controller.begin_ready_turn()
+        self.assertIsNotNone(action_request)
+        assert action_request is not None
+        self.assertNotEqual(action_request.turn_id, first_request.turn_id)
 
     async def test_close_order_use_after_close_redaction_and_hostile_types(self) -> None:
         fixture = ControllerFixture()

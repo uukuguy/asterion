@@ -338,12 +338,8 @@ def _apply_turn_committed(
     adapter_invoked = bool(record.payload["adapter_invoked"])
     if state.pending_turn is None and adapter_invoked:
         raise NativeStateError("native adapter turn commit requires pending turn")
-    if (
-        state.pending_turn is None
-        and not adapter_invoked
-        and _record_has_event_type(record, "session.budget-limited")
-    ):
-        raise NativeStateError("native budget-limited turn requires pending turn")
+    if state.pending_turn is None and not adapter_invoked:
+        raise NativeStateError("native non-invoked turn commit requires pending turn")
     if state.pending_turn is not None and not adapter_invoked:
         _validate_budget_limited_pending_turn_commit(state, record, usage)
     if state.pending_turn is not None and state.pending_turn.turn_id != turn_id:
@@ -415,13 +411,6 @@ def _validate_budget_limited_pending_turn_commit(
         or terminal.type != "session.budget-limited"
     ):
         raise NativeStateError("native budget-limited events are invalid")
-
-
-def _record_has_event_type(record: NativeRecord, event_type: str) -> bool:
-    return any(
-        event.type == event_type
-        for event in _events_from_payload(record.payload["events"])
-    )
 
 
 def _apply_turn_recovery_required(
