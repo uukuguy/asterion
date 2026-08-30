@@ -27,8 +27,9 @@ Asterion-native parity, or broaden any public protocol.
 ## Approved Decision
 
 Use option **1A**: the operator injects one already-selected generic operation
-dispatcher, while the Prime provider owns only the callback transport adapter
-and ties its lifecycle to the selected sidecar process.
+dispatcher per session, while the Prime provider owns only the callback
+transport adapter and ties its lifecycle to that session's selected sidecar
+process.
 
 The dispatcher is the same host-owned `OperationManager` that already owns:
 
@@ -87,9 +88,9 @@ framework modules do not import DCI or Prime implementation details.
 
 The injected service identity is `operation-dispatcher`.  It is a session-bound
 managed host service, not a globally discoverable application service and not
-a new `pyproject.toml` entry point.  A Prime system must declare and supply it
-through its operator-owned `host_services`; the Prime factory independently
-fails closed when it is absent or malformed.
+a new `pyproject.toml` entry point.  A Prime system must declare and supply the
+exact root-session instance through its operator-owned `host_services`; the
+Prime factory independently fails closed when it is absent or malformed.
 
 ## Generic Dispatcher Contract
 
@@ -128,6 +129,46 @@ implementation.  The factory requires those projections to equal the selected
 context and snapshots the three bound methods after validation so later
 attribute mutation cannot change the selected service.  The adapter never
 receives a map of services and therefore cannot select one.
+
+## Root and Child Session Assembly
+
+There is exactly one authoritative dispatcher for each session, not one global
+dispatcher for the entire process tree.
+
+For a root session, the operator constructs the `OperationManager` after the
+authority and canonical journal exist but before constructing the selected
+control provider.  The same instance is then supplied in both places:
+
+```text
+ControlPlaneFactoryContext.host_services["operation-dispatcher"]
+ControlHost(operation_manager=the_same_instance)
+```
+
+This removes any Python -> Node -> different Python manager split.  Direct host
+operations and Prime callback operations reach the same durable state machine.
+
+For a child session, reusing the parent's `operation-dispatcher` is forbidden.
+`ChildSessionService` therefore accepts one optional operator-owned synchronous
+dispatcher deriver.  The deriver receives only the already-derived child
+authority, opened child journal, child session ID, and generation; it captures
+the operator-selected resolver, store, and exact service map outside the child
+framework.  It returns one identity-bound `OperationDispatcher`.
+
+Child construction order is fixed:
+
+1. derive and persist the child binding and authority;
+2. open or recover the child canonical journal;
+3. derive and validate the child dispatcher;
+4. replace, never merge ambiguously, the parent session's
+   `operation-dispatcher` in the child factory context;
+5. construct the selected Prime provider and callback transport;
+6. pass the same child dispatcher to the child `ControlHost`.
+
+If the selected provider advertises `operations-v1` and no child dispatcher
+deriver is available, or the returned identity differs, child provider
+creation fails before a sidecar process or operation effect.  A child cannot
+fall back to its parent dispatcher, a global registry, or a request-selected
+service.
 
 ## Private Callback Protocol
 
@@ -311,6 +352,9 @@ Implementation follows RED -> GREEN TDD.
   disconnect, socket path, and symlink cases fail closed;
 - lifecycle wrapper starts callback before process, starts once under
   concurrency, closes both resources, and leaves no endpoint after failures;
+- root and child composition inject the same per-session manager into both the
+  callback and `ControlHost`, while parent-dispatcher reuse fails before child
+  process creation;
 - sentinel secrets and paths are absent from all public errors and `repr`.
 
 ### TypeScript unit boundaries
@@ -389,6 +433,8 @@ The callback correction is complete only when all of the following are true:
 
 - a selected Prime factory cannot advertise a usable `operations-v1` path
   without one exact injected `operation-dispatcher`;
+- root and child sessions each bind one identity-exact manager, and a child can
+  neither inherit nor route operations through its parent's manager;
 - the sole production Node descriptor path constructs the callback client and
   `PrimeOperationGateway`;
 - the real process round trip reaches the injected `OperationManager` exactly
