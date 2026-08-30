@@ -1180,3 +1180,6 @@
 - 21:26 Linearized native journal publication to prevent concurrent overwrite and double budget charge [76cef3d]
 - 21:41 Serialized native store close and rollback proof to prevent descriptor races and unsafe reservation release [4fe58da]
 - 21:49 Redacted native rollback release failures to prevent sensitive exception context leakage [272cb85]
+- 22:06 Sealed native capsules with shared budgeted storage for checkpoint receipts [452fa65]
+- 22:17 Persisted capsule receipts to reject reopened metadata drift [a9cf0bd]
+- 22:23 Charged memory capsule receipts to match file budget accounting [5a82460]
