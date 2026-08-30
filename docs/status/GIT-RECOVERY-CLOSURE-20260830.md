@@ -111,12 +111,26 @@ not published.
 | 53 | `$DARWIN_TMP/asterion-h036.3poTwk/asterion` | `ca3270e80a2f` | `detached` | no | 0/0 | 17 |
 | 54 | `$REPO/.worktrees/prime-ecosystem-parity` | `67d2fc324b3c` | `feature/prime-ecosystem-parity` | no | 1/0 | 1 |
 
-## Pending destructive closure
+## Observed steady state
 
-The provisional bundle and uncommitted archive are verified, but this audit
-commit intentionally precedes destructive cleanup. The next controlled step is
-to create the final bundle, remove worktrees 2–54 by exact registered path,
-prune, delete the three obsolete local branches, remove temporary recovery
-refs only after the final bundle covers them, and delete only the two audited
-primary artifact roots. A final section will record the resulting one-worktree
-steady state after it is observed.
+After the provisional and final bundles verified successfully:
+
+- Git removed worktrees 2–54 by their exact registered paths and pruned the
+  registry; only the primary `main` worktree remains.
+- The obsolete recovery, H-024, and ecosystem local branches were deleted;
+  only local `main` remains.
+- The 23 initial recovery refs plus the audit-head ref were deleted only after
+  the final bundle preserved them; zero `refs/recovery/pre-phase3/*` remain.
+- The literal Node compile-cache root, Task 13 promotion shim root, temporary
+  H-037 Node 22 toolchain, and empty `.worktrees` directory were removed from
+  the repository/workspace. Recoverable generated directories were moved to
+  the system trash rather than erased directly.
+- The provisional bundle was moved to the system trash. The canonical bundle
+  and the separate uncommitted patch/source archive remain under the Git common
+  directory.
+- `git status`, local branch count, worktree count, bundle verification, and
+  the unchanged `origin/main` identity were rechecked after cleanup.
+
+The canonical recovery bundle is refreshed once more after this final record
+is committed, so the bundle contains both the pre-cleanup graph and the final
+clean-main documentation commit.

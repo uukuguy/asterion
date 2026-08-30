@@ -419,32 +419,32 @@ through commit `8b7fb18`.
 - Append only: `docs/status/JOURNAL.md`
 - Modify: `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
 
-- [ ] **Step 1 — Dormant gate:** Add H-037 as pending with command identity
+- [x] **Step 1 — Dormant gate:** Add H-037 as pending with command identity
   `prime-system-parity-operation-host-callback`.  Its gate reruns Task 6's
   focused real-process test, complete system checker, repository checks, and
   promotion check.  The cleanliness guard permits exactly the two already
   audited artifact roots and rejects every other dirty path.
 
-- [ ] **Step 2 — RED canonical transition:** Add a test requiring exactly one
+- [x] **Step 2 — RED canonical transition:** Add a test requiring exactly one
   cycle 37 PASS and `next_action=phase-3-native-kernel-design`; prove it fails
   before executing the gate.  Revert that assertion with an inverse patch so
   the dormant-gate commit is clean.
 
-- [ ] **Step 3 — Independently verify dormant gate:** Run all H-037 commands in
+- [x] **Step 3 — Independently verify dormant gate:** Run all H-037 commands in
   a disposable detached copy.  Expected: exit 0, zero provider/application
   operations, no canonical state mutation.
 
-- [ ] **Step 4 — Execute once:** Run `tools/climb/cycle.sh H-037` exactly once,
+- [x] **Step 4 — Execute once:** Run `tools/climb/cycle.sh H-037` exactly once,
   restore the closure assertion, regenerate the tree, and prove cycle 37
   appears once.  Commit `climb: close Prime system parity production path`.
 
-- [ ] **Step 5 — Truthful state:** Mark Phase 2
+- [x] **Step 5 — Truthful state:** Mark Phase 2
   `Verified-system-parity: PASS` with the named real process and repository
   gates.  Keep every native row missing and Phase 3/4 unchecked.  Set the next
   action to Phase 3 native-kernel design, while noting local-main promotion and
   Git closure remain Task 8.
 
-- [ ] **Step 6 — Verify and commit:** Run:
+- [x] **Step 6 — Verify and commit:** Run:
 
   ```bash
   make docs-check
@@ -470,37 +470,37 @@ through commit `8b7fb18`.
   non-primary worktrees, the literal `$(getconf DARWIN_USER_TEMP_DIR)/`, and
   `.task13-promotion-bin/`
 
-- [ ] **Step 1 — Audit:** Enumerate every worktree and branch with exact HEAD,
+- [x] **Step 1 — Audit:** Enumerate every worktree and branch with exact HEAD,
   status paths, reachability, duplicate patch/tree IDs, and sentinel scan.
   Preserve unique non-generated source state with temporary
   `refs/recovery/pre-phase3/*`; never preserve credentials, environments,
   `node_modules`, caches, build output, or private evidence.
 
-- [ ] **Step 2 — Provisional bundle:** Create and verify
+- [x] **Step 2 — Provisional bundle:** Create and verify
   `.git/asterion-pre-phase3-recovery-20260830.bundle.tmp` containing the current
   integration head, old local main, archived ecosystem/H-024/H-035/H-036
   lines, every detached unique head, and all accepted recovery refs.
 
-- [ ] **Step 3 — Promote:** Move local `main` to the exact verified integration
+- [x] **Step 3 — Promote:** Move local `main` to the exact verified integration
   commit, switch the primary workspace to `main`, and verify old
   `main@262b2fd` remains reachable.  Do not push or update `origin/main`.
 
-- [ ] **Step 4 — Record steady state:** Update branch/recovery fields in
+- [x] **Step 4 — Record steady state:** Update branch/recovery fields in
   `CURRENT-STATE.md`, `RESUME-NEXT-SESSION.md`, Journal, and the recovery report.
   Run docs, Climb, ledger, system checker, callback real-process, and
   `git diff --check` before committing `docs: record Git recovery closure`.
 
-- [ ] **Step 5 — Final bundle:** Create and verify
+- [x] **Step 5 — Final bundle:** Create and verify
   `.git/asterion-pre-phase3-recovery-20260830.bundle` from final local `main`
   and all recovery refs.  Require every audited unique object to appear.  Only
   then remove the provisional bundle.
 
-- [ ] **Step 6 — Remove exact obsolete state:** Remove each audited non-primary
+- [x] **Step 6 — Remove exact obsolete state:** Remove each audited non-primary
   worktree by absolute path, prune, delete obsolete normal branches and
   temporary recovery refs after bundle verification, then delete only the two
   audited artifact roots after rechecking their classified contents.
 
-- [ ] **Step 7 — Final verification:** Run:
+- [x] **Step 7 — Final verification:** Run:
 
   ```bash
   git status --short --branch

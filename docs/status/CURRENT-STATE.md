@@ -11,12 +11,12 @@
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
 - Active work package: Phase 2 is closed at H-037 and
-  `Verified-system-parity` PASS. The callback plan's Task 8 now owns the
-  bundle-backed promotion to local `main` and removal of obsolete branches,
-  worktrees, and audited artifacts before Phase 3 design begins.
-- Git recovery audit: local `main` is promoted to `6e43438`; a verified
-  provisional bundle covers 28 refs, and separate patches/archive preserve all
-  accepted uncommitted source state. Destructive cleanup remains pending.
+  `Verified-system-parity` PASS. Task 8's bundle-backed Git/worktree cleanup is
+  closed; Phase 3 native-kernel design is the sole next program action.
+- Git recovery closure: one clean local `main` branch and one primary worktree
+  remain. A verified complete-history bundle preserves every audited committed
+  head, and separate patches/archive preserve accepted uncommitted source
+  state. `origin/main` remains unchanged.
 
 ## Current Architecture
 
@@ -87,8 +87,6 @@
 
 ## Open Problems
 
-- Complete Task 8's bundle-backed Git recovery closure. Preserve every unique
-  committed head and uncommitted worktree difference before removal.
 - Keep every Asterion-native row missing until Phase 3 evidence exists.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
@@ -134,8 +132,8 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Continue the approved callback plan at Task 8: audit and archive all Git
-   state, promote the verified head to local `main`, then remove obsolete
-   worktrees, branches, and audited artifact roots.
+4. Begin Phase 3 only with an approved native-kernel design derived from the
+   common verified-loop and parity scenarios; do not create implementation
+   worktrees before that design is approved.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

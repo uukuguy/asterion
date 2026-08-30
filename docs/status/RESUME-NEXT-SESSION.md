@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-30 15:36 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-30 15:44 +0800. **Task 8 closure recorded; next work is Phase 3 design.**
 
 ## TL;DR
 
@@ -35,12 +35,13 @@
 - The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
   provider/application operations. `Verified-system-parity` and Phase 2 are
   PASS; every native row remains missing.
-- Local `main` now points to verified integration head `6e43438`; `origin/main`
-  remains `f1316bb`. The provisional bundle covers 28 refs, while binary
-  patches and a 14-file source archive preserve dirty worktree state.
-- The remaining Git cleanup population is 53 obsolete worktrees and three
-  obsolete local branches. No removal occurs before the audit commit and final
-  bundle verification.
+- Local `main` is the sole local branch and primary worktree; `origin/main`
+  remains `f1316bb`. The verified final bundle preserves the pre-cleanup graph,
+  while binary patches and a 14-file source archive preserve accepted dirty
+  worktree state.
+- All 53 obsolete worktrees, three obsolete local branches, 24 temporary
+  recovery refs, and two audited artifact roots are removed from active Git and
+  workspace state.
 
 ## Durable recovery boundary
 
@@ -64,12 +65,10 @@
 
 ## Immediate next action
 
-1. Continue Task 8 of
-   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`: commit
-   the complete Git audit, then build and verify the final recovery bundle.
-2. Remove the 53 exact obsolete worktrees, three obsolete local branches,
-   temporary recovery refs, and two audited artifact roots; verify one clean
-   local-main worktree remains and keep every native row missing.
+1. Start Phase 3 with a separate approved native-kernel design derived from the
+   common verified-loop and parity scenarios.
+2. Keep every native row Missing until exact native evidence exists; do not
+   recreate long-lived worktrees before their branch work is ready to close.
 
 ## Ready-to-paste verification
 
