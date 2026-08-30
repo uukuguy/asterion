@@ -1154,3 +1154,7 @@
 - 09:30 Bound callback and Prime process lifecycle so factory operations share one exact dispatcher [bd706a0]
 - 09:37 Checkpointed reviewed callback lifecycle so recovery resumes at real session composition [84a5c66]
 - 10:31 Closed root/child Prime operation composition so real callbacks share durable managers [8204e6d]
+- 10:32 Checkpointed approved production callbacks so recovery resumes at the complete gate [06d9562]
+- 10:56 Synchronized Prime client parity digests so full-suite validation matches locked resources [de1f78d]
+- 12:09 Closed failed first-start transports so callbacks cannot outlive sidecar startup [2d486f6]
+- 13:11 Verified Prime callback gates and independent review so H-037 may proceed [2d486f6]
