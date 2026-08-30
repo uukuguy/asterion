@@ -10,7 +10,7 @@
 - Git recovery remains closed on the sole local `main` branch and primary
   worktree; no implementation branch or worktree has been opened.
 - The Phase 3.1 Native durable-controller design was approved at `ac1e9ef`.
-- The implementation plan is complete at
+- The implementation plan is complete at `d1c4723` in
   `docs/superpowers/plans/2026-08-30-asterion-native-controller-core.md`.
   It contains ten TDD tasks from dormant H-038 setup through provider binding,
   common/differential/host/crash verification, and exact H-038 closure.
