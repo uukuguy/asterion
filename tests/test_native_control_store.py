@@ -11,7 +11,7 @@ import traceback
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Callable, cast
+from typing import Callable, NoReturn, cast
 from unittest.mock import patch
 
 from asterion.control.authority import RemainingBudget
@@ -31,6 +31,7 @@ from asterion.control.providers.native.store import (
     FileNativeSessionStore,
     MemoryNativeSessionStore,
     MemoryNativeStorageOwner,
+    NativeRootIdentity,
     NativeSessionDirectory,
     NativeStoreError,
 )
@@ -189,6 +190,98 @@ class TestNativeControlStore(unittest.TestCase):
             self.assertNotIn(sentinel, formatted)
         self.assertIsNone(error.__cause__)
         self.assertIsNone(error.__context__)
+
+    def test_file_session_accepts_exact_expected_root_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            root_stat = root.stat(follow_symlinks=False)
+            session = NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+                expected_root_identity=NativeRootIdentity(
+                    root_stat.st_dev,
+                    root_stat.st_ino,
+                ),
+            )
+            try:
+                self.assertTrue(session_child(root).is_dir())
+            finally:
+                session.close()
+
+    def test_file_session_rejects_expected_root_identity_mismatch_before_children(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "root"
+            other = parent / "other"
+            root.mkdir(mode=0o700)
+            other.mkdir(mode=0o700)
+            root.chmod(0o700)
+            other.chmod(0o700)
+            other_stat = other.stat(follow_symlinks=False)
+
+            with self.assertRaises(NativeStoreError) as captured:
+                NativeSessionDirectory.open(
+                    root,
+                    SESSION_ID,
+                    max_total_private_bytes=1_000_000,
+                    expected_root_identity=NativeRootIdentity(
+                        other_stat.st_dev,
+                        other_stat.st_ino,
+                    ),
+                )
+
+            self.assert_redacted_store_error(captured.exception)
+            self.assertFalse(session_child(root).exists())
+            session = NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+            session.close()
+
+    def test_file_session_rejects_hostile_expected_root_identity_shape(
+        self,
+    ) -> None:
+        class HostileTuple(tuple[object, ...]):
+            effects = 0
+
+            def __iter__(self) -> NoReturn:
+                type(self).effects += 1
+                raise AssertionError("SENTINEL_SECRET")
+
+            def __getattribute__(self, name: str) -> object:
+                if name in {"st_dev", "st_ino", "dev", "ino"}:
+                    type(self).effects += 1
+                    raise AssertionError("SENTINEL_SECRET")
+                return super().__getattribute__(name)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+
+            for label, expected in (
+                ("tuple-subclass", HostileTuple((1, 2))),
+                ("bool-dev", NativeRootIdentity.__new__(NativeRootIdentity)),
+            ):
+                with self.subTest(label=label):
+                    if label == "bool-dev":
+                        object.__setattr__(expected, "dev", True)
+                        object.__setattr__(expected, "ino", 1)
+                    with self.assertRaises(NativeStoreError) as captured:
+                        NativeSessionDirectory.open(
+                            root,
+                            SESSION_ID,
+                            max_total_private_bytes=1_000_000,
+                            expected_root_identity=cast(NativeRootIdentity, expected),
+                        )
+                    self.assert_redacted_store_error(captured.exception)
+                    self.assertFalse(session_child(root).exists())
+
+            self.assertEqual(HostileTuple.effects, 0)
 
     def test_memory_store_deduplicates_conflicts_and_replays_slices(self) -> None:
         owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)

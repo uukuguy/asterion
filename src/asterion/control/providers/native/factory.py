@@ -7,6 +7,7 @@ import os
 import secrets
 import stat
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
@@ -33,6 +34,7 @@ from asterion.control.providers.native.model import (
 )
 from asterion.control.providers.native.store import (
     FileNativeSessionStore,
+    NativeRootIdentity,
     NativeSessionDirectory,
     NativeStoreError,
 )
@@ -67,6 +69,30 @@ _CAPABILITIES = (
     "session-lifecycle",
 )
 _CONTINUATION_MEDIA_TYPE = "application/vnd.asterion.native-capsule"
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeFactoryContextSnapshot:
+    system_id: str
+    system_version: str
+    private_root: Path
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeFactoryOptions:
+    session_id: str
+    generation: int
+    max_turns_per_poll: int
+    max_events_per_poll: int
+    max_record_bytes: int
+    max_capsule_bytes: int
+    max_total_private_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class _NativeFactoryAuthority:
+    authority_id: str
+    revision: int
 
 
 class _NativeTurnAdapterSnapshot:
@@ -112,36 +138,26 @@ def build_native_control_plane_client(
     capsule_store: FileNativeCapsuleStore | None = None
     controller: NativeController | None = None
     try:
-        _validate_context_identity(context)
+        identity = _validate_context_identity(context)
         options = _validate_options(context.options)
         authority = _validate_authority(context.authority)
-        _validate_private_root(context.private_root)
         adapter = _snapshot_turn_adapter(context.host_services)
         manifest = native_control_plane_binding().manifest
-
-        session_id = str(options["session_id"])
-        generation = _positive_integer(options, "generation")
-        max_turns_per_poll = _positive_integer(options, "max_turns_per_poll")
-        max_events_per_poll = _positive_integer(options, "max_events_per_poll")
-        max_record_bytes = _positive_integer(options, "max_record_bytes")
-        max_capsule_bytes = _positive_integer(options, "max_capsule_bytes")
-        max_total_private_bytes = _positive_integer(
-            options,
-            "max_total_private_bytes",
-        )
+        root_identity = _validate_private_root(identity.private_root)
 
         owner = NativeSessionDirectory.open(
-            context.private_root,
-            session_id,
-            max_total_private_bytes,
+            identity.private_root,
+            options.session_id,
+            options.max_total_private_bytes,
+            expected_root_identity=root_identity,
         )
         session_store = FileNativeSessionStore(
             owner,
-            max_record_bytes=max_record_bytes,
+            max_record_bytes=options.max_record_bytes,
         )
         capsule_store = FileNativeCapsuleStore(
             owner,
-            max_capsule_bytes=max_capsule_bytes,
+            max_capsule_bytes=options.max_capsule_bytes,
         )
         controller = NativeController(
             owner=owner,
@@ -150,10 +166,10 @@ def build_native_control_plane_client(
             turn_adapter=adapter,
             provider_id=_NATIVE_PRIVATE_PROVIDER_ID,
             provider_version=NATIVE_CONTROL_PLANE_VERSION,
-            system_id=context.system_id,
-            system_version=context.system_version,
-            session_id=session_id,
-            generation=generation,
+            system_id=identity.system_id,
+            system_version=identity.system_version,
+            session_id=options.session_id,
+            generation=options.generation,
             checkpoint_version=NATIVE_CHECKPOINT_VERSION,
             authority_id=authority.authority_id,
             authority_revision=authority.revision,
@@ -168,8 +184,8 @@ def build_native_control_plane_client(
         client = NativeControlPlaneClient(
             manifest=manifest,
             controller=controller,
-            max_turns_per_poll=max_turns_per_poll,
-            max_events_per_poll=max_events_per_poll,
+            max_turns_per_poll=options.max_turns_per_poll,
+            max_events_per_poll=options.max_events_per_poll,
         )
         controller = None
         return client
@@ -209,16 +225,21 @@ def _packaged_manifest() -> ControlPlaneManifest:
     return manifest
 
 
-def _validate_context_identity(context: object) -> None:
+def _validate_context_identity(context: object) -> _NativeFactoryContextSnapshot:
     if (
         type(context) is not ControlPlaneFactoryContext
         or context.control_plane_id != NATIVE_CONTROL_PLANE_ID
         or context.control_plane_version != NATIVE_CONTROL_PLANE_VERSION
     ):
         raise ControlPlaneFactoryError("Native control plane identity is invalid")
+    return _NativeFactoryContextSnapshot(
+        system_id=context.system_id,
+        system_version=context.system_version,
+        private_root=context.private_root,
+    )
 
 
-def _validate_options(options: Mapping[str, str]) -> Mapping[str, str]:
+def _validate_options(options: Mapping[str, str]) -> _NativeFactoryOptions:
     try:
         snapshot = dict(options)
     except Exception:
@@ -232,7 +253,18 @@ def _validate_options(options: Mapping[str, str]) -> Mapping[str, str]:
         raise ControlPlaneFactoryError("Native control plane options are invalid")
     for key in _REQUIRED_OPTIONS - {"session_id"}:
         _positive_integer(snapshot, key)
-    return snapshot
+    return _NativeFactoryOptions(
+        session_id=session_id,
+        generation=_positive_integer(snapshot, "generation"),
+        max_turns_per_poll=_positive_integer(snapshot, "max_turns_per_poll"),
+        max_events_per_poll=_positive_integer(snapshot, "max_events_per_poll"),
+        max_record_bytes=_positive_integer(snapshot, "max_record_bytes"),
+        max_capsule_bytes=_positive_integer(snapshot, "max_capsule_bytes"),
+        max_total_private_bytes=_positive_integer(
+            snapshot,
+            "max_total_private_bytes",
+        ),
+    )
 
 
 def _positive_integer(options: Mapping[str, str], key: str) -> int:
@@ -255,17 +287,20 @@ def _positive_integer(options: Mapping[str, str], key: str) -> int:
     return value
 
 
-def _validate_authority(authority: object) -> AuthorityEnvelope:
+def _validate_authority(authority: object) -> _NativeFactoryAuthority:
     if (
         type(authority) is not AuthorityEnvelope
         or authority.cancelled
         or _NATIVE_TURN_ADAPTER_SERVICE not in authority.host_service_grants
     ):
         raise ControlPlaneFactoryError("Native authority snapshot is unavailable")
-    return authority
+    return _NativeFactoryAuthority(
+        authority_id=authority.authority_id,
+        revision=authority.revision,
+    )
 
 
-def _validate_private_root(private_root: Path) -> None:
+def _validate_private_root(private_root: Path) -> NativeRootIdentity:
     try:
         result = private_root.stat(follow_symlinks=False)
     except OSError:
@@ -273,9 +308,10 @@ def _validate_private_root(private_root: Path) -> None:
     if (
         result.st_uid != os.geteuid()
         or stat.S_IMODE(result.st_mode) != 0o700
-        or not private_root.is_dir()
+        or not stat.S_ISDIR(result.st_mode)
     ):
         raise ControlPlaneFactoryError("Native private root is unavailable")
+    return NativeRootIdentity(result.st_dev, result.st_ino)
 
 
 def _snapshot_turn_adapter(

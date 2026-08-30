@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -39,6 +41,7 @@ from asterion.control.providers.native.model import (
     NativeTurnRequest,
     NativeTurnResult,
 )
+from asterion.control.providers.native import store as native_store_module
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -177,6 +180,7 @@ class FakeDirectory:
         private_root: Path,
         session_id: str,
         max_total_private_bytes: int,
+        **kwargs: object,
     ) -> FakeDirectory:
         return cls()
 
@@ -222,6 +226,10 @@ class FakeCapsuleStore:
 
 
 cleanup_events: list[str] = []
+
+
+def session_child(root: Path) -> Path:
+    return root / hashlib.sha256(SESSION_ID.encode("utf-8")).hexdigest()
 
 
 class TestNativeControlFactory(unittest.TestCase):
@@ -379,6 +387,105 @@ class TestNativeControlFactory(unittest.TestCase):
                 build_native_control_plane_client(context)
 
             self.assertEqual(tuple(private_root.iterdir()), ())
+
+    def test_factory_snapshots_adapter_before_private_root_identity_capture(
+        self,
+    ) -> None:
+        class SwappingAdapter:
+            calls = 0
+
+            def __init__(self, root: Path, replacement: Path, moved: Path) -> None:
+                self.swapped = False
+                self._root = root
+                self._replacement = replacement
+                self._moved = moved
+
+            @property
+            def adapter_id(self) -> str:
+                if not self.swapped:
+                    object.__setattr__(self, "swapped", True)
+                    root = object.__getattribute__(self, "_root")
+                    replacement = object.__getattribute__(self, "_replacement")
+                    moved = object.__getattribute__(self, "_moved")
+                    root.rename(moved)
+                    replacement.rename(root)
+                return "native.swapping-turn/v1"
+
+            async def execute(self, request: NativeTurnRequest) -> NativeTurnResult:
+                self.calls += 1
+                return NativeTurnResult(request.turn_id, (), BudgetUsage.zero())
+
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            private_root = parent / "private"
+            replacement = parent / "replacement"
+            moved_original = parent / "original"
+            private_root.mkdir(mode=0o700)
+            replacement.mkdir(mode=0o700)
+            os.chmod(private_root, 0o755)
+            os.chmod(replacement, 0o700)
+            adapter = SwappingAdapter(private_root, replacement, moved_original)
+            context = make_context(
+                private_root,
+                host_services={"native-turn-adapter": adapter},
+            )
+
+            client = cast(NativeControlPlaneClient, build_native_control_plane_client(context))
+            self.addCleanup(lambda: asyncio.run(client.close()))
+
+            self.assertTrue(adapter.swapped)
+            self.assertEqual(adapter.calls, 0)
+            self.assertTrue(session_child(private_root).is_dir())
+            self.assertFalse(session_child(moved_original).exists())
+
+    def test_factory_rejects_private_root_swap_between_validation_and_open(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary)
+            private_root = parent / "private"
+            replacement = parent / "replacement"
+            moved_original = parent / "original"
+            private_root.mkdir(mode=0o700)
+            replacement.mkdir(mode=0o700)
+            os.chmod(private_root, 0o700)
+            os.chmod(replacement, 0o700)
+            context = make_context(private_root)
+            original_open_root = native_store_module._open_root
+            swapped = False
+
+            def swapping_open_root(path: Path) -> int:
+                nonlocal swapped
+                if not swapped:
+                    swapped = True
+                    path.rename(moved_original)
+                    replacement.rename(path)
+                return original_open_root(path)
+
+            with patch.object(native_store_module, "_open_root", swapping_open_root):
+                with self.assertRaises(ControlPlaneFactoryError) as captured:
+                    build_native_control_plane_client(context)
+
+            rendered = "".join(traceback.format_exception(captured.exception))
+            self.assertTrue(swapped)
+            self.assertIn("Native control plane is unavailable", str(captured.exception))
+            self.assertNotIn(str(parent), rendered)
+            self.assertFalse(session_child(private_root).exists())
+            self.assertFalse(session_child(moved_original).exists())
+
+            original_client = cast(
+                NativeControlPlaneClient,
+                build_native_control_plane_client(
+                    make_context(moved_original),
+                ),
+            )
+            asyncio.run(original_client.close())
+            shutil.rmtree(session_child(moved_original))
+            replacement_client = cast(
+                NativeControlPlaneClient,
+                build_native_control_plane_client(make_context(private_root)),
+            )
+            asyncio.run(replacement_client.close())
 
     def test_factory_snapshots_adapter_without_executing_turn(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

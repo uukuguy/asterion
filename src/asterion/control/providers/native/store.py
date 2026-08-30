@@ -13,6 +13,7 @@ import stat
 import threading
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn, Protocol, cast
 
@@ -47,6 +48,23 @@ class NativeStoreError(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__(_ERROR)
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRootIdentity:
+    """Exact private-root descriptor identity captured before opening state."""
+
+    dev: int
+    ino: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.dev) is not int
+            or type(self.ino) is not int
+            or self.dev < 0
+            or self.ino < 0
+        ):
+            raise NativeStoreError
 
 
 def _raise_store_error() -> NoReturn:
@@ -277,13 +295,23 @@ class NativeSessionDirectory:
         private_root: Path,
         session_id: str,
         max_total_private_bytes: int,
+        *,
+        expected_root_identity: NativeRootIdentity | None = None,
     ) -> NativeSessionDirectory:
         _require_platform()
         _require_session_id(session_id)
+        expected_root_identity = _require_expected_root_identity(
+            expected_root_identity,
+        )
         root_fd = session_fd = records_fd = capsules_fd = lock_fd = -1
         try:
             root_fd = _open_root(private_root)
-            _validate_directory_fd(root_fd, 0o700)
+            root_stat = _validate_directory_fd(root_fd, 0o700)
+            if expected_root_identity is not None and not _same_root_identity(
+                root_stat,
+                expected_root_identity,
+            ):
+                raise NativeStoreError
             session_name = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
             session_fd = _open_or_create_child_directory(root_fd, session_name)
             records_fd = _open_or_create_child_directory(session_fd, "records")
@@ -569,6 +597,25 @@ def _require_session_id(session_id: str) -> None:
         raise NativeStoreError
 
 
+def _require_expected_root_identity(
+    value: NativeRootIdentity | None,
+) -> NativeRootIdentity | None:
+    if value is None:
+        return None
+    if type(value) is not NativeRootIdentity:
+        raise NativeStoreError
+    dev = object.__getattribute__(value, "dev")
+    ino = object.__getattribute__(value, "ino")
+    if (
+        type(dev) is not int
+        or type(ino) is not int
+        or dev < 0
+        or ino < 0
+    ):
+        raise NativeStoreError
+    return value
+
+
 def _require_record_limit(value: int) -> None:
     if (
         isinstance(value, bool)
@@ -682,8 +729,8 @@ def _open_lock(session_fd: int) -> int:
         _raise_store_error()
 
 
-def _validate_directory_fd(descriptor: int, mode: int) -> None:
-    _validate_fd(descriptor, mode, directory=True)
+def _validate_directory_fd(descriptor: int, mode: int) -> os.stat_result:
+    return _validate_fd(descriptor, mode, directory=True)
 
 
 def _validate_fd(
@@ -727,6 +774,10 @@ def _validate_stat(
         raise NativeStoreError
     if regular and result.st_nlink != 1:
         raise NativeStoreError
+
+
+def _same_root_identity(result: os.stat_result, expected: NativeRootIdentity) -> bool:
+    return result.st_dev == expected.dev and result.st_ino == expected.ino
 
 
 def _existing_storage_bytes(descriptor: int, child: str) -> int:
