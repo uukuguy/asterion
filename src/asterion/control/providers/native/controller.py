@@ -50,6 +50,9 @@ from asterion.control.providers.native.store import (
 from asterion.control.providers.native.turn import NativeTurnAdapter
 
 
+CrashHook = Callable[[str], None]
+
+
 class NativeControllerError(RuntimeError):
     """Raised when native controller state cannot be safely advanced."""
 
@@ -65,6 +68,10 @@ def _raise_controller_error() -> NoReturn:
     except NativeControllerError as error:
         error.__context__ = None
         raise
+
+
+def _no_crash(_point: str) -> None:
+    return None
 
 
 class NativeController:
@@ -88,6 +95,7 @@ class NativeController:
         turn_id_factory: Callable[[], str],
         capsule_id_factory: Callable[[], str],
         clock: Callable[[], str],
+        crash_hook: CrashHook = _no_crash,
     ) -> None:
         try:
             _require_owner(owner)
@@ -111,6 +119,8 @@ class NativeController:
             ):
                 if not callable(factory):
                     raise ValueError
+            if not callable(crash_hook):
+                raise ValueError
             self._owner = owner
             self._session_store = session_store
             self._capsule_store = capsule_store
@@ -128,6 +138,7 @@ class NativeController:
             self._turn_id_factory = turn_id_factory
             self._capsule_id_factory = capsule_id_factory
             self._clock = clock
+            self._crash_hook = crash_hook
             self._state = self._reduce_store()
             self._validate_recovered_identity()
         except (NativeControllerError, NativeStoreError):
@@ -150,7 +161,11 @@ class NativeController:
                 command_mapping,
                 command_digest,
             )
+            if records:
+                self._crash_hook("command-before-publish")
             self._append_many(records)
+            if records:
+                self._crash_hook("command-after-publish-before-ack")
             if command.type == "checkpoint.request":
                 self._ensure_checkpoint(str(command.payload["checkpoint_id"]))
         except (NativeControllerError, NativeStoreError):
@@ -179,6 +194,7 @@ class NativeController:
             if request is None:
                 return None
             self._append(turn_started_record(request))
+            self._crash_hook("turn-after-start")
             return self.state.pending_turn
         except (NativeControllerError, NativeStoreError):
             raise
@@ -207,7 +223,9 @@ class NativeController:
     async def execute_turn(self, request: NativeTurnRequest) -> NativeTurnResult:
         try:
             self._require_pending_turn(request)
-            return await self._turn_adapter.execute(request)
+            result = await self._turn_adapter.execute(request)
+            self._crash_hook("turn-after-adapter-before-commit")
+            return result
         except (NativeControllerError, NativeStoreError):
             raise
         except Exception:
@@ -220,6 +238,10 @@ class NativeController:
             events = self._validated_turn_events(request, result)
             committed = _result_for_committed_events(result, events)
             self._append(turn_committed_record(committed, events))
+            if any(event.type in _TERMINAL_EVENT_TYPES for event in events):
+                self._crash_hook("terminal-after-commit-before-host-receipt")
+            else:
+                self._crash_hook("turn-after-commit-before-yield")
         except (NativeControllerError, NativeStoreError):
             raise
         except Exception:
@@ -708,8 +730,10 @@ class NativeController:
         if self.state.lifecycle not in {"running", "paused"}:
             raise NativeControllerError
         metadata = self._seal_capsule(checkpoint_id)
+        self._crash_hook("capsule-after-write-before-checkpoint")
         event = self._checkpoint_event(checkpoint_id, metadata)
         self._append(checkpoint_committed_record(metadata, event))
+        self._crash_hook("checkpoint-after-commit-before-yield")
         return event
 
     def _preflight_checkpoint_request(
@@ -1058,4 +1082,12 @@ _USAGE_FIELDS = (
     "child_tokens",
     "aggregate_tokens",
     "cost_micros",
+)
+_TERMINAL_EVENT_TYPES = frozenset(
+    {
+        "session.budget-limited",
+        "session.cancelled",
+        "session.completed",
+        "session.failed",
+    }
 )
