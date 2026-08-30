@@ -255,16 +255,26 @@ class OperationManager:
         if transaction is None or authority_revision != transaction.authority_revision:
             raise OperationManagerError("operation cancellation is invalid")
         existing = self._receipts.get(operation_id)
-        if existing is not None:
+        if existing is not None and existing.status != "uncertain":
             return existing
         if operation_id not in self._dispatched:
+            if existing is not None:
+                return existing
             return self._record_terminal(
                 self._receipt(transaction, "cancelled", "cancelled-before-dispatch"),
                 reserve=operation_id in self._authority.reserved_operation_ids,
             )
+        service = self._service(transaction)
+        attempt = self._attempts.get(operation_id, 0) + 1
+        self._append(
+            JournalRecord.operation_reconciliation_recorded(
+                operation_id=operation_id, attempt=attempt
+            )
+        )
+        self._attempts[operation_id] = attempt
         try:
             return self._record_terminal(
-                await self._service(transaction).cancel(transaction),
+                await service.cancel(transaction),
                 reserve=operation_id in self._authority.reserved_operation_ids,
             )
         except OperationManagerError:

@@ -142,6 +142,7 @@ class Service:
 
     def __init__(self) -> None:
         self.execute_calls: list[str] = []
+        self.cancel_calls: list[str] = []
         self.reconcile_calls: list[str] = []
         self.fail_execute = False
 
@@ -153,6 +154,7 @@ class Service:
         return _receipt(transaction)
 
     async def cancel(self, transaction):
+        self.cancel_calls.append(transaction.operation_id)
         return _receipt(transaction, "cancelled")
 
     async def reconcile(self, transaction, typed_request, context):
@@ -268,6 +270,53 @@ def _admitted_prefix(transaction: OperationTransaction) -> list[JournalRecord]:
 
 
 class TestOperationManager(unittest.IsolatedAsyncioTestCase):
+    async def test_uncertain_cancel_records_reconciliation_and_recovers_without_retry(
+        self,
+    ) -> None:
+        manager, resolver, _, service, journal = _manager()
+        manager.fail_after = "operation.dispatch.started"
+        transaction = _transaction()
+
+        uncertain = await manager.execute(transaction)
+        self.assertEqual(uncertain.status, "uncertain")
+        self.assertEqual(resolver.calls, 1)
+        self.assertEqual(service.cancel_calls, [])
+
+        manager.fail_after = None
+        cancelled = await manager.cancel(
+            transaction.operation_id, authority_revision=transaction.authority_revision
+        )
+        self.assertEqual(cancelled.status, "cancelled")
+        self.assertEqual(service.cancel_calls, [transaction.operation_id])
+        self.assertEqual(
+            sum(
+                entry.record.kind == "operation.reconciliation.recorded"
+                for entry in journal.replay(JournalCursor(0))
+            ),
+            1,
+        )
+        self.assertEqual(
+            await manager.cancel(
+                transaction.operation_id,
+                authority_revision=transaction.authority_revision,
+            ),
+            cancelled,
+        )
+        self.assertEqual(service.cancel_calls, [transaction.operation_id])
+
+        recovered, recovered_resolver, _, recovered_service = _recovered_manager(
+            journal
+        )
+        self.assertEqual(
+            await recovered.cancel(
+                transaction.operation_id,
+                authority_revision=transaction.authority_revision,
+            ),
+            cancelled,
+        )
+        self.assertEqual(recovered_resolver.calls, 0)
+        self.assertEqual(recovered_service.cancel_calls, [])
+
     async def test_dispatcher_projects_exact_immutable_identity(self) -> None:
         manager, _, _, _, _ = _manager()
 

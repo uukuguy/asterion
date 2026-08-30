@@ -18,6 +18,7 @@ from asterion.control.manager import (
 )
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.system import AgentSystemPlan
+from asterion.operation.manager import OperationManager
 from asterion.pathlight.recorder import NOOP_PATHLIGHT_RECORDER, PathlightRecorder
 from asterion.runtime.host import CancellationSignal
 from asterion.control.authority import BudgetUsage
@@ -85,6 +86,7 @@ def build_prime_rlm_control_host(
     cancellation_signal: CancellationSignal | None = None,
     pathlight: PathlightRecorder = NOOP_PATHLIGHT_RECORDER,
     private_root: Path | None = None,
+    operation_manager: OperationManager | None = None,
 ) -> ControlHost:
     """Build one Prime host with its inseparable native-RLM dependencies.
 
@@ -118,6 +120,7 @@ def build_prime_rlm_control_host(
         pathlight=pathlight,
         admitted_action_preparer=components.admission_preparer,
         provider_owned_actions=components.action_lifecycle,
+        operation_manager=operation_manager,
     )
 class PrimeRlmAdmissionPreparer:
     """Persist the exact Prime-native child binding before admitted delivery."""

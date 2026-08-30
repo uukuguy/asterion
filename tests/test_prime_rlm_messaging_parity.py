@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 from asterion.control.authority import AuthorityLedger
 from asterion.control.execution import ActionExecutionReceipt
@@ -168,6 +169,10 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                         "maxControllerTokens": 100,
                         "maxTurns": 1,
                         "model": "claude-sonnet-4-5",
+                        "operationHost": {
+                            "socketPath": str(root / "prime-operation.sock"),
+                            "token": "a" * 64,
+                        },
                         "portfolio": [
                             {
                                 "kind": "application",
@@ -541,16 +546,20 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
             "rlm.registry-lifecycle": "evidence.rlm.7be120a547f5969762d773ba7bbe122a29ab87b89f67931b9c22e09008fe8f29",
             "rlm.usage-cost": "evidence.rlm.0b41ebbc26f1d298358bae1052fcf47154bbd1f044b82789ac1d1c1a0d40cbfe",
         }
+        feature_rows = cast(tuple[Mapping[str, object], ...], ledger["features"])
         features = {
             str(row["feature_id"]): row
-            for row in ledger["features"]
+            for row in feature_rows
             if str(row["feature_id"]).startswith("rlm.")
         }
         for feature_id, row in features.items():
             with self.subTest(feature_id=feature_id):
+                provider_results = cast(
+                    tuple[Mapping[str, object], ...], row["provider_results"]
+                )
                 result = next(
                     item
-                    for item in row["provider_results"]
+                    for item in provider_results
                     if item["provider_id"] == "asterion.prime-gateway"
                 )
                 expected_status = (
@@ -561,15 +570,19 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                 )
                 self.assertEqual(result["status"], expected_status)
                 self.assertEqual(result["evidence_ids"], (expected[feature_id],))
+        evidence_rows = cast(tuple[Mapping[str, object], ...], ledger["evidence"])
         evidence = tuple(
-            row for row in ledger["evidence"] if str(row["evidence_id"]).startswith("evidence.rlm.")
+            row
+            for row in evidence_rows
+            if str(row["evidence_id"]).startswith("evidence.rlm.")
         )
         self.assertEqual(
             tuple(row["evidence_id"] for row in evidence),
             tuple(sorted(expected.values())),
         )
         for row in evidence:
-            bounded = row["feature_ids"][0] in {
+            feature_ids = cast(tuple[str, ...], row["feature_ids"])
+            bounded = feature_ids[0] in {
                 "rlm.child-model",
                 "rlm.generated-program",
                 "rlm.recursion-depth",

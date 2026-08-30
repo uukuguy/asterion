@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal, Protocol, TypeAlias, cast
+from typing import TYPE_CHECKING, Literal, Protocol, TypeAlias, cast
 
 from asterion.control.authority import (
     AuthorityEnvelope,
@@ -28,7 +28,7 @@ from asterion.control.factory import (
     ControlPlaneFactoryRegistry,
 )
 from asterion.control.host import ControlCommand, ControlEvent, ControlPlaneClient
-from asterion.control.journal import FileCanonicalJournal
+from asterion.control.journal import CanonicalJournal, FileCanonicalJournal, JournalRecord
 from asterion.control.manager import ActionExecutor, ControlHost
 from asterion.control.private_store import (
     MAX_PRIVATE_TEXT_BYTES,
@@ -37,6 +37,10 @@ from asterion.control.private_store import (
 from asterion.control.protocol import OPAQUE_ID
 from asterion.control.system import AgentSystemPlan
 from asterion.runtime.host import CancellationSignal
+
+if TYPE_CHECKING:
+    from asterion.operation.manager import OperationManager
+    from asterion.operation.services import OperationDispatcher
 
 
 _BINDING_NAME = "binding.json"
@@ -62,6 +66,19 @@ class DeriveControlOptions(Protocol):
         child_authority: AuthorityEnvelope,
         generation: int,
     ) -> Mapping[str, str]: ...
+
+
+class DeriveOperationDispatcher(Protocol):
+    """Derive one operator-owned dispatcher after a child journal opens."""
+
+    def __call__(
+        self,
+        *,
+        child_authority: AuthorityEnvelope,
+        child_journal: CanonicalJournal,
+        child_session_id: str,
+        generation: int,
+    ) -> OperationDispatcher: ...
 
 
 class LegacyChildActionExecutorFactory(Protocol):
@@ -319,6 +336,7 @@ class ChildSessionService:
         clock_ms: Callable[[], int],
         control_options: Mapping[str, str] = {},
         derive_control_options: DeriveControlOptions | None = None,
+        derive_operation_dispatcher: DeriveOperationDispatcher | None = None,
         host_services: Mapping[str, object] = {},
         _private_root_fd: int | None = None,
     ) -> None:
@@ -333,6 +351,10 @@ class ChildSessionService:
             or (
                 derive_control_options is not None
                 and not callable(derive_control_options)
+            )
+            or (
+                derive_operation_dispatcher is not None
+                and not callable(derive_operation_dispatcher)
             )
             or (
                 _private_root_fd is not None
@@ -362,6 +384,7 @@ class ChildSessionService:
             raise ChildSessionError("child service construction is invalid") from None
         self._control_options = MappingProxyType(options)
         self._derive_options = derive_control_options
+        self._derive_operation_dispatcher = derive_operation_dispatcher
         self._host_services = MappingProxyType(services)
         self._private_root_fd = -1
         self._children_root_fd = -1
@@ -542,6 +565,40 @@ class ChildSessionService:
                     child_authority=authority,
                     generation=binding.generation,
                 )
+            factory_binding = self._factories.select(
+                self._plan.control_binding.control_plane_id,
+                self._plan.control_binding.version,
+            )
+            operation_manager: OperationDispatcher | None = None
+            child_host_services: Mapping[str, object] = self._host_services
+            if "operations-v1" in factory_binding.capabilities:
+                journal = FileCanonicalJournal.open_at(
+                    root.fd, root.path, binding.session_id
+                )
+                if journal.position == 0:
+                    system = journal.append(
+                        0,
+                        JournalRecord.system_bound(
+                            system_id=self._plan.system_id,
+                            system_version=self._plan.version,
+                        ),
+                    )
+                    journal.append(
+                        system.position,
+                        JournalRecord.authority_bound(
+                            authority_id=authority.authority_id,
+                            authority_revision=authority.revision,
+                        ),
+                    )
+                operation_manager = self._derive_child_operation_dispatcher(
+                    authority=authority,
+                    journal=journal,
+                    session_id=binding.session_id,
+                    generation=binding.generation,
+                )
+                child_host_services_map = dict(self._host_services)
+                child_host_services_map["operation-dispatcher"] = operation_manager
+                child_host_services = MappingProxyType(child_host_services_map)
             context = ControlPlaneFactoryContext(
                 system_id=self._plan.system_id,
                 system_version=self._plan.version,
@@ -550,12 +607,9 @@ class ChildSessionService:
                 private_root=root.path,
                 options=options,
                 authority=authority,
-                host_services=self._host_services,
+                host_services=child_host_services,
             )
-            factory = self._factories.select(
-                self._plan.control_binding.control_plane_id,
-                self._plan.control_binding.version,
-            ).factory
+            factory = factory_binding.factory
             client_executor = _factory_accepts_client(self._executor_factory)
             nested_children: ChildSessionService | None = None
             executor: ActionExecutor | None = None
@@ -570,16 +624,18 @@ class ChildSessionService:
                     clock_ms=self._clock_ms,
                     control_options=self._control_options,
                     derive_control_options=self._derive_options,
-                    host_services=self._host_services,
+                    derive_operation_dispatcher=self._derive_operation_dispatcher,
+                    host_services=child_host_services,
                     _private_root_fd=root.fd,
                 )
                 legacy_factory = cast(
                     LegacyChildActionExecutorFactory, self._executor_factory
                 )
                 executor = legacy_factory(authority, nested_children)
-            journal = FileCanonicalJournal.open_at(
-                root.fd, root.path, binding.session_id
-            )
+            if journal is None:
+                journal = FileCanonicalJournal.open_at(
+                    root.fd, root.path, binding.session_id
+                )
             self.persist_phase(child_root=root, phase="provider-create-started")
             fenced = True
             client = factory(context)
@@ -605,7 +661,15 @@ class ChildSessionService:
                     clock_ms=self._clock_ms,
                     control_options=self._control_options,
                     derive_control_options=self._derive_options,
-                    host_services=nested_services,
+                    derive_operation_dispatcher=self._derive_operation_dispatcher,
+                    host_services={
+                        **nested_services,
+                        **(
+                            {"operation-dispatcher": operation_manager}
+                            if operation_manager is not None
+                            else {}
+                        ),
+                    },
                     _private_root_fd=root.fd,
                 )
             if executor is None:
@@ -628,6 +692,7 @@ class ChildSessionService:
                 clock_ms=self._clock_ms,
                 cancellation_signal=signal,
                 child_service=nested_children,
+                operation_manager=cast("OperationManager | None", operation_manager),
             )
             journal = None
             runtime.host = host
@@ -762,6 +827,57 @@ class ChildSessionService:
                         binding.child_id, "uncertain", binding.action_id
                     )
             raise _uncertain() from None
+
+    def _derive_child_operation_dispatcher(
+        self,
+        *,
+        authority: AuthorityEnvelope,
+        journal: CanonicalJournal,
+        session_id: str,
+        generation: int,
+    ) -> OperationDispatcher:
+        deriver = self._derive_operation_dispatcher
+        if deriver is None:
+            raise ChildSessionError("child operation dispatcher is unavailable")
+        try:
+            dispatcher = deriver(
+                child_authority=authority,
+                child_journal=journal,
+                child_session_id=session_id,
+                generation=generation,
+            )
+            dispatcher_session_id = object.__getattribute__(
+                dispatcher, "session_id"
+            )
+            dispatcher_generation = object.__getattribute__(
+                dispatcher, "generation"
+            )
+            dispatcher_authority_id = object.__getattribute__(
+                dispatcher, "authority_id"
+            )
+            dispatcher_authority_revision = object.__getattribute__(
+                dispatcher, "authority_revision"
+            )
+            execute = object.__getattribute__(dispatcher, "execute")
+            cancel = object.__getattribute__(dispatcher, "cancel")
+            reconcile = object.__getattribute__(dispatcher, "reconcile")
+            if (
+                dispatcher_session_id != session_id
+                or type(dispatcher_generation) is not int
+                or dispatcher_generation != generation
+                or dispatcher_authority_id != authority.authority_id
+                or type(dispatcher_authority_revision) is not int
+                or dispatcher_authority_revision != authority.revision
+                or not all(callable(value) for value in (execute, cancel, reconcile))
+            ):
+                raise ValueError
+            return cast("OperationDispatcher", dispatcher)
+        except ChildSessionError:
+            raise
+        except Exception:
+            raise ChildSessionError(
+                "child operation dispatcher is unavailable"
+            ) from None
 
     async def _attach_runtime(self, child_id: str, runtime: _ChildRuntime) -> None:
         """Retain a created provider before any later fallible construction."""

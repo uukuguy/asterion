@@ -33,7 +33,7 @@ from asterion.control.children import ChildSessionService
 from asterion.control.execution import ActionExecutionFailure, ActionExecutionReceipt
 from asterion.control.factory import ControlPlaneFactoryRegistry
 from asterion.control.host import ControlCommand, ControlEvent, ControlPlaneClient
-from asterion.control.journal import FileCanonicalJournal, JournalCursor
+from asterion.control.journal import CanonicalJournal, FileCanonicalJournal, JournalCursor
 from asterion.control.manager import ControlHost, ControlHostTransportError
 from asterion.control.parity import validate_parity_ledger
 from asterion.control.parity_testing import ParityScenarioRegistry
@@ -54,6 +54,7 @@ from asterion.control.providers.prime.process import (
 )
 from asterion.control.providers.prime.system_actions import PrimeSystemActionService
 from asterion.control.system import AgentSystemPlan, resolve_agent_system
+from asterion.operation.manager import OperationManager
 from asterion.control.providers.prime.parity_testing import (
     PRIME_SESSION_CONTEXT_SCENARIO_IDS,
     PROVEN_PHASE1_PARITY_SCENARIO_IDS,
@@ -73,6 +74,7 @@ from tests.test_control_authority import _envelope
 from tests.test_control_pathlight import _opaque_id
 from tests.test_prime_control_factory import make_context, prepare_paths
 from tests.test_control_system import _application, _manifest, _provider
+from tests.test_operation_manager import Resolver, Service, Store
 
 EXPECTED_IDS = (
     "prime-loop-application",
@@ -611,6 +613,10 @@ async def _run_python_prime_scenario(
                 "maxControllerTokens": 100,
                 "maxTurns": 1,
                 "model": "provider-free-model",
+                "operationHost": {
+                    "socketPath": str(root / "prime-operation.sock"),
+                    "token": "a" * 64,
+                },
                 "portfolio": [
                     {
                         "kind": "application",
@@ -752,6 +758,28 @@ async def _run_python_prime_scenario(
                     generation=generation,
                 )
 
+            child_operation_managers: list[OperationManager] = []
+
+            def derive_child_dispatcher(
+                *,
+                child_authority: AuthorityEnvelope,
+                child_journal: CanonicalJournal,
+                child_session_id: str,
+                generation: int,
+            ) -> OperationManager:
+                manager = OperationManager(
+                    authority=AuthorityLedger(child_authority),
+                    journal=child_journal,
+                    resolver=Resolver(),
+                    private_store=Store(),
+                    services={"operation.auth": Service()},
+                    now_ms=lambda: 1_000,
+                    session_id=child_session_id,
+                    generation=generation,
+                )
+                child_operation_managers.append(manager)
+                return manager
+
             children = ChildSessionService(
                 plan=plan,
                 authority=authority,
@@ -762,6 +790,7 @@ async def _run_python_prime_scenario(
                 clock_ms=lambda: 1_000,
                 control_options=common_options,
                 derive_control_options=derive_child_options,
+                derive_operation_dispatcher=derive_child_dispatcher,
                 host_services={
                     "ecosystem-materializer": _UnusedEcosystemMaterializer(),
                     "ecosystem-source-store": _UnusedEcosystemSourceStore(),
@@ -898,7 +927,9 @@ async def _run_python_prime_scenario(
                 if scenario_id == "prime-loop-checkpoint":
                     checkpoint_deadline = asyncio.get_running_loop().time() + 5
                     while "checkpoint.created" not in {
-                        entry.record.payload["event"]["type"]
+                        cast(
+                            Mapping[str, object], entry.record.payload["event"]
+                        )["type"]
                         for entry in journal.replay(JournalCursor(0))
                         if entry.record.kind == "event.accepted"
                     }:

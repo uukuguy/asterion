@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
+from unittest import mock
 
 from asterion.control.authority import (
     AuthorityEnvelope,
@@ -19,6 +20,7 @@ from asterion.control.authority import (
     PortfolioGrant,
 )
 from asterion.control.children import (
+    ChildActionExecutorFactory,
     ChildSessionError,
     ChildSessionService,
     ChildSessionStatus,
@@ -40,6 +42,7 @@ from asterion.control.host import (
 )
 from asterion.control.journal import FileCanonicalJournal
 from asterion.control.manager import ControlHost, ControlHostError
+from asterion.operation.protocol import OperationReceipt, OperationTransaction
 from asterion.control.system import AgentSystemPlan
 from asterion.runtime.host import CancellationSignal
 from tests.test_control_application_executor import _executor as _application_executor
@@ -89,6 +92,38 @@ class ChildWorkExecutor:
                 cost_micros=3,
             ),
         )
+
+
+class ChildOperationDispatcher:
+    """Minimal identity-bound dispatcher fixture for child composition tests."""
+
+    def __init__(
+        self,
+        *,
+        session_id: str = "child-session-child-1",
+        generation: int = 1,
+        authority_id: str = "child:child-1",
+        authority_revision: int = 1,
+    ) -> None:
+        self.session_id = session_id
+        self.generation = generation
+        self.authority_id = authority_id
+        self.authority_revision = authority_revision
+        self.calls: list[str] = []
+
+    async def execute(self, transaction: OperationTransaction) -> OperationReceipt:
+        self.calls.append(f"execute:{transaction.operation_id}")
+        raise AssertionError("child composition fixture must not execute operations")
+
+    async def cancel(
+        self, operation_id: str, *, authority_revision: int
+    ) -> OperationReceipt:
+        self.calls.append(f"cancel:{operation_id}:{authority_revision}")
+        raise AssertionError("child composition fixture must not cancel operations")
+
+    async def reconcile(self, transaction: OperationTransaction) -> OperationReceipt:
+        self.calls.append(f"reconcile:{transaction.operation_id}")
+        raise AssertionError("child composition fixture must not reconcile operations")
 
 
 class WaitingChildClient:
@@ -348,6 +383,38 @@ def _registry(
             ),
         )
     )
+
+
+def _operations_registry(
+    audit: list[str],
+    clients: list[WaitingChildClient],
+    contexts: list[object],
+) -> ControlPlaneFactoryRegistry:
+    base = _control_factories([]).select("fake.control", "1.0.0")
+
+    def factory(context: object) -> WaitingChildClient:
+        audit.append("child.provider.create")
+        contexts.append(context)
+        client = WaitingChildClient(
+            replace(
+                base.manifest,
+                capabilities=tuple(sorted((*base.capabilities, "operations-v1"))),
+            ),
+            audit,
+        )
+        clients.append(client)
+        return client
+
+    binding = replace(
+        base,
+        capabilities=tuple(sorted((*base.capabilities, "operations-v1"))),
+        factory=factory,
+    )
+    return ControlPlaneFactoryRegistry((binding,))
+
+
+def _operations_plan(root: Path, binding: ControlPlaneFactoryBinding) -> AgentSystemPlan:
+    return replace(_plan(root), control_binding=binding)
 
 
 class RecursiveChildClient:
@@ -647,6 +714,220 @@ class TestChildAuthority(unittest.TestCase):
 
 
 class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
+    async def test_operations_child_uses_one_derived_dispatcher_for_factory_and_host(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            contexts: list[object] = []
+            clients: list[WaitingChildClient] = []
+            registry = _operations_registry(audit, clients, contexts)
+            binding = registry.select("fake.control", "1.0.0")
+            parent_dispatcher = ChildOperationDispatcher(
+                session_id="session-1", authority_id="authority-1"
+            )
+            child_dispatcher = ChildOperationDispatcher()
+            derived: list[tuple[AuthorityEnvelope, object, str, int]] = []
+            host_arguments: list[Mapping[str, object]] = []
+
+            def derive_dispatcher(
+                *,
+                child_authority: AuthorityEnvelope,
+                child_journal: object,
+                child_session_id: str,
+                generation: int,
+            ) -> ChildOperationDispatcher:
+                audit.append("child.dispatcher.derive")
+                derived.append(
+                    (child_authority, child_journal, child_session_id, generation)
+                )
+                return child_dispatcher
+
+            service = ChildSessionService(
+                plan=_operations_plan(root, binding),
+                authority=replace(_child_envelope(), max_recursion_depth=2),
+                control_factories=registry,
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(
+                    audit
+                ),
+                clock_ms=lambda: 1_000,
+                host_services={"operation-dispatcher": parent_dispatcher},
+                derive_operation_dispatcher=derive_dispatcher,
+            )
+            from asterion.control import children as children_module
+
+            original_host = children_module.ControlHost
+
+            def capture_host(**kwargs: object) -> object:
+                host_arguments.append(kwargs)
+                return original_host(**kwargs)  # pyright: ignore[reportArgumentType]
+
+            with mock.patch.object(
+                children_module, "ControlHost", side_effect=capture_host
+            ):
+                receipt = await service.spawn(_child_proposal(), MutableSignal())
+
+            self.assertEqual(receipt.action_id, "spawn-action-1")
+            self.assertEqual(len(derived), 1)
+            child_authority, child_journal, child_session_id, generation = derived[0]
+            self.assertIsInstance(child_authority, AuthorityEnvelope)
+            self.assertIsInstance(child_journal, FileCanonicalJournal)
+            self.assertEqual(child_session_id, "child-session-child-1")
+            self.assertEqual(generation, 1)
+            self.assertEqual(len(contexts), 1)
+            context = contexts[0]
+            context_services = cast(
+                Mapping[str, object], getattr(context, "host_services")
+            )
+            self.assertIs(
+                context_services["operation-dispatcher"],
+                child_dispatcher,
+            )
+            self.assertIsNot(
+                context_services["operation-dispatcher"],
+                parent_dispatcher,
+            )
+            self.assertEqual(len(host_arguments), 1)
+            self.assertIs(host_arguments[0]["journal"], child_journal)
+            self.assertIs(host_arguments[0]["operation_manager"], child_dispatcher)
+            self.assertLess(
+                audit.index("child.dispatcher.derive"),
+                audit.index("child.provider.create"),
+            )
+
+    async def test_operations_child_without_deriver_fails_before_provider_create(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            contexts: list[object] = []
+            clients: list[WaitingChildClient] = []
+            registry = _operations_registry(audit, clients, contexts)
+            binding = registry.select("fake.control", "1.0.0")
+            service = ChildSessionService(
+                plan=_operations_plan(root, binding),
+                authority=replace(_child_envelope(), max_recursion_depth=2),
+                control_factories=registry,
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(
+                    audit
+                ),
+                clock_ms=lambda: 1_000,
+                host_services={
+                    "operation-dispatcher": ChildOperationDispatcher(
+                        session_id="session-1", authority_id="authority-1"
+                    )
+                },
+            )
+
+            with self.assertRaises(ChildSessionError):
+                await service.spawn(_child_proposal(), MutableSignal())
+
+            self.assertEqual(audit, [])
+            self.assertEqual(contexts, [])
+            self.assertEqual(clients, [])
+            self.assertFalse(
+                (root / "children" / "child-1" / "phase.json").exists()
+            )
+
+    async def test_operations_child_rejects_wrong_derived_identity_before_provider(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            contexts: list[object] = []
+            clients: list[WaitingChildClient] = []
+            registry = _operations_registry(audit, clients, contexts)
+            binding = registry.select("fake.control", "1.0.0")
+
+            def derive_dispatcher(
+                *,
+                child_authority: AuthorityEnvelope,
+                child_journal: object,
+                child_session_id: str,
+                generation: int,
+            ) -> ChildOperationDispatcher:
+                del child_authority, child_journal, child_session_id, generation
+                return ChildOperationDispatcher(session_id="hostile-session")
+
+            service = ChildSessionService(
+                plan=_operations_plan(root, binding),
+                authority=replace(_child_envelope(), max_recursion_depth=2),
+                control_factories=registry,
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(
+                    audit
+                ),
+                clock_ms=lambda: 1_000,
+                host_services={
+                    "operation-dispatcher": ChildOperationDispatcher(
+                        session_id="session-1", authority_id="authority-1"
+                    )
+                },
+                derive_operation_dispatcher=derive_dispatcher,
+            )
+
+            with self.assertRaises(ChildSessionError):
+                await service.spawn(_child_proposal(), MutableSignal())
+
+            self.assertEqual(audit, [])
+            self.assertEqual(contexts, [])
+            self.assertEqual(clients, [])
+            self.assertFalse(
+                (root / "children" / "child-1" / "phase.json").exists()
+            )
+
+    async def test_non_operations_child_preserves_parent_services_without_deriving(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            contexts: list[object] = []
+            base = _control_factories([]).select("fake.control", "1.0.0")
+
+            def factory(context: ControlPlaneFactoryContext) -> WaitingChildClient:
+                audit.append("child.provider.create")
+                contexts.append(context)
+                return WaitingChildClient(base.manifest, audit)
+
+            binding = replace(base, factory=factory)
+            parent_dispatcher = ChildOperationDispatcher(
+                session_id="session-1", authority_id="authority-1"
+            )
+            derived_calls: list[object] = []
+
+            def derive_dispatcher(**kwargs: object) -> ChildOperationDispatcher:
+                derived_calls.append(kwargs)
+                raise AssertionError("non-operation provider derived a dispatcher")
+
+            service = ChildSessionService(
+                plan=replace(_plan(root), control_binding=binding),
+                authority=replace(_child_envelope(), max_recursion_depth=2),
+                control_factories=ControlPlaneFactoryRegistry((binding,)),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(
+                    audit
+                ),
+                clock_ms=lambda: 1_000,
+                host_services={"operation-dispatcher": parent_dispatcher},
+                derive_operation_dispatcher=derive_dispatcher,
+            )
+
+            await service.spawn(_child_proposal(), MutableSignal())
+
+            self.assertEqual(derived_calls, [])
+            self.assertEqual(len(contexts), 1)
+            services = cast(Mapping[str, object], getattr(contexts[0], "host_services"))
+            self.assertIs(services["operation-dispatcher"], parent_dispatcher)
     async def test_cancelled_duplicate_waiter_does_not_cancel_shared_spawn(
         self,
     ) -> None:
@@ -786,6 +1067,201 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(clients["child-1"].closed)
             self.assertTrue(clients["grandchild-1"].closed)
+
+    async def test_nested_operations_children_derive_distinct_dispatchers_per_level(
+        self,
+    ) -> None:
+        """Each nested operations host gets its own authority-bound dispatcher."""
+
+        for factory_style in ("legacy", "client-aware"):
+            with self.subTest(factory_style=factory_style):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    audit: list[str] = []
+                    clients: dict[str, RecursiveChildClient] = {}
+                    contexts: dict[str, ControlPlaneFactoryContext] = {}
+                    host_arguments: dict[str, Mapping[str, object]] = {}
+                    derived: list[
+                        tuple[
+                            AuthorityEnvelope,
+                            FileCanonicalJournal,
+                            str,
+                            int,
+                            ChildOperationDispatcher,
+                        ]
+                    ] = []
+                    base = _control_factories([]).select(
+                        "fake.control", "1.0.0"
+                    )
+                    capabilities = tuple(
+                        sorted((*base.capabilities, "operations-v1"))
+                    )
+                    manifest = replace(
+                        base.manifest, capabilities=capabilities
+                    )
+
+                    def factory(
+                        context: ControlPlaneFactoryContext,
+                    ) -> RecursiveChildClient:
+                        label = context.private_root.name
+                        audit.append(f"{label}.provider.create")
+                        contexts[label] = context
+                        client = RecursiveChildClient(
+                            manifest,
+                            audit,
+                            label,
+                            mode=(
+                                "spawn-grandchild"
+                                if label == "child-1"
+                                else "work"
+                            ),
+                        )
+                        clients[label] = client
+                        return client
+
+                    binding = replace(
+                        base, capabilities=capabilities, factory=factory
+                    )
+                    parent_dispatcher = ChildOperationDispatcher(
+                        session_id="session-1",
+                        generation=1,
+                        authority_id="authority-1",
+                        authority_revision=1,
+                    )
+
+                    def derive_dispatcher(
+                        *,
+                        child_authority: AuthorityEnvelope,
+                        child_journal: object,
+                        child_session_id: str,
+                        generation: int,
+                    ) -> ChildOperationDispatcher:
+                        if not isinstance(child_journal, FileCanonicalJournal):
+                            raise AssertionError("child journal is not file-backed")
+                        dispatcher = ChildOperationDispatcher(
+                            session_id=child_session_id,
+                            generation=generation,
+                            authority_id=child_authority.authority_id,
+                            authority_revision=child_authority.revision,
+                        )
+                        audit.append(f"{child_session_id}.dispatcher.derive")
+                        derived.append(
+                            (
+                                child_authority,
+                                child_journal,
+                                child_session_id,
+                                generation,
+                                dispatcher,
+                            )
+                        )
+                        return dispatcher
+
+                    executor_factory: ChildActionExecutorFactory
+                    if factory_style == "legacy":
+
+                        def legacy_executor_factory(
+                            authority: AuthorityEnvelope,
+                            children: ChildSessionService,
+                        ) -> RecursiveRouterExecutor:
+                            del authority
+                            return RecursiveRouterExecutor(audit, children)
+
+                        executor_factory = legacy_executor_factory
+
+                    else:
+
+                        def client_aware_executor_factory(
+                            authority: AuthorityEnvelope,
+                            children: ChildSessionService,
+                            client: ControlPlaneClient,
+                        ) -> RecursiveRouterExecutor:
+                            del authority, client
+                            return RecursiveRouterExecutor(audit, children)
+
+                        executor_factory = client_aware_executor_factory
+
+                    service = ChildSessionService(
+                        plan=_operations_plan(root, binding),
+                        authority=replace(
+                            _child_envelope(), max_recursion_depth=2
+                        ),
+                        control_factories=ControlPlaneFactoryRegistry((binding,)),
+                        private_root=root,
+                        content=RecordingResolver(),
+                        child_action_executor_factory=executor_factory,
+                        clock_ms=lambda: 1_000,
+                        host_services={"operation-dispatcher": parent_dispatcher},
+                        derive_operation_dispatcher=derive_dispatcher,
+                    )
+
+                    from asterion.control import children as children_module
+
+                    original_host = children_module.ControlHost
+
+                    def capture_host(**kwargs: object) -> object:
+                        session_id = kwargs.get("session_id")
+                        if not isinstance(session_id, str):
+                            raise AssertionError("host session identity is invalid")
+                        host_arguments[session_id] = kwargs
+                        return original_host(**kwargs)  # pyright: ignore[reportArgumentType]
+
+                    try:
+                        with mock.patch.object(
+                            children_module, "ControlHost", side_effect=capture_host
+                        ):
+                            receipt = await asyncio.wait_for(
+                                service.spawn(_child_proposal(), MutableSignal()),
+                                timeout=1,
+                            )
+                    finally:
+                        await service.close()
+
+                    self.assertEqual(receipt.action_id, "spawn-action-1")
+                    self.assertEqual(
+                        [entry[2] for entry in derived],
+                        [
+                            "child-session-child-1",
+                            "child-session-grandchild-1",
+                        ],
+                    )
+                    self.assertEqual(
+                        [
+                            (entry[0].authority_id, entry[0].revision, entry[3])
+                            for entry in derived
+                        ],
+                        [
+                            ("child:child-1", 1, 1),
+                            ("child:grandchild-1", 1, 1),
+                        ],
+                    )
+                    self.assertIsNot(derived[0][1], derived[1][1])
+
+                    for authority, journal, session_id, _generation, dispatcher in derived:
+                        label = session_id.removeprefix("child-session-")
+                        context_services = contexts[label].host_services
+                        host = host_arguments[session_id]
+                        self.assertIs(
+                            context_services["operation-dispatcher"], dispatcher
+                        )
+                        self.assertIs(host["operation_manager"], dispatcher)
+                        self.assertIs(host["journal"], journal)
+                        self.assertIsNot(dispatcher, parent_dispatcher)
+                        self.assertEqual(dispatcher.authority_id, authority.authority_id)
+                        self.assertEqual(dispatcher.session_id, session_id)
+                        self.assertEqual(dispatcher.generation, 1)
+                        self.assertEqual(
+                            dispatcher.authority_revision, authority.revision
+                        )
+                        self.assertLess(
+                            audit.index(f"{session_id}.dispatcher.derive"),
+                            audit.index(f"{label}.provider.create"),
+                        )
+                    self.assertIsNot(
+                        contexts["child-1"].host_services["operation-dispatcher"],
+                        contexts["grandchild-1"].host_services[
+                            "operation-dispatcher"
+                        ],
+                    )
 
     async def test_nested_concurrency_rejects_second_grandchild_before_provider_create(
         self,
