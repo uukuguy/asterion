@@ -178,6 +178,7 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
         )
         writer.write(frame + extra)
         await writer.drain()
+        writer.write_eof()
         response = await reader.readline()
         writer.close()
         await writer.wait_closed()
@@ -283,6 +284,38 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
         )
         oversized = b"{" + b"x" * 70_000 + b"}\n"
         self.assertIsNone(await self._exchange(oversized))
+        self.assertEqual(self.dispatcher.calls, [])
+
+    async def test_request_requires_half_close_and_rejects_delayed_trailing_data(
+        self,
+    ) -> None:
+        await self.server.start()
+        socket_path = str(self.server.descriptor["socketPath"])
+
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        writer.write(
+            json.dumps(_request("execute", "request-open")).encode() + b"\n"
+        )
+        await writer.drain()
+        response = json.loads((await reader.readline()).decode())
+        self.assertEqual(response["code"], "operation-host-failed")
+        writer.close()
+        await writer.wait_closed()
+        self.assertEqual(self.dispatcher.calls, [])
+
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        writer.write(
+            json.dumps(_request("execute", "request-delayed")).encode() + b"\n"
+        )
+        await writer.drain()
+        await asyncio.sleep(0.02)
+        writer.write(b"{}\n")
+        await writer.drain()
+        writer.write_eof()
+        response = json.loads((await reader.readline()).decode())
+        self.assertEqual(response["code"], "operation-host-failed")
+        writer.close()
+        await writer.wait_closed()
         self.assertEqual(self.dispatcher.calls, [])
 
     async def test_timeout_and_hostile_failures_return_only_safe_error(self) -> None:
@@ -421,6 +454,7 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
         )
         writer.write(json.dumps(request).encode() + b"\n")
         await writer.drain()
+        writer.write_eof()
         response = await reader.readline()
         writer.close()
         await writer.wait_closed()

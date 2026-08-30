@@ -119,8 +119,10 @@ through commit `8b7fb18`.
 
   Expected: FAIL on the missing module, not on fixture syntax.
 
-- [ ] **Step 2 — GREEN:** Implement a one-line, size-capped Unix server.  Bind
-  the four dispatcher identity values at construction, snapshot the three
+- [ ] **Step 2 — GREEN:** Implement a one-line, size-capped Unix server.  Require
+  request write-side EOF after the line so extra or delayed trailing data is
+  rejected deterministically before dispatch.  Bind the four dispatcher
+  identity values at construction, snapshot the three
   methods, create the socket under the resolved private root with mode `0600`,
   validate `OperationTransaction`/`OperationReceipt` canonically, and emit only
   the fixed error response.  Preserve `asyncio.CancelledError`; redact every
@@ -181,9 +183,11 @@ through commit `8b7fb18`.
 
   Expected: build or test FAIL because the client is absent.
 
-- [ ] **Step 2 — GREEN client:** Implement the client with `node:net`, the
-  descriptor timeout, a fixed frame cap, exact key validation, canonical
-  operation validators, and safe `PrimeOperationError` only.
+- [ ] **Step 2 — GREEN client:** Implement the client with `node:net`; write one
+  line with `socket.end(frame)` so the write side closes before awaiting the
+  response.  Enforce the descriptor timeout, a fixed frame cap, exact key
+  validation, canonical operation validators, and safe `PrimeOperationError`
+  only.
 
 - [ ] **Step 3 — RED production composition:** Add descriptor tests requiring
   exact `operationHost`, rejecting missing/extra/invalid path/token values, and

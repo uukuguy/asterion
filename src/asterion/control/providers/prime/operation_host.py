@@ -24,7 +24,6 @@ from asterion.operation.services import OperationDispatcher
 
 PRIME_OPERATION_HOST_PROTOCOL = "asterion.prime-operation-host/v1"
 _MAX_FRAME_BYTES = 64 * 1024
-_TRAILING_FRAME_GRACE_SECONDS = 0.005
 _TOKEN = re.compile(r"^[0-9a-f]{64}$")
 _TRANSACTION_REQUEST_FIELDS = {
     "protocol",
@@ -199,15 +198,9 @@ class PrimeOperationHostServer:
             request_id = _extract_request_id(frame)
             if not frame or len(frame) > _MAX_FRAME_BYTES:
                 raise PrimeOperationHostError()
-            try:
-                trailing = await asyncio.wait_for(
-                    reader.read(1),
-                    timeout=min(
-                        self._request_timeout, _TRAILING_FRAME_GRACE_SECONDS
-                    ),
-                )
-            except TimeoutError:
-                trailing = b""
+            trailing = await asyncio.wait_for(
+                reader.read(1), timeout=self._request_timeout
+            )
             if trailing:
                 raise PrimeOperationHostError()
             request = _decode_frame(frame)

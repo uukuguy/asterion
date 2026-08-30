@@ -220,9 +220,12 @@ protocol, id, type="error", code="operation-host-failed"
 ```
 
 Frames are one JSON line, body-free, size-capped, deadline-bound, and accepted
-only over the generated Unix socket.  Unknown keys, duplicate or malformed
-identities, invalid tokens, oversized frames, extra lines, trailing data,
-invalid receipts, and timeouts fail closed.  There is no retry.
+only over the generated Unix socket.  The requester must half-close its write
+side immediately after that line, while retaining the read side for the one
+response; EOF is the deterministic frame terminator that lets the server reject
+extra lines and delayed trailing data before dispatch.  Unknown keys, duplicate
+or malformed identities, invalid tokens, oversized frames, extra lines,
+trailing data, invalid receipts, and timeouts fail closed.  There is no retry.
 
 ## Python Callback Server
 
@@ -275,9 +278,10 @@ before returning a safe error.
 
 Add a `PrimeOperationHostClient` implementing the existing
 `PrimeOperationDispatcher` interface.  It connects to the one descriptor-bound
-socket per call, writes one exact frame, enforces the descriptor timeout and
-frame cap, validates one exact response, and closes the connection.  It never
-retries and never reads a request body.
+socket per call, writes one exact frame, half-closes the write side, enforces the
+descriptor timeout and frame cap, validates one exact response on the retained
+read side, and closes the connection.  It never retries and never reads a
+request body.
 
 `validateDescriptor()` accepts `operationHost` only through the same recursive
 optional-field technique used for `daemonLifecycle`, with exact keys and the
