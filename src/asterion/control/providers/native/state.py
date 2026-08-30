@@ -58,7 +58,11 @@ def session_bound_record(
         "authority_id": authority_id,
         "authority_revision": authority_revision,
     }
-    record = NativeRecord(f"session-bound:{session_id}:{generation}", "session.bound", payload)
+    record = NativeRecord(
+        _canonical_record_id("session.bound", payload),
+        "session.bound",
+        payload,
+    )
     _validate_record(record)
     return record
 
@@ -67,13 +71,12 @@ def authority_synced_record(
     authority_revision: int, budget: RemainingBudget
 ) -> NativeRecord:
     budget_payload = _remaining_budget_mapping(budget)
-    budget_digest = _digest(budget_payload)
     payload = {
         "authority_revision": authority_revision,
         "budget": budget_payload,
     }
     record = NativeRecord(
-        f"authority-synced:{authority_revision}:{budget_digest}",
+        _canonical_record_id("authority.synced", payload),
         "authority.synced",
         payload,
     )
@@ -91,7 +94,7 @@ def command_committed_record(
         "events": tuple(event.to_mapping() for event in events),
     }
     record = NativeRecord(
-        f"command:{command.command_id}",
+        _canonical_record_id("command.committed", payload),
         "command.committed",
         payload,
     )
@@ -101,7 +104,11 @@ def command_committed_record(
 
 def turn_started_record(request: NativeTurnRequest) -> NativeRecord:
     payload = {"request": _turn_request_mapping(request)}
-    record = NativeRecord(f"turn-started:{request.turn_id}", "turn.started", payload)
+    record = NativeRecord(
+        _canonical_record_id("turn.started", payload),
+        "turn.started",
+        payload,
+    )
     _validate_record(record)
     return record
 
@@ -121,7 +128,11 @@ def turn_committed_record(
         "usage": _usage_mapping(result.usage),
         "adapter_invoked": adapter_invoked,
     }
-    record = NativeRecord(f"turn-committed:{result.turn_id}", "turn.committed", payload)
+    record = NativeRecord(
+        _canonical_record_id("turn.committed", payload),
+        "turn.committed",
+        payload,
+    )
     _validate_record(record)
     return record
 
@@ -135,7 +146,7 @@ def turn_recovery_required_record(
         "events": tuple(event.to_mapping() for event in events),
     }
     record = NativeRecord(
-        f"turn-recovery-required:{turn_id}",
+        _canonical_record_id("turn.recovery-required", payload),
         "turn.recovery-required",
         payload,
     )
@@ -151,7 +162,7 @@ def checkpoint_committed_record(
         "event": event.to_mapping(),
     }
     record = NativeRecord(
-        f"checkpoint:{metadata.capsule_id}:{metadata.covered_position}",
+        _canonical_record_id("checkpoint.committed", payload),
         "checkpoint.committed",
         payload,
     )
@@ -184,6 +195,8 @@ def reduce_native_entries(entries: Iterable[NativeEntry]) -> NativeControllerSta
             previous_digest = entry.digest
             continue
         _validate_record(entry.record)
+        if state.terminal_event_id is not None:
+            raise NativeStateError("native terminal state rejects new records")
         state = _apply_record(state, entry)
         seen_records[entry.record.record_id] = record_digest
         previous_digest = entry.digest
@@ -265,7 +278,7 @@ def _apply_command_committed(
 
     command_digests = dict(state.command_digests)
     previous = command_digests.get(command.command_id)
-    if previous is not None and previous != command_digest:
+    if previous is not None:
         raise NativeStateError("native command identity conflicts")
     command_digests[command.command_id] = command_digest
 
@@ -328,6 +341,9 @@ def _apply_turn_committed(
         raise NativeStateError("native pending turn commit requires adapter invocation")
     if state.pending_turn is not None and state.pending_turn.turn_id != turn_id:
         raise NativeStateError("native pending turn identity mismatches")
+    _validate_usage_fits_budget(usage, state.remaining_budget)
+    if state.pending_turn is not None:
+        _validate_usage_fits_budget(usage, state.pending_turn.budget)
 
     next_state = replace(state, usage=_add_usage(state.usage, usage))
     next_state = _apply_events(
@@ -529,6 +545,13 @@ def _validate_turn_request(
         raise NativeStateError("native turn request identity mismatches")
     if any(command_id not in state.command_digests for command_id in request.causal_command_ids):
         raise NativeStateError("native turn references unknown command")
+    if (
+        state.remaining_budget is None
+        or state.budget_authority_revision is None
+        or state.budget_authority_revision != request.authority_revision
+        or request.budget != state.remaining_budget
+    ):
+        raise NativeStateError("native turn request budget mismatches authority")
     pending_input_digests = {item.command_digest: item for item in state.pending_inputs}
     pending_action_digests = {
         item.command_digest: item for item in state.pending_action_results
@@ -585,19 +608,10 @@ def _validate_record(record: NativeRecord) -> None:
             _require_semver(record.payload["checkpoint_version"])
             _require_identifier(record.payload["provider_id"])
             _require_identifier(record.payload["system_id"])
-            _require_record_id(
-                record,
-                f"session-bound:{record.payload['session_id']}:{record.payload['generation']}",
-            )
         elif record.kind == "authority.synced":
             _require_fields(record.payload, {"authority_revision", "budget"})
             _require_positive_int(record.payload["authority_revision"])
-            budget = _remaining_budget_from_mapping(record.payload["budget"])
-            _require_record_id(
-                record,
-                "authority-synced:"
-                f"{record.payload['authority_revision']}:{_digest(_remaining_budget_mapping(budget))}",
-            )
+            _remaining_budget_from_mapping(record.payload["budget"])
         elif record.kind == "command.committed":
             _require_fields(record.payload, {"command_digest", "command", "events"})
             _require_digest(record.payload["command_digest"])
@@ -605,11 +619,9 @@ def _validate_record(record: NativeRecord) -> None:
             if record.payload["command_digest"] != _digest(command.to_mapping()):
                 raise NativeStateError("native command digest mismatches")
             _events_from_payload(record.payload["events"])
-            _require_record_id(record, f"command:{command.command_id}")
         elif record.kind == "turn.started":
             _require_fields(record.payload, {"request"})
-            request = _turn_request_from_mapping(record.payload["request"])
-            _require_record_id(record, f"turn-started:{request.turn_id}")
+            _turn_request_from_mapping(record.payload["request"])
         elif record.kind == "turn.committed":
             _require_fields(
                 record.payload, {"turn_id", "events", "usage", "adapter_invoked"}
@@ -619,28 +631,20 @@ def _validate_record(record: NativeRecord) -> None:
                 raise NativeStateError("native adapter flag is invalid")
             _events_from_payload(record.payload["events"])
             _validate_turn_usage(_usage_from_mapping(record.payload["usage"]))
-            _require_record_id(record, f"turn-committed:{record.payload['turn_id']}")
         elif record.kind == "turn.recovery-required":
             _require_fields(record.payload, {"turn_id", "reason_code", "events"})
             _require_opaque(record.payload["turn_id"])
             _require_identifier(record.payload["reason_code"])
             _events_from_payload(record.payload["events"])
-            _require_record_id(
-                record,
-                f"turn-recovery-required:{record.payload['turn_id']}",
-            )
         elif record.kind == "checkpoint.committed":
             _require_fields(record.payload, {"metadata", "event"})
-            metadata = _metadata_from_mapping(record.payload["metadata"])
+            _metadata_from_mapping(record.payload["metadata"])
             event = ControlEvent.from_mapping(_mapping(record.payload["event"]))
             if event.type != "checkpoint.created":
                 raise NativeStateError("native checkpoint event type is invalid")
-            _require_record_id(
-                record,
-                f"checkpoint:{metadata.capsule_id}:{metadata.covered_position}",
-            )
         else:
             raise NativeStateError("native record kind is invalid")
+        _require_record_id(record, _canonical_record_id(record.kind, record.payload))
     except (TypeError, ValueError, KeyError) as exc:
         if isinstance(exc, NativeStateError):
             raise
@@ -1070,6 +1074,80 @@ def _validate_budget_bounds(value: RemainingBudget) -> None:
             raise NativeStateError("native budget exceeds safe integer range")
 
 
+def _validate_usage_fits_budget(
+    usage: BudgetUsage, budget: RemainingBudget | None
+) -> None:
+    if budget is None:
+        raise NativeStateError("native usage requires authoritative budget")
+    for field in _USAGE_FIELDS:
+        if getattr(usage, field) > getattr(budget, field):
+            raise NativeStateError("native usage exceeds authoritative budget")
+
+
 def _require_record_id(record: NativeRecord, expected: str) -> None:
     if record.record_id != expected:
         raise NativeStateError("native record identity is not canonical")
+
+
+def _canonical_record_id(kind: str, payload: Mapping[str, object]) -> str:
+    prefix = _RECORD_ID_PREFIXES.get(kind)
+    if prefix is None:
+        raise NativeStateError("native record kind is invalid")
+    return f"{prefix}:{_digest(_record_identity(kind, payload))}"
+
+
+def _record_identity(kind: str, payload: Mapping[str, object]) -> Mapping[str, object]:
+    payload_digest = _digest(payload)
+    if kind == "session.bound":
+        return {
+            "session_id": payload["session_id"],
+            "generation": payload["generation"],
+            "payload_digest": payload_digest,
+        }
+    if kind == "authority.synced":
+        return {
+            "authority_revision": payload["authority_revision"],
+            "budget_digest": _digest(_mapping(payload["budget"])),
+        }
+    if kind == "command.committed":
+        command = _mapping(payload["command"])
+        return {
+            "command_id": command["command_id"],
+            "command_digest": payload["command_digest"],
+            "payload_digest": payload_digest,
+        }
+    if kind == "turn.started":
+        request = _mapping(payload["request"])
+        return {
+            "turn_id": request["turn_id"],
+            "request_digest": _digest(request),
+        }
+    if kind == "turn.committed":
+        return {
+            "turn_id": payload["turn_id"],
+            "payload_digest": payload_digest,
+        }
+    if kind == "turn.recovery-required":
+        return {
+            "turn_id": payload["turn_id"],
+            "payload_digest": payload_digest,
+        }
+    if kind == "checkpoint.committed":
+        metadata = _mapping(payload["metadata"])
+        return {
+            "capsule_id": metadata["capsule_id"],
+            "covered_position": metadata["covered_position"],
+            "payload_digest": payload_digest,
+        }
+    raise NativeStateError("native record kind is invalid")
+
+
+_RECORD_ID_PREFIXES = {
+    "session.bound": "session-bound",
+    "authority.synced": "authority-synced",
+    "command.committed": "command",
+    "turn.started": "turn-started",
+    "turn.committed": "turn-committed",
+    "turn.recovery-required": "turn-recovery",
+    "checkpoint.committed": "checkpoint",
+}

@@ -34,6 +34,7 @@ from asterion.control.providers.native.state import (
 
 
 SESSION_ID = "session-1"
+MAX_PROTOCOL_ID = "a" * 128
 GENERATION = 1
 AUTHORITY_ID = "authority-1"
 AUTHORITY_REVISION = 1
@@ -332,6 +333,33 @@ def invalid_prefixes() -> tuple[tuple[str, tuple[NativeEntry, ...]], ...]:
     )
 
 
+def _terminal_records() -> tuple[NativeRecord, ...]:
+    return (
+        *_valid_records(),
+        turn_committed_record(
+            NativeTurnResult(
+                turn_id="turn-terminal",
+                events=(
+                    NativeEventDraft(
+                        "session.completed",
+                        {"reason_code": "done"},
+                    ),
+                ),
+                usage=_usage(),
+            ),
+            (
+                _event(
+                    "event-terminal",
+                    3,
+                    "session.completed",
+                    {"reason_code": "done"},
+                ),
+            ),
+            adapter_invoked=False,
+        ),
+    )
+
+
 class TestNativeControlModel(unittest.TestCase):
     def test_record_digest_is_canonical_and_payload_is_frozen(self) -> None:
         payload: dict[str, object] = {
@@ -574,6 +602,77 @@ class TestNativeControlModel(unittest.TestCase):
             with self.subTest(label=label), self.assertRaises(NativeStateError):
                 reduce_native_entries(entries)
 
+    def test_reducer_rejects_every_nonduplicate_record_after_terminal(self) -> None:
+        command = _input_command("command-after-terminal")
+        request = NativeTurnRequest(
+            turn_id="turn-after-terminal",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+        checkpoint_event = _event(
+            "event-checkpoint-after-terminal",
+            4,
+            "checkpoint.created",
+            {
+                "checkpoint_id": "checkpoint-after-terminal",
+                "capsule_id": "capsule-after-terminal",
+                "capsule_digest": "e" * 64,
+                "control_plane_id": "native",
+                "control_plane_version": "0.1.0",
+                "checkpoint_version": "1.0.0",
+                "covered_sequence": 3,
+                "storage_ref": "storage-after-terminal",
+            },
+        )
+        metadata = NativeCapsuleMetadata(
+            capsule_id="capsule-after-terminal",
+            capsule_digest="e" * 64,
+            control_plane_id="native",
+            control_plane_version="0.1.0",
+            checkpoint_version="1.0.0",
+            covered_position=5,
+            covered_sequence=3,
+            storage_ref="storage-after-terminal",
+        )
+        cases = (
+            ("authority", authority_synced_record(2, _budget())),
+            ("command-without-events", command_committed_record(command, ())),
+            ("turn-started", turn_started_record(request)),
+            (
+                "turn-committed",
+                turn_committed_record(
+                    NativeTurnResult("turn-after-terminal", (), _usage()),
+                    (),
+                    adapter_invoked=False,
+                ),
+            ),
+            (
+                "turn-recovery",
+                turn_recovery_required_record(
+                    "turn-after-terminal",
+                    "adapter-failed",
+                    (),
+                ),
+            ),
+            ("checkpoint", checkpoint_committed_record(metadata, checkpoint_event)),
+        )
+
+        for label, record in cases:
+            with self.subTest(label=label), self.assertRaises(NativeStateError):
+                reduce_native_entries(_chain((*_terminal_records(), record)))
+
+    def test_reducer_allows_exact_duplicate_record_replay_after_terminal(self) -> None:
+        records = _terminal_records()
+        state = reduce_native_entries(_chain((*records, records[-1])))
+
+        self.assertEqual(state.terminal_event_id, "event-terminal")
+        self.assertEqual(tuple(event.event_id for event in state.events).count("event-terminal"), 1)
+
     def test_equal_record_id_retry_is_ignored_but_conflict_is_rejected(self) -> None:
         input_command = _input_command()
         command_record = command_committed_record(input_command, ())
@@ -701,6 +800,151 @@ class TestNativeControlModel(unittest.TestCase):
         self.assertEqual(state.usage.controller_tokens, 10)
         self.assertEqual(state.usage.aggregate_tokens, 10)
         self.assertEqual(state.usage.cost_micros, 25)
+
+    def test_turn_start_requires_synced_authority_budget_and_exact_request_budget(
+        self,
+    ) -> None:
+        request = NativeTurnRequest(
+            turn_id="turn-budget",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+        missing_sync_prefix = (
+            _session_bound(),
+            command_committed_record(_session_create_command(), (_session_created(),)),
+            turn_committed_record(
+                NativeTurnResult(
+                    turn_id="turn-bootstrap",
+                    events=(
+                        NativeEventDraft(
+                            "session.running",
+                            {"reason_code": "started"},
+                        ),
+                    ),
+                    usage=_usage(),
+                ),
+                (_session_running(),),
+                adapter_invoked=False,
+            ),
+        )
+        mismatch_budget = replace(
+            request,
+            budget=_budget(controller_tokens=99, aggregate_tokens=99),
+        )
+
+        cases = (
+            ("missing-sync", (*missing_sync_prefix, turn_started_record(request))),
+            ("budget-mismatch", (*_valid_records(), turn_started_record(mismatch_budget))),
+        )
+        for label, records in cases:
+            with self.subTest(label=label), self.assertRaises(NativeStateError):
+                reduce_native_entries(_chain(records))
+
+    def test_turn_commit_usage_must_not_exceed_pending_budget_by_field(self) -> None:
+        fields = ("controller_tokens", "aggregate_tokens", "cost_micros")
+        for field in fields:
+            budget_values = {
+                "controller_tokens": 5,
+                "aggregate_tokens": 5,
+                "cost_micros": 5,
+            }
+            budget = _budget(**budget_values)
+            usage_values = {
+                "controller_tokens": 1,
+                "aggregate_tokens": 1,
+                "cost_micros": 1,
+            }
+            if field in {"controller_tokens", "aggregate_tokens"}:
+                usage_values["controller_tokens"] = 6
+                usage_values["aggregate_tokens"] = 6
+            else:
+                usage_values[field] = 6
+            request = NativeTurnRequest(
+                turn_id=f"turn-overrun-{field}",
+                session_id=SESSION_ID,
+                generation=GENERATION,
+                authority_revision=AUTHORITY_REVISION,
+                causal_command_ids=(),
+                inputs=(),
+                action_results=(),
+                budget=budget,
+            )
+            records = (
+                _session_bound(),
+                authority_synced_record(AUTHORITY_REVISION, budget),
+                command_committed_record(_session_create_command(), (_session_created(),)),
+                turn_committed_record(
+                    NativeTurnResult(
+                        turn_id="turn-bootstrap",
+                        events=(
+                            NativeEventDraft(
+                                "session.running",
+                                {"reason_code": "started"},
+                            ),
+                        ),
+                        usage=_usage(),
+                    ),
+                    (_session_running(),),
+                    adapter_invoked=False,
+                ),
+                turn_started_record(request),
+                turn_committed_record(
+                    NativeTurnResult(
+                        f"turn-overrun-{field}",
+                        (),
+                        _usage(**usage_values),
+                    ),
+                    (),
+                ),
+            )
+            with self.subTest(field=field), self.assertRaises(NativeStateError):
+                reduce_native_entries(_chain(records))
+
+    def test_turn_commit_usage_must_not_exceed_current_remaining_budget(self) -> None:
+        synced_budget = _budget(controller_tokens=10, aggregate_tokens=10, cost_micros=10)
+        reduced_budget = _budget(controller_tokens=2, aggregate_tokens=2, cost_micros=2)
+        request = NativeTurnRequest(
+            turn_id="turn-current-budget",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=synced_budget,
+        )
+        records = (
+            _session_bound(),
+            authority_synced_record(AUTHORITY_REVISION, synced_budget),
+            command_committed_record(_session_create_command(), (_session_created(),)),
+            turn_committed_record(
+                NativeTurnResult(
+                    turn_id="turn-bootstrap",
+                    events=(NativeEventDraft("session.running", {"reason_code": "started"}),),
+                    usage=_usage(),
+                ),
+                (_session_running(),),
+                adapter_invoked=False,
+            ),
+            turn_started_record(request),
+            authority_synced_record(2, reduced_budget),
+            turn_committed_record(
+                NativeTurnResult(
+                    "turn-current-budget",
+                    (),
+                    _usage(controller_tokens=3, aggregate_tokens=3, cost_micros=3),
+                ),
+                (),
+            ),
+        )
+
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(_chain(records))
 
     def test_reducer_rejects_usage_impersonating_application_or_child_work(self) -> None:
         for usage in (
@@ -957,6 +1201,141 @@ class TestNativeControlModel(unittest.TestCase):
 
         with self.assertRaises(NativeStateError):
             reduce_native_entries(entries)
+
+    def test_record_ids_are_bounded_for_max_length_public_ids(self) -> None:
+        action_command_id = "b" * 128
+        command = _command(
+            MAX_PROTOCOL_ID,
+            "input.submit",
+            {
+                "input_id": MAX_PROTOCOL_ID,
+                "delivery": "direct",
+                "content_ref": MAX_PROTOCOL_ID,
+            },
+            session_id=MAX_PROTOCOL_ID,
+        )
+        action_command = _command(
+            action_command_id,
+            "action.resolve",
+            {
+                "action_id": MAX_PROTOCOL_ID,
+                "resolution": "succeeded",
+                "reason_code": "ok",
+                "receipt_ref": MAX_PROTOCOL_ID,
+            },
+            session_id=MAX_PROTOCOL_ID,
+        )
+        request = NativeTurnRequest(
+            turn_id=MAX_PROTOCOL_ID,
+            session_id=MAX_PROTOCOL_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(MAX_PROTOCOL_ID, action_command_id),
+            inputs=(
+                NativeInputReference(
+                    input_id=MAX_PROTOCOL_ID,
+                    delivery="direct",
+                    content_ref=MAX_PROTOCOL_ID,
+                    command_digest=_command_digest(command),
+                ),
+            ),
+            action_results=(
+                NativeActionResultReference(
+                    action_id=MAX_PROTOCOL_ID,
+                    resolution="succeeded",
+                    reason_code="ok",
+                    receipt_ref=MAX_PROTOCOL_ID,
+                    command_digest=_command_digest(action_command),
+                ),
+            ),
+            budget=_budget(),
+        )
+        records = (
+            session_bound_record(
+                provider_id="native",
+                provider_version="0.1.0",
+                system_id="research.system",
+                system_version="1.0.0",
+                session_id=MAX_PROTOCOL_ID,
+                generation=GENERATION,
+                checkpoint_version="1.0.0",
+                authority_id=MAX_PROTOCOL_ID,
+                authority_revision=AUTHORITY_REVISION,
+            ),
+            authority_synced_record(AUTHORITY_REVISION, _budget()),
+            command_committed_record(
+                _command(
+                    "command-create",
+                    "session.create",
+                    {
+                        "system_id": "research.system",
+                        "system_version": "1.0.0",
+                        "goal_id": MAX_PROTOCOL_ID,
+                        "goal_ref": MAX_PROTOCOL_ID,
+                    },
+                    session_id=MAX_PROTOCOL_ID,
+                ),
+                (
+                    _event(
+                        "event-created",
+                        1,
+                        "session.created",
+                        {
+                            "goal_id": MAX_PROTOCOL_ID,
+                            "authority_id": MAX_PROTOCOL_ID,
+                            "authority_revision": AUTHORITY_REVISION,
+                        },
+                        session_id=MAX_PROTOCOL_ID,
+                    ),
+                ),
+            ),
+            turn_committed_record(
+                NativeTurnResult(
+                    turn_id="turn-bootstrap",
+                    events=(NativeEventDraft("session.running", {"reason_code": "started"}),),
+                    usage=_usage(),
+                ),
+                (
+                    _event(
+                        "event-running-2",
+                        2,
+                        "session.running",
+                        {"reason_code": "started"},
+                        session_id=MAX_PROTOCOL_ID,
+                    ),
+                ),
+                adapter_invoked=False,
+            ),
+            command_committed_record(command, ()),
+            command_committed_record(action_command, ()),
+            turn_started_record(request),
+            turn_committed_record(
+                NativeTurnResult(MAX_PROTOCOL_ID, (), _usage()),
+                (),
+            ),
+        )
+
+        for record in records:
+            with self.subTest(kind=record.kind):
+                self.assertLessEqual(len(record.record_id), 128)
+                self.assertRegex(record.record_id, r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+        state = reduce_native_entries(_chain(records))
+
+        self.assertEqual(state.session_id, MAX_PROTOCOL_ID)
+        self.assertEqual(tuple(ref.input_id for ref in state.pending_inputs), ())
+
+    def test_record_id_derivation_changes_when_identity_payload_drifts(self) -> None:
+        command = _input_command()
+        first = command_committed_record(command, ())
+        changed_payload = dict(command.payload)
+        changed_payload["content_ref"] = "input-ref-2"
+        changed = command_committed_record(replace(command, payload=changed_payload), ())
+        tampered = NativeRecord(first.record_id, changed.kind, changed.payload)
+
+        self.assertNotEqual(first.record_id, changed.record_id)
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(_chain((*_valid_records(), tampered)))
 
     def test_checkpoint_metadata_must_match_event_and_covered_state(self) -> None:
         base = _valid_records()
