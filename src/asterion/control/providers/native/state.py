@@ -21,6 +21,7 @@ from asterion.control.providers.native.model import (
     NativeEntry,
     NativeEventDraft,
     NativeInputReference,
+    MAX_SAFE_JSON_INTEGER,
     NativeRecord,
     NativeTurnRequest,
     NativeTurnResult,
@@ -28,7 +29,7 @@ from asterion.control.providers.native.model import (
 )
 
 
-MAX_USAGE_VALUE = 2**63 - 1
+MAX_USAGE_VALUE = MAX_SAFE_JSON_INTEGER
 
 
 class NativeStateError(ValueError):
@@ -298,6 +299,11 @@ def _apply_turn_started(
     if state.pending_turn is not None:
         raise NativeStateError("native turn is already pending")
     request = _turn_request_from_mapping(record.payload["request"])
+    if (
+        request.turn_id in state.fenced_turn_ids
+        or request.turn_id in state.committed_turn_digests
+    ):
+        raise NativeStateError("native turn cannot start after fence or commit")
     _validate_turn_request(state, request)
     return replace(state, pending_turn=request)
 
@@ -307,12 +313,19 @@ def _apply_turn_committed(
 ) -> NativeControllerState:
     _require_active(state)
     turn_id = str(record.payload["turn_id"])
+    if turn_id in state.fenced_turn_ids:
+        raise NativeStateError("native fenced turn cannot commit")
     usage = _usage_from_mapping(record.payload["usage"])
     _validate_turn_usage(usage)
     committed_turns = dict(state.committed_turn_digests)
     previous = committed_turns.get(turn_id)
     if previous is not None and previous != record.digest:
         raise NativeStateError("native turn identity conflicts")
+    adapter_invoked = bool(record.payload["adapter_invoked"])
+    if state.pending_turn is None and adapter_invoked:
+        raise NativeStateError("native adapter turn commit requires pending turn")
+    if state.pending_turn is not None and not adapter_invoked:
+        raise NativeStateError("native pending turn commit requires adapter invocation")
     if state.pending_turn is not None and state.pending_turn.turn_id != turn_id:
         raise NativeStateError("native pending turn identity mismatches")
 
@@ -352,6 +365,8 @@ def _apply_turn_recovery_required(
 ) -> NativeControllerState:
     _require_active(state)
     turn_id = str(record.payload["turn_id"])
+    if turn_id in state.fenced_turn_ids or turn_id in state.committed_turn_digests:
+        raise NativeStateError("native turn cannot recover after fence or commit")
     if state.pending_turn is not None and state.pending_turn.turn_id != turn_id:
         raise NativeStateError("native recovery turn identity mismatches")
     state = _apply_events(state, _events_from_payload(record.payload["events"]))
@@ -418,6 +433,8 @@ def _apply_event(
         raise NativeStateError("native event identity or sequence mismatches")
     if state.terminal_event_id is not None:
         raise NativeStateError("native session already has a terminal event")
+    if any(existing.event_id == event.event_id for existing in state.events):
+        raise NativeStateError("native event identity conflicts")
 
     lifecycle = state.lifecycle
     goal_id = state.goal_id
@@ -568,10 +585,19 @@ def _validate_record(record: NativeRecord) -> None:
             _require_semver(record.payload["checkpoint_version"])
             _require_identifier(record.payload["provider_id"])
             _require_identifier(record.payload["system_id"])
+            _require_record_id(
+                record,
+                f"session-bound:{record.payload['session_id']}:{record.payload['generation']}",
+            )
         elif record.kind == "authority.synced":
             _require_fields(record.payload, {"authority_revision", "budget"})
             _require_positive_int(record.payload["authority_revision"])
-            _remaining_budget_from_mapping(record.payload["budget"])
+            budget = _remaining_budget_from_mapping(record.payload["budget"])
+            _require_record_id(
+                record,
+                "authority-synced:"
+                f"{record.payload['authority_revision']}:{_digest(_remaining_budget_mapping(budget))}",
+            )
         elif record.kind == "command.committed":
             _require_fields(record.payload, {"command_digest", "command", "events"})
             _require_digest(record.payload["command_digest"])
@@ -579,9 +605,11 @@ def _validate_record(record: NativeRecord) -> None:
             if record.payload["command_digest"] != _digest(command.to_mapping()):
                 raise NativeStateError("native command digest mismatches")
             _events_from_payload(record.payload["events"])
+            _require_record_id(record, f"command:{command.command_id}")
         elif record.kind == "turn.started":
             _require_fields(record.payload, {"request"})
-            _turn_request_from_mapping(record.payload["request"])
+            request = _turn_request_from_mapping(record.payload["request"])
+            _require_record_id(record, f"turn-started:{request.turn_id}")
         elif record.kind == "turn.committed":
             _require_fields(
                 record.payload, {"turn_id", "events", "usage", "adapter_invoked"}
@@ -591,17 +619,26 @@ def _validate_record(record: NativeRecord) -> None:
                 raise NativeStateError("native adapter flag is invalid")
             _events_from_payload(record.payload["events"])
             _validate_turn_usage(_usage_from_mapping(record.payload["usage"]))
+            _require_record_id(record, f"turn-committed:{record.payload['turn_id']}")
         elif record.kind == "turn.recovery-required":
             _require_fields(record.payload, {"turn_id", "reason_code", "events"})
             _require_opaque(record.payload["turn_id"])
             _require_identifier(record.payload["reason_code"])
             _events_from_payload(record.payload["events"])
+            _require_record_id(
+                record,
+                f"turn-recovery-required:{record.payload['turn_id']}",
+            )
         elif record.kind == "checkpoint.committed":
             _require_fields(record.payload, {"metadata", "event"})
-            _metadata_from_mapping(record.payload["metadata"])
+            metadata = _metadata_from_mapping(record.payload["metadata"])
             event = ControlEvent.from_mapping(_mapping(record.payload["event"]))
             if event.type != "checkpoint.created":
                 raise NativeStateError("native checkpoint event type is invalid")
+            _require_record_id(
+                record,
+                f"checkpoint:{metadata.capsule_id}:{metadata.covered_position}",
+            )
         else:
             raise NativeStateError("native record kind is invalid")
     except (TypeError, ValueError, KeyError) as exc:
@@ -805,6 +842,7 @@ def _events_from_payload(value: object) -> tuple[ControlEvent, ...]:
 def _remaining_budget_mapping(value: RemainingBudget) -> Mapping[str, object]:
     if not isinstance(value, RemainingBudget):
         raise NativeStateError("native remaining budget is invalid")
+    _validate_budget_bounds(value)
     return {
         "controller_tokens": value.controller_tokens,
         "application_tokens": value.application_tokens,
@@ -828,7 +866,7 @@ def _remaining_budget_from_mapping(value: object) -> RemainingBudget:
             "deadline_ms",
         },
     )
-    return RemainingBudget(
+    budget = RemainingBudget(
         controller_tokens=_int(mapping["controller_tokens"]),
         application_tokens=_int(mapping["application_tokens"]),
         child_tokens=_int(mapping["child_tokens"]),
@@ -836,24 +874,29 @@ def _remaining_budget_from_mapping(value: object) -> RemainingBudget:
         cost_micros=_int(mapping["cost_micros"]),
         deadline_ms=_int(mapping["deadline_ms"]),
     )
+    _validate_budget_bounds(budget)
+    return budget
 
 
 def _usage_mapping(value: BudgetUsage) -> Mapping[str, object]:
     if not isinstance(value, BudgetUsage):
         raise NativeStateError("native usage is invalid")
+    _validate_usage_bounds(value)
     return {field: getattr(value, field) for field in _USAGE_FIELDS}
 
 
 def _usage_from_mapping(value: object) -> BudgetUsage:
     mapping = _mapping(value)
     _require_fields(mapping, set(_USAGE_FIELDS))
-    return BudgetUsage(
+    usage = BudgetUsage(
         controller_tokens=_int(mapping["controller_tokens"]),
         application_tokens=_int(mapping["application_tokens"]),
         child_tokens=_int(mapping["child_tokens"]),
         aggregate_tokens=_int(mapping["aggregate_tokens"]),
         cost_micros=_int(mapping["cost_micros"]),
     )
+    _validate_usage_bounds(usage)
+    return usage
 
 
 def _add_usage(previous: BudgetUsage, delta: BudgetUsage) -> BudgetUsage:
@@ -872,6 +915,7 @@ def _digest(value: Mapping[str, object]) -> str:
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
+        allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -916,7 +960,12 @@ def _append_unique(values: tuple[str, ...], value: str) -> tuple[str, ...]:
 
 
 def _int(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or value > MAX_SAFE_JSON_INTEGER
+    ):
         raise NativeStateError("native integer is invalid")
     return value
 
@@ -998,3 +1047,29 @@ _USAGE_FIELDS = (
     "aggregate_tokens",
     "cost_micros",
 )
+
+
+def _validate_usage_bounds(value: BudgetUsage) -> None:
+    for field in _USAGE_FIELDS:
+        current = getattr(value, field)
+        if current < 0 or current > MAX_SAFE_JSON_INTEGER:
+            raise NativeStateError("native usage exceeds safe integer range")
+
+
+def _validate_budget_bounds(value: RemainingBudget) -> None:
+    for field in (
+        "controller_tokens",
+        "application_tokens",
+        "child_tokens",
+        "aggregate_tokens",
+        "cost_micros",
+        "deadline_ms",
+    ):
+        current = getattr(value, field)
+        if current < 0 or current > MAX_SAFE_JSON_INTEGER:
+            raise NativeStateError("native budget exceeds safe integer range")
+
+
+def _require_record_id(record: NativeRecord, expected: str) -> None:
+    if record.record_id != expected:
+        raise NativeStateError("native record identity is not canonical")

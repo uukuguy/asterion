@@ -275,6 +275,7 @@ def _valid_records() -> tuple[NativeRecord, ...]:
                 usage=_usage(),
             ),
             (_session_running(),),
+            adapter_invoked=False,
         ),
     )
 
@@ -448,6 +449,113 @@ class TestNativeControlModel(unittest.TestCase):
         with self.assertRaises(NativeStateError):
             reduce_native_entries(_chain((tampered,)))
 
+    def test_reducer_enforces_canonical_record_ids_for_every_kind(self) -> None:
+        input_command = _input_command()
+        request = _turn_request(input_command=input_command)
+        checkpoint_event = _event(
+            "event-checkpoint",
+            3,
+            "checkpoint.created",
+            {
+                "checkpoint_id": "checkpoint-1",
+                "capsule_id": "capsule-1",
+                "capsule_digest": "d" * 64,
+                "control_plane_id": "native",
+                "control_plane_version": "0.1.0",
+                "checkpoint_version": "1.0.0",
+                "covered_sequence": 2,
+                "storage_ref": "storage-1",
+            },
+        )
+        metadata = NativeCapsuleMetadata(
+            capsule_id="capsule-1",
+            capsule_digest="d" * 64,
+            control_plane_id="native",
+            control_plane_version="0.1.0",
+            checkpoint_version="1.0.0",
+            covered_position=4,
+            covered_sequence=2,
+            storage_ref="storage-1",
+        )
+        cases = (
+            ("session.bound", (NativeRecord("wrong-session-bound", "session.bound", _session_bound().payload),)),
+            (
+                "authority.synced",
+                (
+                    _session_bound(),
+                    NativeRecord(
+                        "wrong-authority",
+                        "authority.synced",
+                        authority_synced_record(AUTHORITY_REVISION, _budget()).payload,
+                    ),
+                ),
+            ),
+            (
+                "command.committed",
+                (
+                    *_valid_records(),
+                    NativeRecord(
+                        "wrong-command",
+                        "command.committed",
+                        command_committed_record(input_command, ()).payload,
+                    ),
+                ),
+            ),
+            (
+                "turn.started",
+                (
+                    *_valid_records(),
+                    command_committed_record(input_command, ()),
+                    NativeRecord(
+                        "wrong-turn-start",
+                        "turn.started",
+                        turn_started_record(request).payload,
+                    ),
+                ),
+            ),
+            (
+                "turn.committed",
+                (
+                    *_valid_records(),
+                    NativeRecord(
+                        "wrong-turn-commit",
+                        "turn.committed",
+                        turn_committed_record(
+                            NativeTurnResult("turn-2", (), _usage()),
+                            (),
+                            adapter_invoked=False,
+                        ).payload,
+                    ),
+                ),
+            ),
+            (
+                "turn.recovery-required",
+                (
+                    *_valid_records(),
+                    NativeRecord(
+                        "wrong-turn-recovery",
+                        "turn.recovery-required",
+                        turn_recovery_required_record("turn-2", "adapter-failed", ()).payload,
+                    ),
+                ),
+            ),
+            (
+                "checkpoint.committed",
+                (
+                    *_valid_records(),
+                    NativeRecord(
+                        "wrong-checkpoint",
+                        "checkpoint.committed",
+                        checkpoint_committed_record(metadata, checkpoint_event).payload,
+                    ),
+                ),
+            ),
+        )
+
+        for label, records in cases:
+            with self.subTest(label=label), self.assertRaises(NativeStateError):
+                reduce_native_entries(_chain(records))
+
     def test_reducer_accepts_contiguous_chain_and_activates_goal_on_session_created(
         self,
     ) -> None:
@@ -491,6 +599,30 @@ class TestNativeControlModel(unittest.TestCase):
         with self.assertRaises(NativeStateError):
             reduce_native_entries(conflict)
 
+    def test_reducer_rejects_same_command_id_with_noncanonical_fresh_events(self) -> None:
+        input_command = _input_command()
+        command_record = command_committed_record(input_command, ())
+        replay_with_fresh_event = NativeRecord(
+            "command-replay:command-input",
+            "command.committed",
+            {
+                "command_digest": command_record.payload["command_digest"],
+                "command": command_record.payload["command"],
+                "events": (
+                    _budget_report(
+                        "event-command-replay",
+                        3,
+                        _usage(),
+                    ).to_mapping(),
+                ),
+            },
+        )
+
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(
+                _chain((*_valid_records(), command_record, replay_with_fresh_event))
+            )
+
     def test_authority_sync_record_id_includes_revision_and_budget_digest(self) -> None:
         first = authority_synced_record(1, _budget(controller_tokens=10, aggregate_tokens=10))
         retry = authority_synced_record(1, _budget(controller_tokens=10, aggregate_tokens=10))
@@ -529,6 +661,7 @@ class TestNativeControlModel(unittest.TestCase):
                         first_usage,
                     ),
                     (_budget_report("event-budget-1", 3, first_usage),),
+                    adapter_invoked=False,
                 ),
                 turn_committed_record(
                     NativeTurnResult(
@@ -558,6 +691,7 @@ class TestNativeControlModel(unittest.TestCase):
                             ),
                         ),
                     ),
+                    adapter_invoked=False,
                 ),
             )
         )
@@ -582,6 +716,7 @@ class TestNativeControlModel(unittest.TestCase):
                             turn_committed_record(
                                 NativeTurnResult("turn-bad", (), usage),
                                 (),
+                                adapter_invoked=False,
                             ),
                         )
                     )
@@ -614,6 +749,70 @@ class TestNativeControlModel(unittest.TestCase):
         self.assertEqual(state.pending_inputs, ())
         self.assertEqual(state.pending_action_results, ())
         self.assertEqual(state.pending_turn, None)
+
+    def test_reducer_rejects_orphan_and_non_invoked_pending_turn_commits(self) -> None:
+        request = NativeTurnRequest(
+            turn_id="turn-pending",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+        pending_commit = turn_committed_record(
+            NativeTurnResult("turn-pending", (), _usage()),
+            (),
+            adapter_invoked=False,
+        )
+        orphan_commit = turn_committed_record(
+            NativeTurnResult("turn-orphan", (), _usage()),
+            (),
+        )
+
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(_chain((*_valid_records(), orphan_commit)))
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(
+                _chain((*_valid_records(), turn_started_record(request), pending_commit))
+            )
+
+    def test_reducer_rejects_start_or_commit_after_turn_is_fenced(self) -> None:
+        request = NativeTurnRequest(
+            turn_id="turn-fenced",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+        recovery = turn_recovery_required_record(
+            "turn-fenced",
+            "adapter-failed",
+            (),
+        )
+
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(
+                _chain((*_valid_records(), recovery, turn_started_record(request)))
+            )
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(
+                _chain(
+                    (
+                        *_valid_records(),
+                        recovery,
+                        turn_committed_record(
+                            NativeTurnResult("turn-fenced", (), _usage()),
+                            (),
+                            adapter_invoked=False,
+                        ),
+                    )
+                )
+            )
 
     def test_turn_started_rejects_mutated_or_unknown_command_inputs(self) -> None:
         input_command = _input_command()
@@ -663,6 +862,101 @@ class TestNativeControlModel(unittest.TestCase):
                     )
                 )
             )
+
+    def test_reducer_rejects_duplicate_event_ids_before_append(self) -> None:
+        duplicate = _budget_report("event-running-2", 3, _usage())
+
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(
+                _chain(
+                    (
+                        *_valid_records(),
+                        turn_committed_record(
+                            NativeTurnResult(
+                                "turn-duplicate-event",
+                                (
+                                    NativeEventDraft(
+                                        "budget.reported",
+                                        {
+                                            "controller_tokens": 0,
+                                            "application_tokens": 0,
+                                            "child_tokens": 0,
+                                            "aggregate_tokens": 0,
+                                            "cost_micros": 0,
+                                        },
+                                    ),
+                                ),
+                                _usage(),
+                            ),
+                            (duplicate,),
+                            adapter_invoked=False,
+                        ),
+                    )
+                )
+            )
+
+    def test_native_model_rejects_non_canonical_json_numbers(self) -> None:
+        for value in (float("nan"), float("inf"), float("-inf"), 1.5):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                NativeRecord("record-1", "authority.synced", {"revision": value})
+
+    def test_native_usage_and_budget_reject_js_unsafe_values(self) -> None:
+        unsafe = 2**53
+
+        with self.assertRaises(ValueError):
+            NativeTurnResult(
+                "turn-unsafe",
+                (),
+                _usage(controller_tokens=unsafe, aggregate_tokens=unsafe),
+            )
+        with self.assertRaises(ValueError):
+            NativeTurnRequest(
+                turn_id="turn-unsafe",
+                session_id=SESSION_ID,
+                generation=GENERATION,
+                authority_revision=AUTHORITY_REVISION,
+                causal_command_ids=(),
+                inputs=(),
+                action_results=(),
+                budget=_budget(controller_tokens=unsafe, aggregate_tokens=unsafe),
+            )
+        with self.assertRaises(NativeStateError):
+            authority_synced_record(
+                AUTHORITY_REVISION,
+                _budget(controller_tokens=unsafe, aggregate_tokens=unsafe),
+            )
+
+    def test_reducer_rejects_js_unsafe_cumulative_usage(self) -> None:
+        maximum = 2**53 - 1
+        entries = _chain(
+            (
+                *_valid_records(),
+                turn_committed_record(
+                    NativeTurnResult(
+                        "turn-max-minus-one",
+                        (),
+                        _usage(
+                            controller_tokens=maximum - 1,
+                            aggregate_tokens=maximum - 1,
+                        ),
+                    ),
+                    (),
+                    adapter_invoked=False,
+                ),
+                turn_committed_record(
+                    NativeTurnResult(
+                        "turn-overflow",
+                        (),
+                        _usage(controller_tokens=2, aggregate_tokens=2),
+                    ),
+                    (),
+                    adapter_invoked=False,
+                ),
+            )
+        )
+
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(entries)
 
     def test_checkpoint_metadata_must_match_event_and_covered_state(self) -> None:
         base = _valid_records()

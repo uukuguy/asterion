@@ -21,6 +21,7 @@ from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
 
 NATIVE_JOURNAL_VERSION = "asterion.native-journal/v1"
+MAX_SAFE_JSON_INTEGER = 2**53 - 1
 NATIVE_RECORD_KINDS = frozenset(
     {
         "session.bound",
@@ -61,6 +62,7 @@ class NativeRecord:
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
+            allow_nan=False,
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
@@ -99,6 +101,7 @@ class NativeEntry:
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
+            allow_nan=False,
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
@@ -213,6 +216,7 @@ class NativeTurnRequest:
             raise ValueError("native turn action results are invalid")
         if not isinstance(self.budget, RemainingBudget):
             raise ValueError("native turn budget is invalid")
+        _require_safe_budget(self.budget, "native turn budget")
         object.__setattr__(self, "causal_command_ids", command_ids)
         object.__setattr__(self, "inputs", inputs)
         object.__setattr__(self, "action_results", action_results)
@@ -237,6 +241,7 @@ class NativeTurnResult:
             raise ValueError("native turn result events are invalid")
         if not isinstance(self.usage, BudgetUsage):
             raise ValueError("native turn result usage is invalid")
+        _require_safe_usage(self.usage, "native turn result usage")
         object.__setattr__(self, "events", events)
 
     def __repr__(self) -> str:
@@ -374,6 +379,11 @@ def _json_value(value: object) -> object:
         return {str(key): _json_value(item) for key, item in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [_json_value(item) for item in value]
+    if isinstance(value, float):
+        raise ValueError("native JSON floats are invalid")
+    if isinstance(value, int) and not isinstance(value, bool):
+        if abs(value) > MAX_SAFE_JSON_INTEGER:
+            raise ValueError("native JSON integer exceeds safe range")
     return value
 
 
@@ -398,6 +408,7 @@ def _assert_json_value(value: object, label: str) -> None:
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
+            allow_nan=False,
         )
     except (TypeError, ValueError):
         raise ValueError(f"{label} is not canonical JSON") from None
@@ -428,10 +439,45 @@ def _require_version(value: object, label: str) -> None:
 
 
 def _require_nonnegative_integer(value: object, label: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or value > MAX_SAFE_JSON_INTEGER
+    ):
         raise ValueError(f"{label} is invalid")
 
 
 def _require_positive_integer(value: object, label: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 1
+        or value > MAX_SAFE_JSON_INTEGER
+    ):
         raise ValueError(f"{label} is invalid")
+
+
+def _require_safe_usage(value: BudgetUsage, label: str) -> None:
+    for field in (
+        "controller_tokens",
+        "application_tokens",
+        "child_tokens",
+        "aggregate_tokens",
+        "cost_micros",
+    ):
+        _require_nonnegative_integer(getattr(value, field), f"{label} {field}")
+
+
+def _require_safe_budget(value: RemainingBudget, label: str) -> None:
+    _require_safe_usage(
+        BudgetUsage(
+            controller_tokens=value.controller_tokens,
+            application_tokens=value.application_tokens,
+            child_tokens=value.child_tokens,
+            aggregate_tokens=value.aggregate_tokens,
+            cost_micros=value.cost_micros,
+        ),
+        label,
+    )
+    _require_nonnegative_integer(value.deadline_ms, f"{label} deadline")
