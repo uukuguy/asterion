@@ -7,6 +7,7 @@ import queue
 import stat
 import tempfile
 import threading
+import traceback
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
@@ -173,6 +174,19 @@ class TestNativeControlStore(unittest.TestCase):
         self.assertEqual(str(error), "native session store is unavailable")
         self.assertNotIn("SENTINEL_SECRET", str(error))
         self.assertNotIn("SENTINEL_SECRET", repr(error))
+        self.assertIsNone(error.__cause__)
+        self.assertIsNone(error.__context__)
+
+    def assert_traceback_chain_redacted(
+        self,
+        error: BaseException,
+        *sentinels: str,
+    ) -> None:
+        formatted = "".join(
+            traceback.format_exception(type(error), error, error.__traceback__)
+        )
+        for sentinel in sentinels:
+            self.assertNotIn(sentinel, formatted)
         self.assertIsNone(error.__cause__)
         self.assertIsNone(error.__context__)
 
@@ -933,6 +947,137 @@ class TestNativeControlStore(unittest.TestCase):
             self.assertIn(0, observed_unlinked_fd_nlinks)
             self.assertFalse(temporary.exists())
             self.assertEqual(session.budget.used_bytes, 0)
+
+    def test_publication_release_failure_redacts_sensitive_original(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            expected = NativeEntry(1, None, bound_record())
+            encoded = canonical_entry_bytes(expected)
+            token = "8" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+
+            def fail_write(_descriptor: int, _data: bytes) -> None:
+                raise OSError("SENTINEL_SECRET_RELEASE_ORIGINAL")
+
+            def fail_release(_size: int) -> None:
+                raise NativeStoreError
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", fail_write),
+                patch.object(session.budget, "release", fail_release),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assert_traceback_chain_redacted(
+                raised.exception,
+                "SENTINEL_SECRET_RELEASE_ORIGINAL",
+            )
+            self.assertFalse(temporary.exists())
+            self.assertEqual(session.budget.used_bytes, len(encoded))
+
+    def test_cleanup_failure_redacts_sensitive_publication_and_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            expected = NativeEntry(1, None, bound_record())
+            encoded = canonical_entry_bytes(expected)
+            token = "9" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+
+            def fail_write(_descriptor: int, _data: bytes) -> None:
+                raise OSError("SENTINEL_SECRET_CLEANUP_ORIGINAL")
+
+            def fail_cleanup_sync(_descriptor: int) -> None:
+                raise OSError("SENTINEL_SECRET_CLEANUP_FAILURE")
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", fail_write),
+                patch.object(store_module, "_fsync_directory", fail_cleanup_sync),
+                patch.object(store_module, "_fsync_directory_quietly", fail_cleanup_sync),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assert_traceback_chain_redacted(
+                raised.exception,
+                "SENTINEL_SECRET_CLEANUP_ORIGINAL",
+                "SENTINEL_SECRET_CLEANUP_FAILURE",
+            )
+            self.assertFalse(temporary.exists())
+            self.assertEqual(session.budget.used_bytes, len(encoded))
+
+    def test_native_publication_error_release_failure_stays_context_free(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            expected = NativeEntry(1, None, bound_record())
+            encoded = canonical_entry_bytes(expected)
+            token = "a" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+
+            def fail_write(_descriptor: int, _data: bytes) -> None:
+                raise NativeStoreError
+
+            def fail_release(_size: int) -> None:
+                raise NativeStoreError
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", fail_write),
+                patch.object(session.budget, "release", fail_release),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assert_traceback_chain_redacted(raised.exception)
+            self.assertFalse(temporary.exists())
+            self.assertEqual(session.budget.used_bytes, len(encoded))
+
+    def test_process_control_publication_error_survives_release_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            expected = NativeEntry(1, None, bound_record())
+            encoded = canonical_entry_bytes(expected)
+            token = "b" * 32
+            temporary = records / f".record-00000000000000000001-{token}.tmp"
+
+            def interrupt_write(_descriptor: int, _data: bytes) -> None:
+                raise KeyboardInterrupt
+
+            def fail_release(_size: int) -> None:
+                raise NativeStoreError
+
+            with (
+                patch.object(store_module.secrets, "token_hex", return_value=token),
+                patch.object(store_module, "_write_all", interrupt_write),
+                patch.object(session.budget, "release", fail_release),
+                self.assertRaises(KeyboardInterrupt) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assertIs(type(raised.exception), KeyboardInterrupt)
+            self.assertFalse(temporary.exists())
+            self.assertEqual(session.budget.used_bytes, len(encoded))
 
 
 CorruptCase = Callable[[], None]

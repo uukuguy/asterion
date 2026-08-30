@@ -479,23 +479,25 @@ class FileNativeSessionStore:
         except BaseException as error:
             should_release = False
             if not final_linked:
-                should_release = _remove_unpublished_temp(
-                    self._records_fd,
-                    temporary,
-                    temp_fd=descriptor,
-                    temp_created=temp_created,
-                )
+                try:
+                    should_release = _remove_unpublished_temp(
+                        self._records_fd,
+                        temporary,
+                        temp_fd=descriptor,
+                        temp_created=temp_created,
+                    )
+                except Exception:
+                    should_release = False
             _close_fd_quietly(descriptor)
             if should_release:
                 try:
                     self._owner.budget.release(len(encoded))
-                except NativeStoreError:
-                    if isinstance(error, Exception):
-                        raise
-            if isinstance(error, NativeStoreError):
-                raise
+                except Exception:
+                    pass
             if isinstance(error, Exception):
                 _raise_store_error()
+            error.__cause__ = None
+            error.__context__ = None
             raise
         _close_fd_quietly(descriptor)
 
@@ -977,7 +979,7 @@ def _fsync_directory(descriptor: int) -> None:
 def _fsync_directory_quietly(descriptor: int) -> None:
     try:
         _fsync_directory(descriptor)
-    except OSError:
+    except Exception:
         pass
 
 
