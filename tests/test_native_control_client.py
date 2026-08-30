@@ -341,6 +341,38 @@ async def _collect_events(
     return tuple(result)
 
 
+def _install_fail_turn_failure(fixture: Fixture) -> list[tuple[str, str]]:
+    calls: list[tuple[str, str]] = []
+
+    def fail_turn_raises(
+        request: NativeTurnRequest,
+        reason_code: str,
+    ) -> None:
+        calls.append((request.turn_id, reason_code))
+        raise RuntimeError("SENTINEL_SECRET")
+
+    fixture.controller.fail_turn = fail_turn_raises  # type: ignore[method-assign]
+    return calls
+
+
+async def _assert_native_control_error(
+    case: unittest.TestCase,
+    operation: object,
+) -> NativeControlError:
+    try:
+        if callable(operation):
+            result = operation()
+        else:
+            result = operation
+        await result  # type: ignore[misc]
+    except NativeControlError as error:
+        case.assertIsNone(error.__context__)
+        case.assertIsNone(error.__cause__)
+        case.assertNotIn("SENTINEL_SECRET", str(error))
+        return error
+    case.fail("NativeControlError was not raised")
+
+
 class TestNativeControlClient(unittest.IsolatedAsyncioTestCase):
     async def test_send_is_durable_before_return_and_equal_retry_is_idempotent(
         self,
@@ -582,6 +614,164 @@ class TestNativeControlClient(unittest.IsolatedAsyncioTestCase):
             ),
             1,
         )
+
+    async def test_cancellation_fail_turn_failure_poisons_without_reexecution(
+        self,
+    ) -> None:
+        adapter = BlockingAdapter(
+            NativeTurnResult(
+                "copy-request-turn",
+                (proposal_draft(),),
+                _usage(controller_tokens=1, aggregate_tokens=1),
+            )
+        )
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        fail_calls = _install_fail_turn_failure(fixture)
+        events_task = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+
+        await asyncio.wait_for(adapter.started.wait(), timeout=1)
+        pending = fixture.controller.state.pending_turn
+        self.assertIsNotNone(pending)
+        events_task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await events_task
+        adapter.release.set()
+        assert pending is not None
+
+        self.assertEqual(fail_calls, [(pending.turn_id, "native-turn-cancelled")])
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(fixture.controller.state.pending_turn, pending)
+
+        await _assert_native_control_error(
+            self,
+            _collect_events(fixture.client, EventCursor(1, 2)),
+        )
+        await _assert_native_control_error(
+            self,
+            fixture.client.send(
+                input_command("command-poisoned", "content-ref-poisoned")
+            ),
+        )
+        await _assert_native_control_error(
+            self,
+            fixture.client.sync_authority_snapshot(
+                _budget(controller_tokens=20, aggregate_tokens=20)
+            ),
+        )
+
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(
+            [entry.record.kind for entry in fixture.store.replay()].count(
+                "turn.recovery-required"
+            ),
+            0,
+        )
+        await asyncio.wait_for(fixture.client.close(), timeout=1)
+        await asyncio.wait_for(fixture.client.close(), timeout=1)
+        self.assertEqual(fixture.close_calls, 1)
+
+    async def test_adapter_exception_fail_turn_failure_poisons_and_wakes_close(
+        self,
+    ) -> None:
+        adapter = CountingAdapter(RuntimeError("SENTINEL_SECRET"))
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        fail_calls = _install_fail_turn_failure(fixture)
+
+        await _assert_native_control_error(
+            self,
+            _collect_events(fixture.client, EventCursor(1, 2)),
+        )
+
+        pending = fixture.controller.state.pending_turn
+        self.assertIsNotNone(pending)
+        assert pending is not None
+        self.assertEqual(fail_calls, [(pending.turn_id, "native-turn-failed")])
+        self.assertEqual(adapter.calls, 1)
+
+        await _assert_native_control_error(
+            self,
+            _collect_events(fixture.client, EventCursor(1, 2)),
+        )
+        await _assert_native_control_error(
+            self,
+            fixture.client.send(
+                input_command("command-after-poison", "content-ref-after-poison")
+            ),
+        )
+        await _assert_native_control_error(
+            self,
+            fixture.client.sync_authority_snapshot(_budget()),
+        )
+
+        self.assertEqual(adapter.calls, 1)
+        await asyncio.wait_for(fixture.client.close(), timeout=1)
+        await asyncio.wait_for(fixture.client.close(), timeout=1)
+        self.assertEqual(fixture.close_calls, 1)
+
+    async def test_close_waiter_wakes_when_settlement_failure_poisons_claim(
+        self,
+    ) -> None:
+        adapter = BlockingAdapter(NativeTurnResult("other-turn", (), _usage()))
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        fail_calls = _install_fail_turn_failure(fixture)
+        events_task = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+
+        await asyncio.wait_for(adapter.started.wait(), timeout=1)
+        pending = fixture.controller.state.pending_turn
+        self.assertIsNotNone(pending)
+        close_task = asyncio.create_task(fixture.client.close())
+        await asyncio.sleep(0.05)
+
+        self.assertFalse(close_task.done())
+        adapter.release.set()
+        await _assert_native_control_error(
+            self,
+            asyncio.wait_for(events_task, timeout=1),
+        )
+        await asyncio.wait_for(close_task, timeout=1)
+        assert pending is not None
+
+        self.assertEqual(
+            fail_calls, [(pending.turn_id, "native-turn-result-invalid")]
+        )
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(fixture.close_calls, 1)
+
+    async def test_invalid_result_fail_turn_failure_poisons_without_reexecution(
+        self,
+    ) -> None:
+        adapter = CountingAdapter(NativeTurnResult("other-turn", (), _usage()))
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        fail_calls = _install_fail_turn_failure(fixture)
+
+        await _assert_native_control_error(
+            self,
+            _collect_events(fixture.client, EventCursor(1, 2)),
+        )
+
+        pending = fixture.controller.state.pending_turn
+        self.assertIsNotNone(pending)
+        assert pending is not None
+        self.assertEqual(
+            fail_calls, [(pending.turn_id, "native-turn-result-invalid")]
+        )
+        self.assertEqual(adapter.calls, 1)
+
+        await _assert_native_control_error(
+            self,
+            _collect_events(fixture.client, EventCursor(1, 2)),
+        )
+
+        self.assertEqual(adapter.calls, 1)
+        await asyncio.wait_for(fixture.client.close(), timeout=1)
 
     async def test_close_waits_for_in_flight_adapter_before_closing_resources(
         self,

@@ -69,6 +69,7 @@ class NativeControlPlaneClient:
             self._settled = asyncio.Condition(self._lock)
             self._closing = False
             self._closed = False
+            self._poisoned = False
         except NativeControlError:
             _raise_control_error()
         except Exception:
@@ -231,8 +232,10 @@ class NativeControlPlaneClient:
             except NativeControlError:
                 raise
             except (NativeControllerError, NativeStoreError):
+                self._poison_if_uncertain(request)
                 _raise_control_error()
             except Exception:
+                self._poison_if_uncertain(request)
                 _raise_control_error()
             finally:
                 if clear_claim:
@@ -280,10 +283,8 @@ class NativeControlPlaneClient:
                     return
                 if self._controller.state.pending_turn == request:
                     try:
-                        self._controller.fail_turn(request, "native-turn-cancelled")
-                    except (NativeControllerError, NativeStoreError):
-                        pass
-                    except Exception:
+                        self._fail_pending_turn(request, "native-turn-cancelled")
+                    except NativeControlError:
                         pass
             finally:
                 self._clear_in_flight_claim(request)
@@ -294,8 +295,10 @@ class NativeControlPlaneClient:
         try:
             self._controller.fail_turn(request, reason_code)
         except (NativeControllerError, NativeStoreError):
+            self._poison_if_uncertain(request)
             _raise_control_error()
         except Exception:
+            self._poison_if_uncertain(request)
             _raise_control_error()
 
     def _discardable_fenced_terminal(self, request: NativeTurnRequest) -> bool:
@@ -309,7 +312,7 @@ class NativeControlPlaneClient:
         )
 
     def _require_open(self) -> None:
-        if self._closed or self._closing:
+        if self._closed or self._closing or self._poisoned:
             _raise_control_error()
 
     def _require_not_closed(self) -> None:
@@ -318,8 +321,16 @@ class NativeControlPlaneClient:
 
     def _clear_in_flight_claim(self, request: NativeTurnRequest) -> None:
         if self._in_flight_turn == request:
+            self._poison_if_uncertain(request)
             self._in_flight_turn = None
             self._settled.notify_all()
+
+    def _poison_if_uncertain(self, request: NativeTurnRequest) -> None:
+        if (
+            self._controller.state.pending_turn == request
+            and not self._discardable_fenced_terminal(request)
+        ):
+            self._poisoned = True
 
 
 def _require_positive_safe_integer(value: object) -> None:
