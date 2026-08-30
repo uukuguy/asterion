@@ -189,4 +189,4 @@
   description: Native durable controller core survives exact provider-free crash and replay gates
   parent_paradigm: native-controller-core
   ranking: 0.9
-  status: pending
+  status: passed

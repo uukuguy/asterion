@@ -1206,3 +1206,4 @@
 - 04:36 Required canonical native recovery stdout to reject hidden child noise [9df3e35]
 - 04:47 Gated Native controller core receipt so H-038 has exact preflight proof [de58460]
 - 05:16 Restored Prime source fixture helper so pre-H make check can import all tests [204fc99]
+- 06:52 Closed H-038 exactly once and routed Native work to Phase 3.2 verified-loop design [750f7f8]

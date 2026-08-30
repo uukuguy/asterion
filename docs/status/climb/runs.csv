@@ -36,3 +36,4 @@ cycle,hypothesis_id,outcome,command_id
 35,H-035,passed,check.client-interfaces-closure
 36,H-036,passed,check.operational-parity-closure
 37,H-037,passed,prime-system-parity-operation-host-callback
+38,H-038,passed,check.native-controller-core-provider-free

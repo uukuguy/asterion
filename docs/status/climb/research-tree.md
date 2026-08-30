@@ -37,4 +37,5 @@
 - H-035: passed — client interface closure gates
 - H-036: passed — operational surface closure gates
 - H-037: passed — Prime system parity production callback
-- Next: H-038 — Native durable controller core
+- H-038: passed — Native durable controller core
+- Next: Phase 3.2 — Native Verified-loop

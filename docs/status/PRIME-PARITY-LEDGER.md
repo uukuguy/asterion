@@ -22,6 +22,7 @@
 | Prime Gateway implemented | Implemented; provider-free gate PASS | `make prime-verify-provider-free` | Real-process fake-Prime scenarios; no model-provider operation. |
 | `Verified-loop` | PASS | `make ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent prime-verify-native-rlm-bounded` | Real finite Prime run under prior explicit bounded authority. |
 | `Verified-system-parity` | PASS | `uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway` | H-037 closed the exact Prime Gateway union at 61 passed, 0 blocking, 2 excluded, and zero provider/application operations. |
+| Native controller core | PASS | `make test.native-controller-core.provider-free` | Provider-free durable single-session substrate; all 61 compound Native rows remain Missing. |
 | Native `Verified-loop` | Missing | Not run | Requires native provider common and differential evidence. |
 | `Verified-native-parity` | Missing | Not run | Final goal; requires every mandatory native parity scenario. |
 
@@ -173,8 +174,24 @@ This establishes `Verified-system-parity` only for
 remains Missing, and neither provider-free evidence nor H-037 grants future
 model, credential, network, application, or native execution authority.
 
-## Next evidence boundary
+## Native controller-core boundary
 
-Canonical Climb state ends at H-037 and routes to
-`phase-3-native-kernel-design`. Do not invent H-038 or promote any native row
-before an approved Phase 3 plan and exact native evidence exist.
+H-038 passed exactly once with command identity
+`check.native-controller-core-provider-free`. The gate:
+
+- passed `make test.native-controller-core.provider-free` at 189 tests;
+- emitted the exact `native-controller-core` receipt with 10 common scenarios,
+  five differential cases, eight crash points, zero provider/model/credential/
+  network/application/upload operations, `promoted_feature_ids=[]`, and 61/61
+  mandatory Native rows still missing;
+- passed `make check`, including 2,529 Python tests, TypeScript, Rust, lint,
+  docs, sdist, and wheel checks;
+- passed `make promotion-check` with `commands=28`, zero provider operations,
+  and `full_dataset=no`; and
+- passed `git diff --check` before the canonical transition.
+
+This establishes only the provider-free durable single-session Native
+controller substrate. It does not claim Native `Verified-loop`, compound
+feature parity, provider/model/application execution, or full dataset
+reproduction. Canonical Climb state now routes to
+`phase-3.2-native-verified-loop-design`.

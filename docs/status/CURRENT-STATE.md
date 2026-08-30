@@ -10,9 +10,9 @@
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 2 is closed at H-037 and
-  `Verified-system-parity` PASS. Task 8's bundle-backed Git/worktree cleanup is
-  closed; Phase 3 native-kernel design is the sole next program action.
+- Active work package: Phase 3.1 is closed at H-038 with
+  `native-controller-core` PASS. Phase 3.2 Native Verified-loop design is the
+  sole next program action.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -56,15 +56,20 @@
   Node 22.23.2, then passed `make check`, `make promotion-check`, and
   `git diff --check`. Promotion reported `commands=28`, zero provider
   operations, and `full_dataset=no`.
-- Climb cycle 35 occurs exactly once with
-  `check.client-interfaces-closure`; climb cycle 36 occurs exactly once with
-  `check.operational-parity-closure`; `next_action` is `future-work-queue`.
+- Climb cycles 35 through 38 each occur exactly once:
+  `check.client-interfaces-closure`, `check.operational-parity-closure`,
+  `prime-system-parity-operation-host-callback`, and
+  `check.native-controller-core-provider-free`.
+  `next_action` is `phase-3.2-native-verified-loop-design`.
 - `interfaces.operations` is PASS at exactly 15/15 Prime Gateway rows after
   H-035 plus H-036.
-- Native rows remain missing. The exact checker reports 61 passed, zero ledger
-  blockers, and two excluded rows with zero provider/application operations.
-  Root/child dispatcher composition and the real callback path pass, and
-  canonical `Verified-system-parity` is PASS at H-037.
+- Prime Gateway canonical `Verified-system-parity` remains PASS at H-037: the
+  exact checker reports 61 passed, zero ledger blockers, and two excluded rows
+  with zero provider/application operations.
+- Native controller core is PASS at H-038. The exact provider-free receipt
+  reports 10 common scenarios, five differential cases, eight crash points, all
+  six prohibited operation counters at zero, and `promoted_feature_ids=[]`.
+  Every one of the 61 compound `asterion.native` parity rows remains Missing.
 - `OperationManager` now exposes immutable dispatcher identity, and the
   reviewed Python callback server accepts only exact identity-bound frames over
   a private `0600` Unix socket.
@@ -80,14 +85,15 @@
   execute, reconcile, cancel, missing-callback, failure/no-retry, body-free
   frames, cleanup, and zero Prime effects. Task 6's repository,
   cross-language, promotion, distribution, and independent review gates pass.
-- H-037 passed detached verification and then canonical execution exactly once
-  with 2338/2338 Python tests, TypeScript and Rust checks, package builds, and
-  the 28-command promotion gate. Canonical state routes to
-  `phase-3-native-kernel-design`; no native row was promoted.
+- H-038 passed canonical execution exactly once after clean pre-H gates:
+  focused Native target, exact verifier, `make check`, `make promotion-check`,
+  and `git diff --check`. Canonical state routes to
+  `phase-3.2-native-verified-loop-design`; no compound Native row was promoted.
 
 ## Open Problems
 
-- Keep every Asterion-native row missing until Phase 3 evidence exists.
+- Keep every compound Asterion-native row missing until Phase 3.2+ evidence
+  proves the exact mandatory scenarios.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
 
@@ -112,9 +118,12 @@
 - `docs/superpowers/specs/2026-08-28-asterion-prime-client-interfaces-design.md`
 - `docs/superpowers/specs/2026-08-30-prime-operation-host-callback-design.md`
 - `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`
+- `docs/superpowers/specs/2026-08-30-asterion-native-controller-core-design.md`
+- `docs/superpowers/plans/2026-08-30-asterion-native-controller-core.md`
 - `docs/status/PRIME-PARITY-LEDGER.md`
 - `.superpowers/sdd/client-interfaces-task-10-report.md`
 - `.superpowers/sdd/operational-parity-task-16-report.md`
+- `.superpowers/sdd/native-core-task-10-report.md`
 
 ### Implementation entry points
 
@@ -125,6 +134,8 @@
 - `packages/typescript/prime-gateway/` — Prime daemon translation and durable
   private bridge
 - `tools/check_prime_parity.py` — exact domain and system claim reducer
+- `tools/verify_native_controller_core.py` — exact provider-free Native
+  controller-core receipt verifier
 - `tools/check_promotion.py` — isolated source/wheel/promotion verification
 
 ## Resume Instructions
@@ -132,8 +143,8 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Begin Phase 3 only with an approved native-kernel design derived from the
-   common verified-loop and parity scenarios; do not create implementation
-   worktrees before that design is approved.
+4. Begin Phase 3.2 by designing Native Verified-loop evidence on top of the
+   H-038 controller substrate; do not create implementation worktrees before
+   that design is approved.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.
