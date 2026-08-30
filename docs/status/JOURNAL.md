@@ -1175,3 +1175,8 @@
 - 20:24 Hardened native replay invariants to close Task 2 review findings [9ca46d6]
 - 20:36 Closed native terminal, budget, and bounded-ID replay gaps [13cb8e0]
 - 20:44 Consumed native turn budgets across replay to block aggregate overspend [d8eca54]
+- 21:01 Native descriptor journal landed to persist controller records with redacted fail-closed storage [702cb65]
+- 21:13 Hardened native journal trust boundaries after Task 3 security review [cf229fb]
+- 21:26 Linearized native journal publication to prevent concurrent overwrite and double budget charge [76cef3d]
+- 21:41 Serialized native store close and rollback proof to prevent descriptor races and unsafe reservation release [4fe58da]
+- 21:49 Redacted native rollback release failures to prevent sensitive exception context leakage [272cb85]
