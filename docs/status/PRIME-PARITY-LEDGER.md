@@ -179,7 +179,7 @@ model, credential, network, application, or native execution authority.
 H-038 passed exactly once with command identity
 `check.native-controller-core-provider-free`. The gate:
 
-- passed `make test.native-controller-core.provider-free` at 189 tests;
+- passed the 190-test `make test.native-controller-core.provider-free` suite;
 - emitted the exact `native-controller-core` receipt with 10 common scenarios,
   five differential cases, eight crash points, zero provider/model/credential/
   network/application/upload operations, `promoted_feature_ids=[]`, and 61/61
