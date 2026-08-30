@@ -312,6 +312,11 @@ class NativeControlPlaneClient:
         except Exception:
             self._poison_if_uncertain(request)
             _raise_control_error()
+        except asyncio.CancelledError:
+            raise
+        except BaseException as error:
+            self._poison_if_uncertain(request)
+            _raise_sanitized_base_exception(error)
 
     def _discardable_fenced_terminal(self, request: NativeTurnRequest) -> bool:
         state = self._controller.state
