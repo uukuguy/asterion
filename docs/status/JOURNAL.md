@@ -1171,3 +1171,7 @@
 - 18:34 最终批准 Native 控制器核心设计，授权进入实施计划 [ac1e9ef]
 - 19:06 完成 Native 控制器核心实施计划，锁定 H-038 前十项 TDD 闭环 [d1c4723]
 - 19:54 Opened dormant H-038 gate so native controller core starts from exact state [91d3e0f]
+- 20:12 Native immutable record/reducer landed to support Task 2 state replay [41080b6]
+- 20:24 Hardened native replay invariants to close Task 2 review findings [9ca46d6]
+- 20:36 Closed native terminal, budget, and bounded-ID replay gaps [13cb8e0]
+- 20:44 Consumed native turn budgets across replay to block aggregate overspend [d8eca54]
