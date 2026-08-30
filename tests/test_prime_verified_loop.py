@@ -393,6 +393,84 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _write_prime_source(root: Path) -> Mapping[str, object]:
+    contents = {
+        "package-lock.json": json.dumps(
+            {
+                "name": "prime-agent",
+                "version": "0.7.1",
+                "lockfileVersion": 3,
+                "packages": {
+                    "": {"name": "prime-agent", "version": "0.7.1"},
+                    "packages/coding-agent": {
+                        "name": "@earendil-works/pi-coding-agent",
+                        "version": "0.7.1",
+                    },
+                },
+            }
+        ),
+        "packages/coding-agent/package.json": json.dumps(
+            {"name": "@earendil-works/pi-coding-agent", "version": "0.7.1"}
+        ),
+        "packages/coding-agent/src/modes/daemon/daemon-client.ts": (
+            "export const fixtureClient = true;\n"
+        ),
+        "packages/coding-agent/src/modes/daemon/daemon-protocol.ts": (
+            "export const DAEMON_PROTOCOL_VERSION = 7;\n"
+        ),
+        "prime-agent.sh": "#!/bin/sh\nexit 0\n",
+    }
+    for relative, text in contents.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+    (root / "prime-agent.sh").chmod(0o755)
+    for command in (
+        ("git", "init", "--quiet"),
+        ("git", "config", "user.name", "Asterion Test"),
+        ("git", "config", "user.email", "asterion@example.invalid"),
+        ("git", "add", "."),
+        ("git", "commit", "--quiet", "-m", "fixture"),
+    ):
+        subprocess.run(
+            command,
+            cwd=root,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    source_commit = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return {
+        "format": "asterion.prime-artifact-lock/v1",
+        "source_commit": source_commit,
+        "package_name": "@earendil-works/pi-coding-agent",
+        "package_version": "0.7.1",
+        "daemon_protocol": 7,
+        "daemon_schema_revision": 14,
+        "daemon_schema_id": "protocol-7-schema-14-816309b1cd50",
+        "files": {relative: _sha256(text) for relative, text in contents.items()},
+        "rlm_runtime": {
+            "entry": "packages/coding-agent/dist/bundle/cli.js",
+            "binding_chunk": "packages/coding-agent/dist/bundle/chunk-binding.js",
+            "patch_sha256": "a" * 64,
+            "closure": {
+                "packages/coding-agent/dist/bundle/chunk-binding.js": "b" * 64,
+                "packages/coding-agent/dist/bundle/cli.js": "c" * 64,
+            },
+            "derived_closure": {
+                "packages/coding-agent/dist/bundle/chunk-binding.js": "d" * 64,
+                "packages/coding-agent/dist/bundle/cli.js": "c" * 64,
+            },
+        },
+    }
+
+
 def _default_prime_source_root() -> Path:
     return Path(__file__).resolve().parents[1] / "3th-party/prime-agent"
 
