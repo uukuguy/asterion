@@ -4,10 +4,11 @@ import asyncio
 import hashlib
 import json
 import re
+import subprocess
 import tempfile
 import unittest
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import cast
@@ -266,13 +267,18 @@ def _prime_results_for_identity(
     if identity.source_commit != PINNED_PRIME_COMMIT:
         raise AssertionError("Prime oracle lock identity is invalid")
     _validate_prime_scenario_matrix()
-    results = run_prime_loop_scenarios(fake_prime=True)
+    results = run_prime_loop_scenarios(
+        fake_prime=True,
+        execution_identity=identity,
+        prime_source_root=_prime_source_root(),
+    )
     identities = tuple(getattr(result, "scenario_id") for result in results)
     if identities != EXPECTED_IDS:
         raise AssertionError("locked Prime scenario identities diverged")
     if any(getattr(result, "status") != "PASS" for result in results):
         raise AssertionError("locked Prime scenario did not pass")
     for result in results:
+        _validate_prime_result_identity(result, identity)
         _prime_external_counter_observation(result)
     return cast(tuple[PrimeLoopScenarioResult, ...], results)
 
@@ -341,6 +347,41 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _prime_source_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "3th-party/prime-agent"
+
+
+def _prime_oracle_identity_mapping(
+    identity: PrimeOracleLockIdentity,
+) -> Mapping[str, str]:
+    return cast(Mapping[str, str], asdict(identity))
+
+
+def _prime_oracle_identity_digest(identity: PrimeOracleLockIdentity) -> str:
+    return _sha256_text(
+        json.dumps(_prime_oracle_identity_mapping(identity), sort_keys=True)
+    )
+
+
+def _validate_prime_result_identity(
+    result: PrimeLoopScenarioResult,
+    identity: PrimeOracleLockIdentity,
+) -> None:
+    serialized = json.loads(result.serialized_observations)
+    identity_mapping = _prime_oracle_identity_mapping(identity)
+    identity_digest = _prime_oracle_identity_digest(identity)
+    if (
+        serialized.get("execution_identity") != identity_mapping
+        or serialized.get("execution_identity_sha256") != identity_digest
+        or result.execution_identity_sha256 != identity_digest
+    ):
+        raise AssertionError("Prime result execution identity diverged")
+
+
 def _validate_prime_scenario_matrix() -> Mapping[str, Mapping[str, object]]:
     if _sha256_bytes(SCENARIO_FIXTURE.read_bytes()) != _VERIFIED_LOOP_SCENARIO_FIXTURE_SHA256:
         raise AssertionError("Prime scenario fixture drifted")
@@ -391,12 +432,25 @@ def _prime_external_counter_observation(
         raise AssertionError("Prime oracle process evidence is malformed")
     if result.process_counts != row["process_counts"]:
         raise AssertionError("Prime oracle process evidence diverged")
+    external_effects = cast(Mapping[str, object], serialized["external_effects"])
+    if set(external_effects) != {
+        "application_operations",
+        "local_application_operations",
+    }:
+        raise AssertionError("Prime external application evidence is malformed")
+    external_application_operations = _int(external_effects["application_operations"])
+    local_application_operations = _int(external_effects["local_application_operations"])
+    if (
+        result.external_application_operations != external_application_operations
+        or local_application_operations != result.application_operations
+    ):
+        raise AssertionError("Prime external application evidence diverged")
     return {
         "provider_operations": result.provider_operations,
         "model_operations": daemon_model_provider,
         "credential_reads": 0,
         "network_operations": 0,
-        "application_operations": 0,
+        "application_operations": external_application_operations,
         "upload_operations": 0,
     }
 
@@ -787,7 +841,12 @@ class TestNativePrimeDifferential(unittest.IsolatedAsyncioTestCase):
         daemon = json.loads(result.serialized_observations)["daemon"]
         self.assertEqual(result.application_operations, 1)
         self.assertEqual(daemon["applicationOperations"], 1)
+        self.assertEqual(
+            json.loads(result.serialized_observations)["external_effects"],
+            {"application_operations": 0, "local_application_operations": 1},
+        )
         self.assertEqual(counts["application_operations"], 0)
+        self.assertEqual(result.external_application_operations, 0)
         with self.assertRaises(AssertionError):
             _prime_external_counter_observation(
                 replace(result, provider_operations=1),
@@ -810,6 +869,84 @@ class TestNativePrimeDifferential(unittest.IsolatedAsyncioTestCase):
             _prime_external_counter_observation(
                 replace(result, serialized_observations=tampered_serialized),
             )
+        with self.assertRaises(AssertionError):
+            _prime_external_counter_observation(
+                replace(result, external_application_operations=1),
+            )
+        external_tampered_serialized = json.dumps(
+            {
+                **json.loads(result.serialized_observations),
+                "external_effects": {
+                    **json.loads(result.serialized_observations)["external_effects"],
+                    "application_operations": 1,
+                },
+            },
+            sort_keys=True,
+        )
+        with self.assertRaises(AssertionError):
+            _prime_external_counter_observation(
+                replace(result, serialized_observations=external_tampered_serialized),
+            )
+
+    async def test_prime_oracle_results_are_bound_to_executed_pinned_source_identity(
+        self,
+    ) -> None:
+        identity = _validate_prime_oracle_lock_identity()
+        results = await asyncio.to_thread(
+            run_prime_loop_scenarios,
+            fake_prime=True,
+            execution_identity=identity,
+            prime_source_root=_prime_source_root(),
+        )
+        identity_mapping = _prime_oracle_identity_mapping(identity)
+        identity_digest = _prime_oracle_identity_digest(identity)
+        for result in results:
+            with self.subTest(scenario_id=result.scenario_id):
+                serialized = json.loads(result.serialized_observations)
+                self.assertEqual(serialized["execution_identity"], identity_mapping)
+                self.assertEqual(serialized["execution_identity_sha256"], identity_digest)
+                self.assertEqual(result.execution_identity_sha256, identity_digest)
+                _validate_prime_result_identity(result, identity)
+                with self.assertRaises(AssertionError):
+                    _validate_prime_result_identity(
+                        replace(result, execution_identity_sha256="0" * 64),
+                        identity,
+                    )
+                with self.assertRaises(AssertionError):
+                    _validate_prime_result_identity(
+                        replace(
+                            result,
+                            serialized_observations=json.dumps(
+                                {
+                                    **serialized,
+                                    "execution_identity_sha256": "0" * 64,
+                                },
+                                sort_keys=True,
+                            ),
+                        ),
+                        identity,
+                    )
+
+    async def test_valid_adjacent_locks_cannot_bless_unrelated_executed_prime_source(
+        self,
+    ) -> None:
+        identity = _validate_prime_oracle_lock_identity()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "package-lock.json").write_text("{}\n", encoding="utf-8")
+            subprocess.run(("git", "init", "--quiet"), cwd=root, check=True)
+            subprocess.run(("git", "config", "user.name", "Asterion Test"), cwd=root, check=True)
+            subprocess.run(("git", "config", "user.email", "asterion@example.invalid"), cwd=root, check=True)
+            subprocess.run(("git", "add", "."), cwd=root, check=True)
+            subprocess.run(("git", "commit", "--quiet", "-m", "unrelated"), cwd=root, check=True)
+
+            with self.assertRaises(AssertionError):
+                await asyncio.to_thread(
+                    run_prime_loop_scenarios,
+                    fake_prime=True,
+                    execution_identity=identity,
+                    prime_source_root=root,
+                )
 
     async def test_prime_oracle_lock_identity_rejects_commit_artifact_and_module_drift(
         self,

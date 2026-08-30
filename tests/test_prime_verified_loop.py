@@ -75,6 +75,17 @@ from tests.test_control_pathlight import _opaque_id
 from tests.test_prime_control_factory import make_context, prepare_paths
 from tests.test_control_system import _application, _manifest, _provider
 from tests.test_operation_manager import Resolver, Service, Store
+from tools.setup_prime_agent import (
+    PINNED_PRIME_COMMIT,
+    PrimeSetupError,
+    default_ecosystem_module_lock_path,
+    default_harness_module_lock_path,
+    default_lock_path,
+    load_prime_artifact_lock,
+    load_prime_ecosystem_module_lock,
+    load_prime_harness_module_lock,
+    verify_prime_checkout,
+)
 
 EXPECTED_IDS = (
     "prime-loop-application",
@@ -111,10 +122,12 @@ class PrimeLoopScenarioResult:
     evidence_id: str
     provider_operations: int
     application_operations: int
+    external_application_operations: int
     process_counts: Mapping[str, int]
     pathlight_nodes: tuple[str, ...]
     pathlight_control_events: tuple[str, ...]
     pathlight_gaps: tuple[str, ...]
+    execution_identity_sha256: str
     serialized_observations: str
 
 
@@ -170,6 +183,43 @@ class _UnusedEcosystemMaterializer:
 class _UnusedMcpCredentialRefresh:
     def refresh(self, lease_id: str, challenge_digest: str) -> str:
         raise AssertionError((lease_id, challenge_digest))
+
+
+class _ExternalEffectRecorder:
+    def __init__(self) -> None:
+        self._local_application_operations: list[str] = []
+        self._application_operations: list[str] = []
+
+    def record_local_application_operation(self, operation: str) -> None:
+        self._local_application_operations.append(operation)
+
+    def record_application_operation(self, operation: str) -> None:
+        self._application_operations.append(operation)
+
+    def snapshot(self) -> Mapping[str, int]:
+        return {
+            "application_operations": len(self._application_operations),
+            "local_application_operations": len(self._local_application_operations),
+        }
+
+
+class _AuditedUsageImplementation(UsageImplementation):
+    def __init__(
+        self,
+        audit: list[str],
+        external_effects: _ExternalEffectRecorder,
+        *,
+        input_tokens: int = 100,
+        output_tokens: int = 55,
+    ) -> None:
+        super().__init__(audit, input_tokens=input_tokens, output_tokens=output_tokens)
+        self._external_effects = external_effects
+
+    async def execute(
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
+        self._external_effects.record_local_application_operation("implementation.execute")
+        return await super().execute(invocation)
 
 
 class _ScenarioExecutor:
@@ -231,13 +281,23 @@ class _FaultBoundaryExecutor:
 
 
 class _WorkerCrashImplementation(UsageImplementation):
-    def __init__(self, audit: list[str], worker_pids: list[int]) -> None:
+    def __init__(
+        self,
+        audit: list[str],
+        worker_pids: list[int],
+        external_effects: _ExternalEffectRecorder | None = None,
+    ) -> None:
         super().__init__(audit, input_tokens=4, output_tokens=3)
         self._worker_pids = worker_pids
+        self._external_effects = external_effects
 
     async def execute(
         self, invocation: CapabilityInvocation
     ) -> CapabilityExecutionResult:
+        if self._external_effects is not None:
+            self._external_effects.record_local_application_operation(
+                "implementation.execute"
+            )
         self.audit.append("implementation.execute")
         self.calls.append(invocation)
         worker = await asyncio.create_subprocess_exec(
@@ -329,82 +389,96 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _write_prime_source(root: Path) -> Mapping[str, object]:
-    contents = {
-        "package-lock.json": json.dumps(
-            {
-                "name": "prime-agent",
-                "version": "0.7.1",
-                "lockfileVersion": 3,
-                "packages": {
-                    "": {"name": "prime-agent", "version": "0.7.1"},
-                    "packages/coding-agent": {
-                        "name": "@earendil-works/pi-coding-agent",
-                        "version": "0.7.1",
-                    },
-                },
-            }
-        ),
-        "packages/coding-agent/package.json": json.dumps(
-            {"name": "@earendil-works/pi-coding-agent", "version": "0.7.1"}
-        ),
-        "packages/coding-agent/src/modes/daemon/daemon-client.ts": (
-            "export const fixtureClient = true;\n"
-        ),
-        "packages/coding-agent/src/modes/daemon/daemon-protocol.ts": (
-            "export const DAEMON_PROTOCOL_VERSION = 7;\n"
-        ),
-        "prime-agent.sh": "#!/bin/sh\nexit 0\n",
-    }
-    for relative, text in contents.items():
-        target = root / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
-    (root / "prime-agent.sh").chmod(0o755)
-    for command in (
-        ("git", "init", "--quiet"),
-        ("git", "config", "user.name", "Asterion Test"),
-        ("git", "config", "user.email", "asterion@example.invalid"),
-        ("git", "add", "."),
-        ("git", "commit", "--quiet", "-m", "fixture"),
-    ):
-        subprocess.run(
-            command,
-            cwd=root,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    source_commit = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _default_prime_source_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "3th-party/prime-agent"
+
+
+def _prime_execution_identity_mapping(value: object) -> Mapping[str, str]:
+    fields = (
+        "source_commit",
+        "artifact_lock_sha256",
+        "harness_module_lock_sha256",
+        "ecosystem_module_lock_sha256",
+        "ecosystem_bundle_sha256",
+    )
+    mapping: dict[str, str] = {}
+    for field in fields:
+        item = getattr(value, field, None)
+        if not isinstance(item, str):
+            raise AssertionError("Prime execution identity is invalid")
+        mapping[field] = item
+    return mapping
+
+
+def _default_prime_execution_identity_mapping() -> Mapping[str, str]:
     return {
-        "format": "asterion.prime-artifact-lock/v1",
-        "source_commit": source_commit,
-        "package_name": "@earendil-works/pi-coding-agent",
-        "package_version": "0.7.1",
-        "daemon_protocol": 7,
-        "daemon_schema_revision": 14,
-        "daemon_schema_id": "protocol-7-schema-14-816309b1cd50",
-        "files": {relative: _sha256(text) for relative, text in contents.items()},
-        "rlm_runtime": {
-            "entry": "packages/coding-agent/dist/bundle/cli.js",
-            "binding_chunk": "packages/coding-agent/dist/bundle/chunk-binding.js",
-            "patch_sha256": "a" * 64,
-            "closure": {
-                "packages/coding-agent/dist/bundle/chunk-binding.js": "b" * 64,
-                "packages/coding-agent/dist/bundle/cli.js": "c" * 64,
-            },
-            "derived_closure": {
-                "packages/coding-agent/dist/bundle/chunk-binding.js": "d" * 64,
-                "packages/coding-agent/dist/bundle/cli.js": "c" * 64,
-            },
-        },
+        "source_commit": PINNED_PRIME_COMMIT,
+        "artifact_lock_sha256": _sha256_bytes(default_lock_path().read_bytes()),
+        "harness_module_lock_sha256": _sha256_bytes(
+            default_harness_module_lock_path().read_bytes()
+        ),
+        "ecosystem_module_lock_sha256": _sha256_bytes(
+            default_ecosystem_module_lock_path().read_bytes()
+        ),
+        "ecosystem_bundle_sha256": _sha256_bytes(
+            default_ecosystem_module_lock_path()
+            .with_name("prime-ecosystem-module.mjs")
+            .read_bytes()
+        ),
     }
+
+
+def _prime_execution_identity_digest(identity: Mapping[str, str]) -> str:
+    return _sha256(json.dumps(dict(identity), sort_keys=True))
+
+
+def _validate_prime_loop_execution_identity(
+    execution_identity: object | None,
+    prime_source_root: Path | None,
+) -> tuple[Mapping[str, str], str, Path]:
+    try:
+        expected = _default_prime_execution_identity_mapping()
+        selected = (
+            expected
+            if execution_identity is None
+            else _prime_execution_identity_mapping(execution_identity)
+        )
+        if dict(selected) != dict(expected):
+            raise AssertionError("Prime execution identity diverged")
+        artifact = load_prime_artifact_lock(default_lock_path())
+        harness = load_prime_harness_module_lock(default_harness_module_lock_path())
+        ecosystem = load_prime_ecosystem_module_lock(default_ecosystem_module_lock_path())
+        if (
+            artifact.source_commit != PINNED_PRIME_COMMIT
+            or harness.source_commit != PINNED_PRIME_COMMIT
+            or ecosystem.source_commit != PINNED_PRIME_COMMIT
+            or ecosystem.artifact_lock_sha256 != selected["artifact_lock_sha256"]
+            or ecosystem.bundle_sha256 != selected["ecosystem_bundle_sha256"]
+        ):
+            raise AssertionError("Prime execution identity diverged")
+        for relative_path, digest in {
+            **dict(harness.source_files),
+            **dict(harness.built_modules),
+        }.items():
+            if artifact.files.get(relative_path) != digest:
+                raise AssertionError("Prime execution harness lock drifted")
+        for module in ecosystem.modules:
+            if (
+                module.source_path not in artifact.files
+                or artifact.files.get(module.built_path) != module.sha256
+            ):
+                raise AssertionError("Prime execution module lock drifted")
+        source_root = prime_source_root or _default_prime_source_root()
+        report = verify_prime_checkout(source_root, lock_path=default_lock_path())
+        if report.source_commit != selected["source_commit"]:
+            raise AssertionError("Prime execution source root diverged")
+        return selected, _prime_execution_identity_digest(selected), source_root
+    except (AssertionError, OSError, PrimeSetupError):
+        raise AssertionError("Prime loop execution identity is invalid") from None
 
 
 def _prime_plan(
@@ -512,6 +586,10 @@ def _integer_observation(value: object) -> int:
 async def _run_python_prime_scenario(
     row: Mapping[str, object],
     index: int,
+    *,
+    execution_identity: Mapping[str, str],
+    execution_identity_sha256: str,
+    prime_source_root: Path,
 ) -> PrimeLoopScenarioResult:
     scenario_id = str(row["scenario_id"])
     package_root = (
@@ -526,15 +604,11 @@ async def _run_python_prime_scenario(
             "workspace",
             "agent",
             "session",
-            "prime-source",
             "applications",
             "private",
         ):
             (root / name).mkdir(mode=0o700)
-        artifact_lock_path = root / "artifact-lock.json"
-        artifact_lock_path.write_text(
-            json.dumps(_write_prime_source(root / "prime-source"))
-        )
+        artifact_lock_path = default_lock_path()
         daemon, socket_path, observations_path = await _start_fake_daemon(
             root, scenario_id
         )
@@ -593,7 +667,7 @@ async def _run_python_prime_scenario(
                 "model": "provider-free-model",
                 "node_executable": str(Path(shutil.which("node") or "node")),
                 "prime_socket_path": str(socket_path),
-                "prime_source_root": str(root / "prime-source"),
+                "prime_source_root": str(prime_source_root),
                 "provider": "provider-free",
                 "session_dir": str(root / "session"),
                 "session_id": "session-1",
@@ -628,7 +702,7 @@ async def _run_python_prime_scenario(
                     for grant in authority.allowed_portfolio
                 ],
                 "primeSocketPath": str(socket_path),
-                "primeSourceRoot": str(root / "prime-source"),
+                "primeSourceRoot": str(prime_source_root),
                 "provider": "provider-free",
                 "probeReady": False,
                 "rlmMaxChildren": 0,
@@ -697,10 +771,16 @@ async def _run_python_prime_scenario(
             )
             recorder = MemoryPathlightRecorder(_opaque_id(600 + index))
             audit: list[str] = []
+            external_effects = _ExternalEffectRecorder()
             implementation = (
-                _WorkerCrashImplementation(audit, worker_pids)
+                _WorkerCrashImplementation(audit, worker_pids, external_effects)
                 if scenario_id == "prime-loop-worker-crash"
-                else UsageImplementation(audit, input_tokens=4, output_tokens=3)
+                else _AuditedUsageImplementation(
+                    audit,
+                    external_effects,
+                    input_tokens=4,
+                    output_tokens=3,
+                )
             )
             provider, application, assembly = _assembly(
                 root / "applications",
@@ -1172,12 +1252,16 @@ async def _run_python_prime_scenario(
                 and isinstance(entry.record.payload.get("event"), Mapping)
             ]
             gateway_stderr = _read_private_sinks(gateway_stderr_sinks)
+            external_effect_counters = external_effects.snapshot()
             serialized = json.dumps(
                 {
                     "scenario_id": scenario_id,
                     "daemon": observations,
                     "daemon_stderr": daemon_stderr,
                     "daemon_stdout": daemon_stdout,
+                    "execution_identity": dict(execution_identity),
+                    "execution_identity_sha256": execution_identity_sha256,
+                    "external_effects": dict(external_effect_counters),
                     "gateway_stderr": gateway_stderr,
                     "host_state": repr(snapshot.state),
                     "exception_strings": tuple(exception_observations),
@@ -1202,6 +1286,9 @@ async def _run_python_prime_scenario(
                     observations["modelProviderOperations"]
                 ),
                 application_operations=audit.count("implementation.execute"),
+                external_application_operations=_integer_observation(
+                    external_effect_counters["application_operations"]
+                ),
                 process_counts={
                     key: value
                     for key, value in {
@@ -1221,6 +1308,7 @@ async def _run_python_prime_scenario(
                 pathlight_nodes=pathlight_nodes,
                 pathlight_control_events=pathlight_control_events,
                 pathlight_gaps=tuple(sorted(evidence_gaps)),
+                execution_identity_sha256=execution_identity_sha256,
                 serialized_observations=serialized,
             )
         finally:
@@ -1308,18 +1396,37 @@ def _scenario_outcome(scenario_id: str, actions: tuple[object, ...]) -> str:
 
 async def _run_all_python_prime_scenarios(
     rows: Mapping[str, Mapping[str, object]],
+    *,
+    execution_identity: Mapping[str, str],
+    execution_identity_sha256: str,
+    prime_source_root: Path,
 ) -> tuple[PrimeLoopScenarioResult, ...]:
     results: list[PrimeLoopScenarioResult] = []
     for index, scenario_id in enumerate(EXPECTED_IDS, start=1):
-        results.append(await _run_python_prime_scenario(rows[scenario_id], index))
+        results.append(
+            await _run_python_prime_scenario(
+                rows[scenario_id],
+                index,
+                execution_identity=execution_identity,
+                execution_identity_sha256=execution_identity_sha256,
+                prime_source_root=prime_source_root,
+            )
+        )
     return tuple(results)
 
 
 def run_prime_loop_scenarios(
-    *, fake_prime: bool
+    *,
+    fake_prime: bool,
+    execution_identity: object | None = None,
+    prime_source_root: Path | None = None,
 ) -> tuple[PrimeLoopScenarioResult, ...]:
     if fake_prime is not True:
         raise AssertionError("Task 12 only admits provider-free fake Prime evidence")
+    identity, identity_digest, source_root = _validate_prime_loop_execution_identity(
+        execution_identity,
+        prime_source_root,
+    )
     rows = {str(row["scenario_id"]): row for row in _load_scenarios()}
     package_root = (
         Path(__file__).resolve().parents[1] / "packages/typescript/prime-gateway"
@@ -1331,7 +1438,14 @@ def run_prime_loop_scenarios(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    return asyncio.run(_run_all_python_prime_scenarios(rows))
+    return asyncio.run(
+        _run_all_python_prime_scenarios(
+            rows,
+            execution_identity=identity,
+            execution_identity_sha256=identity_digest,
+            prime_source_root=source_root,
+        )
+    )
 
 
 class TestPrimeVerifiedLoopChildBoundary(unittest.TestCase):
