@@ -333,7 +333,7 @@ class TestPrimeClimb(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 2)
 
-    def test_h036_closure_declares_future_queue_without_successor(self) -> None:
+    def test_h036_closure_remains_unique_with_h037_successor(self) -> None:
         hypotheses = (ROOT / "docs" / "status" / "climb" / "hypotheses.yaml").read_text(
             encoding="utf-8"
         )
@@ -359,17 +359,18 @@ class TestPrimeClimb(unittest.TestCase):
         run_rows = [row.split(",") for row in rows[1:]]
         self.assertEqual(
             [int(columns[0]) for columns in run_rows],
-            list(range(1, 37)),
+            list(range(1, 38)),
         )
         self.assertEqual(
             [columns[1] for columns in run_rows],
-            [f"H-{cycle:03d}" for cycle in range(1, 37)],
+            [f"H-{cycle:03d}" for cycle in range(1, 38)],
         )
         self.assertEqual(
-            rows[-2:],
+            rows[-3:],
             [
                 "35,H-035,passed,check.client-interfaces-closure",
                 "36,H-036,passed,check.operational-parity-closure",
+                "37,H-037,passed,prime-system-parity-operation-host-callback",
             ],
         )
         self.assertEqual(
@@ -379,17 +380,18 @@ class TestPrimeClimb(unittest.TestCase):
                 )
             ),
             {
-                "last_hypothesis": "H-036",
+                "last_hypothesis": "H-037",
                 "last_outcome": "passed",
-                "next_action": "future-work-queue",
+                "next_action": "phase-3-native-kernel-design",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("- H-036: passed — operational surface closure gates", research_tree)
-        self.assertIn("- Future: separately approved hypothesis required", research_tree)
-        self.assertNotIn("- H-037:", research_tree)
+        self.assertIn("- H-037: passed — Prime system parity production callback", research_tree)
+        self.assertIn("- Next: Phase 3 — Asterion-native kernel design", research_tree)
+        self.assertNotIn("- Future: separately approved hypothesis required", research_tree)
         for excluded_hypothesis_id in ("H-044", "H-045"):
             self.assertNotIn(excluded_hypothesis_id, hypotheses)
             self.assertNotIn(excluded_hypothesis_id, "\n".join(rows))
@@ -462,7 +464,7 @@ class TestPrimeClimb(unittest.TestCase):
             rows = (state_dir / "runs.csv").read_text(encoding="utf-8").splitlines()
             self.assertEqual(rows[-1], "35,H-035,passed,check.client-interfaces-closure")
 
-    def test_h037_dormant_gate_does_not_claim_execution_or_phase3(self) -> None:
+    def test_h037_canonical_closure_occurs_once_and_routes_to_phase3(self) -> None:
         hypotheses = (ROOT / "docs" / "status" / "climb" / "hypotheses.yaml").read_text(
             encoding="utf-8"
         )
@@ -471,7 +473,7 @@ class TestPrimeClimb(unittest.TestCase):
             "  description: Prime system parity production path closes through the operator-owned operation callback\n"
             "  parent_paradigm: system-parity\n"
             "  ranking: 0.9\n"
-            "  status: pending\n",
+            "  status: passed\n",
             hypotheses,
         )
         rows = (ROOT / "docs" / "status" / "climb" / "runs.csv").read_text(
@@ -479,13 +481,13 @@ class TestPrimeClimb(unittest.TestCase):
         ).splitlines()
         self.assertEqual(
             rows[-1],
-            "36,H-036,passed,check.operational-parity-closure",
+            "37,H-037,passed,prime-system-parity-operation-host-callback",
         )
         self.assertEqual(
             [int(row.split(",", 1)[0]) for row in rows[1:]],
-            list(range(1, 37)),
+            list(range(1, 38)),
         )
-        self.assertEqual(sum(",H-037," in row for row in rows), 0)
+        self.assertEqual(sum(",H-037," in row for row in rows), 1)
         self.assertEqual(
             json.loads(
                 (ROOT / "docs" / "status" / "climb" / "session-state.json").read_text(
@@ -493,17 +495,22 @@ class TestPrimeClimb(unittest.TestCase):
                 )
             ),
             {
-                "last_hypothesis": "H-036",
+                "last_hypothesis": "H-037",
                 "last_outcome": "passed",
-                "next_action": "future-work-queue",
+                "next_action": "phase-3-native-kernel-design",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(
             encoding="utf-8"
         )
-        self.assertNotIn("- H-037:", research_tree)
-        self.assertIn("- Future: separately approved hypothesis required", research_tree)
-        self.assertNotIn("- Next: Phase 3", research_tree)
+        self.assertEqual(
+            research_tree.count(
+                "- H-037: passed — Prime system parity production callback"
+            ),
+            1,
+        )
+        self.assertIn("- Next: Phase 3 — Asterion-native kernel design", research_tree)
+        self.assertNotIn("- Future: separately approved hypothesis required", research_tree)
 
     def test_h037_gate_is_exact_and_allows_only_audited_artifact_roots(self) -> None:
         allowed_statuses = (
