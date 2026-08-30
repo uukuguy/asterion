@@ -101,6 +101,22 @@ class OperationManager:
         self.fail_after: str | None = None
         self._recover()
 
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    @property
+    def authority_id(self) -> str:
+        return self._authority.envelope.authority_id
+
+    @property
+    def authority_revision(self) -> int:
+        return self._authority.envelope.revision
+
     async def execute(self, transaction: OperationTransaction) -> OperationReceipt:
         self._validate_transaction(transaction)
         existing = self._transactions.get(transaction.operation_id)

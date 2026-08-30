@@ -31,6 +31,32 @@ class OperationPrivateRequestStore(Protocol):
     def get_digest(self, transaction: OperationTransaction) -> str | None: ...
 
 
+class OperationDispatcher(Protocol):
+    @property
+    def session_id(self) -> str: ...
+
+    @property
+    def generation(self) -> int: ...
+
+    @property
+    def authority_id(self) -> str: ...
+
+    @property
+    def authority_revision(self) -> int: ...
+
+    async def execute(
+        self, transaction: OperationTransaction
+    ) -> OperationReceipt: ...
+
+    async def cancel(
+        self, operation_id: str, *, authority_revision: int
+    ) -> OperationReceipt: ...
+
+    async def reconcile(
+        self, transaction: OperationTransaction
+    ) -> OperationReceipt: ...
+
+
 @dataclass(frozen=True)
 class OperationHandoffProof:
     """Opaque, manager-durable proof emitted before an irreversible handoff."""

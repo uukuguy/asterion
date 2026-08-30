@@ -13,7 +13,11 @@ from asterion.control.authority import (
 )
 from asterion.control.journal import JournalCursor, JournalRecord, MemoryCanonicalJournal
 from asterion.operation.manager import OperationManager, OperationManagerError
-from asterion.operation.services import OperationHandoffProof, StagedOperationService
+from asterion.operation.services import (
+    OperationDispatcher,
+    OperationHandoffProof,
+    StagedOperationService,
+)
 from asterion.operation.protocol import (
     EFFECT_COUNTERS,
     OperationReceipt,
@@ -264,6 +268,38 @@ def _admitted_prefix(transaction: OperationTransaction) -> list[JournalRecord]:
 
 
 class TestOperationManager(unittest.IsolatedAsyncioTestCase):
+    async def test_dispatcher_projects_exact_immutable_identity(self) -> None:
+        manager, _, _, _, _ = _manager()
+
+        dispatcher: OperationDispatcher = manager
+        self.assertEqual(
+            (
+                dispatcher.session_id,
+                dispatcher.generation,
+                dispatcher.authority_id,
+                dispatcher.authority_revision,
+            ),
+            ("session-1", 1, "authority-1", 1),
+        )
+        for field, value in (
+            ("session_id", "hostile-session"),
+            ("generation", 2),
+            ("authority_id", "hostile-authority"),
+            ("authority_revision", 2),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(AttributeError):
+                    setattr(dispatcher, field, value)
+        self.assertEqual(
+            (
+                dispatcher.session_id,
+                dispatcher.generation,
+                dispatcher.authority_id,
+                dispatcher.authority_revision,
+            ),
+            ("session-1", 1, "authority-1", 1),
+        )
+
     async def test_operation_protocol_imports_in_fresh_process(self) -> None:
         result = subprocess.run(
             [sys.executable, "-c", "import asterion.operation.protocol"],
