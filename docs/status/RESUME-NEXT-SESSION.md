@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-30 14:44 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-30 15:30 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -29,12 +29,12 @@
 - Callback Task 6 is independently approved through `9c00a9a`: the final HEAD
   passes 2335 Python tests, TypeScript, Rust, lint, docs, build, the 28-command
   promotion gate, and the cross-cutting review fix loop.
-- Task 7's dormant H-037 gate is committed at `610c39f` and passed detached
-  verification with 2338 Python tests plus the full 28-command promotion gate.
-  Its disposable worktree is removed; canonical Climb state remains H-036.
+- Task 7 is closed at `73ef120`: H-037 passed detached verification and then
+  canonical execution exactly once with 2338 Python tests plus the full
+  28-command promotion gate. The disposable verification worktree is removed.
 - The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
-  provider/application operations. Phase 2 now awaits only the exact one-time
-  H-037 canonical transition; native rows remain missing.
+  provider/application operations. `Verified-system-parity` and Phase 2 are
+  PASS; every native row remains missing.
 
 ## Durable recovery boundary
 
@@ -46,8 +46,9 @@
   and `577f5ea261d515223d578673f7431fd12d141fb5160c1611315ab015892485a8`.
 - The synchronized ecosystem module-lock digest is
   `4cee1b9e8a1292e92232f2cafe0872988658a27680bece3755f710ac1bad5dd2`.
-- Do not invent Climb hypotheses. Canonical state ends at H-036 with
-  `next_action=future-work-queue`; only the approved H-037 gate may follow.
+- Do not invent Climb hypotheses. Canonical state ends at H-037 with
+  `next_action=phase-3-native-kernel-design`; Task 8 Git closure precedes new
+  design work.
 - Do not instantiate `PrimeOperationGateway` with synthetic receipts or select
   an operation service from request data. Implement only the approved callback
   boundary in
@@ -57,11 +58,12 @@
 
 ## Immediate next action
 
-1. Continue Task 7 of
-   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`: execute
-   the detached-verified H-037 gate exactly once on canonical state.
-2. Keep every native row missing, close Phase 2 documents, then consolidate
-   local `main`, worktrees, branches, and recovery artifacts behind a bundle.
+1. Continue Task 8 of
+   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`: archive
+   every unique committed and uncommitted worktree state behind verified
+   recovery artifacts.
+2. Promote the verified integration head to local `main`, remove all obsolete
+   worktrees/branches/artifact roots, and keep every native row missing.
 
 ## Ready-to-paste verification
 

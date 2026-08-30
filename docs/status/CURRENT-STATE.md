@@ -9,10 +9,10 @@
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 2 production closure — callback Tasks 1 through 6
-  are independently approved through `9c00a9a`; Task 7's dormant H-037 gate is
-  committed at `610c39f`, passed detached full verification, and now owns the
-  single canonical closure transition.
+- Active work package: Phase 2 is closed at H-037 and
+  `Verified-system-parity` PASS. The callback plan's Task 8 now owns the
+  bundle-backed promotion to local `main` and removal of obsolete branches,
+  worktrees, and audited artifacts before Phase 3 design begins.
 
 ## Current Architecture
 
@@ -59,8 +59,8 @@
   H-035 plus H-036.
 - Native rows remain missing. The exact checker reports 61 passed, zero ledger
   blockers, and two excluded rows with zero provider/application operations.
-  Root/child dispatcher composition and the real callback path now pass, but
-  the canonical `Verified-system-parity` transition remains pending H-037.
+  Root/child dispatcher composition and the real callback path pass, and
+  canonical `Verified-system-parity` is PASS at H-037.
 - `OperationManager` now exposes immutable dispatcher identity, and the
   reviewed Python callback server accepts only exact identity-bound frames over
   a private `0600` Unix socket.
@@ -74,22 +74,17 @@
 - Root and nested child sessions now bind distinct identity-exact managers to
   both provider context and `ControlHost`. The real Node sidecar proves
   execute, reconcile, cancel, missing-callback, failure/no-retry, body-free
-  frames, cleanup, and zero Prime effects. Task 6's final 2335-test repository,
-  cross-language, promotion, distribution, and independent review gates pass;
-  Phase 2 now awaits only the single H-037 closure.
-- The dormant H-037 gate passed detached verification with 2338/2338 Python
-  tests, TypeScript and Rust checks, package builds, and the 28-command
-  promotion gate. Its isolated Climb state recorded H-037 exactly once and
-  routed to `phase-3-native-kernel-design`; canonical state remains at H-036.
+  frames, cleanup, and zero Prime effects. Task 6's repository,
+  cross-language, promotion, distribution, and independent review gates pass.
+- H-037 passed detached verification and then canonical execution exactly once
+  with 2338/2338 Python tests, TypeScript and Rust checks, package builds, and
+  the 28-command promotion gate. Canonical state routes to
+  `phase-3-native-kernel-design`; no native row was promoted.
 
 ## Open Problems
 
-- Option 1A and its root/child correction are verified: each session keeps one
-  Python `OperationManager`, while Prime owns only a lifecycle-managed private
-  callback transport.
-- Execute the independently verified H-037 gate exactly once on canonical
-  state; do not broaden its provider-free command identity or promote native
-  rows.
+- Complete Task 8's bundle-backed Git recovery closure. Preserve every unique
+  committed head and uncommitted worktree difference before removal.
 - Keep every Asterion-native row missing until Phase 3 evidence exists.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
@@ -135,7 +130,8 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Continue the approved callback plan at Task 7 by executing the detached-
-   verified H-037 gate exactly once on canonical state.
+4. Continue the approved callback plan at Task 8: audit and archive all Git
+   state, promote the verified head to local `main`, then remove obsolete
+   worktrees, branches, and audited artifact roots.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

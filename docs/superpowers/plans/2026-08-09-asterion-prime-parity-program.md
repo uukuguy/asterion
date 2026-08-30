@@ -27,7 +27,7 @@
 |---|---|---|---|
 | 0 — Control-plane foundation | `2026-08-09-asterion-control-plane-foundation.md` | Fake provider proves a complete pause/resume/fault/recovery session without model/runtime access | 4–7 engineer-weeks; abstraction and recovery semantics |
 | 1 — Prime verified loop | `2026-08-10-asterion-prime-verified-loop.md` | `Verified-loop`, including bounded Prime/RLM child work, portfolio invocation, detach/attach, checkpoint/recovery, cancellation, budget, redaction and fault injection | 8–14 engineer-weeks; RPC extension points and crash windows |
-| 2 — Prime system parity | Create from the pinned parity ledger after Phase 1 | No missing mandatory pinned Prime feature and passing `Verified-system-parity` | 3–6 engineer-months; interface/ecosystem breadth |
+| 2 — Prime system parity | `2026-08-10-asterion-prime-system-parity.md` plus closed domain plans | PASS at H-037: no missing mandatory pinned Prime feature and passing `Verified-system-parity` | 3–6 engineer-months; interface/ecosystem breadth |
 | 3 — Native long-running kernel | Create after Phase 1 supplies a stable differential oracle | Native provider passes the common verified-loop suite and foundational parity domains | 5–9 engineer-months; persistent kernel and recursive consistency |
 | 4 — Native full parity | Create from the same closed ledger after Phase 3 | No missing mandatory scenario and passing `Verified-native-parity` | 3–7 engineer-months; long-tail ecosystem and governance |
 
@@ -114,17 +114,23 @@ The named gate must prove goal continuation, an admitted portfolio invocation, r
 - Produces Asterion-reachable equivalents for all pinned session/context, RLM, long-running, continual-harness, ecosystem and operations inventory items.
 - Delegation to Prime is permitted; bypassing Asterion authority, identity, recovery or evidence is not.
 
-- [ ] **Step 1: Convert the approved inventory into a closed parity ledger**
+- [x] **Step 1: Convert the approved inventory into a closed parity ledger**
 
 Give every feature a stable ID, Prime source/RPC evidence, Asterion entry point, deterministic conformance scenario, provider-backed requirement, status and compatibility impact. Classify only genuinely non-functional pixel/hidden-reasoning equivalence as excluded.
 
-- [ ] **Step 2: Plan and implement parity domains in dependency order**
+- [x] **Step 2: Plan and implement parity domains in dependency order**
 
 Use separate detailed subplans for: session/context tree; RLM/messaging; daemon/heartbeat/schedules; continual harness; skills/extensions/packages/MCP/providers; SDK/CLI/RPC/ACP/JSON/TUI/export/share; auth/settings/model/telemetry/doctor/update.
 
-- [ ] **Step 3: Run the system-parity gate**
+- [x] **Step 3: Run the system-parity gate**
 
 Require zero `missing` mandatory ledger entries, all common scenarios passing through Prime Gateway, bounded real-provider evidence where semantically required, and compatibility tests for the pinned build plus the next explicitly accepted build.
+
+H-037 passed exactly once at the pinned Prime baseline. The exact checker
+reported 61 passed, zero blocking, and two reviewed exclusions; the production
+operation callback, complete repository gate, 28-command promotion gate, and
+clean-diff gate passed with zero provider/application operations. Phase 3
+native rows remain Missing by design.
 
 ### Task 4: Deliver Phase 3 — Asterion-native long-running kernel
 

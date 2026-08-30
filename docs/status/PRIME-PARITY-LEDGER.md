@@ -21,7 +21,7 @@
 | `control-plane-foundation` | PASS | Phase 0 gate | Provider-free fake only; no Prime/model/runtime/application operation. |
 | Prime Gateway implemented | Implemented; provider-free gate PASS | `make prime-verify-provider-free` | Real-process fake-Prime scenarios; no model-provider operation. |
 | `Verified-loop` | PASS | `make ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent prime-verify-native-rlm-bounded` | Real finite Prime run under prior explicit bounded authority. |
-| `Verified-system-parity` | BLOCKED | `uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway` | Current exact checker reports 40 passed, 21 blocking, 2 excluded, zero provider/application operations. |
+| `Verified-system-parity` | PASS | `uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway` | H-037 closed the exact Prime Gateway union at 61 passed, 0 blocking, 2 excluded, and zero provider/application operations. |
 | Native `Verified-loop` | Missing | Not run | Requires native provider common and differential evidence. |
 | `Verified-native-parity` | Missing | Not run | Final goal; requires every mandatory native parity scenario. |
 
@@ -144,17 +144,37 @@ H-035, `interfaces.operations` is now PASS at exactly 15/15 Prime Gateway rows.
 The clean H-036 cycle used the six receipts, the exact six-feature checker,
 `make check`, `make promotion-check`, and `git diff --check`; promotion reported
 `commands=28 provider_operations=0 full_dataset=no`. Cycle 36 occurs exactly
-once with `check.operational-parity-closure`; the climb state now points to the
-future-work queue.
+once with `check.operational-parity-closure`; H-037 follows it exactly once.
 
 This does not claim live OAuth, live model selection, live telemetry delivery,
-actual update/restart effects, Asterion-native behavior, or full system parity.
-`Verified-system-parity` remains BLOCKED on other mandatory rows; the exact
-system checker reports 40 passed, 21 blocking, and two excluded rows with zero
-provider/application operations. `Verified-native-parity` remains missing.
+actual update/restart effects, or Asterion-native behavior. Those provider-free
+operation receipts contribute only their exact functional rows; the broader
+system claim requires the complete closed union and production callback gate
+below. `Verified-native-parity` remains missing.
+
+## Prime system-parity closure
+
+H-037 passed exactly once with command identity
+`prime-system-parity-operation-host-callback`. The gate:
+
+- built the Prime Gateway under Node 22.23.2;
+- passed all four real-process callback scenarios, including execute,
+  reconcile/cancel, safe failure, cleanup, and no retry;
+- passed the exact system checker at 61 passed, zero blocking, two excluded,
+  and zero provider/application operations;
+- passed `make check`, including 2,338 Python tests, TypeScript, Rust, lint,
+  docs, sdist, and wheel checks;
+- passed `make promotion-check` with `commands=28`, zero provider operations,
+  and `full_dataset=no`; and
+- passed `git diff --check` before the canonical transition.
+
+This establishes `Verified-system-parity` only for
+`asterion.prime-gateway` at the pinned Prime baseline. Every native-kernel row
+remains Missing, and neither provider-free evidence nor H-037 grants future
+model, credential, network, application, or native execution authority.
 
 ## Next evidence boundary
 
-No H-037 exists in the canonical queue. The next hypothesis requires separate
-approval and must preserve the native/system parity nonclaims above until new
-evidence closes those exact rows.
+Canonical Climb state ends at H-037 and routes to
+`phase-3-native-kernel-design`. Do not invent H-038 or promote any native row
+before an approved Phase 3 plan and exact native evidence exist.
