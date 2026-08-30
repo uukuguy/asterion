@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-30 13:12 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-30 14:44 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -29,6 +29,9 @@
 - Callback Task 6 is independently approved through `9c00a9a`: the final HEAD
   passes 2335 Python tests, TypeScript, Rust, lint, docs, build, the 28-command
   promotion gate, and the cross-cutting review fix loop.
+- Task 7's dormant H-037 gate is committed at `610c39f` and passed detached
+  verification with 2338 Python tests plus the full 28-command promotion gate.
+  Its disposable worktree is removed; canonical Climb state remains H-036.
 - The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
   provider/application operations. Phase 2 now awaits only the exact one-time
   H-037 canonical transition; native rows remain missing.
@@ -55,10 +58,10 @@
 ## Immediate next action
 
 1. Continue Task 7 of
-   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`: add the
-   dormant H-037 gate and its RED canonical transition test.
-2. Verify the dormant gate in a disposable detached copy, then execute H-037
-   exactly once and keep every native row missing.
+   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`: execute
+   the detached-verified H-037 gate exactly once on canonical state.
+2. Keep every native row missing, close Phase 2 documents, then consolidate
+   local `main`, worktrees, branches, and recovery artifacts behind a bundle.
 
 ## Ready-to-paste verification
 

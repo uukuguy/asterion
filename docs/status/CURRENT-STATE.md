@@ -10,8 +10,9 @@
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
 - Active work package: Phase 2 production closure — callback Tasks 1 through 6
-  are independently approved through `9c00a9a`; Task 7 owns the single H-037
-  canonical closure transition.
+  are independently approved through `9c00a9a`; Task 7's dormant H-037 gate is
+  committed at `610c39f`, passed detached full verification, and now owns the
+  single canonical closure transition.
 
 ## Current Architecture
 
@@ -76,14 +77,19 @@
   frames, cleanup, and zero Prime effects. Task 6's final 2335-test repository,
   cross-language, promotion, distribution, and independent review gates pass;
   Phase 2 now awaits only the single H-037 closure.
+- The dormant H-037 gate passed detached verification with 2338/2338 Python
+  tests, TypeScript and Rust checks, package builds, and the 28-command
+  promotion gate. Its isolated Climb state recorded H-037 exactly once and
+  routed to `phase-3-native-kernel-design`; canonical state remains at H-036.
 
 ## Open Problems
 
 - Option 1A and its root/child correction are verified: each session keeps one
   Python `OperationManager`, while Prime owns only a lifecycle-managed private
   callback transport.
-- Create, independently verify, and execute H-037 exactly once; do not broaden
-  its provider-free command identity or promote native rows.
+- Execute the independently verified H-037 gate exactly once on canonical
+  state; do not broaden its provider-free command identity or promote native
+  rows.
 - Keep every Asterion-native row missing until Phase 3 evidence exists.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
@@ -129,7 +135,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Continue the approved callback plan at Task 7: create the dormant H-037
-   gate, verify it in a disposable detached copy, then execute it exactly once.
+4. Continue the approved callback plan at Task 7 by executing the detached-
+   verified H-037 gate exactly once on canonical state.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

@@ -1160,3 +1160,5 @@
 - 13:11 Verified Prime callback gates and independent review so H-037 may proceed [2d486f6]
 - 13:12 Recorded Task 6 approval so recovery resumes at the single H-037 gate [9c00a9a]
 - 13:16 Checkpointed Task 6 closure so durable state authorizes only H-037 [8a3b2b5]
+- 13:17 Added dormant H-037 system-parity gate for detached verification before canonical closure [610c39f]
+- 14:44 Verified detached H-037 through full check and promotion without mutating canonical state [610c39f]
