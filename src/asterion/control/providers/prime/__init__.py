@@ -11,6 +11,11 @@ from asterion.control.providers.prime.operation import (
     PrimeOperationClient,
     PrimeOperationError,
 )
+from asterion.control.providers.prime.operation_host import (
+    PRIME_OPERATION_HOST_PROTOCOL,
+    PrimeOperationHostError,
+    PrimeOperationHostServer,
+)
 from asterion.control.private_store import (
     PrivateAttachmentResolver,
     PrivateContentResolver,
@@ -54,6 +59,9 @@ __all__ = (
     "PrimeControlPlaneClient",
     "PrimeOperationClient",
     "PrimeOperationError",
+    "PRIME_OPERATION_HOST_PROTOCOL",
+    "PrimeOperationHostError",
+    "PrimeOperationHostServer",
     "PrimeContinualHarnessService",
     "PrimeHarnessEdit",
     "PrimeHarnessEffect",
