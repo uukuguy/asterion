@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-30 06:56 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-30 08:07 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -11,6 +11,9 @@
   does not inject an operator-owned TypeScript operation dispatcher.
 - Python long-running transport validation is closed by `a666f1c`: Task 4
   Python `90/90` and Task 3 `35/35` pass.
+- Option 1A is approved and committed as design `0bf5db5`: the operator injects
+  the sole Python `OperationManager`, while the Prime provider owns only a
+  lifecycle-managed private callback transport.
 - The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
   provider/application operations, but Phase 2 must not close until the
   operation production-assembly gap is resolved and independently reverified.
@@ -28,18 +31,19 @@
 - Do not rerun or invent Climb hypotheses. Canonical state ends at H-036 with
   `next_action=future-work-queue`.
 - Do not instantiate `PrimeOperationGateway` with synthetic receipts or select
-  an operation service from request data. No existing operator-owned dispatcher
-  or reverse callback transport is available in the TypeScript descriptor path.
+  an operation service from request data. Implement only the approved callback
+  boundary in
+  `docs/superpowers/specs/2026-08-30-prime-operation-host-callback-design.md`.
 - The literal `$(getconf DARWIN_USER_TEMP_DIR)/` and
   `.task13-promotion-bin/` artifact roots remain excluded and untouched.
 
 ## Immediate next action
 
-1. Decide whether to add an explicit operator-owned host callback
-   transport/service for Prime operations (recommended) or withdraw the
-   unreachable `operations-v1` production claim and reopen the six operation
-   parity rows.
-2. Amend the approved design/plan before implementation. H-037 remains blocked.
+1. Complete written review of design commit `0bf5db5`.
+2. After approval, invoke the writing-plans workflow, commit an exact RED/GREEN
+   implementation plan, and execute it with SDD plus TDD.
+3. Keep H-037 blocked until the real production callback round trip, full
+   provider-free gates, and independent review all pass.
 
 ## Ready-to-paste verification
 
