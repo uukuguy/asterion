@@ -1197,3 +1197,7 @@
 - 00:34 Sanitized native recovery process-control failures to preserve fixed public error boundaries [51a542f]
 - 01:32 Bound native factory and packaged manifest so exact provider selection constructs Task 7 client [f40ef72]
 - 02:17 Pinned native private-root inode to close validation/open swap race [896f9b3]
+- 02:46 Closed native conformance/host/differential gates and recovery-boundary sync behavior [3a47b12]
+- 03:36 Hardened native Prime differential evidence to close Fix Wave 1 review gaps [b6211db]
+- 04:22 Bound executed Prime oracle identity and external-effect evidence for Wave 2 [d2fcfc5]
+- 04:37 Bound Prime evidence IDs to serialized observations for Wave 3 [eb7b652]
