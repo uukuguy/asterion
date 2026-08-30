@@ -1166,3 +1166,4 @@
 - 15:30 Closed Prime system parity exactly once and routed work to native-kernel design [73ef120]
 - 15:31 Published Phase 2 evidence boundaries so native work cannot inherit ambiguous claims [6e43438]
 - 15:39 Captured every Git state before cleanup so all removals remain recoverable [46efb48]
+- 18:21 设计 Native 持久控制器核心及 61 项 Prime 全量复现追踪边界 [7fe847e]
