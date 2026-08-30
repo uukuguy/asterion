@@ -11,9 +11,10 @@ import re
 import secrets
 import stat
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
-from typing import NoReturn, Protocol
+from typing import NoReturn, Protocol, cast
 
 from asterion.control.protocol import OPAQUE_ID
 from asterion.control.providers.native.model import (
@@ -120,6 +121,9 @@ class NativeStorageOwner(Protocol):
     def require_open(self) -> None:
         raise NotImplementedError
 
+    def operation(self) -> AbstractContextManager[None]:
+        raise NotImplementedError
+
     def close(self) -> None:
         raise NotImplementedError
 
@@ -144,6 +148,9 @@ class MemoryNativeStorageOwner:
 
     def __init__(self, *, maximum_bytes: int) -> None:
         self._budget = NativeStorageBudget(maximum_bytes)
+        self._operation_lock = threading.RLock()
+        self._entries: list[NativeEntry] = []
+        self._by_record_id: dict[str, NativeEntry] = {}
         self._closed = False
 
     @property
@@ -155,8 +162,14 @@ class MemoryNativeStorageOwner:
         if self._closed:
             raise NativeStoreError
 
+    @contextmanager
+    def operation(self) -> Iterator[None]:
+        with self._operation_lock:
+            yield
+
     def close(self) -> None:
-        self._closed = True
+        with self._operation_lock:
+            self._closed = True
 
 
 class MemoryNativeSessionStore:
@@ -167,48 +180,62 @@ class MemoryNativeSessionStore:
         max_record_bytes: int,
     ) -> None:
         _require_record_limit(max_record_bytes)
-        owner.require_open()
-        self._owner = owner
+        if type(owner) is not MemoryNativeStorageOwner:
+            raise NativeStoreError
+        self._owner = cast(MemoryNativeStorageOwner, owner)
         self._max_record_bytes = max_record_bytes
-        self._entries: list[NativeEntry] = []
-        self._by_record_id: dict[str, NativeEntry] = {}
         self._closed = False
+        with self._owner.operation():
+            self._owner.require_open()
 
     @property
     def position(self) -> int:
-        self._require_usable()
-        return len(self._entries)
+        with self._owner.operation():
+            self._require_usable()
+            return len(self._owner._entries)
 
     def append(self, expected_position: int, record: NativeRecord) -> NativeEntry:
-        self._require_usable()
-        _require_position_boundary(expected_position)
-        if type(record) is not NativeRecord:
-            raise NativeStoreError
-        current = len(self._entries)
-        existing = self._by_record_id.get(record.record_id)
-        if existing is not None:
-            if expected_position != current or existing.record.digest != record.digest:
+        with self._owner.operation():
+            self._require_usable()
+            _require_position_boundary(expected_position)
+            if type(record) is not NativeRecord:
                 raise NativeStoreError
-            _validate_entries(tuple(self._entries))
-            return existing
-        if expected_position != current:
-            raise NativeStoreError
-        previous_digest = self._entries[-1].digest if self._entries else None
-        entry = NativeEntry(current + 1, previous_digest, record)
-        encoded = _encode_entry(entry)
-        _require_encoded_size(encoded, self._max_record_bytes)
-        _validate_entries((*self._entries, entry))
-        self._owner.budget.reserve(len(encoded))
-        self._entries.append(entry)
-        self._by_record_id[record.record_id] = entry
-        return entry
+            current = len(self._owner._entries)
+            existing = self._owner._by_record_id.get(record.record_id)
+            if existing is not None:
+                if (
+                    not _expected_position_matches_idempotent_append(
+                        expected_position,
+                        current,
+                        existing,
+                    )
+                    or existing.record.digest != record.digest
+                ):
+                    raise NativeStoreError
+                _require_encoded_size(_encode_entry(existing), self._max_record_bytes)
+                _validate_entries(tuple(self._owner._entries))
+                return existing
+            if expected_position != current:
+                raise NativeStoreError
+            previous_digest = (
+                self._owner._entries[-1].digest if self._owner._entries else None
+            )
+            entry = NativeEntry(current + 1, previous_digest, record)
+            encoded = _encode_entry(entry)
+            _require_encoded_size(encoded, self._max_record_bytes)
+            _validate_entries((*self._owner._entries, entry))
+            self._owner.budget.reserve(len(encoded))
+            self._owner._entries.append(entry)
+            self._owner._by_record_id[record.record_id] = entry
+            return entry
 
     def replay(self, position: int = 0) -> tuple[NativeEntry, ...]:
-        self._require_usable()
-        _require_replay_position(position, len(self._entries))
-        entries = tuple(self._entries)
-        _validate_entries(entries)
-        return entries[position:]
+        with self._owner.operation():
+            self._require_usable()
+            _require_replay_position(position, len(self._owner._entries))
+            entries = tuple(self._owner._entries)
+            _validate_entries(entries)
+            return entries[position:]
 
     def close(self) -> None:
         self._closed = True
@@ -238,6 +265,7 @@ class NativeSessionDirectory:
         self._capsules_fd = capsules_fd
         self._lock_fd = lock_fd
         self._budget = budget
+        self._operation_lock = threading.RLock()
         self._closed = False
 
     @classmethod
@@ -290,6 +318,11 @@ class NativeSessionDirectory:
         if self._closed:
             raise NativeStoreError
 
+    @contextmanager
+    def operation(self) -> Iterator[None]:
+        with self._operation_lock:
+            yield
+
     def duplicate_records_fd(self) -> int:
         self.require_open()
         try:
@@ -305,21 +338,22 @@ class NativeSessionDirectory:
             _raise_store_error()
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
-        except OSError:
-            pass
-        for descriptor in (
-            self._lock_fd,
-            self._capsules_fd,
-            self._records_fd,
-            self._session_fd,
-            self._root_fd,
-        ):
-            _close_fd_quietly(descriptor)
+        with self._operation_lock:
+            if self._closed:
+                return
+            self._closed = True
+            try:
+                fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            for descriptor in (
+                self._lock_fd,
+                self._capsules_fd,
+                self._records_fd,
+                self._session_fd,
+                self._root_fd,
+            ):
+                _close_fd_quietly(descriptor)
 
 
 class FileNativeSessionStore:
@@ -330,14 +364,16 @@ class FileNativeSessionStore:
         max_record_bytes: int,
     ) -> None:
         _require_record_limit(max_record_bytes)
-        session_directory.require_open()
         self._owner = session_directory
         self._max_record_bytes = max_record_bytes
-        self._records_fd = session_directory.duplicate_records_fd()
+        self._records_fd = -1
         self._closed = False
         try:
-            self._entries = self._load_entries()
-            self._by_record_id = _index_by_record_id(self._entries)
+            with self._owner.operation():
+                self._require_usable()
+                self._records_fd = session_directory.duplicate_records_fd()
+                self._entries = self._load_entries()
+                self._by_record_id = _index_by_record_id(self._entries)
         except NativeStoreError:
             self.close()
             raise
@@ -347,36 +383,68 @@ class FileNativeSessionStore:
 
     @property
     def position(self) -> int:
-        self._require_usable()
-        self._refresh()
-        return len(self._entries)
+        with self._owner.operation():
+            self._require_usable()
+            self._refresh()
+            return len(self._entries)
 
     def append(self, expected_position: int, record: NativeRecord) -> NativeEntry:
-        self._require_usable()
-        _require_position_boundary(expected_position)
-        if type(record) is not NativeRecord:
-            raise NativeStoreError
-        self._refresh()
-        current = len(self._entries)
-        existing = self._by_record_id.get(record.record_id)
-        if existing is not None:
-            if expected_position != current or existing.record.digest != record.digest:
+        with self._owner.operation():
+            self._require_usable()
+            _require_position_boundary(expected_position)
+            if type(record) is not NativeRecord:
                 raise NativeStoreError
-            _validate_entries(self._entries)
-            return existing
-        if expected_position != current:
-            raise NativeStoreError
+            self._refresh()
+            current = len(self._entries)
+            existing = self._by_record_id.get(record.record_id)
+            if existing is not None:
+                if (
+                    not _expected_position_matches_idempotent_append(
+                        expected_position,
+                        current,
+                        existing,
+                    )
+                    or existing.record.digest != record.digest
+                ):
+                    raise NativeStoreError
+                _require_encoded_size(_encode_entry(existing), self._max_record_bytes)
+                _validate_entries(self._entries)
+                return existing
+            if expected_position != current:
+                raise NativeStoreError
 
-        previous_digest = self._entries[-1].digest if self._entries else None
-        entry = NativeEntry(current + 1, previous_digest, record)
-        encoded = _encode_entry(entry)
-        _require_encoded_size(encoded, self._max_record_bytes)
-        _validate_entries((*self._entries, entry))
-        final_name = _final_name(entry)
-        temporary = f".record-{entry.position:020d}-{secrets.token_hex(16)}.tmp"
-        self._owner.budget.reserve(len(encoded))
+            previous_digest = self._entries[-1].digest if self._entries else None
+            entry = NativeEntry(current + 1, previous_digest, record)
+            encoded = _encode_entry(entry)
+            _require_encoded_size(encoded, self._max_record_bytes)
+            _validate_entries((*self._entries, entry))
+            final_name = _final_name(entry)
+            temporary = f".record-{entry.position:020d}-{secrets.token_hex(16)}.tmp"
+            self._owner.budget.reserve(len(encoded))
+            try:
+                self._publish_entry(temporary, final_name, encoded)
+            except NativeStoreError:
+                raise
+            except Exception:
+                _raise_store_error()
+
+            self._refresh()
+            final_entry = self._by_record_id.get(record.record_id)
+            if final_entry != entry:
+                raise NativeStoreError
+            return entry
+
+    def replay(self, position: int = 0) -> tuple[NativeEntry, ...]:
+        with self._owner.operation():
+            self._require_usable()
+            self._refresh()
+            _require_replay_position(position, len(self._entries))
+            return self._entries[position:]
+
+    def _publish_entry(self, temporary: str, final_name: str, encoded: bytes) -> None:
         descriptor = -1
-        published = False
+        temp_created = False
+        final_linked = False
         try:
             descriptor = os.open(
                 temporary,
@@ -384,49 +452,50 @@ class FileNativeSessionStore:
                 0o600,
                 dir_fd=self._records_fd,
             )
+            temp_created = True
             os.fchmod(descriptor, 0o600)
             _validate_fd(descriptor, 0o600, regular=True)
             _write_all(descriptor, encoded)
             os.fsync(descriptor)
-            written = _validate_fd(descriptor, 0o600, regular=True)
-            if written.st_size != len(encoded):
+            temp_stat = _validate_fd(descriptor, 0o600, regular=True)
+            if temp_stat.st_size != len(encoded):
                 raise NativeStoreError
             os.close(descriptor)
             descriptor = -1
-            os.rename(
+            os.link(
                 temporary,
                 final_name,
                 src_dir_fd=self._records_fd,
                 dst_dir_fd=self._records_fd,
+                follow_symlinks=False,
             )
-            published = True
+            final_linked = True
             _fsync_directory(self._records_fd)
+            os.unlink(temporary, dir_fd=self._records_fd)
+            _fsync_directory(self._records_fd)
+            final_stat = _validate_child_file(self._records_fd, final_name, 0o600)
+            if not _same_trusted_file(temp_stat, final_stat):
+                raise NativeStoreError
         except NativeStoreError:
             if descriptor >= 0:
                 _close_fd_quietly(descriptor)
-            if not published:
-                _unlink_child_quietly(self._records_fd, temporary)
-                _fsync_directory_quietly(self._records_fd)
+            if not final_linked and _remove_unpublished_temp(
+                self._records_fd,
+                temporary,
+                temp_created=temp_created,
+            ):
                 self._owner.budget.release(len(encoded))
             raise
         except Exception:
             if descriptor >= 0:
                 _close_fd_quietly(descriptor)
-            if not published:
-                _unlink_child_quietly(self._records_fd, temporary)
-                _fsync_directory_quietly(self._records_fd)
+            if not final_linked and _remove_unpublished_temp(
+                self._records_fd,
+                temporary,
+                temp_created=temp_created,
+            ):
                 self._owner.budget.release(len(encoded))
             _raise_store_error()
-
-        self._entries = (*self._entries, entry)
-        self._by_record_id[record.record_id] = entry
-        return entry
-
-    def replay(self, position: int = 0) -> tuple[NativeEntry, ...]:
-        self._require_usable()
-        self._refresh()
-        _require_replay_position(position, len(self._entries))
-        return self._entries[position:]
 
     def close(self) -> None:
         if self._closed:
@@ -515,6 +584,17 @@ def _require_replay_position(value: int, current: int) -> None:
     _require_position_boundary(value)
     if value > current:
         raise NativeStoreError
+
+
+def _expected_position_matches_idempotent_append(
+    expected_position: int,
+    current_position: int,
+    existing: NativeEntry,
+) -> bool:
+    return expected_position == current_position or (
+        existing.position == current_position
+        and expected_position == existing.position - 1
+    )
 
 
 def _require_encoded_size(encoded: bytes, maximum: int) -> None:
@@ -903,6 +983,26 @@ def _unlink_child_quietly(parent_fd: int, name: str) -> None:
         pass
     except OSError:
         pass
+
+
+def _remove_unpublished_temp(
+    parent_fd: int,
+    name: str,
+    *,
+    temp_created: bool,
+) -> bool:
+    if not temp_created:
+        return True
+    try:
+        os.unlink(name, dir_fd=parent_fd)
+        _fsync_directory(parent_fd)
+        return True
+    except FileNotFoundError:
+        _fsync_directory_quietly(parent_fd)
+        return True
+    except OSError:
+        _fsync_directory_quietly(parent_fd)
+        return False
 
 
 def _close_fd_quietly(descriptor: int) -> None:

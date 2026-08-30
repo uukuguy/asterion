@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import stat
 import tempfile
+import threading
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
@@ -77,6 +79,20 @@ def authority_record(revision: int = 1) -> NativeRecord:
             cost_micros=10_000,
             deadline_ms=60_000,
         ),
+    )
+
+
+def bound_record_with_authority_revision(revision: int) -> NativeRecord:
+    return session_bound_record(
+        provider_id="native",
+        provider_version="0.1.0",
+        system_id="research.system",
+        system_version="1.0.0",
+        session_id=SESSION_ID,
+        generation=1,
+        checkpoint_version="1.0.0",
+        authority_id="authority-1",
+        authority_revision=revision,
     )
 
 
@@ -470,9 +486,196 @@ class TestNativeControlStore(unittest.TestCase):
                 store.append(0, hostile_record())
             self.assert_redacted_store_error(file_error.exception)
 
+    def test_two_file_borrowers_equal_append_publish_once_without_double_charge(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            first = FileNativeSessionStore(session, max_record_bytes=65_536)
+            second = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(first.close)
+            self.addCleanup(second.close)
+            rename_barrier = threading.Barrier(2)
+            original_rename = os.rename
+
+            def racing_rename(
+                src: str,
+                dst: str,
+                *,
+                src_dir_fd: int | None = None,
+                dst_dir_fd: int | None = None,
+            ) -> None:
+                rename_barrier.wait(timeout=5)
+                original_rename(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+
+            with patch.object(store_module.os, "rename", racing_rename):
+                results = run_two_appends(
+                    (first, 0, bound_record()),
+                    (second, 0, bound_record()),
+                )
+
+            entries = assert_two_successes(self, results)
+            self.assertEqual(entries[0], entries[1])
+            final_files = list(records.glob("*.record"))
+            self.assertEqual(final_files, [records / final_name(entries[0])])
+            self.assertEqual(final_files[0].stat().st_nlink, 1)
+            self.assertEqual(
+                session.budget.used_bytes,
+                len(canonical_entry_bytes(entries[0])),
+            )
+
+    def test_two_file_borrowers_conflicting_append_has_one_fixed_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            bootstrap = FileNativeSessionStore(session, max_record_bytes=65_536)
+            bootstrap.append(0, bound_record())
+            first = FileNativeSessionStore(session, max_record_bytes=65_536)
+            second = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(bootstrap.close)
+            self.addCleanup(first.close)
+            self.addCleanup(second.close)
+            rename_barrier = threading.Barrier(2)
+            original_rename = os.rename
+
+            def racing_rename(
+                src: str,
+                dst: str,
+                *,
+                src_dir_fd: int | None = None,
+                dst_dir_fd: int | None = None,
+            ) -> None:
+                rename_barrier.wait(timeout=5)
+                original_rename(src, dst, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+
+            with patch.object(store_module.os, "rename", racing_rename):
+                results = run_two_appends(
+                    (first, 1, authority_record()),
+                    (second, 1, authority_record(2)),
+                )
+
+            entries, errors = split_results(results)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(len(errors), 1)
+            self.assert_redacted_store_error(errors[0])
+            self.assertEqual(len(list(records.glob("*.record"))), 2)
+
+    def test_file_borrower_stale_position_fails_after_owner_serialized_refresh(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, _records = prepared_file_session(root)
+            first = FileNativeSessionStore(session, max_record_bytes=65_536)
+            second = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(first.close)
+            self.addCleanup(second.close)
+
+            committed = first.append(0, bound_record())
+            with self.assertRaises(NativeStoreError) as raised:
+                second.append(0, bound_record_with_authority_revision(2))
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assertEqual(first.replay(), (committed,))
+            self.assertEqual(second.replay(), (committed,))
+
+    def test_file_publish_never_overwrites_existing_final_and_cleans_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session, records = prepared_file_session(root)
+            store = FileNativeSessionStore(session, max_record_bytes=65_536)
+            self.addCleanup(session.close)
+            self.addCleanup(store.close)
+            entry = NativeEntry(1, None, bound_record())
+            preexisting = records / final_name(entry)
+            original_write_all = store_module._write_all
+
+            def create_final_then_write(descriptor: int, data: bytes) -> None:
+                preexisting.write_bytes(b"SENTINEL_SECRET")
+                preexisting.chmod(0o600)
+                original_write_all(descriptor, data)
+
+            with (
+                patch.object(store_module, "_write_all", create_final_then_write),
+                self.assertRaises(NativeStoreError) as raised,
+            ):
+                store.append(0, bound_record())
+
+            self.assert_redacted_store_error(raised.exception)
+            self.assertEqual(preexisting.read_bytes(), b"SENTINEL_SECRET")
+            self.assertEqual(preexisting.stat().st_nlink, 1)
+            self.assertEqual(list(records.glob(".record-*.tmp")), [])
+            self.assertEqual(session.budget.used_bytes, 0)
+
+    def test_memory_borrowers_share_owner_serialized_journal_and_budget(self) -> None:
+        owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)
+        first = MemoryNativeSessionStore(owner, max_record_bytes=65_536)
+        second = MemoryNativeSessionStore(owner, max_record_bytes=65_536)
+        self.addCleanup(owner.close)
+        self.addCleanup(first.close)
+        self.addCleanup(second.close)
+
+        entry = first.append(0, bound_record())
+        self.assertEqual(second.append(1, bound_record()), entry)
+        self.assertEqual(second.replay(), (entry,))
+        self.assertEqual(owner.budget.used_bytes, len(canonical_entry_bytes(entry)))
+        with self.assertRaises(NativeStoreError) as raised:
+            second.append(1, bound_record_with_authority_revision(2))
+        self.assert_redacted_store_error(raised.exception)
+
 
 CorruptCase = Callable[[], None]
 EntryMutator = Callable[[Path, Path, NativeEntry, NativeEntry], None]
+AppendRequest = tuple[FileNativeSessionStore, int, NativeRecord]
+AppendResult = tuple[str, NativeEntry | BaseException]
+
+
+def run_two_appends(left: AppendRequest, right: AppendRequest) -> list[AppendResult]:
+    results: queue.Queue[AppendResult] = queue.Queue()
+
+    def append(request: AppendRequest) -> None:
+        store, expected_position, record = request
+        try:
+            results.put(("ok", store.append(expected_position, record)))
+        except BaseException as error:
+            results.put(("error", error))
+
+    threads = (
+        threading.Thread(target=append, args=(left,)),
+        threading.Thread(target=append, args=(right,)),
+    )
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+    if any(thread.is_alive() for thread in threads):
+        raise AssertionError("concurrent append did not finish")
+    return [results.get_nowait(), results.get_nowait()]
+
+
+def split_results(results: list[AppendResult]) -> tuple[list[NativeEntry], list[BaseException]]:
+    entries: list[NativeEntry] = []
+    errors: list[BaseException] = []
+    for status, value in results:
+        if status == "ok":
+            entries.append(cast(NativeEntry, value))
+        else:
+            errors.append(cast(BaseException, value))
+    return entries, errors
+
+
+def assert_two_successes(
+    case: unittest.TestCase,
+    results: list[AppendResult],
+) -> list[NativeEntry]:
+    entries, errors = split_results(results)
+    case.assertEqual(errors, [])
+    case.assertEqual(len(entries), 2)
+    return entries
 
 
 class HostileNativeRecord(NativeRecord):
