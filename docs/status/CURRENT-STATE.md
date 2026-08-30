@@ -3,14 +3,15 @@
 ## Project Snapshot
 
 - Project: Asterion
-- Active branch: `feature/prime-client-interfaces`
+- Active branch: `recovery/pre-consolidation-root-20260830`
 - Theme-level focus: Prime system parity through closed, exact evidence
   packages, followed by Asterion-native kernel parity
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 2 — H-036 operational surface closed; future
-  queue awaits a separately approved hypothesis
+- Active work package: Phase 2 production closure — approved Prime operation
+  host callback design through `8b7fb18`; exact implementation plan ready at
+  `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`
 
 ## Current Architecture
 
@@ -55,15 +56,18 @@
   `check.operational-parity-closure`; `next_action` is `future-work-queue`.
 - `interfaces.operations` is PASS at exactly 15/15 Prime Gateway rows after
   H-035 plus H-036.
-- Native rows remain missing. `Verified-system-parity` remains BLOCKED: the
-  exact checker reports 40 passed, 21 blocking, and two excluded rows with zero
-  provider/application operations. No client or operation evidence promotes a
-  broader system or native claim.
+- Native rows remain missing. The exact checker now reports 61 passed, zero
+  ledger blockers, and two excluded rows with zero provider/application
+  operations, but `Verified-system-parity` remains BLOCKED because independent
+  review proved the production TypeScript descriptor path does not yet inject
+  an operator-owned operation dispatcher.
 
 ## Open Problems
 
-- No H-037 has been approved; the canonical queue is a future-work queue until
-  a separate hypothesis defines the next exact scope.
+- Option 1A and its root/child correction are approved: each session keeps one
+  Python `OperationManager`, while Prime owns only a lifecycle-managed private
+  callback transport. H-037 remains uncreated until implementation, real
+  process verification, full gates, and independent review pass.
 - Keep every Asterion-native row missing until Phase 3 evidence exists.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
@@ -87,6 +91,8 @@
 - `docs/superpowers/plans/2026-08-10-asterion-prime-client-interfaces-parity.md`
 - `docs/superpowers/plans/2026-08-10-asterion-prime-operational-parity.md`
 - `docs/superpowers/specs/2026-08-28-asterion-prime-client-interfaces-design.md`
+- `docs/superpowers/specs/2026-08-30-prime-operation-host-callback-design.md`
+- `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`
 - `docs/status/PRIME-PARITY-LEDGER.md`
 - `.superpowers/sdd/client-interfaces-task-10-report.md`
 - `.superpowers/sdd/operational-parity-task-16-report.md`
@@ -107,7 +113,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Do not start H-037 without a separate approved hypothesis and evidence
-   boundary.
+4. Execute the approved callback plan with RED -> GREEN SDD; do not create or
+   run H-037 before its real-process and independent-review prerequisites pass.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

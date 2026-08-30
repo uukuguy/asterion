@@ -11,8 +11,9 @@
   does not inject an operator-owned TypeScript operation dispatcher.
 - Python long-running transport validation is closed by `a666f1c`: Task 4
   Python `90/90` and Task 3 `35/35` pass.
-- Option 1A is approved and committed as design `0bf5db5`: the operator injects
-  the sole Python `OperationManager`, while the Prime provider owns only a
+- Option 1A is approved in `0bf5db5` and its per-session root/child correction
+  is committed in `8b7fb18`: the operator injects the sole Python
+  `OperationManager` for each session, while the Prime provider owns only a
   lifecycle-managed private callback transport.
 - The ledger checker reports `61 passed / 0 blocking / 2 excluded` with zero
   provider/application operations, but Phase 2 must not close until the
@@ -39,10 +40,10 @@
 
 ## Immediate next action
 
-1. Complete written review of design commit `0bf5db5`.
-2. After approval, invoke the writing-plans workflow, commit an exact RED/GREEN
-   implementation plan, and execute it with SDD plus TDD.
-3. Keep H-037 blocked until the real production callback round trip, full
+1. Commit and execute
+   `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md` with SDD
+   plus RED -> GREEN TDD, beginning at Task 1.
+2. Keep H-037 blocked until the real production callback round trip, full
    provider-free gates, and independent review all pass.
 
 ## Ready-to-paste verification

@@ -1140,3 +1140,4 @@
 - 08:04 Approved option 1A: keep OperationManager authority in Python and bind the selected Prime sidecar to one lifecycle-managed private callback transport [pending]
 - 08:07 Designed the Prime operation host callback to close the unreachable production operation path [0bf5db5]
 - 08:08 Checkpointed callback design review to preserve the exact next implementation boundary [d403ea5]
+- 08:14 Bound callbacks per session to prevent child operations from inheriting parent authority [8b7fb18]
