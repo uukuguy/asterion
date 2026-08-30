@@ -23,6 +23,7 @@ from asterion.control.providers.native.model import (
     NativeCapsuleMetadata,
     NativeControllerState,
     NativeEntry,
+    NativeEventDraft,
     NativeRecord,
     NativeInputReference,
     NativeTurnRequest,
@@ -33,6 +34,7 @@ from asterion.control.providers.native.state import (
     _command_committed_record_from_mapping,
     _metadata_from_mapping,
     _session_bound_record_from_mapping,
+    _turn_request_from_mapping,
     authority_synced_record,
     checkpoint_committed_record,
     reduce_native_entries,
@@ -160,6 +162,10 @@ class NativeController:
         try:
             if type(budget) is not RemainingBudget:
                 raise NativeControllerError
+            if self.state.session_id is None:
+                return
+            if self.state.terminal_event_id is not None:
+                return
             revision = self._require_bound_authority_revision()
             self._append_equal_or_new(authority_synced_record(revision, budget))
         except (NativeControllerError, NativeStoreError):
@@ -212,7 +218,8 @@ class NativeController:
     ) -> None:
         try:
             events = self._validated_turn_events(request, result)
-            self._append(turn_committed_record(result, events))
+            committed = _result_for_committed_events(result, events)
+            self._append(turn_committed_record(committed, events))
         except (NativeControllerError, NativeStoreError):
             raise
         except Exception:
@@ -447,15 +454,22 @@ class NativeController:
             or state.generation is None
         ):
             return None
+        recovered_reference_digests = self._recovered_reference_digests(state)
+        pending_inputs = tuple(
+            item
+            for item in state.pending_inputs
+            if item.command_digest not in recovered_reference_digests
+        )
         terminal_results = tuple(
             result
             for result in state.pending_action_results
             if result.resolution in {"rejected", "succeeded", "failed", "cancelled", "uncertain"}
+            and result.command_digest not in recovered_reference_digests
         )
-        if state.pending_inputs and terminal_results:
+        if pending_inputs and terminal_results:
             raise NativeControllerError
-        if state.pending_inputs:
-            inputs = (state.pending_inputs[0],)
+        if pending_inputs:
+            inputs = (pending_inputs[0],)
             command_ids = self._command_ids_for_digests(
                 {item.command_digest for item in inputs}
             )
@@ -495,6 +509,23 @@ class NativeController:
                 budget=state.remaining_budget,
             )
         return None
+
+    def _recovered_reference_digests(
+        self, state: NativeControllerState
+    ) -> frozenset[str]:
+        if not state.recovery_required_turn_ids:
+            return frozenset()
+        recovered_turn_ids = frozenset(state.recovery_required_turn_ids)
+        digests: set[str] = set()
+        for entry in self._session_store.replay():
+            if entry.record.kind != "turn.started":
+                continue
+            request = _turn_request_from_mapping(entry.record.payload["request"])
+            if request.turn_id not in recovered_turn_ids:
+                continue
+            digests.update(item.command_digest for item in request.inputs)
+            digests.update(item.command_digest for item in request.action_results)
+        return frozenset(digests)
 
     def _stable_turn_id(
         self,
@@ -948,6 +979,23 @@ def _add_usage(previous: BudgetUsage, delta: BudgetUsage) -> BudgetUsage:
 
 def _usage_payload(value: BudgetUsage) -> Mapping[str, object]:
     return {field: getattr(value, field) for field in _USAGE_FIELDS}
+
+
+def _result_for_committed_events(
+    result: NativeTurnResult, events: tuple[ControlEvent, ...]
+) -> NativeTurnResult:
+    """Use the canonical public event payloads for persisted draft validation."""
+
+    if type(result) is not NativeTurnResult:
+        raise NativeControllerError
+    return NativeTurnResult(
+        result.turn_id,
+        tuple(
+            NativeEventDraft(event.type, event.payload)
+            for event in events
+        ),
+        result.usage,
+    )
 
 
 def _digest(value: Mapping[str, object]) -> str:
