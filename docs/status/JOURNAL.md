@@ -1188,3 +1188,10 @@
 - 23:25 Fenced native replay drift to protect Task 5 recovery determinism [0bc51c7]
 - 23:36 Sealed native capsules from replay prefixes for complete recovery coverage [8b2c11e]
 - 23:43 Rejected custom native turn script mappings to close hostile constructor execution [169113c]
+- 23:55 Exposed async native control client to serialize durable turn/event advancement [cfc3689]
+
+## 2026-08-31
+- 00:07 Serialized native in-flight turn ownership to prevent duplicate adapter execution [f773695]
+- 00:16 Poisoned uncertain native turn settlement to prevent re-execution after recovery write failure [70012e8]
+- 00:23 Settled adapter process-control aborts to prevent stuck native turn ownership [3777fa8]
+- 00:34 Sanitized native recovery process-control failures to preserve fixed public error boundaries [51a542f]
