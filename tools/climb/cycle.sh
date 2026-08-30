@@ -21,6 +21,18 @@ require_node22() {
   fi
 }
 
+require_h037_tree() {
+  status="$(git status --porcelain)"
+  allowed_temp='?? "$(getconf DARWIN_USER_TEMP_DIR)/"'
+  allowed_promotion='?? .task13-promotion-bin/'
+  case "$status" in
+    ""|"$allowed_temp"|"$allowed_promotion"|"$allowed_temp
+$allowed_promotion"|"$allowed_promotion
+$allowed_temp") ;;
+    *) exit 2 ;;
+  esac
+}
+
 case "${1-}" in
   H-001)
     uv run python -m unittest -v tests.test_prime_rlm_messaging_parity
@@ -202,6 +214,18 @@ case "${1-}" in
     make promotion-check
     git diff --check
     python3 tools/climb/regen-tree.py H-036 passed future-work-queue check.operational-parity-closure
+    ;;
+  H-037)
+    require_h037_tree
+    require_node22
+    npm --prefix packages/typescript/prime-gateway run build
+    uv run python -m unittest -v tests.test_prime_operation_real_process
+    uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway
+    make check
+    make promotion-check
+    git diff --check
+    require_h037_tree
+    python3 tools/climb/regen-tree.py H-037 passed phase-3-native-kernel-design prime-system-parity-operation-host-callback
     ;;
   *) exit 2 ;;
 esac

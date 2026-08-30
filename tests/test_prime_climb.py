@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -13,6 +14,11 @@ EXPECTED_H036 = {
     "hypothesis": "H-036",
     "outcome": "passed",
     "command_id": "check.operational-parity-closure",
+}
+EXPECTED_H037 = {
+    "hypothesis": "H-037",
+    "outcome": "passed",
+    "command_id": "prime-system-parity-operation-host-callback",
 }
 
 
@@ -27,6 +33,19 @@ def _seed_h035_state(state_dir: Path) -> None:
         if row.startswith("cycle,") or int(row.split(",", 1)[0]) <= 35
     ]
     (state_dir / "runs.csv").write_text("\n".join(h035_rows) + "\n", encoding="utf-8")
+
+
+def _seed_h036_state(state_dir: Path) -> None:
+    state_dir.mkdir()
+    canonical_rows = (ROOT / "docs" / "status" / "climb" / "runs.csv").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    h036_rows = [
+        row
+        for row in canonical_rows
+        if row.startswith("cycle,") or int(row.split(",", 1)[0]) <= 36
+    ]
+    (state_dir / "runs.csv").write_text("\n".join(h036_rows) + "\n", encoding="utf-8")
 
 
 def _write_executable(path: Path, content: str) -> None:
@@ -76,6 +95,77 @@ def _fake_h036_path(bin_dir: Path, log_path: Path, *, dirty: bool = False) -> st
 def _run_h036_cycle(state_dir: Path, path: str, log_path: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(ROOT / "tools" / "climb" / "cycle.sh"), "H-036"],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "ASTERION_CLIMB_STATE_DIR": str(state_dir),
+            "ASTERION_TEST_COMMAND_LOG": str(log_path),
+            "PATH": path,
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _fake_h037_path(
+    bin_dir: Path,
+    log_path: Path,
+    *,
+    status: tuple[str, ...] = (),
+) -> str:
+    del log_path
+    _write_executable(
+        bin_dir / "npm",
+        "#!/bin/sh\n"
+        "printf 'npm %s\\n' \"$*\" >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "exit 0\n",
+    )
+    _write_executable(
+        bin_dir / "make",
+        "#!/bin/sh\n"
+        "printf 'make %s\\n' \"$*\" >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "exit 0\n",
+    )
+    _write_executable(
+        bin_dir / "uv",
+        "#!/bin/sh\n"
+        "printf 'uv %s\\n' \"$*\" >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "exit 0\n",
+    )
+    rendered_status = "".join(
+        f"  printf '%s\\n' {shlex.quote(line)}\n" for line in status
+    ) or "  :\n"
+    _write_executable(
+        bin_dir / "git",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"status\" ]; then\n"
+        f"{rendered_status}"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"diff\" ] && [ \"$2\" = \"--check\" ]; then\n"
+        "  printf 'git diff --check\\n' >> \"$ASTERION_TEST_COMMAND_LOG\"\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 2\n",
+    )
+    _write_executable(
+        bin_dir / "node",
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"-v\" ]; then\n"
+        "  printf 'v22.23.2\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n",
+    )
+    return str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+
+
+def _run_h037_cycle(
+    state_dir: Path, path: str, log_path: Path
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(ROOT / "tools" / "climb" / "cycle.sh"), "H-037"],
         cwd=ROOT,
         env={
             **os.environ,
@@ -371,6 +461,127 @@ class TestPrimeClimb(unittest.TestCase):
             self.assertFalse(command_log.exists())
             rows = (state_dir / "runs.csv").read_text(encoding="utf-8").splitlines()
             self.assertEqual(rows[-1], "35,H-035,passed,check.client-interfaces-closure")
+
+    def test_h037_dormant_gate_does_not_claim_execution_or_phase3(self) -> None:
+        hypotheses = (ROOT / "docs" / "status" / "climb" / "hypotheses.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "- id: H-037\n"
+            "  description: Prime system parity production path closes through the operator-owned operation callback\n"
+            "  parent_paradigm: system-parity\n"
+            "  ranking: 0.9\n"
+            "  status: pending\n",
+            hypotheses,
+        )
+        rows = (ROOT / "docs" / "status" / "climb" / "runs.csv").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        self.assertEqual(
+            rows[-1],
+            "36,H-036,passed,check.operational-parity-closure",
+        )
+        self.assertEqual(
+            [int(row.split(",", 1)[0]) for row in rows[1:]],
+            list(range(1, 37)),
+        )
+        self.assertEqual(sum(",H-037," in row for row in rows), 0)
+        self.assertEqual(
+            json.loads(
+                (ROOT / "docs" / "status" / "climb" / "session-state.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+            {
+                "last_hypothesis": "H-036",
+                "last_outcome": "passed",
+                "next_action": "future-work-queue",
+            },
+        )
+        research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("- H-037:", research_tree)
+        self.assertIn("- Future: separately approved hypothesis required", research_tree)
+        self.assertNotIn("- Next: Phase 3", research_tree)
+
+    def test_h037_gate_is_exact_and_allows_only_audited_artifact_roots(self) -> None:
+        allowed_statuses = (
+            (),
+            ('?? "$(getconf DARWIN_USER_TEMP_DIR)/"',),
+            ("?? .task13-promotion-bin/",),
+            (
+                '?? "$(getconf DARWIN_USER_TEMP_DIR)/"',
+                "?? .task13-promotion-bin/",
+            ),
+        )
+        for status in allowed_statuses:
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
+                workspace = Path(temporary)
+                state_dir = workspace / "climb"
+                command_log = workspace / "commands.log"
+                bin_dir = workspace / "bin"
+                bin_dir.mkdir()
+                _seed_h036_state(state_dir)
+
+                completed = _run_h037_cycle(
+                    state_dir,
+                    _fake_h037_path(bin_dir, command_log, status=status),
+                    command_log,
+                )
+
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(_latest_cycle_result(state_dir), EXPECTED_H037)
+                self.assertEqual(
+                    json.loads((state_dir / "session-state.json").read_text()),
+                    {
+                        "last_hypothesis": "H-037",
+                        "last_outcome": "passed",
+                        "next_action": "phase-3-native-kernel-design",
+                    },
+                )
+                self.assertEqual(
+                    command_log.read_text(encoding="utf-8").splitlines(),
+                    [
+                        "npm --prefix packages/typescript/prime-gateway run build",
+                        "uv run python -m unittest -v tests.test_prime_operation_real_process",
+                        "uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway",
+                        "make check",
+                        "make promotion-check",
+                        "git diff --check",
+                    ],
+                )
+
+    def test_h037_rejects_every_other_dirty_path_before_commands_or_state(self) -> None:
+        for status in (
+            (" M docs/status/JOURNAL.md",),
+            ("?? unexpected-artifact/",),
+            (
+                '?? "$(getconf DARWIN_USER_TEMP_DIR)/"',
+                "?? unexpected-artifact/",
+            ),
+        ):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
+                workspace = Path(temporary)
+                state_dir = workspace / "climb"
+                command_log = workspace / "commands.log"
+                bin_dir = workspace / "bin"
+                bin_dir.mkdir()
+                _seed_h036_state(state_dir)
+
+                completed = _run_h037_cycle(
+                    state_dir,
+                    _fake_h037_path(bin_dir, command_log, status=status),
+                    command_log,
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertFalse(command_log.exists())
+                rows = (state_dir / "runs.csv").read_text(encoding="utf-8").splitlines()
+                self.assertEqual(
+                    rows[-1],
+                    "36,H-036,passed,check.operational-parity-closure",
+                )
 
 
 if __name__ == "__main__":

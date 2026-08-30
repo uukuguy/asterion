@@ -180,3 +180,8 @@
   parent_paradigm: interface-operations
   ranking: 0.7
   status: passed
+- id: H-037
+  description: Prime system parity production path closes through the operator-owned operation callback
+  parent_paradigm: system-parity
+  ranking: 0.9
+  status: pending

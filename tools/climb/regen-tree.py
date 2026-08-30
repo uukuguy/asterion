@@ -225,6 +225,12 @@ def main(arguments: list[str]) -> int:
             "future-work-queue",
             "check.operational-parity-closure",
         ): 36,
+        (
+            "H-037",
+            "passed",
+            "phase-3-native-kernel-design",
+            "prime-system-parity-operation-host-callback",
+        ): 37,
     }
     cycle = accepted.get((hypothesis_id, outcome, next_action, command_id))
     if cycle is None:
@@ -242,7 +248,7 @@ def main(arguments: list[str]) -> int:
             for row in reader:
                 if len(row) != 4:
                     return 2
-                existing_rows.append(tuple(row))
+                existing_rows.append((row[0], row[1], row[2], row[3]))
     if len(existing_rows) != cycle - 1:
         return 2
     for index, row in enumerate(existing_rows, start=1):
@@ -469,13 +475,23 @@ def main(arguments: list[str]) -> int:
                 "- Next: H-036 — operational surface inventory",
             )
         )
-    elif cycle >= 36:
+    elif cycle == 36:
         rendered.extend(
             (
                 "- H-034: passed — ecosystem closure gates",
                 "- H-035: passed — client interface closure gates",
                 "- H-036: passed — operational surface closure gates",
                 "- Future: separately approved hypothesis required",
+            )
+        )
+    elif cycle >= 37:
+        rendered.extend(
+            (
+                "- H-034: passed — ecosystem closure gates",
+                "- H-035: passed — client interface closure gates",
+                "- H-036: passed — operational surface closure gates",
+                "- H-037: passed — Prime system parity production callback",
+                "- Next: Phase 3 — Asterion-native kernel design",
             )
         )
     (root / "research-tree.md").write_text(

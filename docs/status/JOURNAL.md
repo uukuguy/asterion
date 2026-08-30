@@ -1159,3 +1159,4 @@
 - 12:09 Closed failed first-start transports so callbacks cannot outlive sidecar startup [2d486f6]
 - 13:11 Verified Prime callback gates and independent review so H-037 may proceed [2d486f6]
 - 13:12 Recorded Task 6 approval so recovery resumes at the single H-037 gate [9c00a9a]
+- 13:16 Checkpointed Task 6 closure so durable state authorizes only H-037 [8a3b2b5]
