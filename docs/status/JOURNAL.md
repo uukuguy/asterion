@@ -1204,3 +1204,4 @@
 - 04:09 Proved native real-process crash recovery across eight durable controller boundaries [0c2945b]
 - 04:28 Hardened native crash proof markers and hook redaction after review [70f9056]
 - 04:36 Required canonical native recovery stdout to reject hidden child noise [9df3e35]
+- 04:47 Gated Native controller core receipt so H-038 has exact preflight proof [de58460]
