@@ -513,10 +513,12 @@ class RecordingProcess:
         audit: list[str],
         *,
         fail_request: bool = False,
+        fail_after_pid: bool = False,
         request_gate: asyncio.Event | None = None,
     ) -> None:
         self.audit = audit
         self.fail_request = fail_request
+        self.fail_after_pid = fail_after_pid
         self.request_gate = request_gate
         self.request_calls = 0
         self.close_calls = 0
@@ -529,6 +531,8 @@ class RecordingProcess:
         if self.fail_request:
             raise RuntimeError("SENTINEL_PROCESS_START")
         self.pid = 4242
+        if self.fail_after_pid:
+            raise RuntimeError("SENTINEL_PROCESS_START_AFTER_SPAWN")
         if self.request_gate is not None:
             await self.request_gate.wait()
         return {"ok": True}
@@ -636,7 +640,40 @@ class TestPrimeManagedOperationTransport(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PrimeSidecarProcessError) as raised:
             await transport.request({"id": "request-1"})
 
-        self.assertEqual(audit, ["callback.start", "process.request", "callback.close"])
+        self.assertEqual(
+            audit,
+            [
+                "callback.start",
+                "process.request",
+                "process.close",
+                "callback.close",
+            ],
+        )
+        self.assertNotIn("SENTINEL", repr(raised.exception))
+        await transport.close()
+
+    async def test_first_process_failure_after_spawn_closes_process_then_callback(
+        self,
+    ) -> None:
+        audit: list[str] = []
+        callback = RecordingCallback(audit)
+        process = RecordingProcess(audit, fail_after_pid=True)
+        transport = PrimeManagedOperationTransport(process=process, callback=callback)
+
+        with self.assertRaises(PrimeSidecarProcessError) as raised:
+            await transport.request({"id": "request-1"})
+
+        self.assertEqual(
+            audit,
+            [
+                "callback.start",
+                "process.request",
+                "process.close",
+                "callback.close",
+            ],
+        )
+        self.assertEqual(process.close_calls, 1)
+        self.assertEqual(callback.close_calls, 1)
         self.assertNotIn("SENTINEL", repr(raised.exception))
         await transport.close()
 

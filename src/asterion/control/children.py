@@ -39,7 +39,6 @@ from asterion.control.system import AgentSystemPlan
 from asterion.runtime.host import CancellationSignal
 
 if TYPE_CHECKING:
-    from asterion.operation.manager import OperationManager
     from asterion.operation.services import OperationDispatcher
 
 
@@ -692,7 +691,7 @@ class ChildSessionService:
                 clock_ms=self._clock_ms,
                 cancellation_signal=signal,
                 child_service=nested_children,
-                operation_manager=cast("OperationManager | None", operation_manager),
+                operation_manager=operation_manager,
             )
             journal = None
             runtime.host = host

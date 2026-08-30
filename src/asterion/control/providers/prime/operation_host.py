@@ -148,21 +148,11 @@ class PrimeManagedOperationTransport:
     async def _close_callback_after_failed_start(
         self, initial_pid: object | None
     ) -> None:
-        if initial_pid is not None or self._process_pid() is not None:
+        if initial_pid is not None:
             return
-        async with self._close_lock:
-            if self._callback_closed:
-                self._start_failed = True
-                return
-            self._callback_closed = True
-            self._start_failed = True
-            try:
-                callback_close = object.__getattribute__(self._callback, "close")
-                await callback_close()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                return
+        self._start_failed = True
+        with suppress(PrimeSidecarProcessError):
+            await self.close()
 
     async def close(self) -> None:
         async with self._close_lock:

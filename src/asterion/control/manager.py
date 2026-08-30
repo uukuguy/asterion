@@ -59,9 +59,9 @@ from asterion.pathlight.recorder import (
 )
 
 if TYPE_CHECKING:
-    from asterion.operation.manager import OperationManager
     from asterion.operation.protocol import OperationReceipt, OperationTransaction
     from asterion.operation.services import (
+        OperationDispatcher,
         OperationPrivateRequestResolver,
         OperationPrivateRequestStore,
         OperationService,
@@ -265,7 +265,7 @@ class ControlHost:
         session_context_client: SessionContextClient | None = None,
         admitted_action_preparer: AdmittedActionPreparer | None = None,
         provider_owned_actions: ProviderOwnedActionLifecycle | None = None,
-        operation_manager: OperationManager | None = None,
+        operation_manager: OperationDispatcher | None = None,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
