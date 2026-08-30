@@ -300,6 +300,83 @@ class TestOperationManager(unittest.IsolatedAsyncioTestCase):
             ("session-1", 1, "authority-1", 1),
         )
 
+    async def test_dispatcher_identity_ignores_hostile_collaborator_projections(
+        self,
+    ) -> None:
+        class HostileIdentity:
+            @property
+            def session_id(self) -> str:
+                return "collaborator-session"
+
+            @property
+            def generation(self) -> int:
+                return 900
+
+            @property
+            def authority_id(self) -> str:
+                return "collaborator-authority"
+
+            @property
+            def authority_revision(self) -> int:
+                return 900
+
+        class HostileResolver(HostileIdentity, Resolver):
+            pass
+
+        class HostileStore(HostileIdentity, Store):
+            pass
+
+        class HostileService(HostileIdentity, Service):
+            pass
+
+        journal = MemoryCanonicalJournal("selected-session")
+        first = journal.append(
+            0,
+            JournalRecord.system_bound(
+                system_id="research.system", system_version="1.0.0"
+            ),
+        )
+        journal.append(
+            first.position,
+            JournalRecord.authority_bound(
+                authority_id="authority-1", authority_revision=1
+            ),
+        )
+        dispatcher: OperationDispatcher = OperationManager(
+            authority=AuthorityLedger(
+                _envelope(
+                    allowed_operations=("operation.auth",),
+                    host_service_grants=("operation.auth",),
+                )
+            ),
+            journal=journal,
+            resolver=HostileResolver(),
+            private_store=HostileStore(),
+            services={"operation.auth": HostileService()},
+            now_ms=lambda: 1000,
+            session_id="selected-session",
+            generation=7,
+        )
+
+        self.assertEqual(
+            (
+                dispatcher.session_id,
+                dispatcher.generation,
+                dispatcher.authority_id,
+                dispatcher.authority_revision,
+            ),
+            ("selected-session", 7, "authority-1", 1),
+        )
+        for field, value in (
+            ("session_id", "hostile-session"),
+            ("generation", 8),
+            ("authority_id", "hostile-authority"),
+            ("authority_revision", 2),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(AttributeError):
+                    setattr(dispatcher, field, value)
+
     async def test_operation_protocol_imports_in_fresh_process(self) -> None:
         result = subprocess.run(
             [sys.executable, "-c", "import asterion.operation.protocol"],
