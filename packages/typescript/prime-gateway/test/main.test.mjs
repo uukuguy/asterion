@@ -13,6 +13,7 @@ import {
   boundedRlmActionBudget,
   mayAdmitProviderOwnedRlmDeletion,
   servePrimeGatewaySidecar,
+  validatePrimeSidecarDescriptor,
 } from "../dist/src/main.js";
 import { loadPrimeClientModule } from "../dist/src/main.js";
 import { PRIME_ECOSYSTEM_LOCK_CONTRACT } from "../dist/src/ecosystem.js";
@@ -22,6 +23,74 @@ import {
   PrimeGateway,
   PrivateValueStore,
 } from "../dist/src/index.js";
+
+function sidecarDescriptor(operationHost = {
+  socketPath: "/tmp/asterion-operation-host.sock",
+  token: "a".repeat(64),
+}) {
+  return {
+    agentDir: "/tmp/agent",
+    artifactLockPath: "/tmp/artifact-lock.json",
+    authorityId: "authority-1",
+    authorityRevision: 1,
+    expectedRuntimeBuildId: "build-1",
+    gatewayRoot: "/tmp/gateway",
+    generation: 1,
+    maxContinuations: 1,
+    maxControllerTokens: 100,
+    maxTurns: 1,
+    model: "provider-free-model",
+    operationHost,
+    portfolio: [{
+      kind: "application",
+      provider_id: "example.provider",
+      application_id: "alpha",
+      version: "1.0.0",
+      runtime_id: "fake.runtime",
+    }],
+    primeSocketPath: "/tmp/prime.sock",
+    primeSourceRoot: "/tmp/prime-source",
+    provider: "provider-free",
+    probeReady: false,
+    recoveryReadOnly: false,
+    remainingBudget: {
+      controller_tokens: 0,
+      application_tokens: 100,
+      child_tokens: 100,
+      aggregate_tokens: 200,
+      cost_micros: 0,
+      deadline_ms: 1_000,
+    },
+    rlmMaxChildren: 0,
+    rlmMaxDepth: 0,
+    sessionDir: "/tmp/session",
+    sessionId: "session-1",
+    skillPath: "/tmp/skill.md",
+    timeoutMs: 100,
+    workspace: "/tmp/workspace",
+  };
+}
+
+test("production descriptor requires one exact private operation host", () => {
+  const valid = validatePrimeSidecarDescriptor(sidecarDescriptor());
+  assert.deepEqual(valid.operationHost, {
+    socketPath: "/tmp/asterion-operation-host.sock",
+    token: "a".repeat(64),
+  });
+  assert.equal(Object.isFrozen(valid.operationHost), true);
+
+  const missing = sidecarDescriptor();
+  delete missing.operationHost;
+  for (const descriptor of [
+    missing,
+    sidecarDescriptor({ socketPath: "relative.sock", token: "a".repeat(64) }),
+    sidecarDescriptor({ socketPath: "/tmp/host.sock", token: "SENTINEL-TOKEN" }),
+    sidecarDescriptor({ socketPath: "/tmp/host.sock", token: ["a".repeat(64)] }),
+    sidecarDescriptor({ socketPath: "/tmp/host.sock", token: "a".repeat(64), extra: true }),
+  ]) {
+    assert.throws(() => validatePrimeSidecarDescriptor(descriptor));
+  }
+});
 
 function command(type, payload, commandId = "command-1") {
   return {

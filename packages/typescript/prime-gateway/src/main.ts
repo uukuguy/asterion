@@ -111,6 +111,7 @@ import type {
   RlmSpawnProposal,
 } from "./rlm-host-bridge.js";
 import { PrimeOperationGateway } from "./operation.js";
+import { PrimeOperationHostClient } from "./operation-host.js";
 import type { OperationReceipt } from "@dci/agent-runtime";
 
 export const PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1";
@@ -215,6 +216,7 @@ interface PrimeSidecarDescriptor {
   readonly authorityRevision: number;
   readonly authorityExpiresAtMs?: number;
   readonly daemonLifecycle?: Readonly<{ readonly socketPath: string; readonly token: string }>;
+  readonly operationHost?: Readonly<{ readonly socketPath: string; readonly token: string }>;
   readonly expectedRuntimeBuildId: string;
   readonly gatewayRoot: string;
   readonly generation: number;
@@ -896,7 +898,32 @@ function validatePortfolio(value: unknown): readonly SkillApplicationTarget[] {
   return Object.freeze(targets);
 }
 
-function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
+export function validatePrimeSidecarDescriptor(value: unknown): PrimeSidecarDescriptor {
+  if (!isRecord(value) || !Object.hasOwn(value, "operationHost")) {
+    throw new PrimeGatewayError();
+  }
+  const operationHost = value.operationHost;
+  const { operationHost: _ignored, ...base } = value;
+  if (
+    !isRecord(operationHost) ||
+    !hasExactKeys(operationHost, ["socketPath", "token"]) ||
+    !validText(operationHost.socketPath) ||
+    !isAbsolute(String(operationHost.socketPath)) ||
+    typeof operationHost.token !== "string" ||
+    !TOKEN_PATTERN.test(operationHost.token)
+  ) {
+    throw new PrimeGatewayError();
+  }
+  return Object.freeze({
+    ...validateDescriptorBase(base),
+    operationHost: Object.freeze({
+      socketPath: operationHost.socketPath,
+      token: operationHost.token as string,
+    }),
+  });
+}
+
+function validateDescriptorBase(value: unknown): PrimeSidecarDescriptor {
   if (isRecord(value) && Object.hasOwn(value, "daemonLifecycle")) {
     const lifecycle = value.daemonLifecycle;
     const { daemonLifecycle: _ignored, ...base } = value;
@@ -909,7 +936,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       throw new PrimeGatewayError();
     }
     return Object.freeze({
-      ...validateDescriptor(base),
+      ...validateDescriptorBase(base),
       daemonLifecycle: Object.freeze({
         socketPath: lifecycle.socketPath,
         token: lifecycle.token as string,
@@ -1893,7 +1920,7 @@ function readPrivateDescriptor(): PrimeSidecarDescriptor {
     throw new PrimeGatewayError();
   }
   try {
-    return validateDescriptor(JSON.parse(readFileSync(fd, { encoding: "utf8" })));
+    return validatePrimeSidecarDescriptor(JSON.parse(readFileSync(fd, { encoding: "utf8" })));
   } catch {
     throw new PrimeGatewayError();
   }
@@ -2063,9 +2090,27 @@ function restoredBridgeContext(
   });
 }
 
+export function createPrimeOperationGatewayFromDescriptor(
+  descriptor: PrimeSidecarDescriptor,
+): PrimeOperationGateway {
+  if (descriptor.operationHost === undefined) {
+    throw new PrimeGatewayError();
+  }
+  return new PrimeOperationGateway(
+    new PrimeOperationHostClient(descriptor.operationHost, {
+      sessionId: descriptor.sessionId,
+      generation: descriptor.generation,
+      authorityId: descriptor.authorityId,
+      authorityRevision: descriptor.authorityRevision,
+      timeoutMs: descriptor.timeoutMs,
+    }),
+  );
+}
+
 async function createSidecarFromDescriptor(
   descriptor: PrimeSidecarDescriptor,
 ): Promise<PrimeGatewaySidecar> {
+  const operationGateway = createPrimeOperationGatewayFromDescriptor(descriptor);
   const transport = new PrimeDaemonClient({
     clientId: `asterion-${descriptor.sessionId}`,
     connectTimeoutMs: descriptor.timeoutMs,
@@ -2735,6 +2780,7 @@ async function createSidecarFromDescriptor(
     currentGeneration: descriptor.generation,
     sessionId: descriptor.sessionId,
     privateValues,
+    operation: operationGateway,
     gateway: {
       accept: (command) => gateway.accept(command),
       updateRemainingBudget: (budget) => {

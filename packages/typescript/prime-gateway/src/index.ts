@@ -130,6 +130,15 @@ export {
 export type {
   PrimeOperationDispatcher,
 } from "./operation.js";
+export {
+  MAX_OPERATION_HOST_FRAME_BYTES,
+  PRIME_OPERATION_HOST_PROTOCOL,
+  PrimeOperationHostClient,
+} from "./operation-host.js";
+export type {
+  PrimeOperationHostDescriptor,
+  PrimeOperationHostIdentity,
+} from "./operation-host.js";
 export type {
   PrivateResultProjection,
   PrivateAttachmentMetadata,

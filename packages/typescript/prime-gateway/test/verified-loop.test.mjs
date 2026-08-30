@@ -281,6 +281,10 @@ async function startGateway(root, scenario, socketPath, descriptorPatch = {}) {
     rlmMaxChildren: 0,
     rlmMaxDepth: 0,
     model: "provider-free-model",
+    operationHost: {
+      socketPath: join(root, "unreachable-operation-host.sock"),
+      token: "a".repeat(64),
+    },
     portfolio: [{
       kind: "application",
       provider_id: "example.provider",
