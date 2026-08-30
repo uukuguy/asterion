@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import traceback
 import unittest
 from collections.abc import Callable, Iterable, Mapping
@@ -247,13 +248,34 @@ class HostileEventCursor(EventCursor):
 
 class HostileTurnRequest(NativeTurnRequest):
     comparisons: int
+    attribute_reads: int
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "comparisons", 0)
+        object.__setattr__(self, "attribute_reads", 0)
 
     def __eq__(self, other: object) -> bool:
         object.__setattr__(self, "comparisons", self.comparisons + 1)
         raise AssertionError("SENTINEL_SECRET")
+
+    def __getattribute__(self, name: str) -> object:
+        if name in {
+            "turn_id",
+            "session_id",
+            "generation",
+            "authority_revision",
+            "causal_command_ids",
+            "inputs",
+            "action_results",
+            "budget",
+        }:
+            object.__setattr__(
+                self,
+                "attribute_reads",
+                object.__getattribute__(self, "attribute_reads") + 1,
+            )
+            raise AssertionError("SENTINEL_SECRET")
+        return super().__getattribute__(name)
 
 
 class HostileTurnResult(NativeTurnResult):
@@ -345,6 +367,24 @@ class TrackingCapsuleStore(MemoryNativeCapsuleStore):
     def __init__(self, owner: MemoryNativeStorageOwner, close_order: list[str]) -> None:
         super().__init__(owner, max_capsule_bytes=65_536)
         self.close_order = close_order
+        self.sealed_payloads: dict[str, bytes] = {}
+
+    def seal(
+        self,
+        *,
+        capsule_id: str,
+        payload: bytes,
+        covered_position: int,
+        covered_sequence: int,
+    ) -> NativeCapsuleMetadata:
+        metadata = super().seal(
+            capsule_id=capsule_id,
+            payload=payload,
+            covered_position=covered_position,
+            covered_sequence=covered_sequence,
+        )
+        self.sealed_payloads[capsule_id] = payload
+        return metadata
 
     def close(self) -> None:
         self.close_order.append("capsule")
@@ -679,6 +719,44 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(NativeTurnError):
             _turn_script_key(replace(request, inputs=(), action_results=()))
 
+    async def test_turn_adapter_rejects_hostile_subclasses_before_reads(self) -> None:
+        request = NativeTurnRequest(
+            turn_id="turn-hostile",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+        hostile_request = HostileTurnRequest(
+            turn_id=request.turn_id,
+            session_id=request.session_id,
+            generation=request.generation,
+            authority_revision=request.authority_revision,
+            causal_command_ids=request.causal_command_ids,
+            inputs=request.inputs,
+            action_results=request.action_results,
+            budget=request.budget,
+        )
+        hostile_result = HostileTurnResult("turn-hostile", (), _usage())
+
+        with self.assertRaises(NativeTurnError) as script_error:
+            DeterministicNativeTurnAdapter({"input:content-ref": hostile_result})
+        self.assertEqual(hostile_result.attribute_reads, 0)
+        self.assertIsNone(script_error.exception.__context__)
+        self.assertNotIn("SENTINEL_SECRET", str(script_error.exception))
+
+        adapter = DeterministicNativeTurnAdapter({"input:content-ref": NativeTurnResult("turn-hostile", (), _usage())})
+        with self.assertRaises(NativeTurnError) as key_error:
+            _turn_script_key(hostile_request)
+        self.assertEqual(hostile_request.attribute_reads, 0)
+        self.assertIsNone(key_error.exception.__context__)
+        with self.assertRaises(NativeTurnError):
+            await adapter.execute(hostile_request)
+        self.assertEqual(hostile_request.attribute_reads, 0)
+
     async def test_action_cannot_advance_without_host_terminal_resolution(self) -> None:
         fixture = ControllerFixture(
             adapter=CountingAdapter(
@@ -825,6 +903,89 @@ class TestNativeControlController(unittest.IsolatedAsyncioTestCase):
         checkpoint = fixture.controller.state.checkpoint
         self.assertIsNotNone(checkpoint)
         fixture.capsules.verify(cast(NativeCapsuleMetadata, checkpoint))
+
+    async def test_checkpoint_capsule_payload_is_exact_replay_prefix(self) -> None:
+        fixture = ControllerFixture()
+        await fixture.create()
+        await fixture.controller.accept(input_command("command-input-prefix", "content-ref-prefix"))
+        request = fixture.controller.begin_ready_turn()
+        self.assertIsNotNone(request)
+        before_entries = fixture.store.replay()
+        before_state = fixture.controller.state
+
+        event = fixture.controller.checkpoint("checkpoint-prefix")
+
+        payload = json.loads(
+            fixture.capsules.sealed_payloads[str(event.payload["capsule_id"])].decode("utf-8")
+        )
+        self.assertEqual(payload["format"], "asterion.native-controller-capsule/v1")
+        self.assertEqual(payload["checkpoint_id"], "checkpoint-prefix")
+        self.assertNotIn("body", json.dumps(payload, sort_keys=True))
+        self.assertNotIn("/Users/", json.dumps(payload, sort_keys=True))
+        rebuilt = tuple(
+            NativeEntry(
+                int(item["position"]),
+                None if item["previous_digest"] is None else str(item["previous_digest"]),
+                NativeRecord(
+                    str(item["record"]["record_id"]),
+                    str(item["record"]["kind"]),
+                    cast(Mapping[str, object], item["record"]["payload"]),
+                ),
+            )
+            for item in payload["journal_prefix"]
+        )
+        self.assertEqual(rebuilt, before_entries)
+        self.assertEqual(reduce_native_entries(rebuilt), before_state)
+        self.assertEqual(len(rebuilt), fixture.store.position - 1)
+
+    async def test_checkpoint_capsule_coverage_changes_for_budget_and_input_refs(
+        self,
+    ) -> None:
+        async def capsule_for(
+            *,
+            budget: RemainingBudget,
+            content_ref: str,
+            delivery: str = "direct",
+        ) -> tuple[str, bytes]:
+            fixture = ControllerFixture()
+            await fixture.create(budget)
+            await fixture.controller.accept(
+                input_command(
+                    "command-input-covered",
+                    content_ref,
+                    delivery=delivery,
+                )
+            )
+            event = fixture.controller.checkpoint("checkpoint-covered")
+            capsule_id = str(event.payload["capsule_id"])
+            return capsule_id, fixture.capsules.sealed_payloads[capsule_id]
+
+        base_id, base_payload = await capsule_for(
+            budget=_budget(controller_tokens=100, aggregate_tokens=100),
+            content_ref="content-ref-covered-a",
+        )
+        budget_id, budget_payload = await capsule_for(
+            budget=_budget(controller_tokens=99, aggregate_tokens=99),
+            content_ref="content-ref-covered-a",
+        )
+        input_id, input_payload = await capsule_for(
+            budget=_budget(controller_tokens=100, aggregate_tokens=100),
+            content_ref="content-ref-covered-b",
+        )
+        delivery_id, delivery_payload = await capsule_for(
+            budget=_budget(controller_tokens=100, aggregate_tokens=100),
+            content_ref="content-ref-covered-a",
+            delivery="steer",
+        )
+
+        for label, capsule_id, payload in (
+            ("budget", budget_id, budget_payload),
+            ("input", input_id, input_payload),
+            ("delivery", delivery_id, delivery_payload),
+        ):
+            with self.subTest(label=label):
+                self.assertNotEqual(capsule_id, base_id)
+                self.assertNotEqual(payload, base_payload)
 
     async def test_checkpoint_retry_after_capsule_publish_is_deterministic_and_charged_once(
         self,

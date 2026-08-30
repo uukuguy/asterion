@@ -7,6 +7,8 @@ from types import MappingProxyType
 from typing import Protocol
 
 from asterion.control.providers.native.model import (
+    NativeActionResultReference,
+    NativeInputReference,
     NativeTurnRequest,
     NativeTurnResult,
 )
@@ -43,7 +45,7 @@ class DeterministicNativeTurnAdapter:
             raise NativeTurnError
         frozen: dict[str, NativeTurnResult] = {}
         for key, result in scripts.items():
-            if not isinstance(key, str) or not isinstance(result, NativeTurnResult):
+            if not isinstance(key, str) or type(result) is not NativeTurnResult:
                 raise NativeTurnError
             frozen[key] = result
         self._scripts = MappingProxyType(frozen)
@@ -54,7 +56,7 @@ class DeterministicNativeTurnAdapter:
         return self._adapter_id
 
     async def execute(self, request: NativeTurnRequest) -> NativeTurnResult:
-        if not isinstance(request, NativeTurnRequest):
+        if type(request) is not NativeTurnRequest:
             raise NativeTurnError
         try:
             result = self._scripts[_turn_script_key(request)]
@@ -72,13 +74,18 @@ class DeterministicNativeTurnAdapter:
 
 
 def _turn_script_key(request: NativeTurnRequest) -> str:
-    if not isinstance(request, NativeTurnRequest):
+    if type(request) is not NativeTurnRequest:
         raise NativeTurnError
     if request.inputs and request.action_results:
         raise NativeTurnError
     if request.inputs:
-        return f"input:{request.inputs[0].content_ref}"
+        selected_input = request.inputs[0]
+        if type(selected_input) is not NativeInputReference:
+            raise NativeTurnError
+        return f"input:{selected_input.content_ref}"
     if request.action_results:
         result = request.action_results[0]
+        if type(result) is not NativeActionResultReference:
+            raise NativeTurnError
         return f"action:{result.action_id}:{result.resolution}"
     raise NativeTurnError

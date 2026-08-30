@@ -22,6 +22,7 @@ from asterion.control.providers.native.model import (
     NativeActionResultReference,
     NativeCapsuleMetadata,
     NativeControllerState,
+    NativeEntry,
     NativeRecord,
     NativeInputReference,
     NativeTurnRequest,
@@ -607,11 +608,19 @@ class NativeController:
         _require_opaque(checkpoint_id)
         covered_position = self._session_store.position
         covered_sequence = self.state.next_sequence - 1
+        prefix = self._session_store.replay()
+        if len(prefix) != covered_position or reduce_native_entries(prefix) != self.state:
+            raise NativeControllerError
         payload = _canonical_json(
-            {
-                "checkpoint_id": checkpoint_id,
-                "state": _state_capsule_payload(self.state),
-            }
+            _checkpoint_capsule_payload(
+                checkpoint_id=checkpoint_id,
+                control_plane_id=self._provider_id,
+                control_plane_version=self._provider_version,
+                checkpoint_version=self._checkpoint_version,
+                covered_position=covered_position,
+                covered_sequence=covered_sequence,
+                entries=prefix,
+            )
         )
         capsule_id = _bounded_hash_id(
             "capsule",
@@ -955,31 +964,43 @@ def _canonical_json(value: object) -> bytes:
     ).encode("utf-8")
 
 
-def _state_capsule_payload(state: NativeControllerState) -> Mapping[str, object]:
+def _checkpoint_capsule_payload(
+    *,
+    checkpoint_id: str,
+    control_plane_id: str,
+    control_plane_version: str,
+    checkpoint_version: str,
+    covered_position: int,
+    covered_sequence: int,
+    entries: tuple[NativeEntry, ...],
+) -> Mapping[str, object]:
     return {
-        "provider_id": state.provider_id,
-        "provider_version": state.provider_version,
-        "checkpoint_version": state.checkpoint_version,
-        "system_id": state.system_id,
-        "system_version": state.system_version,
-        "session_id": state.session_id,
-        "generation": state.generation,
-        "lifecycle": state.lifecycle,
-        "goal_id": state.goal_id,
-        "goal_status": state.goal_status,
-        "authority_id": state.authority_id,
-        "authority_revision": state.authority_revision,
-        "budget_authority_revision": state.budget_authority_revision,
-        "usage": _usage_payload(state.usage),
-        "next_sequence": state.next_sequence,
-        "terminal_event_id": state.terminal_event_id,
-        "command_ids": tuple(sorted(state.command_digests)),
-        "pending_input_ids": tuple(item.input_id for item in state.pending_inputs),
-        "pending_action_ids": tuple(
-            item.action_id for item in state.pending_action_results
-        ),
-        "pending_turn_id": None if state.pending_turn is None else state.pending_turn.turn_id,
-        "fenced_turn_ids": state.fenced_turn_ids,
+        "format": "asterion.native-controller-capsule/v1",
+        "checkpoint_id": checkpoint_id,
+        "control_plane_id": control_plane_id,
+        "control_plane_version": control_plane_version,
+        "checkpoint_version": checkpoint_version,
+        "covered_position": covered_position,
+        "covered_sequence": covered_sequence,
+        "journal_prefix": tuple(_entry_capsule_payload(entry) for entry in entries),
+    }
+
+
+def _entry_capsule_payload(entry: NativeEntry) -> Mapping[str, object]:
+    if type(entry) is not NativeEntry:
+        raise NativeControllerError
+    record = entry.record
+    if type(record) is not NativeRecord:
+        raise NativeControllerError
+    return {
+        "position": entry.position,
+        "previous_digest": entry.previous_digest,
+        "digest": entry.digest,
+        "record": {
+            "record_id": record.record_id,
+            "kind": record.kind,
+            "payload": record.payload,
+        },
     }
 
 
