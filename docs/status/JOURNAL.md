@@ -1195,3 +1195,5 @@
 - 00:16 Poisoned uncertain native turn settlement to prevent re-execution after recovery write failure [70012e8]
 - 00:23 Settled adapter process-control aborts to prevent stuck native turn ownership [3777fa8]
 - 00:34 Sanitized native recovery process-control failures to preserve fixed public error boundaries [51a542f]
+- 01:32 Bound native factory and packaged manifest so exact provider selection constructs Task 7 client [f40ef72]
+- 02:17 Pinned native private-root inode to close validation/open swap race [896f9b3]
