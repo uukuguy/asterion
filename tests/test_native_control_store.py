@@ -347,6 +347,54 @@ class TestNativeControlStore(unittest.TestCase):
             self.assertTrue(retained.exists())
             self.assertEqual(constrained.replay(), (entry,))
 
+    def test_session_directory_counts_capsule_receipt_finals_and_temps(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session = NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+            session.close()
+            capsules = session_child(root) / "capsules"
+            body = capsules / f"{'a' * 64}.capsule"
+            receipt = capsules / f"{'a' * 64}.capsule-receipt"
+            temp = capsules / f".capsule-receipt-{'b' * 32}.tmp"
+            body.write_bytes(b"body")
+            receipt.write_bytes(b"receipt")
+            temp.write_bytes(b"temp")
+            body.chmod(0o600)
+            receipt.chmod(0o600)
+            temp.chmod(0o600)
+
+            with self.assertRaises(NativeStoreError) as raised:
+                NativeSessionDirectory.open(
+                    root,
+                    SESSION_ID,
+                    max_total_private_bytes=len(b"bodyreceipttemp") - 1,
+                )
+            self.assert_redacted_store_error(raised.exception)
+
+            reopened = NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=len(b"bodyreceipttemp"),
+            )
+            self.addCleanup(reopened.close)
+            self.assertEqual(reopened.budget.used_bytes, len(b"bodyreceipttemp"))
+            reopened.close()
+
+            unknown = capsules / "unknown.capsule-receipt"
+            unknown.write_bytes(b"x")
+            unknown.chmod(0o600)
+            with self.assertRaises(NativeStoreError) as raised:
+                NativeSessionDirectory.open(
+                    root,
+                    SESSION_ID,
+                    max_total_private_bytes=1_000_000,
+                )
+            self.assert_redacted_store_error(raised.exception)
+
     def test_file_store_releases_failed_reservation_and_removes_only_own_temp(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

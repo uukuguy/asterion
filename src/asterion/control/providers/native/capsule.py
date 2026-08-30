@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import secrets
 import threading
 import weakref
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import NoReturn, Protocol, cast
 
@@ -39,7 +41,15 @@ NATIVE_CONTROL_PLANE_VERSION = "0.1.0"
 NATIVE_CHECKPOINT_VERSION = "1.0.0"
 _CAPSULE_DOMAIN = b"asterion.native-capsule/v1\x00"
 _CAPSULE_FILE = re.compile(r"^[0-9a-f]{64}\.capsule$")
+_CAPSULE_RECEIPT_FILE = re.compile(r"^[0-9a-f]{64}\.capsule-receipt$")
 _CAPSULE_MODE = 0o600
+_MAX_RECEIPT_BYTES = 4096
+
+
+class _PublishFailed(Exception):
+    def __init__(self, cleanup_proven: bool) -> None:
+        super().__init__()
+        self.cleanup_proven = cleanup_proven
 
 
 class NativeCapsuleStore(Protocol):
@@ -64,6 +74,7 @@ class NativeCapsuleStore(Protocol):
 class _MemoryCapsule:
     metadata: NativeCapsuleMetadata
     payload: bytes
+    receipt: bytes
 
 
 @dataclass
@@ -126,10 +137,10 @@ class MemoryNativeCapsuleStore:
                 _raise_capsule_error()
 
     def verify(self, metadata: NativeCapsuleMetadata) -> None:
+        _require_metadata(metadata)
         with self._owner.operation():
             try:
                 self._require_usable()
-                _require_metadata(metadata)
                 existing = _memory_state(self._owner).capsules.get(metadata.storage_ref)
                 if existing is None:
                     raise NativeStoreError
@@ -158,6 +169,8 @@ class FileNativeCapsuleStore:
         *,
         max_capsule_bytes: int,
     ) -> None:
+        if type(session_directory) is not NativeSessionDirectory:
+            raise NativeStoreError
         _require_capsule_limit(max_capsule_bytes)
         self._owner = session_directory
         self._max_capsule_bytes = max_capsule_bytes
@@ -200,27 +213,38 @@ class FileNativeCapsuleStore:
                     max_capsule_bytes=self._max_capsule_bytes,
                 )
                 name = _capsule_name(capsule.metadata.storage_ref)
-                existing = _read_existing_capsule(
+                receipt_name = _receipt_name(capsule.metadata.storage_ref)
+                existing = _read_existing_pair(
                     self._capsules_fd,
                     name,
+                    receipt_name,
                     self._max_capsule_bytes,
                 )
                 if existing is not None:
-                    _require_payload(existing, self._max_capsule_bytes)
-                    if existing != capsule.payload:
+                    existing_payload, existing_metadata = existing
+                    if existing_payload != capsule.payload:
+                        raise NativeStoreError
+                    if existing_metadata != capsule.metadata:
                         raise NativeStoreError
                     previous = self._metadata_by_ref.get(capsule.metadata.storage_ref)
                     if previous is not None and previous != capsule.metadata:
                         raise NativeStoreError
-                    _require_metadata_matches_payload(capsule.metadata, existing)
                     self._metadata_by_ref[capsule.metadata.storage_ref] = (
                         capsule.metadata
                     )
                     return capsule.metadata
                 temporary = f".capsule-{secrets.token_hex(16)}.tmp"
-                self._owner.budget.reserve(len(capsule.payload))
+                receipt_temporary = f".capsule-receipt-{secrets.token_hex(16)}.tmp"
+                self._owner.budget.reserve(len(capsule.payload) + len(capsule.receipt))
                 try:
-                    self._publish_capsule(temporary, name, capsule.payload)
+                    self._publish_pair(
+                        temporary,
+                        name,
+                        capsule.payload,
+                        receipt_temporary,
+                        receipt_name,
+                        capsule.receipt,
+                    )
                 except NativeStoreError:
                     raise
                 except Exception:
@@ -233,19 +257,23 @@ class FileNativeCapsuleStore:
                 _raise_capsule_error()
 
     def verify(self, metadata: NativeCapsuleMetadata) -> None:
+        _require_metadata(metadata)
         with self._owner.operation():
             try:
                 self._require_usable()
-                _require_metadata(metadata)
-                payload = _read_existing_capsule(
+                pair = _read_existing_pair(
                     self._capsules_fd,
                     _capsule_name(metadata.storage_ref),
+                    _receipt_name(metadata.storage_ref),
                     self._max_capsule_bytes,
                 )
-                if payload is None:
+                if pair is None:
                     raise NativeStoreError
+                payload, persisted = pair
                 previous = self._metadata_by_ref.get(metadata.storage_ref)
                 if previous is not None and previous != metadata:
+                    raise NativeStoreError
+                if persisted != metadata:
                     raise NativeStoreError
                 _require_metadata_matches_payload(metadata, payload)
                 self._metadata_by_ref[metadata.storage_ref] = metadata
@@ -263,7 +291,43 @@ class FileNativeCapsuleStore:
             self._closed = True
             _close_fd_quietly(descriptor)
 
-    def _publish_capsule(self, temporary: str, final_name: str, payload: bytes) -> None:
+    def _publish_pair(
+        self,
+        body_temporary: str,
+        body_name: str,
+        body: bytes,
+        receipt_temporary: str,
+        receipt_name: str,
+        receipt: bytes,
+    ) -> None:
+        published = False
+        try:
+            self._publish_one(body_temporary, body_name, body)
+            published = True
+            self._publish_one(receipt_temporary, receipt_name, receipt)
+        except _PublishFailed as error:
+            if published:
+                _raise_capsule_error()
+            if error.cleanup_proven:
+                try:
+                    self._owner.budget.release(len(body) + len(receipt))
+                except Exception:
+                    pass
+            _raise_capsule_error()
+        except BaseException as error:
+            if published:
+                if isinstance(error, Exception):
+                    _raise_capsule_error()
+                error.__cause__ = None
+                error.__context__ = None
+                raise
+            if isinstance(error, Exception):
+                _raise_capsule_error()
+            error.__cause__ = None
+            error.__context__ = None
+            raise
+
+    def _publish_one(self, temporary: str, final_name: str, payload: bytes) -> None:
         descriptor = -1
         temp_created = False
         final_linked = False
@@ -314,13 +378,8 @@ class FileNativeCapsuleStore:
                 except Exception:
                     should_release = False
             _close_fd_quietly(descriptor)
-            if should_release:
-                try:
-                    self._owner.budget.release(len(payload))
-                except Exception:
-                    pass
             if isinstance(error, Exception):
-                _raise_capsule_error()
+                raise _PublishFailed(should_release) from None
             error.__cause__ = None
             error.__context__ = None
             raise
@@ -363,7 +422,7 @@ def _build_capsule(
         covered_sequence=covered_sequence,
         storage_ref=_storage_ref(capsule_id),
     )
-    return _MemoryCapsule(metadata, payload)
+    return _MemoryCapsule(metadata, payload, _encode_receipt(metadata))
 
 
 def _require_same_capsule(
@@ -374,18 +433,44 @@ def _require_same_capsule(
         raise NativeStoreError
 
 
-def _read_existing_capsule(parent_fd: int, name: str, max_bytes: int) -> bytes | None:
+def _read_existing_pair(
+    parent_fd: int,
+    body_name: str,
+    receipt_name: str,
+    max_body_bytes: int,
+) -> tuple[bytes, NativeCapsuleMetadata] | None:
+    body_exists = _child_exists(parent_fd, body_name)
+    receipt_exists = _child_exists(parent_fd, receipt_name)
+    if not body_exists and not receipt_exists:
+        return None
+    if not body_exists or not receipt_exists:
+        raise NativeStoreError
+    body = _read_child_file(parent_fd, body_name, _CAPSULE_MODE, max_body_bytes)
+    receipt = _read_child_file(
+        parent_fd,
+        receipt_name,
+        _CAPSULE_MODE,
+        _MAX_RECEIPT_BYTES,
+    )
+    metadata = _decode_receipt(receipt, receipt_name)
+    _require_metadata_matches_payload(metadata, body)
+    if body_name != _capsule_name(metadata.storage_ref):
+        raise NativeStoreError
+    return body, metadata
+
+
+def _child_exists(parent_fd: int, name: str) -> bool:
     try:
         _validate_child_file(parent_fd, name, _CAPSULE_MODE)
     except NativeStoreError:
         try:
             os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
         except FileNotFoundError:
-            return None
+            return False
         except OSError:
             _raise_capsule_error()
         raise
-    return _read_child_file(parent_fd, name, _CAPSULE_MODE, max_bytes)
+    return True
 
 
 def _require_metadata(metadata: NativeCapsuleMetadata) -> None:
@@ -399,6 +484,7 @@ def _require_metadata(metadata: NativeCapsuleMetadata) -> None:
     ):
         raise NativeStoreError
     _capsule_name(metadata.storage_ref)
+    _receipt_name(metadata.storage_ref)
 
 
 def _require_metadata_matches_payload(
@@ -416,6 +502,127 @@ def _capsule_name(storage_ref: str) -> str:
     if _CAPSULE_FILE.fullmatch(name) is None:
         raise NativeStoreError
     return name
+
+
+def _receipt_name(storage_ref: str) -> str:
+    name = f"{storage_ref}.capsule-receipt"
+    if _CAPSULE_RECEIPT_FILE.fullmatch(name) is None:
+        raise NativeStoreError
+    return name
+
+
+def _encode_receipt(metadata: NativeCapsuleMetadata) -> bytes:
+    _require_metadata(metadata)
+    return _canonical_json(_receipt_document(metadata))
+
+
+def _decode_receipt(raw: bytes, filename: str) -> NativeCapsuleMetadata:
+    if raw.endswith((b"\n", b"\r")):
+        raise NativeStoreError
+    try:
+        text = raw.decode("utf-8")
+        document = json.loads(text, object_pairs_hook=_object_without_duplicates)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        _raise_capsule_error()
+    _assert_json_tree_safe(document)
+    if _canonical_json(document) != raw:
+        raise NativeStoreError
+    if not isinstance(document, dict) or set(document) != {
+        "capsule_id",
+        "capsule_digest",
+        "control_plane_id",
+        "control_plane_version",
+        "checkpoint_version",
+        "covered_position",
+        "covered_sequence",
+        "storage_ref",
+    }:
+        raise NativeStoreError
+    try:
+        metadata = NativeCapsuleMetadata(
+            capsule_id=str(document["capsule_id"]),
+            capsule_digest=str(document["capsule_digest"]),
+            control_plane_id=str(document["control_plane_id"]),
+            control_plane_version=str(document["control_plane_version"]),
+            checkpoint_version=str(document["checkpoint_version"]),
+            covered_position=_positive_integer(document["covered_position"]),
+            covered_sequence=_positive_integer(document["covered_sequence"]),
+            storage_ref=str(document["storage_ref"]),
+        )
+    except (TypeError, ValueError):
+        _raise_capsule_error()
+    _require_metadata(metadata)
+    if filename != _receipt_name(metadata.storage_ref):
+        raise NativeStoreError
+    return metadata
+
+
+def _receipt_document(metadata: NativeCapsuleMetadata) -> dict[str, object]:
+    return {
+        "capsule_id": metadata.capsule_id,
+        "capsule_digest": metadata.capsule_digest,
+        "control_plane_id": metadata.control_plane_id,
+        "control_plane_version": metadata.control_plane_version,
+        "checkpoint_version": metadata.checkpoint_version,
+        "covered_position": metadata.covered_position,
+        "covered_sequence": metadata.covered_sequence,
+        "storage_ref": metadata.storage_ref,
+    }
+
+
+def _canonical_json(value: object) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        _raise_capsule_error()
+
+
+def _object_without_duplicates(pairs: Sequence[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate key")
+        result[key] = value
+    return result
+
+
+def _assert_json_tree_safe(value: object) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise NativeStoreError
+            _assert_json_tree_safe(item)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _assert_json_tree_safe(item)
+        return
+    if isinstance(value, float):
+        raise NativeStoreError
+    if isinstance(value, int) and not isinstance(value, bool):
+        if abs(value) > MAX_SAFE_JSON_INTEGER:
+            raise NativeStoreError
+        return
+    if value is None or isinstance(value, (str, bool)):
+        return
+    raise NativeStoreError
+
+
+def _positive_integer(value: object) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 1
+        or value > MAX_SAFE_JSON_INTEGER
+    ):
+        raise NativeStoreError
+    return value
 
 
 def _storage_ref(capsule_id: str) -> str:

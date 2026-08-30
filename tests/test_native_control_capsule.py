@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import stat
 import tempfile
 import threading
 import traceback
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -33,6 +36,7 @@ PROVIDER_ID = "native"
 PROVIDER_VERSION = "0.1.0"
 CHECKPOINT_VERSION = "1.0.0"
 CAPSULE_DOMAIN = b"asterion.native-capsule/v1\x00"
+CAPSULE_RECEIPT_SUFFIX = ".capsule-receipt"
 
 
 def storage_ref(capsule_id: str) -> str:
@@ -41,6 +45,14 @@ def storage_ref(capsule_id: str) -> str:
 
 def capsule_path(root: Path, capsule_id: str) -> Path:
     return session_child(root) / "capsules" / f"{storage_ref(capsule_id)}.capsule"
+
+
+def receipt_path(root: Path, capsule_id: str) -> Path:
+    return (
+        session_child(root)
+        / "capsules"
+        / f"{storage_ref(capsule_id)}{CAPSULE_RECEIPT_SUFFIX}"
+    )
 
 
 def payload_digest(payload: bytes) -> str:
@@ -66,8 +78,50 @@ def metadata(
     )
 
 
+def receipt_document(value: NativeCapsuleMetadata) -> dict[str, object]:
+    return {
+        "capsule_id": value.capsule_id,
+        "capsule_digest": value.capsule_digest,
+        "control_plane_id": value.control_plane_id,
+        "control_plane_version": value.control_plane_version,
+        "checkpoint_version": value.checkpoint_version,
+        "covered_position": value.covered_position,
+        "covered_sequence": value.covered_sequence,
+        "storage_ref": value.storage_ref,
+    }
+
+
+def receipt_bytes(value: NativeCapsuleMetadata) -> bytes:
+    return json.dumps(
+        receipt_document(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
 class HostileBytes(bytes):
     pass
+
+
+class HostileSessionDirectory(NativeSessionDirectory):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    @contextmanager
+    def operation(self) -> Iterator[None]:
+        self.calls += 1
+        raise AssertionError("SENTINEL_HOSTILE_OPERATION")
+        yield
+
+    def require_open(self) -> None:
+        self.calls += 1
+        raise AssertionError("SENTINEL_HOSTILE_REQUIRE")
+
+    def duplicate_capsules_fd(self) -> int:
+        self.calls += 1
+        raise AssertionError("SENTINEL_HOSTILE_DUP")
 
 
 class TestNativeControlCapsule(unittest.TestCase):
@@ -122,14 +176,22 @@ class TestNativeControlCapsule(unittest.TestCase):
 
             self.assertEqual(first, metadata())
             self.assertEqual(first, second)
-            self.assertEqual(session.budget.used_bytes, len(b"SENTINEL_PRIVATE_CAPSULE"))
+            self.assertEqual(
+                session.budget.used_bytes,
+                len(b"SENTINEL_PRIVATE_CAPSULE") + len(receipt_bytes(first)),
+            )
             self.assertNotIn("SENTINEL_PRIVATE_CAPSULE", repr(first))
             self.assertNotIn("storage_ref", repr(first))
             self.assertFalse(Path(first.storage_ref).is_absolute())
             self.assertEqual(first.storage_ref, storage_ref("capsule-1"))
             self.assertEqual(capsule_path(root, "capsule-1").read_bytes(), b"SENTINEL_PRIVATE_CAPSULE")
+            self.assertEqual(receipt_path(root, "capsule-1").read_bytes(), receipt_bytes(first))
             self.assertEqual(
                 stat.S_IMODE(capsule_path(root, "capsule-1").stat().st_mode),
+                0o600,
+            )
+            self.assertEqual(
+                stat.S_IMODE(receipt_path(root, "capsule-1").stat().st_mode),
                 0o600,
             )
 
@@ -225,6 +287,11 @@ class TestNativeControlCapsule(unittest.TestCase):
             )
             self.addCleanup(reopened_session.close)
             self.addCleanup(reopened.close)
+            used_after_reopen = reopened_session.budget.used_bytes
+            self.assertEqual(
+                used_after_reopen,
+                len(b"SENTINEL_PRIVATE_CAPSULE") + len(receipt_bytes(original)),
+            )
             with patch.object(capsule_module.os, "listdir", side_effect=AssertionError("scan")):
                 reopened.verify(original)
                 self.assertEqual(
@@ -236,6 +303,26 @@ class TestNativeControlCapsule(unittest.TestCase):
                     ),
                     original,
                 )
+            self.assertEqual(reopened_session.budget.used_bytes, used_after_reopen)
+            for drifted in (
+                replace(original, capsule_id="capsule-2", storage_ref=storage_ref("capsule-2")),
+                replace(original, control_plane_id="other"),
+                replace(original, control_plane_version="0.2.0"),
+                replace(original, checkpoint_version="2.0.0"),
+                replace(original, covered_position=2),
+                replace(original, covered_sequence=2),
+            ):
+                with self.subTest(drifted=drifted), self.assertRaises(NativeStoreError) as raised:
+                    reopened.verify(drifted)
+                self.assert_redacted_store_error(raised.exception)
+            with self.assertRaises(NativeStoreError) as raised:
+                reopened.seal(
+                    capsule_id="capsule-1",
+                    payload=b"SENTINEL_PRIVATE_CAPSULE",
+                    covered_position=2,
+                    covered_sequence=1,
+                )
+            self.assert_redacted_store_error(raised.exception)
 
             reopened.close()
             reopened_session.close()
@@ -334,6 +421,60 @@ class TestNativeControlCapsule(unittest.TestCase):
                     store.verify(drifted)
                 self.assert_redacted_store_error(raised.exception)
 
+    def test_file_capsule_receipt_sidecar_rejects_corruption_and_partial_pairs(self) -> None:
+        for label, mutate in receipt_corruption_cases():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                session = NativeSessionDirectory.open(
+                    root,
+                    SESSION_ID,
+                    max_total_private_bytes=1_000_000,
+                )
+                store = capsule_module.FileNativeCapsuleStore(
+                    session,
+                    max_capsule_bytes=65_536,
+                )
+                sealed = store.seal(
+                    capsule_id="capsule-1",
+                    payload=b"SENTINEL_PRIVATE_CAPSULE",
+                    covered_position=1,
+                    covered_sequence=1,
+                )
+                store.close()
+                session.close()
+                self.assertTrue(receipt_path(root, sealed.capsule_id).exists())
+                mutate(root, sealed)
+                try:
+                    reopened_session = NativeSessionDirectory.open(
+                        root,
+                        SESSION_ID,
+                        max_total_private_bytes=1_000_000,
+                    )
+                except NativeStoreError as error:
+                    self.assert_redacted_store_error(error)
+                    continue
+                reopened = capsule_module.FileNativeCapsuleStore(
+                    reopened_session,
+                    max_capsule_bytes=65_536,
+                )
+                self.addCleanup(reopened_session.close)
+                self.addCleanup(reopened.close)
+                with self.assertRaises(NativeStoreError) as raised:
+                    reopened.verify(sealed)
+                self.assert_redacted_store_error(raised.exception)
+
+    def test_file_capsule_constructor_rejects_hostile_session_subclass_before_effects(self) -> None:
+        hostile = HostileSessionDirectory()
+
+        with self.assertRaises(NativeStoreError) as raised:
+            capsule_module.FileNativeCapsuleStore(
+                hostile,  # type: ignore[arg-type]
+                max_capsule_bytes=65_536,
+            )
+
+        self.assert_redacted_store_error(raised.exception)
+        self.assertEqual(hostile.calls, 0)
+
     def test_file_capsule_counts_record_and_capsule_bytes_in_one_budget(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -357,7 +498,9 @@ class TestNativeControlCapsule(unittest.TestCase):
 
             self.assertEqual(
                 session.budget.used_bytes,
-                len(canonical_entry_bytes(entry)) + len(payload),
+                len(canonical_entry_bytes(entry))
+                + len(payload)
+                + len(receipt_bytes(sealed)),
             )
             self.assertEqual(journal.append(journal.position, bound_record()), entry)
             self.assertEqual(
@@ -371,7 +514,9 @@ class TestNativeControlCapsule(unittest.TestCase):
             )
             self.assertEqual(
                 session.budget.used_bytes,
-                len(canonical_entry_bytes(entry)) + len(payload),
+                len(canonical_entry_bytes(entry))
+                + len(payload)
+                + len(receipt_bytes(sealed)),
             )
             session.close()
 
@@ -381,7 +526,12 @@ class TestNativeControlCapsule(unittest.TestCase):
             constrained = NativeSessionDirectory.open(
                 root,
                 SESSION_ID,
-                max_total_private_bytes=len(canonical_entry_bytes(entry)) + len(payload) + 13,
+                max_total_private_bytes=(
+                    len(canonical_entry_bytes(entry))
+                    + len(payload)
+                    + len(receipt_bytes(sealed))
+                    + 13
+                ),
             )
             constrained_capsules = capsule_module.FileNativeCapsuleStore(
                 constrained,
@@ -469,7 +619,11 @@ class TestNativeControlCapsule(unittest.TestCase):
             self.assert_redacted_store_error(raised.exception)
             self.assertFalse(temp.exists())
             self.assertTrue(alias.exists())
-            self.assertEqual(session.budget.used_bytes, len(b"SENTINEL_PRIVATE_CAPSULE"))
+            expected_receipt = receipt_bytes(metadata(covered_position=1, covered_sequence=1))
+            self.assertEqual(
+                session.budget.used_bytes,
+                len(b"SENTINEL_PRIVATE_CAPSULE") + len(expected_receipt),
+            )
 
         owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)
         store = capsule_module.MemoryNativeCapsuleStore(owner, max_capsule_bytes=65_536)
@@ -605,6 +759,76 @@ def file_corruption_cases():
         ("hardlink", hardlink),
         ("replacement", replacement),
         ("growth-after-eof", growth_after_eof),
+    )
+
+
+def receipt_corruption_cases():
+    def corrupt_digest(root: Path, sealed: NativeCapsuleMetadata) -> None:
+        changed = replace(sealed, capsule_digest="b" * 64)
+        receipt_path(root, sealed.capsule_id).write_bytes(receipt_bytes(changed))
+        receipt_path(root, sealed.capsule_id).chmod(0o600)
+
+    def noncanonical(root: Path, sealed: NativeCapsuleMetadata) -> None:
+        document = receipt_document(sealed)
+        receipt_path(root, sealed.capsule_id).write_text(
+            json.dumps(document, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        receipt_path(root, sealed.capsule_id).chmod(0o600)
+
+    def duplicate_key(root: Path, sealed: NativeCapsuleMetadata) -> None:
+        document = receipt_document(sealed)
+        tail = json.dumps(
+            {
+                "capsule_digest": document["capsule_digest"],
+                "checkpoint_version": document["checkpoint_version"],
+                "control_plane_id": document["control_plane_id"],
+                "control_plane_version": document["control_plane_version"],
+                "covered_position": document["covered_position"],
+                "covered_sequence": document["covered_sequence"],
+                "storage_ref": document["storage_ref"],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        raw = (
+            '{"capsule_id":"capsule-1","capsule_id":"capsule-1",'
+            f"{tail.removeprefix('{')}"
+        ).encode("utf-8")
+        receipt_path(root, sealed.capsule_id).write_bytes(raw)
+        receipt_path(root, sealed.capsule_id).chmod(0o600)
+
+    def wrong_mode(root: Path, sealed: NativeCapsuleMetadata) -> None:
+        receipt_path(root, sealed.capsule_id).chmod(0o644)
+
+    def symlink(root: Path, sealed: NativeCapsuleMetadata) -> None:
+        path = receipt_path(root, sealed.capsule_id)
+        path.unlink()
+        os.symlink("SENTINEL_RECEIPT_TARGET", path)
+
+    def hardlink(root: Path, sealed: NativeCapsuleMetadata) -> None:
+        os.link(receipt_path(root, sealed.capsule_id), session_child(root) / "receipt-hardlink")
+
+    def oversize(root: Path, sealed: NativeCapsuleMetadata) -> None:
+        receipt_path(root, sealed.capsule_id).write_bytes(b"{" + (b'"x":1,' * 2000) + b'"y":2}')
+        receipt_path(root, sealed.capsule_id).chmod(0o600)
+
+    def missing_receipt(root: Path, sealed: NativeCapsuleMetadata) -> None:
+        receipt_path(root, sealed.capsule_id).unlink()
+
+    def missing_body(root: Path, sealed: NativeCapsuleMetadata) -> None:
+        capsule_path(root, sealed.capsule_id).unlink()
+
+    return (
+        ("corrupt-digest", corrupt_digest),
+        ("noncanonical", noncanonical),
+        ("duplicate-key", duplicate_key),
+        ("wrong-mode", wrong_mode),
+        ("symlink", symlink),
+        ("hardlink", hardlink),
+        ("oversize", oversize),
+        ("missing-receipt", missing_receipt),
+        ("missing-body", missing_body),
     )
 
 

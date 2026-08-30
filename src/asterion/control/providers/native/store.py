@@ -38,6 +38,8 @@ _RECORD_FILE = re.compile(r"^(?P<position>[0-9]{20})-(?P<digest>[0-9a-f]{64})\.r
 _RECORD_TEMP = re.compile(r"^\.record-[0-9]{20}-[0-9a-f]{32}\.tmp$")
 _CAPSULE_TEMP = re.compile(r"^\.capsule-[0-9a-f]{32}\.tmp$")
 _CAPSULE_FILE = re.compile(r"^[0-9a-f]{64}\.capsule$")
+_CAPSULE_RECEIPT_TEMP = re.compile(r"^\.capsule-receipt-[0-9a-f]{32}\.tmp$")
+_CAPSULE_RECEIPT_FILE = re.compile(r"^[0-9a-f]{64}\.capsule-receipt$")
 
 
 class NativeStoreError(RuntimeError):
@@ -737,7 +739,12 @@ def _existing_storage_bytes(descriptor: int, child: str) -> int:
         if child == "records":
             exact = _RECORD_FILE.fullmatch(name) or _RECORD_TEMP.fullmatch(name)
         else:
-            exact = _CAPSULE_FILE.fullmatch(name) or _CAPSULE_TEMP.fullmatch(name)
+            exact = (
+                _CAPSULE_FILE.fullmatch(name)
+                or _CAPSULE_TEMP.fullmatch(name)
+                or _CAPSULE_RECEIPT_FILE.fullmatch(name)
+                or _CAPSULE_RECEIPT_TEMP.fullmatch(name)
+            )
         if exact is None:
             raise NativeStoreError
         result = _validate_child_file(descriptor, name, 0o600)
