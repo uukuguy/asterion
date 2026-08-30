@@ -173,6 +173,9 @@ class NativeControlPlaneClient:
                 failed = True
             except Exception:
                 failed = True
+            except BaseException as error:
+                await self._settle_aborted_adapter_turn(request)
+                _raise_sanitized_base_exception(error)
             if failed:
                 try:
                     await self._commit_failed_turn_or_discard_cancelled(
@@ -289,6 +292,15 @@ class NativeControlPlaneClient:
             finally:
                 self._clear_in_flight_claim(request)
 
+    async def _settle_aborted_adapter_turn(self, request: NativeTurnRequest) -> None:
+        async with self._lock:
+            try:
+                self._require_not_closed()
+                if not self._discardable_fenced_terminal(request):
+                    self._poisoned = True
+            finally:
+                self._clear_in_flight_claim(request)
+
     def _fail_pending_turn(
         self, request: NativeTurnRequest, reason_code: str
     ) -> None:
@@ -341,3 +353,29 @@ def _require_positive_safe_integer(value: object) -> None:
         or value > MAX_SAFE_JSON_INTEGER
     ):
         raise NativeControlError
+
+
+def _raise_sanitized_base_exception(error: BaseException) -> NoReturn:
+    error_type = type(error)
+    if error_type is KeyboardInterrupt:
+        try:
+            raise KeyboardInterrupt from None
+        except KeyboardInterrupt as sanitized:
+            sanitized.__context__ = None
+            sanitized.__cause__ = None
+            raise
+    if error_type is SystemExit:
+        try:
+            raise SystemExit from None
+        except SystemExit as sanitized:
+            sanitized.__context__ = None
+            sanitized.__cause__ = None
+            raise
+    if error_type is GeneratorExit:
+        try:
+            raise GeneratorExit from None
+        except GeneratorExit as sanitized:
+            sanitized.__context__ = None
+            sanitized.__cause__ = None
+            raise
+    _raise_control_error()

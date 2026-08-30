@@ -243,6 +243,36 @@ class BlockingAdapter:
         return self.result
 
 
+class BlockingBaseExceptionAdapter:
+    adapter_id = "native.blocking-base-exception-turn/v1"
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+        self.started = asyncio.Event()
+        self.second_started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.calls = 0
+
+    async def execute(self, request: NativeTurnRequest) -> NativeTurnResult:
+        self.calls += 1
+        if self.calls == 2:
+            self.second_started.set()
+        self.started.set()
+        await self.release.wait()
+        raise self.error
+
+
+class HostileBaseException(BaseException):
+    constructions = 0
+
+    def __init__(self) -> None:
+        type(self).constructions += 1
+        super().__init__("SENTINEL_SECRET")
+
+    def __str__(self) -> str:
+        raise AssertionError("SENTINEL_SECRET")
+
+
 class HostileManifest(ControlPlaneManifest):
     def to_mapping(self) -> Mapping[str, object]:
         raise AssertionError("SENTINEL_SECRET")
@@ -369,8 +399,36 @@ async def _assert_native_control_error(
         case.assertIsNone(error.__context__)
         case.assertIsNone(error.__cause__)
         case.assertNotIn("SENTINEL_SECRET", str(error))
+        case.assertNotIn(
+            "SENTINEL_SECRET",
+            "".join(traceback.format_exception(error)),
+        )
         return error
     case.fail("NativeControlError was not raised")
+
+
+async def _assert_sanitized_process_control(
+    case: unittest.TestCase,
+    operation: object,
+    expected_type: type[BaseException],
+) -> BaseException:
+    try:
+        if callable(operation):
+            result = operation()
+        else:
+            result = operation
+        await result  # type: ignore[misc]
+    except BaseException as error:
+        case.assertIs(type(error), expected_type)
+        case.assertEqual(error.args, ())
+        case.assertIsNone(error.__context__)
+        case.assertIsNone(error.__cause__)
+        case.assertNotIn(
+            "SENTINEL_SECRET",
+            "".join(traceback.format_exception(error)),
+        )
+        return error
+    case.fail(f"{expected_type.__name__} was not raised")
 
 
 class TestNativeControlClient(unittest.IsolatedAsyncioTestCase):
@@ -614,6 +672,152 @@ class TestNativeControlClient(unittest.IsolatedAsyncioTestCase):
             ),
             1,
         )
+
+    async def test_exact_process_control_from_adapter_is_sanitized_after_cleanup(
+        self,
+    ) -> None:
+        cases: tuple[tuple[str, type[BaseException], BaseException], ...] = (
+            ("keyboard", KeyboardInterrupt, KeyboardInterrupt("SENTINEL_SECRET")),
+            ("system-exit", SystemExit, SystemExit("SENTINEL_SECRET")),
+            ("generator-exit", GeneratorExit, GeneratorExit("SENTINEL_SECRET")),
+        )
+        for label, error_type, error in cases:
+            with self.subTest(label=label):
+                adapter = CountingAdapter(error)
+                fixture = Fixture(adapter=adapter)
+                await fixture.create()
+                await fixture.client.send(input_command())
+
+                await _assert_sanitized_process_control(
+                    self,
+                    _collect_events(fixture.client, EventCursor(1, 2)),
+                    error_type,
+                )
+
+                pending = fixture.controller.state.pending_turn
+                self.assertIsNotNone(pending)
+                self.assertEqual(adapter.calls, 1)
+                self.assertEqual(fixture.controller.state.pending_turn, pending)
+                self.assertEqual(
+                    [entry.record.kind for entry in fixture.store.replay()].count(
+                        "turn.recovery-required"
+                    ),
+                    0,
+                )
+                await _assert_native_control_error(
+                    self,
+                    _collect_events(fixture.client, EventCursor(1, 2)),
+                )
+                self.assertEqual(adapter.calls, 1)
+                await asyncio.wait_for(fixture.client.close(), timeout=1)
+
+    async def test_custom_base_exception_from_adapter_is_normalized_and_poisoned(
+        self,
+    ) -> None:
+        HostileBaseException.constructions = 0
+        error = HostileBaseException()
+        adapter = CountingAdapter(error)
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+
+        await _assert_native_control_error(
+            self,
+            _collect_events(fixture.client, EventCursor(1, 2)),
+        )
+
+        pending = fixture.controller.state.pending_turn
+        self.assertIsNotNone(pending)
+        self.assertEqual(HostileBaseException.constructions, 1)
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(fixture.controller.state.pending_turn, pending)
+        await _assert_native_control_error(
+            self,
+            _collect_events(fixture.client, EventCursor(1, 2)),
+        )
+        await _assert_native_control_error(
+            self,
+            fixture.client.send(
+                input_command("command-custom-poisoned", "content-ref-custom")
+            ),
+        )
+        await _assert_native_control_error(
+            self,
+            fixture.client.sync_authority_snapshot(_budget()),
+        )
+        self.assertEqual(adapter.calls, 1)
+        await asyncio.wait_for(fixture.client.close(), timeout=1)
+        await asyncio.wait_for(fixture.client.close(), timeout=1)
+        self.assertEqual(fixture.close_calls, 1)
+
+    async def test_custom_base_exception_wakes_close_and_blocks_second_iterator(
+        self,
+    ) -> None:
+        HostileBaseException.constructions = 0
+        adapter = BlockingBaseExceptionAdapter(HostileBaseException())
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        events_task = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+
+        await asyncio.wait_for(adapter.started.wait(), timeout=1)
+        second_events = await asyncio.wait_for(
+            _collect_events(fixture.client, EventCursor(1, 2)),
+            timeout=1,
+        )
+        close_task = asyncio.create_task(fixture.client.close())
+        await asyncio.sleep(0.05)
+
+        self.assertEqual(second_events, ())
+        self.assertFalse(adapter.second_started.is_set())
+        self.assertFalse(close_task.done())
+        adapter.release.set()
+        await _assert_native_control_error(
+            self,
+            asyncio.wait_for(events_task, timeout=1),
+        )
+        await asyncio.wait_for(close_task, timeout=1)
+
+        self.assertEqual(HostileBaseException.constructions, 1)
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(fixture.close_calls, 1)
+
+    async def test_terminal_cancel_fences_base_exception_without_poisoning_client(
+        self,
+    ) -> None:
+        HostileBaseException.constructions = 0
+        adapter = BlockingBaseExceptionAdapter(HostileBaseException())
+        fixture = Fixture(adapter=adapter)
+        await fixture.create()
+        await fixture.client.send(input_command())
+        events_task = asyncio.create_task(_collect_events(fixture.client, EventCursor(1, 2)))
+
+        await asyncio.wait_for(adapter.started.wait(), timeout=1)
+        started_turn = fixture.controller.state.pending_turn
+        self.assertIsNotNone(started_turn)
+        await fixture.client.send(
+            lifecycle_command(
+                "command-cancel-base-exception",
+                "session.cancel",
+                "operator-cancel",
+            )
+        )
+        adapter.release.set()
+        await _assert_native_control_error(
+            self,
+            asyncio.wait_for(events_task, timeout=1),
+        )
+        replayed = await asyncio.wait_for(
+            _collect_events(fixture.client, EventCursor(1, 2)),
+            timeout=1,
+        )
+        assert started_turn is not None
+
+        self.assertEqual([event.type for event in replayed], ["session.cancelled"])
+        self.assertIn(started_turn.turn_id, fixture.controller.state.fenced_turn_ids)
+        self.assertFalse(fixture.controller.state.recovery_required_turn_ids)
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(HostileBaseException.constructions, 1)
 
     async def test_cancellation_fail_turn_failure_poisons_without_reexecution(
         self,

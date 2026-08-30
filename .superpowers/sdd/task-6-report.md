@@ -252,3 +252,87 @@ Only `src/asterion/control/providers/native/client.py`,
 `tests/test_native_control_client.py`, and this ignored Task 6 report were
 changed for Fix Wave 2. Existing tracked `docs/status/JOURNAL.md` changes were
 left untouched.
+
+## Fix Wave 3 - Process-Control Adapter Abort Cleanup
+
+### Blocker
+
+The adapter execution wrapper still caught ordinary `Exception` paths only.
+Exact process-control `BaseException` exits such as `KeyboardInterrupt`,
+`SystemExit`, and `GeneratorExit`, plus custom hostile `BaseException`
+subclasses, could bypass in-flight ownership settlement. That left the client
+able to leak sentinel exception bodies or keep close waiters blocked on a stuck
+claim.
+
+### RED Evidence
+
+Focused new regressions:
+
+```bash
+uv run python -m unittest -v tests.test_native_control_client.TestNativeControlClient.test_exact_process_control_from_adapter_is_sanitized_after_cleanup tests.test_native_control_client.TestNativeControlClient.test_custom_base_exception_from_adapter_is_normalized_and_poisoned tests.test_native_control_client.TestNativeControlClient.test_custom_base_exception_wakes_close_and_blocks_second_iterator tests.test_native_control_client.TestNativeControlClient.test_terminal_cancel_fences_base_exception_without_poisoning_client
+```
+
+Result: RED, exit 1. Exact built-ins leaked `SENTINEL_SECRET` args and custom
+`BaseException` propagated through the public iterator path instead of being
+normalized; in-flight cleanup was not guaranteed on these exits.
+
+### Fix
+
+- Added an adapter `BaseException` cleanup path after the existing
+  `asyncio.CancelledError` and ordinary `Exception` handling.
+- Non-cancellation adapter aborts now settle the in-flight claim under the
+  existing client lock, notify waiters, and poison unless the exact turn was
+  already terminal-fenced.
+- The client does not call `fail_turn()` for arbitrary process-control aborts,
+  avoiding swallowed process-control recovery writes.
+- Exact `KeyboardInterrupt`, `SystemExit`, and `GeneratorExit` propagate as
+  fresh exact built-ins with empty args and cleared cause/context.
+- Custom hostile `BaseException` subclasses normalize to fixed unchained
+  `NativeControlError` without constructing or stringifying the hostile type.
+- Terminal-cancel fencing during a suspended adapter abort still discards
+  healthy without recovery or re-execution.
+
+### GREEN Evidence
+
+Focused new regressions:
+
+```bash
+uv run python -m unittest -v tests.test_native_control_client.TestNativeControlClient.test_exact_process_control_from_adapter_is_sanitized_after_cleanup tests.test_native_control_client.TestNativeControlClient.test_custom_base_exception_from_adapter_is_normalized_and_poisoned tests.test_native_control_client.TestNativeControlClient.test_custom_base_exception_wakes_close_and_blocks_second_iterator tests.test_native_control_client.TestNativeControlClient.test_terminal_cancel_fences_base_exception_without_poisoning_client
+```
+
+Result: PASS, exit 0, 4 tests, OK.
+
+Focused client tests:
+
+```bash
+uv run python -m unittest -v tests.test_native_control_client
+```
+
+Result: PASS, exit 0, 26 tests, OK.
+
+Task 2-6 native suite:
+
+```bash
+uv run python -m unittest -v tests.test_native_control_model tests.test_native_control_store tests.test_native_control_capsule tests.test_native_control_controller tests.test_native_control_client
+```
+
+Result: PASS, exit 0, 135 tests, OK.
+
+Static checks:
+
+```bash
+uv run ruff check src/asterion/control/providers/native/client.py tests/test_native_control_client.py
+uv run pyright src/asterion/control/providers/native/client.py tests/test_native_control_client.py
+uv run python -m py_compile src/asterion/control/providers/native/client.py tests/test_native_control_client.py
+git diff --check
+```
+
+Results: Ruff passed; Pyright reported `0 errors, 0 warnings, 0 informations`
+plus its version notice; `py_compile` passed; `git diff --check` passed.
+
+### Scope Notes
+
+Only `src/asterion/control/providers/native/client.py`,
+`tests/test_native_control_client.py`, and this tracked Task 6 report were
+changed for Fix Wave 3. Existing tracked `docs/status/JOURNAL.md` changes were
+left unstaged.
