@@ -1202,3 +1202,4 @@
 - 04:22 Bound executed Prime oracle identity and external-effect evidence for Wave 2 [d2fcfc5]
 - 04:37 Bound Prime evidence IDs to serialized observations for Wave 3 [eb7b652]
 - 04:09 Proved native real-process crash recovery across eight durable controller boundaries [0c2945b]
+- 04:28 Hardened native crash proof markers and hook redaction after review [70f9056]
