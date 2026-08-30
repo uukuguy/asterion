@@ -1207,3 +1207,4 @@
 - 04:47 Gated Native controller core receipt so H-038 has exact preflight proof [de58460]
 - 05:16 Restored Prime source fixture helper so pre-H make check can import all tests [204fc99]
 - 06:52 Closed H-038 exactly once and routed Native work to Phase 3.2 verified-loop design [47a2839]
+- 07:11 Accepted generic awaitable Native observations to clear Task10 Pyright diagnostic [d748a57]
