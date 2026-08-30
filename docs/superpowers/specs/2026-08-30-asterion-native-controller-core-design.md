@@ -1,7 +1,7 @@
 # Asterion Native Durable Controller Core Design
 
 **Date:** 2026-08-30
-**Status:** Section design approved; pending final written-spec review
+**Status:** Approved
 **Program position:** Phase 3.1 of the Prime-equivalence program
 
 ## Objective
