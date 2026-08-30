@@ -37,6 +37,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test.prime-client-parity.provider-free
 .PHONY: test.prime-operational-auth.provider-free test.prime-operational-telemetry-usage.provider-free test.prime-operational-doctor.provider-free test.prime-operational-controlled-update-restart.provider-free
 .PHONY: test.prime-operational-harness.provider-free test.prime-operational-parity.provider-free
+.PHONY: test.native-controller-core.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -321,6 +322,20 @@ test.prime-operational-parity.provider-free:
 	$(UV_BIN) run python tools/check_prime_parity.py \
 		--features operation.auth,operation.model-selection,operation.settings-keybindings,operation.telemetry-usage,operation.doctor,operation.controlled-update-restart \
 		--provider asterion.prime-gateway
+
+test.native-controller-core.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_native_control_model \
+		tests.test_native_control_store \
+		tests.test_native_control_capsule \
+		tests.test_native_control_controller \
+		tests.test_native_control_client \
+		tests.test_native_control_factory \
+		tests.test_native_control_conformance \
+		tests.test_native_control_host \
+		tests.test_native_prime_differential \
+		tests.test_native_control_process_recovery \
+		tests.test_native_controller_core_verification
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" $(if $(ASTERION_PRIME_AUTHORITY),--authority "$(ASTERION_PRIME_AUTHORITY)") $(if $(ASTERION_PRIME_MAX_COST_MICROS),--max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)")
