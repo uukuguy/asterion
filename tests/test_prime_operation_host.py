@@ -153,7 +153,7 @@ def _plain(value: object) -> object:
 class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
-        self.private_root = Path(self.temporary.name)
+        self.private_root = Path(self.temporary.name).resolve()
         self.dispatcher = RecordingDispatcher()
         self.server = PrimeOperationHostServer(
             dispatcher=self.dispatcher,
@@ -178,7 +178,6 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
         )
         writer.write(frame + extra)
         await writer.drain()
-        writer.write_eof()
         response = await reader.readline()
         writer.close()
         await writer.wait_closed()
@@ -366,6 +365,25 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
             await server.close()
             self.assertFalse((Path(target_name) / "prime-operation.sock").exists())
 
+    async def test_symlinked_private_root_parent_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as target_name:
+            target = Path(target_name).resolve()
+            child = target / "child"
+            child.mkdir()
+            link = self.private_root / "linked-parent"
+            os.symlink(target, link)
+            server = PrimeOperationHostServer(
+                dispatcher=self.dispatcher,
+                private_root=link / "child",
+                token=TOKEN,
+            )
+            with self.assertRaisesRegex(
+                PrimeOperationHostError, "^Prime operation host failed$"
+            ):
+                await server.start()
+            await server.close()
+            self.assertFalse((child / "prime-operation.sock").exists())
+
     async def test_dispatcher_is_snapshotted_and_validated_at_construction(self) -> None:
         class MutableDispatcher(RecordingDispatcher):
             pass
@@ -403,7 +421,6 @@ class TestPrimeOperationHost(unittest.IsolatedAsyncioTestCase):
         )
         writer.write(json.dumps(request).encode() + b"\n")
         await writer.drain()
-        writer.write_eof()
         response = await reader.readline()
         writer.close()
         await writer.wait_closed()

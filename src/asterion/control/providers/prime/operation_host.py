@@ -24,6 +24,7 @@ from asterion.operation.services import OperationDispatcher
 
 PRIME_OPERATION_HOST_PROTOCOL = "asterion.prime-operation-host/v1"
 _MAX_FRAME_BYTES = 64 * 1024
+_TRAILING_FRAME_GRACE_SECONDS = 0.005
 _TOKEN = re.compile(r"^[0-9a-f]{64}$")
 _TRANSACTION_REQUEST_FIELDS = {
     "protocol",
@@ -131,6 +132,7 @@ class PrimeOperationHostServer:
             if (
                 not self._private_root.is_dir()
                 or self._private_root.is_symlink()
+                or self._private_root != self._resolved_root
                 or self._private_root.resolve(strict=True) != self._resolved_root
                 or self._socket_path.exists()
                 or self._socket_path.is_symlink()
@@ -140,12 +142,14 @@ class PrimeOperationHostServer:
                 self._handle_client,
                 path=str(self._socket_path),
                 limit=_MAX_FRAME_BYTES + 1,
+                start_serving=False,
             )
             socket_stat = os.lstat(self._socket_path)
             if not stat.S_ISSOCK(socket_stat.st_mode):
                 raise OSError
             self._created_socket_identity = (socket_stat.st_dev, socket_stat.st_ino)
             self._socket_path.chmod(0o600)
+            await self._server.start_serving()
         except asyncio.CancelledError:
             with suppress(Exception):
                 await self._shutdown()
@@ -195,9 +199,15 @@ class PrimeOperationHostServer:
             request_id = _extract_request_id(frame)
             if not frame or len(frame) > _MAX_FRAME_BYTES:
                 raise PrimeOperationHostError()
-            trailing = await asyncio.wait_for(
-                reader.read(1), timeout=self._request_timeout
-            )
+            try:
+                trailing = await asyncio.wait_for(
+                    reader.read(1),
+                    timeout=min(
+                        self._request_timeout, _TRAILING_FRAME_GRACE_SECONDS
+                    ),
+                )
+            except TimeoutError:
+                trailing = b""
             if trailing:
                 raise PrimeOperationHostError()
             request = _decode_frame(frame)
