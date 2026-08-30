@@ -319,8 +319,10 @@ validated acceleration and migration boundary.
 
 1. Validate the host command and its system/session/authority identities.
 2. Commit `session.bound` if the store is empty.
-3. Commit the command and its `session.created`, active `goal.updated`, and
-   `session.running` events as one `command.committed` record.
+3. Commit the command and its `session.created` and `session.running` events as
+   one `command.committed` record. The existing host reducer makes the bound
+   goal active when it accepts `session.created`; emitting a second
+   `goal.updated(active)` would be a duplicate transition and is forbidden.
 4. Return from `send()` only after the durability barrier completes.
 
 ### Authority and budget synchronization
