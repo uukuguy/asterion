@@ -1170,3 +1170,4 @@
 - 18:24 锁定书面 spec 审阅为下一动作，防止未经确认提前实施 [82fb224]
 - 18:34 最终批准 Native 控制器核心设计，授权进入实施计划 [ac1e9ef]
 - 19:06 完成 Native 控制器核心实施计划，锁定 H-038 前十项 TDD 闭环 [d1c4723]
+- 19:54 Opened dormant H-038 gate so native controller core starts from exact state [91d3e0f]
