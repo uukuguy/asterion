@@ -344,8 +344,13 @@ def _apply_turn_committed(
     _validate_usage_fits_budget(usage, state.remaining_budget)
     if state.pending_turn is not None:
         _validate_usage_fits_budget(usage, state.pending_turn.budget)
+    remaining_budget = _subtract_usage_from_budget(state.remaining_budget, usage)
 
-    next_state = replace(state, usage=_add_usage(state.usage, usage))
+    next_state = replace(
+        state,
+        remaining_budget=remaining_budget,
+        usage=_add_usage(state.usage, usage),
+    )
     next_state = _apply_events(
         next_state, _events_from_payload(record.payload["events"])
     )
@@ -1082,6 +1087,27 @@ def _validate_usage_fits_budget(
     for field in _USAGE_FIELDS:
         if getattr(usage, field) > getattr(budget, field):
             raise NativeStateError("native usage exceeds authoritative budget")
+
+
+def _subtract_usage_from_budget(
+    budget: RemainingBudget | None, usage: BudgetUsage
+) -> RemainingBudget:
+    if budget is None:
+        raise NativeStateError("native usage requires authoritative budget")
+    values = {
+        field: getattr(budget, field) - getattr(usage, field)
+        for field in _USAGE_FIELDS
+    }
+    if any(value < 0 or value > MAX_SAFE_JSON_INTEGER for value in values.values()):
+        raise NativeStateError("native remaining budget subtraction is invalid")
+    return RemainingBudget(
+        controller_tokens=values["controller_tokens"],
+        application_tokens=values["application_tokens"],
+        child_tokens=values["child_tokens"],
+        aggregate_tokens=values["aggregate_tokens"],
+        cost_micros=values["cost_micros"],
+        deadline_ms=budget.deadline_ms,
+    )
 
 
 def _require_record_id(record: NativeRecord, expected: str) -> None:

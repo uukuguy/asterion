@@ -946,6 +946,284 @@ class TestNativeControlModel(unittest.TestCase):
         with self.assertRaises(NativeStateError):
             reduce_native_entries(_chain(records))
 
+    def test_multi_turn_usage_consumes_remaining_budget_before_next_commit(self) -> None:
+        first_request = NativeTurnRequest(
+            turn_id="turn-sixty-a",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+        second_request = NativeTurnRequest(
+            turn_id="turn-sixty-b",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+        records = (
+            *_valid_records(),
+            turn_started_record(first_request),
+            turn_committed_record(
+                NativeTurnResult(
+                    "turn-sixty-a",
+                    (),
+                    _usage(controller_tokens=60, aggregate_tokens=60),
+                ),
+                (),
+            ),
+            turn_started_record(second_request),
+            turn_committed_record(
+                NativeTurnResult(
+                    "turn-sixty-b",
+                    (),
+                    _usage(controller_tokens=60, aggregate_tokens=60),
+                ),
+                (),
+            ),
+        )
+
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(_chain(records))
+
+    def test_exact_budget_exhaustion_updates_remaining_budget_to_zero(self) -> None:
+        request = NativeTurnRequest(
+            turn_id="turn-exhaust",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+
+        state = reduce_native_entries(
+            _chain(
+                (
+                    *_valid_records(),
+                    turn_started_record(request),
+                    turn_committed_record(
+                        NativeTurnResult(
+                            "turn-exhaust",
+                            (),
+                            _usage(
+                                controller_tokens=100,
+                                aggregate_tokens=100,
+                                cost_micros=10_000,
+                            ),
+                        ),
+                        (),
+                    ),
+                )
+            )
+        )
+
+        self.assertEqual(
+            state.remaining_budget,
+            _budget(controller_tokens=0, aggregate_tokens=0, cost_micros=0),
+        )
+        self.assertEqual(state.usage.controller_tokens, 100)
+        self.assertEqual(state.usage.aggregate_tokens, 100)
+
+    def test_nonzero_turn_after_zero_budget_rejects_before_state_update(self) -> None:
+        exhausted_prefix = (
+            *_valid_records(),
+            turn_started_record(
+                NativeTurnRequest(
+                    turn_id="turn-exhaust",
+                    session_id=SESSION_ID,
+                    generation=GENERATION,
+                    authority_revision=AUTHORITY_REVISION,
+                    causal_command_ids=(),
+                    inputs=(),
+                    action_results=(),
+                    budget=_budget(),
+                )
+            ),
+            turn_committed_record(
+                NativeTurnResult(
+                    "turn-exhaust",
+                    (),
+                    _usage(
+                        controller_tokens=100,
+                        aggregate_tokens=100,
+                        cost_micros=10_000,
+                    ),
+                ),
+                (),
+            ),
+        )
+        full = (
+            *exhausted_prefix,
+            turn_started_record(
+                NativeTurnRequest(
+                    turn_id="turn-after-zero",
+                    session_id=SESSION_ID,
+                    generation=GENERATION,
+                    authority_revision=AUTHORITY_REVISION,
+                    causal_command_ids=(),
+                    inputs=(),
+                    action_results=(),
+                    budget=_budget(),
+                )
+            ),
+            turn_committed_record(
+                NativeTurnResult(
+                    "turn-after-zero",
+                    (),
+                    _usage(controller_tokens=1, aggregate_tokens=1),
+                ),
+                (),
+            ),
+        )
+
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(_chain(full))
+
+        prefix_state = reduce_native_entries(_chain(exhausted_prefix))
+        self.assertEqual(prefix_state.usage.controller_tokens, 100)
+        self.assertEqual(
+            prefix_state.remaining_budget,
+            _budget(controller_tokens=0, aggregate_tokens=0, cost_micros=0),
+        )
+
+    def test_next_turn_request_must_carry_updated_remaining_budget(self) -> None:
+        stale_second_request = NativeTurnRequest(
+            turn_id="turn-stale-budget",
+            session_id=SESSION_ID,
+            generation=GENERATION,
+            authority_revision=AUTHORITY_REVISION,
+            causal_command_ids=(),
+            inputs=(),
+            action_results=(),
+            budget=_budget(),
+        )
+        records = (
+            *_valid_records(),
+            turn_started_record(
+                NativeTurnRequest(
+                    turn_id="turn-sixty",
+                    session_id=SESSION_ID,
+                    generation=GENERATION,
+                    authority_revision=AUTHORITY_REVISION,
+                    causal_command_ids=(),
+                    inputs=(),
+                    action_results=(),
+                    budget=_budget(),
+                )
+            ),
+            turn_committed_record(
+                NativeTurnResult(
+                    "turn-sixty",
+                    (),
+                    _usage(controller_tokens=60, aggregate_tokens=60),
+                ),
+                (),
+            ),
+            turn_started_record(stale_second_request),
+        )
+
+        with self.assertRaises(NativeStateError):
+            reduce_native_entries(_chain(records))
+
+    def test_authority_resync_replaces_capacity_without_resetting_cumulative_usage(
+        self,
+    ) -> None:
+        first_usage = _usage(controller_tokens=60, aggregate_tokens=60, cost_micros=1)
+        second_usage = _usage(controller_tokens=50, aggregate_tokens=50, cost_micros=2)
+        records = (
+            *_valid_records(),
+            turn_started_record(
+                NativeTurnRequest(
+                    turn_id="turn-before-resync",
+                    session_id=SESSION_ID,
+                    generation=GENERATION,
+                    authority_revision=AUTHORITY_REVISION,
+                    causal_command_ids=(),
+                    inputs=(),
+                    action_results=(),
+                    budget=_budget(),
+                )
+            ),
+            turn_committed_record(
+                NativeTurnResult(
+                    "turn-before-resync",
+                    (
+                        NativeEventDraft(
+                            "budget.reported",
+                            {
+                                "controller_tokens": 60,
+                                "application_tokens": 0,
+                                "child_tokens": 0,
+                                "aggregate_tokens": 60,
+                                "cost_micros": 1,
+                            },
+                        ),
+                    ),
+                    first_usage,
+                ),
+                (_budget_report("event-budget-before-resync", 3, first_usage),),
+            ),
+            authority_synced_record(2, _budget()),
+            turn_started_record(
+                NativeTurnRequest(
+                    turn_id="turn-after-resync",
+                    session_id=SESSION_ID,
+                    generation=GENERATION,
+                    authority_revision=2,
+                    causal_command_ids=(),
+                    inputs=(),
+                    action_results=(),
+                    budget=_budget(),
+                )
+            ),
+            turn_committed_record(
+                NativeTurnResult(
+                    "turn-after-resync",
+                    (
+                        NativeEventDraft(
+                            "budget.reported",
+                            {
+                                "controller_tokens": 110,
+                                "application_tokens": 0,
+                                "child_tokens": 0,
+                                "aggregate_tokens": 110,
+                                "cost_micros": 3,
+                            },
+                        ),
+                    ),
+                    second_usage,
+                ),
+                (
+                    _budget_report(
+                        "event-budget-after-resync",
+                        4,
+                        _usage(
+                            controller_tokens=110,
+                            aggregate_tokens=110,
+                            cost_micros=3,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        state = reduce_native_entries(_chain(records))
+
+        self.assertEqual(state.usage.controller_tokens, 110)
+        self.assertEqual(state.usage.cost_micros, 3)
+        self.assertEqual(
+            state.remaining_budget,
+            _budget(controller_tokens=50, aggregate_tokens=50, cost_micros=9_998),
+        )
+
     def test_reducer_rejects_usage_impersonating_application_or_child_work(self) -> None:
         for usage in (
             _usage(controller_tokens=1, application_tokens=1, aggregate_tokens=2),
