@@ -1158,3 +1158,4 @@
 - 10:56 Synchronized Prime client parity digests so full-suite validation matches locked resources [de1f78d]
 - 12:09 Closed failed first-start transports so callbacks cannot outlive sidecar startup [2d486f6]
 - 13:11 Verified Prime callback gates and independent review so H-037 may proceed [2d486f6]
+- 13:12 Recorded Task 6 approval so recovery resumes at the single H-037 gate [9c00a9a]

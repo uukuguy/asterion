@@ -9,9 +9,9 @@
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 2 production closure — callback Tasks 1 through 5
-  are independently approved through `8204e6d`; Task 6 owns the complete
-  pre-promotion gate and cross-cutting review.
+- Active work package: Phase 2 production closure — callback Tasks 1 through 6
+  are independently approved through `9c00a9a`; Task 7 owns the single H-037
+  canonical closure transition.
 
 ## Current Architecture
 
@@ -56,10 +56,10 @@
   `check.operational-parity-closure`; `next_action` is `future-work-queue`.
 - `interfaces.operations` is PASS at exactly 15/15 Prime Gateway rows after
   H-035 plus H-036.
-- Native rows remain missing. The exact checker now reports 61 passed, zero
-  ledger blockers, and two excluded rows with zero provider/application
-  operations, but `Verified-system-parity` remains BLOCKED until root/child
-  dispatcher composition and the real production callback round trip pass.
+- Native rows remain missing. The exact checker reports 61 passed, zero ledger
+  blockers, and two excluded rows with zero provider/application operations.
+  Root/child dispatcher composition and the real callback path now pass, but
+  the canonical `Verified-system-parity` transition remains pending H-037.
 - `OperationManager` now exposes immutable dispatcher identity, and the
   reviewed Python callback server accepts only exact identity-bound frames over
   a private `0600` Unix socket.
@@ -73,17 +73,17 @@
 - Root and nested child sessions now bind distinct identity-exact managers to
   both provider context and `ControlHost`. The real Node sidecar proves
   execute, reconcile, cancel, missing-callback, failure/no-retry, body-free
-  frames, cleanup, and zero Prime effects. Phase 2 still awaits Task 6 full
-  repository gates and the single H-037 closure.
+  frames, cleanup, and zero Prime effects. Task 6's final 2335-test repository,
+  cross-language, promotion, distribution, and independent review gates pass;
+  Phase 2 now awaits only the single H-037 closure.
 
 ## Open Problems
 
-- Option 1A and its root/child correction are approved: each session keeps one
+- Option 1A and its root/child correction are verified: each session keeps one
   Python `OperationManager`, while Prime owns only a lifecycle-managed private
-  callback transport. H-037 remains uncreated until implementation, real
-  process verification, full gates, and independent review pass.
-- Task 6 must pass the focused, repository, distribution, parity, and promotion
-  gates and close cross-cutting review before H-037 may be created or run.
+  callback transport.
+- Create, independently verify, and execute H-037 exactly once; do not broaden
+  its provider-free command identity or promote native rows.
 - Keep every Asterion-native row missing until Phase 3 evidence exists.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
@@ -129,7 +129,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Continue the approved callback plan at Task 6; do not create or run H-037
-   before every full gate and cross-cutting review prerequisite passes.
+4. Continue the approved callback plan at Task 7: create the dormant H-037
+   gate, verify it in a disposable detached copy, then execute it exactly once.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.
