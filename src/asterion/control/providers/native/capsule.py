@@ -128,7 +128,7 @@ class MemoryNativeCapsuleStore:
                 if existing is not None:
                     _require_same_capsule(existing, capsule)
                     return existing.metadata
-                self._owner.budget.reserve(len(capsule.payload))
+                self._owner.budget.reserve(len(capsule.payload) + len(capsule.receipt))
                 state.capsules[capsule.metadata.storage_ref] = capsule
                 return capsule.metadata
             except NativeStoreError:

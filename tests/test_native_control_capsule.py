@@ -196,7 +196,7 @@ class TestNativeControlCapsule(unittest.TestCase):
             )
 
     def test_memory_capsules_share_owner_budget_and_conflict_rules(self) -> None:
-        owner = MemoryNativeStorageOwner(maximum_bytes=64)
+        owner = MemoryNativeStorageOwner(maximum_bytes=1_000)
         first = capsule_module.MemoryNativeCapsuleStore(owner, max_capsule_bytes=32)
         second = capsule_module.MemoryNativeCapsuleStore(owner, max_capsule_bytes=32)
         self.addCleanup(owner.close)
@@ -219,7 +219,20 @@ class TestNativeControlCapsule(unittest.TestCase):
             ),
             sealed,
         )
-        self.assertEqual(owner.budget.used_bytes, len(b"capsule-body"))
+        self.assertEqual(
+            owner.budget.used_bytes,
+            len(b"capsule-body")
+            + len(
+                receipt_bytes(
+                    metadata(
+                        "capsule-1",
+                        b"capsule-body",
+                        covered_position=2,
+                        covered_sequence=1,
+                    )
+                )
+            ),
+        )
         for kwargs in (
             {"payload": b"changed", "covered_position": 2, "covered_sequence": 1},
             {"payload": b"capsule-body", "covered_position": 3, "covered_sequence": 1},
@@ -228,6 +241,166 @@ class TestNativeControlCapsule(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(NativeStoreError) as raised:
                 second.seal(capsule_id="capsule-1", **kwargs)
             self.assert_redacted_store_error(raised.exception)
+
+    def test_memory_capsule_budget_counts_body_plus_receipt_once(self) -> None:
+        first_payload = b"first-body"
+        first_metadata = metadata(
+            "capsule-1",
+            first_payload,
+            covered_position=1,
+            covered_sequence=1,
+        )
+        first_combined = len(first_payload) + len(receipt_bytes(first_metadata))
+        owner = MemoryNativeStorageOwner(maximum_bytes=first_combined)
+        store = capsule_module.MemoryNativeCapsuleStore(owner, max_capsule_bytes=65_536)
+        self.addCleanup(owner.close)
+        self.addCleanup(store.close)
+
+        sealed = store.seal(
+            capsule_id="capsule-1",
+            payload=first_payload,
+            covered_position=1,
+            covered_sequence=1,
+        )
+
+        self.assertEqual(sealed, first_metadata)
+        self.assertEqual(owner.budget.used_bytes, first_combined)
+        self.assertEqual(
+            store.seal(
+                capsule_id="capsule-1",
+                payload=first_payload,
+                covered_position=1,
+                covered_sequence=1,
+            ),
+            sealed,
+        )
+        self.assertEqual(owner.budget.used_bytes, first_combined)
+        with self.assertRaises(NativeStoreError) as raised:
+            store.seal(
+                capsule_id="capsule-2",
+                payload=b"second-body",
+                covered_position=1,
+                covered_sequence=1,
+            )
+        self.assert_redacted_store_error(raised.exception)
+        self.assertEqual(owner.budget.used_bytes, first_combined)
+
+    def test_memory_capsule_body_only_cap_rejects_and_failure_charges_nothing(self) -> None:
+        payload = b"body-only-budget"
+        expected = metadata(
+            "capsule-1",
+            payload,
+            covered_position=1,
+            covered_sequence=1,
+        )
+        combined = len(payload) + len(receipt_bytes(expected))
+        owner = MemoryNativeStorageOwner(maximum_bytes=combined - 1)
+        store = capsule_module.MemoryNativeCapsuleStore(owner, max_capsule_bytes=65_536)
+        self.addCleanup(owner.close)
+        self.addCleanup(store.close)
+
+        with self.assertRaises(NativeStoreError) as raised:
+            store.seal(
+                capsule_id="capsule-1",
+                payload=payload,
+                covered_position=1,
+                covered_sequence=1,
+            )
+
+        self.assert_redacted_store_error(raised.exception)
+        self.assertEqual(owner.budget.used_bytes, 0)
+        with self.assertRaises(NativeStoreError) as raised:
+            store.verify(expected)
+        self.assert_redacted_store_error(raised.exception)
+
+    def test_memory_capsule_conflict_and_reservation_failure_do_not_change_budget(self) -> None:
+        payload = b"stable-body"
+        expected = metadata(
+            "capsule-1",
+            payload,
+            covered_position=1,
+            covered_sequence=1,
+        )
+        combined = len(payload) + len(receipt_bytes(expected))
+        owner = MemoryNativeStorageOwner(maximum_bytes=combined + 1)
+        store = capsule_module.MemoryNativeCapsuleStore(owner, max_capsule_bytes=65_536)
+        self.addCleanup(owner.close)
+        self.addCleanup(store.close)
+        store.seal(
+            capsule_id="capsule-1",
+            payload=payload,
+            covered_position=1,
+            covered_sequence=1,
+        )
+        self.assertEqual(owner.budget.used_bytes, combined)
+
+        with self.assertRaises(NativeStoreError) as raised:
+            store.seal(
+                capsule_id="capsule-1",
+                payload=b"changed-body",
+                covered_position=1,
+                covered_sequence=1,
+            )
+        self.assert_redacted_store_error(raised.exception)
+        self.assertEqual(owner.budget.used_bytes, combined)
+        with self.assertRaises(NativeStoreError) as raised:
+            store.seal(
+                capsule_id="capsule-2",
+                payload=b"x",
+                covered_position=1,
+                covered_sequence=1,
+            )
+        self.assert_redacted_store_error(raised.exception)
+        self.assertEqual(owner.budget.used_bytes, combined)
+
+    def test_memory_and_file_capsule_budget_accounting_match_for_same_metadata(self) -> None:
+        payload = b"same-private-size"
+        expected = metadata(
+            "capsule-1",
+            payload,
+            covered_position=3,
+            covered_sequence=2,
+        )
+        combined = len(payload) + len(receipt_bytes(expected))
+        owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)
+        memory = capsule_module.MemoryNativeCapsuleStore(owner, max_capsule_bytes=65_536)
+        self.addCleanup(owner.close)
+        self.addCleanup(memory.close)
+
+        self.assertEqual(
+            memory.seal(
+                capsule_id="capsule-1",
+                payload=payload,
+                covered_position=3,
+                covered_sequence=2,
+            ),
+            expected,
+        )
+        self.assertEqual(owner.budget.used_bytes, combined)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session = NativeSessionDirectory.open(
+                root,
+                SESSION_ID,
+                max_total_private_bytes=1_000_000,
+            )
+            file_store = capsule_module.FileNativeCapsuleStore(
+                session,
+                max_capsule_bytes=65_536,
+            )
+            self.addCleanup(session.close)
+            self.addCleanup(file_store.close)
+            self.assertEqual(
+                file_store.seal(
+                    capsule_id="capsule-1",
+                    payload=payload,
+                    covered_position=3,
+                    covered_sequence=2,
+                ),
+                expected,
+            )
+            self.assertEqual(session.budget.used_bytes, combined)
 
     def test_capsule_payload_must_be_exact_nonempty_bounded_bytes(self) -> None:
         owner = MemoryNativeStorageOwner(maximum_bytes=1_000_000)
