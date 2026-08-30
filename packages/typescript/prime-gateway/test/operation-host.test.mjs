@@ -235,6 +235,31 @@ test("operation host client times out once and validates bound identity", async 
   }
 });
 
+test("operation host client enforces an absolute deadline against slow drip", async () => {
+  const host = await operationServer((frame, socket) => {
+    assert.ok(frame.byteLength > 0);
+    const interval = setInterval(() => socket.write(" "), 10);
+    const finish = setTimeout(() => {
+      clearInterval(interval);
+      socket.end();
+    }, 120);
+    socket.once("close", () => {
+      clearInterval(interval);
+      clearTimeout(finish);
+    });
+  });
+  try {
+    const started = Date.now();
+    await assert.rejects(
+      client(host.socketPath, 30).execute(transaction()),
+      PrimeOperationError,
+    );
+    assert.ok(Date.now() - started < 90);
+  } finally {
+    await host.close();
+  }
+});
+
 test("operation host client rejects malformed descriptors with one safe error", () => {
   for (const descriptor of [
     { socketPath: "relative.sock", token },

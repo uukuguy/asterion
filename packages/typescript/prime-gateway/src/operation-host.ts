@@ -131,12 +131,19 @@ export class PrimeOperationHostClient implements PrimeOperationDispatcher {
       let byteCount = 0;
       let settled = false;
       let ended = false;
+      let deadline: NodeJS.Timeout | undefined;
+      const clearDeadline = () => {
+        if (deadline !== undefined) clearTimeout(deadline);
+        deadline = undefined;
+      };
       const fail = () => {
         if (settled) return;
         settled = true;
+        clearDeadline();
         socket.destroy();
         reject(new PrimeOperationError());
       };
+      deadline = setTimeout(fail, this.identity.timeoutMs);
       socket.setTimeout(this.identity.timeoutMs, fail);
       socket.once("connect", () => socket.end(frame));
       socket.on("data", (chunk: Buffer) => {
@@ -167,6 +174,7 @@ export class PrimeOperationHostClient implements PrimeOperationDispatcher {
           rejectDuplicateJsonKeys(text);
           const parsed: unknown = JSON.parse(text);
           settled = true;
+          clearDeadline();
           resolve(parsed);
         } catch {
           fail();
