@@ -1,20 +1,20 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-31 12:48 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-31 12:51 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Phase 3.2 Task 2 is committed at `949d3af`: descriptor-only Native RLM
-  environment identity, monotonic usage, and exact snapshot-prefix recovery.
-- Its provider-free matrix passed: 18 focused tests, repository-wide `make
-  lint`, and `git diff --check`.
+- Phase 3.2 Task 3 is committed at `3ce703a`: Native operation goals, terminal
+  fencing, and exact exclusive-cursor replay.
+- Its provider-free matrix passed: 15 focused/conformance tests, repository-
+  wide `make lint`, and `git diff --check`.
 - No provider/model/network operation was run or authorized.
 
 ## Durable boundary
 
 - Task 1 (`5a42230`) covers Native session records. Task 2 (`949d3af`) covers
-  `rlm.environment`, `rlm.usage-cost`, and `rlm.recovery` with only opaque
-  IDs, digests, and counters.
+  RLM environment/recovery. Task 3 (`3ce703a`) covers operation state and
+  replay, all with only opaque IDs, digests, and counters.
 - Recovery validates its snapshot digest against the exact preceding reduced
   environment/usage state; unknown environments, conflicting prefixes, and
   safe-integer overflow fail closed.
@@ -31,8 +31,8 @@
 
 ## Immediate next action
 
-1. Commit the Task 2 journal/checkpoint state, then implement Phase 3.2 Task
-   3: Native operation goals and detach/attach/replay semantics using TDD.
+1. Commit this Task 3 journal/checkpoint state, then implement Phase 3.2 Task
+   4: the nine-row provider-free differential receipt and exact reducer.
 
 ## Ready-to-paste verification
 

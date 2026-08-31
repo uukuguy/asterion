@@ -1213,3 +1213,4 @@
 - 10:28 Planned six reviewed Native Verified-loop tasks with real-provider execution separately gated [f03377b]
 - 11:05 Added Native verified session reducer so Phase 3.2 Task 1 has provider-free evidence [5a42230]
 - 12:48 Added descriptor-only Native RLM recovery and monotonic usage evidence [949d3af]
+- 12:51 Added Native operation terminal and replay reducer evidence [3ce703a]
