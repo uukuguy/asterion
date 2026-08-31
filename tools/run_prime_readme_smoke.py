@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sys
 import tempfile
 from pathlib import Path
 
+from asterion.runtime.observation import RunObservationLog
 from tools.prime_native_rlm_experiment import (
     native_rlm_model_selector_digest,
     prepare_native_rlm_experiment,
@@ -22,9 +25,20 @@ from tools.verify_prime_loop import (
 )
 
 
+def _write_result(path: Path, result: object) -> None:
+    temporary = path.with_name(f".{path.name}.tmp")
+    with temporary.open("x", encoding="utf-8") as handle:
+        json.dump(result, handle, sort_keys=True, separators=(",", ":"))
+    os.replace(temporary, path)
+
+
 def main() -> int:
+    result_path = Path(sys.argv[1]) if len(sys.argv) == 2 else None
+    log = RunObservationLog(Path("runs/observations"), "prime-readme-rlm-smoke")
+    log.record("run.started")
     source_root = Path("3th-party/prime-agent")
     try:
+        log.record("run.phase", {"phase": "prime.preflight"})
         environment = _native_rlm_environment()
         reservation = prepare_native_rlm_experiment(
             None, max_cost_micros=None, deadline_ms=600_000, environ=environment
@@ -37,6 +51,7 @@ def main() -> int:
         root.chmod(0o700)
 
         async def runner(active: object) -> object:
+            log.record("run.phase", {"phase": "prime.rlm"})
             return await run_owned_native_rlm_sidecar_probe(
                 active,
                 selection,
@@ -58,10 +73,18 @@ def main() -> int:
             )
 
         result = asyncio.run(run_native_rlm_experiment(reservation, runner))
-        print(json.dumps({"status": result["status"], "scenario": "readme-rlm-smoke"}))
+        output = {"status": result["status"], "scenario": "readme-rlm-smoke"}
+        if result_path is not None:
+            _write_result(result_path, output)
+        log.terminal("completed", "readme_rlm_smoke")
+        print(json.dumps(output))
         return 0
     except Exception:
-        print(json.dumps({"status": "External-limited", "scenario": "readme-rlm-smoke"}))
+        output = {"status": "External-limited", "scenario": "readme-rlm-smoke"}
+        if result_path is not None:
+            _write_result(result_path, output)
+        log.terminal("external-limited", "readme_rlm_smoke")
+        print(json.dumps(output))
         return 2
 
 
