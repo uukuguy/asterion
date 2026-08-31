@@ -33,6 +33,8 @@ Runners receive a resolved plan, runtime, implementations, cancellation signal, 
 
 Host services are operator-owned and explicitly injected. `executor.controlled` does not itself authorize commands. The Rust executor applies trusted policy, direct invocation, cleared environments, deadlines, output caps, and cancellation; it is not an OS sandbox.
 
+The repository `.env` already contains operator-owned backend LLM configuration. Application or operator integration may resolve that configuration and inject an exact host service; framework modules must never read `.env`, credentials, or provider settings directly. A user-facing “small verification” is one preset action: it must not ask the user for provider, model, cost, or deadline knobs. The integration enforces finite controls internally and exposes only public-safe status. Missing Native host wiring is an application-integration task, not a request for the user to budget or configure a backend.
+
 ## Route Changes by Intent
 
 - **Runtime:** add `src/asterion/runtimes/<name>.py`, an exact factory binding, capability mapping, and tests. Do not fork capability manifests by runtime.
