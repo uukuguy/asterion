@@ -637,6 +637,7 @@ def _native_rlm_bounded_external_limit(
         raise PrimeVerificationError("Prime native RLM evidence root is invalid") from None
     stage = "preflight"
     stderr_path: Path | None = None
+    run_root: Path | None = None
     preflight = verify_preflight(source_root)
     stage = "environment"
     environment = _native_rlm_environment()
@@ -815,6 +816,11 @@ def _native_rlm_bounded_external_limit(
             stage,
             stderr_path=stderr_path,
             safe_error=str(error),
+            progress_path=(
+                run_root / "rlm" / "native-rlm-progress.json"
+                if run_root is not None
+                else None
+            ),
         )
         raise PrimeExternalLimit(str(error)) from None
     except (OSError, RuntimeError, TypeError, ValueError):
@@ -832,6 +838,7 @@ def _write_native_rlm_external_limit_evidence(
     *,
     stderr_path: Path | None = None,
     safe_error: str | None = None,
+    progress_path: Path | None = None,
 ) -> None:
     """Persist only the safe terminal category when a bounded probe cannot finish."""
 
@@ -839,7 +846,7 @@ def _write_native_rlm_external_limit_evidence(
         return
     payload = {
         "format": "asterion.prime-native-rlm-external-limit/v1",
-        "failure_class": _native_rlm_failure_class(stderr_path, safe_error=safe_error),
+        "failure_class": _native_rlm_failure_class(stderr_path, safe_error=safe_error, progress_path=progress_path),
         "stage": stage if stage in {"authorization", "runtime", "workspace", "execution", "receipt"} else "preflight",
         "status": "External-limited",
     }
@@ -859,7 +866,7 @@ def _write_native_rlm_external_limit_evidence(
 
 
 def _native_rlm_failure_class(
-    stderr_path: Path | None, *, safe_error: str | None = None
+    stderr_path: Path | None, *, safe_error: str | None = None, progress_path: Path | None = None
 ) -> str:
     """Classify private sidecar diagnostics without retaining their content."""
     if isinstance(safe_error, str) and safe_error.startswith(
@@ -869,6 +876,17 @@ def _native_rlm_failure_class(
         # root-start failure.  Preserve the earlier public stage instead of
         # reporting that cleanup's terminal event as its cause.
         return "root_start"
+    if isinstance(progress_path, Path):
+        try:
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            if (
+                isinstance(progress, Mapping)
+                and progress.get("format") == "asterion.prime-native-rlm-progress/v1"
+                and progress.get("stage") == "start"
+            ):
+                return "root_start"
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
     private_category: str | None = None
     if isinstance(stderr_path, Path):
         try:
