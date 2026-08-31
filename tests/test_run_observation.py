@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+
+class TestRunObservationLog(unittest.TestCase):
+    def test_records_safe_events_and_public_snapshot(self) -> None:
+        from asterion.runtime.observation import RunObservationLog
+
+        with tempfile.TemporaryDirectory() as directory:
+            log = RunObservationLog(Path(directory), "run-1")
+            log.record("run.started")
+            log.record("run.phase", {"phase": "prime.sidecar"})
+            snapshot = log.terminal("external-limited", "checkpoint_lifecycle")
+
+            self.assertEqual(snapshot["status"], "external-limited")
+            self.assertEqual(snapshot["last_sequence"], 3)
+            events = [json.loads(line) for line in (Path(directory) / "run-1.events.jsonl").read_text().splitlines()]
+            self.assertEqual([event["type"] for event in events], ["run.started", "run.phase", "run.terminal"])
+
+    def test_rejects_private_or_unknown_payload(self) -> None:
+        from asterion.runtime.observation import RunObservationError, RunObservationLog
+
+        with tempfile.TemporaryDirectory() as directory:
+            log = RunObservationLog(Path(directory), "run-1")
+            with self.assertRaises(RunObservationError):
+                log.record("run.phase", {"prompt": "secret"})
