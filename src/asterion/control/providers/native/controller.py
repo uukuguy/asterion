@@ -48,6 +48,10 @@ from asterion.control.providers.native.store import (
     NativeStoreError,
 )
 from asterion.control.providers.native.turn import NativeTurnAdapter
+from asterion.control.providers.native.verified import (
+    NativeVerifiedFeatureRecord,
+    native_verified_records_from_controller_state,
+)
 
 
 CrashHook = Callable[[str], None]
@@ -294,6 +298,16 @@ class NativeController:
         entries = self._session_store.replay()
         self._state = reduce_native_entries(entries)
         return self._validated_event_suffix(self.state.events, cursor)
+
+    def verified_feature_records(self) -> tuple[NativeVerifiedFeatureRecord, ...]:
+        try:
+            entries = self._session_store.replay()
+            self._state = reduce_native_entries(entries)
+            return native_verified_records_from_controller_state(self.state, entries)
+        except (NativeControllerError, NativeStoreError):
+            raise
+        except Exception:
+            _raise_controller_error()
 
     def close(self) -> None:
         try:
