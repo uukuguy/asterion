@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 import json
 import subprocess
 from pathlib import Path
 
+from asterion.control.authority import BudgetUsage
+from asterion.control.providers.native.bounded import NativeBoundedReservation
+from asterion.control.providers.native.model import NativeTurnResult
 from tools.verify_native_verified_loop import (
     BOUNDED_FEATURE_IDS,
     PROVIDER_FREE_FEATURE_IDS,
     build_native_verified_loop_report,
+    run_small_verification,
 )
 
 
@@ -35,32 +40,34 @@ def _nine_passes() -> tuple[dict[str, object], ...]:
 
 
 class TestNativeVerifiedLoopVerification(unittest.TestCase):
-    def test_small_verification_cli_has_no_provider_or_budget_inputs(self) -> None:
-        completed = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "tools/verify_native_verified_loop.py",
-                "--level",
-                "small-verification",
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+    def test_small_verification_has_no_user_provider_or_budget_inputs(self) -> None:
+        class Host:
+            async def execute(self, reservation: object, request: object) -> object:
+                return NativeTurnResult(
+                    request.turn_id, (), BudgetUsage(1, 0, 0, 1, 0)
+                )
 
-        self.assertEqual(completed.returncode, 1)
-        self.assertEqual(
-            json.loads(completed.stdout),
-            {
-                "level": "small-verification",
-                "promoted_feature_ids": [],
-                "status": "External-limited",
-            },
-        )
-        self.assertNotIn("reservation", completed.stdout)
+        class Resolver:
+            def resolve(self) -> tuple[object, object]:
+                return (
+                    NativeBoundedReservation(
+                        reservation_id="small-verification",
+                        provider_digest="1" * 64,
+                        model_digest="2" * 64,
+                        max_turns=1,
+                        max_cost_micros=1,
+                        deadline_ms=1,
+                    ),
+                    Host(),
+                )
+
+        report = asyncio.run(run_small_verification(Resolver()))
+
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["level"], "small-verification")
+        self.assertEqual(report["bounded_passed_feature_ids"], list(BOUNDED_FEATURE_IDS))
+        self.assertEqual(report["promoted_feature_ids"], [])
+        self.assertNotIn("reservation", json.dumps(report))
 
     def test_provider_free_receipt_cannot_promote_bounded_rows(self) -> None:
         report = build_native_verified_loop_report(

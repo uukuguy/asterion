@@ -290,7 +290,7 @@ class TestPrimeClimb(unittest.TestCase):
 
         self.assertEqual(
             state["next_action"],
-            "phase-3.2-native-small-verification-host",
+            "phase-3.2-native-small-verification-sidecar",
         )
         self.assertNotIn("Native Verified-loop", _passed_ledger_claims())
 
@@ -313,8 +313,8 @@ class TestPrimeClimb(unittest.TestCase):
             state,
             {
                 "last_hypothesis": "H-038",
-                "last_outcome": "provider-free-incomplete",
-                "next_action": "phase-3.2-native-small-verification-host",
+                "last_outcome": "external-limited-sidecar",
+                "next_action": "phase-3.2-native-small-verification-sidecar",
             },
         )
         tree = (ROOT / "docs/status/climb/research-tree.md").read_text()
@@ -523,8 +523,8 @@ class TestPrimeClimb(unittest.TestCase):
             ),
             {
                 "last_hypothesis": "H-038",
-                "last_outcome": "provider-free-incomplete",
-                "next_action": "phase-3.2-native-small-verification-host",
+                "last_outcome": "external-limited-sidecar",
+                "next_action": "phase-3.2-native-small-verification-sidecar",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(
@@ -641,8 +641,8 @@ class TestPrimeClimb(unittest.TestCase):
             ),
             {
                 "last_hypothesis": "H-038",
-                "last_outcome": "provider-free-incomplete",
-                "next_action": "phase-3.2-native-small-verification-host",
+                "last_outcome": "external-limited-sidecar",
+                "next_action": "phase-3.2-native-small-verification-sidecar",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(

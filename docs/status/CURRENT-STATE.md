@@ -12,8 +12,8 @@
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
 - Active work package: Phase 3.1 is closed at H-038 with
   `native-controller-core` PASS. Phase 3.2 has provider-free Native
-  Verified-loop evidence and is paused at its unconfigured operator-owned
-  small-verification host.
+  Verified-loop evidence and has a configured operator-owned small-verification
+  host. Its first explicit run stopped at the existing Prime sidecar boundary.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -61,7 +61,7 @@
   `check.client-interfaces-closure`, `check.operational-parity-closure`,
   `prime-system-parity-operation-host-callback`, and
   `check.native-controller-core-provider-free`.
-  `next_action` is `phase-3.2-native-small-verification-host`.
+  `next_action` is `phase-3.2-native-small-verification-sidecar`.
 - `interfaces.operations` is PASS at exactly 15/15 Prime Gateway rows after
   H-035 plus H-036.
 - Prime Gateway canonical `Verified-system-parity` remains PASS at H-037: the
@@ -91,9 +91,10 @@
   and `git diff --check`. Canonical state routes to
   `phase-3.2-native-verified-loop-design`; no compound Native row was promoted.
 - Phase 3.2 provider-free receipt evidences nine Native Verified-loop rows
-  with zero external counters. A parameter-free small-verification preset now
-  exists, but no operator-owned host is configured; the two bounded rows remain
-  `External-limited`, so Native `Verified-loop` and all compound Native rows
+  with zero external counters. A parameter-free operator-owned host now reads
+  the existing `.env` configuration and ran once; the established Prime Native
+  RLM sidecar stopped during execution, so the two bounded rows remain
+  `External-limited`. Native `Verified-loop` and all compound Native rows
   remain Missing.
 
 ## Open Problems

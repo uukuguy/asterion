@@ -1,18 +1,18 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-31 16:13 +0800. **Session is paused only at an operator-owned small-verification host boundary.**
+> Updated: 2026-08-31 16:51 +0800. **Session is paused at the existing Prime Native RLM sidecar boundary.**
 
 ## TL;DR
 
-- Phase 3.2 provider-free work and the parameter-free preset are committed
-  through `72c4788`: nine Native rows, their exact receipt, a single-use
-  resolver boundary, and a non-executing user entrypoint.
+- Phase 3.2 provider-free work, the parameter-free preset, and the application
+  bridge are committed through `8263fa5`: nine Native rows, their exact
+  receipt, a single-use resolver, and a controlled Prime host.
 - `make test.native-verified-loop.provider-free` passes 17 tests and emits
   nine evidenced rows, two bounded gaps, zero external counters, and no
   promoted features.
-- `verify_native_verified_loop.py --level small-verification` is explicitly
-  `External-limited` until an operator-owned preset host is injected; it
-  performs no host/provider operation.
+- One explicit `make verify.native-verified-loop.small` run reached the existing
+  Prime Native RLM execution stage and returned `External-limited` with safe
+  failure class `sidecar`; it produced no promotable receipt.
 
 ## Durable boundary
 
@@ -31,16 +31,15 @@
 
 ## In-flight work
 
-- The small-verification preset closure state needs its documentation commit.
-- The approved follow-on plan is
-  `docs/superpowers/plans/2026-08-31-native-small-verification-preset.md`.
+- The small-verification host bridge is committed at `8263fa5`.
+- The approved host plan is
+  `docs/superpowers/plans/2026-08-31-native-small-verification-host.md`.
 
 ## Immediate next action
 
-1. Commit the small-verification preset closure state.
-2. Add and review an operator-owned preset host. The user-facing action must
-   not accept provider, model, budget, or deadline arguments; absent the host,
-   retain `External-limited`/`INCOMPLETE`.
+1. Diagnose the existing Prime Native RLM sidecar execution failure using only
+   safe failure classes. The user-facing action still accepts no provider,
+   model, budget, or deadline arguments.
 
 ## Ready-to-paste verification
 

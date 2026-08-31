@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import argparse
 import importlib
 import json
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+
+from asterion.control.authority import RemainingBudget
+from asterion.control.providers.native.bounded import (
+    BoundedNativeTurnAdapter,
+    NativeBoundedTurnError,
+    NativeSmallVerificationPresetResolver,
+)
+from asterion.control.providers.native.model import NativeTurnRequest
 
 
 PROVIDER_FREE_FEATURE_IDS = {
@@ -92,6 +101,42 @@ def _valid_observation(
     )
 
 
+async def run_small_verification(
+    resolver: NativeSmallVerificationPresetResolver,
+) -> Mapping[str, object]:
+    """Run one injected small preset without accepting user configuration."""
+
+    try:
+        adapter = BoundedNativeTurnAdapter.from_small_verification_preset(resolver)
+        result = await adapter.execute(
+            NativeTurnRequest(
+                turn_id="native-small-verification-turn",
+                session_id="native-small-verification-session",
+                generation=1,
+                authority_revision=1,
+                causal_command_ids=(),
+                inputs=(),
+                action_results=(),
+                budget=RemainingBudget(1, 0, 0, 1, 1, 1),
+            )
+        )
+        if result.usage.aggregate_tokens < 1:
+            raise NativeBoundedTurnError
+        return {
+            "status": "PASS",
+            "level": "small-verification",
+            "bounded_passed_feature_ids": list(BOUNDED_FEATURE_IDS),
+            "promoted_feature_ids": [],
+        }
+    except (NativeBoundedTurnError, ValueError):
+        return {
+            "status": "External-limited",
+            "level": "small-verification",
+            "bounded_passed_feature_ids": [],
+            "promoted_feature_ids": [],
+        }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -100,7 +145,7 @@ def main() -> int:
         required=True,
     )
     arguments = parser.parse_args()
-    if arguments.level in {"bounded", "small-verification"}:
+    if arguments.level == "bounded":
         print(
             json.dumps(
                 {
@@ -113,6 +158,27 @@ def main() -> int:
             )
         )
         return 1
+    if arguments.level == "small-verification":
+        try:
+            from asterion.applications.dci_agent_lite.native_small_verification import (
+                NativeSmallVerificationOperatorResolver,
+                PrimeNativeSmallVerificationHost,
+            )
+
+            root = Path(__file__).resolve().parents[1]
+            resolver = NativeSmallVerificationOperatorResolver.from_repository(
+                root, PrimeNativeSmallVerificationHost()
+            )
+            report = asyncio.run(run_small_verification(resolver))
+        except (ImportError, OSError, ValueError):
+            report = {
+                "status": "External-limited",
+                "level": "small-verification",
+                "bounded_passed_feature_ids": [],
+                "promoted_feature_ids": [],
+            }
+        print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+        return 0 if report["status"] == "PASS" else 1
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root))
     try:
