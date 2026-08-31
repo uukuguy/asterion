@@ -36,7 +36,8 @@ def _write_result(path: Path, result: object) -> None:
 
 def main() -> int:
     result_path = Path(sys.argv[1]) if len(sys.argv) == 2 else None
-    log = RunObservationLog(Path("runs/observations"), "prime-readme-rlm-smoke")
+    run_id = f"prime-readme-rlm-smoke-{time.time_ns()}"
+    log = RunObservationLog(Path("runs/observations"), run_id)
     phase = "prime.launch"
     root: Path | None = None
     stderr_path: Path | None = None

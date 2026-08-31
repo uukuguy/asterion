@@ -1041,10 +1041,6 @@ def _native_rlm_failure_class(
             private_category = "sidecar_request"
         elif b"asterion-prime-rlm-host-frame:" in content:
             private_category = "rlm_host_frame"
-    if safe_error == "Native RLM controlled probe running event-transport did not complete":
-        return private_category or "event_transport"
-    if private_category is not None:
-        return private_category
     control_categories = {
         "Native RLM controlled probe running control did not complete": "control",
         "Native RLM controlled probe running event-transition did not complete": "event_transition",
@@ -1056,6 +1052,8 @@ def _native_rlm_failure_class(
     }
     if safe_error in control_categories:
         return control_categories[safe_error]
+    if safe_error == "Native RLM controlled probe running event-transport did not complete":
+        return private_category or "event_transport"
     if (
         isinstance(safe_error, str)
         and safe_error.startswith(
@@ -1082,6 +1080,8 @@ def _native_rlm_failure_class(
             "session-budget-limited", "session-cancelled",
         }:
             return "event_transition_" + event_type.replace("-", "_")
+    if private_category is not None:
+        return private_category
     if not isinstance(stderr_path, Path):
         return "unavailable"
     patterns = (

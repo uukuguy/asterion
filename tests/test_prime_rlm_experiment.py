@@ -12,6 +12,7 @@ from asterion.control.authority import BudgetUsage
 from asterion.control.host import ControlEvent
 from asterion.control.providers.prime.client import RlmAdmissionBinding
 import tools.prime_native_rlm_experiment as native_rlm
+from tools.verify_prime_loop import _native_rlm_failure_class
 from tools.prime_native_rlm_experiment import (
     build_native_rlm_daemon_environment,
     build_native_rlm_daemon_plan,
@@ -621,6 +622,23 @@ class TestNativeRlmExperiment(unittest.TestCase):
                     ),
                     expected,
                 )
+
+    def test_failure_class_keeps_the_primary_safe_error_over_cleanup_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr_path = Path(directory) / "sidecar.stderr.log"
+            stderr_path.write_bytes(
+                b"asterion-prime-gateway-cancel-stage:terminal-appended\n"
+            )
+
+            self.assertEqual(
+                _native_rlm_failure_class(
+                    stderr_path,
+                    safe_error=(
+                        "Native RLM controlled probe running event-transition did not complete"
+                    ),
+                ),
+                "event_transition",
+            )
 
     def test_controlled_probe_keeps_only_the_safe_native_action_kind(self) -> None:
         event = ControlEvent(
