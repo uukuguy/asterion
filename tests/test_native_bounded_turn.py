@@ -58,7 +58,48 @@ class FailingBoundedHost:
         raise RuntimeError("SENTINEL_SECRET")
 
 
+class RecordingPresetResolver:
+    def __init__(self, reservation: object, host: object) -> None:
+        self.calls = 0
+        self.reservation = reservation
+        self.host = host
+
+    def resolve(self) -> tuple[object, object]:
+        self.calls += 1
+        return self.reservation, self.host
+
+
 class TestNativeBoundedTurn(unittest.TestCase):
+    def test_small_preset_resolver_returns_one_exact_reservation_and_host(self) -> None:
+        host = ReturningBoundedHost()
+        resolver = RecordingPresetResolver(
+            NativeBoundedReservation(
+                reservation_id="reservation-small-preset",
+                provider_digest="1" * 64,
+                model_digest="2" * 64,
+                max_turns=1,
+                max_cost_micros=1000,
+                deadline_ms=1000,
+            ),
+            host,
+        )
+
+        adapter = BoundedNativeTurnAdapter.from_small_verification_preset(resolver)
+
+        self.assertEqual(adapter.adapter_id, "native.bounded-turn/v1")
+        self.assertEqual(resolver.calls, 1)
+        self.assertEqual(host.calls, 0)
+
+    def test_invalid_small_preset_never_calls_turn_host(self) -> None:
+        host = RecordingBoundedHost()
+        resolver = RecordingPresetResolver(None, host)
+
+        with self.assertRaises(NativeBoundedTurnError):
+            BoundedNativeTurnAdapter.from_small_verification_preset(resolver)
+
+        self.assertEqual(resolver.calls, 1)
+        self.assertEqual(host.calls, 0)
+
     def test_missing_reservation_never_calls_host(self) -> None:
         host = RecordingBoundedHost()
 

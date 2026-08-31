@@ -43,6 +43,12 @@ class NativeBoundedTurnHost(Protocol):
     ) -> NativeTurnResult: ...
 
 
+class NativeSmallVerificationPresetResolver(Protocol):
+    """Operator-owned resolver for the fixed small-verification preset."""
+
+    def resolve(self) -> tuple[NativeBoundedReservation, NativeBoundedTurnHost]: ...
+
+
 class BoundedNativeTurnAdapter:
     """One reservation-bound adapter suitable for explicit factory injection."""
 
@@ -59,6 +65,21 @@ class BoundedNativeTurnAdapter:
             raise NativeBoundedTurnError
         self._reservation = reservation
         self._host = host
+
+    @classmethod
+    def from_small_verification_preset(
+        cls,
+        resolver: NativeSmallVerificationPresetResolver,
+    ) -> BoundedNativeTurnAdapter:
+        try:
+            resolve = object.__getattribute__(resolver, "resolve")
+            resolved = resolve()
+        except Exception:
+            raise NativeBoundedTurnError from None
+        if type(resolved) is not tuple or len(resolved) != 2:
+            raise NativeBoundedTurnError
+        reservation, host = resolved
+        return cls(reservation, host)
 
     async def execute(self, request: NativeTurnRequest) -> NativeTurnResult:
         return await run_bounded_native_turn(self._reservation, self._host, request)
@@ -102,11 +123,11 @@ def _valid_reservation(reservation: NativeBoundedReservation) -> bool:
         and all(
             type(value) is int and 0 < value <= MAX_SAFE_JSON_INTEGER
             for value in (
-                reservation.max_turns,
                 reservation.max_cost_micros,
                 reservation.deadline_ms,
             )
         )
+        and reservation.max_turns == 1
     )
 
 
