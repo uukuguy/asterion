@@ -14,12 +14,16 @@ class TestRunObservationLog(unittest.TestCase):
             log = RunObservationLog(Path(directory), "run-1")
             log.record("run.started")
             log.record("run.phase", {"phase": "prime.sidecar"})
+            log.record("run.heartbeat", {"phase": "prime.rlm", "elapsed_seconds": "5"})
             snapshot = log.terminal("external-limited", "checkpoint_lifecycle")
 
             self.assertEqual(snapshot["status"], "external-limited")
-            self.assertEqual(snapshot["last_sequence"], 3)
+            self.assertEqual(snapshot["last_sequence"], 4)
             events = [json.loads(line) for line in (Path(directory) / "run-1.events.jsonl").read_text().splitlines()]
-            self.assertEqual([event["type"] for event in events], ["run.started", "run.phase", "run.terminal"])
+            self.assertEqual(
+                [event["type"] for event in events],
+                ["run.started", "run.phase", "run.heartbeat", "run.terminal"],
+            )
 
     def test_rejects_private_or_unknown_payload(self) -> None:
         from asterion.runtime.observation import RunObservationError, RunObservationLog

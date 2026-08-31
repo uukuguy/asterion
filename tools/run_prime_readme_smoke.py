@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from asterion.runtime.observation import RunObservationLog
@@ -64,27 +65,48 @@ def main() -> int:
             nonlocal phase
             phase = "prime.rlm"
             observe("run.phase", {"phase": phase})
-            with stderr_path.open("xb") as stderr_sink:
-                return await run_owned_native_rlm_sidecar_probe(
-                    active,
-                    selection,
-                    root,
-                    resources,
-                    environ=environment,
-                    private_stderr_sink=stderr_sink,
-                    probe=lambda sidecar: run_native_rlm_controlled_probe(
-                    sidecar,
-                    active,
-                    root,
-                    exercise_application=False,
-                    exercise_checkpoint=False,
-                    exercise_cancellation=False,
-                    exercise_budget_probe=False,
-                    expected_model_selector_digest=native_rlm_model_selector_digest(
-                        selection
-                    ),
-                    ),
-                )
+            started = time.monotonic()
+            stop_heartbeats = asyncio.Event()
+
+            async def heartbeat() -> None:
+                while not stop_heartbeats.is_set():
+                    try:
+                        await asyncio.wait_for(stop_heartbeats.wait(), timeout=5)
+                    except TimeoutError:
+                        observe(
+                            "run.heartbeat",
+                            {
+                                "phase": phase,
+                                "elapsed_seconds": str(int(time.monotonic() - started)),
+                            },
+                        )
+
+            heartbeat_task = asyncio.create_task(heartbeat())
+            try:
+                with stderr_path.open("xb") as stderr_sink:
+                    return await run_owned_native_rlm_sidecar_probe(
+                        active,
+                        selection,
+                        root,
+                        resources,
+                        environ=environment,
+                        private_stderr_sink=stderr_sink,
+                        probe=lambda sidecar: run_native_rlm_controlled_probe(
+                            sidecar,
+                            active,
+                            root,
+                            exercise_application=False,
+                            exercise_checkpoint=False,
+                            exercise_cancellation=False,
+                            exercise_budget_probe=False,
+                            expected_model_selector_digest=native_rlm_model_selector_digest(
+                                selection
+                            ),
+                        ),
+                    )
+            finally:
+                stop_heartbeats.set()
+                await heartbeat_task
 
         result = asyncio.run(run_native_rlm_experiment(reservation, runner))
         output = {"status": result["status"], "scenario": "readme-rlm-smoke"}

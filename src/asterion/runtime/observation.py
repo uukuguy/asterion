@@ -16,6 +16,7 @@ class RunObservationError(ValueError):
 _PAYLOADS = {
     "run.started": frozenset(),
     "run.phase": frozenset({"phase"}),
+    "run.heartbeat": frozenset({"phase", "elapsed_seconds"}),
     "run.terminal": frozenset({"status", "reason"}),
 }
 _TERMINAL = frozenset({"completed", "failed", "cancelled", "external-limited"})
