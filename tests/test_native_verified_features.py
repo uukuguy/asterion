@@ -98,6 +98,71 @@ def _selector_digest(continuation_id: str) -> str:
     ).hexdigest()
 
 
+def _rlm_snapshot_digest(
+    environment_id: str,
+    environment_digest: str,
+    child_tokens: int,
+    cost_micros: int,
+) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "domain": "asterion.native-verified-rlm-snapshot/v1",
+                "environment_id": environment_id,
+                "environment_digest": environment_digest,
+                "child_tokens": child_tokens,
+                "cost_micros": cost_micros,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _rlm_restart_records() -> tuple[NativeVerifiedFeatureRecord, ...]:
+    environment_id = "environment-1"
+    environment_digest = "3" * 64
+    return _records(
+        (
+            (
+                "rlm.environment",
+                {
+                    "environment_id": environment_id,
+                    "environment_digest": environment_digest,
+                },
+            ),
+            (
+                "rlm.usage-cost",
+                {
+                    "environment_id": environment_id,
+                    "child_tokens": 7,
+                    "cost_micros": 11,
+                },
+            ),
+            (
+                "rlm.recovery",
+                {
+                    "environment_id": environment_id,
+                    "snapshot_digest": _rlm_snapshot_digest(
+                        environment_id,
+                        environment_digest,
+                        7,
+                        11,
+                    ),
+                },
+            ),
+            (
+                "rlm.usage-cost",
+                {
+                    "environment_id": environment_id,
+                    "child_tokens": 2,
+                    "cost_micros": 3,
+                },
+            ),
+        )
+    )
+
+
 def _budget() -> RemainingBudget:
     return RemainingBudget(
         controller_tokens=100,
@@ -504,6 +569,104 @@ class TestNativeVerifiedSessions(unittest.TestCase):
             self.assertEqual(projection["total_tokens"], 5)
         finally:
             controller.close()
+
+
+class TestNativeVerifiedRlm(unittest.TestCase):
+    def test_snapshot_recovery_preserves_environment_and_usage(self) -> None:
+        state = reduce_verified_feature_records(_rlm_restart_records())
+
+        projection = state.rlm_projection("environment-1")
+
+        self.assertEqual(projection["environment_digest"], "3" * 64)
+        self.assertEqual(projection["child_tokens"], 9)
+        self.assertEqual(projection["cost_micros"], 14)
+        self.assertNotIn("snapshot", projection)
+        with self.assertRaises(TypeError):
+            projection["cost_micros"] = 0  # type: ignore[index]
+
+    def test_recovery_rejects_missing_or_conflicting_snapshot_prefix(self) -> None:
+        with self.assertRaises(NativeVerifiedFeatureError):
+            reduce_verified_feature_records(
+                _records(
+                    (
+                        (
+                            "rlm.recovery",
+                            {
+                                "environment_id": "environment-1",
+                                "snapshot_digest": "4" * 64,
+                            },
+                        ),
+                    )
+                )
+            )
+
+        records = _rlm_restart_records()
+        with self.assertRaises(NativeVerifiedFeatureError):
+            reduce_verified_feature_records(
+                (
+                    *records[:2],
+                    _record(
+                        "rlm.recovery",
+                        {
+                            "environment_id": "environment-1",
+                            "snapshot_digest": _rlm_snapshot_digest(
+                                "environment-1",
+                                "3" * 64,
+                                6,
+                                11,
+                            ),
+                        },
+                    ),
+                )
+            )
+
+    def test_usage_rejects_unknown_environment_and_counter_overflow(self) -> None:
+        with self.assertRaises(NativeVerifiedFeatureError):
+            reduce_verified_feature_records(
+                _records(
+                    (
+                        (
+                            "rlm.usage-cost",
+                            {
+                                "environment_id": "environment-missing",
+                                "child_tokens": 1,
+                                "cost_micros": 1,
+                            },
+                        ),
+                    )
+                )
+            )
+
+        with self.assertRaises(NativeVerifiedFeatureError):
+            reduce_verified_feature_records(
+                _records(
+                    (
+                        (
+                            "rlm.environment",
+                            {
+                                "environment_id": "environment-1",
+                                "environment_digest": "3" * 64,
+                            },
+                        ),
+                        (
+                            "rlm.usage-cost",
+                            {
+                                "environment_id": "environment-1",
+                                "child_tokens": 9_007_199_254_740_991,
+                                "cost_micros": 0,
+                            },
+                        ),
+                        (
+                            "rlm.usage-cost",
+                            {
+                                "environment_id": "environment-1",
+                                "child_tokens": 1,
+                                "cost_micros": 0,
+                            },
+                        ),
+                    )
+                )
+            )
 
 
 if __name__ == "__main__":

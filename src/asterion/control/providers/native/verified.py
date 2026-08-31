@@ -25,6 +25,9 @@ VERIFIED_FEATURE_IDS = frozenset(
         "session.persistence-naming",
         "session.resume-delete",
         "session.usage-status",
+        "rlm.environment",
+        "rlm.recovery",
+        "rlm.usage-cost",
     }
 )
 
@@ -89,13 +92,19 @@ class NativeVerifiedFeatureRecord:
 @dataclass(frozen=True)
 class NativeVerifiedState:
     _sessions: Mapping[str, Mapping[str, object]]
+    _rlm_environments: Mapping[str, Mapping[str, object]]
 
     def __post_init__(self) -> None:
         sessions = {
             session_id: MappingProxyType(dict(projection))
             for session_id, projection in self._sessions.items()
         }
+        rlm_environments = {
+            environment_id: MappingProxyType(dict(projection))
+            for environment_id, projection in self._rlm_environments.items()
+        }
         object.__setattr__(self, "_sessions", MappingProxyType(sessions))
+        object.__setattr__(self, "_rlm_environments", MappingProxyType(rlm_environments))
 
     @property
     def session_ids(self) -> tuple[str, ...]:
@@ -105,10 +114,21 @@ class NativeVerifiedState:
     def feature_ids(self) -> tuple[str, ...]:
         return tuple(sorted(VERIFIED_FEATURE_IDS))
 
+    @property
+    def rlm_environment_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._rlm_environments))
+
     def session_projection(self, session_id: str) -> Mapping[str, object]:
         try:
             _require_opaque(session_id)
             return self._sessions[session_id]
+        except KeyError:
+            _raise_verified_error()
+
+    def rlm_projection(self, environment_id: str) -> Mapping[str, object]:
+        try:
+            _require_opaque(environment_id)
+            return self._rlm_environments[environment_id]
         except KeyError:
             _raise_verified_error()
 
@@ -304,12 +324,37 @@ class _SessionReduction:
 
 
 @dataclass
+class _RlmEnvironmentReduction:
+    environment_id: str
+    environment_digest: str
+    child_tokens: int = 0
+    cost_micros: int = 0
+
+    def projection(self) -> Mapping[str, object]:
+        return {
+            "environment_id": self.environment_id,
+            "environment_digest": self.environment_digest,
+            "child_tokens": self.child_tokens,
+            "cost_micros": self.cost_micros,
+        }
+
+    def snapshot_digest(self) -> str:
+        return _digest(
+            {
+                "domain": "asterion.native-verified-rlm-snapshot/v1",
+                **self.projection(),
+            }
+        )
+
+
+@dataclass
 class _MutableReduction:
     sessions: dict[str, _SessionReduction]
+    rlm_environments: dict[str, _RlmEnvironmentReduction]
 
     @classmethod
     def empty(cls) -> _MutableReduction:
-        return cls({})
+        return cls({}, {})
 
     def apply(self, record: NativeVerifiedFeatureRecord) -> None:
         if record.feature_id == "session.persistence-naming":
@@ -324,6 +369,15 @@ class _MutableReduction:
         if record.feature_id == "session.usage-status":
             self._apply_usage_status(record.payload)
             return
+        if record.feature_id == "rlm.environment":
+            self._apply_rlm_environment(record.payload)
+            return
+        if record.feature_id == "rlm.usage-cost":
+            self._apply_rlm_usage(record.payload)
+            return
+        if record.feature_id == "rlm.recovery":
+            self._apply_rlm_recovery(record.payload)
+            return
         raise NativeVerifiedFeatureError
 
     def freeze(self) -> NativeVerifiedState:
@@ -331,7 +385,11 @@ class _MutableReduction:
             {
                 session_id: session.projection()
                 for session_id, session in self.sessions.items()
-            }
+            },
+            {
+                environment_id: environment.projection()
+                for environment_id, environment in self.rlm_environments.items()
+            },
         )
 
     def _session(self, payload: Mapping[str, object]) -> _SessionReduction:
@@ -422,6 +480,44 @@ class _MutableReduction:
         session.controller_tokens = controller_tokens
         session.cost_micros = cost_micros
 
+    def _apply_rlm_environment(self, payload: Mapping[str, object]) -> None:
+        environment_id = str(payload["environment_id"])
+        environment_digest = str(payload["environment_digest"])
+        existing = self.rlm_environments.get(environment_id)
+        if existing is None:
+            self.rlm_environments[environment_id] = _RlmEnvironmentReduction(
+                environment_id,
+                environment_digest,
+            )
+            return
+        if existing.environment_digest != environment_digest:
+            raise NativeVerifiedFeatureError
+
+    def _apply_rlm_usage(self, payload: Mapping[str, object]) -> None:
+        environment = self._rlm_environment(payload)
+        child_tokens = _nonnegative_int(payload["child_tokens"])
+        cost_micros = _nonnegative_int(payload["cost_micros"])
+        if (
+            child_tokens > MAX_SAFE_JSON_INTEGER - environment.child_tokens
+            or cost_micros > MAX_SAFE_JSON_INTEGER - environment.cost_micros
+        ):
+            raise NativeVerifiedFeatureError
+        environment.child_tokens += child_tokens
+        environment.cost_micros += cost_micros
+
+    def _apply_rlm_recovery(self, payload: Mapping[str, object]) -> None:
+        environment = self._rlm_environment(payload)
+        if payload["snapshot_digest"] != environment.snapshot_digest():
+            raise NativeVerifiedFeatureError
+
+    def _rlm_environment(
+        self, payload: Mapping[str, object]
+    ) -> _RlmEnvironmentReduction:
+        try:
+            return self.rlm_environments[str(payload["environment_id"])]
+        except KeyError:
+            raise NativeVerifiedFeatureError from None
+
 
 def _feature_record(
     feature_id: str, payload: Mapping[str, object]
@@ -506,6 +602,22 @@ def _validate_feature_payload(feature_id: str, payload: Mapping[str, object]) ->
         _nonnegative_int(payload["cost_micros"])
         if total_tokens < controller_tokens:
             raise NativeVerifiedFeatureError
+        return
+    if feature_id == "rlm.environment":
+        _require_fields(payload, {"environment_id", "environment_digest"})
+        _require_opaque(payload["environment_id"])
+        _require_sha256(payload["environment_digest"])
+        return
+    if feature_id == "rlm.usage-cost":
+        _require_fields(payload, {"environment_id", "child_tokens", "cost_micros"})
+        _require_opaque(payload["environment_id"])
+        _nonnegative_int(payload["child_tokens"])
+        _nonnegative_int(payload["cost_micros"])
+        return
+    if feature_id == "rlm.recovery":
+        _require_fields(payload, {"environment_id", "snapshot_digest"})
+        _require_opaque(payload["environment_id"])
+        _require_sha256(payload["snapshot_digest"])
         return
     raise NativeVerifiedFeatureError
 
