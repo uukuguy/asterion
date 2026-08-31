@@ -919,7 +919,7 @@ def _native_rlm_failure_class(
         lifecycle_stage = max(
             (
                 (content.rfind(f"asterion-prime-checkpoint-lifecycle:{stage}".encode()), stage)
-                for stage in ("connect", "request", "response", "complete", "unavailable", "refused", "denied", "failed")
+                for stage in ("connect", "request", "accepted", "response", "complete", "unavailable", "refused", "denied", "failed")
                 if f"asterion-prime-checkpoint-lifecycle:{stage}".encode() in content
             ),
             default=(-1, None),
