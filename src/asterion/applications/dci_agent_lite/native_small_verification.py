@@ -5,16 +5,21 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
+import json
 from pathlib import Path
 import os
 import secrets
+import subprocess
+import sys
 
 from dotenv import dotenv_values
 
+from asterion.control.authority import BudgetUsage
 from asterion.control.providers.native.bounded import (
     NativeBoundedReservation,
     NativeBoundedTurnHost,
 )
+from asterion.control.providers.native.model import NativeTurnRequest, NativeTurnResult
 
 
 _MODEL_ENV = "ASTERION_PRIME_EXPERIMENT_MODEL"
@@ -31,6 +36,32 @@ class NativeSmallVerificationApplicationError(ValueError):
         super().__init__("native small verification is unavailable")
         self.__cause__ = None
         self.__context__ = None
+
+
+@dataclass(frozen=True, repr=False)
+class PrimeNativeSmallVerificationHost:
+    """Project one controlled Prime run into a bounded Native turn."""
+
+    runner: Callable[[], Mapping[str, object]] = field(
+        default=lambda: _run_prime_native_small_verification(Path.cwd()), repr=False
+    )
+
+    async def execute(
+        self,
+        reservation: NativeBoundedReservation,
+        request: NativeTurnRequest,
+    ) -> NativeTurnResult:
+        try:
+            report = self.runner()
+            usage = _validated_bounded_usage(report, reservation.max_cost_micros)
+            tokens = usage["aggregate_tokens"]
+            return NativeTurnResult(
+                request.turn_id,
+                (),
+                BudgetUsage(tokens, 0, 0, tokens, usage["cost_micros"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            raise NativeSmallVerificationApplicationError from None
 
 
 @dataclass(frozen=True, repr=False)
@@ -95,7 +126,78 @@ def _load_private_backend_environment(repo_root: Path) -> Mapping[str, str]:
         raise NativeSmallVerificationApplicationError from None
 
 
+def _run_prime_native_small_verification(repo_root: Path) -> Mapping[str, object]:
+    """Invoke the existing explicit bounded runner without returning its output."""
+
+    try:
+        completed = subprocess.run(
+            (
+                sys.executable,
+                "tools/verify_prime_loop.py",
+                "--level",
+                "native-rlm-bounded",
+                "--native-rlm-experiment",
+                "--source-root",
+                "3th-party/prime-agent",
+            ),
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=660,
+        )
+        if completed.returncode != 0:
+            raise ValueError
+        report = json.loads(completed.stdout)
+        if not isinstance(report, Mapping):
+            raise ValueError
+        return report
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, ValueError):
+        raise NativeSmallVerificationApplicationError from None
+
+
+def _validated_bounded_usage(
+    report: Mapping[str, object], max_cost_micros: int
+) -> Mapping[str, int]:
+    """Accept only an exact body-free completion report from that runner."""
+
+    try:
+        usage = report["usage"]
+        if (
+            set(report) != {
+                "status", "level", "terminal", "child_started",
+                "message_delivered", "child_deleted", "checkpoint_recovered",
+                "detach_attached", "cancelled", "budget_limited",
+                "child_model_selected", "generated_program_admitted",
+                "recursion_depth_limited", "provider_operations",
+                "application_operations", "usage", "full_dataset_ran",
+            }
+            or report["status"] != "PASS"
+            or report["level"] != "native-rlm-bounded"
+            or report["terminal"] != "completed"
+            or report["generated_program_admitted"] is not True
+            or report["provider_operations"] != 1
+            or report["application_operations"] != 1
+            or report["full_dataset_ran"] is not False
+            or not isinstance(usage, Mapping)
+            or set(usage) != {"aggregate_tokens", "cost_micros"}
+        ):
+            raise ValueError
+        tokens = usage["aggregate_tokens"]
+        cost = usage["cost_micros"]
+        if (
+            isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 1
+            or isinstance(cost, bool) or not isinstance(cost, int) or cost < 0
+            or cost > max_cost_micros
+        ):
+            raise ValueError
+        return {"aggregate_tokens": tokens, "cost_micros": cost}
+    except (KeyError, TypeError, ValueError):
+        raise NativeSmallVerificationApplicationError from None
+
+
 __all__ = (
     "NativeSmallVerificationApplicationError",
     "NativeSmallVerificationOperatorResolver",
+    "PrimeNativeSmallVerificationHost",
 )
