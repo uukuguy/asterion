@@ -35,6 +35,7 @@ def _write_result(path: Path, result: object) -> None:
 def main() -> int:
     result_path = Path(sys.argv[1]) if len(sys.argv) == 2 else None
     log = RunObservationLog(Path("runs/observations"), "prime-readme-rlm-smoke")
+    phase = "prime.launch"
     def observe(event_type: str, payload: dict[str, str] | None = None) -> None:
         event = log.record(event_type, payload)
         print(json.dumps(event, sort_keys=True, separators=(",", ":")), flush=True)
@@ -42,7 +43,8 @@ def main() -> int:
     observe("run.started")
     source_root = Path("3th-party/prime-agent")
     try:
-        observe("run.phase", {"phase": "prime.preflight"})
+        phase = "prime.preflight"
+        observe("run.phase", {"phase": phase})
         environment = _native_rlm_environment()
         reservation = prepare_native_rlm_experiment(
             None, max_cost_micros=None, deadline_ms=600_000, environ=environment
@@ -55,7 +57,9 @@ def main() -> int:
         root.chmod(0o700)
 
         async def runner(active: object) -> object:
-            observe("run.phase", {"phase": "prime.rlm"})
+            nonlocal phase
+            phase = "prime.rlm"
+            observe("run.phase", {"phase": phase})
             return await run_owned_native_rlm_sidecar_probe(
                 active,
                 selection,
@@ -80,14 +84,14 @@ def main() -> int:
         output = {"status": result["status"], "scenario": "readme-rlm-smoke"}
         if result_path is not None:
             _write_result(result_path, output)
-        print(json.dumps(log.terminal("completed", "readme_rlm_smoke")), flush=True)
+        print(json.dumps(log.terminal("completed", "prime.rlm")), flush=True)
         print(json.dumps(output))
         return 0
     except Exception:
         output = {"status": "External-limited", "scenario": "readme-rlm-smoke"}
         if result_path is not None:
             _write_result(result_path, output)
-        print(json.dumps(log.terminal("external-limited", "readme_rlm_smoke")), flush=True)
+        print(json.dumps(log.terminal("external-limited", phase)), flush=True)
         print(json.dumps(output))
         return 2
 
