@@ -445,6 +445,45 @@ class _NativeRlmActionExecutor:
         raise RuntimeError("native RLM action escaped provider ownership")
 
 
+class _NativeRlmDeniedOperationDispatcher:
+    """Identity-bound callback surface for a probe with no operation grants."""
+
+    def __init__(
+        self, reservation: NativeRlmExperimentReservation, session_id: str
+    ) -> None:
+        self._session_id = session_id
+        self._authority_id = reservation.authority.authority_id
+        self._authority_revision = reservation.authority.revision
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
+    def generation(self) -> int:
+        return 1
+
+    @property
+    def authority_id(self) -> str:
+        return self._authority_id
+
+    @property
+    def authority_revision(self) -> int:
+        return self._authority_revision
+
+    async def execute(self, transaction: object) -> object:
+        del transaction
+        raise PrimeRlmExperimentError("Native RLM operation is not authorized")
+
+    async def cancel(self, operation_id: str, *, authority_revision: int) -> object:
+        del operation_id, authority_revision
+        raise PrimeRlmExperimentError("Native RLM operation is not authorized")
+
+    async def reconcile(self, transaction: object) -> object:
+        del transaction
+        raise PrimeRlmExperimentError("Native RLM operation is not authorized")
+
+
 class _BoundedProbeRuntime:
     """A no-capability runtime for the explicit verification application."""
 
@@ -1038,6 +1077,7 @@ def build_native_rlm_sidecar_descriptor(
     *,
     session_id: str = _SESSION_ID,
     daemon_lifecycle: Mapping[str, str] | None = None,
+    operation_host: Mapping[str, str],
 ) -> Mapping[str, object]:
     """Build the closed private descriptor for the single native probe session."""
     if (
@@ -1053,6 +1093,9 @@ def build_native_rlm_sidecar_descriptor(
             or set(daemon_lifecycle) != {"socketPath", "token"}
             or any(not isinstance(value, str) or not value for value in daemon_lifecycle.values())
         )
+        or not isinstance(operation_host, Mapping)
+        or set(operation_host) != {"socketPath", "token"}
+        or any(not isinstance(value, str) or not value for value in operation_host.values())
     ):
         raise PrimeRlmExperimentError("Native RLM sidecar descriptor is invalid")
     budget = reservation.authority.budget_limit
@@ -1063,6 +1106,7 @@ def build_native_rlm_sidecar_descriptor(
         "expectedRuntimeBuildId": resources.expected_runtime_build_id, "gatewayRoot": str(root / "gateway"), "generation": 1,
         "maxContinuations": 3, "maxControllerTokens": budget.controller_tokens, "maxTurns": 12,
         "model": selection.model,
+        "operationHost": dict(operation_host),
         "portfolio": [{"kind": "application", "provider_id": grant.provider_id, "application_id": grant.application_id, "version": grant.version, "runtime_id": grant.runtime_id} for grant in reservation.authority.allowed_portfolio],
         "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(resources.prime_source_root), "provider": selection.provider, "probeReady": True, "rlmMaxChildren": 1, "rlmMaxDepth": 1,
         "remainingBudget": {"controller_tokens": budget.controller_tokens, "application_tokens": budget.application_tokens, "child_tokens": budget.child_tokens, "aggregate_tokens": budget.aggregate_tokens, "cost_micros": budget.cost_micros, "deadline_ms": reservation.limits.deadline_ms},
@@ -1182,6 +1226,7 @@ async def execute_native_rlm_sidecar_probe(
     )
     sidecar: object | None = None
     lifecycle_server: object | None = None
+    operation_host: object | None = None
     primary_failure = False
     completed_probe = False
     try:
@@ -1190,6 +1235,7 @@ async def execute_native_rlm_sidecar_probe(
             PrimeDaemonLifecycleFailure,
             PrimeDaemonLifecycleServer,
         )
+        from asterion.control.providers.prime.operation_host import PrimeOperationHostServer
 
         async def stop_daemon(active_session_id: str) -> None:
             # `prepare_update_restart` has persisted the recovery manifest.
@@ -1295,6 +1341,14 @@ async def execute_native_rlm_sidecar_probe(
             session_id=session_id,
         )
         await lifecycle_server.start()
+        boundary("operation-host")
+        operation_host = PrimeOperationHostServer(
+            dispatcher=_NativeRlmDeniedOperationDispatcher(reservation, session_id),
+            private_root=root.resolve(strict=True),
+            token=secrets.token_hex(32),
+            request_timeout=min(5.0, reservation.limits.deadline_ms / 1_000),
+        )
+        await operation_host.start()
         if lifecycle_preflight is not None:
             await lifecycle_preflight(root / "daemon-lifecycle.sock")
         descriptor = build_native_rlm_sidecar_descriptor(
@@ -1304,6 +1358,7 @@ async def execute_native_rlm_sidecar_probe(
             resources,
             session_id=session_id,
             daemon_lifecycle=lifecycle_server.descriptor,
+            operation_host=operation_host.descriptor,
         )
         boundary("sidecar-start")
         sidecar = await sidecar_launcher(descriptor, resources)
@@ -1355,6 +1410,9 @@ async def execute_native_rlm_sidecar_probe(
                 if lifecycle_server is not None:
                     boundary("cleanup-lifecycle")
                     await lifecycle_server.close()
+                if operation_host is not None:
+                    boundary("cleanup-operation-host")
+                    await operation_host.close()
                 boundary("cleanup-daemon")
                 await _reap_owned_daemon(
                     daemon, plan, resources,

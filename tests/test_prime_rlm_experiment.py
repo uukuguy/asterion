@@ -1371,6 +1371,10 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 root,
                 resources,
                 session_id="native-maintenance",
+                operation_host={
+                    "socketPath": str(root / "prime-operation.sock"),
+                    "token": "a" * 64,
+                },
             )
             self.assertEqual(descriptor["sessionId"], "native-maintenance")
             self.assertEqual(descriptor["provider"], "deepseek")
@@ -1389,6 +1393,13 @@ class TestNativeRlmExperiment(unittest.TestCase):
             self.assertEqual(descriptor["skillPath"], str(resources.skill_path))
             self.assertEqual(resources.skill_path.name, "skill")
             self.assertEqual(descriptor["expectedRuntimeBuildId"], "build-1")
+            self.assertEqual(
+                descriptor["operationHost"],
+                {
+                    "socketPath": str(root / "prime-operation.sock"),
+                    "token": "a" * 64,
+                },
+            )
 
     def test_daemon_start_waits_for_owned_socket(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
