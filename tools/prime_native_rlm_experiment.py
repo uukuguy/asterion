@@ -2205,16 +2205,36 @@ def _record_native_rlm_control_fact(
     if operation is not None and isinstance(action_id, str):
         identities[operation] = (event.event_id, action_id)
 
+def _native_rlm_public_progress_stage(stage: object) -> str:
+    """Project only fixed lifecycle labels into private diagnostic evidence."""
+
+    return (
+        stage
+        if stage
+        in {
+            "create",
+            "created",
+            "start",
+            "budget",
+            "application",
+            "running",
+            "model-evidence",
+            "detach-attach",
+            "checkpoint",
+            "cancellation",
+            "skill-spawn",
+            "skill-message",
+        }
+        else "unknown"
+    )
+
+
 def _write_native_rlm_progress(
     root: Path, stage: str, result: NativeRlmProbeResult
 ) -> None:
     payload = {
         "format": "asterion.prime-native-rlm-progress/v1",
-        "stage": (
-            stage
-            if stage in {"create", "created", "start", "running", "skill-spawn", "skill-message"}
-            else "unknown"
-        ),
+        "stage": _native_rlm_public_progress_stage(stage),
         "child_started": result.child_started,
         "message_delivered": result.message_delivered,
         "child_deleted": result.child_deleted,

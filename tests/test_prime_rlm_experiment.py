@@ -368,6 +368,17 @@ class TestNativeRlmExperiment(unittest.TestCase):
         self.assertEqual(host.commands[-1].payload, {"reason_code": "probe-cleanup"})
         self.assertTrue(host.closed)
 
+    def test_progress_stage_projects_only_safe_probe_boundaries(self) -> None:
+        self.assertEqual(native_rlm._native_rlm_public_progress_stage("budget"), "budget")
+        self.assertEqual(
+            native_rlm._native_rlm_public_progress_stage("model-evidence"),
+            "model-evidence",
+        )
+        self.assertEqual(
+            native_rlm._native_rlm_public_progress_stage("SENTINEL_PRIVATE_STAGE"),
+            "unknown",
+        )
+
     def test_controlled_probe_records_a_real_detach_attach_after_rlm_closes(self) -> None:
         class Host:
             def __init__(self) -> None:
