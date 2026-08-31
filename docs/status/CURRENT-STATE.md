@@ -11,8 +11,9 @@
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
 - Active work package: Phase 3.1 is closed at H-038 with
-  `native-controller-core` PASS. Phase 3.2 Native Verified-loop design is the
-  sole next program action.
+  `native-controller-core` PASS. Phase 3.2 has provider-free Native
+  Verified-loop evidence and is paused at separately authorized bounded
+  execution.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -60,7 +61,7 @@
   `check.client-interfaces-closure`, `check.operational-parity-closure`,
   `prime-system-parity-operation-host-callback`, and
   `check.native-controller-core-provider-free`.
-  `next_action` is `phase-3.2-native-verified-loop-design`.
+  `next_action` is `phase-3.2-native-verified-loop-bounded-authorization`.
 - `interfaces.operations` is PASS at exactly 15/15 Prime Gateway rows after
   H-035 plus H-036.
 - Prime Gateway canonical `Verified-system-parity` remains PASS at H-037: the
@@ -89,6 +90,10 @@
   focused Native target, exact verifier, `make check`, `make promotion-check`,
   and `git diff --check`. Canonical state routes to
   `phase-3.2-native-verified-loop-design`; no compound Native row was promoted.
+- Phase 3.2 provider-free receipt evidences nine Native Verified-loop rows
+  with zero external counters. The two bounded rows remain
+  `External-limited`, so Native `Verified-loop` and all compound Native rows
+  remain Missing.
 
 ## Open Problems
 
@@ -143,8 +148,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Begin Phase 3.2 by designing Native Verified-loop evidence on top of the
-   H-038 controller substrate; do not create implementation worktrees before
-   that design is approved.
+4. Resume Phase 3.2 only with a new, explicit finite authorization for a
+   bounded Native run; otherwise retain the provider-free receipt unchanged.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import json
+import subprocess
 from pathlib import Path
 
 from tools.verify_native_verified_loop import (
@@ -47,6 +49,18 @@ class TestNativeVerifiedLoopVerification(unittest.TestCase):
         self.assertEqual(report["bounded_required_feature_ids"], list(BOUNDED_FEATURE_IDS))
         self.assertEqual(report["promoted_feature_ids"], [])
         self.assertEqual(report["status"], "INCOMPLETE")
+
+    def test_bounded_cli_without_reservation_is_external_limited_and_safe(self) -> None:
+        completed = subprocess.run(
+            ["uv", "run", "python", "tools/verify_native_verified_loop.py", "--level", "bounded"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(json.loads(completed.stdout)["status"], "External-limited")
 
 
 if __name__ == "__main__":

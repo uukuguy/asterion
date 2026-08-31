@@ -23,7 +23,7 @@
 | `Verified-loop` | PASS | `make ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent prime-verify-native-rlm-bounded` | Real finite Prime run under prior explicit bounded authority. |
 | `Verified-system-parity` | PASS | `uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway` | H-037 closed the exact Prime Gateway union at 61 passed, 0 blocking, 2 excluded, and zero provider/application operations. |
 | Native controller core | PASS | `make test.native-controller-core.provider-free` | Provider-free durable single-session substrate; all 61 compound Native rows remain Missing. |
-| Native `Verified-loop` | Missing | Not run | Requires native provider common and differential evidence. |
+| Native `Verified-loop` | Missing | `make test.native-verified-loop.provider-free` | Nine provider-free rows are evidenced; `rlm.generated-program` and `operation.autonomous-quality` require separate finite authorization. |
 | `Verified-native-parity` | Missing | Not run | Final goal; requires every mandatory native parity scenario. |
 
 ## Stable parity domains

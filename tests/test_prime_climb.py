@@ -304,8 +304,8 @@ class TestPrimeClimb(unittest.TestCase):
             state,
             {
                 "last_hypothesis": "H-038",
-                "last_outcome": "passed",
-                "next_action": "phase-3.2-native-verified-loop-design",
+                "last_outcome": "provider-free-incomplete",
+                "next_action": "phase-3.2-native-verified-loop-bounded-authorization",
             },
         )
         tree = (ROOT / "docs/status/climb/research-tree.md").read_text()
@@ -514,8 +514,8 @@ class TestPrimeClimb(unittest.TestCase):
             ),
             {
                 "last_hypothesis": "H-038",
-                "last_outcome": "passed",
-                "next_action": "phase-3.2-native-verified-loop-design",
+                "last_outcome": "provider-free-incomplete",
+                "next_action": "phase-3.2-native-verified-loop-bounded-authorization",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(
@@ -632,8 +632,8 @@ class TestPrimeClimb(unittest.TestCase):
             ),
             {
                 "last_hypothesis": "H-038",
-                "last_outcome": "passed",
-                "next_action": "phase-3.2-native-verified-loop-design",
+                "last_outcome": "provider-free-incomplete",
+                "next_action": "phase-3.2-native-verified-loop-bounded-authorization",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(

@@ -1215,3 +1215,5 @@
 - 12:48 Added descriptor-only Native RLM recovery and monotonic usage evidence [949d3af]
 - 12:51 Added Native operation terminal and replay reducer evidence [3ce703a]
 - 13:00 Added Native provider-free verified-loop receipt with bounded gaps [aac1727]
+- 15:04 Added dormant Native bounded-turn reservation and receipt boundary [13c0436]
+- 15:08 Verified Native provider-free receipt at 9/9; bounded rows remain External-limited

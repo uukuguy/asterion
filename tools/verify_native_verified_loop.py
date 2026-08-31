@@ -94,8 +94,22 @@ def _valid_observation(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", choices=("provider-free",), required=True)
-    parser.parse_args()
+    parser.add_argument("--level", choices=("provider-free", "bounded"), required=True)
+    parser.add_argument("--reservation")
+    arguments = parser.parse_args()
+    if arguments.level == "bounded":
+        print(
+            json.dumps(
+                {
+                    "status": "External-limited",
+                    "level": "bounded",
+                    "promoted_feature_ids": [],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 1
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root))
     try:
