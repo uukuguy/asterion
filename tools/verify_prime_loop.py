@@ -877,6 +877,14 @@ def _native_rlm_failure_class(
     }
     if safe_error in fixed_errors:
         return fixed_errors[safe_error]
+    controlled_errors = {
+        "Native RLM controlled probe event pump timed out": "pump_timeout",
+        "Native RLM controlled probe event observation timed out": "observation_timeout",
+        "Native RLM terminal state is invalid": "terminal_state",
+        "Native RLM model evidence did not complete": "model_evidence",
+    }
+    if safe_error in controlled_errors:
+        return controlled_errors[safe_error]
     if isinstance(safe_error, str) and safe_error.startswith(
         "Native RLM controlled probe start "
     ):

@@ -37,6 +37,15 @@ def _write_result(path: Path, result: object) -> None:
 def _safe_exception_class(error: Exception) -> str:
     """Project only a closed exception class, never its provider message."""
 
+    message = str(error)
+    for prefix, code in (
+        ("Native RLM controlled probe ", "controlled_probe"),
+        ("Native RLM sidecar ", "sidecar"),
+        ("Native RLM daemon ", "daemon"),
+        ("Native RLM experiment ", "experiment_internal"),
+    ):
+        if message.startswith(prefix):
+            return code
     return {
         "PrimeRlmExperimentError": "experiment",
         "PrimeControlError": "control",
