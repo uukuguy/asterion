@@ -1,20 +1,21 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-31 12:51 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-31 13:00 +0800. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Phase 3.2 Task 3 is committed at `3ce703a`: Native operation goals, terminal
-  fencing, and exact exclusive-cursor replay.
-- Its provider-free matrix passed: 15 focused/conformance tests, repository-
-  wide `make lint`, and `git diff --check`.
+- Phase 3.2 Task 4 is committed at `aac1727`: exact nine-row provider-free
+  Native receipt and verifier, pinned to test-side Prime lock validation.
+- `make test.native-verified-loop.provider-free` passes with nine evidenced
+  rows, two bounded gaps, zero external counters, and no promoted features.
 - No provider/model/network operation was run or authorized.
 
 ## Durable boundary
 
 - Task 1 (`5a42230`) covers Native session records. Task 2 (`949d3af`) covers
   RLM environment/recovery. Task 3 (`3ce703a`) covers operation state and
-  replay, all with only opaque IDs, digests, and counters.
+  replay. Task 4 (`aac1727`) records their provider-free evidence, all with
+  only opaque IDs, digests, and counters.
 - Recovery validates its snapshot digest against the exact preceding reduced
   environment/usage state; unknown environments, conflicting prefixes, and
   safe-integer overflow fail closed.
@@ -31,8 +32,8 @@
 
 ## Immediate next action
 
-1. Commit this Task 3 journal/checkpoint state, then implement Phase 3.2 Task
-   4: the nine-row provider-free differential receipt and exact reducer.
+1. Commit this Task 4 journal/checkpoint state, then implement Phase 3.2 Task
+   5: dormant bounded-turn authority and receipt reconciliation using TDD.
 
 ## Ready-to-paste verification
 
