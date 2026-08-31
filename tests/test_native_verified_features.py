@@ -163,6 +163,30 @@ def _rlm_restart_records() -> tuple[NativeVerifiedFeatureRecord, ...]:
     )
 
 
+def _goal_history() -> tuple[NativeVerifiedFeatureRecord, ...]:
+    return _records(
+        (
+            ("operation.goals", {"operation_id": "operation-1", "goal_status": "active"}),
+            (
+                "operation.detach-attach-replay",
+                {"operation_id": "operation-1", "cursor": 1, "event_digest": "5" * 64},
+            ),
+            (
+                "operation.detach-attach-replay",
+                {"operation_id": "operation-1", "cursor": 2, "event_digest": "6" * 64},
+            ),
+            (
+                "operation.detach-attach-replay",
+                {"operation_id": "operation-1", "cursor": 3, "event_digest": "7" * 64},
+            ),
+            (
+                "operation.goals",
+                {"operation_id": "operation-1", "goal_status": "succeeded"},
+            ),
+        )
+    )
+
+
 def _budget() -> RemainingBudget:
     return RemainingBudget(
         controller_tokens=100,
@@ -567,6 +591,13 @@ class TestNativeVerifiedSessions(unittest.TestCase):
             projection = state.session_projection(SESSION_ID)
             self.assertEqual(projection["deliveries"], ("input-1",))
             self.assertEqual(projection["total_tokens"], 5)
+            self.assertEqual(len(state.operation_ids), 1)
+            operation_id = state.operation_ids[0]
+            self.assertEqual(state.operation_projection(operation_id)["goal_status"], "active")
+            self.assertEqual(
+                tuple(cursor for cursor, _ in state.replay(operation_id, after_cursor=0)),
+                tuple(range(1, len(controller.state.events) + 1)),
+            )
         finally:
             controller.close()
 
@@ -662,6 +693,50 @@ class TestNativeVerifiedRlm(unittest.TestCase):
                                 "environment_id": "environment-1",
                                 "child_tokens": 1,
                                 "cost_micros": 0,
+                            },
+                        ),
+                    )
+                )
+            )
+
+
+class TestNativeVerifiedOperations(unittest.TestCase):
+    def test_goal_detach_attach_replay_has_one_terminal_history(self) -> None:
+        state = reduce_verified_feature_records(_goal_history())
+
+        projection = state.operation_projection("operation-1")
+
+        self.assertEqual(projection["goal_status"], "succeeded")
+        self.assertEqual(
+            state.replay("operation-1", after_cursor=2),
+            ((3, "7" * 64),),
+        )
+        with self.assertRaises(TypeError):
+            projection["goal_status"] = "mutated"  # type: ignore[index]
+
+    def test_operation_rejects_second_terminal_and_cursor_gap(self) -> None:
+        history = _goal_history()
+        with self.assertRaises(NativeVerifiedFeatureError):
+            reduce_verified_feature_records(
+                (
+                    *history,
+                    _record(
+                        "operation.goals",
+                        {"operation_id": "operation-1", "goal_status": "cancelled"},
+                    ),
+                )
+            )
+
+        with self.assertRaises(NativeVerifiedFeatureError):
+            reduce_verified_feature_records(
+                _records(
+                    (
+                        (
+                            "operation.detach-attach-replay",
+                            {
+                                "operation_id": "operation-1",
+                                "cursor": 2,
+                                "event_digest": "5" * 64,
                             },
                         ),
                     )

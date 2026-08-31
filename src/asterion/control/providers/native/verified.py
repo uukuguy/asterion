@@ -28,6 +28,8 @@ VERIFIED_FEATURE_IDS = frozenset(
         "rlm.environment",
         "rlm.recovery",
         "rlm.usage-cost",
+        "operation.detach-attach-replay",
+        "operation.goals",
     }
 )
 
@@ -93,6 +95,7 @@ class NativeVerifiedFeatureRecord:
 class NativeVerifiedState:
     _sessions: Mapping[str, Mapping[str, object]]
     _rlm_environments: Mapping[str, Mapping[str, object]]
+    _operations: Mapping[str, Mapping[str, object]]
 
     def __post_init__(self) -> None:
         sessions = {
@@ -103,8 +106,13 @@ class NativeVerifiedState:
             environment_id: MappingProxyType(dict(projection))
             for environment_id, projection in self._rlm_environments.items()
         }
+        operations = {
+            operation_id: MappingProxyType(dict(projection))
+            for operation_id, projection in self._operations.items()
+        }
         object.__setattr__(self, "_sessions", MappingProxyType(sessions))
         object.__setattr__(self, "_rlm_environments", MappingProxyType(rlm_environments))
+        object.__setattr__(self, "_operations", MappingProxyType(operations))
 
     @property
     def session_ids(self) -> tuple[str, ...]:
@@ -118,6 +126,10 @@ class NativeVerifiedState:
     def rlm_environment_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._rlm_environments))
 
+    @property
+    def operation_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._operations))
+
     def session_projection(self, session_id: str) -> Mapping[str, object]:
         try:
             _require_opaque(session_id)
@@ -130,6 +142,25 @@ class NativeVerifiedState:
             _require_opaque(environment_id)
             return self._rlm_environments[environment_id]
         except KeyError:
+            _raise_verified_error()
+
+    def operation_projection(self, operation_id: str) -> Mapping[str, object]:
+        try:
+            _require_opaque(operation_id)
+            return self._operations[operation_id]
+        except KeyError:
+            _raise_verified_error()
+
+    def replay(self, operation_id: str, *, after_cursor: int) -> tuple[tuple[int, str], ...]:
+        try:
+            _require_opaque(operation_id)
+            cursor = _nonnegative_int(after_cursor)
+            operation = self._operations[operation_id]
+            history = operation["history"]
+            if not isinstance(history, tuple) or cursor > len(history):
+                raise NativeVerifiedFeatureError
+            return tuple(item for item in history if item[0] > cursor)
+        except (KeyError, NativeVerifiedFeatureError):
             _raise_verified_error()
 
 
@@ -279,6 +310,40 @@ def native_verified_records_from_controller_state(
             },
         )
     )
+    if state.goal_status is not None:
+        operation_id = _bounded_hash_id(
+            "operation",
+            {
+                "domain": "asterion.native-verified-operation/v1",
+                "session_id": state.session_id,
+                "generation": state.generation,
+            },
+        )
+        records.append(
+            _feature_record(
+                "operation.goals",
+                {"operation_id": operation_id, "goal_status": "active"},
+            )
+        )
+        for event in state.events:
+            records.append(
+                _feature_record(
+                    "operation.detach-attach-replay",
+                    {
+                        "operation_id": operation_id,
+                        "cursor": event.sequence,
+                        "event_digest": _digest(event.to_mapping()),
+                    },
+                )
+            )
+        terminal_status = _terminal_operation_goal_status(state.goal_status)
+        if terminal_status is not None:
+            records.append(
+                _feature_record(
+                    "operation.goals",
+                    {"operation_id": operation_id, "goal_status": terminal_status},
+                )
+            )
     return tuple(records)
 
 
@@ -348,13 +413,28 @@ class _RlmEnvironmentReduction:
 
 
 @dataclass
+class _OperationReduction:
+    operation_id: str
+    goal_status: str
+    history: tuple[tuple[int, str], ...] = ()
+
+    def projection(self) -> Mapping[str, object]:
+        return {
+            "operation_id": self.operation_id,
+            "goal_status": self.goal_status,
+            "history": self.history,
+        }
+
+
+@dataclass
 class _MutableReduction:
     sessions: dict[str, _SessionReduction]
     rlm_environments: dict[str, _RlmEnvironmentReduction]
+    operations: dict[str, _OperationReduction]
 
     @classmethod
     def empty(cls) -> _MutableReduction:
-        return cls({}, {})
+        return cls({}, {}, {})
 
     def apply(self, record: NativeVerifiedFeatureRecord) -> None:
         if record.feature_id == "session.persistence-naming":
@@ -378,6 +458,12 @@ class _MutableReduction:
         if record.feature_id == "rlm.recovery":
             self._apply_rlm_recovery(record.payload)
             return
+        if record.feature_id == "operation.goals":
+            self._apply_operation_goal(record.payload)
+            return
+        if record.feature_id == "operation.detach-attach-replay":
+            self._apply_operation_replay(record.payload)
+            return
         raise NativeVerifiedFeatureError
 
     def freeze(self) -> NativeVerifiedState:
@@ -389,6 +475,10 @@ class _MutableReduction:
             {
                 environment_id: environment.projection()
                 for environment_id, environment in self.rlm_environments.items()
+            },
+            {
+                operation_id: operation.projection()
+                for operation_id, operation in self.operations.items()
             },
         )
 
@@ -518,6 +608,38 @@ class _MutableReduction:
         except KeyError:
             raise NativeVerifiedFeatureError from None
 
+    def _apply_operation_goal(self, payload: Mapping[str, object]) -> None:
+        operation_id = str(payload["operation_id"])
+        goal_status = str(payload["goal_status"])
+        existing = self.operations.get(operation_id)
+        if existing is None:
+            if goal_status != "active":
+                raise NativeVerifiedFeatureError
+            self.operations[operation_id] = _OperationReduction(
+                operation_id,
+                goal_status,
+            )
+            return
+        if existing.goal_status in _TERMINAL_GOAL_STATUSES:
+            raise NativeVerifiedFeatureError
+        if goal_status not in _TERMINAL_GOAL_STATUSES:
+            raise NativeVerifiedFeatureError
+        existing.goal_status = goal_status
+
+    def _apply_operation_replay(self, payload: Mapping[str, object]) -> None:
+        operation = self._operation(payload)
+        cursor = _positive_int(payload["cursor"])
+        event_digest = str(payload["event_digest"])
+        if cursor != len(operation.history) + 1:
+            raise NativeVerifiedFeatureError
+        operation.history = (*operation.history, (cursor, event_digest))
+
+    def _operation(self, payload: Mapping[str, object]) -> _OperationReduction:
+        try:
+            return self.operations[str(payload["operation_id"])]
+        except KeyError:
+            raise NativeVerifiedFeatureError from None
+
 
 def _feature_record(
     feature_id: str, payload: Mapping[str, object]
@@ -619,6 +741,18 @@ def _validate_feature_payload(feature_id: str, payload: Mapping[str, object]) ->
         _require_opaque(payload["environment_id"])
         _require_sha256(payload["snapshot_digest"])
         return
+    if feature_id == "operation.goals":
+        _require_fields(payload, {"operation_id", "goal_status"})
+        _require_opaque(payload["operation_id"])
+        if payload["goal_status"] not in _OPERATION_GOAL_STATUSES:
+            raise NativeVerifiedFeatureError
+        return
+    if feature_id == "operation.detach-attach-replay":
+        _require_fields(payload, {"operation_id", "cursor", "event_digest"})
+        _require_opaque(payload["operation_id"])
+        _positive_int(payload["cursor"])
+        _require_sha256(payload["event_digest"])
+        return
     raise NativeVerifiedFeatureError
 
 
@@ -718,6 +852,15 @@ def _status_from_lifecycle(lifecycle: str) -> str:
     return status
 
 
+def _terminal_operation_goal_status(goal_status: str) -> str | None:
+    return {
+        "budget_limited": "budget_limited",
+        "cancelled": "cancelled",
+        "completed": "succeeded",
+        "failed": "failed",
+    }.get(goal_status)
+
+
 def _bounded_hash_id(prefix: str, payload: Mapping[str, object]) -> str:
     record_id = f"{prefix}:{_digest(payload)}"
     _require_opaque(record_id)
@@ -763,3 +906,7 @@ _SAFE_SESSION_STATUSES = frozenset(
         "failed",
     }
 )
+_OPERATION_GOAL_STATUSES = frozenset(
+    {"active", "succeeded", "cancelled", "failed", "budget_limited"}
+)
+_TERMINAL_GOAL_STATUSES = _OPERATION_GOAL_STATUSES - {"active"}
