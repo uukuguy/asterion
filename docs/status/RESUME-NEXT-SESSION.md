@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-31 17:28 +0800. **Session is paused at Prime Native RLM checkpoint-lifecycle acceptance.**
+> Updated: 2026-08-31 17:43 +0800. **Session is paused at Prime Native RLM checkpoint manager's idle barrier.**
 
 ## TL;DR
 
@@ -10,10 +10,10 @@
 - `make test.native-verified-loop.provider-free` passes 17 tests and emits
   nine evidenced rows, two bounded gaps, zero external counters, and no
   promoted features.
-- Two explicit `make verify.native-verified-loop.small` runs returned
-  `External-limited` with no promotable receipt. The second passed sidecar
-  descriptor validation after the required operation host was bound, then
-  safely classified the remaining boundary as checkpoint-lifecycle request.
+- Four explicit `make verify.native-verified-loop.small` runs returned
+  `External-limited` with no promotable receipt. The descriptor, callback, and
+  lifecycle acceptance boundaries are passed; the latest safe classification
+  is `checkpoint_idle`, before the main README-style RLM probe starts.
 
 ## Durable boundary
 
@@ -38,7 +38,8 @@
 
 ## Immediate next action
 
-1. Diagnose checkpoint-lifecycle acceptance using only safe failure classes.
+1. Diagnose the checkpoint manager's idle barrier using only safe failure
+   classes, then run the main README-style RLM probe.
    The user-facing action still accepts no provider, model, budget, or deadline
    arguments.
 

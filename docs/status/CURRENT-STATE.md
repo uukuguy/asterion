@@ -15,7 +15,8 @@
   Verified-loop evidence and has a configured operator-owned small-verification
   host. Its initial run stopped at the Prime sidecar descriptor boundary;
   the corrected operation-host descriptor now reaches the bounded checkpoint
-  lifecycle callback, which remains External-limited before acceptance.
+  manager; its exact idle barrier remains External-limited before the main RLM
+  probe begins.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -95,8 +96,9 @@
 - Phase 3.2 provider-free receipt evidences nine Native Verified-loop rows
   with zero external counters. A parameter-free operator-owned host reads the
   existing `.env` configuration. Its second bounded run passed Gateway
-  descriptor validation and reached the checkpoint lifecycle callback, but did
-  not receive lifecycle acceptance; the two bounded rows remain
+  descriptor validation, lifecycle acceptance, and the checkpoint manager.
+  Its current exact boundary is the manager idle barrier before the main RLM
+  probe; the two bounded rows remain
   `External-limited`. Native `Verified-loop` and all compound Native rows
   remain Missing.
 
