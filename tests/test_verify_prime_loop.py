@@ -717,10 +717,22 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
                 "asterion-prime-checkpoint-runtime-stop-failed\n",
                 encoding="utf-8",
             )
-
             self.assertEqual(
                 prime_loop._native_rlm_failure_class(stderr),
                 "checkpoint_runtime_stop",
+            )
+
+    def test_failure_evidence_classifies_checkpoint_stop_substage_without_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-checkpoint-stop:shim\n"
+                "asterion-prime-checkpoint-stop:shutdown\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr),
+                "checkpoint_stop_shutdown",
             )
 
     def test_failure_evidence_classifies_checkpoint_lifecycle_stage_without_content(self) -> None:

@@ -2678,6 +2678,9 @@ async function createSidecarFromDescriptor(
             // immutable private shim at the checkpoint boundary so the
             // successor never restores a manifest that references a missing
             // module.
+            if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+              process.stderr.write("asterion-prime-checkpoint-stop:shim\n");
+            }
             await writeRlmHostShim(descriptor);
             if (rlmHostClose === undefined) {
               const context = restoredBridgeContext(
@@ -2696,6 +2699,9 @@ async function createSidecarFromDescriptor(
             }
             let shutdown;
             try {
+              if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+                process.stderr.write("asterion-prime-checkpoint-stop:shutdown\n");
+              }
               shutdown = await transport.request(
                 { type: "shutdown" },
                 `checkpoint-shutdown-${checkpointId}`,

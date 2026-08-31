@@ -915,6 +915,14 @@ def _native_rlm_failure_class(
             ),
             None,
         )
+        stop_stage = max(
+            (
+                (content.rfind(f"asterion-prime-checkpoint-stop:{stage}".encode()), stage)
+                for stage in ("shim", "shutdown")
+                if f"asterion-prime-checkpoint-stop:{stage}".encode() in content
+            ),
+            default=(-1, None),
+        )[1]
         checkpoint_stage = max(
             (
                 (content.rfind(f"asterion-prime-checkpoint-stage:{stage}".encode()), stage)
@@ -948,6 +956,8 @@ def _native_rlm_failure_class(
             private_category = "checkpoint_attach_" + attach_failure
         elif shutdown_failure is not None:
             private_category = "checkpoint_shutdown_" + shutdown_failure
+        elif stop_stage is not None:
+            private_category = "checkpoint_stop_" + stop_stage
         elif b"asterion-prime-checkpoint-coordinator-failed:" in content:
             coordinator_phase = next(
                 (phase for phase in ("manifest", "prepare", "shutdown", "fence", "start", "restore", "coordinator")
