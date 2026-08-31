@@ -337,6 +337,14 @@ test.native-controller-core.provider-free:
 		tests.test_native_control_process_recovery \
 		tests.test_native_controller_core_verification
 
+.PHONY: test.native-verified-loop.provider-free
+test.native-verified-loop.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_native_verified_features \
+		tests.test_native_verified_differential \
+		tests.test_native_verified_loop_verification
+	$(UV_BIN) run python tools/verify_native_verified_loop.py --level provider-free
+
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" $(if $(ASTERION_PRIME_AUTHORITY),--authority "$(ASTERION_PRIME_AUTHORITY)") $(if $(ASTERION_PRIME_MAX_COST_MICROS),--max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)")
 
