@@ -38,7 +38,7 @@ def main() -> int:
     phase = "prime.launch"
     def observe(event_type: str, payload: dict[str, str] | None = None) -> None:
         event = log.record(event_type, payload)
-        print(json.dumps(event, sort_keys=True, separators=(",", ":")), flush=True)
+        print(json.dumps(dict(event), sort_keys=True, separators=(",", ":")), flush=True)
 
     observe("run.started")
     source_root = Path("3th-party/prime-agent")
@@ -84,14 +84,14 @@ def main() -> int:
         output = {"status": result["status"], "scenario": "readme-rlm-smoke"}
         if result_path is not None:
             _write_result(result_path, output)
-        print(json.dumps(log.terminal("completed", "prime.rlm")), flush=True)
+        print(json.dumps(dict(log.terminal("completed", "prime.rlm"))), flush=True)
         print(json.dumps(output))
         return 0
     except Exception:
         output = {"status": "External-limited", "scenario": "readme-rlm-smoke"}
         if result_path is not None:
             _write_result(result_path, output)
-        print(json.dumps(log.terminal("external-limited", phase)), flush=True)
+        print(json.dumps(dict(log.terminal("external-limited", phase))), flush=True)
         print(json.dumps(output))
         return 2
 
