@@ -28,3 +28,15 @@ class TestRunObservationLog(unittest.TestCase):
             log = RunObservationLog(Path(directory), "run-1")
             with self.assertRaises(RunObservationError):
                 log.record("run.phase", {"prompt": "secret"})
+
+    def test_resumes_sequence_from_a_valid_existing_log(self) -> None:
+        from asterion.runtime.observation import RunObservationLog
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = RunObservationLog(root, "run-1")
+            first.record("run.started")
+            second = RunObservationLog(root, "run-1")
+            event = second.record("run.phase", {"phase": "prime.rlm"})
+
+        self.assertEqual(event["sequence"], 2)
