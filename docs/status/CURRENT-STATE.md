@@ -13,7 +13,9 @@
 - Active work package: Phase 3.1 is closed at H-038 with
   `native-controller-core` PASS. Phase 3.2 has provider-free Native
   Verified-loop evidence and has a configured operator-owned small-verification
-  host. Its first explicit run stopped at the existing Prime sidecar boundary.
+  host. Its initial run stopped at the Prime sidecar descriptor boundary;
+  the corrected operation-host descriptor now reaches the bounded checkpoint
+  lifecycle callback, which remains External-limited before acceptance.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -91,9 +93,10 @@
   and `git diff --check`. Canonical state routes to
   `phase-3.2-native-verified-loop-design`; no compound Native row was promoted.
 - Phase 3.2 provider-free receipt evidences nine Native Verified-loop rows
-  with zero external counters. A parameter-free operator-owned host now reads
-  the existing `.env` configuration and ran once; the established Prime Native
-  RLM sidecar stopped during execution, so the two bounded rows remain
+  with zero external counters. A parameter-free operator-owned host reads the
+  existing `.env` configuration. Its second bounded run passed Gateway
+  descriptor validation and reached the checkpoint lifecycle callback, but did
+  not receive lifecycle acceptance; the two bounded rows remain
   `External-limited`. Native `Verified-loop` and all compound Native rows
   remain Missing.
 

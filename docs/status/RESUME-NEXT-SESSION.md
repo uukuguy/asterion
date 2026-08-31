@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-31 16:51 +0800. **Session is paused at the existing Prime Native RLM sidecar boundary.**
+> Updated: 2026-08-31 17:28 +0800. **Session is paused at Prime Native RLM checkpoint-lifecycle acceptance.**
 
 ## TL;DR
 
@@ -10,9 +10,10 @@
 - `make test.native-verified-loop.provider-free` passes 17 tests and emits
   nine evidenced rows, two bounded gaps, zero external counters, and no
   promoted features.
-- One explicit `make verify.native-verified-loop.small` run reached the existing
-  Prime Native RLM execution stage and returned `External-limited` with safe
-  failure class `sidecar`; it produced no promotable receipt.
+- Two explicit `make verify.native-verified-loop.small` runs returned
+  `External-limited` with no promotable receipt. The second passed sidecar
+  descriptor validation after the required operation host was bound, then
+  safely classified the remaining boundary as checkpoint-lifecycle request.
 
 ## Durable boundary
 
@@ -37,9 +38,9 @@
 
 ## Immediate next action
 
-1. Diagnose the existing Prime Native RLM sidecar execution failure using only
-   safe failure classes. The user-facing action still accepts no provider,
-   model, budget, or deadline arguments.
+1. Diagnose checkpoint-lifecycle acceptance using only safe failure classes.
+   The user-facing action still accepts no provider, model, budget, or deadline
+   arguments.
 
 ## Ready-to-paste verification
 
