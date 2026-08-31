@@ -17,6 +17,7 @@ from asterion.control.providers.prime.client import RlmLifecycleObservation
 from asterion.control.providers.prime.client import RlmMessageAdmissionBinding
 from asterion.control.providers.prime.rlm import PrimeRlmAdmissionPreparer
 from asterion.control.providers.prime.rlm import PrimeRlmActionLifecycle
+from asterion.control.providers.prime.rlm import PrimeRlmLifecycleError
 from asterion.control.providers.prime.rlm import build_prime_rlm_host_components
 from asterion.control.rlm import RlmChildService, RlmError, RlmMessageBinding
 from asterion.control.authority import BudgetUsage
@@ -435,6 +436,25 @@ class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
         await preparer.reconcile_lifecycle()
 
         self.assertEqual(service.status("child-1").status, "completed")
+
+    async def test_lifecycle_projects_an_unbound_child_as_a_safe_binding_failure(self) -> None:
+        service = RlmChildService(_authority())
+        client = _Client(
+            RlmAdmissionBinding("action-1", "child-1", 1, 1, "a" * 64)
+        )
+        client.lifecycle = (
+            RlmLifecycleObservation(
+                "rlm.child.started", "child-other", native_identity_digest="b" * 64
+            ),
+        )
+        preparer = PrimeRlmAdmissionPreparer(
+            client=client, children=service, parent_session_id="session-1"
+        )
+
+        with self.assertRaisesRegex(PrimeRlmLifecycleError, "binding") as raised:
+            await preparer.reconcile_lifecycle()
+
+        self.assertEqual(raised.exception.safe_code, "binding")
 
     async def test_accepts_native_deletion_only_after_a_terminal_child(self) -> None:
         service = RlmChildService(_authority())

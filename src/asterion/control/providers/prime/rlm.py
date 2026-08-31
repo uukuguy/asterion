@@ -30,6 +30,18 @@ from asterion.control.providers.prime.client import (
 from asterion.control.rlm import RlmChildBinding, RlmChildService, RlmError, RlmMessageBinding
 
 
+class PrimeRlmLifecycleError(RlmError):
+    """A body-free, fixed category for Prime provider lifecycle failures."""
+
+    _CODES = frozenset({"binding", "transition", "terminal"})
+
+    def __init__(self, safe_code: str) -> None:
+        if safe_code not in self._CODES:
+            raise ValueError("Prime RLM lifecycle error is invalid")
+        self.safe_code = safe_code
+        super().__init__(f"Prime RLM lifecycle {safe_code} is invalid")
+
+
 @dataclass(frozen=True)
 class PrimeRlmHostComponents:
     """The exact Prime-native RLM services a ControlHost must receive together."""
@@ -235,30 +247,39 @@ class PrimeRlmAdmissionPreparer:
 
         observations = await self._client.rlm_lifecycle()
         if not isinstance(observations, tuple):
-            raise RlmError("Prime RLM lifecycle is invalid")
+            raise PrimeRlmLifecycleError("transition")
         for observation in observations:
             if not isinstance(observation, RlmLifecycleObservation):
-                raise RlmError("Prime RLM lifecycle is invalid")
-            binding = self._children.binding(observation.child_id)
-            current = self._children.status(observation.child_id)
+                raise PrimeRlmLifecycleError("transition")
+            try:
+                binding = self._children.binding(observation.child_id)
+                current = self._children.status(observation.child_id)
+            except RlmError:
+                raise PrimeRlmLifecycleError("binding") from None
             if observation.type == "rlm.child.started":
                 if current.status == "admitted":
                     assert observation.native_identity_digest is not None
-                    self._children.record_started(
-                        binding, native_identity=observation.native_identity_digest
-                    )
+                    try:
+                        self._children.record_started(
+                            binding, native_identity=observation.native_identity_digest
+                        )
+                    except RlmError:
+                        raise PrimeRlmLifecycleError("transition") from None
                 elif current.status not in {"started", "completed", "failed", "cancelled"}:
-                    raise RlmError("Prime RLM lifecycle conflicts")
+                    raise PrimeRlmLifecycleError("transition")
                 continue
             if observation.type == "rlm.child.deleted":
                 if current.status not in {"completed", "failed", "cancelled"}:
-                    raise RlmError("Prime RLM lifecycle conflicts")
+                    raise PrimeRlmLifecycleError("transition")
                 continue
             if current.status == "started":
                 assert observation.status is not None
-                self._children.record_terminal(binding, status=observation.status)
+                try:
+                    self._children.record_terminal(binding, status=observation.status)
+                except RlmError:
+                    raise PrimeRlmLifecycleError("terminal") from None
             elif current.status != observation.status:
-                raise RlmError("Prime RLM lifecycle conflicts")
+                raise PrimeRlmLifecycleError("terminal")
 
     def owns(self, proposal: ControlEvent) -> bool:
         """True only after this exact action has a durable native-child binding."""

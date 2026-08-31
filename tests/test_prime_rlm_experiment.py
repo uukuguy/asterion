@@ -609,6 +609,19 @@ class TestNativeRlmExperiment(unittest.TestCase):
             "event-transition",
         )
 
+    def test_controlled_probe_classifies_safe_provider_lifecycle_stages(self) -> None:
+        for message, expected in (
+            ("provider-owned action lifecycle reconcile is invalid", "provider-lifecycle-reconcile"),
+            ("provider-owned action lifecycle settlement is invalid", "provider-lifecycle-settlement"),
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(
+                    native_rlm._native_rlm_control_failure_category(
+                        native_rlm.ControlHostError(message)
+                    ),
+                    expected,
+                )
+
     def test_controlled_probe_keeps_only_the_safe_native_action_kind(self) -> None:
         event = ControlEvent(
             protocol="asterion.agent-control/v1",

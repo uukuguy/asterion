@@ -1055,6 +1055,18 @@ class ControlHost:
             terminals = await lifecycle.reconcile()
             if not isinstance(terminals, tuple):
                 raise TypeError
+        except ControlHostError:
+            raise
+        except Exception as error:
+            safe_code = getattr(error, "safe_code", None)
+            if safe_code in {"binding", "transition", "terminal"}:
+                raise ControlHostError(
+                    f"provider-owned action lifecycle {safe_code} is invalid"
+                ) from None
+            raise ControlHostError(
+                "provider-owned action lifecycle reconcile is invalid"
+            ) from None
+        try:
             for terminal in terminals:
                 if not isinstance(terminal, ProviderOwnedActionTerminal):
                     raise TypeError
@@ -1071,11 +1083,9 @@ class ControlHost:
                         reason_code="provider-owned-terminal",
                         receipt_ref=None,
                     )
-        except ControlHostError:
-            raise
-        except Exception:
+        except Exception as error:
             raise ControlHostError(
-                "provider-owned action lifecycle is invalid"
+                "provider-owned action lifecycle settlement is invalid"
             ) from None
 
     async def _settle_provider_owned_actions_before_terminal(self) -> None:
