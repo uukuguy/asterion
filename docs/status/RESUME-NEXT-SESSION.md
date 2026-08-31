@@ -1,6 +1,6 @@
-# Live Session Checkpoint
+# Next-Session Handoff
 
-> Updated: 2026-08-31 06:52 +0800. **Session remains active — not a final handoff.**
+> Updated: 2026-08-31 11:05 +0800. **Formal handoff — resume from the stated next action.**
 
 ## TL;DR
 
@@ -9,6 +9,8 @@
   provider/application operations.
 - Phase 3.1 Native durable-controller core is closed at H-038 with exact
   provider-free evidence. The receipt claims only `native-controller-core: PASS`.
+- Phase 3.2 design and six-task plan are committed (`b764e52`, `f03377b`).
+- Phase 3.2 Task 1 is implemented and independently approved at `5a42230`.
 - All 61 compound `asterion.native` parity rows remain Missing. Native
   `Verified-loop` and `Verified-native-parity` are not claimed.
 - Canonical Climb state records `38,H-038,passed,check.native-controller-core-provider-free`
@@ -31,10 +33,23 @@
   cancellation, and public-safe evidence. Native still must prove the complete
   Verified-loop and every compound parity feature before any Native parity PASS.
 
+## In-flight handoff state
+
+- Task 1 added the provider-free Native verified-session reducer in
+  `src/asterion/control/providers/native/verified.py`; it covers exactly
+  session persistence/naming, resume/delete, delivery, and usage/status.
+- Independent task review returned APPROVED with zero findings. Focused Task 1
+  verification reported 48 tests passing plus `make lint` and `git diff --check`.
+- The only worktree modification is the appended 11:05 JOURNAL entry for
+  `5a42230`; commit it before starting Task 2. No branch/worktree was created.
+- Real provider execution remains prohibited. The bounded path is implementation
+  work only until a new explicit finite-budget authorization is granted.
+
 ## Immediate next action
 
-1. Design Phase 3.2 Native Verified-loop evidence on top of the H-038 controller
-   substrate.
+1. Commit the pending JOURNAL line, append the SDD progress entry for Task 1,
+   then dispatch Phase 3.2 Task 2 using
+   `.superpowers/sdd/task-2-brief.md` from the approved plan.
 
 ## Ready-to-paste verification
 
