@@ -102,6 +102,7 @@ class PrimeDaemonLifecycleServer:
         socket_path: Path,
         token: str,
         session_id: str,
+        diagnostic: Callable[[str], None] | None = None,
     ) -> None:
         if (
             not isinstance(lifecycle, PrimeDaemonLifecycle)
@@ -110,12 +111,14 @@ class PrimeDaemonLifecycleServer:
             or _LIFECYCLE_TOKEN.fullmatch(token) is None
             or not isinstance(session_id, str)
             or _REQUEST_ID.fullmatch(session_id) is None
+            or diagnostic is not None and not callable(diagnostic)
         ):
             raise PrimeSidecarProcessError()
         self._lifecycle = lifecycle
         self._socket_path = socket_path
         self._token = token
         self._session_id = session_id
+        self._diagnostic = diagnostic
         self._server: asyncio.AbstractServer | None = None
         self._restart_tasks: set[asyncio.Task[None]] = set()
 
@@ -176,6 +179,7 @@ class PrimeDaemonLifecycleServer:
                 )
                 self._restart_tasks.add(task)
                 task.add_done_callback(self._restart_tasks.discard)
+                self._note("accepted")
                 writer.write(_encode_frame({
                     "protocol": PRIME_DAEMON_LIFECYCLE_PROTOCOL,
                     "id": request_id,
@@ -183,11 +187,19 @@ class PrimeDaemonLifecycleServer:
                 }))
                 await writer.drain()
         except (OSError, TimeoutError, ValueError, PrimeSidecarProcessError):
-            pass
+            self._note("failed")
         finally:
             writer.close()
             with suppress(OSError):
                 await writer.wait_closed()
+
+    def _note(self, stage: str) -> None:
+        if stage not in {"accepted", "failed"}:
+            return
+        callback = self._diagnostic
+        if callback is not None:
+            with suppress(Exception):
+                callback(stage)
 
     async def _restart_and_record(self, request_id: str, active_session_id: str) -> None:
         response: Mapping[str, object]

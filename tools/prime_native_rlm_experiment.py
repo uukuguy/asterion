@@ -1339,6 +1339,9 @@ async def execute_native_rlm_sidecar_probe(
             socket_path=root / "daemon-lifecycle.sock",
             token=secrets.token_hex(32),
             session_id=session_id,
+            diagnostic=lambda stage: (root / "daemon-lifecycle-request").write_text(
+                stage + "\n", encoding="ascii"
+            ),
         )
         await lifecycle_server.start()
         boundary("operation-host")

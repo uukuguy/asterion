@@ -51,6 +51,7 @@ class TestPrimeDaemonLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_private_server_restarts_only_the_bound_session(self) -> None:
         calls: list[str] = []
+        diagnostics: list[str] = []
 
         async def stop(_: str) -> None:
             calls.append("stop")
@@ -67,6 +68,7 @@ class TestPrimeDaemonLifecycle(unittest.IsolatedAsyncioTestCase):
                 socket_path=socket_path,
                 token=token,
                 session_id="session-1",
+                diagnostic=diagnostics.append,
             )
             await server.start()
             reader, writer = await asyncio.open_unix_connection(str(socket_path))
@@ -103,5 +105,6 @@ class TestPrimeDaemonLifecycle(unittest.IsolatedAsyncioTestCase):
             })
             self.assertEqual(receipt.stat().st_mode & 0o777, 0o600)
             self.assertEqual(calls, ["stop", "start"])
+            self.assertEqual(diagnostics, ["accepted"])
             await server.close()
             self.assertFalse(socket_path.exists())
