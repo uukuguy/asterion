@@ -35,6 +35,33 @@ def _nine_passes() -> tuple[dict[str, object], ...]:
 
 
 class TestNativeVerifiedLoopVerification(unittest.TestCase):
+    def test_small_verification_cli_has_no_provider_or_budget_inputs(self) -> None:
+        completed = subprocess.run(
+            [
+                "uv",
+                "run",
+                "python",
+                "tools/verify_native_verified_loop.py",
+                "--level",
+                "small-verification",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(
+            json.loads(completed.stdout),
+            {
+                "level": "small-verification",
+                "promoted_feature_ids": [],
+                "status": "External-limited",
+            },
+        )
+        self.assertNotIn("reservation", completed.stdout)
+
     def test_provider_free_receipt_cannot_promote_bounded_rows(self) -> None:
         report = build_native_verified_loop_report(
             ROOT,

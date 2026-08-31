@@ -94,15 +94,18 @@ def _valid_observation(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", choices=("provider-free", "bounded"), required=True)
-    parser.add_argument("--reservation")
+    parser.add_argument(
+        "--level",
+        choices=("provider-free", "bounded", "small-verification"),
+        required=True,
+    )
     arguments = parser.parse_args()
-    if arguments.level == "bounded":
+    if arguments.level in {"bounded", "small-verification"}:
         print(
             json.dumps(
                 {
                     "status": "External-limited",
-                    "level": "bounded",
+                    "level": arguments.level,
                     "promoted_feature_ids": [],
                 },
                 sort_keys=True,

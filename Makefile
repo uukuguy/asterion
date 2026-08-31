@@ -350,6 +350,11 @@ verify.native-verified-loop.bounded:
 	@echo "Use explicit verifier with an operator-approved reservation; this target does not execute a provider."
 	@exit 1
 
+.PHONY: verify.native-verified-loop.small
+verify.native-verified-loop.small:
+	@echo "Small Native verification requires an operator-owned preset host; this target does not execute a provider."
+	@exit 1
+
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" $(if $(ASTERION_PRIME_AUTHORITY),--authority "$(ASTERION_PRIME_AUTHORITY)") $(if $(ASTERION_PRIME_MAX_COST_MICROS),--max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)")
 
