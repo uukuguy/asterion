@@ -285,6 +285,15 @@ def _passed_ledger_claims() -> tuple[str, ...]:
 
 
 class TestPrimeClimb(unittest.TestCase):
+    def test_native_verified_loop_small_preset_remains_external_limited(self) -> None:
+        state = json.loads((ROOT / "docs/status/climb/session-state.json").read_text())
+
+        self.assertEqual(
+            state["next_action"],
+            "phase-3.2-native-small-verification-host",
+        )
+        self.assertNotIn("Native Verified-loop", _passed_ledger_claims())
+
     def test_h038_canonical_closure_occurs_once_and_routes_to_phase32(self) -> None:
         hypotheses = (ROOT / "docs/status/climb/hypotheses.yaml").read_text()
         self.assertIn(
@@ -305,7 +314,7 @@ class TestPrimeClimb(unittest.TestCase):
             {
                 "last_hypothesis": "H-038",
                 "last_outcome": "provider-free-incomplete",
-                "next_action": "phase-3.2-native-verified-loop-bounded-authorization",
+                "next_action": "phase-3.2-native-small-verification-host",
             },
         )
         tree = (ROOT / "docs/status/climb/research-tree.md").read_text()
@@ -515,7 +524,7 @@ class TestPrimeClimb(unittest.TestCase):
             {
                 "last_hypothesis": "H-038",
                 "last_outcome": "provider-free-incomplete",
-                "next_action": "phase-3.2-native-verified-loop-bounded-authorization",
+                "next_action": "phase-3.2-native-small-verification-host",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(
@@ -633,7 +642,7 @@ class TestPrimeClimb(unittest.TestCase):
             {
                 "last_hypothesis": "H-038",
                 "last_outcome": "provider-free-incomplete",
-                "next_action": "phase-3.2-native-verified-loop-bounded-authorization",
+                "next_action": "phase-3.2-native-small-verification-host",
             },
         )
         research_tree = (ROOT / "docs" / "status" / "climb" / "research-tree.md").read_text(

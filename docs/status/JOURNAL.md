@@ -1217,3 +1217,8 @@
 - 13:00 Added Native provider-free verified-loop receipt with bounded gaps [aac1727]
 - 15:04 Added dormant Native bounded-turn reservation and receipt boundary [13c0436]
 - 15:08 Verified Native provider-free receipt at 9/9; bounded rows remain External-limited
+- 16:01 Recorded Native provider-free boundary and bounded authorization successor [83aea1d]
+- 16:06 Specified user-simple Native small-verification preset [732e0fc]
+- 16:10 Planned Native small-verification preset implementation [cc0e4dc]
+- 16:12 Added single-use operator-owned Native small-verification preset [874ae91]
+- 16:13 Added parameter-free Native small-verification preflight [72c4788]

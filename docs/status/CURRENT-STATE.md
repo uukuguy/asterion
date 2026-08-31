@@ -12,8 +12,8 @@
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
 - Active work package: Phase 3.1 is closed at H-038 with
   `native-controller-core` PASS. Phase 3.2 has provider-free Native
-  Verified-loop evidence and is paused at separately authorized bounded
-  execution.
+  Verified-loop evidence and is paused at its unconfigured operator-owned
+  small-verification host.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -61,7 +61,7 @@
   `check.client-interfaces-closure`, `check.operational-parity-closure`,
   `prime-system-parity-operation-host-callback`, and
   `check.native-controller-core-provider-free`.
-  `next_action` is `phase-3.2-native-verified-loop-bounded-authorization`.
+  `next_action` is `phase-3.2-native-small-verification-host`.
 - `interfaces.operations` is PASS at exactly 15/15 Prime Gateway rows after
   H-035 plus H-036.
 - Prime Gateway canonical `Verified-system-parity` remains PASS at H-037: the
@@ -91,7 +91,8 @@
   and `git diff --check`. Canonical state routes to
   `phase-3.2-native-verified-loop-design`; no compound Native row was promoted.
 - Phase 3.2 provider-free receipt evidences nine Native Verified-loop rows
-  with zero external counters. The two bounded rows remain
+  with zero external counters. A parameter-free small-verification preset now
+  exists, but no operator-owned host is configured; the two bounded rows remain
   `External-limited`, so Native `Verified-loop` and all compound Native rows
   remain Missing.
 
@@ -148,7 +149,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Resume Phase 3.2 only with a new, explicit finite authorization for a
-   bounded Native run; otherwise retain the provider-free receipt unchanged.
+4. Resume Phase 3.2 by injecting and reviewing an operator-owned small-
+   verification host; otherwise retain the provider-free receipt unchanged.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.
