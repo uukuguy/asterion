@@ -20,7 +20,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: dci-run dci-benchmark
 .PHONY: dci-basic-example dci-runtime-context-example
 .PHONY: test-typescript test-rust check-rust
-.PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded
+.PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded prime-readme-rlm-smoke
 .PHONY: prime-parity-inventory prime-verify-system-parity
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
 .PHONY: test.prime-long-running.provider-free test.prime-long-running.bounded
@@ -48,7 +48,7 @@ help:
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
-	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free test.prime-long-running.bounded"
+	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-readme-rlm-smoke prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free test.prime-long-running.bounded"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
 
@@ -359,6 +359,9 @@ prime-verify-bounded:
 
 prime-verify-native-rlm-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level native-rlm-bounded --native-rlm-experiment --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
+
+prime-readme-rlm-smoke:
+	$(UV_BIN) run python -m tools.run_prime_readme_smoke
 
 prime-parity-inventory:
 	$(UV_BIN) run python tools/check_prime_parity.py --claim inventory
