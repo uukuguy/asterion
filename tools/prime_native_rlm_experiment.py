@@ -420,15 +420,13 @@ def _native_rlm_system_action_deadline(
 def _native_rlm_pump_timeout_seconds(
     reservation: NativeRlmExperimentReservation, exercise_checkpoint: bool
 ) -> int:
-    """Allow the driver to await one authorized gateway checkpoint resolution."""
+    """Allow one authorized native gateway operation to settle."""
 
     if (
         not isinstance(reservation, NativeRlmExperimentReservation)
         or not isinstance(exercise_checkpoint, bool)
     ):
         raise PrimeRlmExperimentError("Native RLM pump deadline is invalid")
-    if not exercise_checkpoint:
-        return _PUMP_TIMEOUT_SECONDS
     return max(
         _PUMP_TIMEOUT_SECONDS,
         _native_rlm_system_action_deadline(reservation) // 1_000 + 5,
