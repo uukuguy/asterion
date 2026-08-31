@@ -640,6 +640,12 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 "event_transition",
             )
 
+    def test_failure_class_projects_fixed_probe_boundary(self) -> None:
+        self.assertEqual(
+            _native_rlm_failure_class(None, safe_error="Native RLM probe did not complete"),
+            "probe",
+        )
+
     def test_controlled_probe_keeps_only_the_safe_native_action_kind(self) -> None:
         event = ControlEvent(
             protocol="asterion.agent-control/v1",

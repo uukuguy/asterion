@@ -869,6 +869,14 @@ def _native_rlm_failure_class(
     stderr_path: Path | None, *, safe_error: str | None = None, progress_path: Path | None = None
 ) -> str:
     """Classify private sidecar diagnostics without retaining their content."""
+    fixed_errors = {
+        "Native RLM probe did not complete": "probe",
+        "Native RLM probe result is invalid": "probe_result",
+        "Native RLM sidecar cleanup failed": "sidecar_cleanup",
+        "Native RLM daemon cleanup failed": "daemon_cleanup",
+    }
+    if safe_error in fixed_errors:
+        return fixed_errors[safe_error]
     if isinstance(safe_error, str) and safe_error.startswith(
         "Native RLM controlled probe start "
     ):

@@ -34,6 +34,22 @@ def _write_result(path: Path, result: object) -> None:
     os.replace(temporary, path)
 
 
+def _safe_exception_class(error: Exception) -> str:
+    """Project only a closed exception class, never its provider message."""
+
+    return {
+        "PrimeRlmExperimentError": "experiment",
+        "PrimeControlError": "control",
+        "ControlHostError": "host",
+        "ControlHostTransportError": "transport",
+        "TimeoutError": "timeout",
+        "OSError": "os",
+        "RuntimeError": "runtime",
+        "ValueError": "value",
+        "TypeError": "type",
+    }.get(type(error).__name__, "unexpected")
+
+
 def main() -> int:
     result_path = Path(sys.argv[1]) if len(sys.argv) == 2 else None
     run_id = f"prime-readme-rlm-smoke-{time.time_ns()}"
@@ -131,8 +147,12 @@ def main() -> int:
             except OSError:
                 pass
         classified = _native_rlm_failure_class(stderr_path, safe_error=str(error))
-        if classified not in {"unavailable", "unknown"}:
+        if classified.startswith("gateway_cancel_"):
+            reason = f"{phase}.{_safe_exception_class(error)}"
+        elif classified not in {"unavailable", "unknown"}:
             reason = f"{phase}.{classified}"
+        elif reason == phase:
+            reason = f"{phase}.{_safe_exception_class(error)}"
         output = {"status": "External-limited", "scenario": "readme-rlm-smoke"}
         if result_path is not None:
             _write_result(result_path, output)
