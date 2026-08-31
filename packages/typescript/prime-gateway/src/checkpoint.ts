@@ -532,12 +532,14 @@ export class PrimeCheckpointManager {
     coveredSequence: number,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void> = async () => undefined,
     timeoutMs = 120_000,
+    idleVerified = false,
   ): Promise<PrimeCheckpointCreated> {
     if (
       !validOpaqueId(checkpointId) ||
       !positiveInteger(coveredSequence) ||
       typeof onRecovered !== "function" ||
-      !positiveInteger(timeoutMs)
+      !positiveInteger(timeoutMs) ||
+      typeof idleVerified !== "boolean"
     ) {
       return Promise.reject(new PrimeCheckpointError());
     }
@@ -547,7 +549,7 @@ export class PrimeCheckpointManager {
         ? existing.promise
         : Promise.reject(new PrimeCheckpointError());
     }
-    const promise = this.createOnce(checkpointId, coveredSequence, onRecovered, timeoutMs)
+    const promise = this.createOnce(checkpointId, coveredSequence, onRecovered, timeoutMs, idleVerified)
       .catch(() => {
         throw new PrimeCheckpointError();
       });
@@ -616,21 +618,24 @@ export class PrimeCheckpointManager {
     coveredSequence: number,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
     timeoutMs: number,
+    idleVerified: boolean,
   ): Promise<PrimeCheckpointCreated> {
     validateHello(
       this.transport.hello,
       this.artifactEvidence,
       this.options.expectedRuntimeBuildId,
     );
-    this.noteStage("idle");
-    requireSuccessful(
-      await this.transport.request(
-        { type: "wait_for_idle", activeSessionId: this.options.activeSessionId },
-        `${this.options.sessionId}-checkpoint-${checkpointId}-idle`,
-        timeoutMs,
-      ),
-      "wait_for_idle",
-    );
+    if (!idleVerified) {
+      this.noteStage("idle");
+      requireSuccessful(
+        await this.transport.request(
+          { type: "wait_for_idle", activeSessionId: this.options.activeSessionId },
+          `${this.options.sessionId}-checkpoint-${checkpointId}-idle`,
+          timeoutMs,
+        ),
+        "wait_for_idle",
+      );
+    }
     const prepareCommandId =
       `${this.options.sessionId}-checkpoint-${checkpointId}-prepare`;
     this.noteStage("prepare");

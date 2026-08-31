@@ -317,6 +317,7 @@ export interface PrimeGatewayOptions {
     coveredSequence: number,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
     deadlineMs?: number,
+    idleVerified?: boolean,
   ) => Promise<PrimeCheckpointCreated>;
   readonly sessionContext?: PrimeGatewaySessionContextExecutor;
   readonly onSessionReady?: (context: PrimeGatewayCreateContext) => void;
@@ -2548,6 +2549,7 @@ export class PrimeGateway {
           privateDiagnosticCheckpointRecovery("complete");
         },
         remainingMs,
+        this.sessionStatus === "paused",
       );
       if (
         recovered === undefined ||

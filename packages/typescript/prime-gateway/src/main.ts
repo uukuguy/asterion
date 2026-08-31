@@ -2650,7 +2650,7 @@ async function createSidecarFromDescriptor(
         return session;
       })();
     },
-    async createCheckpoint(checkpointId, coveredSequence, onRecovered, deadlineMs) {
+    async createCheckpoint(checkpointId, coveredSequence, onRecovered, deadlineMs, idleVerified) {
       const identity = store.snapshot().primeIdentity;
       const cursor = store.snapshot().primeCursor;
       if (identity === undefined || cursor === undefined || daemonLifecycle === undefined) {
@@ -2764,6 +2764,7 @@ async function createSidecarFromDescriptor(
         coveredSequence,
         onRecovered,
         deadlineMs,
+        idleVerified,
       );
     },
     onSessionReady() {
