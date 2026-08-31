@@ -751,6 +751,22 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
                 "checkpoint_lifecycle_accepted",
             )
 
+    def test_failure_evidence_prefers_root_start_failure_over_cleanup_cancellation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text(
+                "asterion-prime-gateway-cancel-stage:terminal-appended\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(
+                    stderr,
+                    safe_error="Native RLM controlled probe start control did not complete",
+                ),
+                "root_start",
+            )
+
     def test_failure_evidence_classifies_checkpoint_recovery_field_without_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             stderr = Path(directory) / "sidecar.stderr.log"

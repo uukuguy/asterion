@@ -862,6 +862,13 @@ def _native_rlm_failure_class(
     stderr_path: Path | None, *, safe_error: str | None = None
 ) -> str:
     """Classify private sidecar diagnostics without retaining their content."""
+    if isinstance(safe_error, str) and safe_error.startswith(
+        "Native RLM controlled probe start "
+    ):
+        # A best-effort cancellation during outer cleanup is expected after a
+        # root-start failure.  Preserve the earlier public stage instead of
+        # reporting that cleanup's terminal event as its cause.
+        return "root_start"
     private_category: str | None = None
     if isinstance(stderr_path, Path):
         try:
