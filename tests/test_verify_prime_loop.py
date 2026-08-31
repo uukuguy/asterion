@@ -611,7 +611,9 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
             stderr = Path(directory) / "sidecar.stderr.log"
             stderr.write_text("asterion-prime-sidecar-stage:serve\n", encoding="utf-8")
 
-            self.assertEqual(prime_loop._native_rlm_failure_class(stderr), "sidecar")
+            self.assertEqual(
+                prime_loop._native_rlm_failure_class(stderr), "sidecar_serve"
+            )
 
     def test_failure_evidence_classifies_checkpoint_request_without_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -993,7 +993,15 @@ def _native_rlm_failure_class(
         elif b"asterion-prime-sidecar-failed:command.accept" in content:
             private_category = "sidecar_command_accept"
         elif b"asterion-prime-sidecar-stage:" in content:
-            private_category = "sidecar"
+            sidecar_stage = next(
+                (
+                    stage
+                    for stage in ("descriptor", "sidecar", "serve", "close")
+                    if f"asterion-prime-sidecar-stage:{stage}".encode() in content
+                ),
+                "unknown",
+            )
+            private_category = "sidecar_" + sidecar_stage
         elif b"asterion-prime-sidecar-failed:" in content:
             private_category = "sidecar_request"
         elif b"asterion-prime-rlm-host-frame:" in content:
