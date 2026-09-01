@@ -963,7 +963,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
             self.assertEqual(start.payload["delivery"], "direct")
             self.assertEqual(start.payload["content_ref"], "native-rlm-start-input")
             continuation = native_rlm.native_rlm_continue_command(reservation)
-            self.assertEqual(continuation.payload["delivery"], "follow_up")
+            self.assertEqual(continuation.payload["delivery"], "steer")
             self.assertEqual(
                 continuation.payload["content_ref"], "native-rlm-continue-input"
             )

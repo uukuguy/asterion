@@ -49,7 +49,9 @@ class PrimeCoreSmokeReceiptTests(unittest.TestCase):
             "independently extend it. Complete only after a later direct instruction.",
         )
         self.assertIn("first = await rlm", goal.resolve_text("native-rlm-start-input", max_bytes=500))
-        self.assertIn("second = await rlm", goal.resolve_text("native-rlm-continue-input", max_bytes=500))
+        self.assertNotIn("ping-one", goal.resolve_text("native-rlm-start-input", max_bytes=500))
+        self.assertIn("second = await rlm", goal.resolve_text("native-rlm-continue-input", max_bytes=1000))
+        self.assertIn("ping-one", goal.resolve_text("native-rlm-continue-input", max_bytes=1000))
 
     def test_replay_requires_post_attach_work_and_healthy_gap_free_observation(self) -> None:
         evidence = SimpleNamespace(

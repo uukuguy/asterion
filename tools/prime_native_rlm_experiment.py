@@ -789,7 +789,7 @@ def native_rlm_continue_command(
             authority_revision=reservation.authority.revision,
             type="input.submit",
             payload={
-                "input_id": "native-rlm-continue", "delivery": "follow_up",
+                "input_id": "native-rlm-continue", "delivery": "steer",
                 "content_ref": _CONTINUE_REFERENCE,
             },
         )
@@ -1996,7 +1996,7 @@ async def run_native_rlm_controlled_probe(
             if (
                 detach_while_active
                 and not latest.detach_attached
-                and latest.children_started >= 1
+                and latest.children_started > latest.children_completed
                 and snapshot.state.terminal_event_id is None
             ):
                 stage = "detach"
