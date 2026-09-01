@@ -3268,7 +3268,7 @@ export class PrimeGateway {
   }
 
   private async raiseMappingFault(error: unknown): Promise<void> {
-    if (this.terminal || this.closed) {
+    if (this.terminal || this.closed || this.sessionStatus === "recovery_required") {
       return;
     }
     if (
@@ -3283,13 +3283,11 @@ export class PrimeGateway {
         recoverable: true,
         evidence_ref: null,
       }));
-      if (this.sessionStatus !== "recovery_required") {
-        await this.append(this.reasonEvent(
-          "session.recovery-required",
-          "prime-event-invalid",
-        ));
-        this.mapper?.noteExternalRecoveryRequired();
-      }
+      await this.append(this.reasonEvent(
+        "session.recovery-required",
+        "prime-event-invalid",
+      ));
+      this.mapper?.noteExternalRecoveryRequired();
     } catch (error) {
       if (!(error instanceof PrimeEventMappingError)) {
         this.terminal = true;

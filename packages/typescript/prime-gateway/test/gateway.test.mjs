@@ -3286,6 +3286,10 @@ test("gateway preserves daemon control mapping with client observations enabled 
         eventTypes(state.store).slice(-2),
         ["fault.raised", "session.recovery-required"],
       );
+      assert.equal(
+        eventTypes(state.store).filter((type) => type === "fault.raised").length,
+        1,
+      );
       assert.deepEqual(state.gateway.clientObservationsAfterCursor({ generation: 1, sequence: 0 }), []);
     } finally {
       await state.cleanup();

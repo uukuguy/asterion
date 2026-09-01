@@ -1274,3 +1274,6 @@
 - 23:25 Retained invalid Prime response-frame category across the reader boundary [pending commit]
 - 23:26 Committed response-frame categorization for safe smoke diagnosis [0b5e074]
 - 23:35 Aligned RLM child-initiation window with the admitted session deadline [pending commit]
+- 23:36 Committed full authorized RLM initiation window to avoid half-window uncertainty [c02bdb1]
+- 02:53 Stopped pathological real smoke after seven minutes: no terminal, stalled heartbeats, and saturated Python CPU; diagnosing control replay loop [no code commit]
+- 03:00 Made Gateway mapping failure recovery idempotent to prevent unbounded fault event amplification [pending commit]
