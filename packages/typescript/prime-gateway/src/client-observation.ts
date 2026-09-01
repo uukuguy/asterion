@@ -139,8 +139,13 @@ export class PrimeClientObservationMapper {
     try {
       if (this.closed || !record(value) || typeof value.type !== "string") throw new PrimeClientObservationError();
       if (value.type !== "session_event" && value.type !== "extension_ui_request") return Object.freeze([]);
-      if (value.activeSessionId !== this.options.activeSessionId) return Object.freeze([]);
       const nativeSequence = this.nextNativeSequence(value.meta);
+      if (value.activeSessionId !== this.options.activeSessionId) {
+        await this.options.commit?.(nativeSequence, null);
+        this.nativeSequence = nativeSequence;
+        this.markHealthyThrough(nativeSequence);
+        return Object.freeze([]);
+      }
       const prepared = value.type === "session_event" ? await this.prepareSessionEvent(value.event, nativeSequence, written)
         : value.type === "extension_ui_request" ? await this.prepareExtension(value, nativeSequence, written) : undefined;
       if (prepared === undefined) {

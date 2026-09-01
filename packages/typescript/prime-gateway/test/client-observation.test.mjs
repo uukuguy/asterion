@@ -91,6 +91,19 @@ test("fails closed for cursor gaps and post-close observations while ignoring fo
   }
 });
 
+test("consumes a foreign-session native sequence without projecting its body", async () => {
+  const root = await temporaryStoreRoot();
+  try {
+    const mapper = mapperFixture(await PrivateValueStore.open(root.root));
+    await mapper.map({ type: "session_event", activeSessionId: "prime-session-2", meta: { sequence: 1 },
+      event: { type: "message_end", message: { role: "assistant", content: "FOREIGN" } } });
+    const [observation] = await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 2 },
+      event: { type: "message_end", message: { role: "assistant", content: "LOCAL" } } });
+    assert.equal(observation.source_sequence, 1);
+    assert.deepEqual(mapper.health, { status: "healthy", reason_code: null, observed_through_native_sequence: 2, first_missing_native_sequence: null, resync_required: false });
+  } finally { await root.cleanup(); }
+});
+
 test("projects a body-free degraded health snapshot after a native sequence gap", async () => {
   const root = await temporaryStoreRoot();
   try {
