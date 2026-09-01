@@ -265,7 +265,7 @@ def _require_native_rlm_skill_success(
 ) -> None:
     """Validate the closed Skill Bridge admission/terminal pair."""
 
-    if not isinstance(result, Mapping) or operation not in {"application", "checkpoint"}:
+    if not isinstance(result, Mapping) or operation not in {"application", "checkpoint", "goal"}:
         raise PrimeRlmExperimentError("Native RLM controlled probe skill result is invalid")
     admission = result.get("admission")
     terminal = result.get("terminal")

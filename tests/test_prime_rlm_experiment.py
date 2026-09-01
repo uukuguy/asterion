@@ -221,6 +221,13 @@ class TestNativeRlmExperiment(unittest.TestCase):
             },
             operation="checkpoint",
         )
+        native_rlm._require_native_rlm_skill_success(
+            {
+                "admission": {"resolution": "admitted"},
+                "terminal": {"resolution": "succeeded"},
+            },
+            operation="goal",
+        )
         with self.assertRaisesRegex(
             PrimeRlmExperimentError,
             "checkpoint admission was rejected deadline-not-authorized",
