@@ -165,6 +165,47 @@ class RlmMessageAdmissionBinding:
             raise PrimeControlError()
 
 
+@dataclass(frozen=True)
+class ClientObservationHealth:
+    """Closed, body-free health of the private client-observation projection."""
+
+    status: Literal["healthy", "degraded", "resync-required"]
+    reason_code: Literal["native-sequence-gap"] | None
+    observed_through_native_sequence: int
+    first_missing_native_sequence: int | None
+    resync_required: bool
+
+    def __post_init__(self) -> None:
+        if (
+            self.status not in {"healthy", "degraded", "resync-required"}
+            or self.reason_code not in {None, "native-sequence-gap"}
+            or isinstance(self.observed_through_native_sequence, bool)
+            or not isinstance(self.observed_through_native_sequence, int)
+            or self.observed_through_native_sequence < 0
+            or self.first_missing_native_sequence is not None
+            and (
+                isinstance(self.first_missing_native_sequence, bool)
+                or not isinstance(self.first_missing_native_sequence, int)
+                or self.first_missing_native_sequence < 1
+            )
+            or type(self.resync_required) is not bool
+            or self.status == "healthy"
+            and (
+                self.reason_code is not None
+                or self.first_missing_native_sequence is not None
+                or self.resync_required
+            )
+            or self.status != "healthy"
+            and (
+                self.reason_code != "native-sequence-gap"
+                or self.first_missing_native_sequence
+                != self.observed_through_native_sequence + 1
+                or self.resync_required != (self.status == "resync-required")
+            )
+        ):
+            raise PrimeControlError()
+
+
 class PrimeControlError(RuntimeError):
     """Raised when Prime cannot safely accept or replay a control operation."""
 
@@ -816,6 +857,41 @@ class PrimeControlPlaneClient:
                 raise PrimeControlError() from None
 
         return iterate()
+
+    async def client_observation_health(
+        self, cursor: ClientCursor | None = None
+    ) -> ClientObservationHealth:
+        """Read one validated, body-free observation-health snapshot."""
+
+        if self._closed or (cursor is not None and not isinstance(cursor, ClientCursor)):
+            raise PrimeControlError()
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "client_observations",
+            "cursor": None if cursor is None else {
+                "generation": cursor.generation, "sequence": cursor.sequence,
+            },
+        }
+        try:
+            response = await self._process.request(envelope)
+            if response.get("type") != "client_observations.batch":
+                raise ValueError
+            health = response.get("health")
+            if not isinstance(health, Mapping):
+                raise ValueError
+            return ClientObservationHealth(
+                status=health["status"], reason_code=health["reason_code"],
+                observed_through_native_sequence=health["observed_through_native_sequence"],
+                first_missing_native_sequence=health["first_missing_native_sequence"],
+                resync_required=health["resync_required"],
+            )
+        except PrimeSidecarProcessError as error:
+            if error.safe_code in {"response-timeout", "sidecar-error", "response-eof", "response-invalid"}:
+                raise PrimeControlError(safe_code=error.safe_code) from None
+            raise PrimeControlError() from None
+        except (KeyError, TypeError, ValueError):
+            raise PrimeControlError() from None
 
     def describe(self, reference: str) -> PrivateValueDescriptor:
         """Return a previously observed immutable private-value descriptor."""

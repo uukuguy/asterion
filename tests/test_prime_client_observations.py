@@ -9,6 +9,7 @@ from typing import cast
 
 from asterion.client.protocol import ClientCursor
 from asterion.control.providers.prime.client import (
+    ClientObservationHealth,
     PrimeControlError,
     PrimeControlPlaneClient,
 )
@@ -138,6 +139,27 @@ class TestPrimeClientObservations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replay, observations[1:])
         self.assertNotIn("SENTINEL_BODY", repr(observations))
         self.assertEqual(self.process.event_requests[0]["type"], "client_observations")
+
+    async def test_client_observation_health_is_closed_and_body_free(self) -> None:
+        process = _PagedProcess({
+            (1, 0): {
+                "type": "client_observations.batch", "observations": [], "next_cursor": None,
+                "health": {
+                    "status": "healthy", "reason_code": None,
+                    "observed_through_native_sequence": 4,
+                    "first_missing_native_sequence": None, "resync_required": False,
+                },
+            },
+        })
+        client = PrimeControlPlaneClient(process=process, private_content=_Resolver())
+        health = await client.client_observation_health(ClientCursor(1, 0))
+        self.assertEqual(health, ClientObservationHealth(
+            status="healthy", reason_code=None,
+            observed_through_native_sequence=4,
+            first_missing_native_sequence=None, resync_required=False,
+        ))
+        self.assertNotIn("SENTINEL_BODY", repr(health))
+        await client.close()
 
     async def test_hostile_observation_transport_is_redacted(self) -> None:
         self.process.observations[0] = {
