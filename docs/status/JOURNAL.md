@@ -1295,3 +1295,4 @@
 - 04:40 Aligned Prime action admission to latest durable session state, preventing paused-state drift [c4757e2]
 - 04:55 Classified Prime event-processing failures without exposing native event bodies [d72ec44]
 - 05:02 Isolated optional Prime client observations; README RLM smoke completed [f7f899d]
+- 05:20 Documented Prime Smoke Core/Full research and Core acceptance design [ad0c3cd]
