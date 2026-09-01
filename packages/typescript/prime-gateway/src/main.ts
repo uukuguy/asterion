@@ -2280,6 +2280,8 @@ async function createSidecarFromDescriptor(
         let stage = "ready";
         try {
           await ready;
+          stage = "gateway-ready";
+          await gateway.waitForActionProposalAvailability();
           stage = "private-input";
           const inputRef = await privateValues.putInput(proposal.goalText);
           stage = "event-identity";
@@ -2335,6 +2337,7 @@ async function createSidecarFromDescriptor(
       admitMessage: async (proposal: RlmMessageProposal) => {
         try {
           await ready;
+          await gateway.waitForActionProposalAvailability();
           const childId = proposal.senderId === descriptor.sessionId
             ? proposal.recipientId
             : proposal.recipientId === descriptor.sessionId

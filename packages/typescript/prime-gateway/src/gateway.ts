@@ -605,6 +605,13 @@ export class PrimeGateway {
     });
   }
 
+  async waitForActionProposalAvailability(): Promise<void> {
+    await this.durableQueue;
+    if (this.closed || this.terminal || this.sessionStatus !== "running") {
+      throw new PrimeGatewayError();
+    }
+  }
+
   toString(): string {
     return "[Asterion Prime gateway]";
   }

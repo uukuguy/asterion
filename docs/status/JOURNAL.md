@@ -1283,3 +1283,4 @@
 - 03:30 Separated persistent Prime RLM goal from direct start input; preserved model-originated lifecycle proof [be771c0]
 - 03:37 Refined native RLM admission diagnostics to isolate event submission from host resolution [a82ceb0]
 - 03:40 Classified private action-proposal rejection stages to expose the exact RLM gateway race [1e12344]
+- 03:44 Gated the Prime RLM bridge on durable session.running to prevent smoke-only early admission [f94a383]
