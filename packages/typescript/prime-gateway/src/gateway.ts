@@ -854,8 +854,11 @@ export class PrimeGateway {
       privateDiagnosticActionProposal("identity");
       throw new PrimeGatewayError();
     }
+    const hasDurableRunningPrefix = this.options.store.eventsAfter(0).some(
+      ({ event: stored }) => stored.generation === this.options.generation && stored.type === "session.running",
+    );
     if (
-      this.sessionStatus !== "running" &&
+      !hasDurableRunningPrefix &&
       !(this.sessionStatus === "paused" && event.payload.kind === "checkpoint.create")
     ) {
       privateDiagnosticActionProposal("session");
