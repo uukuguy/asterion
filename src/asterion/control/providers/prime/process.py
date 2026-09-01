@@ -40,7 +40,7 @@ _PUBLIC_ENV_ALLOWLIST = frozenset(
 class PrimeSidecarProcessError(RuntimeError):
     """Raised when the private Prime sidecar cannot produce a safe result."""
 
-    _SAFE_CODES = frozenset({"response-timeout", "sidecar-error"})
+    _SAFE_CODES = frozenset({"response-timeout", "sidecar-error", "response-eof", "response-invalid"})
 
     def __init__(
         self, message: str = "Prime sidecar process failed", *, safe_code: str | None = None
@@ -470,9 +470,17 @@ class PrimeSidecarProcess:
         try:
             while not self._closed and not self._transport_failed:
                 response_line = await reader.readline()
-                if not response_line or len(response_line) > _MAX_FRAME_BYTES:
-                    raise PrimeSidecarProcessError()
-                response = _decode_frame(response_line)
+                if not response_line:
+                    self._fail_transport("response-eof")
+                    return
+                if len(response_line) > _MAX_FRAME_BYTES:
+                    self._fail_transport("response-invalid")
+                    return
+                try:
+                    response = _decode_frame(response_line)
+                except PrimeSidecarProcessError:
+                    self._fail_transport("response-invalid")
+                    return
                 response_id = response.get("id")
                 if not isinstance(response_id, str):
                     raise PrimeSidecarProcessError()
@@ -497,14 +505,14 @@ class PrimeSidecarProcess:
         except (OSError, ValueError, PrimeSidecarProcessError):
             self._fail_transport()
 
-    def _fail_transport(self) -> None:
+    def _fail_transport(self, safe_code: str | None = None) -> None:
         self._transport_failed = True
         pending = tuple(self._pending.values())
         self._pending.clear()
         for _, future, timeout_handle in pending:
             timeout_handle.cancel()
             if not future.done():
-                future.set_exception(PrimeSidecarProcessError())
+                future.set_exception(PrimeSidecarProcessError(safe_code=safe_code))
                 future.add_done_callback(_consume_future_exception)
 
     def _expire_pending(

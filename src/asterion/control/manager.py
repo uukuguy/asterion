@@ -75,7 +75,7 @@ class ControlHostError(RuntimeError):
 class ControlHostTransportError(ControlHostError):
     """Raised when a persisted provider operation has uncertain transport state."""
 
-    _SAFE_CODES = frozenset({"authority-sync", "event-read", "event-read-response-timeout", "event-read-sidecar-error"})
+    _SAFE_CODES = frozenset({"authority-sync", "event-read", "event-read-response-timeout", "event-read-sidecar-error", "event-read-response-eof", "event-read-response-invalid"})
 
     def __init__(self, message: str, *, safe_code: str | None = None) -> None:
         if safe_code is not None and safe_code not in self._SAFE_CODES:
@@ -613,6 +613,8 @@ class ControlHost:
                             if safe_code == "response-timeout"
                             else "event-read-sidecar-error"
                             if safe_code == "sidecar-error"
+                            else "event-read-" + safe_code
+                            if safe_code in {"response-eof", "response-invalid"}
                             else "event-read"
                         ),
                     ) from None
