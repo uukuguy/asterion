@@ -1277,3 +1277,5 @@
 - 23:36 Committed full authorized RLM initiation window to avoid half-window uncertainty [c02bdb1]
 - 02:53 Stopped pathological real smoke after seven minutes: no terminal, stalled heartbeats, and saturated Python CPU; diagnosing control replay loop [no code commit]
 - 03:00 Made Gateway mapping failure recovery idempotent to prevent unbounded fault event amplification [pending commit]
+- 03:01 Committed idempotent mapping recovery so one bad outbound cannot create a fault storm [d088047]
+- 03:10 Tightened the native RLM root prompt to require immediate IPython execution [pending commit]

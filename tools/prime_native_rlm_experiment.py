@@ -76,13 +76,12 @@ _APPLICATION_TARGET = {
     "runtime_id": "prime.gateway",
 }
 _PROBE_GOAL = (
-    "Use the preloaded RLM callable now through IPython. Execute exactly this code, then "
-    "finish the turn:\n"
+    "Do not answer with prose. Use the IPython tool now and execute exactly this code:\n"
     "handle = await rlm('Reply exactly pong to the parent, then finish.', "
     "name='native-rlm-child')\n"
     "await agent_message.send('ping', receiver_role='child', receiver_name=handle.name)\n"
-    "When pong arrives as a later prompt, execute `await rlm.delete_subagent(handle.rlm_child_id)` "
-    "followed by `await goal.complete()`, then finish. Do not use any other tools or create another child."
+    "Do not use another tool or create another child. When pong arrives as a later prompt, use IPython "
+    "to execute `await rlm.delete_subagent(handle.rlm_child_id)` and then `await goal.complete()`."
 )
 _DEFAULT_OPERATIONS = tuple(
     sorted(
