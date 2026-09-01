@@ -2675,19 +2675,12 @@ export class PrimeGateway {
     if (this.options.store.clientObservationHealth(this.options.generation).status !== "healthy") {
       return undefined;
     }
-    // Prime's durable cursor advances for every native outbound event, while
-    // client observations intentionally advance only for the subset exposed
-    // through this private channel.  A newly attached root can therefore
-    // already have a cursor before it has emitted an observation.  Continue
-    // validation from that authoritative native cursor, not from the sparse
-    // observation progress.
-    const primeCursor = this.options.store.snapshot().primeCursor;
     return new PrimeClientObservationMapper({
       sessionId: this.options.sessionId,
       generation: this.options.generation,
       activeSessionId,
       privateValues: values,
-      initialNativeSequence: primeCursor?.sequence ?? progress.nativeSequence,
+      initialNativeSequence: progress.nativeSequence,
       initialObservationSequence: progress.observationSequence,
       commit: async (nativeSequence, observation, stage) => {
         await this.options.store.recordClientObservationProgress(
