@@ -39,7 +39,7 @@ test("stores client bodies and emits only references", async () => {
       type: "session_event",
       activeSessionId: "prime-session-1",
       meta: { sequence: 1 },
-      event: { type: "message_end", role: "assistant", content: "SENTINEL_BODY" },
+      event: { type: "message_end", message: { role: "assistant", content: "SENTINEL_BODY" } },
     });
     assert.equal(mapped[0].kind, "message.available");
     assert.equal(typeof mapped[0].payload.content_ref, "string");
@@ -64,26 +64,26 @@ test("fails closed for cursor gaps and post-close observations while ignoring fo
     await mapper.map({
       type: "session_event",
       activeSessionId: "prime-session-1",
-      event: { type: "message_end", role: "assistant", content: "one" },
+      event: { type: "message_end", message: { role: "assistant", content: "one" } },
       meta: { sequence: 1 },
     });
     await assert.rejects(mapper.map({
       type: "session_event",
       activeSessionId: "prime-session-1",
-      event: { type: "message_end", role: "assistant", content: "gap" },
+      event: { type: "message_end", message: { role: "assistant", content: "gap" } },
       meta: { sequence: 3 },
     }));
     assert.deepEqual(await mapper.map({
       type: "session_event",
       activeSessionId: "prime-session-2",
-      event: { type: "message_end", role: "assistant", content: "foreign" },
+      event: { type: "message_end", message: { role: "assistant", content: "foreign" } },
       meta: { sequence: 2 },
     }), []);
     await mapper.close();
     await assert.rejects(mapper.map({
       type: "session_event",
       activeSessionId: "prime-session-1",
-      event: { type: "message_end", role: "assistant", content: "late" },
+      event: { type: "message_end", message: { role: "assistant", content: "late" } },
       meta: { sequence: 2 },
     }));
   } finally {
@@ -129,7 +129,7 @@ test("requires an exact native sequence and does not consume it when storage fai
     });
     const native = {
       type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
-      event: { type: "message_end", role: "assistant", content: "retry-body" },
+      event: { type: "message_end", message: { role: "assistant", content: "retry-body" } },
     };
     await assert.rejects(mapper.map({ ...native, meta: {} }));
     await assert.rejects(mapper.map(native));
@@ -150,7 +150,7 @@ test("rejects hostile client descriptors before body-free observations escape", 
   });
   await assert.rejects(mapper.map({
     type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
-    event: { type: "message_end", role: "assistant", content: "SENTINEL_BODY" },
+    event: { type: "message_end", message: { role: "assistant", content: "SENTINEL_BODY" } },
   }));
 });
 
@@ -160,7 +160,7 @@ test("rejects a client value above the conservative one-frame limit", async () =
     const mapper = mapperFixture(await PrivateValueStore.open(root.root));
     await assert.rejects(mapper.map({
       type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
-      event: { type: "message_end", role: "assistant", content: "x".repeat(700 * 1024 + 1) },
+      event: { type: "message_end", message: { role: "assistant", content: "x".repeat(700 * 1024 + 1) } },
     }));
   } finally {
     await root.cleanup();
@@ -180,7 +180,7 @@ test("passes unscoped daemon events through without consuming the client sequenc
     }
     const [observation] = await mapper.map({
       type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
-      event: { type: "message_end", role: "assistant", content: "mapped" },
+      event: { type: "message_end", message: { role: "assistant", content: "mapped" } },
     });
     assert.equal(observation.source_sequence, 1);
   } finally {
@@ -196,7 +196,7 @@ test("rejects non-canonical commands and broad tool or extension identifiers", a
       { type: "commands_changed", commands: ["SENTINEL_BODY"], revision: 1 },
       { type: "commands_changed", commands: ["beta", "alpha"], revision: 1 },
       { type: "commands_changed", commands: ["alpha", "alpha"], revision: 1 },
-      { type: "tool_start", callId: "call-1", name: "SENTINEL_BODY", arguments: {} },
+      { type: "tool_execution_start", toolCallId: "call-1", toolName: "SENTINEL_BODY", args: {} },
     ]) {
       await assert.rejects(mapper.map({
         type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 }, event,
@@ -239,7 +239,7 @@ test("rolls back a staged private body when observation progress commit fails", 
     });
     const outbound = {
       type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
-      event: { type: "message_end", role: "assistant", content: "SENTINEL_ROLLBACK_BODY" },
+      event: { type: "message_end", message: { role: "assistant", content: "SENTINEL_ROLLBACK_BODY" } },
     };
     await assert.rejects(mapper.map(outbound));
     assert.ok(descriptor);

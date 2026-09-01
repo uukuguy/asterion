@@ -198,19 +198,20 @@ export class PrimeClientObservationMapper {
   private async prepareSessionEvent(value: unknown, nativeSequence: number, written: PrivateClientValueDescriptor[]): Promise<Prepared | undefined> {
     if (!record(value) || typeof value.type !== "string") throw new PrimeClientObservationError();
     if (value.type === "message_end") {
-      if ((value.role !== "assistant" && value.role !== "user") || typeof value.content !== "string") throw new PrimeClientObservationError();
-      const d = await this.store("message", "text/plain", value.content, nativeSequence, written);
-      return { nativeSequence, kind: "message.available", payload: { content_ref: d.reference, media_type: d.mediaType, message_id: typeof value.id === "string" && OPAQUE_ID.test(value.id) ? value.id : `message-${this.sequence + 1}`, role: value.role, sha256: d.sha256, size: d.size } };
+      const message = value.message;
+      if (!record(message) || (message.role !== "assistant" && message.role !== "user") || !("content" in message)) throw new PrimeClientObservationError();
+      const d = await this.store("message", "application/json", message.content, nativeSequence, written);
+      return { nativeSequence, kind: "message.available", payload: { content_ref: d.reference, media_type: d.mediaType, message_id: typeof message.id === "string" && OPAQUE_ID.test(message.id) ? message.id : `message-${this.sequence + 1}`, role: message.role, sha256: d.sha256, size: d.size } };
     }
-    if (value.type === "tool_start") {
-      if (typeof value.callId !== "string" || !OPAQUE_ID.test(value.callId) || typeof value.name !== "string" || !IDENTIFIER.test(value.name)) throw new PrimeClientObservationError();
-      const d = await this.store("tool-arguments", "application/json", value.arguments, nativeSequence, written);
-      return { nativeSequence, kind: "tool.started", payload: { arguments_ref: d.reference, call_id: value.callId, name: value.name, sha256: d.sha256, size: d.size } };
+    if (value.type === "tool_execution_start") {
+      if (typeof value.toolCallId !== "string" || !OPAQUE_ID.test(value.toolCallId) || typeof value.toolName !== "string" || !IDENTIFIER.test(value.toolName)) throw new PrimeClientObservationError();
+      const d = await this.store("tool-arguments", "application/json", value.args, nativeSequence, written);
+      return { nativeSequence, kind: "tool.started", payload: { arguments_ref: d.reference, call_id: value.toolCallId, name: value.toolName, sha256: d.sha256, size: d.size } };
     }
-    if (value.type === "tool_end") {
-      if (typeof value.callId !== "string" || !OPAQUE_ID.test(value.callId) || typeof value.isError !== "boolean") throw new PrimeClientObservationError();
+    if (value.type === "tool_execution_end") {
+      if (typeof value.toolCallId !== "string" || !OPAQUE_ID.test(value.toolCallId) || typeof value.toolName !== "string" || !IDENTIFIER.test(value.toolName) || typeof value.isError !== "boolean") throw new PrimeClientObservationError();
       const d = await this.store("tool-result", "application/json", value.result, nativeSequence, written);
-      return { nativeSequence, kind: "tool.completed", payload: { call_id: value.callId, is_error: value.isError, media_type: d.mediaType, result_ref: d.reference, sha256: d.sha256, size: d.size } };
+      return { nativeSequence, kind: "tool.completed", payload: { call_id: value.toolCallId, is_error: value.isError, media_type: d.mediaType, result_ref: d.reference, sha256: d.sha256, size: d.size } };
     }
     if (value.type === "artifact_available") {
       if (typeof value.artifactId !== "string" || !OPAQUE_ID.test(value.artifactId) || typeof value.mediaType !== "string" || !MEDIA_TYPE.test(value.mediaType)) throw new PrimeClientObservationError();

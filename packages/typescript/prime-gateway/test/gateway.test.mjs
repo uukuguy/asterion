@@ -3117,7 +3117,7 @@ test("gateway persists body-free client observations across reopen and resumes t
       state.session.emit({
         type: "session_event",
         activeSessionId: "prime-root-1",
-        event: { type: "message_end", role: "assistant", content },
+        event: { type: "message_end", message: { role: "assistant", content } },
         meta: {
           id: `prime-client-event-${sequence}`,
           protocol: { name: "prime-agent.daemon", version: 7 },
@@ -3173,7 +3173,7 @@ test("gateway persists body-free client observations across reopen and resumes t
     restoredSession.emit({
       type: "session_event",
       activeSessionId: "prime-root-1",
-      event: { type: "message_end", role: "assistant", content: "third private body" },
+      event: { type: "message_end", message: { role: "assistant", content: "third private body" } },
       meta: {
         id: "prime-client-event-3",
         protocol: { name: "prime-agent.daemon", version: 7 },
@@ -3204,7 +3204,7 @@ test("gateway retains a client observation sequence gap across reopen", async ()
     }, "command-create-gap"));
     state.session.emit({
       type: "session_event", activeSessionId: "prime-root-1",
-      event: { type: "message_end", role: "assistant", content: "private body" },
+      event: { type: "message_end", message: { role: "assistant", content: "private body" } },
       meta: {
         id: "prime-client-gap", protocol: { name: "prime-agent.daemon", version: 7 },
         sequence: 2, cursor: { generation: "worker-generation-1", sequence: 2 },
@@ -3240,7 +3240,7 @@ test("gateway retains a client observation sequence gap across reopen", async ()
     assert.deepEqual(reopened.clientObservationHealth(), state.gateway.clientObservationHealth());
     restoredSession.emit({
       type: "session_event", activeSessionId: "prime-root-1",
-      event: { type: "message_end", role: "assistant", content: "still private" },
+      event: { type: "message_end", message: { role: "assistant", content: "still private" } },
       meta: {
         id: "prime-client-after-gap", protocol: { name: "prime-agent.daemon", version: 7 },
         sequence: 3, cursor: { generation: "worker-generation-1", sequence: 3 },
@@ -3286,7 +3286,7 @@ test("gateway starts client observation after a fresh-create attach cursor", asy
     state.session.emit({
       type: "session_event",
       activeSessionId: "prime-root-1",
-      event: { type: "message_end", role: "assistant", content: "first private body" },
+      event: { type: "message_end", message: { role: "assistant", content: "first private body" } },
       meta: {
         id: "prime-client-event-2",
         protocol: { name: "prime-agent.daemon", version: 7 },

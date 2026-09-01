@@ -50,8 +50,8 @@ _CORE_CONTINUE = (
     "name='prime-core-child-two')\n"
     "await agent_message.send('ping-two', receiver_role='child', receiver_name=second.name)\n"
     "Do not create a third child. On later pong prompts, delete each completed child; after both "
-    "are deleted, execute `await goal.complete()` and then `await asterion_control.complete_goal(goal_id='native-rlm-goal', "
-    "summary='prime-core-complete', idempotency_key='prime-core-complete', budget={'controller_tokens': 1, 'application_tokens': 0, "
+    "are deleted, execute `await goal.complete()`, then `import asterion_control`, then `await asterion_control.complete_goal(goal_id='native-rlm-goal', "
+    "summary='prime-core-complete', idempotency_key='prime-core-goal-complete', budget={'controller_tokens': 1, 'application_tokens': 0, "
     "'child_tokens': 0, 'aggregate_tokens': 1, 'cost_micros': 0, 'deadline_ms': 300000})` in IPython."
 )
 
