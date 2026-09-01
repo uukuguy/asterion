@@ -917,6 +917,38 @@ class TestNativeRlmExperiment(unittest.TestCase):
             "completed",
         )
 
+    def test_gateway_probe_observer_reuses_pumped_message_actions(self) -> None:
+        class Lifecycle:
+            def __init__(self, type, child_id, status=None):
+                self.type, self.child_id, self.status = type, child_id, status
+
+        class Binding:
+            delivered = True
+
+        class Client:
+            def events(self):
+                raise AssertionError("the already-pumped event history must not be reread")
+
+            async def rlm_lifecycle(self):
+                return (
+                    Lifecycle("rlm.child.started", "child-1"),
+                    Lifecycle("rlm.child.terminal", "child-1", "completed"),
+                    Lifecycle("rlm.child.deleted", "child-1"),
+                )
+
+            async def rlm_message_binding(self, _action_id):
+                return Binding()
+
+        result = asyncio.run(
+            observe_native_rlm_gateway_probe(
+                Client(),
+                usage=BudgetUsage(1, 1, 1, 3, 3),
+                message_action_ids=("message-1",),
+            )
+        )
+
+        self.assertEqual(result.terminal, "completed")
+
     def test_message_action_collector_uses_only_child_message_proposals(self) -> None:
         class Event:
             def __init__(self, type, payload):

@@ -33,7 +33,7 @@ from asterion.control.rlm import RlmChildBinding, RlmChildService, RlmError, Rlm
 class PrimeRlmLifecycleError(RlmError):
     """A body-free, fixed category for Prime provider lifecycle failures."""
 
-    _CODES = frozenset({"binding", "transition", "terminal"})
+    _CODES = frozenset({"gateway", "binding", "transition", "terminal"})
 
     def __init__(self, safe_code: str) -> None:
         if safe_code not in self._CODES:
@@ -245,7 +245,10 @@ class PrimeRlmAdmissionPreparer:
     async def reconcile_lifecycle(self) -> None:
         """Apply the complete Gateway lifecycle history monotonically."""
 
-        observations = await self._client.rlm_lifecycle()
+        try:
+            observations = await self._client.rlm_lifecycle()
+        except Exception:
+            raise PrimeRlmLifecycleError("gateway") from None
         if not isinstance(observations, tuple):
             raise PrimeRlmLifecycleError("transition")
         for observation in observations:

@@ -1059,7 +1059,7 @@ class ControlHost:
             raise
         except Exception as error:
             safe_code = getattr(error, "safe_code", None)
-            if safe_code in {"binding", "transition", "terminal"}:
+            if safe_code in {"gateway", "binding", "transition", "terminal"}:
                 raise ControlHostError(
                     f"provider-owned action lifecycle {safe_code} is invalid"
                 ) from None

@@ -155,7 +155,10 @@ def main() -> int:
     except Exception as error:
         reason = phase
         safe_code = getattr(error, "safe_code", None)
-        if safe_code in {"pump_timeout", "observation_timeout"}:
+        if isinstance(safe_code, str) and (
+            safe_code in {"pump_timeout", "observation_timeout"}
+            or safe_code.startswith("experiment_")
+        ):
             reason = f"{phase}.{safe_code}"
         if root is not None:
             try:

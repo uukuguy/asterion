@@ -7,6 +7,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 import asyncio
+import inspect
 import json
 import os
 from pathlib import Path
@@ -110,7 +111,9 @@ class PrimeRlmExperimentError(RuntimeError):
     def __init__(self, message: str, *, safe_code: str | None = None) -> None:
         if safe_code not in {None, "pump_timeout", "observation_timeout"}:
             raise ValueError("Native RLM experiment error is invalid")
-        self.safe_code = safe_code
+        caller = inspect.currentframe()
+        line = caller.f_back.f_lineno if caller is not None and caller.f_back is not None else 0
+        self.safe_code = safe_code or f"experiment_line_{line}"
         super().__init__(message)
 
 
@@ -1059,15 +1062,29 @@ async def collect_native_rlm_message_action_ids(client: object) -> tuple[str, ..
 
 
 async def observe_native_rlm_gateway_probe(
-    client: object, *, usage: BudgetUsage
+    client: object,
+    *,
+    usage: BudgetUsage,
+    message_action_ids: Sequence[str] | None = None,
 ) -> NativeRlmProbeResult:
-    """Compose the closed Gateway event and RLM-read surfaces for one probe."""
-    try:
-        action_ids = await collect_native_rlm_message_action_ids(client)
-    except PrimeRlmExperimentError:
+    """Compose closed Gateway evidence, reusing the validated pump when present."""
+    if message_action_ids is None:
+        try:
+            action_ids = await collect_native_rlm_message_action_ids(client)
+        except PrimeRlmExperimentError:
+            raise PrimeRlmExperimentError(
+                "Native RLM probe observation message-actions is invalid"
+            ) from None
+    elif (
+        isinstance(message_action_ids, (str, bytes))
+        or not isinstance(message_action_ids, Sequence)
+        or any(not isinstance(action_id, str) or not action_id for action_id in message_action_ids)
+    ):
         raise PrimeRlmExperimentError(
             "Native RLM probe observation message-actions is invalid"
-        ) from None
+        )
+    else:
+        action_ids = tuple(sorted(set(message_action_ids)))
     return await observe_native_rlm_probe(
         client, message_action_ids=action_ids, usage=usage
     )
@@ -1650,6 +1667,7 @@ async def run_native_rlm_controlled_probe(
     last_action_kind: str | None = None
     observed_event_types: list[str] = []
     observed_identities: dict[str, tuple[str, str]] = {}
+    observed_message_action_ids: set[str] = set()
 
     def observe_event(event: ControlEvent) -> None:
         nonlocal checkpoint_created, last_action_kind, last_event_type
@@ -1663,6 +1681,10 @@ async def run_native_rlm_controlled_probe(
         action_kind = _native_rlm_safe_action_kind(event)
         if action_kind is not None:
             last_action_kind = action_kind
+        if event.type == "action.proposed" and event.payload.get("kind") == "child.message":
+            action_id = event.payload.get("action_id")
+            if isinstance(action_id, str) and action_id:
+                observed_message_action_ids.add(action_id)
 
     host = build_native_rlm_control_host(
         sidecar,
@@ -1714,10 +1736,14 @@ async def run_native_rlm_controlled_probe(
                 safe_code="pump_timeout",
             ) from None
 
-    async def observe_bounded(usage: BudgetUsage) -> NativeRlmProbeResult:
+    async def observe_bounded(
+        usage: BudgetUsage, *, message_action_ids: Sequence[str]
+    ) -> NativeRlmProbeResult:
         try:
             return await asyncio.wait_for(
-                observe_native_rlm_gateway_probe(observer, usage=usage),
+                observe_native_rlm_gateway_probe(
+                    observer, usage=usage, message_action_ids=message_action_ids
+                ),
                 timeout=_PUMP_TIMEOUT_SECONDS,
             )
         except TimeoutError:
@@ -1821,7 +1847,10 @@ async def run_native_rlm_controlled_probe(
                     latest = replace(latest, terminal=terminal, usage=snapshot.authority_usage)
                     checkpoint()
                     return latest
-            observed = await observe_bounded(snapshot.authority_usage)
+            observed = await observe_bounded(
+                snapshot.authority_usage,
+                message_action_ids=tuple(sorted(observed_message_action_ids)),
+            )
             latest = replace(
                 observed,
                 application_receipted=latest.application_receipted,
@@ -2177,6 +2206,7 @@ def _native_rlm_control_failure_category(error: Exception) -> str:
         "control provider event transition failed": "event-transition",
         "control action admission failed": "action-admission",
         "provider-owned action lifecycle is invalid": "provider-lifecycle",
+        "provider-owned action lifecycle gateway is invalid": "provider-lifecycle-gateway",
         "provider-owned action lifecycle binding is invalid": "provider-lifecycle-binding",
         "provider-owned action lifecycle transition is invalid": "provider-lifecycle-transition",
         "provider-owned action lifecycle terminal is invalid": "provider-lifecycle-terminal",
