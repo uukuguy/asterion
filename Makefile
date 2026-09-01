@@ -5,6 +5,7 @@ DCI_ARGS ?=
 ASTERION_PRIME_SOURCE_ROOT ?= 3th-party/prime-agent
 ASTERION_PRIME_AUTHORITY ?=
 ASTERION_PRIME_MAX_COST_MICROS ?=
+ASTERION_PRIME_NODE ?= $(shell npm exec --offline --yes --package=node@22 -- which node 2>/dev/null)
 
 .DEFAULT_GOAL := help
 
@@ -156,10 +157,10 @@ check-rust: test-rust
 	cargo clippy --manifest-path packages/rust/controlled-executor/Cargo.toml -- -D warnings
 
 prime-check:
-	$(UV_BIN) run python tools/setup_prime_agent.py --check --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
+	ASTERION_PRIME_NODE="$(ASTERION_PRIME_NODE)" $(UV_BIN) run python tools/setup_prime_agent.py --check --node-executable "$(ASTERION_PRIME_NODE)" --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
 
 prime-setup:
-	$(UV_BIN) run python tools/setup_prime_agent.py --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
+	ASTERION_PRIME_NODE="$(ASTERION_PRIME_NODE)" $(UV_BIN) run python tools/setup_prime_agent.py --node-executable "$(ASTERION_PRIME_NODE)" --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
 
 prime-verify-provider-free:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level provider-free
@@ -364,7 +365,7 @@ prime-readme-rlm-smoke:
 	$(UV_BIN) run python -m tools.run_prime_readme_smoke
 
 prime-smoke-core:
-	$(UV_BIN) run python -m tools.run_prime_core_smoke
+	ASTERION_PRIME_NODE="$(ASTERION_PRIME_NODE)" $(UV_BIN) run python -m tools.run_prime_core_smoke
 
 prime-parity-inventory:
 	$(UV_BIN) run python tools/check_prime_parity.py --claim inventory
