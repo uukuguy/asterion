@@ -612,6 +612,29 @@ class TestNativeRlmExperiment(unittest.TestCase):
             "event-transport-event-read",
         )
 
+    def test_controlled_probe_exposes_only_fixed_control_category(self) -> None:
+        class Host:
+            async def dispatch(self, _command) -> None:
+                return None
+
+            async def pump(self) -> None:
+                raise native_rlm.ControlHostError("SENTINEL_PRIVATE")
+
+            async def close(self) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            reservation = prepare_native_rlm_experiment(
+                None, max_cost_micros=None, deadline_ms=None,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}, now_ms=1_000,
+            )
+            with mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=Host()):
+                with self.assertRaises(PrimeRlmExperimentError) as raised:
+                    asyncio.run(run_native_rlm_controlled_probe(object(), reservation, Path(directory)))
+
+        self.assertEqual(raised.exception.safe_code, "control")
+        self.assertNotIn("SENTINEL_PRIVATE", str(raised.exception))
+
     def test_controlled_probe_classifies_fixed_event_transition(self) -> None:
         self.assertEqual(
             native_rlm._native_rlm_control_failure_category(

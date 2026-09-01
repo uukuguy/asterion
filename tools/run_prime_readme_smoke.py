@@ -12,6 +12,7 @@ from pathlib import Path
 
 from asterion.runtime.observation import RunObservationLog
 from tools.prime_native_rlm_experiment import (
+    PrimeRlmExperimentError,
     native_rlm_model_selector_digest,
     prepare_native_rlm_experiment,
     resolve_native_rlm_model,
@@ -156,7 +157,7 @@ def main() -> int:
         reason = phase
         safe_code = getattr(error, "safe_code", None)
         if isinstance(safe_code, str) and (
-            safe_code in {"pump_timeout", "observation_timeout"}
+            safe_code in PrimeRlmExperimentError._SAFE_CODES
             or safe_code.startswith("experiment_")
         ):
             reason = f"{phase}.{safe_code}"

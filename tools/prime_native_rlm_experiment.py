@@ -108,8 +108,31 @@ _DEFAULT_OPERATIONS = tuple(
 class PrimeRlmExperimentError(RuntimeError):
     """Raised with a public-safe native RLM experiment preparation failure."""
 
+    _SAFE_CODES = frozenset(
+        {
+            "pump_timeout",
+            "observation_timeout",
+            "control",
+            "event-transport",
+            "event-transport-authority-sync",
+            "event-transport-event-read",
+            "event-transition",
+            "action-admission",
+            "provider-lifecycle",
+            "provider-lifecycle-gateway",
+            "provider-lifecycle-binding",
+            "provider-lifecycle-transition",
+            "provider-lifecycle-terminal",
+            "provider-lifecycle-reconcile",
+            "provider-lifecycle-settlement",
+            "event-journal",
+            "budget-report",
+            "event-invalid",
+        }
+    )
+
     def __init__(self, message: str, *, safe_code: str | None = None) -> None:
-        if safe_code not in {None, "pump_timeout", "observation_timeout"}:
+        if safe_code is not None and safe_code not in self._SAFE_CODES:
             raise ValueError("Native RLM experiment error is invalid")
         caller = inspect.currentframe()
         line = caller.f_back.f_lineno if caller is not None and caller.f_back is not None else 0
@@ -2003,7 +2026,8 @@ async def run_native_rlm_controlled_probe(
             category = "action-admission-" + last_action_kind
         primary_failure = True
         raise PrimeRlmExperimentError(
-            f"Native RLM controlled probe {stage} {category} did not complete"
+            f"Native RLM controlled probe {stage} {category} did not complete",
+            safe_code=category if category in PrimeRlmExperimentError._SAFE_CODES else None,
         ) from None
     finally:
         try:
