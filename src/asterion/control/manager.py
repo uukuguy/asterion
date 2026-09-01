@@ -801,14 +801,6 @@ class ControlHost:
         try:
             reduced = reduce_control_event(self._state, event)
         except ControlStateError:
-            if event.type == "action.proposed":
-                import os
-                if os.environ.get("ASTERION_PRIME_PRIVATE_DIAGNOSTICS") == "1":
-                    print(
-                        "asterion-prime-host-action-state:"
-                        + (self._state.session_status or "none"),
-                        file=__import__("sys").stderr,
-                    )
             raise ControlHostError("control provider event transition failed") from None
         self._state = reduced
         if report is not None:

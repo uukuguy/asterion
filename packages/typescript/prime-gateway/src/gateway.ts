@@ -608,14 +608,12 @@ export class PrimeGateway {
   async waitForActionProposalAvailability(): Promise<void> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       await this.durableQueue;
-      const hasDurableRunningPrefix = this.options.store.eventsAfter(0).some(
-        ({ event }) => event.generation === this.options.generation && event.type === "session.running",
-      );
-      if (hasDurableRunningPrefix && !this.closed && !this.terminal) {
+      const durableSessionStatus = this.durableSessionStatus();
+      if (durableSessionStatus === "running" && !this.closed && !this.terminal) {
         return;
       }
       if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
-        const category = this.closed ? "closed" : this.terminal ? "terminal" : hasDurableRunningPrefix ? "state" : "prefix";
+        const category = this.closed ? "closed" : this.terminal ? "terminal" : durableSessionStatus === undefined ? "prefix" : "state";
         process.stderr.write(`asterion-prime-rlm-ready:${category}\n`);
       }
       if (this.closed || this.terminal || this.sessionStatus === "paused" || this.sessionStatus === "recovery_required") {
@@ -854,12 +852,10 @@ export class PrimeGateway {
       privateDiagnosticActionProposal("identity");
       throw new PrimeGatewayError();
     }
-    const hasDurableRunningPrefix = this.options.store.eventsAfter(0).some(
-      ({ event: stored }) => stored.generation === this.options.generation && stored.type === "session.running",
-    );
+    const durableSessionStatus = this.durableSessionStatus();
     if (
-      !hasDurableRunningPrefix &&
-      !(this.sessionStatus === "paused" && event.payload.kind === "checkpoint.create")
+      durableSessionStatus !== "running" &&
+      !(durableSessionStatus === "paused" && event.payload.kind === "checkpoint.create")
     ) {
       privateDiagnosticActionProposal("session");
       this.releaseReservedEvent(event);
@@ -3387,6 +3383,32 @@ export class PrimeGateway {
       reservation.eventId === event.event_id &&
       reservation.emittedAt === event.emitted_at
     );
+  }
+
+  private durableSessionStatus(): GatewaySessionStatus | undefined {
+    let status: GatewaySessionStatus | undefined;
+    for (const { event } of this.options.store.eventsAfter(0)) {
+      if (event.generation !== this.options.generation) {
+        continue;
+      }
+      if (event.type === "session.created") {
+        status ??= "created";
+      } else if (event.type === "session.running") {
+        status = "running";
+      } else if (event.type === "session.paused") {
+        status = "paused";
+      } else if (event.type === "session.recovery-required") {
+        status = "recovery_required";
+      } else if ([
+        "session.budget-limited",
+        "session.cancelled",
+        "session.completed",
+        "session.failed",
+      ].includes(event.type)) {
+        status = "terminal";
+      }
+    }
+    return status;
   }
 
   private updateSessionStatus(event: ControlEvent): void {

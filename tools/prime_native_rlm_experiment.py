@@ -130,6 +130,11 @@ class PrimeRlmExperimentError(RuntimeError):
             "event-transport-event-read-event-protocol",
             "event-transport-event-read-event-runtime",
             "event-transition",
+            "event-transition-action-proposed-created",
+            "event-transition-action-proposed-paused",
+            "event-transition-action-proposed-recovery-required",
+            "event-transition-action-proposed-none",
+            "event-transition-action-proposed-other",
             "action-admission",
             "provider-lifecycle",
             "provider-lifecycle-gateway",
@@ -1807,7 +1812,6 @@ async def run_native_rlm_controlled_probe(
         session_created = True
         stage = "created"
         checkpoint()
-        await pump_bounded()
         stage = "running"
         checkpoint()
         await host.dispatch(native_rlm_start_command(reservation))
@@ -2055,6 +2059,8 @@ async def run_native_rlm_controlled_probe(
             category = "event-transition-" + last_event_type.replace(".", "-")
             if last_event_type == "session.completed":
                 category += "-" + _native_rlm_terminal_transition_category(host)
+            elif last_event_type == "action.proposed":
+                category += "-" + _native_rlm_action_transition_session_category(host)
         if category == "action-admission" and last_action_kind is not None:
             category = "action-admission-" + last_action_kind
         primary_failure = True
@@ -2277,6 +2283,22 @@ def _native_rlm_control_failure_category(error: Exception) -> str:
         "control provider event is invalid": "event-invalid",
     }
     return categories.get(str(error), "control")
+
+
+def _native_rlm_action_transition_session_category(host: object) -> str:
+    """Return a fixed, public-safe Host state category for a rejected action."""
+
+    try:
+        snapshot = getattr(host, "snapshot")()
+        status = getattr(getattr(snapshot, "state"), "session_status")
+    except Exception:
+        return "other"
+    return {
+        None: "none",
+        "created": "created",
+        "paused": "paused",
+        "recovery_required": "recovery-required",
+    }.get(status, "other")
 
 
 def _native_rlm_failure_may_reconcile_terminal(stage: str) -> bool:

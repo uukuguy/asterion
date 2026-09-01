@@ -643,6 +643,29 @@ class TestNativeRlmExperiment(unittest.TestCase):
             "event-transition",
         )
 
+    def test_action_transition_projects_only_fixed_host_session_states(self) -> None:
+        class Host:
+            def __init__(self, status) -> None:
+                self._status = status
+
+            def snapshot(self):
+                return type("Snapshot", (), {
+                    "state": type("State", (), {"session_status": self._status})()
+                })()
+
+        for status, expected in (
+            (None, "none"),
+            ("created", "created"),
+            ("paused", "paused"),
+            ("recovery_required", "recovery-required"),
+            ("running", "other"),
+        ):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    native_rlm._native_rlm_action_transition_session_category(Host(status)),
+                    expected,
+                )
+
     def test_controlled_probe_classifies_safe_provider_lifecycle_stages(self) -> None:
         for message, expected in (
             ("provider-owned action lifecycle reconcile is invalid", "provider-lifecycle-reconcile"),
