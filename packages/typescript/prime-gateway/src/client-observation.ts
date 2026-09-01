@@ -138,21 +138,12 @@ export class PrimeClientObservationMapper {
     const written: PrivateClientValueDescriptor[] = [];
     try {
       if (this.closed || !record(value) || typeof value.type !== "string") throw new PrimeClientObservationError();
-      if (value.type !== "session_event" && value.type !== "extension_ui_request") {
-        if (!record(value.meta) || !("sequence" in value.meta)) return Object.freeze([]);
-        const nativeSequence = this.nextNativeSequence(value.meta);
-        await this.options.commit?.(nativeSequence, null);
-        this.nativeSequence = nativeSequence;
-        this.markHealthyThrough(nativeSequence);
+      if (value.type !== "session_event" && value.type !== "extension_ui_request") return Object.freeze([]);
+      if (value.activeSessionId !== this.options.activeSessionId) {
         return Object.freeze([]);
       }
       const nativeSequence = this.nextNativeSequence(value.meta);
-      if (value.activeSessionId !== this.options.activeSessionId) {
-        await this.options.commit?.(nativeSequence, null);
-        this.nativeSequence = nativeSequence;
-        this.markHealthyThrough(nativeSequence);
-        return Object.freeze([]);
-      }
+      if (nativeSequence === undefined) return Object.freeze([]);
       const prepared = value.type === "session_event" ? await this.prepareSessionEvent(value.event, nativeSequence, written)
         : value.type === "extension_ui_request" ? await this.prepareExtension(value, nativeSequence, written) : undefined;
       if (prepared === undefined) {
@@ -191,12 +182,18 @@ export class PrimeClientObservationMapper {
     }
   }
 
-  private nextNativeSequence(meta: unknown): number {
-    if (!record(meta) || !Number.isSafeInteger(meta.sequence) || Number(meta.sequence) < 1 ||
-      (this.nativeSequence !== 0 && Number(meta.sequence) !== this.nativeSequence + 1)) {
+  private nextNativeSequence(meta: unknown): number | undefined {
+    if (!record(meta) || !Number.isSafeInteger(meta.sequence) || Number(meta.sequence) < 1) {
       throw new PrimeClientObservationError("sequence");
     }
-    return Number(meta.sequence);
+    const received = Number(meta.sequence);
+    if (this.nativeSequence !== 0 && received === this.nativeSequence) {
+      return undefined;
+    }
+    if (this.nativeSequence !== 0 && received < this.nativeSequence) {
+      throw new PrimeClientObservationError("sequence");
+    }
+    return received;
   }
 
   private markHealthyThrough(nativeSequence: number): void {

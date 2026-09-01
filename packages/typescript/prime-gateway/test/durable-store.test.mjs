@@ -818,7 +818,7 @@ test("durable store reopens identity cursor and safe event suffix", async () => 
   }
 });
 
-test("durable store reopens only a contiguous canonical client observation prefix", async () => {
+test("durable store reopens a strictly increasing sparse client observation cursor", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   try {
     const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
@@ -838,28 +838,28 @@ test("durable store reopens only a contiguous canonical client observation prefi
         size: sequence,
       },
     });
-    const stage = async (sequence) => {
-      const value = observation(sequence);
+    const stage = async (nativeSequence, observationSequence) => {
+      const value = observation(observationSequence);
       const descriptor = {
-        generation: 1, nativeSequence: sequence,
+        generation: 1, nativeSequence,
         reference: value.payload.content_ref, kind: "message", mediaType: "text/plain",
         size: value.payload.size, sha256: value.payload.sha256,
       };
       await store.stageClientObservationValue(descriptor);
       return descriptor;
     };
-    const first = await stage(1);
-    await store.recordClientObservationProgress(1, 1, observation(1), first);
-    const second = await stage(2);
-    await store.recordClientObservationProgress(1, 2, observation(2), second);
-    await store.recordClientObservationProgress(1, 2, observation(2), second);
+    const first = await stage(134, 1);
+    await store.recordClientObservationProgress(1, 134, observation(1), first);
+    const second = await stage(136, 2);
+    await store.recordClientObservationProgress(1, 136, observation(2), second);
+    await store.recordClientObservationProgress(1, 136, observation(2), second);
     await assert.rejects(
-      store.recordClientObservationProgress(1, 4, observation(3)),
+      store.recordClientObservationProgress(1, 135, observation(3)),
     );
     const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
     assert.deepEqual(reopened.clientObservations(1), [observation(1), observation(2)]);
     assert.deepEqual(reopened.clientObservationProgress(1), {
-      nativeSequence: 2,
+      nativeSequence: 136,
       observationSequence: 2,
     });
     assert.equal(JSON.stringify(reopened.clientObservations(1)).includes("SENTINEL"), false);

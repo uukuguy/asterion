@@ -57,7 +57,7 @@ test("stores client bodies and emits only references", async () => {
   }
 });
 
-test("fails closed for cursor gaps and post-close observations while ignoring foreign sessions", async () => {
+test("accepts sparse same-session cursors and rejects a regression or post-close observation", async () => {
   const root = await temporaryStoreRoot();
   try {
     const mapper = mapperFixture(await PrivateValueStore.open(root.root));
@@ -65,20 +65,28 @@ test("fails closed for cursor gaps and post-close observations while ignoring fo
       type: "session_event",
       activeSessionId: "prime-session-1",
       event: { type: "message_end", message: { role: "assistant", content: "one" } },
-      meta: { sequence: 1 },
+      meta: { sequence: 134 },
     });
-    await assert.rejects(mapper.map({
+    const [sparse] = await mapper.map({
       type: "session_event",
       activeSessionId: "prime-session-1",
-      event: { type: "message_end", message: { role: "assistant", content: "gap" } },
-      meta: { sequence: 3 },
-    }));
+      event: { type: "message_end", message: { role: "assistant", content: "sparse" } },
+      meta: { sequence: 136 },
+    });
+    assert.equal(sparse.source_sequence, 2);
+    assert.deepEqual(mapper.health, { status: "healthy", reason_code: null, observed_through_native_sequence: 136, first_missing_native_sequence: null, resync_required: false });
     assert.deepEqual(await mapper.map({
       type: "session_event",
       activeSessionId: "prime-session-2",
       event: { type: "message_end", message: { role: "assistant", content: "foreign" } },
-      meta: { sequence: 2 },
+      meta: { sequence: 1 },
     }), []);
+    await assert.rejects(mapper.map({
+      type: "session_event",
+      activeSessionId: "prime-session-1",
+      event: { type: "message_end", message: { role: "assistant", content: "regression" } },
+      meta: { sequence: 135 },
+    }));
     await mapper.close();
     await assert.rejects(mapper.map({
       type: "session_event",
@@ -91,32 +99,33 @@ test("fails closed for cursor gaps and post-close observations while ignoring fo
   }
 });
 
-test("consumes a foreign-session native sequence without projecting its body", async () => {
+test("does not consume a foreign-session cursor or project its body", async () => {
   const root = await temporaryStoreRoot();
   try {
     const mapper = mapperFixture(await PrivateValueStore.open(root.root));
     await mapper.map({ type: "session_event", activeSessionId: "prime-session-2", meta: { sequence: 1 },
       event: { type: "message_end", message: { role: "assistant", content: "FOREIGN" } } });
-    const [observation] = await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 2 },
+    const [observation] = await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
       event: { type: "message_end", message: { role: "assistant", content: "LOCAL" } } });
     assert.equal(observation.source_sequence, 1);
-    assert.deepEqual(mapper.health, { status: "healthy", reason_code: null, observed_through_native_sequence: 2, first_missing_native_sequence: null, resync_required: false });
+    assert.deepEqual(mapper.health, { status: "healthy", reason_code: null, observed_through_native_sequence: 1, first_missing_native_sequence: null, resync_required: false });
   } finally { await root.cleanup(); }
 });
 
-test("accepts the first visible native sequence as an attach baseline", async () => {
+test("treats a repeated cursor as an idempotent replay duplicate", async () => {
   const root = await temporaryStoreRoot();
   try {
     const mapper = mapperFixture(await PrivateValueStore.open(root.root));
-    const [observation] = await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 2 },
+    const [observation] = await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 136 },
       event: { type: "message_end", message: { role: "assistant", content: "LOCAL" } } });
     assert.equal(observation.source_sequence, 1);
-    await assert.rejects(mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 4 },
-      event: { type: "message_end", message: { role: "assistant", content: "GAP" } } }));
+    assert.deepEqual(await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 136 },
+      event: { type: "message_end", message: { role: "assistant", content: "DUPLICATE" } } }), []);
+    assert.equal(mapper.health.observed_through_native_sequence, 136);
   } finally { await root.cleanup(); }
 });
 
-test("projects a body-free degraded health snapshot after a native sequence gap", async () => {
+test("projects a body-free degraded health snapshot after a cursor regression", async () => {
   const root = await temporaryStoreRoot();
   try {
     const mapper = mapperFixture(await PrivateValueStore.open(root.root));
@@ -125,7 +134,7 @@ test("projects a body-free degraded health snapshot after a native sequence gap"
       event: { type: "goal_update", goal: { status: "active", tokensUsed: 0 } },
     });
     await assert.rejects(mapper.map({
-      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 3 },
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 0 },
       event: { type: "goal_update", goal: { status: "active", tokensUsed: 0 } },
     }));
     assert.deepEqual(mapper.health, {
@@ -213,15 +222,15 @@ test("passes unscoped daemon events through without consuming the client sequenc
   }
 });
 
-test("consumes sequenced daemon frames without projecting their bodies", async () => {
+test("does not consume unscoped daemon frames", async () => {
   const root = await temporaryStoreRoot();
   try {
     const mapper = mapperFixture(await PrivateValueStore.open(root.root));
-    assert.deepEqual(await mapper.map({ type: "daemon_notice", meta: { sequence: 1 }, body: "SENTINEL" }), []);
-    const [observation] = await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 2 },
+    assert.deepEqual(await mapper.map({ type: "daemon_notice", meta: { sequence: 134 }, body: "SENTINEL" }), []);
+    const [observation] = await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
       event: { type: "message_end", message: { role: "assistant", content: "LOCAL" } } });
     assert.equal(observation.source_sequence, 1);
-    assert.equal(mapper.health.observed_through_native_sequence, 2);
+    assert.equal(mapper.health.observed_through_native_sequence, 1);
   } finally { await root.cleanup(); }
 });
 

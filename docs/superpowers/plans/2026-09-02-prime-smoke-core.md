@@ -65,14 +65,16 @@ Prime Gateway sidecar, Make.
   progress, first gap, and a resync flag in private `client_observations.batch`.
 - Core accepts only `healthy`, zero-gap evidence.
 
-- [ ] Write failing TypeScript tests for a native sequence gap, invalid
-  supported payload, durable failure, restart persistence, and successful full
-  resync; verify canonical events continue but health never silently returns
-  healthy.
+- [ ] Write failing TypeScript tests for sparse cursor acceptance, replay
+  duplicates, foreign-session isolation, cursor regression, invalid supported
+  payload, durable failure, restart persistence, and successful full resync.
+  Verify canonical events continue but health never silently returns healthy.
 - [ ] Run the single Node test file and observe the health-contract failures.
-- [ ] Add closed validators and journal records; map failures to durable health
-  without retaining event bodies; expose exact health in the sidecar response;
-  parse it strictly in Python.
+- [ ] Add closed validators and journal records; accept only strictly
+  increasing same-session cursor progress (not `+1`), retain contiguous public
+  source sequences, map actual replay/generation/durable failures to health
+  without retaining event bodies, expose exact health in the sidecar response,
+  and parse it strictly in Python.
 - [ ] Run Node and Python focused tests; expect PASS.
 - [ ] Commit observation-health contract only.
 

@@ -1966,14 +1966,9 @@ export class GatewayDurableStore {
       staged.sha256 !== progress.stagedSha256 || staged.size !== progress.stagedSize ||
       (binding.sha256 !== undefined && (staged.sha256 !== binding.sha256 || staged.size !== binding.size))
     )) throw new GatewayStoreConflictError();
-    // A fresh attach can durably establish a Prime cursor before there is a
-    // client-observation record.  The first observed native event must follow
-    // that cursor; later records remain strictly contiguous with their own
-    // durable progress.
-    const expectedNative = (previous?.nativeSequence ?? this.primeCursor?.sequence ?? 0) + 1;
     const expectedObservation = (previous?.observationSequence ?? 0) + 1;
     if (
-      progress.nativeSequence !== expectedNative ||
+      (previous !== undefined && progress.nativeSequence <= previous.nativeSequence) ||
       (progress.observation !== null &&
         (progress.observation.active_session_id !== this.sessionId ||
           progress.observation.generation !== generation ||
@@ -2627,7 +2622,7 @@ export class GatewayDurableStore {
           !positiveInteger(generation) ||
           !positiveInteger(nativeSequence) ||
           progress.nativeSequence !== nativeSequence ||
-          nativeSequence !== (previous?.nativeSequence ?? 0) + 1 ||
+          (previous !== undefined && nativeSequence <= previous.nativeSequence) ||
           (progress.observation !== null &&
             (progress.observation.active_session_id !== this.sessionId ||
               progress.observation.generation !== generation ||
@@ -3122,7 +3117,7 @@ export class GatewayDurableStore {
       const previous = this.clientObservationProgressByGeneration.get(generation);
       if (match === null || !positiveInteger(generation) ||
         !positiveInteger(progress.nativeSequence) ||
-        progress.nativeSequence !== (previous?.nativeSequence ?? this.primeCursor?.sequence ?? 0) + 1) {
+        (previous !== undefined && progress.nativeSequence <= previous.nativeSequence)) {
         throw new GatewayStoreCorruptionError();
       }
       const observationSequence = previous?.observationSequence ?? 0;

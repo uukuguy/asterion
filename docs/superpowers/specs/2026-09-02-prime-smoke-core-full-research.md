@@ -131,6 +131,32 @@ visible across restart; only complete reconciliation restores `healthy`.
 Canonical control events may continue, but Core fails whenever observation
 health is not healthy.
 
+### Sol specialist review: Prime cursor semantics
+
+Two authorized Core attempts provided the decisive wire evidence: a root
+subscription advanced from `134` to `136`, and independently from `140` to
+`141`, without a transport failure.  Prime assigns `meta.sequence` before its
+capability, filter, and reconstruction decisions, so it is a session cursor,
+not a contiguous per-client delivery sequence.  A numeric jump is therefore
+not evidence of replay loss.
+
+The private observation projection consequently has these closed rules:
+
+- For the active root session and one cursor generation, a larger cursor is
+  accepted; an equal cursor is an idempotent replay duplicate; a smaller cursor
+  fails closed.
+- Foreign-session and unscoped daemon frames are ignored before cursor
+  processing and cannot advance root observation progress.
+- Durable observation progress is strictly increasing, while public
+  `source_sequence` remains exactly contiguous.
+- Generation changes, attach `replay.status=unavailable`, transport failure,
+  and uncertain durable commits remain the only causes for degraded or
+  resync-required health.  A cursor jump alone never degrades health.
+
+The cursor-generation identity must be retained when the transport exposes it;
+the current version preserves the independently durable root observation
+cursor rather than deriving it from the canonical event cursor.
+
 ### Planned implementation surfaces
 
 - `tools/run_prime_core_smoke.py`: bounded entrypoint, safe heartbeat and
