@@ -184,7 +184,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 native_rlm._native_rlm_pump_timeout_seconds(
                     reservation, False, active_detach=True
                 ),
-                10,
+                305,
             )
 
     def test_system_action_deadline_uses_bounded_default_and_authority_cap(self) -> None:
@@ -962,6 +962,11 @@ class TestNativeRlmExperiment(unittest.TestCase):
             self.assertEqual(start.type, "input.submit")
             self.assertEqual(start.payload["delivery"], "direct")
             self.assertEqual(start.payload["content_ref"], "native-rlm-start-input")
+            continuation = native_rlm.native_rlm_continue_command(reservation)
+            self.assertEqual(continuation.payload["delivery"], "follow_up")
+            self.assertEqual(
+                continuation.payload["content_ref"], "native-rlm-continue-input"
+            )
             pause = native_rlm_session_pause_command(reservation)
             self.assertEqual(pause.type, "session.pause")
             self.assertEqual(pause.payload["reason_code"], "checkpoint-boundary")

@@ -34,18 +34,24 @@ class _CoreSmokeFailure(PrimeRlmExperimentError):
 
 
 _CORE_GOAL = (
-    "Complete two independent native RLM child lifecycles in sequence. Each child "
-    "must receive one parent message, finish, and be deleted before the goal completes."
+    "Complete two independent native RLM child lifecycles. Each child must receive "
+    "one parent ping, finish, and be deleted before the goal completes."
 )
 _CORE_START = (
-    "Do not answer with prose. Use IPython now. Create exactly one child with rlm, "
-    "send it one ping using agent_message.send, and wait for its reply in a later turn. "
-    "Do not create any other child or complete the goal yet."
+    "Do not answer with prose. Use the IPython tool now and execute exactly this code:\n"
+    "first = await rlm('Reply exactly pong to the parent, then finish.', "
+    "name='prime-core-child-one')\n"
+    "await agent_message.send('ping-one', receiver_role='child', receiver_name=first.name)\n"
+    "Do not create another child or complete the goal. When a child pong arrives in a "
+    "later prompt, use IPython to delete only the completed child."
 )
 _CORE_CONTINUE = (
-    "Continue the private Core task now. Delete the finished first child if needed. "
-    "Then use IPython to create exactly one different second child with rlm, send it one ping, "
-    "wait for its reply, delete it, and complete the goal. Do not answer with prose."
+    "Do not answer with prose. Use the IPython tool now and execute exactly this code:\n"
+    "second = await rlm('Reply exactly pong to the parent, then finish.', "
+    "name='prime-core-child-two')\n"
+    "await agent_message.send('ping-two', receiver_role='child', receiver_name=second.name)\n"
+    "Do not create a third child. On later pong prompts, delete each completed child; after both "
+    "are deleted, execute `await goal.complete()` in IPython."
 )
 
 
@@ -74,6 +80,17 @@ def _external_limited() -> PrimeCoreSmokeResult:
         recursion_policy_enforced=False, control_event_sequence_contiguous=False,
         observation_health="unknown", observation_gap_count=1,
         cleanup_complete=False, privacy_checks_passed=False, within_budget=False,
+    )
+
+
+def _core_replay_contiguous(probe: object) -> bool:
+    """Accept replay evidence only when it survives a healthy reconnect."""
+
+    return (
+        getattr(probe, "detach_attached", False) is True
+        and getattr(probe, "work_continued_after_attach", False) is True
+        and getattr(probe, "observation_health", "unknown") == "healthy"
+        and getattr(probe, "observation_gap_count", 1) == 0
     )
 
 
@@ -160,7 +177,7 @@ def main() -> int:
             message_causality_complete=getattr(probe, "message_delivered", False),
             detached_while_active=getattr(probe, "detach_attached", False),
             reattached=getattr(probe, "detach_attached", False),
-            replay_contiguous=getattr(probe, "detach_attached", False),
+            replay_contiguous=_core_replay_contiguous(probe),
             work_continued_after_attach=getattr(probe, "work_continued_after_attach", False),
             recursion_policy_enforced=getattr(probe, "recursion_depth_limited", False),
             control_event_sequence_contiguous=getattr(probe, "control_event_sequence_contiguous", False),

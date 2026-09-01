@@ -499,8 +499,6 @@ def _native_rlm_pump_timeout_seconds(
         or not isinstance(active_detach, bool)
     ):
         raise PrimeRlmExperimentError("Native RLM pump deadline is invalid")
-    if active_detach:
-        return _PUMP_TIMEOUT_SECONDS
     return max(
         _PUMP_TIMEOUT_SECONDS,
         _native_rlm_system_action_deadline(reservation) // 1_000 + 5,
@@ -791,7 +789,7 @@ def native_rlm_continue_command(
             authority_revision=reservation.authority.revision,
             type="input.submit",
             payload={
-                "input_id": "native-rlm-continue", "delivery": "direct",
+                "input_id": "native-rlm-continue", "delivery": "follow_up",
                 "content_ref": _CONTINUE_REFERENCE,
             },
         )

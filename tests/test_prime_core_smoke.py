@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from tools.prime_core_smoke import PrimeCoreSmokeResult, verify_prime_core_smoke_result
+from tools.run_prime_core_smoke import _core_replay_contiguous
 
 
 def _result(**changes: object) -> PrimeCoreSmokeResult:
@@ -38,6 +40,24 @@ def _result(**changes: object) -> PrimeCoreSmokeResult:
 
 
 class PrimeCoreSmokeReceiptTests(unittest.TestCase):
+    def test_replay_requires_post_attach_work_and_healthy_gap_free_observation(self) -> None:
+        evidence = SimpleNamespace(
+            detach_attached=True,
+            work_continued_after_attach=True,
+            observation_health="healthy",
+            observation_gap_count=0,
+        )
+        self.assertTrue(_core_replay_contiguous(evidence))
+        for changes in (
+            {"detach_attached": False},
+            {"work_continued_after_attach": False},
+            {"observation_health": "degraded"},
+            {"observation_gap_count": 1},
+        ):
+            with self.subTest(changes=changes):
+                candidate = SimpleNamespace(**vars(evidence) | changes)
+                self.assertFalse(_core_replay_contiguous(candidate))
+
     def test_complete_closed_result_is_pass(self) -> None:
         receipt = verify_prime_core_smoke_result(_result())
 
