@@ -321,6 +321,10 @@ class TestNativeRlmExperiment(unittest.TestCase):
             )
         )
 
+    def test_completed_core_does_not_repeat_an_already_proven_reconnect(self) -> None:
+        self.assertFalse(native_rlm._native_rlm_requires_terminal_reconnect(True))
+        self.assertTrue(native_rlm._native_rlm_requires_terminal_reconnect(False))
+
     def test_application_admission_projects_all_public_authority_rejections(self) -> None:
         for reason in (
             "authority-cancelled",

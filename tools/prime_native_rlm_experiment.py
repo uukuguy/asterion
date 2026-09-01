@@ -2096,11 +2096,12 @@ async def run_native_rlm_controlled_probe(
             if latest.terminal == "completed" and core_lifecycle_complete and (
                 not detach_while_active or root_terminal_complete
             ):
-                stage = "detach-attach"
-                await host.dispatch(native_rlm_session_detach_command(reservation))
-                await host.dispatch(native_rlm_session_attach_command(reservation))
-                latest = replace(latest, detach_attached=True)
-                checkpoint()
+                if _native_rlm_requires_terminal_reconnect(latest.detach_attached):
+                    stage = "detach-attach"
+                    await host.dispatch(native_rlm_session_detach_command(reservation))
+                    await host.dispatch(native_rlm_session_attach_command(reservation))
+                    latest = replace(latest, detach_attached=True)
+                    checkpoint()
                 if exercise_checkpoint:
                     # Prime can only restart from an idle root.  The closed RLM
                     # lifecycle is the quiescence barrier; checkpointing during
@@ -2640,6 +2641,12 @@ def _native_rlm_model_evidence_due(
         and work_continued_after_attach
         and not already_collected
     )
+
+
+def _native_rlm_requires_terminal_reconnect(detach_attached: bool) -> bool:
+    """Avoid a terminal-only reconnect when active work already proved it."""
+
+    return not detach_attached
 
 
 def _terminal_native_rlm_probe_result(
