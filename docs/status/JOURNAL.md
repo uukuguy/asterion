@@ -1272,3 +1272,5 @@
 - 23:16 Committed fresh-attach cursor recovery so live observations cannot fault-loop [ca346e5]
 - 23:20 Fresh-attach smoke reached a clean terminal at 65s but remained External-limited: event-read; sequence storm ruled out [no code commit]
 - 23:25 Retained invalid Prime response-frame category across the reader boundary [pending commit]
+- 23:26 Committed response-frame categorization for safe smoke diagnosis [0b5e074]
+- 23:35 Aligned RLM child-initiation window with the admitted session deadline [pending commit]

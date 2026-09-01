@@ -63,7 +63,6 @@ except ModuleNotFoundError:  # Direct ``python tools/verify_prime_loop.py`` exec
 _MAX_COST_MICROS = 500_000
 _MAX_DEADLINE_MS = 600_000
 _PUMP_TIMEOUT_SECONDS = 10
-_MODEL_INITIATION_TIMEOUT_SECONDS = 300
 _NATIVE_RLM_SYSTEM_ACTION_DEADLINE_MS = 300_000
 _MODEL_KEY = "ASTERION_PRIME_EXPERIMENT_MODEL"
 _SESSION_ID = "native-rlm-root"
@@ -1875,7 +1874,11 @@ async def run_native_rlm_controlled_probe(
             latest = replace(latest, application_receipted=True)
         stage = "running"
         checkpoint()
-        initiation_deadline = time.monotonic() + _MODEL_INITIATION_TIMEOUT_SECONDS
+        # The root model turn is already bounded by the admitted session
+        # deadline.  Do not impose a second, shorter child-initiation cutoff:
+        # a valid Prime turn may spend its first several minutes preparing the
+        # direct README RLM call before proposing the child action.
+        initiation_deadline = deadline
         while time.monotonic() < deadline:
             await asyncio.sleep(0)
             await pump_bounded()
