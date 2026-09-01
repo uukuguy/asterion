@@ -851,6 +851,15 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
             "goal_terminal",
         )
 
+    def test_failure_evidence_classifies_depth_probe_without_private_content(self) -> None:
+        self.assertEqual(
+            prime_loop._native_rlm_failure_class(
+                None,
+                safe_error="Native RLM depth probe connect did not complete",
+            ),
+            "depth_probe",
+        )
+
     def test_failure_evidence_classifies_safe_action_admission_kind(self) -> None:
         self.assertEqual(
             prime_loop._native_rlm_failure_class(

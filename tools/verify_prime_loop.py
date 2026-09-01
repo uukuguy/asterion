@@ -885,6 +885,8 @@ def _native_rlm_failure_class(
     }
     if safe_error in controlled_errors:
         return controlled_errors[safe_error]
+    if isinstance(safe_error, str) and safe_error.startswith("Native RLM depth probe "):
+        return "depth_probe"
     if isinstance(safe_error, str) and safe_error.startswith(
         "Native RLM controlled probe goal "
     ):
