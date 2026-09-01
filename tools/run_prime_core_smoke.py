@@ -39,14 +39,14 @@ _CORE_GOAL = (
 )
 _CORE_START = (
     "Do not answer with prose. Use the IPython tool now and execute exactly this code:\n"
-    "first = await rlm('Reply exactly pong to the parent, then finish.', "
+    "first = await rlm('Wait for an agent message whose body is exactly ping-one. Do not reply or complete until it arrives. Then reply exactly pong-one to the parent and finish.', "
     "name='prime-core-child-one')\n"
     "Do not send a message, create another child, or complete the goal."
 )
 _CORE_CONTINUE = (
     "Do not answer with prose. Use the IPython tool now and execute exactly this code:\n"
     "await agent_message.send('ping-one', receiver_role='child', receiver_name='prime-core-child-one')\n"
-    "second = await rlm('Reply exactly pong to the parent, then finish.', "
+    "second = await rlm('Wait for an agent message whose body is exactly ping-two. Do not reply or complete until it arrives. Then reply exactly pong-two to the parent and finish.', "
     "name='prime-core-child-two')\n"
     "await agent_message.send('ping-two', receiver_role='child', receiver_name=second.name)\n"
     "Do not create a third child. On later pong prompts, delete each completed child; after both "

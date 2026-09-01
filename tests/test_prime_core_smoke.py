@@ -49,7 +49,8 @@ class PrimeCoreSmokeReceiptTests(unittest.TestCase):
             "independently extend it. Complete only after a later direct instruction.",
         )
         self.assertIn("first = await rlm", goal.resolve_text("native-rlm-start-input", max_bytes=500))
-        self.assertNotIn("ping-one", goal.resolve_text("native-rlm-start-input", max_bytes=500))
+        self.assertIn("Do not reply or complete until", goal.resolve_text("native-rlm-start-input", max_bytes=500))
+        self.assertNotIn("agent_message.send", goal.resolve_text("native-rlm-start-input", max_bytes=500))
         self.assertIn("second = await rlm", goal.resolve_text("native-rlm-continue-input", max_bytes=1000))
         self.assertIn("ping-one", goal.resolve_text("native-rlm-continue-input", max_bytes=1000))
 
