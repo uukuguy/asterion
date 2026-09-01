@@ -291,6 +291,18 @@ class TestNativeRlmExperiment(unittest.TestCase):
             "goal-not-completed",
         )
 
+    def test_snapshot_completed_terminal_is_authoritative_when_observer_lags(self) -> None:
+        snapshot = type(
+            "Snapshot",
+            (),
+            {
+                "state": type(
+                    "State", (), {"terminal_event_id": "terminal-1", "session_status": "completed"}
+                )(),
+            },
+        )()
+        self.assertEqual(native_rlm._native_rlm_snapshot_terminal(snapshot), "completed")
+
     def test_application_admission_projects_all_public_authority_rejections(self) -> None:
         for reason in (
             "authority-cancelled",

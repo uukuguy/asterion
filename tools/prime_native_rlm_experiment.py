@@ -2058,10 +2058,13 @@ async def run_native_rlm_controlled_probe(
                 _require_native_rlm_skill_success(
                     await completion_task, operation="goal"
                 )
-            root_terminal_complete = (
-                snapshot.state.terminal_event_id is not None
-                and snapshot.state.session_status == "completed"
-            )
+            root_terminal_complete = _native_rlm_snapshot_terminal(snapshot) == "completed"
+            if root_terminal_complete:
+                latest = replace(
+                    latest,
+                    terminal="completed",
+                    usage=snapshot.authority_usage,
+                )
             if latest.terminal == "completed" and core_lifecycle_complete and (
                 not detach_while_active or root_terminal_complete
             ):
@@ -2600,6 +2603,18 @@ def _write_native_rlm_progress(
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def _native_rlm_snapshot_terminal(snapshot: object) -> str | None:
+    """Return the completed terminal recorded by the authoritative host snapshot."""
+
+    try:
+        state = snapshot.state
+        if state.terminal_event_id is not None and state.session_status == "completed":
+            return "completed"
+    except AttributeError:
+        return None
+    return None
 
 
 def _terminal_native_rlm_probe_result(
