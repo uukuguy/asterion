@@ -40,6 +40,7 @@ import type {
 import type { PrivateValueStore } from "./private-store.js";
 import {
   PrimeClientObservationMapper,
+  PrimeClientObservationError,
 } from "./client-observation.js";
 import type { PrimeClientObservation } from "./client-observation.js";
 import type {
@@ -3304,11 +3305,13 @@ export class PrimeGateway {
     if (this.terminal || this.closed || this.sessionStatus === "recovery_required") {
       return;
     }
-    if (
-      process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1" &&
-      error instanceof PrimeEventMappingError
-    ) {
-      process.stderr.write(`asterion-prime-event-mapping:${error.kind}\n`);
+    if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+      const category = error instanceof PrimeEventMappingError
+        ? `mapping-${error.kind}`
+        : error instanceof PrimeClientObservationError
+        ? "client-observation"
+        : "gateway";
+      process.stderr.write(`asterion-prime-event-processing:${category}\n`);
     }
     try {
       await this.append(this.event("fault.raised", {

@@ -1292,3 +1292,4 @@
 - 04:11 Anchored RLM admission on the durable same-generation running prefix [10f99e0]
 - 04:17 Aligned RLM event submission with the durable running-prefix invariant [796c0c0]
 - 04:25 Added fixed-category Host action-state diagnostics for Prime RLM [1b6735c]
+- 04:40 Aligned Prime action admission to latest durable session state, preventing paused-state drift [c4757e2]
