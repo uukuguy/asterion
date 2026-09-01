@@ -201,6 +201,18 @@ test("passes unscoped daemon events through without consuming the client sequenc
   }
 });
 
+test("consumes sequenced daemon frames without projecting their bodies", async () => {
+  const root = await temporaryStoreRoot();
+  try {
+    const mapper = mapperFixture(await PrivateValueStore.open(root.root));
+    assert.deepEqual(await mapper.map({ type: "daemon_notice", meta: { sequence: 1 }, body: "SENTINEL" }), []);
+    const [observation] = await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 2 },
+      event: { type: "message_end", message: { role: "assistant", content: "LOCAL" } } });
+    assert.equal(observation.source_sequence, 1);
+    assert.equal(mapper.health.observed_through_native_sequence, 2);
+  } finally { await root.cleanup(); }
+});
+
 test("rejects non-canonical commands and broad tool or extension identifiers", async () => {
   const root = await temporaryStoreRoot();
   try {
