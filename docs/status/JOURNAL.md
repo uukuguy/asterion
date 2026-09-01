@@ -1296,3 +1296,4 @@
 - 04:55 Classified Prime event-processing failures without exposing native event bodies [d72ec44]
 - 05:02 Isolated optional Prime client observations; README RLM smoke completed [f7f899d]
 - 05:20 Documented Prime Smoke Core/Full research and Core acceptance design [ad0c3cd]
+- 05:28 Added closed Prime Core receipt truth table to prevent partial smoke promotion [514c192]

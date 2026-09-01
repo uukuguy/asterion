@@ -91,6 +91,31 @@ test("fails closed for cursor gaps, foreign sessions, and post-close observation
   }
 });
 
+test("projects a body-free degraded health snapshot after a native sequence gap", async () => {
+  const root = await temporaryStoreRoot();
+  try {
+    const mapper = mapperFixture(await PrivateValueStore.open(root.root));
+    await mapper.map({
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
+      event: { type: "goal_update", goal: { status: "active", tokensUsed: 0 } },
+    });
+    await assert.rejects(mapper.map({
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 3 },
+      event: { type: "goal_update", goal: { status: "active", tokensUsed: 0 } },
+    }));
+    assert.deepEqual(mapper.health, {
+      status: "degraded",
+      reason_code: "native-sequence-gap",
+      observed_through_native_sequence: 1,
+      first_missing_native_sequence: 2,
+      resync_required: false,
+    });
+    assert.equal(JSON.stringify(mapper.health).includes("SENTINEL_BODY"), false);
+  } finally {
+    await root.cleanup();
+  }
+});
+
 test("requires an exact native sequence and does not consume it when storage fails", async () => {
   let fail = true;
   const root = await temporaryStoreRoot();

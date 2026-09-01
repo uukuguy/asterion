@@ -17,6 +17,14 @@ export interface PrimeClientObservation {
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
+export interface PrimeClientObservationHealth {
+  readonly status: "healthy" | "degraded" | "resync-required";
+  readonly reason_code: "native-sequence-gap" | null;
+  readonly observed_through_native_sequence: number;
+  readonly first_missing_native_sequence: number | null;
+  readonly resync_required: boolean;
+}
+
 export class PrimeClientObservationError extends Error {
   constructor(
     readonly kind: "session-mismatch" | "sequence" | "invalid" = "invalid",
@@ -85,6 +93,7 @@ export class PrimeClientObservationMapper {
   private closed = false;
   private serial: Promise<void> = Promise.resolve();
   private readonly now: () => string;
+  private healthValue: PrimeClientObservationHealth;
 
   constructor(private readonly options: PrimeClientObservationMapperOptions) {
     if (!OPAQUE_ID.test(options.sessionId) || !Number.isSafeInteger(options.generation) || options.generation < 1 ||
@@ -96,14 +105,33 @@ export class PrimeClientObservationMapper {
     this.now = options.now ?? (() => new Date().toISOString());
     this.nativeSequence = options.initialNativeSequence ?? 0;
     this.sequence = options.initialObservationSequence ?? 0;
+    this.healthValue = Object.freeze({
+      status: "healthy",
+      reason_code: null,
+      observed_through_native_sequence: this.nativeSequence,
+      first_missing_native_sequence: null,
+      resync_required: false,
+    });
   }
 
   async map(value: unknown): Promise<readonly PrimeClientObservation[]> {
-    const work = this.serial.then(() => this.mapOne(value));
+    const work = this.serial.then(() => this.mapOne(value)).catch((error: unknown) => {
+      if (error instanceof PrimeClientObservationError && error.kind === "sequence") {
+        this.healthValue = Object.freeze({
+          status: "degraded",
+          reason_code: "native-sequence-gap",
+          observed_through_native_sequence: this.nativeSequence,
+          first_missing_native_sequence: this.nativeSequence + 1,
+          resync_required: false,
+        });
+      }
+      throw error;
+    });
     this.serial = work.then(() => undefined, () => undefined);
     return work;
   }
   async close(): Promise<void> { this.closed = true; await this.serial; }
+  get health(): PrimeClientObservationHealth { return this.healthValue; }
   toString(): string { return "[Prime client observation mapper]"; }
 
   private async mapOne(value: unknown): Promise<readonly PrimeClientObservation[]> {
