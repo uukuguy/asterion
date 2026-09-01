@@ -18,7 +18,9 @@ export interface PrimeClientObservation {
 }
 
 export class PrimeClientObservationError extends Error {
-  constructor() { super("Prime client observation failed"); this.name = "PrimeClientObservationError"; }
+  constructor(
+    readonly kind: "session-mismatch" | "sequence" | "invalid" = "invalid",
+  ) { super("Prime client observation failed"); this.name = "PrimeClientObservationError"; }
 }
 
 export interface PrimeClientObservationMapperOptions {
@@ -109,7 +111,9 @@ export class PrimeClientObservationMapper {
     try {
       if (this.closed || !record(value) || typeof value.type !== "string") throw new PrimeClientObservationError();
       if (value.type !== "session_event" && value.type !== "extension_ui_request") return Object.freeze([]);
-      if (value.activeSessionId !== this.options.activeSessionId) throw new PrimeClientObservationError();
+      if (value.activeSessionId !== this.options.activeSessionId) {
+        throw new PrimeClientObservationError("session-mismatch");
+      }
       const nativeSequence = this.nextNativeSequence(value.meta);
       const prepared = value.type === "session_event" ? await this.prepareSessionEvent(value.event, nativeSequence, written)
         : value.type === "extension_ui_request" ? await this.prepareExtension(value, nativeSequence, written) : undefined;
@@ -148,7 +152,9 @@ export class PrimeClientObservationMapper {
   }
 
   private nextNativeSequence(meta: unknown): number {
-    if (!record(meta) || !Number.isSafeInteger(meta.sequence) || Number(meta.sequence) < 1 || Number(meta.sequence) !== this.nativeSequence + 1) throw new PrimeClientObservationError();
+    if (!record(meta) || !Number.isSafeInteger(meta.sequence) || Number(meta.sequence) < 1 || Number(meta.sequence) !== this.nativeSequence + 1) {
+      throw new PrimeClientObservationError("sequence");
+    }
     return Number(meta.sequence);
   }
 

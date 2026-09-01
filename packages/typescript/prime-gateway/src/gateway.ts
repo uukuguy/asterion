@@ -3283,9 +3283,22 @@ export class PrimeGateway {
     if (this.mapper === undefined || this.terminal) {
       return;
     }
-    const observations = this.clientObservationMapper === undefined
-      ? []
-      : await this.clientObservationMapper.map(outbound);
+    let observations: readonly PrimeClientObservation[] = [];
+    if (this.clientObservationMapper !== undefined) {
+      try {
+        observations = await this.clientObservationMapper.map(outbound);
+      } catch (error) {
+        // Client observations are an optional, private projection. A malformed
+        // projection must not fence the canonical control event stream.
+        this.clientObservationMapper = undefined;
+        if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+          const category = error instanceof PrimeClientObservationError
+            ? error.kind
+            : "gateway";
+          process.stderr.write(`asterion-prime-client-observation-disabled:${category}\n`);
+        }
+      }
+    }
     for (const observation of observations) {
       if (observation.source_sequence !== this.clientObservations.length + 1) {
         throw new PrimeGatewayError();
@@ -3309,7 +3322,7 @@ export class PrimeGateway {
       const category = error instanceof PrimeEventMappingError
         ? `mapping-${error.kind}`
         : error instanceof PrimeClientObservationError
-        ? "client-observation"
+        ? `client-observation-${error.kind}`
         : "gateway";
       process.stderr.write(`asterion-prime-event-processing:${category}\n`);
     }
