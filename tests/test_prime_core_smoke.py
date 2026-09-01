@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 from tools.prime_core_smoke import PrimeCoreSmokeResult, verify_prime_core_smoke_result
-from tools.run_prime_core_smoke import _core_replay_contiguous
+from tools.run_prime_core_smoke import _core_private_goal, _core_replay_contiguous
 
 
 def _result(**changes: object) -> PrimeCoreSmokeResult:
@@ -40,6 +40,17 @@ def _result(**changes: object) -> PrimeCoreSmokeResult:
 
 
 class PrimeCoreSmokeReceiptTests(unittest.TestCase):
+    def test_persistent_core_goal_defers_to_the_direct_stage_instruction(self) -> None:
+        goal = _core_private_goal()
+
+        self.assertEqual(
+            goal.resolve_text("native-rlm-goal", max_bytes=500),
+            "Follow the direct verification instruction. Do not inspect, retry, or "
+            "independently extend it. Complete only after a later direct instruction.",
+        )
+        self.assertIn("first = await rlm", goal.resolve_text("native-rlm-start-input", max_bytes=500))
+        self.assertIn("second = await rlm", goal.resolve_text("native-rlm-continue-input", max_bytes=500))
+
     def test_replay_requires_post_attach_work_and_healthy_gap_free_observation(self) -> None:
         evidence = SimpleNamespace(
             detach_attached=True,

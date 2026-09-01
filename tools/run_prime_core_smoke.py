@@ -34,8 +34,8 @@ class _CoreSmokeFailure(PrimeRlmExperimentError):
 
 
 _CORE_GOAL = (
-    "Complete two independent native RLM child lifecycles. Each child must receive "
-    "one parent ping, finish, and be deleted before the goal completes."
+    "Follow the direct verification instruction. Do not inspect, retry, or "
+    "independently extend it. Complete only after a later direct instruction."
 )
 _CORE_START = (
     "Do not answer with prose. Use the IPython tool now and execute exactly this code:\n"
@@ -94,6 +94,12 @@ def _core_replay_contiguous(probe: object) -> bool:
     )
 
 
+def _core_private_goal() -> NativeRlmPrivateGoal:
+    """Return the staged private inputs for the bounded Core scenario."""
+
+    return NativeRlmPrivateGoal(_CORE_GOAL, _CORE_START, _CORE_CONTINUE)
+
+
 def main() -> int:
     run_id = f"prime-core-smoke-{time.time_ns()}"
     log = RunObservationLog(Path("runs/observations"), run_id)
@@ -116,9 +122,7 @@ def main() -> int:
         root = Path(tempfile.mkdtemp(prefix="asterion-prime-core-", dir="/tmp"))
         root.chmod(0o700)
         stderr_path = root / "sidecar.stderr.log"
-        private_goal = NativeRlmPrivateGoal(
-            _CORE_GOAL, _CORE_START, _CORE_CONTINUE
-        )
+        private_goal = _core_private_goal()
 
         async def run() -> object:
             observe("run.phase", {"phase": "prime.core"})
