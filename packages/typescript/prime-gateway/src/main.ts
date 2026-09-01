@@ -2613,10 +2613,6 @@ async function createSidecarFromDescriptor(
           longRunningStore: store,
         });
         nativeRootSession = session;
-        if (descriptor.probeReady) {
-          sessionReady?.();
-          sessionReady = undefined;
-        }
         return session;
       } catch (error) {
         privateDiagnosticProbeCreateFailure(descriptor, "native-session");
