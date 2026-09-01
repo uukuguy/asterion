@@ -75,7 +75,11 @@ _APPLICATION_TARGET = {
     "version": "0.1.0",
     "runtime_id": "prime.gateway",
 }
-_PROBE_GOAL = (
+_PERSISTENT_PROBE_GOAL = (
+    "Complete one native RLM child lifecycle: start one child, deliver one ping, "
+    "delete that child, then complete the goal."
+)
+_PROBE_START = (
     "Do not answer with prose. Use the IPython tool now and execute exactly this code:\n"
     "handle = await rlm('Reply exactly pong to the parent, then finish.', "
     "name='native-rlm-child')\n"
@@ -285,16 +289,18 @@ def _require_native_rlm_skill_budget_rejection(result: object) -> None:
 class NativeRlmPrivateGoal:
     """One private root instruction; its text never enters public evidence."""
 
-    text: str
+    goal_text: str
+    start_text: str | None = None
 
     def resolve_text(self, reference: str, *, max_bytes: int) -> str:
-        if (
-            reference not in {_GOAL_REFERENCE, _START_REFERENCE}
-            or not isinstance(max_bytes, int)
-            or max_bytes < len(self.text.encode("utf-8"))
-        ):
+        values = {
+            _GOAL_REFERENCE: self.goal_text,
+            _START_REFERENCE: self.start_text or self.goal_text,
+        }
+        value = values.get(reference)
+        if not isinstance(value, str) or not isinstance(max_bytes, int) or max_bytes < len(value.encode("utf-8")):
             raise KeyError("private native RLM input is unavailable")
-        return self.text
+        return value
 
     def resolve_bytes(self, *args: object, **kwargs: object) -> bytes:
         del args, kwargs
@@ -1718,17 +1724,20 @@ async def run_native_rlm_controlled_probe(
             if isinstance(action_id, str) and action_id:
                 observed_message_action_ids.add(action_id)
 
+    private_goal = NativeRlmPrivateGoal(
+        _PERSISTENT_PROBE_GOAL, _PROBE_START
+    ) if goal is None else goal
     host = build_native_rlm_control_host(
         sidecar,
         reservation,
         root,
-        goal=NativeRlmPrivateGoal(_PROBE_GOAL) if goal is None else goal,
+        goal=private_goal,
         event_observer=observe_event,
     )
     observer = PrimeControlPlaneClient(
         process=sidecar,
-        private_content=NativeRlmPrivateGoal(_PROBE_GOAL),
-        private_attachments=NativeRlmPrivateGoal(_PROBE_GOAL),
+        private_content=private_goal,
+        private_attachments=private_goal,
     )
     latest = NativeRlmProbeResult(
         terminal="uncertain",

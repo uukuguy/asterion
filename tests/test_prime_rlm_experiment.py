@@ -893,20 +893,30 @@ class TestNativeRlmExperiment(unittest.TestCase):
             )
             self.assertEqual(isolated.session_id, "native-maintenance")
 
-    def test_private_goal_resolves_only_the_root_reference(self) -> None:
-        goal = NativeRlmPrivateGoal("private native instruction")
+    def test_private_goal_keeps_persistent_goal_and_start_instruction_distinct(self) -> None:
+        goal = NativeRlmPrivateGoal(
+            "private persistent outcome", "private first instruction"
+        )
 
         self.assertEqual(
             goal.resolve_text("native-rlm-goal", max_bytes=100),
-            "private native instruction",
+            "private persistent outcome",
         )
         self.assertEqual(
             goal.resolve_text("native-rlm-start-input", max_bytes=100),
-            "private native instruction",
+            "private first instruction",
+        )
+        self.assertNotEqual(
+            goal.resolve_text("native-rlm-goal", max_bytes=100),
+            goal.resolve_text("native-rlm-start-input", max_bytes=100),
+        )
+        self.assertEqual(
+            goal.resolve_text("native-rlm-start-input", max_bytes=100),
+            "private first instruction",
         )
         with self.assertRaises(KeyError):
             goal.resolve_text("other", max_bytes=100)
-        self.assertNotIn("private native instruction", repr(goal))
+        self.assertNotIn("private persistent outcome", repr(goal))
 
     def test_control_host_rejects_a_non_sidecar_before_opening_private_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1279,3 +1279,4 @@
 - 03:00 Made Gateway mapping failure recovery idempotent to prevent unbounded fault event amplification [pending commit]
 - 03:01 Committed idempotent mapping recovery so one bad outbound cannot create a fault storm [d088047]
 - 03:10 Tightened the native RLM root prompt to require immediate IPython execution [pending commit]
+- 03:11 Committed direct IPython start instruction for the RLM root [a3cbb0b]

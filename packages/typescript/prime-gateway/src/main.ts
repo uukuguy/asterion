@@ -2277,14 +2277,18 @@ async function createSidecarFromDescriptor(
       maxDepth: descriptor.rlmMaxDepth,
       maxSpawnCount: descriptor.rlmMaxChildren,
       admitSpawn: async (proposal: RlmSpawnProposal) => {
+        let stage = "ready";
         try {
           await ready;
+          stage = "private-input";
           const inputRef = await privateValues.putInput(proposal.goalText);
+          stage = "event-identity";
           const identity = gateway.nextEventIdentity();
           const actionId = deriveControlActionId(
             descriptor.sessionId,
             proposal.idempotencyKey,
           );
+          stage = "binding";
           await store.recordRlmBinding({
             action_id: actionId,
             child_id: proposal.childId,
@@ -2292,6 +2296,7 @@ async function createSidecarFromDescriptor(
             depth: proposal.rlmDepth,
             model_selector_digest: proposal.modelSelectorDigest,
           });
+          stage = "event";
           const event = validateControlEvent({
             protocol: "asterion.agent-control/v1",
             event_id: identity.eventId,
@@ -2312,6 +2317,7 @@ async function createSidecarFromDescriptor(
               causal_parent_ids: context.causalParentIds,
             },
           });
+          stage = "admission";
           await gateway.emitActionProposal(event);
           const admission = await gateway.waitForAdmission(actionId);
           return Object.freeze({
@@ -2319,6 +2325,9 @@ async function createSidecarFromDescriptor(
             childId: proposal.childId,
           });
         } catch {
+          if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+            process.stderr.write(`asterion-prime-rlm-spawn:${stage}\n`);
+          }
           return Object.freeze({ resolution: "uncertain" as const, childId: proposal.childId });
         }
       },
