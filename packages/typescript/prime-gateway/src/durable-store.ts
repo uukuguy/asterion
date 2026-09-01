@@ -62,6 +62,7 @@ const PRIVATE_REF_PATTERN = /^private:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 const RECORD_KINDS = new Set([
   "command.accepted",
   "client.observation.progress",
+  "client.observation.health",
   "client.observation.staged",
   "context.binding.initialized",
   "context.binding.rebound",
@@ -238,6 +239,15 @@ export interface GatewayClientObservation {
 export interface GatewayClientObservationProgress {
   readonly nativeSequence: number;
   readonly observationSequence: number;
+}
+
+/** Public-safe state: contains sequence metadata only, never observation bodies. */
+export interface GatewayClientObservationHealth {
+  readonly status: "healthy" | "degraded" | "resync-required";
+  readonly reason_code: "native-sequence-gap" | null;
+  readonly observed_through_native_sequence: number;
+  readonly first_missing_native_sequence: number | null;
+  readonly resync_required: boolean;
 }
 
 export interface GatewayClientObservationStage {
@@ -753,6 +763,31 @@ function validateClientObservationProgressPayload(value: unknown): Readonly<{
     stagedReference: value.staged_reference,
     stagedSha256: value.staged_sha256,
     stagedSize: value.staged_size,
+  });
+}
+
+function validateClientObservationHealthPayload(value: unknown): GatewayClientObservationHealth {
+  if (!isRecord(value) || !hasExactKeys(value, [
+    "status", "reason_code", "observed_through_native_sequence",
+    "first_missing_native_sequence", "resync_required",
+  ]) ||
+    (value.status !== "healthy" && value.status !== "degraded" && value.status !== "resync-required") ||
+    (value.reason_code !== null && value.reason_code !== "native-sequence-gap") ||
+    !nonNegativeInteger(value.observed_through_native_sequence) ||
+    (value.first_missing_native_sequence !== null && !positiveInteger(value.first_missing_native_sequence)) ||
+    typeof value.resync_required !== "boolean" ||
+    (value.status === "healthy" && (value.reason_code !== null || value.first_missing_native_sequence !== null || value.resync_required)) ||
+    (value.status !== "healthy" && (value.reason_code !== "native-sequence-gap" ||
+      value.first_missing_native_sequence !== value.observed_through_native_sequence + 1 ||
+      value.resync_required !== (value.status === "resync-required")))) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({
+    status: value.status,
+    reason_code: value.reason_code,
+    observed_through_native_sequence: value.observed_through_native_sequence,
+    first_missing_native_sequence: value.first_missing_native_sequence,
+    resync_required: value.resync_required,
   });
 }
 
@@ -1341,6 +1376,10 @@ export class GatewayDurableStore {
   private readonly clientObservationProgressByGeneration = new Map<
     number,
     GatewayClientObservationProgress
+  >();
+  private readonly clientObservationHealthByGeneration = new Map<
+    number,
+    GatewayClientObservationHealth
   >();
   private readonly clientObservationStages = new Map<string, GatewayClientObservationStage>();
   private readonly contextCommands = new Map<string, SessionContextCommand>();
@@ -1989,6 +2028,41 @@ export class GatewayDurableStore {
       Object.freeze({ nativeSequence: 0, observationSequence: 0 });
   }
 
+  async recordClientObservationHealth(
+    generation: number,
+    health: GatewayClientObservationHealth,
+  ): Promise<GatewayRecordReceipt> {
+    if (!positiveInteger(generation)) throw new GatewayStoreConflictError();
+    const validated = validateClientObservationHealthPayload({
+      status: health?.status,
+      reason_code: health?.reason_code,
+      observed_through_native_sequence: health?.observed_through_native_sequence,
+      first_missing_native_sequence: health?.first_missing_native_sequence,
+      resync_required: health?.resync_required,
+    });
+    const payload = {
+      status: validated.status,
+      reason_code: validated.reason_code,
+      observed_through_native_sequence: validated.observed_through_native_sequence,
+      first_missing_native_sequence: validated.first_missing_native_sequence,
+      resync_required: validated.resync_required,
+    };
+    return this.appendRecord(
+      "client.observation.health",
+      `client-observation-health:${generation}:${sha256Hex(canonicalJsonBytes(payload))}`,
+      payload,
+    );
+  }
+
+  clientObservationHealth(generation: number): GatewayClientObservationHealth {
+    if (!positiveInteger(generation)) throw new GatewayStoreConflictError();
+    return this.clientObservationHealthByGeneration.get(generation) ?? Object.freeze({
+      status: "healthy", reason_code: null,
+      observed_through_native_sequence: this.clientObservationProgress(generation).nativeSequence,
+      first_missing_native_sequence: null, resync_required: false,
+    });
+  }
+
   registerEventGeneration(generation: number): void {
     if (!positiveInteger(generation)) {
       throw new GatewayStoreConflictError();
@@ -2571,6 +2645,13 @@ export class GatewayDurableStore {
         )) throw new GatewayStoreCorruptionError();
         return progress as unknown as Record<string, unknown>;
       }
+      if (kind === "client.observation.health") {
+        const match = /^client-observation-health:(?<generation>[1-9][0-9]*):[0-9a-f]{64}$/u.exec(recordId);
+        const health = validateClientObservationHealthPayload(payload);
+        const generation = Number(match?.groups?.generation);
+        if (match === null || !positiveInteger(generation)) throw new GatewayStoreCorruptionError();
+        return health as unknown as Record<string, unknown>;
+      }
       if (kind === "client.observation.staged") {
         const match = /^client-observation-stage:(?<generation>[1-9][0-9]*):(?<native>[1-9][0-9]*)$/u.exec(recordId);
         const stage = validateClientObservationStagePayload(payload);
@@ -3075,6 +3156,14 @@ export class GatewayDurableStore {
         throw new GatewayStoreCorruptionError();
       }
       this.clientObservationStages.set(key, stage);
+    } else if (record.stored.kind === "client.observation.health") {
+      const match = /^client-observation-health:(?<generation>[1-9][0-9]*):[0-9a-f]{64}$/u.exec(record.stored.record_id);
+      const generation = Number(match?.groups?.generation);
+      const health = "reasonCode" in record.payload
+        ? record.payload as unknown as GatewayClientObservationHealth
+        : validateClientObservationHealthPayload(record.payload);
+      if (match === null || !positiveInteger(generation)) throw new GatewayStoreCorruptionError();
+      this.clientObservationHealthByGeneration.set(generation, health);
     } else if (record.stored.kind === "input.delivery.committed") {
       const delivery = record.payload as unknown as GatewayInputDelivery;
       if (this.inputDeliveryValues.has(delivery.commandId)) {

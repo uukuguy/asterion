@@ -868,6 +868,26 @@ test("durable store reopens only a contiguous canonical client observation prefi
   }
 });
 
+test("durable store preserves a body-free degraded observation health snapshot across reopen", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.recordClientObservationHealth(1, {
+      status: "degraded", reason_code: "native-sequence-gap",
+      observed_through_native_sequence: 4,
+      first_missing_native_sequence: 5, resync_required: false,
+    });
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.clientObservationHealth(1), {
+      status: "degraded", reason_code: "native-sequence-gap",
+      observed_through_native_sequence: 4,
+      first_missing_native_sequence: 5, resync_required: false,
+    });
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("durable client observations reject non-closed public payloads before storage", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   const base = {

@@ -146,6 +146,7 @@ export class PrimeClientObservationMapper {
       if (prepared === undefined) {
         await this.options.commit?.(nativeSequence, null);
         this.nativeSequence = nativeSequence;
+        this.markHealthyThrough(nativeSequence);
         return Object.freeze([]);
       }
       const emittedAtValue = this.now();
@@ -162,6 +163,7 @@ export class PrimeClientObservationMapper {
       }));
       this.nativeSequence = prepared.nativeSequence;
       this.sequence = next;
+      this.markHealthyThrough(prepared.nativeSequence);
       return Object.freeze([observation]);
     } catch (error) {
       try {
@@ -182,6 +184,15 @@ export class PrimeClientObservationMapper {
       throw new PrimeClientObservationError("sequence");
     }
     return Number(meta.sequence);
+  }
+
+  private markHealthyThrough(nativeSequence: number): void {
+    if (this.healthValue.status !== "healthy") return;
+    this.healthValue = Object.freeze({
+      status: "healthy", reason_code: null,
+      observed_through_native_sequence: nativeSequence,
+      first_missing_native_sequence: null, resync_required: false,
+    });
   }
 
   private async prepareSessionEvent(value: unknown, nativeSequence: number, written: PrivateClientValueDescriptor[]): Promise<Prepared | undefined> {

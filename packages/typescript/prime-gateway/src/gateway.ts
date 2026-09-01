@@ -460,6 +460,9 @@ export class PrimeGateway {
       this.clientObservations.push(
         ...options.store.clientObservations(options.generation) as readonly PrimeClientObservation[],
       );
+      this.clientObservationHealthValue = options.store.clientObservationHealth(
+        options.generation,
+      );
     } catch {
       throw new PrimeGatewayError();
     }
@@ -2666,6 +2669,12 @@ export class PrimeGateway {
     const progress = this.options.store.clientObservationProgress(
       this.options.generation,
     );
+    // A persisted sequence gap cannot be healed by replaying arbitrary live
+    // events. Keep the projection closed until an explicit resync protocol is
+    // implemented; callers receive the durable degraded health instead.
+    if (this.options.store.clientObservationHealth(this.options.generation).status !== "healthy") {
+      return undefined;
+    }
     // Prime's durable cursor advances for every native outbound event, while
     // client observations intentionally advance only for the subset exposed
     // through this private channel.  A newly attached root can therefore
@@ -3296,10 +3305,16 @@ export class PrimeGateway {
       try {
         observations = await this.clientObservationMapper.map(outbound);
         this.clientObservationHealthValue = this.clientObservationMapper.health;
+        await this.enqueueDurable(() => this.options.store.recordClientObservationHealth(
+          this.options.generation, this.clientObservationHealthValue,
+        ));
       } catch (error) {
         // Client observations are an optional, private projection. A malformed
         // projection must not fence the canonical control event stream.
         this.clientObservationHealthValue = this.clientObservationMapper.health;
+        await this.enqueueDurable(() => this.options.store.recordClientObservationHealth(
+          this.options.generation, this.clientObservationHealthValue,
+        ));
         this.clientObservationMapper = undefined;
         if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
           const category = error instanceof PrimeClientObservationError
