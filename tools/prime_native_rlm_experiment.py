@@ -149,6 +149,9 @@ class PrimeRlmExperimentError(RuntimeError):
             "event-invalid",
             "detach-control",
             "attach-control",
+            "daemon-start",
+            "sidecar-start",
+            "probe",
         }
     )
 
@@ -1303,7 +1306,10 @@ async def execute_native_rlm_sidecar_probe(
     ):
         raise PrimeRlmExperimentError("Native RLM sidecar probe is invalid")
     prepare_native_rlm_workspace(root)
+    phase = "daemon-plan"
     def boundary(stage: str) -> None:
+        nonlocal phase
+        phase = stage
         try:
             (root / "asterion-native-boundary").write_text(stage + "\n", encoding="ascii")
         except OSError:
@@ -1504,7 +1510,10 @@ async def execute_native_rlm_sidecar_probe(
                 usage=BudgetUsage.zero(),
             )
         primary_failure = True
-        raise PrimeRlmExperimentError("Native RLM probe did not complete") from None
+        safe_code = phase if phase in PrimeRlmExperimentError._SAFE_CODES else None
+        raise PrimeRlmExperimentError(
+            "Native RLM probe did not complete", safe_code=safe_code
+        ) from None
     finally:
         boundary("cleanup")
         sidecar_cleanup_error: PrimeRlmExperimentError | None = None

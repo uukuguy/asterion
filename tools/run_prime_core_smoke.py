@@ -12,6 +12,7 @@ from asterion.runtime.observation import RunObservationLog
 from tools.prime_core_smoke import PrimeCoreSmokeResult, verify_prime_core_smoke_result
 from tools.prime_native_rlm_experiment import (
     NativeRlmPrivateGoal,
+    PrimeRlmExperimentError,
     native_rlm_model_selector_digest,
     prepare_native_rlm_experiment,
     resolve_native_rlm_model,
@@ -19,10 +20,17 @@ from tools.prime_native_rlm_experiment import (
     run_owned_native_rlm_sidecar_probe,
 )
 from tools.verify_prime_loop import (
+    _native_rlm_failure_class,
     _native_rlm_environment,
     _native_rlm_runtime_resources,
     verify_preflight,
 )
+
+
+class _CoreSmokeFailure(PrimeRlmExperimentError):
+    def __init__(self, reason: str) -> None:
+        self.safe_reason = reason
+        super().__init__("Native RLM skill core probe failed", safe_code="probe")
 
 
 _CORE_GOAL = (
@@ -112,17 +120,26 @@ def main() -> int:
 
             heartbeat_task = asyncio.create_task(heartbeat())
             try:
-                with stderr_path.open("xb") as stderr_sink:
-                    return await run_owned_native_rlm_sidecar_probe(
-                        reservation, selection, root, resources, environ=environment,
-                        private_stderr_sink=stderr_sink,
-                        probe=lambda sidecar: run_native_rlm_controlled_probe(
+                async def probe(sidecar: object) -> object:
+                    try:
+                        return await run_native_rlm_controlled_probe(
                             sidecar, reservation, root, goal=private_goal, progress_root=root,
                             exercise_application=True,
                             expected_model_selector_digest=native_rlm_model_selector_digest(selection),
                             required_child_count=2, detach_while_active=True,
                             require_observation_health=True, continue_after_attach=True,
-                        ),
+                        )
+                    except Exception as error:
+                        raise _CoreSmokeFailure(_native_rlm_failure_class(
+                            stderr_path, safe_error=str(error),
+                            progress_path=root / "native-rlm-progress.json",
+                        )) from None
+
+                with stderr_path.open("xb") as stderr_sink:
+                    return await run_owned_native_rlm_sidecar_probe(
+                        reservation, selection, root, resources, environ=environment,
+                        private_stderr_sink=stderr_sink,
+                        probe=probe,
                     )
             finally:
                 stop_heartbeats.set()
@@ -164,7 +181,8 @@ def main() -> int:
         return 2
     except Exception as error:
         receipt = dict(verify_prime_core_smoke_result(_external_limited()))
-        print(json.dumps(dict(log.terminal("external-limited", f"prime.core.{_safe_reason(error)}")), sort_keys=True, separators=(",", ":")), flush=True)
+        reason = getattr(error, "safe_reason", _safe_reason(error))
+        print(json.dumps(dict(log.terminal("external-limited", f"prime.core.{reason}")), sort_keys=True, separators=(",", ":")), flush=True)
         print(json.dumps(receipt, sort_keys=True, separators=(",", ":")), flush=True)
         return 2
 
