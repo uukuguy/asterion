@@ -1037,6 +1037,12 @@ def _native_rlm_failure_class(
             private_category = "sidecar_session_create"
         elif b"asterion-prime-sidecar-failed:input-submit" in content:
             private_category = "sidecar_input_submit"
+        elif b"asterion-prime-events-failed:cursor" in content:
+            private_category = "sidecar_events_cursor"
+        elif b"asterion-prime-events-failed:store" in content:
+            private_category = "sidecar_events_store"
+        elif b"asterion-prime-events-failed:protocol" in content:
+            private_category = "sidecar_events_protocol"
         elif b"asterion-prime-sidecar-failed:events" in content:
             private_category = "sidecar_events"
         elif b"asterion-prime-sidecar-failed:authority.update" in content:

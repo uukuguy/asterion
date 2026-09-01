@@ -1627,19 +1627,33 @@ export class PrimeGatewaySidecar {
   }
 
   private events(envelope: SidecarEnvelope): readonly ControlEvent[] {
-    const cursor = validateCursor(envelope.cursor);
+    let cursor: Readonly<{ generation: number; sequence: number }> | null;
+    try {
+      cursor = validateCursor(envelope.cursor);
+    } catch {
+      privateDiagnosticEventFailure("cursor");
+      throw new PrimeGatewayError();
+    }
     const replayCursor = cursor ?? {
       generation: this.options.currentGeneration,
       sequence: 0,
     };
-    const events = this.options.gateway.eventsAfterCursor(
-      replayCursor,
-    ).map((event) => {
-      const validated = validateControlEvent(event);
-      if (validated.generation !== replayCursor.generation) {
+    let source: readonly ControlEvent[];
+    try {
+      source = this.options.gateway.eventsAfterCursor(replayCursor);
+    } catch {
+      privateDiagnosticEventFailure("store");
+      throw new PrimeGatewayError();
+    }
+    const events = source.map((event) => {
+      try {
+        const validated = validateControlEvent(event);
+        if (validated.generation !== replayCursor.generation) throw new PrimeGatewayError();
+        return validated;
+      } catch {
+        privateDiagnosticEventFailure("protocol");
         throw new PrimeGatewayError();
       }
-      return validated;
     });
     return Object.freeze(events);
   }
@@ -1793,6 +1807,12 @@ function privateDiagnosticEnvelopeFailure(value: unknown): void {
   process.stderr.write(
     `asterion-prime-sidecar-failed:${commandType ?? type}\n`,
   );
+}
+
+function privateDiagnosticEventFailure(stage: "cursor" | "store" | "protocol"): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+    process.stderr.write(`asterion-prime-events-failed:${stage}\n`);
+  }
 }
 
 function privateDiagnosticProbeCreateFailure(
