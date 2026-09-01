@@ -1269,3 +1269,6 @@
 - 22:50 Aligned the Prime RLM probe instruction with the README direct-call form [b4ae025]
 - 23:00 Required explicit Prime goal completion after the RLM lifecycle [e552234]
 - 23:15 Fixed fresh-attach client-observation cursor baseline and durable replay invariant [pending commit]
+- 23:16 Committed fresh-attach cursor recovery so live observations cannot fault-loop [ca346e5]
+- 23:20 Fresh-attach smoke reached a clean terminal at 65s but remained External-limited: event-read; sequence storm ruled out [no code commit]
+- 23:25 Retained invalid Prime response-frame category across the reader boundary [pending commit]

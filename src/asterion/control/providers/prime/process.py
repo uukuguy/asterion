@@ -503,8 +503,17 @@ class PrimeSidecarProcess:
                 future.set_result(validated)
         except asyncio.CancelledError:
             raise
-        except (OSError, ValueError, PrimeSidecarProcessError):
-            self._fail_transport()
+        except (OSError, ValueError, PrimeSidecarProcessError) as error:
+            # A response that cannot be decoded, correlated, or validated is a
+            # malformed public IPC frame.  Preserve that fixed category for the
+            # caller instead of collapsing it into an indistinguishable
+            # transport failure; no frame contents cross this boundary.
+            self._fail_transport(
+                getattr(error, "safe_code", None)
+                or "response-invalid"
+                if isinstance(error, (ValueError, PrimeSidecarProcessError))
+                else None
+            )
 
     def _fail_transport(self, safe_code: str | None = None) -> None:
         self._transport_failed = True
