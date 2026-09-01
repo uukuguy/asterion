@@ -49,6 +49,14 @@ Trust-boundary failures must fail closed. Public surfaces must not expose prompt
 
 `list`, `describe`, `acceptance`, `make test`, and `make check` are provider-free; `preflight` checks readiness only. `basic`/`complete` may perform bounded Agent/Judge work. Full benchmarks and paper reproduction require separate authorization and a finite budget. Configuration, caches, and prior evidence never grant execution authority.
 
+## Browser Session Continuity
+
+When browser interaction is required, reuse the already-open browser instance and
+its authenticated profile. Do not create a separate browser profile, isolated
+context, or temporary session that would require the operator to sign in again.
+If the existing session has expired or is unavailable, report that exact
+condition before requesting any operator action.
+
 ## Verification and Evidence
 
 Use `unittest` (`test_<surface>.py`, `Test...`, `test_<behavior>`) and `subTest` matrices. Cover success, failure, immutability, identity, determinism, cancellation, and redaction.
