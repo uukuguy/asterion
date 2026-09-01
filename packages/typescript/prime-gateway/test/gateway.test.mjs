@@ -3193,6 +3193,56 @@ test("gateway persists body-free client observations across reopen and resumes t
   }
 });
 
+test("gateway starts client observation after a fresh-create attach cursor", async () => {
+  const state = await fixture({ clientObservations: true });
+  try {
+    state.session.lastAttachResponse = {
+      id: "fresh-create-attach",
+      type: "response",
+      command: "attach",
+      success: true,
+      data: {
+        activeSessionId: "prime-root-1",
+        protocol: { name: "prime-agent.daemon", version: 7 },
+        replay: { status: "complete", toSequence: 1 },
+        snapshot: {
+          activeSessionId: "prime-root-1",
+          lastEventSequence: 1,
+          lastEventCursor: { generation: "worker-generation-1", sequence: 1 },
+          summary: { sessionId: "transcript-1", activeSessionId: "prime-root-1" },
+          state: { goal: { status: "active" } },
+        },
+        lastEventSequence: 1,
+        lastEventCursor: { generation: "worker-generation-1", sequence: 1 },
+      },
+    };
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system", system_version: "1.0.0", goal_id: "goal-1", goal_ref: goalRef,
+    }, "command-create-fresh-attach"));
+    assert.deepEqual(state.store.snapshot().primeCursor, { generation: "worker-generation-1", sequence: 1 });
+    state.session.emit({
+      type: "session_event",
+      activeSessionId: "prime-root-1",
+      event: { type: "message_end", role: "assistant", content: "first private body" },
+      meta: {
+        id: "prime-client-event-2",
+        protocol: { name: "prime-agent.daemon", version: 7 },
+        sequence: 2,
+        cursor: { generation: "worker-generation-1", sequence: 2 },
+        emittedAt: "2026-08-10T03:30:02Z",
+      },
+    });
+    await state.gateway.settle();
+    assert.deepEqual(eventTypes(state.store), ["session.created", "session.running"]);
+    assert.equal(state.gateway.clientObservationsAfterCursor({ generation: 1, sequence: 0 }).length, 1);
+    assert.equal(eventTypes(state.store).includes("fault.raised"), false);
+    assert.equal(eventTypes(state.store).includes("session.recovery-required"), false);
+  } finally {
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
 test("gateway cleans a staged-only client body before reopen can replay it", async () => {
   const state = await fixture({ clientObservations: true });
   let reopened;
