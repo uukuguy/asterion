@@ -83,7 +83,7 @@ _PROBE_GOAL = (
     "name='native-rlm-child')\n"
     "await agent_message.send('ping', receiver_role='child', receiver_name=handle.name)\n"
     "When pong arrives as a later prompt, execute `await rlm.delete_subagent(handle.rlm_child_id)` "
-    "and finish. Do not use any other tools or create another child."
+    "followed by `await goal.complete()`, then finish. Do not use any other tools or create another child."
 )
 _DEFAULT_OPERATIONS = tuple(
     sorted(
