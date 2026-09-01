@@ -842,6 +842,15 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
             "event_transition",
         )
 
+    def test_failure_evidence_classifies_controlled_goal_terminal_without_private_content(self) -> None:
+        self.assertEqual(
+            prime_loop._native_rlm_failure_class(
+                None,
+                safe_error="Native RLM controlled probe goal terminal did not succeed",
+            ),
+            "goal_terminal",
+        )
+
     def test_failure_evidence_classifies_safe_action_admission_kind(self) -> None:
         self.assertEqual(
             prime_loop._native_rlm_failure_class(

@@ -886,6 +886,17 @@ def _native_rlm_failure_class(
     if safe_error in controlled_errors:
         return controlled_errors[safe_error]
     if isinstance(safe_error, str) and safe_error.startswith(
+        "Native RLM controlled probe goal "
+    ):
+        if safe_error.endswith(" admission is invalid"):
+            return "goal_admission_invalid"
+        if safe_error.startswith("Native RLM controlled probe goal admission was rejected "):
+            return "goal_admission_rejected"
+        if safe_error.endswith(" terminal is invalid"):
+            return "goal_terminal_invalid"
+        if safe_error.endswith(" terminal did not succeed"):
+            return "goal_terminal"
+    if isinstance(safe_error, str) and safe_error.startswith(
         "Native RLM controlled probe start "
     ):
         # A best-effort cancellation during outer cleanup is expected after a
