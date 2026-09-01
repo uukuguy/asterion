@@ -192,7 +192,8 @@ export class PrimeClientObservationMapper {
   }
 
   private nextNativeSequence(meta: unknown): number {
-    if (!record(meta) || !Number.isSafeInteger(meta.sequence) || Number(meta.sequence) < 1 || Number(meta.sequence) !== this.nativeSequence + 1) {
+    if (!record(meta) || !Number.isSafeInteger(meta.sequence) || Number(meta.sequence) < 1 ||
+      (this.nativeSequence !== 0 && Number(meta.sequence) !== this.nativeSequence + 1)) {
       throw new PrimeClientObservationError("sequence");
     }
     return Number(meta.sequence);

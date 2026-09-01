@@ -104,6 +104,18 @@ test("consumes a foreign-session native sequence without projecting its body", a
   } finally { await root.cleanup(); }
 });
 
+test("accepts the first visible native sequence as an attach baseline", async () => {
+  const root = await temporaryStoreRoot();
+  try {
+    const mapper = mapperFixture(await PrivateValueStore.open(root.root));
+    const [observation] = await mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 2 },
+      event: { type: "message_end", message: { role: "assistant", content: "LOCAL" } } });
+    assert.equal(observation.source_sequence, 1);
+    await assert.rejects(mapper.map({ type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 4 },
+      event: { type: "message_end", message: { role: "assistant", content: "GAP" } } }));
+  } finally { await root.cleanup(); }
+});
+
 test("projects a body-free degraded health snapshot after a native sequence gap", async () => {
   const root = await temporaryStoreRoot();
   try {
