@@ -3193,6 +3193,68 @@ test("gateway persists body-free client observations across reopen and resumes t
   }
 });
 
+test("gateway retains a client observation sequence gap across reopen", async () => {
+  const state = await fixture({ clientObservations: true });
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system", system_version: "1.0.0",
+      goal_id: "goal-1", goal_ref: goalRef,
+    }, "command-create-gap"));
+    state.session.emit({
+      type: "session_event", activeSessionId: "prime-root-1",
+      event: { type: "message_end", role: "assistant", content: "private body" },
+      meta: {
+        id: "prime-client-gap", protocol: { name: "prime-agent.daemon", version: 7 },
+        sequence: 2, cursor: { generation: "worker-generation-1", sequence: 2 },
+        emittedAt: "2026-08-10T03:30:02Z",
+      },
+    });
+    await state.gateway.settle();
+    assert.deepEqual(state.gateway.clientObservationHealth(), {
+      status: "degraded", reason_code: "native-sequence-gap",
+      observed_through_native_sequence: 0,
+      first_missing_native_sequence: 1, resync_required: false,
+    });
+    await state.gateway.close();
+
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    const privateValues = await PrivateValueStore.open(state.root, { continuationRoot: state.sessionRoot });
+    const restoredSession = new FakePrimeSession(state.session.sessionPath);
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1", generation: 1, authorityId: "authority-1", store,
+      privateValues, clientObservationValues: privateValues,
+      async createSession() { throw new Error("must restore"); },
+      async restoreSession(_identity, onRecovered) {
+        await onRecovered({
+          transport: recoveryTransport("supervisor-generation-1", "gap-recovery"),
+          primeCursor: { generation: "worker-generation-1", sequence: 2 },
+          transcriptSessionId: "transcript-1", supervisorGeneration: "supervisor-generation-1",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() { throw new Error("not used"); },
+    });
+    assert.deepEqual(reopened.clientObservationHealth(), state.gateway.clientObservationHealth());
+    restoredSession.emit({
+      type: "session_event", activeSessionId: "prime-root-1",
+      event: { type: "message_end", role: "assistant", content: "still private" },
+      meta: {
+        id: "prime-client-after-gap", protocol: { name: "prime-agent.daemon", version: 7 },
+        sequence: 3, cursor: { generation: "worker-generation-1", sequence: 3 },
+        emittedAt: "2026-08-10T03:30:03Z",
+      },
+    });
+    await reopened.settle();
+    assert.deepEqual(reopened.clientObservationsAfterCursor({ generation: 1, sequence: 0 }), []);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
 test("gateway starts client observation after a fresh-create attach cursor", async () => {
   const state = await fixture({ clientObservations: true });
   try {
