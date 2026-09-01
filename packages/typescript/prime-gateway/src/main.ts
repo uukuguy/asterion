@@ -69,7 +69,7 @@ import type {
   PrivateResultProjection,
   PrivateContinuationBinding,
 } from "./private-store.js";
-import type { PrimeClientObservation } from "./client-observation.js";
+import type { PrimeClientObservation, PrimeClientObservationHealth } from "./client-observation.js";
 import type {
   GatewayLongRunningResult,
   GatewayRlmBinding,
@@ -178,6 +178,7 @@ export interface PrimeGatewaySidecarOptions {
     updateRemainingBudget(budget: SkillBudget): void;
     eventsAfterCursor(cursor: { readonly generation: number; readonly sequence: number }): readonly ControlEvent[];
     clientObservationsAfterCursor?(cursor: { readonly generation: number; readonly sequence: number }): readonly PrimeClientObservation[];
+    clientObservationHealth?(): PrimeClientObservationHealth;
     executeSessionContext?(
       command: SessionContextCommand,
       preparePrivate: () => Promise<void>,
@@ -473,6 +474,7 @@ type SidecarResponse =
     readonly type: "client_observations.batch";
     readonly observations: readonly PrimeClientObservation[];
     readonly next_cursor: Readonly<{ readonly generation: number; readonly sequence: number }> | null;
+    readonly health: PrimeClientObservationHealth;
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -1661,11 +1663,21 @@ export class PrimeGatewaySidecar {
   private clientObservations(envelope: SidecarEnvelope): Readonly<{
     observations: readonly PrimeClientObservation[];
     next_cursor: Readonly<{ readonly generation: number; readonly sequence: number }> | null;
+    health: PrimeClientObservationHealth;
   }> {
     const cursor = validateCursor(envelope.cursor);
     const replayCursor = cursor ?? { generation: this.options.currentGeneration, sequence: 0 };
     const observations = this.options.gateway.clientObservationsAfterCursor;
-    if (observations === undefined) throw new PrimeGatewayError();
+    const healthReader = this.options.gateway.clientObservationHealth;
+    if (observations === undefined || healthReader === undefined) throw new PrimeGatewayError();
+    const health = healthReader.call(this.options.gateway);
+    if (
+      (health.status !== "healthy" && health.status !== "degraded" && health.status !== "resync-required") ||
+      (health.reason_code !== null && health.reason_code !== "native-sequence-gap") ||
+      !Number.isSafeInteger(health.observed_through_native_sequence) || health.observed_through_native_sequence < 0 ||
+      (health.first_missing_native_sequence !== null && (!Number.isSafeInteger(health.first_missing_native_sequence) || health.first_missing_native_sequence < 1)) ||
+      typeof health.resync_required !== "boolean"
+    ) throw new PrimeGatewayError();
     const batch = observations.call(this.options.gateway, replayCursor);
     let expected = replayCursor.sequence + 1;
     const selected: PrimeClientObservation[] = [];
@@ -1691,7 +1703,7 @@ export class PrimeGatewaySidecar {
       }), "utf8") > MAX_CLIENT_OBSERVATION_RESPONSE_BYTES) {
         if (selected.length === 0) throw new PrimeGatewayError();
         return Object.freeze({
-          observations: Object.freeze(selected),
+          observations: Object.freeze(selected), health,
           next_cursor: Object.freeze({
             generation: replayCursor.generation,
             sequence: selected.at(-1)!.source_sequence,
@@ -1700,7 +1712,7 @@ export class PrimeGatewaySidecar {
       }
       selected.push(observation);
     }
-    return Object.freeze({ observations: Object.freeze(selected), next_cursor: null });
+    return Object.freeze({ observations: Object.freeze(selected), next_cursor: null, health });
   }
 
   private async readClientValue(envelope: SidecarEnvelope): Promise<Readonly<{
@@ -2828,6 +2840,7 @@ async function createSidecarFromDescriptor(
         store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
       clientObservationsAfterCursor: (cursor) =>
         gateway.clientObservationsAfterCursor(cursor),
+      clientObservationHealth: () => gateway.clientObservationHealth(),
       rlmLifecycle: () => store.rlmLifecycle(),
       rlmBinding: (actionId) => store.rlmBinding(actionId),
       rlmMessageBinding: (actionId) => store.rlmMessageBinding(actionId),

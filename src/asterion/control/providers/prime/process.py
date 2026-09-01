@@ -899,11 +899,36 @@ def _validate_response(
     if response.get("type") == "events.batch":
         expected = expected | {"events"}
     if response.get("type") == "client_observations.batch":
-        expected = expected | {"observations", "next_cursor"}
+        expected = expected | {"observations", "next_cursor", "health"}
         if not isinstance(response.get("observations"), list):
             raise PrimeSidecarProcessError()
         next_cursor = response.get("next_cursor")
         if next_cursor is not None and not isinstance(next_cursor, Mapping):
+            raise PrimeSidecarProcessError()
+        health = response.get("health")
+        if (
+            not isinstance(health, Mapping)
+            or set(health)
+            != {
+                "status",
+                "reason_code",
+                "observed_through_native_sequence",
+                "first_missing_native_sequence",
+                "resync_required",
+            }
+            or health.get("status") not in {"healthy", "degraded", "resync-required"}
+            or health.get("reason_code") not in {None, "native-sequence-gap"}
+            or isinstance(health.get("observed_through_native_sequence"), bool)
+            or not isinstance(health.get("observed_through_native_sequence"), int)
+            or health["observed_through_native_sequence"] < 0
+            or health.get("first_missing_native_sequence") is not None
+            and (
+                isinstance(health.get("first_missing_native_sequence"), bool)
+                or not isinstance(health.get("first_missing_native_sequence"), int)
+                or health["first_missing_native_sequence"] < 1
+            )
+            or not isinstance(health.get("resync_required"), bool)
+        ):
             raise PrimeSidecarProcessError()
     if response.get("type") == "client_value":
         expected = expected | {"descriptor", "body_base64"}

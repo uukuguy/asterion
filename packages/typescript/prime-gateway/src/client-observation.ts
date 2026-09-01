@@ -139,9 +139,7 @@ export class PrimeClientObservationMapper {
     try {
       if (this.closed || !record(value) || typeof value.type !== "string") throw new PrimeClientObservationError();
       if (value.type !== "session_event" && value.type !== "extension_ui_request") return Object.freeze([]);
-      if (value.activeSessionId !== this.options.activeSessionId) {
-        throw new PrimeClientObservationError("session-mismatch");
-      }
+      if (value.activeSessionId !== this.options.activeSessionId) return Object.freeze([]);
       const nativeSequence = this.nextNativeSequence(value.meta);
       const prepared = value.type === "session_event" ? await this.prepareSessionEvent(value.event, nativeSequence, written)
         : value.type === "extension_ui_request" ? await this.prepareExtension(value, nativeSequence, written) : undefined;

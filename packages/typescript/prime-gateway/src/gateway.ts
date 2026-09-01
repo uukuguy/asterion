@@ -42,7 +42,7 @@ import {
   PrimeClientObservationMapper,
   PrimeClientObservationError,
 } from "./client-observation.js";
-import type { PrimeClientObservation } from "./client-observation.js";
+import type { PrimeClientObservation, PrimeClientObservationHealth } from "./client-observation.js";
 import type {
   PrimeCheckpointCreated,
   PrimeCheckpointRecovery,
@@ -430,6 +430,10 @@ export class PrimeGateway {
   private session: PrimeGatewaySession | undefined;
   private mapper: PrimeEventMapper | undefined;
   private clientObservationMapper: PrimeClientObservationMapper | undefined;
+  private clientObservationHealthValue: PrimeClientObservationHealth = Object.freeze({
+    status: "healthy", reason_code: null, observed_through_native_sequence: 0,
+    first_missing_native_sequence: null, resync_required: false,
+  });
   private readonly clientObservations: PrimeClientObservation[] = [];
   private unsubscribe: (() => void) | undefined;
   /** Monotonic source identity for callbacks from a daemon transport. */
@@ -645,6 +649,10 @@ export class PrimeGateway {
       !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 0 || cursor.sequence > this.clientObservations.length
     ) throw new PrimeGatewayError();
     return Object.freeze(this.clientObservations.slice(cursor.sequence));
+  }
+
+  clientObservationHealth(): PrimeClientObservationHealth {
+    return this.clientObservationHealthValue;
   }
 
   async activateEcosystem(value: unknown): Promise<GatewayEcosystemEffectResult> {
@@ -3287,9 +3295,11 @@ export class PrimeGateway {
     if (this.clientObservationMapper !== undefined) {
       try {
         observations = await this.clientObservationMapper.map(outbound);
+        this.clientObservationHealthValue = this.clientObservationMapper.health;
       } catch (error) {
         // Client observations are an optional, private projection. A malformed
         // projection must not fence the canonical control event stream.
+        this.clientObservationHealthValue = this.clientObservationMapper.health;
         this.clientObservationMapper = undefined;
         if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
           const category = error instanceof PrimeClientObservationError

@@ -395,6 +395,10 @@ class FakeGateway {
     this.cursorRequests = [];
     this.clientCursorRequests = [];
     this.clientObservations = [];
+    this.clientObservationHealthValue = {
+      status: "healthy", reason_code: null, observed_through_native_sequence: 0,
+      first_missing_native_sequence: null, resync_required: false,
+    };
     this.contextExecutions = [];
     this.contextCancellations = [];
     this.closed = 0;
@@ -426,6 +430,10 @@ class FakeGateway {
     return this.clientObservations.filter((item) =>
       item.generation === cursor.generation && item.source_sequence > cursor.sequence
     );
+  }
+
+  clientObservationHealth() {
+    return this.clientObservationHealthValue;
   }
 
   async close() {
@@ -1100,6 +1108,7 @@ test("sidecar replays only the requested body-free client observation suffix", a
   });
   assert.equal(response.type, "client_observations.batch");
   assert.deepEqual(response.observations, gateway.clientObservations.slice(1));
+  assert.deepEqual(response.health, gateway.clientObservationHealthValue);
   assert.deepEqual(gateway.clientCursorRequests, [{ generation: 1, sequence: 1 }]);
   assert.equal(JSON.stringify(response).includes("SENTINEL_BODY"), false);
 });

@@ -1297,3 +1297,4 @@
 - 05:02 Isolated optional Prime client observations; README RLM smoke completed [f7f899d]
 - 05:20 Documented Prime Smoke Core/Full research and Core acceptance design [ad0c3cd]
 - 05:28 Added closed Prime Core receipt truth table to prevent partial smoke promotion [514c192]
+- 05:35 Added body-free degraded state for Prime client-observation sequence gaps [cb5e1e6]

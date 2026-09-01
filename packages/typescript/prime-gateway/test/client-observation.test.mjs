@@ -57,7 +57,7 @@ test("stores client bodies and emits only references", async () => {
   }
 });
 
-test("fails closed for cursor gaps, foreign sessions, and post-close observations", async () => {
+test("fails closed for cursor gaps and post-close observations while ignoring foreign sessions", async () => {
   const root = await temporaryStoreRoot();
   try {
     const mapper = mapperFixture(await PrivateValueStore.open(root.root));
@@ -73,12 +73,12 @@ test("fails closed for cursor gaps, foreign sessions, and post-close observation
       event: { type: "message_end", role: "assistant", content: "gap" },
       meta: { sequence: 3 },
     }));
-    await assert.rejects(mapper.map({
+    assert.deepEqual(await mapper.map({
       type: "session_event",
       activeSessionId: "prime-session-2",
       event: { type: "message_end", role: "assistant", content: "foreign" },
       meta: { sequence: 2 },
-    }));
+    }), []);
     await mapper.close();
     await assert.rejects(mapper.map({
       type: "session_event",
