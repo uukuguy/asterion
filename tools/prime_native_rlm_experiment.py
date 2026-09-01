@@ -1838,7 +1838,9 @@ async def run_native_rlm_controlled_probe(
                 host.pump(),
                 timeout=_native_rlm_pump_timeout_seconds(
                     reservation, exercise_checkpoint,
-                    active_detach=detach_while_active,
+                    active_detach=(
+                        detach_while_active and latest.detach_attached
+                    ),
                 ),
             )
         except TimeoutError:
