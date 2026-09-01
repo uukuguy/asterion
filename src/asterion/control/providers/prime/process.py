@@ -397,6 +397,7 @@ class PrimeSidecarProcess:
         ] = {}
         self._reader_task: asyncio.Task[None] | None = None
         self._transport_failed = False
+        self._transport_failure_code: str | None = None
         build_prime_sidecar_spawn_plan(options)
 
     @classmethod
@@ -429,7 +430,7 @@ class PrimeSidecarProcess:
         )
         async with self._lock:
             if self._closed or self._transport_failed or request_id in self._pending:
-                raise PrimeSidecarProcessError()
+                raise PrimeSidecarProcessError(safe_code=self._transport_failure_code)
             sidecar = await self._ensure_started()
             writer = sidecar.stdin
             reader = sidecar.stdout
@@ -507,12 +508,16 @@ class PrimeSidecarProcess:
 
     def _fail_transport(self, safe_code: str | None = None) -> None:
         self._transport_failed = True
+        if self._transport_failure_code is None:
+            self._transport_failure_code = safe_code
         pending = tuple(self._pending.values())
         self._pending.clear()
         for _, future, timeout_handle in pending:
             timeout_handle.cancel()
             if not future.done():
-                future.set_exception(PrimeSidecarProcessError(safe_code=safe_code))
+                future.set_exception(
+                    PrimeSidecarProcessError(safe_code=self._transport_failure_code)
+                )
                 future.add_done_callback(_consume_future_exception)
 
     def _expire_pending(
