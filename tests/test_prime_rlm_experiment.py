@@ -602,6 +602,16 @@ class TestNativeRlmExperiment(unittest.TestCase):
 
         self.assertNotIn("SENTINEL_PRIVATE", str(raised.exception))
 
+    def test_controlled_probe_classifies_fixed_event_transport_stage(self) -> None:
+        error = native_rlm.ControlHostTransportError(
+            "SENTINEL_PRIVATE", safe_code="event-read"
+        )
+
+        self.assertEqual(
+            native_rlm._native_rlm_control_failure_category(error),
+            "event-transport-event-read",
+        )
+
     def test_controlled_probe_classifies_fixed_event_transition(self) -> None:
         self.assertEqual(
             native_rlm._native_rlm_control_failure_category(

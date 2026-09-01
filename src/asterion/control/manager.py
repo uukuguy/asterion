@@ -75,6 +75,14 @@ class ControlHostError(RuntimeError):
 class ControlHostTransportError(ControlHostError):
     """Raised when a persisted provider operation has uncertain transport state."""
 
+    _SAFE_CODES = frozenset({"authority-sync", "event-read"})
+
+    def __init__(self, message: str, *, safe_code: str | None = None) -> None:
+        if safe_code is not None and safe_code not in self._SAFE_CODES:
+            raise ValueError("control transport error safe code is invalid")
+        self.safe_code = safe_code
+        super().__init__(message)
+
 
 class _OperationExecutionManager(Protocol):
     async def execute(self, transaction: OperationTransaction) -> OperationReceipt: ...
@@ -550,7 +558,13 @@ class ControlHost:
         await self._sync_authority_snapshot()
 
     async def pump(self, *, until_terminal: bool = False) -> None:
-        await self._sync_authority_snapshot()
+        try:
+            await self._sync_authority_snapshot()
+        except ControlHostTransportError:
+            raise ControlHostTransportError(
+                "control authority snapshot delivery is uncertain",
+                safe_code="authority-sync",
+            ) from None
         await self._rebuild_admitted_provider_bindings()
         await self._reconcile_provider_owned_actions()
         await self._resume_pending_actions()
@@ -562,24 +576,32 @@ class ControlHost:
                     sequence=self._state.next_sequence - 1,
                 )
                 seen = False
-                events = self._client.events(cursor)
-                async for event in events:
-                    seen = True
-                    if event.type in {
-                        "session.cancelled",
-                        "session.completed",
-                        "session.failed",
-                        "session.budget-limited",
-                    }:
-                        # Providers can report a root terminal in the same
-                        # stream batch as the final provider-owned child
-                        # terminal. Settle that child first so the canonical
-                        # state machine retains its no-active-actions terminal
-                        # invariant without rejecting an ordered provider flow.
-                        await self._settle_provider_owned_actions_before_terminal()
-                    await self._accept_event(event)
-                    if until_terminal and self._state.terminal_event_id is not None:
-                        break
+                try:
+                    events = self._client.events(cursor)
+                    async for event in events:
+                        seen = True
+                        if event.type in {
+                            "session.cancelled",
+                            "session.completed",
+                            "session.failed",
+                            "session.budget-limited",
+                        }:
+                            # Providers can report a root terminal in the same
+                            # stream batch as the final provider-owned child
+                            # terminal. Settle that child first so the canonical
+                            # state machine retains its no-active-actions terminal
+                            # invariant without rejecting an ordered provider flow.
+                            await self._settle_provider_owned_actions_before_terminal()
+                        await self._accept_event(event)
+                        if until_terminal and self._state.terminal_event_id is not None:
+                            break
+                except ControlHostError:
+                    raise
+                except Exception:
+                    raise ControlHostTransportError(
+                        "control provider event transport is uncertain",
+                        safe_code="event-read",
+                    ) from None
                 await self._reconcile_provider_owned_actions()
                 if not until_terminal or self._state.terminal_event_id is not None:
                     break
