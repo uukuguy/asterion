@@ -2317,8 +2317,9 @@ async function createSidecarFromDescriptor(
               causal_parent_ids: context.causalParentIds,
             },
           });
-          stage = "admission";
+          stage = "emit";
           await gateway.emitActionProposal(event);
+          stage = "wait-admission";
           const admission = await gateway.waitForAdmission(actionId);
           return Object.freeze({
             resolution: admission.resolution,
