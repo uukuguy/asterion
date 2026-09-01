@@ -1289,3 +1289,4 @@
 - 03:57 Made RLM admission wait for a stable durable running state without accepting created [2622977]
 - 04:02 Deferred smoke-only native goal seeding until the controlled direct input [9a4e1d7]
 - 04:06 Confirmed Prime session creation via host pump before submitting its first model input [94461f0]
+- 04:11 Anchored RLM admission on the durable same-generation running prefix [10f99e0]

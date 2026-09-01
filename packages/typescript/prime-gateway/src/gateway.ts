@@ -614,6 +614,10 @@ export class PrimeGateway {
       if (hasDurableRunningPrefix && !this.closed && !this.terminal) {
         return;
       }
+      if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+        const category = this.closed ? "closed" : this.terminal ? "terminal" : hasDurableRunningPrefix ? "state" : "prefix";
+        process.stderr.write(`asterion-prime-rlm-ready:${category}\n`);
+      }
       if (this.closed || this.terminal || this.sessionStatus === "paused" || this.sessionStatus === "recovery_required") {
         throw new PrimeGatewayError();
       }
