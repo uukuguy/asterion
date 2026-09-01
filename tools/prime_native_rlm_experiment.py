@@ -1684,6 +1684,8 @@ async def run_native_rlm_controlled_probe(
     exercise_cancellation: bool = False,
     exercise_budget_probe: bool = False,
     expected_model_selector_digest: str | None = None,
+    required_child_count: int = 1,
+    detach_while_active: bool = False,
 ) -> NativeRlmProbeResult:
     """Drive one root session until the closed native RLM proof is complete.
 
@@ -1699,6 +1701,9 @@ async def run_native_rlm_controlled_probe(
         or not isinstance(exercise_checkpoint, bool)
         or not isinstance(exercise_cancellation, bool)
         or not isinstance(exercise_budget_probe, bool)
+        or not isinstance(required_child_count, int)
+        or required_child_count not in {1, 2}
+        or not isinstance(detach_while_active, bool)
         or expected_model_selector_digest is not None
         and (
             not isinstance(expected_model_selector_digest, str)
@@ -1764,6 +1769,7 @@ async def run_native_rlm_controlled_probe(
     session_terminal = False
     cleanup_cancel_attempted = False
     primary_failure = False
+    children_started_at_detach = 0
     spawn_task: asyncio.Task[Mapping[str, object]] | None = None
     message_task: asyncio.Task[Mapping[str, object]] | None = None
     application_task: asyncio.Task[Mapping[str, object]] | None = None
@@ -1926,10 +1932,41 @@ async def run_native_rlm_controlled_probe(
                 cancelled=latest.cancelled,
                 budget_limited=latest.budget_limited,
             )
+            if (
+                detach_while_active
+                and not latest.detach_attached
+                and latest.children_started >= 1
+                and snapshot.state.terminal_event_id is None
+            ):
+                stage = "detach-attach"
+                await host.dispatch(native_rlm_session_detach_command(reservation))
+                await host.dispatch(native_rlm_session_attach_command(reservation))
+                children_started_at_detach = latest.children_started
+                latest = replace(latest, detach_attached=True)
+                checkpoint()
+            if (
+                latest.detach_attached
+                and latest.children_started > children_started_at_detach
+            ):
+                latest = replace(latest, work_continued_after_attach=True)
             checkpoint()
             if not latest.child_started and time.monotonic() >= initiation_deadline:
                 return latest
-            if latest.terminal == "completed":
+            core_lifecycle_complete = (
+                latest.child_started
+                and latest.child_deleted
+                if required_child_count == 1
+                else latest.children_started >= required_child_count
+                and latest.children_completed >= required_child_count
+                and latest.children_deleted >= required_child_count
+            )
+            root_terminal_complete = (
+                snapshot.state.terminal_event_id is not None
+                and snapshot.state.session_status == "completed"
+            )
+            if latest.terminal == "completed" and core_lifecycle_complete and (
+                not detach_while_active or root_terminal_complete
+            ):
                 if expected_model_selector_digest is not None:
                     stage = "model-evidence"
                     child_identity = observed_identities.get("child.spawn")

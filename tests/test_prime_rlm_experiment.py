@@ -441,6 +441,54 @@ class TestNativeRlmExperiment(unittest.TestCase):
             ["session.create", "input.submit", "session.detach", "session.attach"],
         )
 
+    def test_controlled_probe_can_detach_while_the_first_of_two_children_is_active(self) -> None:
+        class Host:
+            def __init__(self) -> None:
+                self.commands = []
+
+            async def dispatch(self, command) -> None:
+                self.commands.append(command)
+
+            async def pump(self) -> None:
+                return None
+
+            def snapshot(self):
+                return type("Snapshot", (), {"authority_usage": BudgetUsage.zero(), "state": type(
+                    "State", (), {"terminal_event_id": None, "session_status": "running"},
+                )()})()
+
+            async def close(self) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None, max_cost_micros=None, deadline_ms=None,
+                max_concurrent_children=2,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}, now_ms=1_000,
+            )
+            host = Host()
+            first = NativeRlmProbeResult(
+                "uncertain", True, True, False, BudgetUsage.zero(), children_started=1,
+            )
+            with (
+                mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=host),
+                mock.patch.object(
+                    native_rlm, "observe_native_rlm_gateway_probe", new_callable=mock.AsyncMock,
+                    side_effect=[first, PrimeRlmExperimentError("stop")],
+                ),
+            ):
+                with self.assertRaises(PrimeRlmExperimentError):
+                    asyncio.run(run_native_rlm_controlled_probe(
+                        object(), reservation, root, required_child_count=2,
+                        detach_while_active=True,
+                    ))
+
+        self.assertEqual(
+            [command.type for command in host.commands],
+            ["session.create", "input.submit", "session.detach", "session.attach", "session.cancel"],
+        )
+
     def test_controlled_probe_records_root_cancellation_after_closed_rlm(self) -> None:
         class Host:
             def __init__(self) -> None:
