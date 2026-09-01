@@ -107,6 +107,12 @@ _DEFAULT_OPERATIONS = tuple(
 class PrimeRlmExperimentError(RuntimeError):
     """Raised with a public-safe native RLM experiment preparation failure."""
 
+    def __init__(self, message: str, *, safe_code: str | None = None) -> None:
+        if safe_code not in {None, "pump_timeout", "observation_timeout"}:
+            raise ValueError("Native RLM experiment error is invalid")
+        self.safe_code = safe_code
+        super().__init__(message)
+
 
 @dataclass(frozen=True, repr=False)
 class NativeRlmExperimentLimits:
@@ -1704,7 +1710,8 @@ async def run_native_rlm_controlled_probe(
             )
         except TimeoutError:
             raise PrimeRlmExperimentError(
-                "Native RLM controlled probe event pump timed out"
+                "Native RLM controlled probe event pump timed out",
+                safe_code="pump_timeout",
             ) from None
 
     async def observe_bounded(usage: BudgetUsage) -> NativeRlmProbeResult:
@@ -1715,7 +1722,8 @@ async def run_native_rlm_controlled_probe(
             )
         except TimeoutError:
             raise PrimeRlmExperimentError(
-                "Native RLM controlled probe event observation timed out"
+                "Native RLM controlled probe event observation timed out",
+                safe_code="observation_timeout",
             ) from None
 
     try:

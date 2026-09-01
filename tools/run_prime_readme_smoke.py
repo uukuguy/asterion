@@ -121,6 +121,7 @@ def main() -> int:
                             sidecar,
                             active,
                             root,
+                            progress_root=root,
                             exercise_application=False,
                             exercise_checkpoint=False,
                             exercise_cancellation=False,
@@ -138,11 +139,24 @@ def main() -> int:
         output = {"status": result["status"], "scenario": "readme-rlm-smoke"}
         if result_path is not None:
             _write_result(result_path, output)
+        if result["status"] != "PASS":
+            terminal = result.get("terminal")
+            reason = (
+                f"prime.rlm.{terminal}"
+                if terminal in {"uncertain", "failed", "cancelled", "budget_limited"}
+                else "prime.rlm.incomplete"
+            )
+            print(json.dumps(dict(log.terminal("external-limited", reason))), flush=True)
+            print(json.dumps(output))
+            return 2
         print(json.dumps(dict(log.terminal("completed", "prime.rlm"))), flush=True)
         print(json.dumps(output))
         return 0
     except Exception as error:
         reason = phase
+        safe_code = getattr(error, "safe_code", None)
+        if safe_code in {"pump_timeout", "observation_timeout"}:
+            reason = f"{phase}.{safe_code}"
         if root is not None:
             try:
                 boundary = (root / "asterion-native-boundary").read_text(
@@ -161,7 +175,15 @@ def main() -> int:
         elif classified not in {"unavailable", "unknown"}:
             reason = f"{phase}.{classified}"
         elif reason == phase:
-            reason = f"{phase}.{_safe_exception_class(error)}"
+            try:
+                progress = json.loads((root / "native-rlm-progress.json").read_text(encoding="utf-8"))
+                stage = progress.get("stage") if isinstance(progress, dict) else None
+                if stage in {"create", "created", "start", "running", "model-evidence", "detach-attach", "checkpoint", "cancellation"}:
+                    reason = f"{phase}.{stage}"
+                else:
+                    reason = f"{phase}.{_safe_exception_class(error)}"
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                reason = f"{phase}.{_safe_exception_class(error)}"
         output = {"status": "External-limited", "scenario": "readme-rlm-smoke"}
         if result_path is not None:
             _write_result(result_path, output)
