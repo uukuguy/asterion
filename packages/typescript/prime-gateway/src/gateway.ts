@@ -608,7 +608,10 @@ export class PrimeGateway {
   async waitForActionProposalAvailability(): Promise<void> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       await this.durableQueue;
-      if (this.sessionStatus === "running" && !this.closed && !this.terminal) {
+      const hasDurableRunningPrefix = this.options.store.eventsAfter(0).some(
+        ({ event }) => event.generation === this.options.generation && event.type === "session.running",
+      );
+      if (hasDurableRunningPrefix && !this.closed && !this.terminal) {
         return;
       }
       if (this.closed || this.terminal || this.sessionStatus === "paused" || this.sessionStatus === "recovery_required") {
