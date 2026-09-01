@@ -1286,3 +1286,4 @@
 - 03:44 Gated the Prime RLM bridge on durable session.running to prevent smoke-only early admission [f94a383]
 - 03:49 Synchronized RLM proposals with the gateway durable running-state barrier [cd49a8b]
 - 03:53 Preserved canonical running state against duplicate native creation observations [3919aa9]
+- 03:57 Made RLM admission wait for a stable durable running state without accepting created [2622977]

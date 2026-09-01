@@ -81,6 +81,7 @@ export interface PrimePrivateSessionConfig {
   readonly maxControllerTokens: number;
   readonly timeoutMs: number;
   readonly rlmMaxDepth?: 0 | 1;
+  readonly suppressInitialGoal?: boolean;
 }
 
 export interface PrimeSessionCreateOptions {
@@ -415,6 +416,7 @@ function validatePrivateConfig(
     !positiveInteger(value.maxTurns) ||
     !positiveInteger(value.maxControllerTokens) ||
     !positiveInteger(value.timeoutMs) ||
+    (value.suppressInitialGoal !== undefined && typeof value.suppressInitialGoal !== "boolean") ||
     (value.rlmMaxDepth !== undefined && value.rlmMaxDepth !== 0 && value.rlmMaxDepth !== 1)
   ) {
     throw new PrimeSessionError();
@@ -929,10 +931,10 @@ export class PrimeSession {
               }),
             }),
             telemetryDisabled: true,
-            initialGoal: Object.freeze({
+            ...(privateConfig.suppressInitialGoal ? {} : { initialGoal: Object.freeze({
               objective: privateConfig.goal,
               tokenBudget: privateConfig.maxControllerTokens,
-            }),
+            }) }),
           }),
         },
         `${options.sessionId}-create`,

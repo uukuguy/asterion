@@ -2611,6 +2611,7 @@ async function createSidecarFromDescriptor(
             maxControllerTokens: descriptor.maxControllerTokens,
             timeoutMs: descriptor.timeoutMs,
             rlmMaxDepth: descriptor.rlmMaxDepth,
+            suppressInitialGoal: descriptor.probeReady,
           },
           bindIdentity,
           longRunningStore: store,
