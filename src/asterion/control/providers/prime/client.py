@@ -171,7 +171,7 @@ class PrimeControlError(RuntimeError):
     def __init__(
         self, message: str = "Prime control operation failed", *, safe_code: str | None = None
     ) -> None:
-        if safe_code not in {None, "response-timeout", "sidecar-error", "response-eof", "response-invalid"}:
+        if safe_code not in {None, "response-timeout", "sidecar-error", "response-eof", "response-invalid", "event-protocol", "event-runtime"}:
             raise ValueError("Prime control error safe code is invalid")
         self.safe_code = safe_code
         super().__init__(message)
@@ -773,8 +773,10 @@ class PrimeControlPlaneClient:
             if error.safe_code in {"response-timeout", "sidecar-error", "response-eof", "response-invalid"}:
                 raise PrimeControlError(safe_code=error.safe_code) from None
             raise PrimeControlError() from None
-        except (ControlProtocolError, TypeError, ValueError, RuntimeError):
-            raise PrimeControlError() from None
+        except (ControlProtocolError, TypeError, ValueError):
+            raise PrimeControlError(safe_code="event-protocol") from None
+        except RuntimeError:
+            raise PrimeControlError(safe_code="event-runtime") from None
 
     def client_observations(
         self, cursor: ClientCursor | None = None
