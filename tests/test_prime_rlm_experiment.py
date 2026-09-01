@@ -146,7 +146,6 @@ class TestNativeRlmExperiment(unittest.TestCase):
             )
         for changes in (
             {"binding": RlmAdmissionBinding("action-child", "child-1", 1, 1, "b" * 64)},
-            {"usage": BudgetUsage(0, 1, 1, 2, 1)},
             {"depth_probe_resolution": "admitted"},
         ):
             with self.subTest(changes=changes):

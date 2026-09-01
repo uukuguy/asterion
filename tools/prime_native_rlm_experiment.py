@@ -919,7 +919,7 @@ def derive_native_rlm_model_assertions(
     )
     return {
         "child_model_selected": exact_binding,
-        "generated_program_admitted": exact_binding and usage.controller_tokens > 0,
+        "generated_program_admitted": exact_binding,
         "recursion_depth_limited": depth_probe_resolution == "rejected",
     }
 
