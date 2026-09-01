@@ -334,6 +334,7 @@ class ControlHost:
         self._provider_owned_actions = provider_owned_actions
         self._operation_manager = operation_manager
         self._provider_bindings_rebuilt = False
+        self._pump_stage = "idle"
         self._children_closed = False
         self._cancellation_signal = cancellation_signal or _NeverCancelled()
         self._clock_ms = clock_ms
@@ -558,6 +559,7 @@ class ControlHost:
         await self._sync_authority_snapshot()
 
     async def pump(self, *, until_terminal: bool = False) -> None:
+        self._pump_stage = "authority-sync"
         try:
             await self._sync_authority_snapshot()
         except ControlHostTransportError:
@@ -565,8 +567,11 @@ class ControlHost:
                 "control authority snapshot delivery is uncertain",
                 safe_code="authority-sync",
             ) from None
+        self._pump_stage = "binding-rebuild"
         await self._rebuild_admitted_provider_bindings()
+        self._pump_stage = "provider-reconcile"
         await self._reconcile_provider_owned_actions()
+        self._pump_stage = "pending-actions"
         await self._resume_pending_actions()
         empty_polls = 0
         try:
@@ -577,6 +582,7 @@ class ControlHost:
                 )
                 seen = False
                 try:
+                    self._pump_stage = "event-read"
                     events = self._client.events(cursor)
                     async for event in events:
                         seen = True
@@ -592,6 +598,7 @@ class ControlHost:
                             # state machine retains its no-active-actions terminal
                             # invariant without rejecting an ordered provider flow.
                             await self._settle_provider_owned_actions_before_terminal()
+                        self._pump_stage = "event-accept"
                         await self._accept_event(event)
                         if until_terminal and self._state.terminal_event_id is not None:
                             break
@@ -602,6 +609,7 @@ class ControlHost:
                         "control provider event transport is uncertain",
                         safe_code="event-read",
                     ) from None
+                self._pump_stage = "provider-reconcile"
                 await self._reconcile_provider_owned_actions()
                 if not until_terminal or self._state.terminal_event_id is not None:
                     break
@@ -619,6 +627,10 @@ class ControlHost:
             raise ControlHostTransportError(
                 "control provider event transport is uncertain"
             ) from None
+    @property
+    def pump_stage(self) -> str:
+        """Return the fixed public-safe stage of the active control pump."""
+        return self._pump_stage
 
     def snapshot(self) -> ControlHostSnapshot:
         return ControlHostSnapshot(
@@ -799,6 +811,7 @@ class ControlHost:
             await self._admit_action(event)
 
     async def _admit_action(self, proposal: ControlEvent) -> None:
+        self._pump_stage = "action-admission"
         try:
             decision = self._authority.evaluate(
                 proposal,

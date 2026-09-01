@@ -111,6 +111,13 @@ class PrimeRlmExperimentError(RuntimeError):
     _SAFE_CODES = frozenset(
         {
             "pump_timeout",
+            "pump_timeout-authority-sync",
+            "pump_timeout-binding-rebuild",
+            "pump_timeout-provider-reconcile",
+            "pump_timeout-pending-actions",
+            "pump_timeout-event-read",
+            "pump_timeout-event-accept",
+            "pump_timeout-action-admission",
             "observation_timeout",
             "control",
             "event-transport",
@@ -1754,9 +1761,17 @@ async def run_native_rlm_controlled_probe(
                 ),
             )
         except TimeoutError:
+            pump_stage = getattr(host, "pump_stage", None)
+            safe_code = (
+                "pump_timeout-" + pump_stage
+                if isinstance(pump_stage, str)
+                and "pump_timeout-" + pump_stage
+                in PrimeRlmExperimentError._SAFE_CODES
+                else "pump_timeout"
+            )
             raise PrimeRlmExperimentError(
                 "Native RLM controlled probe event pump timed out",
-                safe_code="pump_timeout",
+                safe_code=safe_code,
             ) from None
 
     async def observe_bounded(
