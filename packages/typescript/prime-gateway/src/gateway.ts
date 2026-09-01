@@ -606,10 +606,17 @@ export class PrimeGateway {
   }
 
   async waitForActionProposalAvailability(): Promise<void> {
-    await this.durableQueue;
-    if (this.closed || this.terminal || this.sessionStatus !== "running") {
-      throw new PrimeGatewayError();
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      await this.durableQueue;
+      if (this.sessionStatus === "running" && !this.closed && !this.terminal) {
+        return;
+      }
+      if (this.closed || this.terminal || this.sessionStatus === "paused" || this.sessionStatus === "recovery_required") {
+        throw new PrimeGatewayError();
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
+    throw new PrimeGatewayError();
   }
 
   toString(): string {
