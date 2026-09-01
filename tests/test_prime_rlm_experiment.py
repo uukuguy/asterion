@@ -303,6 +303,24 @@ class TestNativeRlmExperiment(unittest.TestCase):
         )()
         self.assertEqual(native_rlm._native_rlm_snapshot_terminal(snapshot), "completed")
 
+    def test_model_evidence_is_due_before_controlled_core_completion(self) -> None:
+        self.assertTrue(
+            native_rlm._native_rlm_model_evidence_due(
+                core_lifecycle_complete=True,
+                detach_attached=True,
+                work_continued_after_attach=True,
+                already_collected=False,
+            )
+        )
+        self.assertFalse(
+            native_rlm._native_rlm_model_evidence_due(
+                core_lifecycle_complete=True,
+                detach_attached=True,
+                work_continued_after_attach=True,
+                already_collected=True,
+            )
+        )
+
     def test_application_admission_projects_all_public_authority_rejections(self) -> None:
         for reason in (
             "authority-cancelled",

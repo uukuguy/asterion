@@ -1834,6 +1834,7 @@ async def run_native_rlm_controlled_probe(
     checkpoint_task: asyncio.Task[Mapping[str, object]] | None = None
     budget_task: asyncio.Task[Mapping[str, object]] | None = None
     completion_task: asyncio.Task[Mapping[str, object]] | None = None
+    model_evidence_collected = expected_model_selector_digest is None
 
     def checkpoint() -> None:
         if progress_root is None:
@@ -2027,11 +2028,38 @@ async def run_native_rlm_controlled_probe(
                 and latest.children_completed >= required_child_count
                 and latest.children_deleted >= required_child_count
             )
+            if _native_rlm_model_evidence_due(
+                core_lifecycle_complete=core_lifecycle_complete,
+                detach_attached=latest.detach_attached,
+                work_continued_after_attach=latest.work_continued_after_attach,
+                already_collected=model_evidence_collected,
+            ):
+                stage = "model-evidence"
+                child_identity = observed_identities.get("child.spawn")
+                if child_identity is None:
+                    raise PrimeRlmExperimentError(
+                        "Native RLM model evidence did not complete"
+                    )
+                binding = await observer.rlm_binding(child_identity[1])
+                depth_resolution = await _probe_native_rlm_depth_limit(
+                    root,
+                    reservation,
+                    expected_model_selector_digest,
+                )
+                model_assertions = derive_native_rlm_model_assertions(
+                    binding=binding,
+                    expected_model_selector_digest=expected_model_selector_digest,
+                    usage=latest.usage,
+                    depth_probe_resolution=depth_resolution,
+                )
+                latest = replace(latest, **model_assertions)
+                model_evidence_collected = True
             if (
                 detach_while_active
                 and core_lifecycle_complete
                 and latest.detach_attached
                 and latest.work_continued_after_attach
+                and model_evidence_collected
                 and completion_task is None
             ):
                 stage = "goal-complete"
@@ -2068,26 +2096,6 @@ async def run_native_rlm_controlled_probe(
             if latest.terminal == "completed" and core_lifecycle_complete and (
                 not detach_while_active or root_terminal_complete
             ):
-                if expected_model_selector_digest is not None:
-                    stage = "model-evidence"
-                    child_identity = observed_identities.get("child.spawn")
-                    if child_identity is None:
-                        raise PrimeRlmExperimentError(
-                            "Native RLM model evidence did not complete"
-                        )
-                    binding = await observer.rlm_binding(child_identity[1])
-                    depth_resolution = await _probe_native_rlm_depth_limit(
-                        root,
-                        reservation,
-                        expected_model_selector_digest,
-                    )
-                    model_assertions = derive_native_rlm_model_assertions(
-                        binding=binding,
-                        expected_model_selector_digest=expected_model_selector_digest,
-                        usage=latest.usage,
-                        depth_probe_resolution=depth_resolution,
-                    )
-                    latest = replace(latest, **model_assertions)
                 stage = "detach-attach"
                 await host.dispatch(native_rlm_session_detach_command(reservation))
                 await host.dispatch(native_rlm_session_attach_command(reservation))
@@ -2615,6 +2623,23 @@ def _native_rlm_snapshot_terminal(snapshot: object) -> str | None:
     except AttributeError:
         return None
     return None
+
+
+def _native_rlm_model_evidence_due(
+    *,
+    core_lifecycle_complete: bool,
+    detach_attached: bool,
+    work_continued_after_attach: bool,
+    already_collected: bool,
+) -> bool:
+    """Collect root-dependent model evidence before controlled completion closes it."""
+
+    return (
+        core_lifecycle_complete
+        and detach_attached
+        and work_continued_after_attach
+        and not already_collected
+    )
 
 
 def _terminal_native_rlm_probe_result(
