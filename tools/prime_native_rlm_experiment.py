@@ -1994,6 +1994,9 @@ async def run_native_rlm_controlled_probe(
                 checkpoint_recovered=latest.checkpoint_recovered,
                 cancelled=latest.cancelled,
                 budget_limited=latest.budget_limited,
+                child_model_selected=latest.child_model_selected,
+                generated_program_admitted=latest.generated_program_admitted,
+                recursion_depth_limited=latest.recursion_depth_limited,
             )
             if (
                 detach_while_active
