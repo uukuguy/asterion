@@ -1281,3 +1281,4 @@
 - 03:10 Tightened the native RLM root prompt to require immediate IPython execution [pending commit]
 - 03:11 Committed direct IPython start instruction for the RLM root [a3cbb0b]
 - 03:30 Separated persistent Prime RLM goal from direct start input; preserved model-originated lifecycle proof [be771c0]
+- 03:37 Refined native RLM admission diagnostics to isolate event submission from host resolution [a82ceb0]

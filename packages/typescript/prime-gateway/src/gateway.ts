@@ -821,28 +821,41 @@ export class PrimeGateway {
   }
 
   async emitActionProposal(event: ControlEvent): Promise<void> {
-    this.assertOpen();
+    if (this.closed || this.terminal) {
+      privateDiagnosticActionProposal("closed");
+      throw new PrimeGatewayError();
+    }
     if (
       event.type !== "action.proposed" ||
       event.session_id !== this.options.sessionId ||
-      event.generation !== this.options.generation ||
-      (this.sessionStatus !== "running" &&
-        !(this.sessionStatus === "paused" &&
-          event.payload.kind === "checkpoint.create")) ||
-      !this.matchesReservation(event) ||
-      this.actions.has(event.payload.action_id)
+      event.generation !== this.options.generation
     ) {
-      if (
-        event.type === "action.proposed" &&
-        event.session_id === this.options.sessionId &&
-        event.generation === this.options.generation &&
-        this.matchesReservation(event)
-      ) {
-        this.releaseReservedEvent(event);
-      }
+      privateDiagnosticActionProposal("identity");
       throw new PrimeGatewayError();
     }
-    await this.append(event);
+    if (
+      this.sessionStatus !== "running" &&
+      !(this.sessionStatus === "paused" && event.payload.kind === "checkpoint.create")
+    ) {
+      privateDiagnosticActionProposal("session");
+      this.releaseReservedEvent(event);
+      throw new PrimeGatewayError();
+    }
+    if (!this.matchesReservation(event)) {
+      privateDiagnosticActionProposal("reservation");
+      throw new PrimeGatewayError();
+    }
+    if (this.actions.has(event.payload.action_id)) {
+      privateDiagnosticActionProposal("duplicate");
+      this.releaseReservedEvent(event);
+      throw new PrimeGatewayError();
+    }
+    try {
+      await this.append(event);
+    } catch {
+      privateDiagnosticActionProposal("append");
+      throw new PrimeGatewayError();
+    }
     this.actions.set(event.payload.action_id, {
       status: "proposed",
       kind: event.payload.kind,
@@ -3416,6 +3429,14 @@ function privateDiagnosticGatewayCancelStage(
 ): void {
   if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
     process.stderr.write(`asterion-prime-gateway-cancel-stage:${stage}\n`);
+  }
+}
+
+function privateDiagnosticActionProposal(
+  stage: "closed" | "identity" | "session" | "reservation" | "duplicate" | "append",
+): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+    process.stderr.write(`asterion-prime-action-proposal:${stage}\n`);
   }
 }
 
