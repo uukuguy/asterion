@@ -1833,6 +1833,7 @@ async def run_native_rlm_controlled_probe(
     application_task: asyncio.Task[Mapping[str, object]] | None = None
     checkpoint_task: asyncio.Task[Mapping[str, object]] | None = None
     budget_task: asyncio.Task[Mapping[str, object]] | None = None
+    completion_task: asyncio.Task[Mapping[str, object]] | None = None
 
     def checkpoint() -> None:
         if progress_root is None:
@@ -2026,6 +2027,37 @@ async def run_native_rlm_controlled_probe(
                 and latest.children_completed >= required_child_count
                 and latest.children_deleted >= required_child_count
             )
+            if (
+                detach_while_active
+                and core_lifecycle_complete
+                and latest.detach_attached
+                and latest.work_continued_after_attach
+                and completion_task is None
+            ):
+                stage = "goal-complete"
+                completion_task = asyncio.create_task(
+                    _send_native_rlm_skill_effect(
+                        root,
+                        operation="goal.complete",
+                        payload={
+                            "idempotency_key": "native-rlm-core-complete",
+                            "goal_id": _GOAL_REFERENCE,
+                            "summary": "native-rlm-core-complete",
+                            "budget": {
+                                "controller_tokens": 1,
+                                "application_tokens": 0,
+                                "child_tokens": 0,
+                                "aggregate_tokens": 1,
+                                "cost_micros": 0,
+                                "deadline_ms": _native_rlm_system_action_deadline(reservation),
+                            },
+                        },
+                    )
+                )
+            if completion_task is not None and completion_task.done():
+                _require_native_rlm_skill_success(
+                    await completion_task, operation="goal"
+                )
             root_terminal_complete = (
                 snapshot.state.terminal_event_id is not None
                 and snapshot.state.session_status == "completed"
