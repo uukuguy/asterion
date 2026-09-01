@@ -75,7 +75,7 @@ class ControlHostError(RuntimeError):
 class ControlHostTransportError(ControlHostError):
     """Raised when a persisted provider operation has uncertain transport state."""
 
-    _SAFE_CODES = frozenset({"authority-sync", "event-read"})
+    _SAFE_CODES = frozenset({"authority-sync", "event-read", "event-read-response-timeout"})
 
     def __init__(self, message: str, *, safe_code: str | None = None) -> None:
         if safe_code is not None and safe_code not in self._SAFE_CODES:
@@ -604,10 +604,15 @@ class ControlHost:
                             break
                 except ControlHostError:
                     raise
-                except Exception:
+                except Exception as error:
+                    safe_code = getattr(error, "safe_code", None)
                     raise ControlHostTransportError(
                         "control provider event transport is uncertain",
-                        safe_code="event-read",
+                        safe_code=(
+                            "event-read-response-timeout"
+                            if safe_code == "response-timeout"
+                            else "event-read"
+                        ),
                     ) from None
                 self._pump_stage = "provider-reconcile"
                 await self._reconcile_provider_owned_actions()

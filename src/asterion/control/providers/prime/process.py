@@ -40,7 +40,14 @@ _PUBLIC_ENV_ALLOWLIST = frozenset(
 class PrimeSidecarProcessError(RuntimeError):
     """Raised when the private Prime sidecar cannot produce a safe result."""
 
-    def __init__(self, message: str = "Prime sidecar process failed") -> None:
+    _SAFE_CODES = frozenset({"response-timeout"})
+
+    def __init__(
+        self, message: str = "Prime sidecar process failed", *, safe_code: str | None = None
+    ) -> None:
+        if safe_code is not None and safe_code not in self._SAFE_CODES:
+            raise ValueError("Prime sidecar process error safe code is invalid")
+        self.safe_code = safe_code
         super().__init__(message)
 
 
@@ -510,7 +517,7 @@ class PrimeSidecarProcess:
             return
         self._pending.pop(request_id, None)
         if not future.done():
-            future.set_exception(PrimeSidecarProcessError())
+            future.set_exception(PrimeSidecarProcessError(safe_code="response-timeout"))
             future.add_done_callback(_consume_future_exception)
 
     async def _stop_reader(self) -> None:

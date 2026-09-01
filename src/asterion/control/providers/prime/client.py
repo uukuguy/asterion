@@ -40,7 +40,10 @@ from asterion.control.session_context import (
     SessionContextCommand,
     SessionContextReceipt,
 )
-from asterion.control.providers.prime.process import PRIME_GATEWAY_IPC_PROTOCOL
+from asterion.control.providers.prime.process import (
+    PRIME_GATEWAY_IPC_PROTOCOL,
+    PrimeSidecarProcessError,
+)
 from asterion.control.providers.prime.long_running import (
     PrimeLongRunningIpcReceipt,
     validate_prime_long_running_mapping,
@@ -165,7 +168,12 @@ class RlmMessageAdmissionBinding:
 class PrimeControlError(RuntimeError):
     """Raised when Prime cannot safely accept or replay a control operation."""
 
-    def __init__(self, message: str = "Prime control operation failed") -> None:
+    def __init__(
+        self, message: str = "Prime control operation failed", *, safe_code: str | None = None
+    ) -> None:
+        if safe_code not in {None, "response-timeout"}:
+            raise ValueError("Prime control error safe code is invalid")
+        self.safe_code = safe_code
         super().__init__(message)
 
 
@@ -761,6 +769,10 @@ class PrimeControlPlaneClient:
                 if self._event_observer is not None:
                     self._event_observer(control_event)
                 yield control_event
+        except PrimeSidecarProcessError as error:
+            if error.safe_code == "response-timeout":
+                raise PrimeControlError(safe_code="response-timeout") from None
+            raise PrimeControlError() from None
         except (ControlProtocolError, TypeError, ValueError, RuntimeError):
             raise PrimeControlError() from None
 
