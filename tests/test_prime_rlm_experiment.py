@@ -1077,6 +1077,9 @@ class TestNativeRlmExperiment(unittest.TestCase):
         self.assertTrue(complete.child_started)
         self.assertTrue(complete.message_delivered)
         self.assertTrue(complete.child_deleted)
+        self.assertEqual(complete.children_started, 1)
+        self.assertEqual(complete.children_completed, 1)
+        self.assertEqual(complete.children_deleted, 1)
 
         not_deleted = classify_native_rlm_probe_observation(
             (
@@ -1484,6 +1487,17 @@ class TestNativeRlmExperiment(unittest.TestCase):
         self.assertEqual(reservation.limits.cost_micros, 500_000)
         self.assertEqual(reservation.limits.deadline_ms, 600_000)
         self.assertEqual(len(reservation.configuration_digest), 64)
+
+    def test_preparation_can_mint_a_bounded_two_child_core_authority(self) -> None:
+        reservation = prepare_native_rlm_experiment(
+            None,
+            max_cost_micros=None,
+            deadline_ms=None,
+            max_concurrent_children=2,
+            environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+            now_ms=1_000,
+        )
+        self.assertEqual(reservation.authority.max_concurrent_children, 2)
 
     def test_sidecar_descriptor_binds_authority_budget_and_selection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

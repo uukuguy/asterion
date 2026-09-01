@@ -244,6 +244,10 @@ class NativeRlmProbeResult:
     causal_identities: Mapping[str, tuple[str, str]] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    children_started: int = 0
+    children_completed: int = 0
+    children_deleted: int = 0
+    work_continued_after_attach: bool = False
 
 
 def _require_native_rlm_skill_success(
@@ -1014,6 +1018,9 @@ def classify_native_rlm_probe_observation(
         message_delivered=message_delivered,
         child_deleted=child_deleted,
         usage=usage,
+        children_started=len(active | completed),
+        children_completed=len(completed),
+        children_deleted=len(deleted),
     )
 
 
@@ -1172,7 +1179,7 @@ def build_native_rlm_sidecar_descriptor(
         "model": selection.model,
         "operationHost": dict(operation_host),
         "portfolio": [{"kind": "application", "provider_id": grant.provider_id, "application_id": grant.application_id, "version": grant.version, "runtime_id": grant.runtime_id} for grant in reservation.authority.allowed_portfolio],
-        "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(resources.prime_source_root), "provider": selection.provider, "probeReady": True, "rlmMaxChildren": 1, "rlmMaxDepth": 1,
+        "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(resources.prime_source_root), "provider": selection.provider, "probeReady": True, "rlmMaxChildren": reservation.authority.max_concurrent_children, "rlmMaxDepth": 1,
         "remainingBudget": {"controller_tokens": budget.controller_tokens, "application_tokens": budget.application_tokens, "child_tokens": budget.child_tokens, "aggregate_tokens": budget.aggregate_tokens, "cost_micros": budget.cost_micros, "deadline_ms": reservation.limits.deadline_ms},
         "sessionDir": str(root / "sessions"), "sessionId": session_id, "skillPath": str(resources.skill_path), "timeoutMs": reservation.limits.deadline_ms, "workspace": str(root / "workspace"),
     }
@@ -2602,6 +2609,7 @@ def prepare_native_rlm_experiment(
     *,
     max_cost_micros: int | None,
     deadline_ms: int | None,
+    max_concurrent_children: int = 1,
     environ: Mapping[str, str],
     now_ms: int | None = None,
 ) -> NativeRlmExperimentReservation:
@@ -2621,6 +2629,9 @@ def prepare_native_rlm_experiment(
             or not isinstance(action_deadline, int)
             or action_deadline < 1
             or action_deadline > _MAX_DEADLINE_MS
+            or isinstance(max_concurrent_children, bool)
+            or not isinstance(max_concurrent_children, int)
+            or max_concurrent_children not in {1, 2}
         ):
             raise ValueError
         model = environ.get(_MODEL_KEY)
@@ -2628,7 +2639,9 @@ def prepare_native_rlm_experiment(
             raise ValueError
         current = int(time.time() * 1000) if now_ms is None else now_ms
         authority = (
-            _default_native_rlm_authority(current, action_deadline)
+            _default_native_rlm_authority(
+                current, action_deadline, max_concurrent_children
+            )
             if authority_path is None
             else load_bounded_rlm_authority(
                 authority_path, max_cost_micros=cost_limit, now_ms=current
@@ -2636,7 +2649,12 @@ def prepare_native_rlm_experiment(
         )
         if authority.max_action_deadline_ms > action_deadline:
             raise ValueError
-        digest = sha256(b"asterion.prime.native-rlm\0" + model.encode()).hexdigest()
+        digest = sha256(
+            b"asterion.prime.native-rlm\0"
+            + model.encode()
+            + b"\0"
+            + str(max_concurrent_children).encode()
+        ).hexdigest()
         return NativeRlmExperimentReservation(
             authority=authority,
             limits=NativeRlmExperimentLimits(cost_limit, action_deadline),
@@ -2647,7 +2665,7 @@ def prepare_native_rlm_experiment(
 
 
 def _default_native_rlm_authority(
-    now_ms: int, deadline_ms: int
+    now_ms: int, deadline_ms: int, max_concurrent_children: int = 1
 ) -> AuthorityEnvelope:
     """Mint a one-command envelope that is never persisted or reused."""
     return AuthorityEnvelope(
@@ -2672,7 +2690,7 @@ def _default_native_rlm_authority(
         expires_at_ms=now_ms + deadline_ms,
         max_action_deadline_ms=deadline_ms,
         max_recursion_depth=1,
-        max_concurrent_children=1,
+        max_concurrent_children=max_concurrent_children,
         execution_domain="trusted-local",
         host_service_grants=("artifact.write",),
     )
