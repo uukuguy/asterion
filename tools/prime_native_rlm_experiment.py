@@ -1807,6 +1807,9 @@ async def run_native_rlm_controlled_probe(
         session_created = True
         stage = "created"
         checkpoint()
+        await pump_bounded()
+        stage = "running"
+        checkpoint()
         await host.dispatch(native_rlm_start_command(reservation))
         stage = "start"
         checkpoint()
