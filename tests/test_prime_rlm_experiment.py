@@ -180,6 +180,12 @@ class TestNativeRlmExperiment(unittest.TestCase):
             )
             self.assertEqual(native_rlm._native_rlm_pump_timeout_seconds(reservation, True), 305)
             self.assertEqual(native_rlm._native_rlm_pump_timeout_seconds(reservation, False), 305)
+            self.assertEqual(
+                native_rlm._native_rlm_pump_timeout_seconds(
+                    reservation, False, active_detach=True
+                ),
+                10,
+            )
 
     def test_system_action_deadline_uses_bounded_default_and_authority_cap(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

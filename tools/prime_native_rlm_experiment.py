@@ -146,6 +146,8 @@ class PrimeRlmExperimentError(RuntimeError):
             "event-journal",
             "budget-report",
             "event-invalid",
+            "detach-control",
+            "attach-control",
         }
     )
 
@@ -248,6 +250,10 @@ class NativeRlmProbeResult:
     children_completed: int = 0
     children_deleted: int = 0
     work_continued_after_attach: bool = False
+    control_event_sequence_contiguous: bool = False
+    terminal_count: int = 0
+    observation_health: str = "unknown"
+    observation_gap_count: int = 0
 
 
 def _require_native_rlm_skill_success(
@@ -474,15 +480,21 @@ def _native_rlm_system_action_deadline(
 
 
 def _native_rlm_pump_timeout_seconds(
-    reservation: NativeRlmExperimentReservation, exercise_checkpoint: bool
+    reservation: NativeRlmExperimentReservation,
+    exercise_checkpoint: bool,
+    *,
+    active_detach: bool = False,
 ) -> int:
     """Allow one authorized native gateway operation to settle."""
 
     if (
         not isinstance(reservation, NativeRlmExperimentReservation)
         or not isinstance(exercise_checkpoint, bool)
+        or not isinstance(active_detach, bool)
     ):
         raise PrimeRlmExperimentError("Native RLM pump deadline is invalid")
+    if active_detach:
+        return _PUMP_TIMEOUT_SECONDS
     return max(
         _PUMP_TIMEOUT_SECONDS,
         _native_rlm_system_action_deadline(reservation) // 1_000 + 5,
@@ -1686,6 +1698,7 @@ async def run_native_rlm_controlled_probe(
     expected_model_selector_digest: str | None = None,
     required_child_count: int = 1,
     detach_while_active: bool = False,
+    require_observation_health: bool = False,
 ) -> NativeRlmProbeResult:
     """Drive one root session until the closed native RLM proof is complete.
 
@@ -1704,6 +1717,7 @@ async def run_native_rlm_controlled_probe(
         or not isinstance(required_child_count, int)
         or required_child_count not in {1, 2}
         or not isinstance(detach_while_active, bool)
+        or not isinstance(require_observation_health, bool)
         or expected_model_selector_digest is not None
         and (
             not isinstance(expected_model_selector_digest, str)
@@ -1723,10 +1737,20 @@ async def run_native_rlm_controlled_probe(
     observed_event_types: list[str] = []
     observed_identities: dict[str, tuple[str, str]] = {}
     observed_message_action_ids: set[str] = set()
+    previous_control_sequence = 0
+    control_event_sequence_contiguous = True
+    terminal_count = 0
 
     def observe_event(event: ControlEvent) -> None:
         nonlocal checkpoint_created, last_action_kind, last_event_type
+        nonlocal previous_control_sequence, control_event_sequence_contiguous, terminal_count
         last_event_type = event.type
+        if not isinstance(event.sequence, int) or event.sequence != previous_control_sequence + 1:
+            control_event_sequence_contiguous = False
+        else:
+            previous_control_sequence = event.sequence
+        if event.type in {"session.completed", "session.failed", "session.cancelled", "session.budget_limited"}:
+            terminal_count += 1
         _record_native_rlm_control_fact(event, observed_event_types, observed_identities)
         if (
             event.type == "checkpoint.created"
@@ -1786,7 +1810,8 @@ async def run_native_rlm_controlled_probe(
             await asyncio.wait_for(
                 host.pump(),
                 timeout=_native_rlm_pump_timeout_seconds(
-                    reservation, exercise_checkpoint
+                    reservation, exercise_checkpoint,
+                    active_detach=detach_while_active,
                 ),
             )
         except TimeoutError:
@@ -1938,9 +1963,11 @@ async def run_native_rlm_controlled_probe(
                 and latest.children_started >= 1
                 and snapshot.state.terminal_event_id is None
             ):
-                stage = "detach-attach"
+                stage = "detach"
                 await host.dispatch(native_rlm_session_detach_command(reservation))
+                stage = "attach"
                 await host.dispatch(native_rlm_session_attach_command(reservation))
+                stage = "detach-attach"
                 children_started_at_detach = latest.children_started
                 latest = replace(latest, detach_attached=True)
                 checkpoint()
@@ -2066,7 +2093,22 @@ async def run_native_rlm_controlled_probe(
                     latest,
                     observed_event_types=tuple(observed_event_types),
                     causal_identities=MappingProxyType(dict(observed_identities)),
+                    control_event_sequence_contiguous=control_event_sequence_contiguous,
+                    terminal_count=terminal_count,
                 )
+                if require_observation_health:
+                    health_reader = getattr(observer, "client_observation_health", None)
+                    if not callable(health_reader):
+                        raise PrimeRlmExperimentError("Native RLM observation health is unavailable")
+                    health = await health_reader()
+                    health_status = getattr(health, "status", None)
+                    if health_status not in {"healthy", "degraded", "resync-required"}:
+                        raise PrimeRlmExperimentError("Native RLM observation health is invalid")
+                    latest = replace(
+                        latest,
+                        observation_health=health_status,
+                        observation_gap_count=0 if health_status == "healthy" else 1,
+                    )
                 session_terminal = True
                 return latest
             if snapshot.state.terminal_event_id is not None:
@@ -2089,8 +2131,18 @@ async def run_native_rlm_controlled_probe(
     except Exception as error:
         if not _native_rlm_failure_may_reconcile_terminal(stage):
             primary_failure = True
+            category = _native_rlm_control_failure_category(error)
+            safe_code = {
+                "detach": "detach-control",
+                "attach": "attach-control",
+            }.get(stage, category)
             raise PrimeRlmExperimentError(
-                f"Native RLM controlled probe {stage} control did not complete"
+                f"Native RLM controlled probe {stage} {category} did not complete",
+                safe_code=(
+                    safe_code
+                    if safe_code in PrimeRlmExperimentError._SAFE_CODES
+                    else None
+                ),
             ) from None
         terminal = _terminal_native_rlm_probe_result(host, latest)
         if terminal is not None:
