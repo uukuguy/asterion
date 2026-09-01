@@ -3374,7 +3374,10 @@ export class PrimeGateway {
 
   private updateSessionStatus(event: ControlEvent): void {
     if (event.type === "session.created") {
-      this.sessionStatus = "created";
+      // Native subscription delivery can repeat its creation observation
+      // after the durable running prefix is established. A repeated creation
+      // must never regress the canonical session state.
+      this.sessionStatus ??= "created";
       this.goalStatus ??= "active";
     } else if (event.type === "goal.updated") {
       this.goalStatus = event.payload.status;

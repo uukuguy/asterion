@@ -1284,3 +1284,4 @@
 - 03:37 Refined native RLM admission diagnostics to isolate event submission from host resolution [a82ceb0]
 - 03:40 Classified private action-proposal rejection stages to expose the exact RLM gateway race [1e12344]
 - 03:44 Gated the Prime RLM bridge on durable session.running to prevent smoke-only early admission [f94a383]
+- 03:49 Synchronized RLM proposals with the gateway durable running-state barrier [cd49a8b]
