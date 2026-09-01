@@ -1294,3 +1294,4 @@
 - 04:25 Added fixed-category Host action-state diagnostics for Prime RLM [1b6735c]
 - 04:40 Aligned Prime action admission to latest durable session state, preventing paused-state drift [c4757e2]
 - 04:55 Classified Prime event-processing failures without exposing native event bodies [d72ec44]
+- 05:02 Isolated optional Prime client observations; README RLM smoke completed [f7f899d]
