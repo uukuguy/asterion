@@ -32,9 +32,12 @@ _CORE_GOAL = (
 _CORE_START = (
     "Do not answer with prose. Use IPython now. Create exactly one child with rlm, "
     "send it one ping using agent_message.send, and wait for its reply in a later turn. "
-    "After its reply, delete that child. Then create exactly one different second child, "
-    "send one ping, wait for its reply, delete it, and complete the goal. Do not create "
-    "a child until the previous child is deleted."
+    "Do not create any other child or complete the goal yet."
+)
+_CORE_CONTINUE = (
+    "Continue the private Core task now. Delete the finished first child if needed. "
+    "Then use IPython to create exactly one different second child with rlm, send it one ping, "
+    "wait for its reply, delete it, and complete the goal. Do not answer with prose."
 )
 
 
@@ -88,7 +91,9 @@ def main() -> int:
         root = Path(tempfile.mkdtemp(prefix="asterion-prime-core-", dir="/tmp"))
         root.chmod(0o700)
         stderr_path = root / "sidecar.stderr.log"
-        private_goal = NativeRlmPrivateGoal(_CORE_GOAL, _CORE_START)
+        private_goal = NativeRlmPrivateGoal(
+            _CORE_GOAL, _CORE_START, _CORE_CONTINUE
+        )
 
         async def run() -> object:
             observe("run.phase", {"phase": "prime.core"})
@@ -116,7 +121,7 @@ def main() -> int:
                             exercise_application=True,
                             expected_model_selector_digest=native_rlm_model_selector_digest(selection),
                             required_child_count=2, detach_while_active=True,
-                            require_observation_health=True,
+                            require_observation_health=True, continue_after_attach=True,
                         ),
                     )
             finally:

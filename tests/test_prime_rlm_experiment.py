@@ -487,12 +487,12 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 with self.assertRaises(PrimeRlmExperimentError):
                     asyncio.run(run_native_rlm_controlled_probe(
                         object(), reservation, root, required_child_count=2,
-                        detach_while_active=True,
+                        detach_while_active=True, continue_after_attach=True,
                     ))
 
         self.assertEqual(
             [command.type for command in host.commands],
-            ["session.create", "input.submit", "session.detach", "session.attach", "session.cancel"],
+            ["session.create", "input.submit", "session.detach", "session.attach", "input.submit", "session.cancel"],
         )
 
     def test_controlled_probe_records_root_cancellation_after_closed_rlm(self) -> None:

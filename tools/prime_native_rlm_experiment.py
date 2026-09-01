@@ -68,6 +68,7 @@ _MODEL_KEY = "ASTERION_PRIME_EXPERIMENT_MODEL"
 _SESSION_ID = "native-rlm-root"
 _GOAL_REFERENCE = "native-rlm-goal"
 _START_REFERENCE = "native-rlm-start-input"
+_CONTINUE_REFERENCE = "native-rlm-continue-input"
 _APPLICATION_TARGET = {
     "kind": "application",
     "provider_id": "asterion.prime-gateway",
@@ -306,11 +307,13 @@ class NativeRlmPrivateGoal:
 
     goal_text: str
     start_text: str | None = None
+    continue_text: str | None = None
 
     def resolve_text(self, reference: str, *, max_bytes: int) -> str:
         values = {
             _GOAL_REFERENCE: self.goal_text,
             _START_REFERENCE: self.start_text or self.goal_text,
+            _CONTINUE_REFERENCE: self.continue_text or self.goal_text,
         }
         value = values.get(reference)
         if not isinstance(value, str) or not isinstance(max_bytes, int) or max_bytes < len(value.encode("utf-8")):
@@ -769,6 +772,28 @@ def native_rlm_start_command(
         )
     except (TypeError, ValueError):
         raise PrimeRlmExperimentError("Native RLM start command is invalid") from None
+
+
+def native_rlm_continue_command(
+    reservation: NativeRlmExperimentReservation,
+    *,
+    session_id: str = _SESSION_ID,
+) -> ControlCommand:
+    """Submit one distinct private continuation after an active reattach."""
+    if not isinstance(reservation, NativeRlmExperimentReservation) or not isinstance(session_id, str) or not session_id:
+        raise PrimeRlmExperimentError("Native RLM continuation command is invalid")
+    try:
+        return ControlCommand(
+            command_id="native-rlm-continue", session_id=session_id,
+            authority_revision=reservation.authority.revision,
+            type="input.submit",
+            payload={
+                "input_id": "native-rlm-continue", "delivery": "direct",
+                "content_ref": _CONTINUE_REFERENCE,
+            },
+        )
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM continuation command is invalid") from None
 
 
 def native_rlm_session_detach_command(
@@ -1699,6 +1724,7 @@ async def run_native_rlm_controlled_probe(
     required_child_count: int = 1,
     detach_while_active: bool = False,
     require_observation_health: bool = False,
+    continue_after_attach: bool = False,
 ) -> NativeRlmProbeResult:
     """Drive one root session until the closed native RLM proof is complete.
 
@@ -1718,6 +1744,7 @@ async def run_native_rlm_controlled_probe(
         or required_child_count not in {1, 2}
         or not isinstance(detach_while_active, bool)
         or not isinstance(require_observation_health, bool)
+        or not isinstance(continue_after_attach, bool)
         or expected_model_selector_digest is not None
         and (
             not isinstance(expected_model_selector_digest, str)
@@ -1967,6 +1994,9 @@ async def run_native_rlm_controlled_probe(
                 await host.dispatch(native_rlm_session_detach_command(reservation))
                 stage = "attach"
                 await host.dispatch(native_rlm_session_attach_command(reservation))
+                if continue_after_attach:
+                    stage = "continue"
+                    await host.dispatch(native_rlm_continue_command(reservation))
                 stage = "detach-attach"
                 children_started_at_detach = latest.children_started
                 latest = replace(latest, detach_attached=True)
