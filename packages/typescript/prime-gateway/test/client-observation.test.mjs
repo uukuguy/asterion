@@ -57,6 +57,25 @@ test("stores client bodies and emits only references", async () => {
   }
 });
 
+test("ignores a Prime tool-result message without disabling later observations", async () => {
+  const root = await temporaryStoreRoot();
+  try {
+    const mapper = mapperFixture(await PrivateValueStore.open(root.root));
+    assert.deepEqual(await mapper.map({
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
+      event: { type: "message_end", message: { role: "toolResult", content: "SENTINEL_TOOL_RESULT" } },
+    }), []);
+    const [observation] = await mapper.map({
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 2 },
+      event: { type: "message_end", message: { role: "assistant", content: "safe" } },
+    });
+    assert.equal(observation.source_sequence, 1);
+    assert.deepEqual(mapper.health, { status: "healthy", reason_code: null, observed_through_native_sequence: 2, first_missing_native_sequence: null, resync_required: false });
+  } finally {
+    await root.cleanup();
+  }
+});
+
 test("accepts sparse same-session cursors and rejects a regression or post-close observation", async () => {
   const root = await temporaryStoreRoot();
   try {

@@ -209,7 +209,9 @@ export class PrimeClientObservationMapper {
     if (!record(value) || typeof value.type !== "string") throw new PrimeClientObservationError();
     if (value.type === "message_end") {
       const message = value.message;
-      if (!record(message) || (message.role !== "assistant" && message.role !== "user") || !("content" in message)) throw new PrimeClientObservationError();
+      if (!record(message) || typeof message.role !== "string") throw new PrimeClientObservationError();
+      if (message.role === "toolResult") return undefined;
+      if ((message.role !== "assistant" && message.role !== "user") || !("content" in message)) throw new PrimeClientObservationError();
       const d = await this.store("message", "application/json", message.content, nativeSequence, written);
       return { nativeSequence, kind: "message.available", payload: { content_ref: d.reference, media_type: d.mediaType, message_id: typeof message.id === "string" && OPAQUE_ID.test(message.id) ? message.id : `message-${this.sequence + 1}`, role: message.role, sha256: d.sha256, size: d.size } };
     }
