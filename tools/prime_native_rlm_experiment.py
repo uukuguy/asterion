@@ -124,6 +124,7 @@ class PrimeRlmExperimentError(RuntimeError):
             "event-transport-authority-sync",
             "event-transport-event-read",
             "event-transport-event-read-response-timeout",
+            "event-transport-event-read-sidecar-error",
             "event-transition",
             "action-admission",
             "provider-lifecycle",
@@ -2240,7 +2241,7 @@ def _native_rlm_control_failure_category(error: Exception) -> str:
     """Project fixed host failures without retaining private transport detail."""
     if isinstance(error, ControlHostTransportError):
         safe_code = getattr(error, "safe_code", None)
-        if safe_code in {"authority-sync", "event-read", "event-read-response-timeout"}:
+        if safe_code in {"authority-sync", "event-read", "event-read-response-timeout", "event-read-sidecar-error"}:
             return "event-transport-" + safe_code
         return "event-transport"
     if not isinstance(error, ControlHostError):
