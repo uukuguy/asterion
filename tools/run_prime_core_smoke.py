@@ -152,6 +152,11 @@ def main() -> int:
         print(json.dumps(dict(log.terminal(terminal, "prime.core")), sort_keys=True, separators=(",", ":")), flush=True)
         print(json.dumps(receipt, sort_keys=True, separators=(",", ":")), flush=True)
         return 0 if receipt["status"] == "PASS" else 2
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        receipt = dict(verify_prime_core_smoke_result(_external_limited()))
+        print(json.dumps(dict(log.terminal("external-limited", "prime.core.interrupted")), sort_keys=True, separators=(",", ":")), flush=True)
+        print(json.dumps(receipt, sort_keys=True, separators=(",", ":")), flush=True)
+        return 2
     except Exception as error:
         receipt = dict(verify_prime_core_smoke_result(_external_limited()))
         print(json.dumps(dict(log.terminal("external-limited", f"prime.core.{_safe_reason(error)}")), sort_keys=True, separators=(",", ":")), flush=True)
