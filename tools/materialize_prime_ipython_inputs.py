@@ -1,15 +1,20 @@
-"""Plan, but never execute, release materialization of Prime IPython inputs."""
+"""Plan or explicitly stage operator-specified Prime image release inputs."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
+import os
 from pathlib import Path
+import re
+import stat
+from typing import Iterable, Protocol
+from urllib.parse import urlsplit
 
 from asterion.applications.prime_agent.operator.image_input_lock import (
-    PRIME_IPYTHON_IMAGE_INPUT_LOCK,
-    PrimeImageInputLockError,
-    VerifiedImageInputArtifactSet,
-    image_input_lock_sha256,
+    ImageArtifact, PRIME_IPYTHON_IMAGE_INPUT_LOCK, PrimeImageInputLockError,
+    ReleaseArtifact, ReleaseLockProposal, ReleaseSpecification,
+    VerifiedImageInputArtifactSet, image_input_lock_sha256,
     verify_image_input_artifact_set,
 )
 
@@ -18,14 +23,43 @@ class PrimeImageMaterializerError(ValueError):
     """Raised when an operator-selected materialization boundary is unsafe."""
 
 
+class ReleaseResponse(Protocol):
+    url: str
+    content_length: int
+    body: Iterable[bytes]
+
+
+class ReleaseTransport(Protocol):
+    def fetch(self, url: str) -> ReleaseResponse: ...
+
+
+@dataclass(frozen=True)
+class ReleaseAuthorization:
+    """A fresh explicit capability required for a release staging operation."""
+
+
 @dataclass(frozen=True)
 class MaterializationPlan:
-    """An inert command description for a separately authorized release flow."""
-
     output_root: Path
     lock_sha256: str
     commands: tuple[tuple[str, ...], ...]
     notice: str
+
+
+@dataclass(frozen=True)
+class ReleaseMaterializationResult:
+    """Public-safe staging outcome; deliberately not verification evidence."""
+
+    target_id: str
+    count: int
+    digests: tuple[str, ...]
+    proposal: ReleaseLockProposal
+
+
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+_COMMIT = re.compile(r"[0-9a-f]{40}")
+_PATH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
+_MAX_BYTES = 1 << 30
 
 
 def repository_root() -> Path:
@@ -39,26 +73,138 @@ def lock_sha256() -> str:
 def plan_materialization(output_root: Path) -> MaterializationPlan:
     """Validate a new external target and return no executable side effect."""
 
-    if not isinstance(output_root, Path) or not output_root.is_absolute() or output_root.exists():
-        raise PrimeImageMaterializerError("Prime image materialization target is invalid")
     try:
-        resolved = output_root.resolve(strict=False)
-        repository = repository_root().resolve(strict=True)
-        parent = resolved.parent.resolve(strict=True)
-        if resolved != output_root or output_root.is_symlink() or repository == resolved or repository in resolved.parents or repository.parent in resolved.parents or not parent.is_dir() or parent.is_symlink():
-            raise ValueError
+        _validate_fresh_external_target(output_root)
     except (OSError, ValueError):
         raise PrimeImageMaterializerError("Prime image materialization target is invalid") from None
     return MaterializationPlan(
-        output_root=output_root,
-        lock_sha256=lock_sha256(),
-        commands=(("asterion-prime-authorized-release-materialize", "--lock-sha256", lock_sha256(), "--output-root", str(output_root)),),
-        notice="This is only a command plan; a separately authorized release workflow must materialize and verify the artifact set.",
+        output_root, lock_sha256(),
+        (("asterion-prime-authorized-release-materialize", "--lock-sha256", lock_sha256(), "--output-root", str(output_root)),),
+        "This is only a command plan; a separately authorized release workflow must materialize and verify the artifact set.",
     )
 
 
+def validate_release_specification(specification: object) -> ReleaseSpecification:
+    """Fail closed unless every caller-injected release field is exact and safe."""
+
+    if type(specification) is not ReleaseSpecification:
+        raise ValueError("Prime image release specification is invalid")
+    if (
+        type(specification.source_commit) is not str
+        or _COMMIT.fullmatch(specification.source_commit) is None
+        or any(type(value) is not str or _SHA256.fullmatch(value) is None for value in (specification.source_tree_sha256, specification.source_package_lock_sha256))
+        or specification.platform != "linux/amd64" or not isinstance(specification.artifacts, tuple) or not specification.artifacts
+    ):
+        raise ValueError("Prime image release specification is invalid")
+    artifacts = specification.artifacts
+    if tuple(sorted(artifacts, key=lambda item: item.path)) != artifacts or len({item.url for item in artifacts}) != len(artifacts):
+        raise ValueError("Prime image release specification is invalid")
+    for artifact in artifacts:
+        if type(artifact) is not ReleaseArtifact:
+            raise ValueError("Prime image release specification is invalid")
+        if type(artifact.url) is not str:
+            raise ValueError("Prime image release specification is invalid")
+        parsed = urlsplit(artifact.url)
+        if (
+            parsed.scheme != "https" or not parsed.netloc
+            or parsed.username is not None or parsed.password is not None or parsed.fragment
+            or _PATH.fullmatch(artifact.path) is None or "//" in artifact.path
+            or any(part in {".", ".."} for part in artifact.path.split("/"))
+            or type(artifact.size) is not int or artifact.size < 0 or artifact.size > _MAX_BYTES
+            or type(artifact.sha256) is not str or _SHA256.fullmatch(artifact.sha256) is None
+        ):
+            raise ValueError("Prime image release specification is invalid")
+    if len({item.path for item in artifacts}) != len(artifacts):
+        raise ValueError("Prime image release specification is invalid")
+    return specification
+
+
+def materialize_authorized_release(
+    output_root: Path, specification: ReleaseSpecification, transport: ReleaseTransport, *, authorization: ReleaseAuthorization | None = None,
+) -> ReleaseMaterializationResult:
+    """Stage exact fetched bytes and issue only an untrusted lock proposal."""
+
+    if type(authorization) is not ReleaseAuthorization:
+        raise PrimeImageMaterializerError("Prime image materialization authorization is invalid")
+    try:
+        spec = validate_release_specification(specification)
+        _validate_fresh_external_target(output_root)
+        if not hasattr(transport, "fetch"):
+            raise ValueError
+        output_root.mkdir(mode=0o700)
+        if (output_root.stat().st_mode & 0o777) != 0o700:
+            raise ValueError
+        for artifact in spec.artifacts:
+            response = transport.fetch(artifact.url)
+            if response.url != artifact.url or response.content_length != artifact.size:
+                raise ValueError
+            _write_checked_file(output_root, artifact.path, response.body, artifact.size, artifact.sha256)
+        proposal = ReleaseLockProposal(
+            spec.source_commit, spec.source_tree_sha256, spec.source_package_lock_sha256, spec.platform,
+            tuple(ImageArtifact(item.kind, item.path, item.size, item.sha256) for item in spec.artifacts),
+        )
+        return ReleaseMaterializationResult(sha256(str(output_root).encode()).hexdigest(), len(proposal.artifacts), tuple(item.sha256 for item in proposal.artifacts), proposal)
+    except (OSError, TypeError, ValueError, PrimeImageInputLockError):
+        raise PrimeImageMaterializerError("Prime image materialization target is invalid") from None
+
+
+def _validate_fresh_external_target(output_root: Path) -> None:
+    if not isinstance(output_root, Path) or not output_root.is_absolute() or output_root.exists() or output_root.is_symlink():
+        raise ValueError
+    resolved = output_root.resolve(strict=False)
+    repository = repository_root().resolve(strict=True)
+    parent = resolved.parent.resolve(strict=True)
+    if not parent.is_dir() or parent.is_symlink() or repository == resolved or repository in resolved.parents or repository.parent in resolved.parents:
+        raise ValueError
+
+
+def _write_checked_file(root: Path, relative: str, chunks: Iterable[bytes], expected_size: int, expected_sha256: str) -> None:
+    destination = root / relative
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # All directories below ``root`` were just created from the validated
+    # relative path; do not mistake the platform's own /var compatibility link
+    # for a caller-controlled staging symlink.
+    if destination.parent.is_symlink():
+        raise ValueError
+    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        digest = sha256()
+        size = 0
+        for chunk in chunks:
+            if type(chunk) is not bytes or size + len(chunk) > expected_size or size + len(chunk) > _MAX_BYTES:
+                raise ValueError
+            _write_all(descriptor, chunk)
+            digest.update(chunk)
+            size += len(chunk)
+        if size != expected_size or digest.hexdigest() != expected_sha256:
+            raise ValueError
+    finally:
+        os.close(descriptor)
+    descriptor = os.open(destination, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        digest = sha256()
+        while chunk := os.read(descriptor, 65536):
+            digest.update(chunk)
+        if not stat.S_ISREG(info.st_mode) or info.st_size != expected_size or digest.hexdigest() != expected_sha256:
+            raise ValueError
+    finally:
+        os.close(descriptor)
+
+
+def _write_all(descriptor: int, chunk: bytes) -> None:
+    """Write a transport chunk completely; short writes never truncate a digest."""
+
+    view = memoryview(chunk)
+    while view:
+        written = os.write(descriptor, view)
+        if written <= 0:
+            raise OSError("short write")
+        view = view[written:]
+
+
 def verify_external_materialization(output_root: Path) -> VerifiedImageInputArtifactSet:
-    """Return verification evidence for an existing result; never download or build it."""
+    """Return static-lock verification evidence for an existing result; never download."""
 
     try:
         return verify_image_input_artifact_set(output_root)

@@ -50,6 +50,63 @@ class ImageArtifact:
 
 
 @dataclass(frozen=True)
+class ReleaseArtifact:
+    """An operator-supplied immutable release object and its staging destination.
+
+    This is intentionally distinct from :class:`ImageArtifact`: the URL is
+    release-local provenance, never a field in a promotable image input lock.
+    """
+
+    kind: str
+    url: str
+    path: str
+    size: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ReleaseSpecification:
+    """Exact, caller-injected release inputs; no bundled release is implied."""
+
+    source_commit: str
+    source_tree_sha256: str
+    source_package_lock_sha256: str
+    platform: str
+    artifacts: tuple[ReleaseArtifact, ...]
+
+
+@dataclass(frozen=True)
+class ReleaseLockProposal:
+    """A canonical but explicitly untrusted candidate for human promotion."""
+
+    source_commit: str
+    source_tree_sha256: str
+    source_package_lock_sha256: str
+    platform: str
+    artifacts: tuple[ImageArtifact, ...]
+    untrusted: bool = True
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "artifacts": [artifact.as_dict() for artifact in self.artifacts],
+            "format": "asterion.image-input-release-proposal/v1",
+            "platform": self.platform,
+            "source_commit": self.source_commit,
+            "source_package_lock_sha256": self.source_package_lock_sha256,
+            "source_tree_sha256": self.source_tree_sha256,
+            "untrusted": self.untrusted,
+        }
+
+
+def canonical_release_lock_proposal_json(proposal: ReleaseLockProposal) -> str:
+    """Return a canonical display/review form, never verification evidence."""
+
+    if type(proposal) is not ReleaseLockProposal or proposal.untrusted is not True:
+        raise PrimeImageInputLockError("Prime image release proposal is invalid")
+    return json.dumps(proposal.as_dict(), separators=(",", ":"), sort_keys=True)
+
+
+@dataclass(frozen=True)
 class ImageInputLock:
     """A syntactically valid, unmaterialized offline Linux input contract."""
 
