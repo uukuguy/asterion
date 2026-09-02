@@ -49,18 +49,34 @@ def _host(provider: Provider, **changes: object) -> _HostModelCoordinator:
 
 
 class TestPrimeModelBroker(unittest.IsolatedAsyncioTestCase):
-    def test_normal_worker_scope_has_only_channel_not_host_routes(self) -> None:
+    async def test_normal_worker_scope_has_only_channel_not_host_routes(self) -> None:
+        calls = 0
         async def provider(_body: bytes) -> bytes:
+            nonlocal calls
+            calls += 1
             return b"ok"
 
-        channel = _host(provider)._activate()
+        host = _host(provider)
+        channel = host._activate()
         self.assertIsInstance(channel, PrimeModelChannel)
         self.assertEqual(set(model_broker.__all__), {
             "PrimeModelBrokerError", "PrimeModelBrokerUsage", "PrimeModelBrokerReceipt", "PrimeModelChannel", "Provider"})
         self.assertEqual({name for name in dir(channel) if not name.startswith("_")}, {"request"})
+        for name in dir(channel):
+            self.assertFalse(any(word in name.lower() for word in (
+                "coordinator", "broker", "provider", "barrier", "release", "activate", "revoke", "usage")))
+        endpoint = channel._transport  # noqa: SLF001 - ordinary worker object traversal
+        for name in dir(endpoint):
+            self.assertFalse(any(word in name.lower() for word in (
+                "coordinator", "broker", "provider", "barrier", "release", "activate", "revoke", "usage")))
+        self.assertEqual(calls, 0)
+        await host.revoke()
 
     async def test_charges_attempted_output_before_rejecting_cap(self) -> None:
+        calls = 0
         async def provider(body: bytes) -> bytes:
+            nonlocal calls
+            calls += 1
             return b"123456" if body == b"one" else b"1234567"
 
         host = _host(provider)
@@ -69,6 +85,9 @@ class TestPrimeModelBroker(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PrimeModelBrokerError):
             await channel.request(b"two")
         self.assertEqual(host.usage().output_bytes, 13)
+        with self.assertRaises(PrimeModelBrokerError):
+            await channel.request(b"two")
+        self.assertEqual(calls, 2)
 
     async def test_provider_cancellations_are_generic_but_outer_cancellation_propagates(self) -> None:
         def sync_cancel(_body: bytes) -> object:
@@ -78,9 +97,11 @@ class TestPrimeModelBroker(unittest.IsolatedAsyncioTestCase):
             raise asyncio.CancelledError("SECRET-ENDPOINT")
 
         for provider in (sync_cancel, async_cancel):
+            host = _host(provider)  # type: ignore[arg-type]
             with self.subTest(provider=provider), self.assertRaises(PrimeModelBrokerError) as raised:
-                await _host(provider)._activate().request(b"SECRET-PROMPT")  # type: ignore[arg-type]
+                await host._activate().request(b"SECRET-PROMPT")
             self.assertNotIn("SECRET", str(raised.exception))
+            await host.revoke()
 
         started = asyncio.Event()
         async def waiting(_body: bytes) -> bytes:
@@ -88,11 +109,13 @@ class TestPrimeModelBroker(unittest.IsolatedAsyncioTestCase):
             await asyncio.Event().wait()
             return b"never"
 
-        task = asyncio.create_task(_host(waiting)._activate().request(b"one"))
+        host = _host(waiting)
+        task = asyncio.create_task(host._activate().request(b"one"))
         await started.wait()
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await task
+        await host.revoke()
 
     async def test_deadline_cancels_provider_and_revoke_receipts_after_terminal_cleanup(self) -> None:
         started = asyncio.Event()
