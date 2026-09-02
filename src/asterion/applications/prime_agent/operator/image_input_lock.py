@@ -17,9 +17,9 @@ from typing import Final
 
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_COMMIT = re.compile(r"[0-9a-f]{40}")
 _RELATIVE_PATH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _FORMAT: Final = "asterion.image-input-lock/v1"
-_PLATFORM: Final = "linux/amd64"
 _SOURCE: Final = (
     "a18809e00ea30638584d87b3afea7285a9d7296c",
     "93a4b02ecc0cc114865fa3d336521cf214047cf4de471b36b51fe610c84ab686",
@@ -31,6 +31,34 @@ _REQUIRED_KINDS: Final = frozenset({"oci-config", "oci-layer", "oci-manifest", "
 
 class PrimeImageInputLockError(ValueError):
     """Raised when a Prime image input lock or artifact set is invalid."""
+
+
+@dataclass(frozen=True)
+class ImagePlatformDescriptor:
+    """One exact OCI target; ``None`` is an explicit absent variant."""
+
+    os: str
+    architecture: str
+    variant: str | None
+
+    def as_dict(self) -> dict[str, str | None]:
+        return {"architecture": self.architecture, "os": self.os, "variant": self.variant}
+
+
+def validate_image_platform_descriptor(value: object) -> ImagePlatformDescriptor:
+    """Reject all non-canonical OCI target descriptors without host inspection."""
+
+    if (
+        type(value) is not ImagePlatformDescriptor
+        or type(value.os) is not str
+        or type(value.architecture) is not str
+        or (value.variant is not None and type(value.variant) is not str)
+        or re.fullmatch(r"[a-z0-9]+", value.os) is None
+        or re.fullmatch(r"[a-z0-9]+", value.architecture) is None
+        or (value.variant is not None and re.fullmatch(r"v[0-9]+", value.variant) is None)
+    ):
+        raise PrimeImageInputLockError("Prime image platform descriptor is invalid")
+    return value
 
 
 _VERIFIED_IMAGE_INPUT_ARTIFACT_SET_TOKEN: Final = object()
@@ -71,7 +99,7 @@ class ReleaseSpecification:
     source_commit: str
     source_tree_sha256: str
     source_package_lock_sha256: str
-    platform: str
+    platform: ImagePlatformDescriptor
     artifacts: tuple[ReleaseArtifact, ...]
 
 
@@ -82,7 +110,7 @@ class ReleaseLockProposal:
     source_commit: str
     source_tree_sha256: str
     source_package_lock_sha256: str
-    platform: str
+    platform: ImagePlatformDescriptor
     artifacts: tuple[ImageArtifact, ...]
     untrusted: bool = True
 
@@ -90,7 +118,7 @@ class ReleaseLockProposal:
         return {
             "artifacts": [artifact.as_dict() for artifact in self.artifacts],
             "format": "asterion.image-input-release-proposal/v1",
-            "platform": self.platform,
+            "platform": self.platform.as_dict(),
             "source_commit": self.source_commit,
             "source_package_lock_sha256": self.source_package_lock_sha256,
             "source_tree_sha256": self.source_tree_sha256,
@@ -103,6 +131,7 @@ def canonical_release_lock_proposal_json(proposal: ReleaseLockProposal) -> str:
 
     if type(proposal) is not ReleaseLockProposal or proposal.untrusted is not True:
         raise PrimeImageInputLockError("Prime image release proposal is invalid")
+    validate_image_platform_descriptor(proposal.platform)
     return json.dumps(proposal.as_dict(), separators=(",", ":"), sort_keys=True)
 
 
@@ -113,14 +142,14 @@ class ImageInputLock:
     source_commit: str
     source_tree_sha256: str
     source_package_lock_sha256: str
-    platform: str
+    platform: ImagePlatformDescriptor
     artifacts: tuple[ImageArtifact, ...]
 
     def as_dict(self) -> dict[str, object]:
         return {
             "artifacts": [artifact.as_dict() for artifact in self.artifacts],
             "format": _FORMAT,
-            "platform": self.platform,
+            "platform": self.platform.as_dict(),
             "source_commit": self.source_commit,
             "source_package_lock_sha256": self.source_package_lock_sha256,
             "source_tree_sha256": self.source_tree_sha256,
@@ -159,9 +188,12 @@ def _artifact(kind: str, path: str, size: int) -> ImageArtifact:
     return ImageArtifact(kind, path, size, sha256((kind + "\0" + path).encode()).hexdigest())
 
 
+_INITIAL_PLATFORM: Final = ImagePlatformDescriptor("linux", "amd64", None)
+
+
 PRIME_IPYTHON_IMAGE_INPUT_LOCK: Final = ImageInputLock(
     *_SOURCE,
-    _PLATFORM,
+    _INITIAL_PLATFORM,
     tuple(
         sorted(
             (
@@ -187,6 +219,50 @@ PRIME_IPYTHON_IMAGE_INPUT_LOCK: Final = ImageInputLock(
 )
 
 
+@dataclass(frozen=True)
+class PromotedImageInputCatalog:
+    """Code-owned exact target-to-lock bindings, never host-selected."""
+
+    locks: tuple[ImageInputLock, ...]
+
+
+PRIME_IPYTHON_IMAGE_INPUT_CATALOG: Final = PromotedImageInputCatalog(
+    (PRIME_IPYTHON_IMAGE_INPUT_LOCK,)
+)
+
+
+def _platform_sort_key(platform: ImagePlatformDescriptor) -> tuple[str, str, bool, str]:
+    return (platform.os, platform.architecture, platform.variant is not None, platform.variant or "")
+
+
+def resolve_promoted_image_input_lock(
+    requested_platform: object,
+    catalog: object = PRIME_IPYTHON_IMAGE_INPUT_CATALOG,
+) -> ImageInputLock:
+    """Resolve one explicit descriptor, failing closed on every ambiguity."""
+
+    requested = validate_image_platform_descriptor(requested_platform)
+    if type(catalog) is not PromotedImageInputCatalog or not isinstance(catalog.locks, tuple) or not catalog.locks:
+        raise PrimeImageInputLockError("Prime image input catalog is invalid")
+    try:
+        locks = catalog.locks
+        if any(type(item) is not ImageInputLock for item in locks):
+            raise ValueError
+        platforms = tuple(validate_image_platform_descriptor(item.platform) for item in locks)
+        if tuple(sorted(platforms, key=_platform_sort_key)) != platforms or len(set(platforms)) != len(platforms):
+            raise ValueError
+        if catalog is not PRIME_IPYTHON_IMAGE_INPUT_CATALOG:
+            raise ValueError
+        if any(_validate_image_input_lock_structure(item) is not item for item in locks):
+            raise ValueError
+        matches = tuple(item for item in locks if item.platform == requested)
+        if len(matches) != 1:
+            raise ValueError
+        return matches[0]
+    except (TypeError, ValueError, PrimeImageInputLockError):
+        raise PrimeImageInputLockError("Prime image input catalog is invalid") from None
+
+
 def canonical_image_input_lock_json(lock: ImageInputLock) -> str:
     """Return the one canonical JSON encoding after strict static validation."""
 
@@ -208,7 +284,12 @@ def image_input_lock_from_dict(value: object) -> ImageInputLock:
     } or value.get("format") != _FORMAT:
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     artifacts = value.get("artifacts")
-    if not isinstance(artifacts, list):
+    platform = value.get("platform")
+    if (
+        not isinstance(artifacts, list)
+        or type(platform) is not dict
+        or frozenset(platform) != {"os", "architecture", "variant"}
+    ):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     if any(
         type(item) is not dict
@@ -218,7 +299,8 @@ def image_input_lock_from_dict(value: object) -> ImageInputLock:
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     try:
         parsed = ImageInputLock(
-            value["source_commit"], value["source_tree_sha256"], value["source_package_lock_sha256"], value["platform"],
+            value["source_commit"], value["source_tree_sha256"], value["source_package_lock_sha256"],
+            ImagePlatformDescriptor(platform["os"], platform["architecture"], platform["variant"]),
             tuple(ImageArtifact(item["kind"], item["path"], item["size"], item["sha256"]) for item in artifacts),
         )
     except (KeyError, TypeError):
@@ -249,13 +331,14 @@ def _validate_image_input_lock_structure(lock: object) -> ImageInputLock:
                 lock.source_commit,
                 lock.source_tree_sha256,
                 lock.source_package_lock_sha256,
-                lock.platform,
             )
         )
-        or (lock.source_commit, lock.source_tree_sha256, lock.source_package_lock_sha256) != _SOURCE
-        or lock.platform != _PLATFORM
+        or _COMMIT.fullmatch(lock.source_commit) is None
+        or _SHA256.fullmatch(lock.source_tree_sha256) is None
+        or _SHA256.fullmatch(lock.source_package_lock_sha256) is None
     ):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
+    validate_image_platform_descriptor(lock.platform)
     artifacts = lock.artifacts
     if (
         not isinstance(artifacts, tuple)

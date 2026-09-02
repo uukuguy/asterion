@@ -12,9 +12,9 @@ from typing import Iterable, Protocol, Sequence
 from urllib.parse import urlsplit
 
 from asterion.applications.prime_agent.operator.image_input_lock import (
-    ImageArtifact, PRIME_IPYTHON_IMAGE_INPUT_LOCK, PrimeImageInputLockError,
+    ImageArtifact, ImagePlatformDescriptor, PRIME_IPYTHON_IMAGE_INPUT_LOCK, PrimeImageInputLockError,
     ReleaseArtifact, ReleaseLockProposal, ReleaseSpecification,
-    VerifiedImageInputArtifactSet, image_input_lock_sha256,
+    VerifiedImageInputArtifactSet, image_input_lock_sha256, resolve_promoted_image_input_lock,
     verify_image_input_artifact_set,
 )
 
@@ -66,7 +66,8 @@ def _consume_release_authorization(authorization: object) -> None:
 
 
 def materialize_release_from_operator_cli(
-    action: Sequence[str], output_root: Path, specification: ReleaseSpecification, transport: ReleaseTransport,
+    action: Sequence[str], output_root: Path, platform: ImagePlatformDescriptor,
+    specification: ReleaseSpecification, transport: ReleaseTransport,
 ) -> ReleaseMaterializationResult:
     """Run staging only for the exact, explicitly selected operator CLI action.
 
@@ -77,13 +78,15 @@ def materialize_release_from_operator_cli(
     if tuple(action) != _OPERATOR_RELEASE_ACTION:
         raise PrimeImageMaterializerError("Prime image materialization authorization is invalid")
     return materialize_authorized_release(
-        output_root, specification, transport, authorization=_mint_release_authorization_from_operator_cli(),
+        output_root, platform, specification, transport,
+        authorization=_mint_release_authorization_from_operator_cli(),
     )
 
 
 @dataclass(frozen=True)
 class MaterializationPlan:
     output_root: Path
+    platform: ImagePlatformDescriptor
     lock_sha256: str
     commands: tuple[tuple[str, ...], ...]
     notice: str
@@ -94,6 +97,7 @@ class ReleaseMaterializationResult:
     """Public-safe staging outcome; deliberately not verification evidence."""
 
     target_id: str
+    platform: ImagePlatformDescriptor
     count: int
     digests: tuple[str, ...]
     proposal: ReleaseLockProposal
@@ -113,16 +117,17 @@ def lock_sha256() -> str:
     return image_input_lock_sha256(PRIME_IPYTHON_IMAGE_INPUT_LOCK)
 
 
-def plan_materialization(output_root: Path) -> MaterializationPlan:
+def plan_materialization(output_root: Path, platform: ImagePlatformDescriptor) -> MaterializationPlan:
     """Validate a new external target and return no executable side effect."""
 
     try:
         _validate_fresh_external_target(output_root)
-    except (OSError, ValueError):
+        selected = resolve_promoted_image_input_lock(platform)
+    except (OSError, ValueError, PrimeImageInputLockError):
         raise PrimeImageMaterializerError("Prime image materialization target is invalid") from None
     return MaterializationPlan(
-        output_root, lock_sha256(),
-        (("asterion-prime-authorized-release-materialize", "--lock-sha256", lock_sha256(), "--output-root", str(output_root)),),
+        output_root, selected.platform, image_input_lock_sha256(selected),
+        (("asterion-prime-authorized-release-materialize", "--lock-sha256", image_input_lock_sha256(selected), "--output-root", str(output_root)),),
         "This is only a command plan; a separately authorized release workflow must materialize and verify the artifact set.",
     )
 
@@ -136,9 +141,10 @@ def validate_release_specification(specification: object) -> ReleaseSpecificatio
         type(specification.source_commit) is not str
         or _COMMIT.fullmatch(specification.source_commit) is None
         or any(type(value) is not str or _SHA256.fullmatch(value) is None for value in (specification.source_tree_sha256, specification.source_package_lock_sha256))
-        or specification.platform != "linux/amd64" or not isinstance(specification.artifacts, tuple) or not specification.artifacts
+        or not isinstance(specification.artifacts, tuple) or not specification.artifacts
     ):
         raise ValueError("Prime image release specification is invalid")
+    resolve_promoted_image_input_lock(specification.platform)
     artifacts = specification.artifacts
     if tuple(sorted(artifacts, key=lambda item: item.path)) != artifacts or len({item.url for item in artifacts}) != len(artifacts):
         raise ValueError("Prime image release specification is invalid")
@@ -163,7 +169,8 @@ def validate_release_specification(specification: object) -> ReleaseSpecificatio
 
 
 def materialize_authorized_release(
-    output_root: Path, specification: ReleaseSpecification, transport: ReleaseTransport, *, authorization: object = None,
+    output_root: Path, platform: ImagePlatformDescriptor, specification: ReleaseSpecification,
+    transport: ReleaseTransport, *, authorization: object = None,
 ) -> ReleaseMaterializationResult:
     """Stage exact fetched bytes and issue only an untrusted lock proposal."""
 
@@ -173,6 +180,9 @@ def materialize_authorized_release(
         raise PrimeImageMaterializerError("Prime image materialization authorization is invalid")
     try:
         spec = validate_release_specification(specification)
+        selected = resolve_promoted_image_input_lock(platform)
+        if spec.platform != selected.platform:
+            raise ValueError
         canonical_root = _validate_fresh_external_target(output_root)
         if not hasattr(transport, "fetch"):
             raise ValueError
@@ -185,10 +195,13 @@ def materialize_authorized_release(
                 raise ValueError
             _write_checked_file(canonical_root, artifact.path, response.body, artifact.size, artifact.sha256)
         proposal = ReleaseLockProposal(
-            spec.source_commit, spec.source_tree_sha256, spec.source_package_lock_sha256, spec.platform,
+            spec.source_commit, spec.source_tree_sha256, spec.source_package_lock_sha256, selected.platform,
             tuple(ImageArtifact(item.kind, item.path, item.size, item.sha256) for item in spec.artifacts),
         )
-        return ReleaseMaterializationResult(sha256(str(canonical_root).encode()).hexdigest(), len(proposal.artifacts), tuple(item.sha256 for item in proposal.artifacts), proposal)
+        return ReleaseMaterializationResult(
+            sha256(str(canonical_root).encode()).hexdigest(), selected.platform,
+            len(proposal.artifacts), tuple(item.sha256 for item in proposal.artifacts), proposal,
+        )
     except (OSError, TypeError, ValueError, PrimeImageInputLockError):
         raise PrimeImageMaterializerError("Prime image materialization target is invalid") from None
 

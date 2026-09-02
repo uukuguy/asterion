@@ -15,13 +15,59 @@ from asterion.applications.prime_agent.operator import image_input_lock as lock
 
 
 class TestPrimeImageInputLock(unittest.TestCase):
+    def test_promoted_catalog_resolves_only_the_requested_exact_descriptor(self) -> None:
+        descriptor = lock.ImagePlatformDescriptor("linux", "amd64", None)
+
+        self.assertEqual(lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.platform, descriptor)
+        self.assertIs(
+            lock.resolve_promoted_image_input_lock(descriptor),
+            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK,
+        )
+        self.assertEqual(
+            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.as_dict()["platform"],
+            {"architecture": "amd64", "os": "linux", "variant": None},
+        )
+
+    def test_descriptor_and_catalog_reject_ambiguous_or_substituted_targets(self) -> None:
+        amd64 = lock.ImagePlatformDescriptor("linux", "amd64", None)
+        arm64 = lock.ImagePlatformDescriptor("linux", "arm64", None)
+        arm64_variant = lock.ImagePlatformDescriptor("linux", "arm64", "v8")
+        promoted = lock.PromotedImageInputCatalog((lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK,))
+        duplicate = lock.PromotedImageInputCatalog(
+            (lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK, lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK)
+        )
+        substitute = lock.ImageInputLock(
+            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.source_commit,
+            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.source_tree_sha256,
+            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.source_package_lock_sha256,
+            amd64,
+            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.artifacts,
+        )
+
+        for descriptor in (arm64, arm64_variant, object(), {"os": "linux", "architecture": "amd64"}):
+            with self.subTest(descriptor=descriptor), self.assertRaises(lock.PrimeImageInputLockError):
+                lock.resolve_promoted_image_input_lock(descriptor, promoted)
+        with self.assertRaises(lock.PrimeImageInputLockError):
+            lock.resolve_promoted_image_input_lock(amd64, duplicate)
+        with self.assertRaises(lock.PrimeImageInputLockError):
+            lock.resolve_promoted_image_input_lock(amd64, lock.PromotedImageInputCatalog((substitute,)))
+        with self.assertRaises(TypeError):
+            lock.resolve_promoted_image_input_lock()  # type: ignore[call-arg]
+
+        for value in (
+            lock.ImagePlatformDescriptor("linux", "amd64", ""),
+            lock.ImagePlatformDescriptor("Linux", "amd64", None),
+        ):
+            with self.subTest(value=value), self.assertRaises(lock.PrimeImageInputLockError):
+                lock.validate_image_platform_descriptor(value)
+
     def test_frozen_lock_is_canonical_and_binds_the_existing_prime_source(self) -> None:
         value = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK
 
         self.assertEqual(value.source_commit, "a18809e00ea30638584d87b3afea7285a9d7296c")
         self.assertEqual(value.source_tree_sha256, "93a4b02ecc0cc114865fa3d336521cf214047cf4de471b36b51fe610c84ab686")
         self.assertEqual(value.source_package_lock_sha256, "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8")
-        self.assertEqual(value.platform, "linux/amd64")
+        self.assertEqual(value.platform, lock.ImagePlatformDescriptor("linux", "amd64", None))
         encoded = lock.canonical_image_input_lock_json(value)
         self.assertEqual(encoded, lock.canonical_image_input_lock_json(value))
         self.assertEqual(encoded, json.dumps(json.loads(encoded), separators=(",", ":"), sort_keys=True))
@@ -34,7 +80,7 @@ class TestPrimeImageInputLock(unittest.TestCase):
         artifacts = cast(list[dict[str, object]], lock_dict["artifacts"])
         cases = (
             {**lock_dict, "url": "https://example.invalid/input"},
-            {**lock_dict, "platform": "linux/arm64"},
+            {**lock_dict, "platform": {"os": "linux", "architecture": "arm64", "variant": None}},
             {**lock_dict, "source_commit": "a" * 40},
             {**lock_dict, "artifacts": list(reversed(artifacts))},
             {**lock_dict, "artifacts": artifacts[:-1]},

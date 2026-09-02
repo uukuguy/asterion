@@ -7,16 +7,21 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest import mock
 
+from asterion.applications.prime_agent.operator.image_input_lock import ImagePlatformDescriptor
 from tools import materialize_prime_ipython_inputs as materializer
+
+
+_INITIAL_PLATFORM = ImagePlatformDescriptor("linux", "amd64", None)
 
 
 class TestPrimeImageMaterializer(unittest.TestCase):
     def test_returns_only_an_explicit_release_command_plan(self) -> None:
         with TemporaryDirectory() as temporary:
             output = (Path(temporary) / "operator-artifacts").resolve()
-            plan = materializer.plan_materialization(output)
+            plan = materializer.plan_materialization(output, _INITIAL_PLATFORM)
 
         self.assertEqual(plan.output_root, output)
+        self.assertEqual(plan.platform, _INITIAL_PLATFORM)
         self.assertEqual(plan.lock_sha256, materializer.lock_sha256())
         self.assertTrue(plan.commands)
         self.assertTrue(all(isinstance(command, tuple) for command in plan.commands))
@@ -35,7 +40,7 @@ class TestPrimeImageMaterializer(unittest.TestCase):
                 materializer.repository_root().parent / "source-target",
             ):
                 with self.subTest(target=target), self.assertRaises(materializer.PrimeImageMaterializerError):
-                    materializer.plan_materialization(target)
+                    materializer.plan_materialization(target, _INITIAL_PLATFORM)
 
     def test_planning_does_not_execute_or_materialize_anything(self) -> None:
         with TemporaryDirectory() as temporary:
@@ -47,5 +52,5 @@ class TestPrimeImageMaterializer(unittest.TestCase):
                 mock.patch.object(Path, "mkdir", side_effect=forbidden),
                 mock.patch.object(Path, "write_bytes", side_effect=forbidden),
             ):
-                materializer.plan_materialization(output)
+                materializer.plan_materialization(output, _INITIAL_PLATFORM)
             self.assertFalse(output.exists())
