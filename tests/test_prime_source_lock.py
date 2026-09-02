@@ -77,6 +77,21 @@ class TestPrimeSourceLock(unittest.TestCase):
                 with self.subTest(value=value), self.assertRaises(PrimeSourceLockError):
                     verify_prime_source_lock(source_root, value)  # type: ignore[arg-type]
 
+    def test_rejects_ref_that_escapes_git_refs_directory(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source_root = (Path(temporary_directory) / "prime-agent").resolve()
+            source_root.mkdir()
+            _write_source(source_root)
+            lock = _lock(source_root)
+            (source_root / ".git" / "refs").mkdir()
+            (source_root / ".git" / "escaped").write_text(f"{_COMMIT}\n")
+            (source_root / ".git" / "HEAD").write_text(
+                "ref: refs/../../.git/escaped\n"
+            )
+
+            with self.assertRaises(PrimeSourceLockError):
+                verify_prime_source_lock(source_root, lock)
+
     def test_rejects_noncanonical_roots_and_symlinked_inputs(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source_root = (Path(temporary_directory) / "prime-agent").resolve()

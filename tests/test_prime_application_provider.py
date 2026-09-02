@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 from importlib import metadata
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from asterion.applications.discovery import (
@@ -41,6 +45,29 @@ def _source_lock(**changes: object) -> PrimeSourceLock:
     return PrimeSourceLock(**values)  # type: ignore[arg-type]
 
 
+def _write_source(root: Path) -> PrimeSourceLock:
+    commit = "b" * 40
+    (root / ".git").mkdir()
+    (root / "src").mkdir()
+    (root / ".git" / "HEAD").write_text(f"{commit}\n")
+    (root / "package.json").write_text(json.dumps({"version": "1.0.0"}))
+    (root / "package-lock.json").write_text(
+        json.dumps({"lockfileVersion": 3, "packages": {"": {"version": "1.0.0"}}})
+    )
+    (root / "src" / "main.ts").write_text("export const prime = 1;\n")
+    tree = sha256()
+    for relative_path in ("package.json", "src/main.ts"):
+        tree.update(relative_path.encode("utf-8"))
+        tree.update(b"\0")
+        tree.update((root / relative_path).read_bytes())
+        tree.update(b"\0")
+    return PrimeSourceLock(
+        commit=commit,
+        tree_sha256=tree.hexdigest(),
+        package_lock_sha256=sha256((root / "package-lock.json").read_bytes()).hexdigest(),
+    )
+
+
 class TestPrimeApplicationProvider(unittest.TestCase):
     def test_provider_declares_one_metadata_only_application(self) -> None:
         provider = create_provider()
@@ -64,8 +91,32 @@ class TestPrimeApplicationProvider(unittest.TestCase):
             "prime-agent",
         )
 
-    def test_preflight_accepts_only_valid_injected_contracts(self) -> None:
-        self.assertEqual(prime_preflight(_profile(), _source_lock()).status, "PASS")
+    def test_preflight_verifies_trusted_lock_against_explicit_source_root(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source_root = (Path(temporary_directory) / "prime-agent").resolve()
+            source_root.mkdir()
+            source_lock = _write_source(source_root)
+
+            self.assertEqual(
+                prime_preflight(_profile(), source_lock, source_root).status,
+                "PASS",
+            )
+
+    def test_preflight_rejects_format_valid_forged_source_lock(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source_root = (Path(temporary_directory) / "prime-agent").resolve()
+            source_root.mkdir()
+            source_lock = _write_source(source_root)
+            forged_lock = PrimeSourceLock(
+                commit=source_lock.commit,
+                tree_sha256="f" * 64,
+                package_lock_sha256=source_lock.package_lock_sha256,
+            )
+
+            self.assertEqual(
+                prime_preflight(_profile(), forged_lock, source_root).status,
+                "source-invalid",
+            )
 
     def test_preflight_returns_fixed_safe_failure_codes(self) -> None:
         cases = (
@@ -76,7 +127,7 @@ class TestPrimeApplicationProvider(unittest.TestCase):
 
         for profile, source_lock, expected in cases:
             with self.subTest(expected=expected):
-                result = prime_preflight(profile, source_lock)  # type: ignore[arg-type]
+                result = prime_preflight(profile, source_lock, Path("/unsafe"))  # type: ignore[arg-type]
                 self.assertEqual(result.status, expected)
                 self.assertNotIn("sha256:", repr(result))
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from asterion.applications.prime_agent.restricted_worker import (
@@ -11,12 +11,13 @@ from asterion.applications.prime_agent.restricted_worker import (
     PrimeRestrictedWorkerProfile,
     validate_prime_restricted_worker,
 )
-from asterion.applications.prime_agent.source_lock import PrimeSourceLock
+from asterion.applications.prime_agent.source_lock import (
+    PrimeSourceLock,
+    PrimeSourceLockError,
+    verify_prime_source_lock,
+)
 
 
-_COMMIT = re.compile(r"[0-9a-f]{40}")
-_SHA256 = re.compile(r"[0-9a-f]{64}")
-_LOCK_FIELDS = frozenset({"commit", "tree_sha256", "package_lock_sha256"})
 _STATUSES = frozenset(
     {"PASS", "worker-invalid", "worker-unavailable", "source-invalid"}
 )
@@ -35,9 +36,10 @@ class PrimePreflightResult:
 
 def prime_preflight(
     profile: PrimeRestrictedWorkerProfile | None,
-    source_lock: PrimeSourceLock,
+    expected_source_lock: PrimeSourceLock,
+    source_root: Path,
 ) -> PrimePreflightResult:
-    """Validate injected static contracts without accessing any provider resource."""
+    """Validate injected contracts without accessing provider resources."""
 
     if profile is None:
         return PrimePreflightResult("worker-unavailable")
@@ -45,19 +47,8 @@ def prime_preflight(
         validate_prime_restricted_worker(profile)
     except (PrimeRestrictedWorkerError, TypeError):
         return PrimePreflightResult("worker-invalid")
-    if not _valid_source_lock(source_lock):
+    try:
+        verify_prime_source_lock(source_root, expected_source_lock)
+    except (PrimeSourceLockError, TypeError):
         return PrimePreflightResult("source-invalid")
     return PrimePreflightResult("PASS")
-
-
-def _valid_source_lock(value: object) -> bool:
-    return (
-        type(value) is PrimeSourceLock
-        and frozenset(vars(value)) == _LOCK_FIELDS
-        and type(value.commit) is str
-        and _COMMIT.fullmatch(value.commit) is not None
-        and type(value.tree_sha256) is str
-        and _SHA256.fullmatch(value.tree_sha256) is not None
-        and type(value.package_lock_sha256) is str
-        and _SHA256.fullmatch(value.package_lock_sha256) is not None
-    )

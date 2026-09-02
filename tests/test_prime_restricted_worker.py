@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from typing import Any, cast
 import unittest
 
 from asterion.applications.prime_agent.restricted_worker import (
@@ -79,16 +80,18 @@ class TestPrimeRestrictedWorkerProfile(unittest.TestCase):
                 validate_prime_restricted_worker(_profile(**{field: value}))
 
     def test_rejects_unexpected_constructor_fields(self) -> None:
+        constructor_arguments = {
+            "image_digest": "sha256:" + "a" * 64,
+            "network_mode": "none",
+            "workspace_mode": "disposable",
+            "credential_mode": "absent",
+            "max_runtime_seconds": 300,
+            "max_output_bytes": 65536,
+            "extra": "unsafe",
+        }
+
         with self.assertRaises(TypeError):
-            PrimeRestrictedWorkerProfile(
-                image_digest="sha256:" + "a" * 64,
-                network_mode="none",
-                workspace_mode="disposable",
-                credential_mode="absent",
-                max_runtime_seconds=300,
-                max_output_bytes=65536,
-                extra="unsafe",
-            )  # type: ignore[call-arg]
+            PrimeRestrictedWorkerProfile(**cast(Any, constructor_arguments))
 
     def test_rejects_profile_with_an_unexpected_field(self) -> None:
         profile = _profile()

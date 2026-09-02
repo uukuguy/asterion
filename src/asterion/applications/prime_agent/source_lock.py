@@ -14,6 +14,7 @@ from typing import Final
 
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_REF_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
 _LOCK_FIELDS: Final = frozenset({"commit", "tree_sha256", "package_lock_sha256"})
 _EXCLUDED_SOURCE_NAMES: Final = frozenset({".git", "node_modules", "package-lock.json"})
 
@@ -90,9 +91,7 @@ def _read_commit(root: Path) -> str:
         raise PrimeSourceLockError("Prime source lock is invalid") from error
     if value.startswith("ref: "):
         reference = value.removeprefix("ref: ")
-        if not re.fullmatch(r"refs/[A-Za-z0-9._/-]+", reference):
-            raise PrimeSourceLockError("Prime source lock is invalid")
-        ref_path = git_dir / reference
+        ref_path = _reference_path(git_dir, reference)
         if _regular_file(ref_path):
             try:
                 value = ref_path.read_text(encoding="ascii").strip()
@@ -103,6 +102,32 @@ def _read_commit(root: Path) -> str:
     if _COMMIT.fullmatch(value) is None:
         raise PrimeSourceLockError("Prime source lock is invalid")
     return value
+
+
+def _reference_path(git_dir: Path, reference: str) -> Path:
+    """Return a regular ref path only when it is contained in ``.git/refs``."""
+
+    components = reference.split("/")
+    if (
+        len(components) < 2
+        or components[0] != "refs"
+        or any(
+            component in {"", ".", ".."}
+            or _REF_COMPONENT.fullmatch(component) is None
+            for component in components[1:]
+        )
+    ):
+        raise PrimeSourceLockError("Prime source lock is invalid")
+    refs_root = git_dir / "refs"
+    if not _directory(refs_root) or refs_root.is_symlink():
+        raise PrimeSourceLockError("Prime source lock is invalid")
+    ref_path = refs_root.joinpath(*components[1:])
+    try:
+        if refs_root.resolve(strict=True) not in ref_path.resolve(strict=False).parents:
+            raise PrimeSourceLockError("Prime source lock is invalid")
+    except OSError as error:
+        raise PrimeSourceLockError("Prime source lock is invalid") from error
+    return ref_path
 
 
 def _packed_ref(path: Path, reference: str) -> str:
