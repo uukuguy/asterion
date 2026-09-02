@@ -8,6 +8,7 @@ evidence: its most favourable classification is ``candidate-native``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import re
 from typing import Final, Literal, cast
@@ -93,6 +94,19 @@ class AcquisitionCapture:
             "url": self.url,
         }
 
+    def as_public_dict(self) -> dict[str, object]:
+        """Return review-safe capture material without its injected locator."""
+
+        return {
+            "kind": self.kind,
+            "metadata_sha256": self.metadata_sha256,
+            "metadata_size": self.metadata_size,
+            "object_sha256": self.object_sha256,
+            "object_size": self.object_size,
+            "path": self.path,
+            "url_sha256": hashlib.sha256(self.url.encode("utf-8")).hexdigest(),
+        }
+
 
 @dataclass(frozen=True)
 class ReleaseSpecGenerationRequest:
@@ -114,7 +128,7 @@ class UntrustedAcquisitionLock:
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "captures": [capture.as_dict() for capture in self.captures],
+            "captures": [capture.as_public_dict() for capture in self.captures],
             "format": "asterion.prime-ipython-acquisition-lock/v1",
             "source": self.source.as_dict(),
             "target": self.target.as_dict(),
@@ -131,7 +145,7 @@ class UntrustedArtifactInventory:
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "artifacts": [artifact.as_dict() for artifact in self.artifacts],
+            "artifacts": [artifact.as_public_dict() for artifact in self.artifacts],
             "format": "asterion.prime-ipython-artifact-inventory/v1",
             "source": self.source.as_dict(),
             "target": self.target.as_dict(),
@@ -148,7 +162,7 @@ class UntrustedReleaseProposal:
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "artifacts": [artifact.as_dict() for artifact in self.artifacts],
+            "artifacts": [artifact.as_public_dict() for artifact in self.artifacts],
             "format": "asterion.prime-ipython-release-proposal/v1",
             "source": self.source.as_dict(),
             "target": self.target.as_dict(),

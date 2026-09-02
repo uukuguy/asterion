@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 import json
 import unittest
 from unittest import mock
@@ -90,6 +91,31 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
             image_input_lock.validate_image_input_lock(result)  # type: ignore[arg-type]
         with self.assertRaises(image_input_lock.PrimeImageInputLockError):
             image_input_lock.VerifiedImageInputArtifactSet(image_input_lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK, object())  # type: ignore[arg-type]
+
+    def test_public_review_json_redacts_capture_urls_to_digests(self) -> None:
+        private_url = "https://private-release-sentinel.invalid/secret-path/node.tar.xz"
+        request = _request(captures=(
+            replace(_CAPTURES[0], url=private_url),
+            _CAPTURES[1],
+        ))
+
+        encoded = generation.canonical_release_spec_generation_json(
+            generation.generate_release_specification(request)
+        )
+        value = json.loads(encoded)
+        expected_digest = hashlib.sha256(private_url.encode("utf-8")).hexdigest()
+
+        self.assertNotIn(private_url, encoded)
+        self.assertNotIn("private-release-sentinel.invalid", encoded)
+        self.assertNotIn("secret-path", encoded)
+        for document_name, entries_key in (
+            ("acquisition_lock", "captures"),
+            ("artifact_inventory", "artifacts"),
+            ("release_proposal", "artifacts"),
+        ):
+            entry = value[document_name][entries_key][0]
+            self.assertNotIn("url", entry)
+            self.assertEqual(entry["url_sha256"], expected_digest)
 
     def test_generation_never_uses_host_or_effectful_services(self) -> None:
         forbidden = RuntimeError("effectful access")
