@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from hashlib import sha256
+import json
 import unittest
 
 from asterion.applications.prime_agent.operator import release_recipe as recipe
@@ -80,3 +82,37 @@ class TestPrimeReleaseRecipe(unittest.TestCase):
                 self.assertRaises(recipe.PrimeReleaseRecipeError),
             ):
                 recipe.validate_candidate_target_policy(value)
+
+    def test_canonical_recipe_digest_covers_every_platform_neutral_field(self) -> None:
+        value = recipe.PRIME_IPYTHON_RELEASE_RECIPE
+        encoded = recipe.canonical_release_recipe_json(value)
+        self.assertEqual(
+            encoded, json.dumps(json.loads(encoded), separators=(",", ":"), sort_keys=True)
+        )
+        self.assertEqual(recipe.release_recipe_sha256(value), sha256(encoded.encode()).hexdigest())
+        for replacement in (
+            replace(value, recipe_revision="prime-ipython-release-recipe/v2"),
+            replace(value, fixture_recipe_sha256="a" * 64),
+            replace(value, artifact_graph_revision="b" * 64),
+            replace(value, metadata_parsers=replace(value.metadata_parsers, node_shasums="c" * 64)),
+        ):
+            with self.subTest(replacement=replacement):
+                self.assertNotEqual(
+                    recipe.release_recipe_sha256(value),
+                    recipe.release_recipe_sha256(replacement),
+                )
+
+    def test_recipe_rejects_missing_or_substituted_new_identity_fields(self) -> None:
+        value = recipe.PRIME_IPYTHON_RELEASE_RECIPE
+        for replacement in (
+            replace(value, fixture_recipe_sha256="not-a-digest"),
+            replace(value, artifact_graph_revision=[]),  # type: ignore[arg-type]
+            replace(value, metadata_parsers=object()),  # type: ignore[arg-type]
+        ):
+            with self.subTest(replacement=replacement), self.assertRaises(recipe.PrimeReleaseRecipeError):
+                recipe.validate_release_recipe(replacement)
+
+    def test_recipe_identity_never_contains_target_or_host_values(self) -> None:
+        value = recipe.PRIME_IPYTHON_RELEASE_RECIPE
+        self.assertTrue({"platform", "url", "path", "host"}.isdisjoint(value.__dataclass_fields__))
+        self.assertNotIn("linux", recipe.canonical_release_recipe_json(value))

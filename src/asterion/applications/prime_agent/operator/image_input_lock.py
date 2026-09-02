@@ -89,6 +89,8 @@ def validate_image_platform_descriptor(value: object) -> ImagePlatformDescriptor
 
 
 _VERIFIED_IMAGE_INPUT_ARTIFACT_SET_TOKEN: Final = object()
+_VERIFIED_CANDIDATE_ARTIFACT_SET_TOKEN: Final = object()
+_PROMOTED_IMAGE_INPUT_TOKEN: Final = object()
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,34 @@ def canonical_release_lock_proposal_json(proposal: ReleaseLockProposal) -> str:
         raise PrimeImageInputLockError("Prime image release proposal is invalid")
     validate_image_platform_descriptor(proposal.platform)
     return json.dumps(proposal.as_dict(), separators=(",", ":"), sort_keys=True)
+
+
+@dataclass(frozen=True, init=False)
+class VerifiedCandidateArtifactSet:
+    """Untrusted candidate bytes, deliberately distinct from promoted evidence."""
+
+    proposal: ReleaseLockProposal
+    root: Path
+    untrusted: bool
+
+    def __init__(self, proposal: ReleaseLockProposal, root: Path, *, _token: object | None = None) -> None:
+        if _token is not _VERIFIED_CANDIDATE_ARTIFACT_SET_TOKEN:
+            raise PrimeImageInputLockError("Prime image input lock is invalid")
+        object.__setattr__(self, "proposal", proposal)
+        object.__setattr__(self, "root", root)
+        object.__setattr__(self, "untrusted", True)
+
+
+@dataclass(frozen=True, init=False)
+class PromotedImageInput:
+    """Opaque authority for a lock selected by the code-owned catalog."""
+
+    lock: ImageInputLock
+
+    def __init__(self, lock: ImageInputLock, *, _token: object | None = None) -> None:
+        if _token is not _PROMOTED_IMAGE_INPUT_TOKEN:
+            raise PrimeImageInputLockError("Prime image input lock is invalid")
+        object.__setattr__(self, "lock", lock)
 
 
 @dataclass(frozen=True)

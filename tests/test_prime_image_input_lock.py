@@ -153,3 +153,16 @@ class TestPrimeImageInputLock(unittest.TestCase):
                 self.assertRaises(lock.PrimeImageInputLockError),
             ):
                 lock.validate_image_platform_descriptor(value)
+
+    def test_candidate_evidence_cannot_be_constructed_as_promoted_input(self) -> None:
+        candidate = lock.ReleaseLockProposal(
+            "a" * 40,
+            "b" * 64,
+            "c" * 64,
+            lock.ImagePlatformDescriptor("linux", "arm64", None),
+            (),
+        )
+        with self.assertRaises(lock.PrimeImageInputLockError):
+            lock.VerifiedCandidateArtifactSet(candidate, Path("/candidate"))
+        with self.assertRaises(lock.PrimeImageInputLockError):
+            lock.PromotedImageInput(_synthetic_lock())
