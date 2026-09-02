@@ -60,15 +60,64 @@ class _ProductionRunner:
             *argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE, env=env,
         )
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
-            raise RestrictedWorkerError("restricted worker value is invalid") from None
-        if len(stdout) + len(stderr) > max_output_bytes:
+        if process.stdout is None or process.stderr is None:
+            await self._stop_and_reap(process, ())
             raise RestrictedWorkerError("restricted worker value is invalid")
-        return DockerCliResult(process.returncode or 0, stdout, stderr)
+        stdout = bytearray()
+        stderr = bytearray()
+        total = 0
+
+        async def read_pipe(pipe: asyncio.StreamReader, destination: bytearray) -> None:
+            nonlocal total
+            while True:
+                chunk = await pipe.read(1)
+                if not chunk:
+                    return
+                if type(chunk) is not bytes or len(chunk) != 1 or total >= max_output_bytes:
+                    raise _DockerCliOutputLimit
+                destination.extend(chunk)
+                total += 1
+
+        readers = (
+            asyncio.create_task(read_pipe(process.stdout, stdout)),
+            asyncio.create_task(read_pipe(process.stderr, stderr)),
+        )
+        try:
+            async with asyncio.timeout(timeout):
+                await asyncio.gather(*readers)
+                await process.wait()
+        except asyncio.CancelledError:
+            await self._stop_and_reap(process, readers)
+            raise
+        except BaseException:
+            await self._stop_and_reap(process, readers)
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+        return DockerCliResult(process.returncode or 0, bytes(stdout), bytes(stderr))
+
+    @staticmethod
+    async def _stop_and_reap(
+        process: asyncio.subprocess.Process,
+        readers: tuple[asyncio.Task[None], ...],
+    ) -> None:
+        for reader in readers:
+            reader.cancel()
+        await asyncio.gather(*readers, return_exceptions=True)
+        if process.returncode is None:
+            process.kill()
+        reaping = asyncio.create_task(process.wait())
+        while not reaping.done():
+            try:
+                await asyncio.shield(reaping)
+            except asyncio.CancelledError:
+                continue
+        try:
+            reaping.result()
+        except BaseException:
+            pass
+
+
+class _DockerCliOutputLimit(Exception):
+    pass
 
 
 class DockerCliEngineTransport(DockerEngineTransport):

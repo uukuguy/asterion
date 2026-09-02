@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from unittest import mock
 
 from asterion.applications.prime_agent.operator.docker_cli import (
     DockerCliEngineTransport,
     DockerCliResult as _Result,
+    _ProductionRunner,
 )
 from asterion.applications.prime_agent.operator.docker_worker import (
     _DockerWorkerSpecification,
@@ -32,6 +34,40 @@ class _Runner:
     async def run(self, *, argv: tuple[str, ...], env: dict[str, str], timeout: float, max_output_bytes: int) -> _Result:
         self.calls.append((argv, env, timeout, max_output_bytes))
         return self.results.pop(0)
+
+
+class _Pipe:
+    def __init__(self, data: bytes = b"", *, blocks: bool = False, failure: Exception | None = None) -> None:
+        self.data = data
+        self.blocks = blocks
+        self.failure = failure
+        self.requests: list[int] = []
+
+    async def read(self, size: int) -> bytes:
+        self.requests.append(size)
+        if self.failure is not None:
+            raise self.failure
+        if self.blocks:
+            await asyncio.Event().wait()
+        chunk, self.data = self.data[:size], self.data[size:]
+        return chunk
+
+
+class _Process:
+    def __init__(self, stdout: _Pipe, stderr: _Pipe) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.returncode: int | None = None
+        self.killed = False
+        self.waited = False
+
+    def kill(self) -> None:
+        self.killed = True
+
+    async def wait(self) -> int:
+        self.waited = True
+        self.returncode = -9
+        return self.returncode
 
 
 def _spec() -> _DockerWorkerSpecification:
@@ -107,3 +143,46 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         for values in (("docker", _SOCKET, _SECCOMP), ("/docker", "tcp://host", _SECCOMP), ("/docker", "/socket", "profile")):
             with self.subTest(values=values), self.assertRaises(RestrictedWorkerError):
                 DockerCliEngineTransport(docker_executable=values[0], socket_path=values[1], seccomp_profile=values[2], runner=_Runner([]))
+
+    async def test_production_runner_caps_combined_streams_and_reaps_without_exposing_output(self) -> None:
+        process = _Process(_Pipe(b"ab"), _Pipe(b"sentinel"))
+        with mock.patch("asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
+            with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+                await _ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=1, max_output_bytes=3)
+
+        self.assertTrue(process.killed)
+        self.assertTrue(process.waited)
+        self.assertLessEqual(max(process.stdout.requests + process.stderr.requests), 1)
+        self.assertNotIn("sentinel", str(raised.exception))
+
+    async def test_production_runner_timeout_reaps_and_redacts(self) -> None:
+        process = _Process(_Pipe(blocks=True), _Pipe(blocks=True))
+        with mock.patch("asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
+            with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+                await _ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=0.001, max_output_bytes=3)
+
+        self.assertTrue(process.killed)
+        self.assertTrue(process.waited)
+        self.assertNotIn("docker", str(raised.exception))
+
+    async def test_production_runner_pipe_failure_reaps_and_redacts(self) -> None:
+        process = _Process(_Pipe(failure=OSError("sentinel pipe failure")), _Pipe())
+        with mock.patch("asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
+            with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+                await _ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=1, max_output_bytes=3)
+
+        self.assertTrue(process.killed)
+        self.assertTrue(process.waited)
+        self.assertNotIn("sentinel", str(raised.exception))
+
+    async def test_production_runner_cancellation_reaps_the_child(self) -> None:
+        process = _Process(_Pipe(blocks=True), _Pipe(blocks=True))
+        with mock.patch("asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
+            running = asyncio.create_task(_ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=1, max_output_bytes=3))
+            await asyncio.sleep(0)
+            running.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await running
+
+        self.assertTrue(process.killed)
+        self.assertTrue(process.waited)
