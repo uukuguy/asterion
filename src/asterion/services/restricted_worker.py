@@ -114,6 +114,35 @@ class RestrictedWorkerCleanupReceipt:
             raise RestrictedWorkerError("restricted worker value is invalid")
 
 
+def verify_restricted_worker_receipts(
+    request: RestrictedWorkerRequest,
+    lease: RestrictedWorkerLease,
+    attestation: RestrictedWorkerAttestation,
+    cleanup: RestrictedWorkerCleanupReceipt,
+) -> None:
+    """Fail closed unless receipts bind one fully destroyed worker lifecycle."""
+    if (
+        type(request) is not RestrictedWorkerRequest
+        or type(lease) is not RestrictedWorkerLease
+        or type(attestation) is not RestrictedWorkerAttestation
+        or type(cleanup) is not RestrictedWorkerCleanupReceipt
+    ):
+        raise RestrictedWorkerError("restricted worker value is invalid")
+    if (
+        request.run_id != lease.run_id
+        or request.challenge_digest != lease.challenge_digest
+        or lease.worker_id != attestation.worker_id
+        or lease.run_id != attestation.run_id
+        or lease.challenge_digest != attestation.challenge_digest
+        or request.image_digest != attestation.image_digest
+        or lease.worker_id != cleanup.worker_id
+        or lease.run_id != cleanup.run_id
+        or lease.challenge_digest != cleanup.challenge_digest
+    ):
+        raise RestrictedWorkerError("restricted worker value is invalid")
+    _validate_true(cleanup.destroyed)
+
+
 class RestrictedWorkerService(Protocol):
     def open(
         self,

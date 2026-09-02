@@ -12,6 +12,7 @@ from asterion.services.restricted_worker import (
     RestrictedWorkerError,
     RestrictedWorkerLease,
     RestrictedWorkerRequest,
+    verify_restricted_worker_receipts,
 )
 
 
@@ -60,7 +61,109 @@ def _attestation(**changes: object) -> RestrictedWorkerAttestation:
     return RestrictedWorkerAttestation(**values)  # type: ignore[arg-type]
 
 
+def _cleanup(**changes: object) -> RestrictedWorkerCleanupReceipt:
+    values: dict[str, object] = {
+        "worker_id": "worker-1",
+        "run_id": "run-1",
+        "challenge_digest": _CHALLENGE_DIGEST,
+        "destroyed": True,
+    }
+    values.update(changes)
+    return RestrictedWorkerCleanupReceipt(**values)  # type: ignore[arg-type]
+
+
 class TestRestrictedWorkerValues(unittest.TestCase):
+    def test_receipt_verification_accepts_one_bound_lifecycle(self) -> None:
+        self.assertIsNone(
+            verify_restricted_worker_receipts(
+                _request(), _lease(), _attestation(), _cleanup()
+            )
+        )
+
+    def test_receipt_verification_rejects_mismatched_lifecycle_identities(self) -> None:
+        cases = (
+            (
+                "request and lease run",
+                _request(),
+                _lease(run_id="run-2"),
+                _attestation(),
+                _cleanup(),
+            ),
+            (
+                "request and lease challenge",
+                _request(),
+                _lease(challenge_digest="sha256:" + "c" * 64),
+                _attestation(),
+                _cleanup(),
+            ),
+            (
+                "lease and attestation worker",
+                _request(),
+                _lease(),
+                _attestation(worker_id="worker-2"),
+                _cleanup(),
+            ),
+            (
+                "lease and attestation run",
+                _request(),
+                _lease(),
+                _attestation(run_id="run-2"),
+                _cleanup(),
+            ),
+            (
+                "lease and attestation challenge",
+                _request(),
+                _lease(),
+                _attestation(challenge_digest="sha256:" + "c" * 64),
+                _cleanup(),
+            ),
+            (
+                "request and attestation image",
+                _request(),
+                _lease(),
+                _attestation(image_digest="sha256:" + "c" * 64),
+                _cleanup(),
+            ),
+            (
+                "lease and cleanup worker",
+                _request(),
+                _lease(),
+                _attestation(),
+                _cleanup(worker_id="worker-2"),
+            ),
+            (
+                "lease and cleanup run",
+                _request(),
+                _lease(),
+                _attestation(),
+                _cleanup(run_id="run-2"),
+            ),
+            (
+                "lease and cleanup challenge",
+                _request(),
+                _lease(),
+                _attestation(),
+                _cleanup(challenge_digest="sha256:" + "c" * 64),
+            ),
+        )
+
+        for name, request, lease, attestation, cleanup in cases:
+            with (
+                self.subTest(name=name),
+                self.assertRaisesRegex(
+                    RestrictedWorkerError, "restricted worker value is invalid"
+                ),
+            ):
+                verify_restricted_worker_receipts(request, lease, attestation, cleanup)
+
+    def test_receipt_verification_rejects_cleanup_not_destroyed(self) -> None:
+        with self.assertRaisesRegex(
+            RestrictedWorkerError, "restricted worker value is invalid"
+        ):
+            verify_restricted_worker_receipts(
+                _request(), _lease(), _attestation(), _cleanup(destroyed=False)
+            )
+
     def test_request_accepts_only_bounded_public_metadata(self) -> None:
         request = _request()
 
@@ -78,13 +181,19 @@ class TestRestrictedWorkerValues(unittest.TestCase):
         )
 
     def test_values_are_immutable(self) -> None:
-        values = (_request(), _lease(), _attestation(), RestrictedWorkerCleanupReceipt(
-            "worker-1", "run-1", _CHALLENGE_DIGEST, True
-        ))
+        values = (
+            _request(),
+            _lease(),
+            _attestation(),
+            RestrictedWorkerCleanupReceipt(
+                "worker-1", "run-1", _CHALLENGE_DIGEST, True
+            ),
+        )
 
         for value in values:
-            with self.subTest(value=type(value).__name__), self.assertRaises(
-                FrozenInstanceError
+            with (
+                self.subTest(value=type(value).__name__),
+                self.assertRaises(FrozenInstanceError),
             ):
                 value.run_id = "run-2"  # type: ignore[misc]
 
@@ -92,22 +201,29 @@ class TestRestrictedWorkerValues(unittest.TestCase):
         invalid_values = ("", " run-1", "run-1 ", "RUN-1", "run_1", "run/1")
         for field in ("role_id", "run_id"):
             for value in invalid_values:
-                with self.subTest(field=field, value=value), self.assertRaisesRegex(
-                    RestrictedWorkerError, "restricted worker value is invalid"
+                with (
+                    self.subTest(field=field, value=value),
+                    self.assertRaisesRegex(
+                        RestrictedWorkerError, "restricted worker value is invalid"
+                    ),
                 ):
                     _request(**{field: value})
         for field in ("image_digest", "challenge_digest"):
             for value in ("latest", "sha256:" + "a" * 63, "sha256:" + "A" * 64):
-                with self.subTest(field=field, value=value), self.assertRaisesRegex(
-                    RestrictedWorkerError, "restricted worker value is invalid"
+                with (
+                    self.subTest(field=field, value=value),
+                    self.assertRaisesRegex(
+                        RestrictedWorkerError, "restricted worker value is invalid"
+                    ),
                 ):
                     _request(**{field: value})
 
     def test_rejects_boolean_or_non_positive_limits(self) -> None:
         for field in ("max_runtime_seconds", "max_output_bytes"):
             for value in (True, 0, -1, 1.5):
-                with self.subTest(field=field, value=value), self.assertRaises(
-                    RestrictedWorkerError
+                with (
+                    self.subTest(field=field, value=value),
+                    self.assertRaises(RestrictedWorkerError),
                 ):
                     _request(**{field: value})
 
@@ -129,8 +245,9 @@ class TestRestrictedWorkerValues(unittest.TestCase):
             ),
         )
         for constructor, field, value in cases:
-            with self.subTest(constructor=constructor, field=field), self.assertRaises(
-                RestrictedWorkerError
+            with (
+                self.subTest(constructor=constructor, field=field),
+                self.assertRaises(RestrictedWorkerError),
             ):
                 if constructor is RestrictedWorkerCleanupReceipt:
                     values: dict[str, Any] = {
