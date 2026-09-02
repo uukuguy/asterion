@@ -27,6 +27,28 @@ _CAPTURES = (
 )
 
 
+def _local_structural_image_lock() -> image_input_lock.ImageInputLock:
+    artifacts = tuple(
+        image_input_lock.ImageArtifact(kind, path, 0, f"{index:064x}")
+        for index, (kind, path) in enumerate(
+            (
+                ("frontend", "build-frontend/launcher.mjs"),
+                ("fixture", "fixture/fixture-lock.json"),
+                ("node-modules", "node/node-modules.tar"),
+                ("node-archive", "node/node.tar.xz"),
+                ("oci-config", "oci/config.json"),
+                ("oci-layer", "oci/layer.tar"),
+                ("oci-manifest", "oci/manifest.json"),
+                ("python-wheel", "python/prime_agent_runtime-0-py3-none-any.whl"),
+            )
+        )
+    )
+    return image_input_lock.ImageInputLock(
+        "a" * 40, "b" * 64, "c" * 64,
+        image_input_lock.ImagePlatformDescriptor("linux", "amd64", None), artifacts,
+    )
+
+
 def _request(**changes: object) -> generation.ReleaseSpecGenerationRequest:
     return replace(
         generation.ReleaseSpecGenerationRequest(
@@ -89,8 +111,10 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
             image_input_lock.image_input_lock_from_dict(value)
         with self.assertRaises(image_input_lock.PrimeImageInputLockError):
             image_input_lock.validate_image_input_lock(result)  # type: ignore[arg-type]
+        structural_lock = _local_structural_image_lock()
+        self.assertEqual(image_input_lock.validate_image_input_lock(structural_lock), structural_lock)
         with self.assertRaises(image_input_lock.PrimeImageInputLockError):
-            image_input_lock.VerifiedImageInputArtifactSet(image_input_lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK, object())  # type: ignore[arg-type]
+            image_input_lock.VerifiedImageInputArtifactSet(structural_lock, object())  # type: ignore[arg-type]
 
     def test_public_review_json_redacts_capture_urls_to_digests(self) -> None:
         private_url = "https://private-release-sentinel.invalid/secret-path/node.tar.xz"

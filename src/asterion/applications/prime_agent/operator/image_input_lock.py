@@ -234,11 +234,11 @@ def _platform_sort_key(platform: ImagePlatformDescriptor) -> tuple[str, str, boo
 
 def resolve_promoted_image_input_lock(
     requested_platform: object,
-    catalog: object = PRIME_IPYTHON_IMAGE_INPUT_CATALOG,
 ) -> ImageInputLock:
-    """Resolve one explicit descriptor, failing closed on every ambiguity."""
+    """Resolve one explicit descriptor from the code-owned catalog only."""
 
     requested = validate_image_platform_descriptor(requested_platform)
+    catalog = PRIME_IPYTHON_IMAGE_INPUT_CATALOG
     if (
         type(catalog) is not PromotedImageInputCatalog
         or not isinstance(catalog.locks, tuple)

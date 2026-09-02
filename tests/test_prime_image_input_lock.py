@@ -11,6 +11,7 @@ from typing import cast
 import unittest
 
 from asterion.applications.prime_agent.operator import image_input_lock as lock
+from tools import materialize_prime_ipython_inputs as materializer
 
 
 def _synthetic_lock() -> lock.ImageInputLock:
@@ -60,6 +61,15 @@ class TestPrimeImageInputLock(unittest.TestCase):
         with self.assertRaises(lock.PrimeImageInputLockError):
             lock.resolve_promoted_image_input_lock(
                 lock.ImagePlatformDescriptor("linux", "arm64", None)
+            )
+
+    def test_promoted_resolution_rejects_caller_supplied_catalog(self) -> None:
+        synthetic = _synthetic_lock()
+        caller_catalog = lock.PromotedImageInputCatalog((synthetic,))
+
+        with self.assertRaises(TypeError):
+            lock.resolve_promoted_image_input_lock(
+                synthetic.platform, caller_catalog  # type: ignore[call-arg]
             )
 
     def test_explicit_lock_is_required_for_hashing_and_verification(self) -> None:
@@ -123,8 +133,14 @@ class TestPrimeImageInputLock(unittest.TestCase):
                 lock.verify_image_input_artifact_set(root, verification_lock)
             (root / "unexpected").rmdir()
             proof = lock.verify_image_input_artifact_set(root, verification_lock)
+            with self.assertRaises(TypeError):
+                materializer.verify_external_materialization(root)  # type: ignore[call-arg]
+            wrapped_proof = materializer.verify_external_materialization(
+                root, verification_lock
+            )
         self.assertEqual(proof.contract, verification_lock)
         self.assertEqual(proof.root, root)
+        self.assertEqual(wrapped_proof, proof)
 
     def test_descriptor_rejects_noncanonical_values(self) -> None:
         for value in (
