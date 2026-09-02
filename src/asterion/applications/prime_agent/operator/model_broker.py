@@ -21,6 +21,7 @@ from asterion.applications.prime_agent.operator.launcher_barrier import PrimeLau
 
 
 Provider = Callable[[bytes], Awaitable[bytes]]
+_PROOF_ISSUER = object()
 
 
 class PrimeModelBrokerError(ValueError):
@@ -72,29 +73,35 @@ class PrimeModelChannel:
 class _LauncherReleaseProof:
     """An internal marker minted only by a released launcher barrier."""
 
-    __slots__ = ("_worker",)
+    __slots__ = ("_token",)
 
-    def __init__(self, worker: RestrictedWorkerLease) -> None:
-        self._worker = worker
+    def __init__(self, issuer: object, token: object) -> None:
+        if issuer is not _PROOF_ISSUER:
+            raise PrimeModelBrokerError("prime model broker is unavailable")
+        self._token = token
 
     def __repr__(self) -> str:
         return "_LauncherReleaseProof(redacted)"
 
 
 def _launcher_release_proof(
-    barrier: PrimeLauncherBarrier, worker: RestrictedWorkerLease
+    barrier: PrimeLauncherBarrier,
+    worker: RestrictedWorkerLease,
+    broker: PrimeModelBroker,
 ) -> _LauncherReleaseProof:
     """Mint a private proof from inside the barrier's release action only."""
     if (
         type(barrier) is not PrimeLauncherBarrier
         or type(worker) is not RestrictedWorkerLease
+        or type(broker) is not PrimeModelBroker
         or barrier._released is not True  # noqa: SLF001 - deliberate private boundary coupling
         or barrier._worker_id != worker.worker_id  # noqa: SLF001
         or barrier._run_id != worker.run_id  # noqa: SLF001
         or barrier._challenge_digest != worker.challenge_digest  # noqa: SLF001
+        or broker._worker != worker  # noqa: SLF001
     ):
         raise PrimeModelBrokerError("prime model broker is unavailable")
-    return _LauncherReleaseProof(worker)
+    return _LauncherReleaseProof(_PROOF_ISSUER, broker._admission_token)  # noqa: SLF001
 
 
 class PrimeModelBroker:
@@ -104,6 +111,7 @@ class PrimeModelBroker:
         "_lease", "_session", "_worker", "_provider", "_deadline", "_monotonic",
         "_lock", "_quiescent", "_released", "_revoked", "_inflight", "_requests",
         "_input_bytes", "_output_bytes",
+        "_admission_token",
     )
 
     def __init__(
@@ -151,6 +159,7 @@ class PrimeModelBroker:
         self._requests = 0
         self._input_bytes = 0
         self._output_bytes = 0
+        self._admission_token = object()
 
     def __repr__(self) -> str:
         return "PrimeModelBroker(redacted)"
@@ -161,7 +170,7 @@ class PrimeModelBroker:
             type(proof) is not _LauncherReleaseProof
             or self._released
             or self._revoked
-            or proof._worker != self._worker
+            or proof._token is not self._admission_token
         ):
             raise PrimeModelBrokerError("prime model broker is unavailable")
         self._released = True
@@ -203,15 +212,35 @@ class PrimeModelBroker:
             self._input_bytes += len(body)
             self._inflight = True
             self._quiescent.clear()
+            remaining = self._deadline - float(self._monotonic())
+        provider_task: asyncio.Future[bytes] | None = None
         try:
-            result = await self._provider(body)
+            if remaining <= 0:
+                raise PrimeModelBrokerError("prime model broker is unavailable")
+            provider_task = asyncio.ensure_future(self._provider(body))
+            done, _ = await asyncio.wait((provider_task,), timeout=remaining)
+            if not done:
+                provider_task.cancel()
+                provider_task.add_done_callback(_consume_provider_result)
+                raise PrimeModelBrokerError("prime model broker is unavailable")
+            if provider_task.cancelled():
+                raise PrimeModelBrokerError("prime model broker is unavailable")
+            try:
+                result = provider_task.result()
+            except asyncio.CancelledError:
+                raise PrimeModelBrokerError("prime model broker is unavailable") from None
             if type(result) is not bytes:
                 raise PrimeModelBrokerError("prime model broker is unavailable")
             async with self._lock:
-                if self._output_bytes + len(result) > self._session.max_output_bytes:
-                    raise PrimeModelBrokerError("prime model broker is unavailable")
                 self._output_bytes += len(result)
+                if self._output_bytes > self._session.max_output_bytes:
+                    raise PrimeModelBrokerError("prime model broker is unavailable")
             return result
+        except asyncio.CancelledError:
+            if provider_task is not None and not provider_task.done():
+                provider_task.cancel()
+                provider_task.add_done_callback(_consume_provider_result)
+            raise
         except PrimeModelBrokerError:
             raise
         except Exception:
@@ -223,3 +252,11 @@ class PrimeModelBroker:
 
     def _expired(self) -> bool:
         return float(self._monotonic()) >= self._deadline
+
+
+def _consume_provider_result(task: asyncio.Future[bytes]) -> None:
+    """Observe a detached timed-out provider task without surfacing its detail."""
+    try:
+        task.exception()
+    except (asyncio.CancelledError, Exception):
+        pass

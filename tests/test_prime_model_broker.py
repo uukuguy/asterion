@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import unittest
 
 from asterion.applications.prime_agent.operator.model_broker import (
@@ -22,6 +23,10 @@ from asterion.services.restricted_worker import RestrictedWorkerAttestation, Res
 
 
 _CHALLENGE = "sha256:" + "a" * 64
+
+
+async def _bytes_result() -> bytes:
+    return b"ok"
 
 
 def _session(**changes: object) -> BoundedModelSessionRequest:
@@ -50,7 +55,7 @@ def _channel(broker: PrimeModelBroker) -> PrimeModelChannel:
         source_read_only=True, resource_limited=True,
     ))
     proofs: list[_LauncherReleaseProof] = []
-    barrier.release(worker, lambda: proofs.append(_launcher_release_proof(barrier, worker)))
+    barrier.release(worker, lambda: proofs.append(_launcher_release_proof(barrier, worker, broker)))
     return broker._release_after_launcher(proofs[0])
 
 
@@ -94,7 +99,59 @@ class TestPrimeModelBroker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await output_channel.request(b"one"), b"123456")
         with self.assertRaises(PrimeModelBrokerError):
             await output_channel.request(b"two")
-        self.assertEqual(output_broker.usage().output_bytes, 6)
+        self.assertEqual(output_broker.usage().output_bytes, 13)
+
+    async def test_times_out_provider_call_and_revoke_does_not_wait_forever(self) -> None:
+        started = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def provider(_body: bytes) -> bytes:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+                return b"never"
+            except asyncio.CancelledError:
+                cancelled.set()
+                await asyncio.sleep(0.02)
+                return b"late"
+
+        broker = _broker(provider)
+        broker._deadline = time.monotonic() + 0.01  # noqa: SLF001 - bounded provider await
+        request = asyncio.create_task(_channel(broker).request(b"one"))
+        await started.wait()
+        with self.assertRaises(PrimeModelBrokerError):
+            await request
+        receipt = await asyncio.wait_for(broker.revoke(), timeout=0.1)
+        self.assertEqual(receipt.status, "revoked")
+        await cancelled.wait()
+        await asyncio.sleep(0.03)
+
+    async def test_provider_cancellation_is_redacted_but_external_cancellation_propagates(self) -> None:
+        async def cancelled_provider(_body: bytes) -> bytes:
+            raise asyncio.CancelledError("SECRET-PROVIDER-CREDENTIAL")
+
+        with self.assertRaises(PrimeModelBrokerError) as raised:
+            await _channel(_broker(cancelled_provider)).request(b"one")
+        self.assertNotIn("SECRET-PROVIDER-CREDENTIAL", str(raised.exception))
+
+        started = asyncio.Event()
+
+        async def waiting_provider(_body: bytes) -> bytes:
+            started.set()
+            await asyncio.Event().wait()
+            return b"never"
+
+        task = asyncio.create_task(_channel(_broker(waiting_provider)).request(b"one"))
+        await started.wait()
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
+    async def test_rejects_directly_forged_release_proof(self) -> None:
+        broker = _broker(lambda _body: _bytes_result())
+        worker = RestrictedWorkerLease("worker-1", "run-1", _CHALLENGE)
+        with self.assertRaises((PrimeModelBrokerError, TypeError)):
+            broker._release_after_launcher(_LauncherReleaseProof(worker))  # type: ignore[call-arg]
 
     async def test_rejects_concurrent_expired_and_revoked_calls_without_provider_call(self) -> None:
         started = asyncio.Event()
