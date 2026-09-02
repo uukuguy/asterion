@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from types import TracebackType
 from typing import Literal, Protocol
 
 from asterion.runtime.host import CancellationSignal
@@ -203,5 +204,10 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
     async def __aenter__(self) -> RestrictedWorkerLease:
         return self._service._admit_lease(self._request, await self._context.__aenter__())
 
-    async def __aexit__(self, *args: object) -> bool | None:
-        return await self._context.__aexit__(*args)
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None:
+        return await self._context.__aexit__(exc_type, exc_value, traceback)
