@@ -43,6 +43,23 @@ class TestPrimeImageInputLock(unittest.TestCase):
             with self.subTest(case=case), self.assertRaises(lock.PrimeImageInputLockError):
                 lock.image_input_lock_from_dict(case)
 
+    def test_parser_rejects_nonexact_artifact_list_items(self) -> None:
+        value = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.as_dict()
+        artifacts = cast(list[dict[str, object]], value["artifacts"])
+        malformed_artifacts: tuple[object, ...] = (
+            object(),
+            {**artifacts[0], "url": "https://example.invalid/input"},
+            {key: item for key, item in artifacts[0].items() if key != "sha256"},
+        )
+
+        for malformed_artifact in malformed_artifacts:
+            with self.subTest(malformed_artifact=malformed_artifact), self.assertRaises(
+                lock.PrimeImageInputLockError
+            ):
+                lock.image_input_lock_from_dict(
+                    {**value, "artifacts": [*artifacts, malformed_artifact]}
+                )
+
     def test_rejects_unsafe_artifact_records_and_duplicate_digests(self) -> None:
         value = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.as_dict()
         artifacts = cast(list[dict[str, object]], value["artifacts"])

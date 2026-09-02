@@ -153,10 +153,16 @@ def image_input_lock_from_dict(value: object) -> ImageInputLock:
     artifacts = value.get("artifacts")
     if not isinstance(artifacts, list):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
+    if any(
+        type(item) is not dict
+        or frozenset(item) != {"kind", "path", "size", "sha256"}
+        for item in artifacts
+    ):
+        raise PrimeImageInputLockError("Prime image input lock is invalid")
     try:
         parsed = ImageInputLock(
             value["source_commit"], value["source_tree_sha256"], value["source_package_lock_sha256"], value["platform"],
-            tuple(ImageArtifact(item["kind"], item["path"], item["size"], item["sha256"]) for item in artifacts if isinstance(item, dict) and frozenset(item) == {"kind", "path", "size", "sha256"}),
+            tuple(ImageArtifact(item["kind"], item["path"], item["size"], item["sha256"]) for item in artifacts),
         )
     except (KeyError, TypeError):
         raise PrimeImageInputLockError("Prime image input lock is invalid") from None
