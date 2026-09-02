@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from collections.abc import Mapping
 
@@ -45,15 +46,21 @@ class _Transport(DockerEngineTransport):
         self.self_check = _safe_self_check()
         self.force_remove_error: Exception | None = None
         self.absence_error: Exception | None = None
+        self.cancel_at: str | None = None
+        self.controls: list[object] = []
 
-    async def create(self, specification: object, *, signal: object = None) -> str:  # type: ignore[override]
+    async def create(self, specification: object, *, control: object) -> str:  # type: ignore[override]
         self.calls.append("create")
         self.spec = specification
-        return "container-1"
+        self.controls.append(control)
+        self._cancel("create")
+        return specification.container_id  # type: ignore[union-attr]
 
-    async def inspect(self, container_id: str) -> Mapping[str, object]:
+    async def inspect(self, container_id: str, *, control: object) -> Mapping[str, object]:
         self.calls.append("inspect")
+        self.controls.append(control)
         self.assert_container_id(container_id)
+        self._cancel("inspect")
         inspections = (
             self.inspection,
             self.post_start_inspection,
@@ -61,37 +68,42 @@ class _Transport(DockerEngineTransport):
         )
         return inspections[self.calls.count("inspect") - 1]
 
-    async def start(self, container_id: str) -> RestrictedWorkerLease:
+    async def start(self, container_id: str, *, control: object) -> RestrictedWorkerLease:
         self.calls.append("start")
+        self.controls.append(control)
         self.assert_container_id(container_id)
+        self._cancel("start")
         return self.lease
 
     async def launcher_self_check(
-        self, container_id: str
+        self, container_id: str, *, control: object
     ) -> DockerWorkerLauncherSelfCheck:
         self.calls.append("launcher_self_check")
+        self.controls.append(control)
         self.assert_container_id(container_id)
+        self._cancel("launcher_self_check")
         return self.self_check
 
-    async def remove(self, container_id: str) -> None:
-        self.calls.append("remove")
-        self.assert_container_id(container_id)
-
-    async def force_remove(self, container_id: str) -> None:
+    async def force_remove(self, container_id: str, *, control: object) -> None:
         self.calls.append("force_remove")
+        self.controls.append(control)
         self.assert_container_id(container_id)
         if self.force_remove_error is not None:
             raise self.force_remove_error
 
-    async def assert_absent(self, container_id: str) -> None:
+    async def assert_absent(self, container_id: str, *, control: object) -> None:
         self.calls.append("assert_absent")
+        self.controls.append(control)
         self.assert_container_id(container_id)
         if self.absence_error is not None:
             raise self.absence_error
 
-    @staticmethod
-    def assert_container_id(container_id: str) -> None:
-        if container_id != "container-1":
+    def _cancel(self, operation: str) -> None:
+        if self.cancel_at == operation:
+            raise asyncio.CancelledError
+
+    def assert_container_id(self, container_id: str) -> None:
+        if self.spec is None or container_id != self.spec.container_id:  # type: ignore[union-attr]
             raise AssertionError("unexpected container identity")
 
 
@@ -190,6 +202,7 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
                 "launcher_id",
                 "user_id",
                 "group_id",
+                "container_id",
             },
         )
         self.assertNotIn("command", fields)
@@ -222,7 +235,10 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid"):
             await self.service.open(_request()).__aenter__()
 
-        self.assertEqual(self.transport.calls, ["create", "inspect", "start", "inspect", "remove"])
+        self.assertEqual(
+            self.transport.calls,
+            ["create", "inspect", "start", "inspect", "force_remove", "assert_absent"],
+        )
         with self.assertRaises(RestrictedWorkerError):
             await self.service.attest(self.transport.lease)
 
@@ -245,7 +261,7 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
                     await self.service.open(_request(run_id="run-2")).__aenter__()
                 self.assertEqual(
                     self.transport.calls,
-                    ["create", "inspect", "start", "inspect", "launcher_self_check", "remove"],
+                    ["create", "inspect", "start", "inspect", "launcher_self_check", "force_remove", "assert_absent"],
                 )
                 self.assertNotIn("DockerWorkerLauncherSelfCheck", str(raised.exception))
                 with self.assertRaises(RestrictedWorkerError):
@@ -303,7 +319,59 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid"):
             await self.service.open(_request()).__aenter__()
 
-        self.assertEqual(self.transport.calls, ["create", "inspect", "remove"])
+        self.assertEqual(
+            self.transport.calls,
+            ["create", "inspect", "force_remove", "assert_absent"],
+        )
+
+    async def test_cancellation_after_create_force_removes_and_proves_absence(self) -> None:
+        self.transport.cancel_at = "inspect"
+
+        with self.assertRaises(asyncio.CancelledError):
+            await self.service.open(_request()).__aenter__()
+
+        self.assertEqual(
+            self.transport.calls,
+            ["create", "inspect", "force_remove", "assert_absent"],
+        )
+        with self.assertRaises(RestrictedWorkerError):
+            await self.service.attest(self.transport.lease)
+
+    async def test_cancellation_at_create_compensates_the_preallocated_identity(self) -> None:
+        self.transport.cancel_at = "create"
+
+        with self.assertRaises(asyncio.CancelledError):
+            await self.service.open(_request()).__aenter__()
+
+        self.assertEqual(self.transport.calls, ["create", "force_remove", "assert_absent"])
+
+    async def test_cancellation_after_start_force_removes_before_attestation(self) -> None:
+        self.transport.cancel_at = "launcher_self_check"
+
+        with self.assertRaises(asyncio.CancelledError):
+            await self.service.open(_request()).__aenter__()
+
+        self.assertEqual(self.transport.calls[-2:], ["force_remove", "assert_absent"])
+        with self.assertRaises(RestrictedWorkerError):
+            await self.service.attest(self.transport.lease)
+
+    async def test_cancellation_during_exit_cleans_up_without_a_receipt(self) -> None:
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+        self.transport.cancel_at = "inspect"
+
+        with self.assertRaises(asyncio.CancelledError):
+            await context.__aexit__(None, None, None)
+
+        self.assertEqual(self.transport.calls[-3:], ["inspect", "force_remove", "assert_absent"])
+        with self.assertRaises(RestrictedWorkerError):
+            await self.service.cleanup_receipt(lease)
+
+    async def test_normal_lifecycle_operations_share_one_call_control(self) -> None:
+        async with self.service.open(_request()):
+            pass
+
+        self.assertEqual(len({id(control) for control in self.transport.controls[:5]}), 1)
 
     async def test_returns_only_attestation_and_cleanup_for_admitted_lease(self) -> None:
         async with self.service.open(_request()) as lease:
@@ -339,7 +407,7 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
             self.transport.calls,
             [
                 "create", "inspect", "start", "inspect", "launcher_self_check",
-                "inspect", "force_remove",
+                "inspect", "force_remove", "assert_absent",
             ],
         )
         with self.assertRaises(RestrictedWorkerError):

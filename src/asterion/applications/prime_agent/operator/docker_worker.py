@@ -6,8 +6,11 @@ injects the narrow engine transport after establishing its own engine policy.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from secrets import token_hex
+from time import monotonic
 from types import TracebackType
 from typing import Literal, Mapping, Protocol
 
@@ -24,6 +27,8 @@ from asterion.services.restricted_worker import (
 _ROLE_ID = "prime.ipython-coding"
 _NON_ROOT_ID = 65534
 _WORKSPACE_TMPFS_BYTES = 67108864
+_LIFECYCLE_SECONDS = 30
+_CLEANUP_SECONDS = 30
 _SAFE_ENVIRONMENT = (
     "HOME=/workspace",
     "PATH=/usr/local/bin:/usr/bin:/bin",
@@ -65,6 +70,21 @@ class _DockerWorkerSpecification:
     launcher_id: Literal["prime-ipython-coding"]
     user_id: int
     group_id: int
+    container_id: str = ""
+
+
+@dataclass(frozen=True, repr=False)
+class _LifecycleCallControl:
+    """Code-owned finite call budget; transports cannot select its limits."""
+
+    deadline: float
+    signal: CancellationSignal | None
+
+    def cancelled(self) -> bool:
+        return self.signal is not None and self.signal.cancelled
+
+    def __repr__(self) -> str:
+        return "_LifecycleCallControl(redacted)"
 
 
 @dataclass(frozen=True, repr=False)
@@ -104,22 +124,28 @@ class DockerEngineTransport(Protocol):
         self,
         specification: _DockerWorkerSpecification,
         *,
-        signal: CancellationSignal | None = None,
+        control: _LifecycleCallControl,
     ) -> str: ...
 
-    async def inspect(self, container_id: str) -> Mapping[str, object]: ...
+    async def inspect(
+        self, container_id: str, *, control: _LifecycleCallControl
+    ) -> Mapping[str, object]: ...
 
-    async def start(self, container_id: str) -> RestrictedWorkerLease: ...
+    async def start(
+        self, container_id: str, *, control: _LifecycleCallControl
+    ) -> RestrictedWorkerLease: ...
 
     async def launcher_self_check(
-        self, container_id: str
+        self, container_id: str, *, control: _LifecycleCallControl
     ) -> DockerWorkerLauncherSelfCheck: ...
 
-    async def remove(self, container_id: str) -> None: ...
+    async def force_remove(
+        self, container_id: str, *, control: _LifecycleCallControl
+    ) -> None: ...
 
-    async def force_remove(self, container_id: str) -> None: ...
-
-    async def assert_absent(self, container_id: str) -> None: ...
+    async def assert_absent(
+        self, container_id: str, *, control: _LifecycleCallControl
+    ) -> None: ...
 
 
 @dataclass
@@ -341,32 +367,32 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
         self._request = request
         self._specification = specification
         self._signal = signal
-        self._container_id: str | None = None
+        self._container_id = "prime-" + token_hex(16)
+        self._specification = replace(specification, container_id=self._container_id)
+        self._control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, signal)
         self._lease: RestrictedWorkerLease | None = None
 
     async def __aenter__(self) -> RestrictedWorkerLease:
         try:
-            container_id = await self._service._transport.create(
-                self._specification, signal=self._signal
-            )
-            if type(container_id) is not str or not container_id:
+            container_id = await self._call_create()
+            if container_id != self._container_id:
                 raise RestrictedWorkerError("restricted worker value is invalid")
-            self._container_id = container_id
-            inspection = await self._service._transport.inspect(container_id)
+            inspection = await self._call_inspect(self._control)
             self._service._validate_inspection(inspection)
-            lease = await self._service._transport.start(container_id)
-            inspection = await self._service._transport.inspect(container_id)
+            lease = await self._call_start()
+            inspection = await self._call_inspect(self._control)
             self._service._validate_inspection(inspection)
-            self_check = await self._service._transport.launcher_self_check(container_id)
+            self_check = await self._call_self_check()
             self._service._validate_launcher_self_check(self_check)
             self._lease = self._service._admit_lease(self._request, lease)
             self._service._bind_container(self._lease, container_id)
             return self._lease
-        except RestrictedWorkerError:
-            await self._remove_after_rejection()
-            raise RestrictedWorkerError("restricted worker value is invalid") from None
-        except Exception:
-            await self._remove_after_rejection()
+        except BaseException as error:
+            cleanup_error = await self._cleanup_after_rejection()
+            if cleanup_error is not None:
+                raise RestrictedWorkerError("restricted worker value is invalid") from None
+            if isinstance(error, asyncio.CancelledError):
+                raise
             raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     async def __aexit__(
@@ -375,34 +401,81 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool | None:
-        if self._container_id is None or self._lease is None:
+        if self._lease is None:
             raise RestrictedWorkerError("restricted worker value is invalid")
+        control = _LifecycleCallControl(monotonic() + _CLEANUP_SECONDS, None)
         try:
-            inspection = await self._service._transport.inspect(self._container_id)
+            inspection = await self._call_inspect(control)
             self._service._validate_inspection(inspection)
-        except Exception:
-            await self._force_remove_after_failed_teardown_evidence()
+        except BaseException as error:
+            cleanup_error = await self._cleanup_container(control)
+            if cleanup_error is not None:
+                raise RestrictedWorkerError("restricted worker value is invalid") from None
+            if isinstance(error, asyncio.CancelledError):
+                raise
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         try:
-            await self._service._transport.force_remove(self._container_id)
-            await self._service._transport.assert_absent(self._container_id)
+            cleanup_error = await self._cleanup_container(control)
+            if cleanup_error is not None:
+                raise cleanup_error
             self._service._record_verified_cleanup(self._lease)
-        except Exception:
+        except BaseException:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         return None
 
-    async def _force_remove_after_failed_teardown_evidence(self) -> None:
-        if self._container_id is None:
-            return
-        try:
-            await self._service._transport.force_remove(self._container_id)
-        except Exception:
-            pass
+    async def _call_create(self) -> str:
+        return await self._within_deadline(
+            self._service._transport.create(self._specification, control=self._control), self._control
+        )
 
-    async def _remove_after_rejection(self) -> None:
-        if self._container_id is None:
-            return
-        try:
-            await self._service._transport.remove(self._container_id)
-        except Exception:
-            pass
+    async def _call_inspect(self, control: _LifecycleCallControl) -> Mapping[str, object]:
+        return await self._within_deadline(
+            self._service._transport.inspect(self._container_id, control=control), control
+        )
+
+    async def _call_start(self) -> RestrictedWorkerLease:
+        return await self._within_deadline(
+            self._service._transport.start(self._container_id, control=self._control), self._control
+        )
+
+    async def _call_self_check(self) -> DockerWorkerLauncherSelfCheck:
+        return await self._within_deadline(
+            self._service._transport.launcher_self_check(self._container_id, control=self._control), self._control
+        )
+
+    async def _within_deadline(self, awaitable: object, control: _LifecycleCallControl):
+        if control.cancelled() or monotonic() >= control.deadline:
+            raise asyncio.CancelledError
+        async with asyncio.timeout_at(control.deadline):
+            result = await awaitable  # type: ignore[misc]
+        if control.cancelled():
+            raise asyncio.CancelledError
+        return result
+
+    async def _cleanup_after_rejection(self) -> BaseException | None:
+        return await self._cleanup_container(
+            _LifecycleCallControl(monotonic() + _CLEANUP_SECONDS, None)
+        )
+
+    async def _cleanup_container(self, control: _LifecycleCallControl) -> BaseException | None:
+        task = asyncio.create_task(self._cleanup_container_unshielded(control))
+        cancellation: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as error:
+                cancellation = error
+            except BaseException as error:
+                return error
+        if task.cancelled():
+            return asyncio.CancelledError()
+        error = task.exception()
+        return error if error is not None else cancellation
+
+    async def _cleanup_container_unshielded(self, control: _LifecycleCallControl) -> None:
+        await self._within_deadline(
+            self._service._transport.force_remove(self._container_id, control=control), control
+        )
+        await self._within_deadline(
+            self._service._transport.assert_absent(self._container_id, control=control), control
+        )
