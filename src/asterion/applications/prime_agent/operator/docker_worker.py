@@ -188,10 +188,11 @@ class DockerRestrictedWorkerService:
         if type(lease) is not RestrictedWorkerLease:
             raise RestrictedWorkerError("restricted worker value is invalid")
         state = self._leases.get(lease.worker_id)
-        request = state.request if state is not None else None
+        if state is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        request = state.request
         if (
-            request is None
-            or request.run_id != lease.run_id
+            request.run_id != lease.run_id
             or request.challenge_digest != lease.challenge_digest
             or (require_removed and not state.removed)
         ):
