@@ -107,6 +107,12 @@ class _BlockingAttachProcess(_AttachProcess):
         return self.returncode
 
 
+class _FailingAttachProcess(_AttachProcess):
+    async def wait(self) -> int:
+        self.waited = True
+        raise RuntimeError("socket /var/run/docker.sock sentinel")
+
+
 class _Signal:
     def __init__(self, cancelled: bool = False) -> None:
         self.cancelled = cancelled
@@ -248,6 +254,21 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(process.stdin.closed)
         self.assertTrue(process.killed)
         self.assertTrue(process.waited)
+
+    async def test_attach_close_redacts_reap_failure_after_killing_and_waiting(self) -> None:
+        process = _FailingAttachProcess(b"")
+        attach = _AttachRunner(process)
+        transport, _ = self._transport([], attach)
+        transport._specifications[_CONTAINER] = _spec()
+        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+
+        with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+            await channel.close(control=self._control())
+
+        self.assertTrue(process.stdin.closed)
+        self.assertTrue(process.killed)
+        self.assertTrue(process.waited)
+        self.assertNotIn("socket", str(raised.exception))
 
     async def test_absence_daemon_failure_and_non_absence_are_rejected(self) -> None:
         for result in (_Result(returncode=1, stderr=b"daemon unavailable"), _Result(stdout=(_CONTAINER + "\n").encode())):
