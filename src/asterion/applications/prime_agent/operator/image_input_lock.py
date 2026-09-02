@@ -33,6 +33,9 @@ class PrimeImageInputLockError(ValueError):
     """Raised when a Prime image input lock or artifact set is invalid."""
 
 
+_VERIFIED_IMAGE_INPUT_ARTIFACT_SET_TOKEN: Final = object()
+
+
 @dataclass(frozen=True)
 class ImageArtifact:
     """One immutable artifact in the closed input set."""
@@ -67,12 +70,30 @@ class ImageInputLock:
         }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class VerifiedImageInputArtifactSet:
     """Evidence that one external root matched an input contract byte-for-byte."""
 
     contract: ImageInputLock
     root: Path
+
+    def __init__(self, contract: ImageInputLock, root: Path, *, _token: object | None = None) -> None:
+        """Reject proof construction outside the completed verification path."""
+
+        if _token is not _VERIFIED_IMAGE_INPUT_ARTIFACT_SET_TOKEN:
+            raise PrimeImageInputLockError("Prime image input lock is invalid")
+        object.__setattr__(self, "contract", contract)
+        object.__setattr__(self, "root", root)
+
+
+def _verified_image_input_artifact_set(
+    contract: ImageInputLock, root: Path
+) -> VerifiedImageInputArtifactSet:
+    """Create verification evidence after the verifier has checked the full set."""
+
+    return VerifiedImageInputArtifactSet(
+        contract, root, _token=_VERIFIED_IMAGE_INPUT_ARTIFACT_SET_TOKEN
+    )
 
 
 def _artifact(kind: str, path: str, size: int) -> ImageArtifact:
@@ -216,7 +237,7 @@ def verify_image_input_artifact_set(
                 os.close(descriptor)
     except (OSError, ValueError):
         raise PrimeImageInputLockError("Prime image input lock is invalid") from None
-    return VerifiedImageInputArtifactSet(verified, root)
+    return _verified_image_input_artifact_set(verified, root)
 
 
 def canonical_image_input_lock_json_unchecked(lock: ImageInputLock) -> str:

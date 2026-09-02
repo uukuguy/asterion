@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from hashlib import sha256
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import cast
 import unittest
 from unittest import mock
@@ -74,6 +77,38 @@ class TestPrimeImageInputLock(unittest.TestCase):
             lock.validate_image_input_lock(substitute)
         with self.assertRaises(lock.PrimeImageInputLockError):
             lock.verify_image_input_artifact_set(Path("/"), substitute)
+
+    def test_only_full_set_verification_can_create_artifact_set_proof(self) -> None:
+        with self.assertRaises(lock.PrimeImageInputLockError):
+            lock.VerifiedImageInputArtifactSet(lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK, Path("/unverified"))
+
+        payloads = {
+            artifact.path: artifact.path.encode()
+            for artifact in lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.artifacts
+        }
+        verification_lock = replace(
+            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK,
+            artifacts=tuple(
+                lock.ImageArtifact(
+                    artifact.kind,
+                    artifact.path,
+                    len(payloads[artifact.path]),
+                    sha256(payloads[artifact.path]).hexdigest(),
+                )
+                for artifact in lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.artifacts
+            ),
+        )
+        with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
+            root = Path(temporary_directory)
+            for path, payload in payloads.items():
+                destination = root / path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(payload)
+            with mock.patch.object(lock, "PRIME_IPYTHON_IMAGE_INPUT_LOCK", verification_lock):
+                proof = lock.verify_image_input_artifact_set(root, verification_lock)
+
+        self.assertEqual(proof.contract, verification_lock)
+        self.assertEqual(proof.root, root)
 
     def test_malformed_artifact_objects_raise_the_public_lock_error(self) -> None:
         canonical = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK
