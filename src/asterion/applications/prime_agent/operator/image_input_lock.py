@@ -139,19 +139,30 @@ def image_input_lock_from_dict(value: object) -> ImageInputLock:
         )
     except (KeyError, TypeError):
         raise PrimeImageInputLockError("Prime image input lock is invalid") from None
-    validate_image_input_lock(parsed)
+    _validate_image_input_lock_structure(parsed)
     if canonical_image_input_lock_json_unchecked(parsed) != canonical_image_input_lock_json_unchecked(PRIME_IPYTHON_IMAGE_INPUT_LOCK):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
-    return parsed
+    return PRIME_IPYTHON_IMAGE_INPUT_LOCK
 
 
 def validate_image_input_lock(lock: object) -> ImageInputLock:
     """Validate an unmaterialized contract without reading files or invoking tools."""
 
+    validated = _validate_image_input_lock_structure(lock)
+    if validated is not PRIME_IPYTHON_IMAGE_INPUT_LOCK:
+        raise PrimeImageInputLockError("Prime image input lock is invalid")
+    return validated
+
+
+def _validate_image_input_lock_structure(lock: object) -> ImageInputLock:
+    """Reject malformed lock records before inspecting artifact fields."""
+
     if type(lock) is not ImageInputLock or (lock.source_commit, lock.source_tree_sha256, lock.source_package_lock_sha256) != _SOURCE or lock.platform != _PLATFORM:
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     artifacts = lock.artifacts
-    if not isinstance(artifacts, tuple) or not artifacts or tuple(sorted(artifacts, key=lambda artifact: artifact.path)) != artifacts:
+    if not isinstance(artifacts, tuple) or not artifacts or any(type(artifact) is not ImageArtifact for artifact in artifacts):
+        raise PrimeImageInputLockError("Prime image input lock is invalid")
+    if tuple(sorted(artifacts, key=lambda artifact: artifact.path)) != artifacts:
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     if len({artifact.path for artifact in artifacts}) != len(artifacts) or len({artifact.sha256 for artifact in artifacts}) != len(artifacts):
         raise PrimeImageInputLockError("Prime image input lock is invalid")

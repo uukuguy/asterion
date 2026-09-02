@@ -59,6 +59,35 @@ class TestPrimeImageInputLock(unittest.TestCase):
         with self.assertRaises(lock.PrimeImageInputLockError):
             lock.image_input_lock_from_dict({**value, "artifacts": duplicate})
 
+    def test_rejects_a_caller_constructed_substitute_lock(self) -> None:
+        canonical = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK
+        substitute = lock.ImageInputLock(
+            canonical.source_commit,
+            canonical.source_tree_sha256,
+            canonical.source_package_lock_sha256,
+            canonical.platform,
+            canonical.artifacts,
+        )
+
+        self.assertIsNot(substitute, canonical)
+        with self.assertRaises(lock.PrimeImageInputLockError):
+            lock.validate_image_input_lock(substitute)
+        with self.assertRaises(lock.PrimeImageInputLockError):
+            lock.verify_image_input_artifact_set(Path("/"), substitute)
+
+    def test_malformed_artifact_objects_raise_the_public_lock_error(self) -> None:
+        canonical = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK
+        malformed = lock.ImageInputLock(
+            canonical.source_commit,
+            canonical.source_tree_sha256,
+            canonical.source_package_lock_sha256,
+            canonical.platform,
+            cast(tuple[lock.ImageArtifact, ...], (object(),)),
+        )
+
+        with self.assertRaises(lock.PrimeImageInputLockError):
+            lock.validate_image_input_lock(malformed)
+
     def test_static_validation_never_uses_effectful_tools_or_environment_files(self) -> None:
         forbidden = RuntimeError("effectful access")
         with (
