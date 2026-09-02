@@ -16,12 +16,12 @@ SOURCE = PROJECT / "src/asterion"
 
 
 class BuiltinControlledCodeApplicationTests(unittest.TestCase):
-    def test_distribution_registers_two_independent_builtin_providers(self) -> None:
+    def test_distribution_registers_exact_global_builtin_provider_inventory(self) -> None:
         entries = tuple(metadata.entry_points(group="asterion.applications"))
         values = list_application_providers(entry_points=entries)
         self.assertEqual(
             [value.provider_id for value in values],
-            ["controlled-code", "dci-agent-lite"],
+            ["controlled-code", "dci-agent-lite", "prime-agent"],
         )
 
     def test_controlled_code_provider_binds_exact_application_and_packages(self) -> None:
