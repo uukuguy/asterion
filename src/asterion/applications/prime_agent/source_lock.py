@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from typing import Final
 
 
@@ -123,19 +124,20 @@ def _tree_sha256(root: Path) -> str:
     try:
         for directory, directory_names, file_names in os.walk(root, followlinks=False):
             directory_path = Path(directory)
+            for name in directory_names:
+                if not _directory(directory_path / name):
+                    raise PrimeSourceLockError("Prime source lock is invalid")
             directory_names[:] = sorted(
                 name
                 for name in directory_names
                 if name not in _EXCLUDED_SOURCE_NAMES
             )
-            if any((directory_path / name).is_symlink() for name in directory_names):
-                raise PrimeSourceLockError("Prime source lock is invalid")
             for name in sorted(file_names):
                 path = directory_path / name
-                if path.name in _EXCLUDED_SOURCE_NAMES:
-                    continue
                 if not _regular_file(path):
                     raise PrimeSourceLockError("Prime source lock is invalid")
+                if path.name in _EXCLUDED_SOURCE_NAMES:
+                    continue
                 files.append(path)
     except OSError as error:
         raise PrimeSourceLockError("Prime source lock is invalid") from error
@@ -175,6 +177,13 @@ def _file_sha256(path: Path) -> str:
 
 def _regular_file(path: Path) -> bool:
     try:
-        return not path.is_symlink() and path.is_file()
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _directory(path: Path) -> bool:
+    try:
+        return stat.S_ISDIR(path.lstat().st_mode)
     except OSError:
         return False

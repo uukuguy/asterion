@@ -94,6 +94,34 @@ class TestPrimeSourceLock(unittest.TestCase):
             with self.assertRaises(PrimeSourceLockError):
                 verify_prime_source_lock(source_root, lock)
 
+    def test_rejects_symlinked_excluded_directory(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source_root = (Path(temporary_directory) / "prime-agent").resolve()
+            source_root.mkdir()
+            _write_source(source_root)
+            lock = _lock(source_root)
+            dependencies = Path(temporary_directory) / "dependencies"
+            dependencies.mkdir()
+            (source_root / "node_modules").symlink_to(
+                dependencies, target_is_directory=True
+            )
+
+            with self.assertRaises(PrimeSourceLockError):
+                verify_prime_source_lock(source_root, lock)
+
+    def test_rejects_symlinked_nested_excluded_file(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source_root = (Path(temporary_directory) / "prime-agent").resolve()
+            source_root.mkdir()
+            _write_source(source_root)
+            lock = _lock(source_root)
+            excluded_target = Path(temporary_directory) / "package-lock.json"
+            excluded_target.write_text("untrusted")
+            (source_root / "src" / "package-lock.json").symlink_to(excluded_target)
+
+            with self.assertRaises(PrimeSourceLockError):
+                verify_prime_source_lock(source_root, lock)
+
     def test_rejects_missing_or_version_drifted_package_inputs(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source_root = (Path(temporary_directory) / "prime-agent").resolve()
