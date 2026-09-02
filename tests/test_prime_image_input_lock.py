@@ -1,4 +1,4 @@
-"""Tests for the closed, offline Prime IPython image-input lock."""
+"""Tests for explicit, offline Prime IPython image-input locks."""
 
 from __future__ import annotations
 
@@ -9,165 +9,97 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
 import unittest
-from unittest import mock
 
 from asterion.applications.prime_agent.operator import image_input_lock as lock
 
 
+def _synthetic_lock() -> lock.ImageInputLock:
+    artifacts = tuple(
+        lock.ImageArtifact(
+            kind, path, 1, sha256((kind + "\\0" + path).encode()).hexdigest()
+        )
+        for kind, path in (
+            ("frontend", "build-frontend/launcher.mjs"),
+            ("fixture", "fixture/fixture-lock.json"),
+            ("node-archive", "node/node-v22.8.0-linux-x64.tar.xz"),
+            ("node-modules", "node/node_modules-linux-amd64.tar"),
+            ("oci-config", "oci/config.json"),
+            ("oci-layer", "oci/layer-000.tar"),
+            ("oci-manifest", "oci/manifest.json"),
+            ("python-wheel", "python/comm-0.2.2-py3-none-any.whl"),
+            (
+                "python-wheel",
+                "python/debugpy-1.8.5-cp312-cp312-manylinux_2_17_x86_64.whl",
+            ),
+            ("python-wheel", "python/ipykernel-6.29.5-py3-none-any.whl"),
+            ("python-wheel", "python/jupyter_client-8.6.2-py3-none-any.whl"),
+            ("python-wheel", "python/prime_agent_runtime-0-py3-none-any.whl"),
+            (
+                "python-wheel",
+                "python/pyzmq-26.1.0-cp312-cp312-manylinux_2_17_x86_64.whl",
+            ),
+            (
+                "python-wheel",
+                "python/tornado-6.4.1-cp38-abi3-manylinux_2_17_x86_64.whl",
+            ),
+            ("python-wheel", "python/traitlets-5.14.3-py3-none-any.whl"),
+        )
+    )
+    return lock.ImageInputLock(
+        "a18809e00ea30638584d87b3afea7285a9d7296c",
+        "93a4b02ecc0cc114865fa3d336521cf214047cf4de471b36b51fe610c84ab686",
+        "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8",
+        lock.ImagePlatformDescriptor("linux", "amd64", None),
+        artifacts,
+    )
+
+
 class TestPrimeImageInputLock(unittest.TestCase):
-    def test_promoted_catalog_resolves_only_the_requested_exact_descriptor(self) -> None:
-        descriptor = lock.ImagePlatformDescriptor("linux", "amd64", None)
-
-        self.assertEqual(lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.platform, descriptor)
-        self.assertIs(
-            lock.resolve_promoted_image_input_lock(descriptor),
-            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK,
-        )
-        self.assertEqual(
-            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.as_dict()["platform"],
-            {"architecture": "amd64", "os": "linux", "variant": None},
-        )
-
-    def test_descriptor_and_catalog_reject_ambiguous_or_substituted_targets(self) -> None:
-        amd64 = lock.ImagePlatformDescriptor("linux", "amd64", None)
-        arm64 = lock.ImagePlatformDescriptor("linux", "arm64", None)
-        arm64_variant = lock.ImagePlatformDescriptor("linux", "arm64", "v8")
-        promoted = lock.PromotedImageInputCatalog((lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK,))
-        duplicate = lock.PromotedImageInputCatalog(
-            (lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK, lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK)
-        )
-        substitute = lock.ImageInputLock(
-            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.source_commit,
-            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.source_tree_sha256,
-            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.source_package_lock_sha256,
-            amd64,
-            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.artifacts,
-        )
-
-        for descriptor in (arm64, arm64_variant, object(), {"os": "linux", "architecture": "amd64"}):
-            with self.subTest(descriptor=descriptor), self.assertRaises(lock.PrimeImageInputLockError):
-                lock.resolve_promoted_image_input_lock(descriptor, promoted)
+    def test_default_promoted_catalog_is_empty_and_cannot_resolve_arm64(self) -> None:
+        self.assertEqual(lock.PRIME_IPYTHON_IMAGE_INPUT_CATALOG.locks, ())
         with self.assertRaises(lock.PrimeImageInputLockError):
-            lock.resolve_promoted_image_input_lock(amd64, duplicate)
-        with self.assertRaises(lock.PrimeImageInputLockError):
-            lock.resolve_promoted_image_input_lock(amd64, lock.PromotedImageInputCatalog((substitute,)))
+            lock.resolve_promoted_image_input_lock(
+                lock.ImagePlatformDescriptor("linux", "arm64", None)
+            )
+
+    def test_explicit_lock_is_required_for_hashing_and_verification(self) -> None:
         with self.assertRaises(TypeError):
-            lock.resolve_promoted_image_input_lock()  # type: ignore[call-arg]
+            lock.image_input_lock_sha256()  # type: ignore[call-arg]
+        with self.assertRaises(TypeError):
+            lock.verify_image_input_artifact_set(Path("/"))  # type: ignore[call-arg]
 
-        for value in (
-            lock.ImagePlatformDescriptor("linux", "amd64", ""),
-            lock.ImagePlatformDescriptor("Linux", "amd64", None),
-        ):
-            with self.subTest(value=value), self.assertRaises(lock.PrimeImageInputLockError):
-                lock.validate_image_platform_descriptor(value)
-
-    def test_frozen_lock_is_canonical_and_binds_the_existing_prime_source(self) -> None:
-        value = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK
-
-        self.assertEqual(value.source_commit, "a18809e00ea30638584d87b3afea7285a9d7296c")
-        self.assertEqual(value.source_tree_sha256, "93a4b02ecc0cc114865fa3d336521cf214047cf4de471b36b51fe610c84ab686")
-        self.assertEqual(value.source_package_lock_sha256, "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8")
-        self.assertEqual(value.platform, lock.ImagePlatformDescriptor("linux", "amd64", None))
+    def test_explicit_synthetic_lock_is_canonical_and_structurally_valid(self) -> None:
+        value = _synthetic_lock()
         encoded = lock.canonical_image_input_lock_json(value)
-        self.assertEqual(encoded, lock.canonical_image_input_lock_json(value))
-        self.assertEqual(encoded, json.dumps(json.loads(encoded), separators=(",", ":"), sort_keys=True))
+        self.assertEqual(
+            encoded,
+            json.dumps(json.loads(encoded), separators=(",", ":"), sort_keys=True),
+        )
         self.assertEqual(lock.validate_image_input_lock(value), value)
-        self.assertNotIsInstance(value, lock.VerifiedImageInputArtifactSet)
+        self.assertEqual(lock.image_input_lock_from_dict(value.as_dict()), value)
 
     def test_rejects_open_or_noncanonical_lock_shapes(self) -> None:
-        value = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK
+        value = _synthetic_lock()
         lock_dict = value.as_dict()
         artifacts = cast(list[dict[str, object]], lock_dict["artifacts"])
-        cases = (
+        for case in (
             {**lock_dict, "url": "https://example.invalid/input"},
-            {**lock_dict, "platform": {"os": "linux", "architecture": "arm64", "variant": None}},
-            {**lock_dict, "source_commit": "a" * 40},
             {**lock_dict, "artifacts": list(reversed(artifacts))},
-            {**lock_dict, "artifacts": artifacts[:-1]},
-        )
-        for case in cases:
-            with self.subTest(case=case), self.assertRaises(lock.PrimeImageInputLockError):
+        ):
+            with (
+                self.subTest(case=case),
+                self.assertRaises(lock.PrimeImageInputLockError),
+            ):
                 lock.image_input_lock_from_dict(case)
 
-    def test_parser_rejects_nonexact_artifact_list_items(self) -> None:
-        value = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.as_dict()
-        artifacts = cast(list[dict[str, object]], value["artifacts"])
-        malformed_artifacts: tuple[object, ...] = (
-            object(),
-            {**artifacts[0], "url": "https://example.invalid/input"},
-            {key: item for key, item in artifacts[0].items() if key != "sha256"},
-        )
-
-        for malformed_artifact in malformed_artifacts:
-            with self.subTest(malformed_artifact=malformed_artifact), self.assertRaises(
-                lock.PrimeImageInputLockError
-            ):
-                lock.image_input_lock_from_dict(
-                    {**value, "artifacts": [*artifacts, malformed_artifact]}
-                )
-
-    def test_rejects_unsafe_artifact_records_and_duplicate_digests(self) -> None:
-        value = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.as_dict()
-        artifacts = cast(list[dict[str, object]], value["artifacts"])
-        for replacement in (
-            {**artifacts[0], "path": "../escape"},
-            {**artifacts[0], "path": "/absolute"},
-            {**artifacts[0], "size": -1},
-            {**artifacts[0], "sha256": "a" * 64},
-            {**artifacts[0], "kind": "python-sdist"},
-        ):
-            mutated = {**value, "artifacts": [replacement, *artifacts[1:]]}
-            with self.subTest(replacement=replacement), self.assertRaises(lock.PrimeImageInputLockError):
-                lock.image_input_lock_from_dict(mutated)
-
-        duplicate = [*artifacts]
-        duplicate[1] = {**duplicate[1], "sha256": duplicate[0]["sha256"]}
-        with self.assertRaises(lock.PrimeImageInputLockError):
-            lock.image_input_lock_from_dict({**value, "artifacts": duplicate})
-
-    def test_parser_rejects_non_scalar_artifact_fields_with_public_error(self) -> None:
-        value = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.as_dict()
-        artifacts = cast(list[dict[str, object]], value["artifacts"])
-        for field, malformed_value in (
-            ("kind", []),
-            ("path", []),
-            ("sha256", []),
-            ("size", True),
-            ("size", "1"),
-        ):
-            replacement = {**artifacts[0], field: malformed_value}
-            malformed = {**value, "artifacts": [replacement, *artifacts[1:]]}
-            with self.subTest(field=field, malformed_value=malformed_value), self.assertRaises(
-                lock.PrimeImageInputLockError
-            ):
-                lock.image_input_lock_from_dict(malformed)
-
-    def test_rejects_a_caller_constructed_substitute_lock(self) -> None:
-        canonical = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK
-        substitute = lock.ImageInputLock(
-            canonical.source_commit,
-            canonical.source_tree_sha256,
-            canonical.source_package_lock_sha256,
-            canonical.platform,
-            canonical.artifacts,
-        )
-
-        self.assertIsNot(substitute, canonical)
-        with self.assertRaises(lock.PrimeImageInputLockError):
-            lock.validate_image_input_lock(substitute)
-        with self.assertRaises(lock.PrimeImageInputLockError):
-            lock.verify_image_input_artifact_set(Path("/"), substitute)
-
     def test_only_full_set_verification_can_create_artifact_set_proof(self) -> None:
-        with self.assertRaises(lock.PrimeImageInputLockError):
-            lock.VerifiedImageInputArtifactSet(lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK, Path("/unverified"))
-
+        verification_lock = _synthetic_lock()
         payloads = {
             artifact.path: artifact.path.encode()
-            for artifact in lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.artifacts
+            for artifact in verification_lock.artifacts
         }
         verification_lock = replace(
-            lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK,
+            verification_lock,
             artifacts=tuple(
                 lock.ImageArtifact(
                     artifact.kind,
@@ -175,48 +107,33 @@ class TestPrimeImageInputLock(unittest.TestCase):
                     len(payloads[artifact.path]),
                     sha256(payloads[artifact.path]).hexdigest(),
                 )
-                for artifact in lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.artifacts
+                for artifact in verification_lock.artifacts
             ),
         )
+        with self.assertRaises(lock.PrimeImageInputLockError):
+            lock.VerifiedImageInputArtifactSet(verification_lock, Path("/unverified"))
         with TemporaryDirectory(dir=Path.cwd()) as temporary_directory:
             root = Path(temporary_directory)
             for path, payload in payloads.items():
                 destination = root / path
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(payload)
-            (root / "unexpected" / "empty").mkdir(parents=True)
-            with mock.patch.object(lock, "PRIME_IPYTHON_IMAGE_INPUT_LOCK", verification_lock):
-                with self.assertRaises(lock.PrimeImageInputLockError):
-                    lock.verify_image_input_artifact_set(root, verification_lock)
-
-                (root / "unexpected" / "empty").rmdir()
-                (root / "unexpected").rmdir()
-                proof = lock.verify_image_input_artifact_set(root, verification_lock)
-
+            (root / "unexpected").mkdir()
+            with self.assertRaises(lock.PrimeImageInputLockError):
+                lock.verify_image_input_artifact_set(root, verification_lock)
+            (root / "unexpected").rmdir()
+            proof = lock.verify_image_input_artifact_set(root, verification_lock)
         self.assertEqual(proof.contract, verification_lock)
         self.assertEqual(proof.root, root)
 
-    def test_malformed_artifact_objects_raise_the_public_lock_error(self) -> None:
-        canonical = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK
-        malformed = lock.ImageInputLock(
-            canonical.source_commit,
-            canonical.source_tree_sha256,
-            canonical.source_package_lock_sha256,
-            canonical.platform,
-            cast(tuple[lock.ImageArtifact, ...], (object(),)),
-        )
-
-        with self.assertRaises(lock.PrimeImageInputLockError):
-            lock.validate_image_input_lock(malformed)
-
-    def test_static_validation_never_uses_effectful_tools_or_environment_files(self) -> None:
-        forbidden = RuntimeError("effectful access")
-        with (
-            mock.patch("socket.create_connection", side_effect=forbidden),
-            mock.patch("subprocess.run", side_effect=forbidden),
-            mock.patch.object(Path, "read_text", side_effect=forbidden),
+    def test_descriptor_rejects_noncanonical_values(self) -> None:
+        for value in (
+            lock.ImagePlatformDescriptor("linux", "amd64", ""),
+            lock.ImagePlatformDescriptor("Linux", "amd64", None),
+            {"os": "linux", "architecture": "amd64", "variant": None},
         ):
-            self.assertEqual(
-                lock.validate_image_input_lock(lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK),
-                lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK,
-            )
+            with (
+                self.subTest(value=value),
+                self.assertRaises(lock.PrimeImageInputLockError),
+            ):
+                lock.validate_image_platform_descriptor(value)

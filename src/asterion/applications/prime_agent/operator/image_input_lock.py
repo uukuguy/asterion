@@ -20,13 +20,30 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _RELATIVE_PATH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _FORMAT: Final = "asterion.image-input-lock/v1"
-_SOURCE: Final = (
-    "a18809e00ea30638584d87b3afea7285a9d7296c",
-    "93a4b02ecc0cc114865fa3d336521cf214047cf4de471b36b51fe610c84ab686",
-    "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8",
+_KINDS: Final = frozenset(
+    {
+        "oci-config",
+        "oci-layer",
+        "oci-manifest",
+        "node-archive",
+        "node-modules",
+        "python-wheel",
+        "fixture",
+        "frontend",
+    }
 )
-_KINDS: Final = frozenset({"oci-config", "oci-layer", "oci-manifest", "node-archive", "node-modules", "python-wheel", "fixture", "frontend"})
-_REQUIRED_KINDS: Final = frozenset({"oci-config", "oci-layer", "oci-manifest", "node-archive", "node-modules", "python-wheel", "fixture", "frontend"})
+_REQUIRED_KINDS: Final = frozenset(
+    {
+        "oci-config",
+        "oci-layer",
+        "oci-manifest",
+        "node-archive",
+        "node-modules",
+        "python-wheel",
+        "fixture",
+        "frontend",
+    }
+)
 
 
 class PrimeImageInputLockError(ValueError):
@@ -42,7 +59,11 @@ class ImagePlatformDescriptor:
     variant: str | None
 
     def as_dict(self) -> dict[str, str | None]:
-        return {"architecture": self.architecture, "os": self.os, "variant": self.variant}
+        return {
+            "architecture": self.architecture,
+            "os": self.os,
+            "variant": self.variant,
+        }
 
 
 def validate_image_platform_descriptor(value: object) -> ImagePlatformDescriptor:
@@ -55,7 +76,10 @@ def validate_image_platform_descriptor(value: object) -> ImagePlatformDescriptor
         or (value.variant is not None and type(value.variant) is not str)
         or re.fullmatch(r"[a-z0-9]+", value.os) is None
         or re.fullmatch(r"[a-z0-9]+", value.architecture) is None
-        or (value.variant is not None and re.fullmatch(r"v[0-9]+", value.variant) is None)
+        or (
+            value.variant is not None
+            and re.fullmatch(r"v[0-9]+", value.variant) is None
+        )
     ):
         raise PrimeImageInputLockError("Prime image platform descriptor is invalid")
     return value
@@ -74,7 +98,12 @@ class ImageArtifact:
     sha256: str
 
     def as_dict(self) -> dict[str, object]:
-        return {"kind": self.kind, "path": self.path, "sha256": self.sha256, "size": self.size}
+        return {
+            "kind": self.kind,
+            "path": self.path,
+            "sha256": self.sha256,
+            "size": self.size,
+        }
 
 
 @dataclass(frozen=True)
@@ -163,7 +192,9 @@ class VerifiedImageInputArtifactSet:
     contract: ImageInputLock
     root: Path
 
-    def __init__(self, contract: ImageInputLock, root: Path, *, _token: object | None = None) -> None:
+    def __init__(
+        self, contract: ImageInputLock, root: Path, *, _token: object | None = None
+    ) -> None:
         """Reject proof construction outside the completed verification path."""
 
         if _token is not _VERIFIED_IMAGE_INPUT_ARTIFACT_SET_TOKEN:
@@ -182,43 +213,6 @@ def _verified_image_input_artifact_set(
     )
 
 
-def _artifact(kind: str, path: str, size: int) -> ImageArtifact:
-    """Create a frozen record without incorporating a download location."""
-
-    return ImageArtifact(kind, path, size, sha256((kind + "\0" + path).encode()).hexdigest())
-
-
-_INITIAL_PLATFORM: Final = ImagePlatformDescriptor("linux", "amd64", None)
-
-
-PRIME_IPYTHON_IMAGE_INPUT_LOCK: Final = ImageInputLock(
-    *_SOURCE,
-    _INITIAL_PLATFORM,
-    tuple(
-        sorted(
-            (
-                _artifact("frontend", "build-frontend/launcher.mjs", 1),
-                _artifact("fixture", "fixture/fixture-lock.json", 1),
-                _artifact("node-archive", "node/node-v22.8.0-linux-x64.tar.xz", 1),
-                _artifact("node-modules", "node/node_modules-linux-amd64.tar", 1),
-                _artifact("oci-config", "oci/config.json", 1),
-                _artifact("oci-layer", "oci/layer-000.tar", 1),
-                _artifact("oci-manifest", "oci/manifest.json", 1),
-                _artifact("python-wheel", "python/comm-0.2.2-py3-none-any.whl", 1),
-                _artifact("python-wheel", "python/debugpy-1.8.5-cp312-cp312-manylinux_2_17_x86_64.whl", 1),
-                _artifact("python-wheel", "python/ipykernel-6.29.5-py3-none-any.whl", 1),
-                _artifact("python-wheel", "python/jupyter_client-8.6.2-py3-none-any.whl", 1),
-                _artifact("python-wheel", "python/prime_agent_runtime-0-py3-none-any.whl", 1),
-                _artifact("python-wheel", "python/pyzmq-26.1.0-cp312-cp312-manylinux_2_17_x86_64.whl", 1),
-                _artifact("python-wheel", "python/tornado-6.4.1-cp38-abi3-manylinux_2_17_x86_64.whl", 1),
-                _artifact("python-wheel", "python/traitlets-5.14.3-py3-none-any.whl", 1),
-            ),
-            key=lambda artifact: artifact.path,
-        )
-    ),
-)
-
-
 @dataclass(frozen=True)
 class PromotedImageInputCatalog:
     """Code-owned exact target-to-lock bindings, never host-selected."""
@@ -226,13 +220,16 @@ class PromotedImageInputCatalog:
     locks: tuple[ImageInputLock, ...]
 
 
-PRIME_IPYTHON_IMAGE_INPUT_CATALOG: Final = PromotedImageInputCatalog(
-    (PRIME_IPYTHON_IMAGE_INPUT_LOCK,)
-)
+PRIME_IPYTHON_IMAGE_INPUT_CATALOG: Final = PromotedImageInputCatalog(())
 
 
 def _platform_sort_key(platform: ImagePlatformDescriptor) -> tuple[str, str, bool, str]:
-    return (platform.os, platform.architecture, platform.variant is not None, platform.variant or "")
+    return (
+        platform.os,
+        platform.architecture,
+        platform.variant is not None,
+        platform.variant or "",
+    )
 
 
 def resolve_promoted_image_input_lock(
@@ -242,18 +239,26 @@ def resolve_promoted_image_input_lock(
     """Resolve one explicit descriptor, failing closed on every ambiguity."""
 
     requested = validate_image_platform_descriptor(requested_platform)
-    if type(catalog) is not PromotedImageInputCatalog or not isinstance(catalog.locks, tuple) or not catalog.locks:
+    if (
+        type(catalog) is not PromotedImageInputCatalog
+        or not isinstance(catalog.locks, tuple)
+        or not catalog.locks
+    ):
         raise PrimeImageInputLockError("Prime image input catalog is invalid")
     try:
         locks = catalog.locks
         if any(type(item) is not ImageInputLock for item in locks):
             raise ValueError
-        platforms = tuple(validate_image_platform_descriptor(item.platform) for item in locks)
-        if tuple(sorted(platforms, key=_platform_sort_key)) != platforms or len(set(platforms)) != len(platforms):
+        platforms = tuple(
+            validate_image_platform_descriptor(item.platform) for item in locks
+        )
+        if tuple(sorted(platforms, key=_platform_sort_key)) != platforms or len(
+            set(platforms)
+        ) != len(platforms):
             raise ValueError
-        if catalog is not PRIME_IPYTHON_IMAGE_INPUT_CATALOG:
-            raise ValueError
-        if any(_validate_image_input_lock_structure(item) is not item for item in locks):
+        if any(
+            _validate_image_input_lock_structure(item) is not item for item in locks
+        ):
             raise ValueError
         matches = tuple(item for item in locks if item.platform == requested)
         if len(matches) != 1:
@@ -270,7 +275,7 @@ def canonical_image_input_lock_json(lock: ImageInputLock) -> str:
     return json.dumps(lock.as_dict(), separators=(",", ":"), sort_keys=True)
 
 
-def image_input_lock_sha256(lock: ImageInputLock = PRIME_IPYTHON_IMAGE_INPUT_LOCK) -> str:
+def image_input_lock_sha256(lock: ImageInputLock) -> str:
     """Return the stable identifier used by an explicit release command plan."""
 
     return sha256(canonical_image_input_lock_json(lock).encode()).hexdigest()
@@ -279,9 +284,19 @@ def image_input_lock_sha256(lock: ImageInputLock = PRIME_IPYTHON_IMAGE_INPUT_LOC
 def image_input_lock_from_dict(value: object) -> ImageInputLock:
     """Parse an unmaterialized contract; this does not verify any artifacts."""
 
-    if not isinstance(value, dict) or frozenset(value) != {
-        "format", "source_commit", "source_tree_sha256", "source_package_lock_sha256", "platform", "artifacts"
-    } or value.get("format") != _FORMAT:
+    if (
+        not isinstance(value, dict)
+        or frozenset(value)
+        != {
+            "format",
+            "source_commit",
+            "source_tree_sha256",
+            "source_package_lock_sha256",
+            "platform",
+            "artifacts",
+        }
+        or value.get("format") != _FORMAT
+    ):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     artifacts = value.get("artifacts")
     platform = value.get("platform")
@@ -292,32 +307,33 @@ def image_input_lock_from_dict(value: object) -> ImageInputLock:
     ):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     if any(
-        type(item) is not dict
-        or frozenset(item) != {"kind", "path", "size", "sha256"}
+        type(item) is not dict or frozenset(item) != {"kind", "path", "size", "sha256"}
         for item in artifacts
     ):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     try:
         parsed = ImageInputLock(
-            value["source_commit"], value["source_tree_sha256"], value["source_package_lock_sha256"],
-            ImagePlatformDescriptor(platform["os"], platform["architecture"], platform["variant"]),
-            tuple(ImageArtifact(item["kind"], item["path"], item["size"], item["sha256"]) for item in artifacts),
+            value["source_commit"],
+            value["source_tree_sha256"],
+            value["source_package_lock_sha256"],
+            ImagePlatformDescriptor(
+                platform["os"], platform["architecture"], platform["variant"]
+            ),
+            tuple(
+                ImageArtifact(item["kind"], item["path"], item["size"], item["sha256"])
+                for item in artifacts
+            ),
         )
     except (KeyError, TypeError):
         raise PrimeImageInputLockError("Prime image input lock is invalid") from None
     _validate_image_input_lock_structure(parsed)
-    if canonical_image_input_lock_json_unchecked(parsed) != canonical_image_input_lock_json_unchecked(PRIME_IPYTHON_IMAGE_INPUT_LOCK):
-        raise PrimeImageInputLockError("Prime image input lock is invalid")
-    return PRIME_IPYTHON_IMAGE_INPUT_LOCK
+    return parsed
 
 
 def validate_image_input_lock(lock: object) -> ImageInputLock:
     """Validate an unmaterialized contract without reading files or invoking tools."""
 
-    validated = _validate_image_input_lock_structure(lock)
-    if validated is not PRIME_IPYTHON_IMAGE_INPUT_LOCK:
-        raise PrimeImageInputLockError("Prime image input lock is invalid")
-    return validated
+    return _validate_image_input_lock_structure(lock)
 
 
 def _validate_image_input_lock_structure(lock: object) -> ImageInputLock:
@@ -355,18 +371,30 @@ def _validate_image_input_lock_structure(lock: object) -> ImageInputLock:
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     if tuple(sorted(artifacts, key=lambda artifact: artifact.path)) != artifacts:
         raise PrimeImageInputLockError("Prime image input lock is invalid")
-    if len({artifact.path for artifact in artifacts}) != len(artifacts) or len({artifact.sha256 for artifact in artifacts}) != len(artifacts):
+    if len({artifact.path for artifact in artifacts}) != len(artifacts) or len(
+        {artifact.sha256 for artifact in artifacts}
+    ) != len(artifacts):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
-    if {artifact.kind for artifact in artifacts} != _REQUIRED_KINDS or not any(artifact.path.startswith("python/prime_agent_runtime-") for artifact in artifacts):
+    if {artifact.kind for artifact in artifacts} != _REQUIRED_KINDS or not any(
+        artifact.path.startswith("python/prime_agent_runtime-")
+        for artifact in artifacts
+    ):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     for artifact in artifacts:
-        if artifact.kind not in _KINDS or _RELATIVE_PATH.fullmatch(artifact.path) is None or "//" in artifact.path or any(part in {".", ".."} for part in artifact.path.split("/")) or artifact.size < 0 or _SHA256.fullmatch(artifact.sha256) is None:
+        if (
+            artifact.kind not in _KINDS
+            or _RELATIVE_PATH.fullmatch(artifact.path) is None
+            or "//" in artifact.path
+            or any(part in {".", ".."} for part in artifact.path.split("/"))
+            or artifact.size < 0
+            or _SHA256.fullmatch(artifact.sha256) is None
+        ):
             raise PrimeImageInputLockError("Prime image input lock is invalid")
     return lock
 
 
 def verify_image_input_artifact_set(
-    root: Path, lock: ImageInputLock = PRIME_IPYTHON_IMAGE_INPUT_LOCK
+    root: Path, lock: ImageInputLock
 ) -> VerifiedImageInputArtifactSet:
     """Return verification evidence only after no-follow checks of every artifact."""
 
