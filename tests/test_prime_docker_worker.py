@@ -41,7 +41,10 @@ class _Transport(DockerEngineTransport):
         self.lease = RestrictedWorkerLease("worker-1", "run-1", _CHALLENGE_DIGEST)
         self.inspection = _safe_inspection()
         self.post_start_inspection = _safe_inspection()
+        self.final_inspection = _safe_inspection()
         self.self_check = _safe_self_check()
+        self.force_remove_error: Exception | None = None
+        self.absence_error: Exception | None = None
 
     async def create(self, specification: object, *, signal: object = None) -> str:  # type: ignore[override]
         self.calls.append("create")
@@ -51,9 +54,12 @@ class _Transport(DockerEngineTransport):
     async def inspect(self, container_id: str) -> Mapping[str, object]:
         self.calls.append("inspect")
         self.assert_container_id(container_id)
-        if self.calls.count("inspect") == 1:
-            return self.inspection
-        return self.post_start_inspection
+        inspections = (
+            self.inspection,
+            self.post_start_inspection,
+            self.final_inspection,
+        )
+        return inspections[self.calls.count("inspect") - 1]
 
     async def start(self, container_id: str) -> RestrictedWorkerLease:
         self.calls.append("start")
@@ -70,6 +76,18 @@ class _Transport(DockerEngineTransport):
     async def remove(self, container_id: str) -> None:
         self.calls.append("remove")
         self.assert_container_id(container_id)
+
+    async def force_remove(self, container_id: str) -> None:
+        self.calls.append("force_remove")
+        self.assert_container_id(container_id)
+        if self.force_remove_error is not None:
+            raise self.force_remove_error
+
+    async def assert_absent(self, container_id: str) -> None:
+        self.calls.append("assert_absent")
+        self.assert_container_id(container_id)
+        if self.absence_error is not None:
+            raise self.absence_error
 
     @staticmethod
     def assert_container_id(container_id: str) -> None:
@@ -294,3 +312,82 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(attestation.image_digest, _IMAGE_DIGEST)
         self.assertTrue(cleanup.destroyed)
+
+    async def test_verified_teardown_inspects_removes_and_proves_absence_in_order(self) -> None:
+        async with self.service.open(_request()) as lease:
+            pass
+
+        self.assertEqual(
+            self.transport.calls,
+            [
+                "create", "inspect", "start", "inspect", "launcher_self_check",
+                "inspect", "force_remove", "assert_absent",
+            ],
+        )
+        self.assertTrue((await self.service.cleanup_receipt(lease)).destroyed)
+
+    async def test_unsafe_final_inspection_fails_closed_without_a_cleanup_receipt(self) -> None:
+        self.transport.final_inspection["env"] = ("SECRET=sentinel",)
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+
+        with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+            await context.__aexit__(None, None, None)
+
+        self.assertNotIn("sentinel", str(raised.exception))
+        self.assertEqual(
+            self.transport.calls,
+            [
+                "create", "inspect", "start", "inspect", "launcher_self_check",
+                "inspect", "force_remove",
+            ],
+        )
+        with self.assertRaises(RestrictedWorkerError):
+            await self.service.cleanup_receipt(lease)
+
+    async def test_force_remove_failure_fails_closed_without_a_cleanup_receipt(self) -> None:
+        self.transport.force_remove_error = RuntimeError("sentinel force-remove failure")
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+
+        with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+            await context.__aexit__(None, None, None)
+
+        self.assertNotIn("sentinel", str(raised.exception))
+        self.assertEqual(self.transport.calls[-2:], ["inspect", "force_remove"])
+        with self.assertRaises(RestrictedWorkerError):
+            await self.service.cleanup_receipt(lease)
+
+    async def test_absence_assertion_failure_fails_closed_without_a_cleanup_receipt(self) -> None:
+        self.transport.absence_error = RuntimeError("sentinel absence failure")
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+
+        with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+            await context.__aexit__(None, None, None)
+
+        self.assertNotIn("sentinel", str(raised.exception))
+        self.assertEqual(self.transport.calls[-3:], ["inspect", "force_remove", "assert_absent"])
+        with self.assertRaises(RestrictedWorkerError):
+            await self.service.cleanup_receipt(lease)
+
+    async def test_teardown_erases_active_state_and_receipt_tombstone_is_exact_and_one_time(self) -> None:
+        async with self.service.open(_request()) as lease:
+            pass
+
+        self.assertNotIn(lease.worker_id, self.service._leases)
+        self.assertNotIn("container-1", repr(self.service._cleanup_tombstones))
+        self.assertEqual(
+            repr(next(iter(self.service._cleanup_tombstones.values()))),
+            "_CleanupTombstone(redacted)",
+        )
+        forged = RestrictedWorkerLease(lease.worker_id, "run-2", _CHALLENGE_DIGEST)
+        with self.assertRaises(RestrictedWorkerError):
+            await self.service.cleanup_receipt(forged)
+        cleanup = await self.service.cleanup_receipt(lease)
+        self.assertEqual(
+            (cleanup.worker_id, cleanup.run_id, cleanup.challenge_digest),
+            (lease.worker_id, lease.run_id, lease.challenge_digest),
+        )
+        with self.assertRaises(RestrictedWorkerError):
+            await self.service.cleanup_receipt(lease)

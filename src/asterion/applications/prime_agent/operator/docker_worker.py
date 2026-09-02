@@ -117,12 +117,27 @@ class DockerEngineTransport(Protocol):
 
     async def remove(self, container_id: str) -> None: ...
 
+    async def force_remove(self, container_id: str) -> None: ...
+
+    async def assert_absent(self, container_id: str) -> None: ...
+
 
 @dataclass
 class _LeaseState:
     request: RestrictedWorkerRequest
     container_id: str
-    removed: bool = False
+
+
+@dataclass(frozen=True, repr=False)
+class _CleanupTombstone:
+    """Minimal post-destruction identity retained until receipt issuance."""
+
+    worker_id: str
+    run_id: str
+    challenge_digest: str
+
+    def __repr__(self) -> str:
+        return "_CleanupTombstone(redacted)"
 
 
 class DockerRestrictedWorkerService:
@@ -139,6 +154,7 @@ class DockerRestrictedWorkerService:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         self._transport = transport
         self._leases: dict[str, _LeaseState] = {}
+        self._cleanup_tombstones: dict[str, _CleanupTombstone] = {}
 
     def request_for(
         self, request: RestrictedWorkerRequest
@@ -186,7 +202,17 @@ class DockerRestrictedWorkerService:
     async def cleanup_receipt(
         self, lease: RestrictedWorkerLease
     ) -> RestrictedWorkerCleanupReceipt:
-        self._request_for_lease(lease, require_removed=True)
+        if type(lease) is not RestrictedWorkerLease:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        tombstone = self._cleanup_tombstones.get(lease.worker_id)
+        if (
+            tombstone is None
+            or tombstone.worker_id != lease.worker_id
+            or tombstone.run_id != lease.run_id
+            or tombstone.challenge_digest != lease.challenge_digest
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        del self._cleanup_tombstones[lease.worker_id]
         return RestrictedWorkerCleanupReceipt(
             lease.worker_id, lease.run_id, lease.challenge_digest, True
         )
@@ -199,6 +225,7 @@ class DockerRestrictedWorkerService:
             or lease.run_id != request.run_id
             or lease.challenge_digest != request.challenge_digest
             or lease.worker_id in self._leases
+            or lease.worker_id in self._cleanup_tombstones
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._leases[lease.worker_id] = _LeaseState(request, "")
@@ -210,15 +237,20 @@ class DockerRestrictedWorkerService:
             raise RestrictedWorkerError("restricted worker value is invalid")
         state.container_id = container_id
 
-    def _mark_removed(self, lease: RestrictedWorkerLease) -> None:
+    def _record_verified_cleanup(self, lease: RestrictedWorkerLease) -> None:
         state = self._leases.get(lease.worker_id)
-        if state is None:
+        if (
+            state is None
+            or state.request.run_id != lease.run_id
+            or state.request.challenge_digest != lease.challenge_digest
+        ):
             raise RestrictedWorkerError("restricted worker value is invalid")
-        state.removed = True
+        del self._leases[lease.worker_id]
+        self._cleanup_tombstones[lease.worker_id] = _CleanupTombstone(
+            lease.worker_id, lease.run_id, lease.challenge_digest
+        )
 
-    def _request_for_lease(
-        self, lease: RestrictedWorkerLease, *, require_removed: bool = False
-    ) -> RestrictedWorkerRequest:
+    def _request_for_lease(self, lease: RestrictedWorkerLease) -> RestrictedWorkerRequest:
         if type(lease) is not RestrictedWorkerLease:
             raise RestrictedWorkerError("restricted worker value is invalid")
         state = self._leases.get(lease.worker_id)
@@ -228,7 +260,6 @@ class DockerRestrictedWorkerService:
         if (
             request.run_id != lease.run_id
             or request.challenge_digest != lease.challenge_digest
-            or (require_removed and not state.removed)
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         return request
@@ -347,11 +378,26 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
         if self._container_id is None or self._lease is None:
             raise RestrictedWorkerError("restricted worker value is invalid")
         try:
-            await self._service._transport.remove(self._container_id)
-            self._service._mark_removed(self._lease)
+            inspection = await self._service._transport.inspect(self._container_id)
+            self._service._validate_inspection(inspection)
+        except Exception:
+            await self._force_remove_after_failed_teardown_evidence()
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+        try:
+            await self._service._transport.force_remove(self._container_id)
+            await self._service._transport.assert_absent(self._container_id)
+            self._service._record_verified_cleanup(self._lease)
         except Exception:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         return None
+
+    async def _force_remove_after_failed_teardown_evidence(self) -> None:
+        if self._container_id is None:
+            return
+        try:
+            await self._service._transport.force_remove(self._container_id)
+        except Exception:
+            pass
 
     async def _remove_after_rejection(self) -> None:
         if self._container_id is None:
