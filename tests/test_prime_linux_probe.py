@@ -61,4 +61,3 @@ class TestPrimeLinuxBackendProbe(unittest.TestCase):
         rendered = repr(ready)
         for secret in ("provider", "model", "prompt", "credential", "socket", "token"):
             self.assertNotIn(secret, rendered)
-
