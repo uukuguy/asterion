@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 from asterion.applications.prime_agent.operator.docker_worker import (
     DockerEngineTransport,
+    DockerWorkerLauncherSelfCheck,
     DockerRestrictedWorkerService,
 )
 from asterion.services.restricted_worker import (
@@ -39,6 +40,8 @@ class _Transport(DockerEngineTransport):
         self.spec: object | None = None
         self.lease = RestrictedWorkerLease("worker-1", "run-1", _CHALLENGE_DIGEST)
         self.inspection = _safe_inspection()
+        self.post_start_inspection = _safe_inspection()
+        self.self_check = _safe_self_check()
 
     async def create(self, specification: object, *, signal: object = None) -> str:  # type: ignore[override]
         self.calls.append("create")
@@ -48,12 +51,21 @@ class _Transport(DockerEngineTransport):
     async def inspect(self, container_id: str) -> Mapping[str, object]:
         self.calls.append("inspect")
         self.assert_container_id(container_id)
-        return self.inspection
+        if self.calls.count("inspect") == 1:
+            return self.inspection
+        return self.post_start_inspection
 
     async def start(self, container_id: str) -> RestrictedWorkerLease:
         self.calls.append("start")
         self.assert_container_id(container_id)
         return self.lease
+
+    async def launcher_self_check(
+        self, container_id: str
+    ) -> DockerWorkerLauncherSelfCheck:
+        self.calls.append("launcher_self_check")
+        self.assert_container_id(container_id)
+        return self.self_check
 
     async def remove(self, container_id: str) -> None:
         self.calls.append("remove")
@@ -100,6 +112,21 @@ def _safe_inspection() -> dict[str, object]:
         "ipc_namespace": "private",
         "uts_namespace": "private",
     }
+
+
+def _safe_self_check(**changes: object) -> DockerWorkerLauncherSelfCheck:
+    values: dict[str, object] = {
+        "nonloopback_network_absent": True,
+        "root_read_only": True,
+        "workspace_only_writable": True,
+        "credentials_absent": True,
+        "effective_capabilities": 0,
+        "no_new_privileges": 1,
+        "seccomp_mode": 2,
+        "effective_user_id": 65534,
+    }
+    values.update(changes)
+    return DockerWorkerLauncherSelfCheck(**values)  # type: ignore[arg-type]
 
 
 class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
@@ -159,6 +186,58 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lease, self.transport.lease)
         self.assertEqual(self.transport.calls[:2], ["create", "inspect"])
         self.assertIn("start", self.transport.calls)
+
+    async def test_revalidates_engine_safety_after_start_before_admission(self) -> None:
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+        self.addAsyncCleanup(context.__aexit__, None, None, None)
+
+        self.assertEqual(lease, self.transport.lease)
+        self.assertEqual(
+            self.transport.calls,
+            ["create", "inspect", "start", "inspect", "launcher_self_check"],
+        )
+
+    async def test_unsafe_post_start_inspection_never_produces_an_attestation(self) -> None:
+        self.transport.post_start_inspection["network_mode"] = "bridge"
+
+        with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid"):
+            await self.service.open(_request()).__aenter__()
+
+        self.assertEqual(self.transport.calls, ["create", "inspect", "start", "inspect", "remove"])
+        with self.assertRaises(RestrictedWorkerError):
+            await self.service.attest(self.transport.lease)
+
+    async def test_rejects_unsafe_launcher_self_checks_without_an_attestation(self) -> None:
+        controls = (
+            ("nonloopback_network_absent", False),
+            ("root_read_only", False),
+            ("workspace_only_writable", False),
+            ("credentials_absent", False),
+            ("effective_capabilities", 1),
+            ("no_new_privileges", 0),
+            ("seccomp_mode", 0),
+            ("effective_user_id", 0),
+        )
+        for field, value in controls:
+            with self.subTest(field=field):
+                self.transport.calls.clear()
+                self.transport.self_check = _safe_self_check(**{field: value})
+                with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+                    await self.service.open(_request(run_id="run-2")).__aenter__()
+                self.assertEqual(
+                    self.transport.calls,
+                    ["create", "inspect", "start", "inspect", "launcher_self_check", "remove"],
+                )
+                self.assertNotIn("DockerWorkerLauncherSelfCheck", str(raised.exception))
+                with self.assertRaises(RestrictedWorkerError):
+                    await self.service.attest(self.transport.lease)
+
+    def test_launcher_self_check_representation_is_redacted(self) -> None:
+        self_check = _safe_self_check()
+
+        self.assertEqual(repr(self_check), "DockerWorkerLauncherSelfCheck(redacted)")
+        self.assertNotIn("65534", repr(self_check))
 
     async def test_unsafe_inspection_never_starts_and_is_redacted(self) -> None:
         controls = (

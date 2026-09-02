@@ -67,6 +67,36 @@ class _DockerWorkerSpecification:
     group_id: int
 
 
+@dataclass(frozen=True, repr=False)
+class DockerWorkerLauncherSelfCheck:
+    """Typed launcher evidence; its representation never exposes raw values."""
+
+    nonloopback_network_absent: bool
+    root_read_only: bool
+    workspace_only_writable: bool
+    credentials_absent: bool
+    effective_capabilities: int
+    no_new_privileges: int
+    seccomp_mode: int
+    effective_user_id: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.nonloopback_network_absent) is not bool
+            or type(self.root_read_only) is not bool
+            or type(self.workspace_only_writable) is not bool
+            or type(self.credentials_absent) is not bool
+            or type(self.effective_capabilities) is not int
+            or type(self.no_new_privileges) is not int
+            or type(self.seccomp_mode) is not int
+            or type(self.effective_user_id) is not int
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+
+    def __repr__(self) -> str:
+        return "DockerWorkerLauncherSelfCheck(redacted)"
+
+
 class DockerEngineTransport(Protocol):
     """Operator-supplied operations over an opaque, fixed-role container."""
 
@@ -80,6 +110,10 @@ class DockerEngineTransport(Protocol):
     async def inspect(self, container_id: str) -> Mapping[str, object]: ...
 
     async def start(self, container_id: str) -> RestrictedWorkerLease: ...
+
+    async def launcher_self_check(
+        self, container_id: str
+    ) -> DockerWorkerLauncherSelfCheck: ...
 
     async def remove(self, container_id: str) -> None: ...
 
@@ -246,6 +280,23 @@ class DockerRestrictedWorkerService:
         except Exception:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
 
+    def _validate_launcher_self_check(
+        self, self_check: DockerWorkerLauncherSelfCheck
+    ) -> None:
+        """Require the in-container launcher to corroborate engine evidence."""
+        if (
+            type(self_check) is not DockerWorkerLauncherSelfCheck
+            or self_check.nonloopback_network_absent is not True
+            or self_check.root_read_only is not True
+            or self_check.workspace_only_writable is not True
+            or self_check.credentials_absent is not True
+            or self_check.effective_capabilities != 0
+            or self_check.no_new_privileges != 1
+            or self_check.seccomp_mode != 2
+            or self_check.effective_user_id != _NON_ROOT_ID
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+
 
 class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLease]):
     def __init__(
@@ -273,6 +324,10 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
             inspection = await self._service._transport.inspect(container_id)
             self._service._validate_inspection(inspection)
             lease = await self._service._transport.start(container_id)
+            inspection = await self._service._transport.inspect(container_id)
+            self._service._validate_inspection(inspection)
+            self_check = await self._service._transport.launcher_self_check(container_id)
+            self._service._validate_launcher_self_check(self_check)
             self._lease = self._service._admit_lease(self._request, lease)
             self._service._bind_container(self._lease, container_id)
             return self._lease
