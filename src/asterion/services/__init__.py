@@ -1,5 +1,13 @@
 """Host-service protocol contracts."""
 
+from asterion.services.restricted_worker import (
+    RestrictedWorkerAttestation,
+    RestrictedWorkerCleanupReceipt,
+    RestrictedWorkerError,
+    RestrictedWorkerLease,
+    RestrictedWorkerRequest,
+    RestrictedWorkerService,
+)
 from asterion.services.registry import (
     HOST_SERVICE_ENTRY_POINT_GROUP,
     HostServiceFactory,
@@ -12,6 +20,12 @@ from asterion.services.registry import (
 
 __all__ = [
     "HOST_SERVICE_ENTRY_POINT_GROUP",
+    "RestrictedWorkerAttestation",
+    "RestrictedWorkerCleanupReceipt",
+    "RestrictedWorkerError",
+    "RestrictedWorkerLease",
+    "RestrictedWorkerRequest",
+    "RestrictedWorkerService",
     "HostServiceFactory",
     "HostServiceFactoryBinding",
     "HostServiceFactoryContext",
