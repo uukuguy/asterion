@@ -238,9 +238,20 @@ def verify_image_input_artifact_set(
         if resolved != root or not resolved.is_dir():
             raise ValueError
         expected = {artifact.path for artifact in verified.artifacts}
+        expected_directories = {
+            parent.as_posix()
+            for artifact in verified.artifacts
+            for parent in Path(artifact.path).parents
+            if parent != Path(".")
+        }
         actual: set[str] = set()
+        actual_directories: set[str] = set()
         for directory, names, files in os.walk(root, followlinks=False):
             directory_path = Path(directory)
+            if not stat.S_ISDIR(directory_path.lstat().st_mode):
+                raise ValueError
+            if directory_path != root:
+                actual_directories.add(directory_path.relative_to(root).as_posix())
             if any((directory_path / name).is_symlink() for name in names):
                 raise ValueError
             for name in files:
@@ -249,7 +260,7 @@ def verify_image_input_artifact_set(
                 if path.is_symlink() or not stat.S_ISREG(path.lstat().st_mode):
                     raise ValueError
                 actual.add(relative)
-        if actual != expected:
+        if actual != expected or actual_directories != expected_directories:
             raise ValueError
         for artifact in verified.artifacts:
             path = root / artifact.path

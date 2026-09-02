@@ -138,7 +138,13 @@ class TestPrimeImageInputLock(unittest.TestCase):
                 destination = root / path
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(payload)
+            (root / "unexpected" / "empty").mkdir(parents=True)
             with mock.patch.object(lock, "PRIME_IPYTHON_IMAGE_INPUT_LOCK", verification_lock):
+                with self.assertRaises(lock.PrimeImageInputLockError):
+                    lock.verify_image_input_artifact_set(root, verification_lock)
+
+                (root / "unexpected" / "empty").rmdir()
+                (root / "unexpected").rmdir()
                 proof = lock.verify_image_input_artifact_set(root, verification_lock)
 
         self.assertEqual(proof.contract, verification_lock)
