@@ -182,14 +182,24 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
         if self._closed:
             return
         self._closed = True
+        cancelled = control.cancelled() or monotonic() >= control.deadline
         if self._process.stdin is not None:
             self._process.stdin.close()
         if self._process.returncode is None:
             self._process.kill()
-        if control.cancelled() or monotonic() >= control.deadline:
+        reaping = asyncio.create_task(self._process.wait())
+        while not reaping.done():
+            try:
+                await asyncio.shield(reaping)
+            except asyncio.CancelledError:
+                cancelled = True
+        try:
+            reaping.result()
+        except BaseException:
+            if not cancelled:
+                raise RestrictedWorkerError("restricted worker value is invalid") from None
+        if cancelled or control.cancelled() or monotonic() >= control.deadline:
             raise asyncio.CancelledError
-        async with asyncio.timeout_at(control.deadline):
-            await self._process.wait()
 
     async def _read_bounded(self, control: _LifecycleCallControl) -> bytes:
         if control.cancelled() or monotonic() >= control.deadline:

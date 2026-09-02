@@ -93,6 +93,25 @@ class _AttachProcess(_Process):
         self.stdin = _Writer()
 
 
+class _BlockingAttachProcess(_AttachProcess):
+    def __init__(self) -> None:
+        super().__init__(b"")
+        self.wait_started = asyncio.Event()
+        self.allow_wait = asyncio.Event()
+
+    async def wait(self) -> int:
+        self.waited = True
+        self.wait_started.set()
+        await self.allow_wait.wait()
+        self.returncode = -9
+        return self.returncode
+
+
+class _Signal:
+    def __init__(self, cancelled: bool = False) -> None:
+        self.cancelled = cancelled
+
+
 class _AttachRunner:
     def __init__(self, process: _AttachProcess) -> None:
         self.process = process
@@ -127,8 +146,8 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         runner = _Runner(results)
         return DockerCliEngineTransport(docker_executable="/usr/local/bin/docker", socket_path=_SOCKET, seccomp_profile=_SECCOMP, runner=runner, attach_runner=cast(DockerCliAttachRunner | None, attach)), runner
 
-    def _control(self) -> _LifecycleCallControl:
-        return _LifecycleCallControl(asyncio.get_running_loop().time() + 10, None)
+    def _control(self, signal: _Signal | None = None) -> _LifecycleCallControl:
+        return _LifecycleCallControl(asyncio.get_running_loop().time() + 10, signal)
 
     async def test_create_preflights_and_uses_only_the_fixed_argv_and_empty_environment(self) -> None:
         transport, runner = self._transport([_Result(stdout=b"{}"), _Result(stdout=b"{}"), _Result(stdout=(_CONTAINER + "\n").encode())])
@@ -197,6 +216,38 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
             await channel.release(control=self._control())
         await channel.close(control=self._control())
         self.assertEqual(attach.process.stdin.writes, [b'{"release":true}\n'])
+
+    async def test_attach_close_reaps_when_control_is_already_cancelled(self) -> None:
+        process = _AttachProcess(b"")
+        attach = _AttachRunner(process)
+        transport, _ = self._transport([], attach)
+        transport._specifications[_CONTAINER] = _spec()
+        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+
+        with self.assertRaises(asyncio.CancelledError):
+            await channel.close(control=self._control(_Signal(True)))
+
+        self.assertTrue(process.stdin.closed)
+        self.assertTrue(process.killed)
+        self.assertTrue(process.waited)
+
+    async def test_attach_close_reaps_after_outer_cancellation(self) -> None:
+        process = _BlockingAttachProcess()
+        attach = _AttachRunner(process)
+        transport, _ = self._transport([], attach)
+        transport._specifications[_CONTAINER] = _spec()
+        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        closing = asyncio.create_task(channel.close(control=self._control()))
+        await process.wait_started.wait()
+        closing.cancel()
+        process.allow_wait.set()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await closing
+
+        self.assertTrue(process.stdin.closed)
+        self.assertTrue(process.killed)
+        self.assertTrue(process.waited)
 
     async def test_absence_daemon_failure_and_non_absence_are_rejected(self) -> None:
         for result in (_Result(returncode=1, stderr=b"daemon unavailable"), _Result(stdout=(_CONTAINER + "\n").encode())):
