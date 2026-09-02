@@ -26,6 +26,7 @@ from asterion.applications.prime_agent.source_lock import (
 
 
 _EXCLUDED_NAMES: Final = frozenset({".git", "node_modules", ".cache", "cache", ".pytest_cache", "__pycache__"})
+_SOURCE_LOCK_EXCLUDED_NAMES: Final = frozenset({".git", "node_modules"})
 _IMAGE_PREFIX: Final = "src/asterion/applications/prime_agent/operator/image"
 
 
@@ -45,6 +46,13 @@ class PrimeIpythonBuildContext:
     asset_sha256: str
 
 
+@dataclass(frozen=True)
+class _CapturedFile:
+    relative: str
+    data: bytes
+    mode: int
+
+
 def repository_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -62,27 +70,30 @@ def canonical_build_context(root: Path, lock: PrimeSourceLock) -> PrimeIpythonBu
         raise PrimeIpythonImageError("Prime image input is invalid") from error
     source_root = _absolute_directory(root)
     assets = _absolute_directory(image_root())
+    source_files = _capture_files(source_root, source=True)
+    if _source_tree_digest(source_files) != verified.tree_sha256 or _package_lock_digest(source_files) != verified.package_lock_sha256:
+        raise PrimeIpythonImageError("Prime image input is invalid")
+    asset_files = _capture_files(assets, source=False)
     entries = [
-        *( (f"prime/{relative}", path) for relative, path in _closed_files(source_root) ),
-        *( (f"image/{relative}", path) for relative, path in _closed_files(assets) ),
+        *((f"prime/{item.relative}", item) for item in source_files if not _context_excluded(item.relative)),
+        *((f"image/{item.relative}", item) for item in asset_files if not _context_excluded(item.relative)),
     ]
     if not entries or len({name for name, _ in entries}) != len(entries):
         raise PrimeIpythonImageError("Prime image input is invalid")
     archive = io.BytesIO()
     try:
         with tarfile.open(fileobj=archive, mode="w", format=tarfile.GNU_FORMAT) as output:
-            for name, path in sorted(entries):
-                data = path.read_bytes()
+            for name, captured in sorted(entries):
                 member = tarfile.TarInfo(name)
-                member.size = len(data)
-                member.mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
+                member.size = len(captured.data)
+                member.mode = captured.mode
                 member.uid = member.gid = member.mtime = 0
                 member.uname = member.gname = ""
-                output.addfile(member, io.BytesIO(data))
+                output.addfile(member, io.BytesIO(captured.data))
     except (OSError, tarfile.TarError) as error:
         raise PrimeIpythonImageError("Prime image input is invalid") from error
     tar_bytes = archive.getvalue()
-    assets_digest = _digest_files(_closed_files(assets))
+    assets_digest = _digest_files(asset_files)
     return PrimeIpythonBuildContext(
         tar_bytes=tar_bytes,
         build_input_sha256=sha256(tar_bytes).hexdigest(),
@@ -195,30 +206,84 @@ def _absolute_directory(path: Path) -> Path:
     return resolved
 
 
-def _closed_files(root: Path) -> tuple[tuple[str, Path], ...]:
-    files: list[tuple[str, Path]] = []
+def source_tree_sha256(root: Path) -> str:
+    """Return the source-lock tree digest from a no-follow byte snapshot."""
+
+    return _source_tree_digest(_capture_files(_absolute_directory(root), source=True))
+
+
+def _capture_files(root: Path, *, source: bool) -> tuple[_CapturedFile, ...]:
+    files: list[_CapturedFile] = []
     try:
         for directory, names, file_names in os.walk(root, followlinks=False):
             directory_path = Path(directory)
-            names[:] = sorted(name for name in names if not _excluded_name(name))
+            for name in names:
+                if not stat.S_ISDIR((directory_path / name).lstat().st_mode):
+                    raise ValueError
+            names[:] = sorted(
+                name
+                for name in names
+                if not (name in _SOURCE_LOCK_EXCLUDED_NAMES if source else _excluded_name(name))
+            )
             for name in sorted(file_names):
                 path = directory_path / name
-                if _excluded_name(name):
+                relative = path.relative_to(root).as_posix()
+                if not source and _context_excluded(relative):
                     continue
-                if path.is_symlink() or not stat.S_ISREG(path.stat().st_mode):
-                    raise ValueError
-                files.append((path.relative_to(root).as_posix(), path))
+                files.append(_capture_file(path, relative))
     except (OSError, ValueError) as error:
         raise PrimeIpythonImageError("Prime image input is invalid") from error
-    return tuple(sorted(files))
+    return tuple(sorted(files, key=lambda item: item.relative))
 
 
-def _digest_files(files: tuple[tuple[str, Path], ...]) -> str:
+def _capture_file(path: Path, relative: str) -> _CapturedFile:
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ValueError
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        after = path.lstat()
+        if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) != (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns):
+            raise ValueError
+        return _CapturedFile(relative, b"".join(chunks), 0o755 if opened.st_mode & 0o111 else 0o644)
+    finally:
+        os.close(descriptor)
+
+
+def _source_tree_digest(files: tuple[_CapturedFile, ...]) -> str:
     digest = sha256()
-    for relative, path in files:
-        digest.update(relative.encode())
+    for captured in files:
+        if captured.relative.rsplit("/", 1)[-1] == "package-lock.json":
+            continue
+        digest.update(captured.relative.encode())
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(captured.data)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _package_lock_digest(files: tuple[_CapturedFile, ...]) -> str:
+    matches = [item for item in files if item.relative == "package-lock.json"]
+    if len(matches) != 1:
+        raise PrimeIpythonImageError("Prime image input is invalid")
+    return sha256(matches[0].data).hexdigest()
+
+
+def _digest_files(files: tuple[_CapturedFile, ...]) -> str:
+    digest = sha256()
+    for captured in files:
+        digest.update(captured.relative.encode())
+        digest.update(b"\0")
+        digest.update(captured.data)
         digest.update(b"\0")
     return digest.hexdigest()
 
@@ -244,6 +309,10 @@ def _unsafe_output_path(path: Path) -> bool:
 
 def _excluded_name(name: str) -> bool:
     return name in _EXCLUDED_NAMES or name == ".env" or name.startswith(".env.")
+
+
+def _context_excluded(relative: str) -> bool:
+    return any(_excluded_name(component) for component in relative.split("/"))
 
 
 if __name__ == "__main__":

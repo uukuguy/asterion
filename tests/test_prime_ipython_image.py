@@ -35,7 +35,11 @@ class TestPrimeIpythonImage(unittest.TestCase):
                 (root / name).mkdir()
                 (root / name / "hidden").write_text("no\n")
             (root / ".env").write_text("secret\n")
-            lock = PrimeSourceLock("a" * 40, "b" * 64, "c" * 64)
+            lock = PrimeSourceLock(
+                "a" * 40,
+                image.source_tree_sha256(root),
+                sha256((root / "package-lock.json").read_bytes()).hexdigest(),
+            )
             with mock.patch.object(image, "verify_prime_source_lock", return_value=lock):
                 first = image.canonical_build_context(root, lock)
                 second = image.canonical_build_context(root, lock)
@@ -50,6 +54,42 @@ class TestPrimeIpythonImage(unittest.TestCase):
         self.assertFalse(any(".git" in name or "node_modules" in name or ".env" in name or ".cache" in name for name in names))
         self.assertTrue(all(member.uid == member.gid == member.mtime == 0 for member in members))
         self.assertTrue(all(member.mode in {0o644, 0o755} for member in members))
+
+    def test_context_rejects_source_replaced_after_lock_verification(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = (Path(temporary) / "prime").resolve()
+            root.mkdir()
+            (root / "package.json").write_text('{"version":"1.0.0"}\n')
+            (root / "package-lock.json").write_text("{}\n")
+            (root / "src").mkdir()
+            source = root / "src" / "main.js"
+            source.write_text("original\n")
+            lock = PrimeSourceLock(
+                "a" * 40,
+                image.source_tree_sha256(root),
+                sha256((root / "package-lock.json").read_bytes()).hexdigest(),
+            )
+
+            def verify_then_replace(_root: Path, _lock: PrimeSourceLock) -> PrimeSourceLock:
+                source.unlink()
+                source.write_text("replacement\n")
+                return lock
+
+            with mock.patch.object(image, "verify_prime_source_lock", side_effect=verify_then_replace):
+                with self.assertRaises(image.PrimeIpythonImageError):
+                    image.canonical_build_context(root, lock)
+
+    def test_context_rejects_symlinked_source_file_after_lock_verification(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = (Path(temporary) / "prime").resolve()
+            root.mkdir()
+            (root / "package.json").write_text('{"version":"1.0.0"}\n')
+            (root / "package-lock.json").write_text("{}\n")
+            (root / "main.js").symlink_to(root / "package.json")
+            lock = PrimeSourceLock("a" * 40, "b" * 64, "c" * 64)
+            with mock.patch.object(image, "verify_prime_source_lock", return_value=lock):
+                with self.assertRaises(image.PrimeIpythonImageError):
+                    image.canonical_build_context(root, lock)
 
     def test_dockerfile_and_private_config_are_closed(self) -> None:
         dockerfile = image.image_root() / "Dockerfile"
