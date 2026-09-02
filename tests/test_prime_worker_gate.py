@@ -182,3 +182,13 @@ class TestPrimeWorkerBoundary(unittest.TestCase):
                 _attestation(),
                 _cleanup(),
             )
+
+    def test_rejects_a_non_prime_role_even_when_all_receipts_match(self) -> None:
+        with self.assertRaises(PrimeWorkerBoundaryError):
+            verify_prime_worker_boundary(
+                _profile(),
+                _request(role_id="other.role"),
+                _lease(),
+                _attestation(),
+                _cleanup(),
+            )

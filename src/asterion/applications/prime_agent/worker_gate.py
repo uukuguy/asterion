@@ -50,7 +50,8 @@ def verify_prime_worker_boundary(
         raise PrimeWorkerBoundaryError("prime worker boundary is invalid") from None
 
     if (
-        request.image_digest != profile.image_digest
+        request.role_id != "prime.ipython-coding"
+        or request.image_digest != profile.image_digest
         or request.max_runtime_seconds != profile.max_runtime_seconds
         or request.max_output_bytes != profile.max_output_bytes
         or any(
