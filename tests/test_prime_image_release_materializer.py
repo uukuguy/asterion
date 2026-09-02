@@ -57,10 +57,12 @@ class TestPrimeImageReleaseMaterializer(unittest.TestCase):
         transport = _Transport({spec.artifacts[0].url: _Response(spec.artifacts[0].url, b"node")})
         with TemporaryDirectory() as directory:
             root = Path(directory) / "fresh"
-            result = materializer.materialize_authorized_release(root, spec, transport, authorization=materializer.ReleaseAuthorization())
+            result = materializer.materialize_authorized_release(
+                root, spec, transport, authorization=materializer._mint_release_authorization_from_operator_cli(),
+            )
             self.assertEqual((root / "node/node.tar").read_bytes(), b"node")
             self.assertEqual((root.stat().st_mode & 0o777), 0o700)
-        self.assertEqual(result.target_id, sha256(str(root).encode()).hexdigest())
+        self.assertEqual(result.target_id, sha256(str(root.resolve()).encode()).hexdigest())
         self.assertEqual(result.count, 1)
         self.assertEqual(result.digests, (sha256(b"node").hexdigest(),))
         self.assertNotIsInstance(result, materializer.VerifiedImageInputArtifactSet)
@@ -71,7 +73,50 @@ class TestPrimeImageReleaseMaterializer(unittest.TestCase):
         transport = _Transport({spec.artifacts[0].url: _Response(spec.artifacts[0].url, b"node", final_url="https://other.invalid/node")})
         with TemporaryDirectory() as directory:
             with self.assertRaises(materializer.PrimeImageMaterializerError):
-                materializer.materialize_authorized_release(Path(directory) / "fresh", spec, transport, authorization=materializer.ReleaseAuthorization())
+                materializer.materialize_authorized_release(
+                    Path(directory) / "fresh", spec, transport, authorization=materializer._mint_release_authorization_from_operator_cli(),
+                )
+
+    def test_canonicalizes_a_symlink_ancestor_for_staging_and_identity(self) -> None:
+        spec = _spec()
+        transport = _Transport({spec.artifacts[0].url: _Response(spec.artifacts[0].url, b"node")})
+        with TemporaryDirectory() as directory:
+            base = Path(directory)
+            canonical_parent = base / "canonical"
+            canonical_parent.mkdir()
+            alias = base / "alias"
+            alias.symlink_to(canonical_parent, target_is_directory=True)
+            requested = alias / "fresh"
+            canonical = canonical_parent / "fresh"
+            result = materializer.materialize_authorized_release(
+                requested, spec, transport, authorization=materializer._mint_release_authorization_from_operator_cli(),
+            )
+            self.assertEqual((canonical / "node/node.tar").read_bytes(), b"node")
+            self.assertEqual(result.target_id, sha256(str(canonical.resolve()).encode()).hexdigest())
+
+    def test_rejects_direct_or_replayed_authorization_before_fetching(self) -> None:
+        spec = _spec()
+        transport = _Transport({spec.artifacts[0].url: _Response(spec.artifacts[0].url, b"node")})
+        with self.assertRaises(TypeError):
+            materializer._ReleaseAuthorization(object())
+        with TemporaryDirectory() as directory:
+            token = materializer._mint_release_authorization_from_operator_cli()
+            materializer.materialize_authorized_release(Path(directory) / "first", spec, transport, authorization=token)
+            with self.assertRaises(materializer.PrimeImageMaterializerError):
+                materializer.materialize_authorized_release(Path(directory) / "second", spec, transport, authorization=token)
+            with self.assertRaises(materializer.PrimeImageMaterializerError):
+                materializer.materialize_authorized_release(Path(directory) / "third", spec, transport, authorization=object())
+        self.assertEqual(transport.calls, [spec.artifacts[0].url])
+
+    def test_operator_cli_path_requires_exact_release_action_before_fetching(self) -> None:
+        spec = _spec()
+        transport = _Transport({spec.artifacts[0].url: _Response(spec.artifacts[0].url, b"node")})
+        with TemporaryDirectory() as directory:
+            with self.assertRaises(materializer.PrimeImageMaterializerError):
+                materializer.materialize_release_from_operator_cli(
+                    ("plan",), Path(directory) / "fresh", spec, transport,
+                )
+        self.assertEqual(transport.calls, [])
 
     def test_release_specification_rejects_non_https_traversal_and_duplicate_downloads(self) -> None:
         valid = _spec()
@@ -90,4 +135,6 @@ class TestPrimeImageReleaseMaterializer(unittest.TestCase):
             transport = _Transport({spec.artifacts[0].url: response})
             with TemporaryDirectory() as directory:
                 with self.subTest(response=response.body), self.assertRaises(materializer.PrimeImageMaterializerError):
-                    materializer.materialize_authorized_release(Path(directory) / "fresh", spec, transport, authorization=materializer.ReleaseAuthorization())
+                    materializer.materialize_authorized_release(
+                        Path(directory) / "fresh", spec, transport, authorization=materializer._mint_release_authorization_from_operator_cli(),
+                    )

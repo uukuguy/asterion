@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import re
 import stat
-from typing import Iterable, Protocol
+from typing import Iterable, Protocol, Sequence
 from urllib.parse import urlsplit
 
 from asterion.applications.prime_agent.operator.image_input_lock import (
@@ -33,9 +33,52 @@ class ReleaseTransport(Protocol):
     def fetch(self, url: str) -> ReleaseResponse: ...
 
 
-@dataclass(frozen=True)
-class ReleaseAuthorization:
-    """A fresh explicit capability required for a release staging operation."""
+class _ReleaseAuthorization:
+    """One-use release authority minted solely by the operator CLI boundary.
+
+    This protects the normal module API.  It is not a defense against code
+    already executing in this Python interpreter, which can inspect private
+    module state.
+    """
+
+    __slots__ = ("_consumed",)
+
+    def __init__(self, mint_key: object) -> None:
+        if mint_key is not _RELEASE_AUTHORIZATION_MINT_KEY:
+            raise TypeError("release authorization is minted by the operator CLI")
+        self._consumed = False
+
+
+_RELEASE_AUTHORIZATION_MINT_KEY = object()
+_OPERATOR_RELEASE_ACTION = ("release-materialize",)
+
+
+def _mint_release_authorization_from_operator_cli() -> _ReleaseAuthorization:
+    """Mint the private one-use authority at the explicit operator CLI edge."""
+
+    return _ReleaseAuthorization(_RELEASE_AUTHORIZATION_MINT_KEY)
+
+
+def _consume_release_authorization(authorization: object) -> None:
+    if type(authorization) is not _ReleaseAuthorization or authorization._consumed:
+        raise ValueError
+    authorization._consumed = True
+
+
+def materialize_release_from_operator_cli(
+    action: Sequence[str], output_root: Path, specification: ReleaseSpecification, transport: ReleaseTransport,
+) -> ReleaseMaterializationResult:
+    """Run staging only for the exact, explicitly selected operator CLI action.
+
+    The narrow injected transport keeps this boundary testable and avoids
+    embedding provider configuration or credentials in this tool.
+    """
+
+    if tuple(action) != _OPERATOR_RELEASE_ACTION:
+        raise PrimeImageMaterializerError("Prime image materialization authorization is invalid")
+    return materialize_authorized_release(
+        output_root, specification, transport, authorization=_mint_release_authorization_from_operator_cli(),
+    )
 
 
 @dataclass(frozen=True)
@@ -120,35 +163,37 @@ def validate_release_specification(specification: object) -> ReleaseSpecificatio
 
 
 def materialize_authorized_release(
-    output_root: Path, specification: ReleaseSpecification, transport: ReleaseTransport, *, authorization: ReleaseAuthorization | None = None,
+    output_root: Path, specification: ReleaseSpecification, transport: ReleaseTransport, *, authorization: object = None,
 ) -> ReleaseMaterializationResult:
     """Stage exact fetched bytes and issue only an untrusted lock proposal."""
 
-    if type(authorization) is not ReleaseAuthorization:
+    try:
+        _consume_release_authorization(authorization)
+    except (AttributeError, ValueError):
         raise PrimeImageMaterializerError("Prime image materialization authorization is invalid")
     try:
         spec = validate_release_specification(specification)
-        _validate_fresh_external_target(output_root)
+        canonical_root = _validate_fresh_external_target(output_root)
         if not hasattr(transport, "fetch"):
             raise ValueError
-        output_root.mkdir(mode=0o700)
-        if (output_root.stat().st_mode & 0o777) != 0o700:
+        canonical_root.mkdir(mode=0o700)
+        if (canonical_root.stat().st_mode & 0o777) != 0o700:
             raise ValueError
         for artifact in spec.artifacts:
             response = transport.fetch(artifact.url)
             if response.url != artifact.url or response.content_length != artifact.size:
                 raise ValueError
-            _write_checked_file(output_root, artifact.path, response.body, artifact.size, artifact.sha256)
+            _write_checked_file(canonical_root, artifact.path, response.body, artifact.size, artifact.sha256)
         proposal = ReleaseLockProposal(
             spec.source_commit, spec.source_tree_sha256, spec.source_package_lock_sha256, spec.platform,
             tuple(ImageArtifact(item.kind, item.path, item.size, item.sha256) for item in spec.artifacts),
         )
-        return ReleaseMaterializationResult(sha256(str(output_root).encode()).hexdigest(), len(proposal.artifacts), tuple(item.sha256 for item in proposal.artifacts), proposal)
+        return ReleaseMaterializationResult(sha256(str(canonical_root).encode()).hexdigest(), len(proposal.artifacts), tuple(item.sha256 for item in proposal.artifacts), proposal)
     except (OSError, TypeError, ValueError, PrimeImageInputLockError):
         raise PrimeImageMaterializerError("Prime image materialization target is invalid") from None
 
 
-def _validate_fresh_external_target(output_root: Path) -> None:
+def _validate_fresh_external_target(output_root: Path) -> Path:
     if not isinstance(output_root, Path) or not output_root.is_absolute() or output_root.exists() or output_root.is_symlink():
         raise ValueError
     resolved = output_root.resolve(strict=False)
@@ -156,6 +201,7 @@ def _validate_fresh_external_target(output_root: Path) -> None:
     parent = resolved.parent.resolve(strict=True)
     if not parent.is_dir() or parent.is_symlink() or repository == resolved or repository in resolved.parents or repository.parent in resolved.parents:
         raise ValueError
+    return resolved
 
 
 def _write_checked_file(root: Path, relative: str, chunks: Iterable[bytes], expected_size: int, expected_sha256: str) -> None:
