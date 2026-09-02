@@ -1,5 +1,11 @@
 """Host-service protocol contracts."""
 
+from asterion.services.bounded_model_session import (
+    BoundedModelSessionError,
+    BoundedModelSessionLease,
+    BoundedModelSessionRequest,
+    BoundedModelSessionService,
+)
 from asterion.services.restricted_worker import (
     RestrictedWorkerAttestation,
     RestrictedWorkerCleanupReceipt,
@@ -20,6 +26,10 @@ from asterion.services.registry import (
 
 __all__ = [
     "HOST_SERVICE_ENTRY_POINT_GROUP",
+    "BoundedModelSessionError",
+    "BoundedModelSessionLease",
+    "BoundedModelSessionRequest",
+    "BoundedModelSessionService",
     "RestrictedWorkerAttestation",
     "RestrictedWorkerCleanupReceipt",
     "RestrictedWorkerError",
