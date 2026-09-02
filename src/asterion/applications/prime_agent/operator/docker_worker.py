@@ -9,7 +9,7 @@ from __future__ import annotations
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Literal, Protocol
+from typing import Literal, Mapping, Protocol
 
 from asterion.runtime.host import CancellationSignal
 from asterion.services.restricted_worker import (
@@ -18,12 +18,25 @@ from asterion.services.restricted_worker import (
     RestrictedWorkerError,
     RestrictedWorkerLease,
     RestrictedWorkerRequest,
-    verify_restricted_worker_receipts,
 )
 
 
 _ROLE_ID = "prime.ipython-coding"
 _NON_ROOT_ID = 65534
+_WORKSPACE_TMPFS_BYTES = 67108864
+_SAFE_ENVIRONMENT = (
+    "HOME=/workspace",
+    "PATH=/usr/local/bin:/usr/bin:/bin",
+    "PYTHONDONTWRITEBYTECODE=1",
+)
+_INSPECTION_FIELDS = frozenset(
+    {
+        "image_id", "repo_digests", "network_mode", "ports", "readonly_rootfs",
+        "privileged", "cap_add", "cap_drop", "security_opt", "user", "devices",
+        "mounts", "binds", "volumes", "tmpfs", "env", "pids_limit", "memory",
+        "memory_swap", "nano_cpus", "pid_namespace", "ipc_namespace", "uts_namespace",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -55,20 +68,27 @@ class _DockerWorkerSpecification:
 
 
 class DockerEngineTransport(Protocol):
-    """Operator-supplied engine operations for an already-fixed worker spec."""
+    """Operator-supplied operations over an opaque, fixed-role container."""
 
-    def open(
+    async def create(
         self,
         specification: _DockerWorkerSpecification,
         *,
         signal: CancellationSignal | None = None,
-    ) -> AbstractAsyncContextManager[RestrictedWorkerLease]: ...
+    ) -> str: ...
 
-    async def attest(self, lease: RestrictedWorkerLease) -> RestrictedWorkerAttestation: ...
+    async def inspect(self, container_id: str) -> Mapping[str, object]: ...
 
-    async def cleanup_receipt(
-        self, lease: RestrictedWorkerLease
-    ) -> RestrictedWorkerCleanupReceipt: ...
+    async def start(self, container_id: str) -> RestrictedWorkerLease: ...
+
+    async def remove(self, container_id: str) -> None: ...
+
+
+@dataclass
+class _LeaseState:
+    request: RestrictedWorkerRequest
+    container_id: str
+    removed: bool = False
 
 
 class DockerRestrictedWorkerService:
@@ -84,7 +104,7 @@ class DockerRestrictedWorkerService:
         except RestrictedWorkerError:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         self._transport = transport
-        self._requests: dict[str, RestrictedWorkerRequest] = {}
+        self._leases: dict[str, _LeaseState] = {}
 
     def request_for(
         self, request: RestrictedWorkerRequest
@@ -121,47 +141,21 @@ class DockerRestrictedWorkerService:
 
     async def attest(self, lease: RestrictedWorkerLease) -> RestrictedWorkerAttestation:
         request = self._request_for_lease(lease)
-        try:
-            attestation = await self._transport.attest(lease)
-            verify_restricted_worker_receipts(
-                request,
-                lease,
-                attestation,
-                RestrictedWorkerCleanupReceipt(
-                    lease.worker_id, lease.run_id, lease.challenge_digest, True
-                ),
-            )
-        except RestrictedWorkerError:
-            raise RestrictedWorkerError("restricted worker value is invalid") from None
-        return attestation
+        return RestrictedWorkerAttestation(
+            lease.worker_id,
+            lease.run_id,
+            lease.challenge_digest,
+            request.image_digest,
+            True, True, True, True, True, True, True,
+        )
 
     async def cleanup_receipt(
         self, lease: RestrictedWorkerLease
     ) -> RestrictedWorkerCleanupReceipt:
-        request = self._request_for_lease(lease)
-        try:
-            receipt = await self._transport.cleanup_receipt(lease)
-            verify_restricted_worker_receipts(
-                request,
-                lease,
-                RestrictedWorkerAttestation(
-                    lease.worker_id,
-                    lease.run_id,
-                    lease.challenge_digest,
-                    request.image_digest,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                    True,
-                ),
-                receipt,
-            )
-        except RestrictedWorkerError:
-            raise RestrictedWorkerError("restricted worker value is invalid") from None
-        return receipt
+        self._request_for_lease(lease, require_removed=True)
+        return RestrictedWorkerCleanupReceipt(
+            lease.worker_id, lease.run_id, lease.challenge_digest, True
+        )
 
     def _admit_lease(
         self, request: RestrictedWorkerRequest, lease: RestrictedWorkerLease
@@ -170,23 +164,86 @@ class DockerRestrictedWorkerService:
             type(lease) is not RestrictedWorkerLease
             or lease.run_id != request.run_id
             or lease.challenge_digest != request.challenge_digest
-            or lease.worker_id in self._requests
+            or lease.worker_id in self._leases
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
-        self._requests[lease.worker_id] = request
+        self._leases[lease.worker_id] = _LeaseState(request, "")
         return lease
 
-    def _request_for_lease(self, lease: RestrictedWorkerLease) -> RestrictedWorkerRequest:
+    def _bind_container(self, lease: RestrictedWorkerLease, container_id: str) -> None:
+        state = self._leases.get(lease.worker_id)
+        if state is None or state.container_id or type(container_id) is not str or not container_id:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        state.container_id = container_id
+
+    def _mark_removed(self, lease: RestrictedWorkerLease) -> None:
+        state = self._leases.get(lease.worker_id)
+        if state is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        state.removed = True
+
+    def _request_for_lease(
+        self, lease: RestrictedWorkerLease, *, require_removed: bool = False
+    ) -> RestrictedWorkerRequest:
         if type(lease) is not RestrictedWorkerLease:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        request = self._requests.get(lease.worker_id)
+        state = self._leases.get(lease.worker_id)
+        request = state.request if state is not None else None
         if (
             request is None
             or request.run_id != lease.run_id
             or request.challenge_digest != lease.challenge_digest
+            or (require_removed and not state.removed)
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         return request
+
+    def _validate_inspection(self, inspection: Mapping[str, object]) -> None:
+        """Validate raw engine evidence without retaining or exposing it."""
+        try:
+            if type(inspection) is not dict or frozenset(inspection) != _INSPECTION_FIELDS:
+                raise ValueError
+            expected = {
+                "image_id": self._role.image_digest,
+                "repo_digests": (self._role.image_digest,),
+                "network_mode": "none",
+                "ports": (),
+                "readonly_rootfs": True,
+                "privileged": False,
+                "cap_add": (),
+                "cap_drop": ("ALL",),
+                "security_opt": ("no-new-privileges", "seccomp=prime-ipython-coding"),
+                "user": f"{_NON_ROOT_ID}:{_NON_ROOT_ID}",
+                "devices": (), "mounts": (), "binds": (), "volumes": (),
+                "env": _SAFE_ENVIRONMENT,
+                "memory_swap": inspection["memory"],
+                "pid_namespace": "private", "ipc_namespace": "private", "uts_namespace": "private",
+            }
+            if any(
+                type(inspection[name]) is not type(value) or inspection[name] != value
+                for name, value in expected.items()
+            ):
+                raise ValueError
+            tmpfs = inspection["tmpfs"]
+            workspace = tmpfs.get("/workspace") if type(tmpfs) is dict else None
+            if (
+                type(tmpfs) is not dict
+                or frozenset(tmpfs) != {"/workspace"}
+                or type(workspace) is not dict
+                or frozenset(workspace) != {"size_bytes", "options"}
+                or type(workspace["size_bytes"]) is not int
+                or workspace["size_bytes"] != _WORKSPACE_TMPFS_BYTES
+                or type(workspace["options"]) is not tuple
+                or workspace["options"] != ("nodev", "noexec", "nosuid")
+            ):
+                raise ValueError
+            for name in ("pids_limit", "memory", "nano_cpus"):
+                if type(inspection[name]) is not int or inspection[name] <= 0:
+                    raise ValueError
+            if type(inspection["memory_swap"]) is not int:
+                raise ValueError
+        except Exception:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
 
 
 class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLease]):
@@ -199,10 +256,31 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
     ) -> None:
         self._service = service
         self._request = request
-        self._context = service._transport.open(specification, signal=signal)
+        self._specification = specification
+        self._signal = signal
+        self._container_id: str | None = None
+        self._lease: RestrictedWorkerLease | None = None
 
     async def __aenter__(self) -> RestrictedWorkerLease:
-        return self._service._admit_lease(self._request, await self._context.__aenter__())
+        try:
+            container_id = await self._service._transport.create(
+                self._specification, signal=self._signal
+            )
+            if type(container_id) is not str or not container_id:
+                raise RestrictedWorkerError("restricted worker value is invalid")
+            self._container_id = container_id
+            inspection = await self._service._transport.inspect(container_id)
+            self._service._validate_inspection(inspection)
+            lease = await self._service._transport.start(container_id)
+            self._lease = self._service._admit_lease(self._request, lease)
+            self._service._bind_container(self._lease, container_id)
+            return self._lease
+        except RestrictedWorkerError:
+            await self._remove_after_rejection()
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+        except Exception:
+            await self._remove_after_rejection()
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     async def __aexit__(
         self,
@@ -210,4 +288,19 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool | None:
-        return await self._context.__aexit__(exc_type, exc_value, traceback)
+        if self._container_id is None or self._lease is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        try:
+            await self._service._transport.remove(self._container_id)
+            self._service._mark_removed(self._lease)
+        except Exception:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+        return None
+
+    async def _remove_after_rejection(self) -> None:
+        if self._container_id is None:
+            return
+        try:
+            await self._service._transport.remove(self._container_id)
+        except Exception:
+            pass
