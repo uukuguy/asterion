@@ -11,10 +11,11 @@ import json
 import re
 from dataclasses import dataclass
 from time import monotonic
-from typing import Mapping, Protocol
+from typing import Mapping, Protocol, cast
 
 from asterion.applications.prime_agent.operator.docker_worker import (
     DockerEngineTransport,
+    DockerLauncherChannel,
     DockerWorkerLauncherSelfCheck,
     _DockerWorkerSpecification,
     _LifecycleCallControl,
@@ -49,6 +50,23 @@ class DockerCliRunner(Protocol):
         self, *, argv: tuple[str, ...], env: dict[str, str], timeout: float,
         max_output_bytes: int,
     ) -> DockerCliResult: ...
+
+
+class DockerCliAttachProcess(Protocol):
+    stdin: asyncio.StreamWriter | None
+    stdout: asyncio.StreamReader | None
+    @property
+    def returncode(self) -> int | None: ...
+
+    def kill(self) -> None: ...
+
+    async def wait(self) -> int: ...
+
+
+class DockerCliAttachRunner(Protocol):
+    async def open(
+        self, *, argv: tuple[str, ...], env: dict[str, str]
+    ) -> DockerCliAttachProcess: ...
 
 
 class _ProductionRunner:
@@ -120,12 +138,76 @@ class _DockerCliOutputLimit(Exception):
     pass
 
 
+class _ProductionAttachRunner:
+    async def open(
+        self, *, argv: tuple[str, ...], env: dict[str, str]
+    ) -> DockerCliAttachProcess:
+        return cast(DockerCliAttachProcess, await asyncio.create_subprocess_exec(
+            *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL, env=env,
+        ))
+
+
+class _DockerCliLauncherChannel(DockerLauncherChannel):
+    """One private interactive attach process; never expose its stream."""
+
+    _RELEASE = b'{"release":true}\n'
+
+    def __init__(self, process: DockerCliAttachProcess) -> None:
+        self._process = process
+        self._read = False
+        self._released = False
+        self._closed = False
+
+    async def self_check(self, *, control: _LifecycleCallControl) -> DockerWorkerLauncherSelfCheck:
+        if self._read or self._closed or self._process.stdout is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        self._read = True
+        raw = await self._read_bounded(control)
+        return DockerCliEngineTransport._parse_self_check_line(raw)
+
+    async def release(self, *, control: _LifecycleCallControl) -> None:
+        if self._released or self._closed or self._process.stdin is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        self._released = True
+        if control.cancelled() or monotonic() >= control.deadline:
+            raise asyncio.CancelledError
+        self._process.stdin.write(self._RELEASE)
+        async with asyncio.timeout_at(control.deadline):
+            await self._process.stdin.drain()
+        if control.cancelled():
+            raise asyncio.CancelledError
+
+    async def close(self, *, control: _LifecycleCallControl) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._process.stdin is not None:
+            self._process.stdin.close()
+        if self._process.returncode is None:
+            self._process.kill()
+        if control.cancelled() or monotonic() >= control.deadline:
+            raise asyncio.CancelledError
+        async with asyncio.timeout_at(control.deadline):
+            await self._process.wait()
+
+    async def _read_bounded(self, control: _LifecycleCallControl) -> bytes:
+        if control.cancelled() or monotonic() >= control.deadline:
+            raise asyncio.CancelledError
+        async with asyncio.timeout_at(control.deadline):
+            raw = await self._process.stdout.read(1025)  # type: ignore[union-attr]
+        if control.cancelled() or type(raw) is not bytes or not raw or len(raw) > 1024:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        return raw
+
+
 class DockerCliEngineTransport(DockerEngineTransport):
     """The exact DockerEngineTransport lifecycle, mapped to fixed CLI argv."""
 
     def __init__(
         self, *, docker_executable: str, socket_path: str, seccomp_profile: str,
         runner: DockerCliRunner | None = None,
+        attach_runner: DockerCliAttachRunner | None = None,
     ) -> None:
         if not all(type(value) is str and value.startswith("/") for value in (docker_executable, socket_path, seccomp_profile)):
             raise RestrictedWorkerError("restricted worker value is invalid")
@@ -134,6 +216,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
         self._prefix = (docker_executable, "--host", "unix://" + socket_path)
         self._seccomp_profile = seccomp_profile
         self._runner = runner or _ProductionRunner()
+        self._attach_runner = attach_runner or _ProductionAttachRunner()
         self._specifications: dict[str, _DockerWorkerSpecification] = {}
 
     async def create(self, specification: _DockerWorkerSpecification, *, control: _LifecycleCallControl) -> str:
@@ -166,10 +249,20 @@ class DockerCliEngineTransport(DockerEngineTransport):
             raise RestrictedWorkerError("restricted worker value is invalid")
         return RestrictedWorkerLease(container_id, specification.run_id, specification.challenge_digest)
 
-    async def launcher_self_check(self, container_id: str, *, control: _LifecycleCallControl) -> DockerWorkerLauncherSelfCheck:
+    async def open_launcher_channel(self, container_id: str, *, control: _LifecycleCallControl) -> DockerLauncherChannel:
         self._specification(container_id)
-        result = await self._call(self._prefix + ("container", "attach", "--no-stdin", "--sig-proxy=false", container_id), control)
-        return self._parse_self_check(result.stdout)
+        if control.cancelled() or monotonic() >= control.deadline:
+            raise asyncio.CancelledError
+        process = await self._attach_runner.open(
+            argv=self._prefix + ("container", "attach", "--sig-proxy=false", container_id), env={}
+        )
+        if process.stdin is None or process.stdout is None:
+            await _DockerCliLauncherChannel(process).close(control=control)
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        if control.cancelled():
+            await _DockerCliLauncherChannel(process).close(control=control)
+            raise asyncio.CancelledError
+        return _DockerCliLauncherChannel(process)
 
     async def force_remove(self, container_id: str, *, control: _LifecycleCallControl) -> None:
         self._specification(container_id)
@@ -249,7 +342,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
             if type(value) is not list or len(value) != 1 or type(value[0]) is not dict:
                 raise ValueError
             item = value[0]
-            if set(item) != {"Id", "Image", "RepoDigests", "Config", "HostConfig", "Mounts", "State"} or item["Id"] != specification.container_id or item["Image"] != specification.image_digest or item["RepoDigests"] != [specification.image_digest] or item["Mounts"] != [] or item["State"] not in ({"Running": False}, {"Running": True}):
+            if set(item) != {"Id", "Image", "RepoDigests", "Config", "HostConfig", "Mounts", "State"} or item["Id"] != specification.container_id or item["Image"] != specification.image_digest or item["RepoDigests"] != [] or item["Mounts"] != [] or item["State"] not in ({"Running": False}, {"Running": True}):
                 raise ValueError
             config, host = item["Config"], item["HostConfig"]
             if type(config) is not dict or set(config) != {"User", "Env", "Entrypoint", "Labels"} or config["User"] != "65534:65534" or config["Env"] != list(_ENVIRONMENT) or config["Entrypoint"] != [_ENTRYPOINT] or type(config["Labels"]) is not dict or any("run" in key.lower() or "challenge" in key.lower() for key in config["Labels"]):
@@ -259,12 +352,20 @@ class DockerCliEngineTransport(DockerEngineTransport):
                 raise ValueError
         except (KeyError, TypeError, ValueError):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
-        return {"image_id": specification.image_digest, "repo_digests": (specification.image_digest,), "network_mode": "none", "ports": (), "readonly_rootfs": True, "privileged": False, "cap_add": (), "cap_drop": ("ALL",), "security_opt": ("no-new-privileges", "seccomp=prime-ipython-coding"), "user": "65534:65534", "devices": (), "mounts": (), "binds": (), "volumes": (), "tmpfs": {"/workspace": {"size_bytes": 67108864, "options": ("nodev", "noexec", "nosuid")}}, "env": _ENVIRONMENT, "pids_limit": 256, "memory": 536870912, "memory_swap": 536870912, "nano_cpus": 1000000000, "pid_namespace": "private", "ipc_namespace": "private", "uts_namespace": "private"}
+        return {"image_id": specification.image_digest, "repo_digests": (), "network_mode": "none", "ports": (), "readonly_rootfs": True, "privileged": False, "cap_add": (), "cap_drop": ("ALL",), "security_opt": ("no-new-privileges", "seccomp=prime-ipython-coding"), "user": "65534:65534", "devices": (), "mounts": (), "binds": (), "volumes": (), "tmpfs": {"/workspace": {"size_bytes": 67108864, "options": ("nodev", "noexec", "nosuid")}}, "env": _ENVIRONMENT, "pids_limit": 256, "memory": 536870912, "memory_swap": 536870912, "nano_cpus": 1000000000, "pid_namespace": "private", "ipc_namespace": "private", "uts_namespace": "private"}
 
-    def _parse_self_check(self, raw: bytes) -> DockerWorkerLauncherSelfCheck:
-        value = self._json(raw)
+    @staticmethod
+    def _parse_self_check_line(raw: bytes) -> DockerWorkerLauncherSelfCheck:
+        if raw.count(b"\n") != 1 or not raw.endswith(b"\n"):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        raw = raw[:-1]
+        if not raw:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        value = DockerCliEngineTransport._json(raw)
         fields = {"nonloopback_network_absent", "root_read_only", "workspace_only_writable", "credentials_absent", "effective_capabilities", "no_new_privileges", "seccomp_mode", "effective_user_id"}
         if type(value) is not dict or set(value) != fields:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        if json.dumps(value, separators=(",", ":"), sort_keys=True).encode() != raw:
             raise RestrictedWorkerError("restricted worker value is invalid")
         try:
             return DockerWorkerLauncherSelfCheck(**value)

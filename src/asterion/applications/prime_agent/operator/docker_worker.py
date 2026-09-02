@@ -117,6 +117,18 @@ class DockerWorkerLauncherSelfCheck:
         return "DockerWorkerLauncherSelfCheck(redacted)"
 
 
+class DockerLauncherChannel(Protocol):
+    """Private, bounded launcher control stream for one opaque container."""
+
+    async def self_check(
+        self, *, control: _LifecycleCallControl
+    ) -> DockerWorkerLauncherSelfCheck: ...
+
+    async def release(self, *, control: _LifecycleCallControl) -> None: ...
+
+    async def close(self, *, control: _LifecycleCallControl) -> None: ...
+
+
 class DockerEngineTransport(Protocol):
     """Operator-supplied operations over an opaque, fixed-role container."""
 
@@ -135,9 +147,9 @@ class DockerEngineTransport(Protocol):
         self, container_id: str, *, control: _LifecycleCallControl
     ) -> RestrictedWorkerLease: ...
 
-    async def launcher_self_check(
+    async def open_launcher_channel(
         self, container_id: str, *, control: _LifecycleCallControl
-    ) -> DockerWorkerLauncherSelfCheck: ...
+    ) -> DockerLauncherChannel: ...
 
     async def force_remove(
         self, container_id: str, *, control: _LifecycleCallControl
@@ -297,7 +309,7 @@ class DockerRestrictedWorkerService:
                 raise ValueError
             expected = {
                 "image_id": self._role.image_digest,
-                "repo_digests": (self._role.image_digest,),
+                "repo_digests": (),
                 "network_mode": "none",
                 "ports": (),
                 "readonly_rootfs": True,
@@ -371,6 +383,7 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
         self._specification = replace(specification, container_id=self._container_id)
         self._control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, signal)
         self._lease: RestrictedWorkerLease | None = None
+        self._channel: DockerLauncherChannel | None = None
 
     async def __aenter__(self) -> RestrictedWorkerLease:
         try:
@@ -382,6 +395,7 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
             lease = await self._call_start()
             inspection = await self._call_inspect(self._control)
             self._service._validate_inspection(inspection)
+            self._channel = await self._call_open_launcher_channel()
             self_check = await self._call_self_check()
             self._service._validate_launcher_self_check(self_check)
             self._lease = self._service._admit_lease(self._request, lease)
@@ -405,6 +419,7 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
             raise RestrictedWorkerError("restricted worker value is invalid")
         control = _LifecycleCallControl(monotonic() + _CLEANUP_SECONDS, None)
         try:
+            await self._call_release(control)
             inspection = await self._call_inspect(control)
             self._service._validate_inspection(inspection)
         except BaseException as error:
@@ -438,9 +453,23 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
             self._service._transport.start(self._container_id, control=self._control), self._control
         )
 
-    async def _call_self_check(self) -> DockerWorkerLauncherSelfCheck:
+    async def _call_open_launcher_channel(self) -> DockerLauncherChannel:
         return await self._within_deadline(
-            self._service._transport.launcher_self_check(self._container_id, control=self._control), self._control
+            self._service._transport.open_launcher_channel(self._container_id, control=self._control), self._control
+        )
+
+    async def _call_self_check(self) -> DockerWorkerLauncherSelfCheck:
+        if self._channel is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        return await self._within_deadline(
+            self._channel.self_check(control=self._control), self._control
+        )
+
+    async def _call_release(self, control: _LifecycleCallControl) -> None:
+        if self._channel is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        await self._within_deadline(
+            self._channel.release(control=control), control
         )
 
     async def _within_deadline(self, awaitable: object, control: _LifecycleCallControl):
@@ -473,9 +502,18 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
         return error if error is not None else cancellation
 
     async def _cleanup_container_unshielded(self, control: _LifecycleCallControl) -> None:
+        channel_error: BaseException | None = None
+        if self._channel is not None:
+            try:
+                await self._within_deadline(self._channel.close(control=control), control)
+            except BaseException as error:
+                channel_error = error
+            self._channel = None
         await self._within_deadline(
             self._service._transport.force_remove(self._container_id, control=control), control
         )
         await self._within_deadline(
             self._service._transport.assert_absent(self._container_id, control=control), control
         )
+        if channel_error is not None:
+            raise channel_error

@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from typing import cast
 from unittest import mock
 
 from asterion.applications.prime_agent.operator.docker_cli import (
+    DockerCliAttachRunner,
     DockerCliEngineTransport,
     DockerCliResult as _Result,
     _ProductionRunner,
@@ -70,6 +72,37 @@ class _Process:
         return self.returncode
 
 
+class _Writer:
+    def __init__(self) -> None:
+        self.writes: list[bytes] = []
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.writes.append(data)
+
+    async def drain(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _AttachProcess(_Process):
+    def __init__(self, data: bytes) -> None:
+        super().__init__(_Pipe(data), _Pipe())
+        self.stdin = _Writer()
+
+
+class _AttachRunner:
+    def __init__(self, process: _AttachProcess) -> None:
+        self.process = process
+        self.calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+    async def open(self, *, argv: tuple[str, ...], env: dict[str, str]) -> _AttachProcess:
+        self.calls.append((argv, env))
+        return self.process
+
+
 def _spec() -> _DockerWorkerSpecification:
     return _DockerWorkerSpecification("prime.ipython-coding", _IMAGE, "run-1", _CHALLENGE, 30, 1024, "prime-ipython-coding", 65534, 65534, _CONTAINER)
 
@@ -78,7 +111,7 @@ def _inspect(*, container_id: str = _CONTAINER, extra: object = None) -> bytes:
     value: dict[str, object] = {
         "Id": container_id,
         "Image": _IMAGE,
-        "RepoDigests": [_IMAGE],
+        "RepoDigests": [],
         "Config": {"User": "65534:65534", "Env": ["HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1"], "Entrypoint": ["/usr/local/bin/prime-ipython-coding"], "Labels": {}},
         "HostConfig": {"NetworkMode": "none", "PortBindings": None, "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true", f"seccomp={_SECCOMP}"], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864"}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "private", "IpcMode": "private", "UTSMode": "private", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}},
         "Mounts": [],
@@ -90,9 +123,9 @@ def _inspect(*, container_id: str = _CONTAINER, extra: object = None) -> bytes:
 
 
 class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
-    def _transport(self, results: list[_Result]) -> tuple[DockerCliEngineTransport, _Runner]:
+    def _transport(self, results: list[_Result], attach: _AttachRunner | None = None) -> tuple[DockerCliEngineTransport, _Runner]:
         runner = _Runner(results)
-        return DockerCliEngineTransport(docker_executable="/usr/local/bin/docker", socket_path=_SOCKET, seccomp_profile=_SECCOMP, runner=runner), runner
+        return DockerCliEngineTransport(docker_executable="/usr/local/bin/docker", socket_path=_SOCKET, seccomp_profile=_SECCOMP, runner=runner, attach_runner=cast(DockerCliAttachRunner | None, attach)), runner
 
     def _control(self) -> _LifecycleCallControl:
         return _LifecycleCallControl(asyncio.get_running_loop().time() + 10, None)
@@ -117,19 +150,53 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("other", str(raised.exception))
 
     async def test_lifecycle_operations_are_closed_and_parse_only_narrow_evidence(self) -> None:
-        selfcheck = json.dumps({"nonloopback_network_absent": True, "root_read_only": True, "workspace_only_writable": True, "credentials_absent": True, "effective_capabilities": 0, "no_new_privileges": 1, "seccomp_mode": 2, "effective_user_id": 65534}).encode()
-        transport, runner = self._transport([_Result(stdout=_inspect()), _Result(), _Result(stdout=selfcheck), _Result(returncode=1, stderr=("No such container: " + _CONTAINER).encode())])
+        selfcheck = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
+        attach = _AttachRunner(_AttachProcess(selfcheck))
+        transport, runner = self._transport([_Result(stdout=_inspect()), _Result(), _Result(returncode=1, stderr=("No such container: " + _CONTAINER).encode())], attach)
         transport._specifications[_CONTAINER] = _spec()
         inspection = await transport.inspect(_CONTAINER, control=self._control())
         lease = await transport.start(_CONTAINER, control=self._control())
-        check = await transport.launcher_self_check(_CONTAINER, control=self._control())
+        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        check = await channel.self_check(control=self._control())
+        await channel.release(control=self._control())
+        await channel.close(control=self._control())
         await transport.assert_absent(_CONTAINER, control=self._control())
         self.assertEqual(inspection["network_mode"], "none")
         self.assertEqual(lease.worker_id, _CONTAINER)
         self.assertEqual(check.effective_user_id, 65534)
         self.assertEqual(runner.calls[1][0][-2:], ("start", _CONTAINER))
-        self.assertEqual(runner.calls[2][0][-4:], ("attach", "--no-stdin", "--sig-proxy=false", _CONTAINER))
-        self.assertEqual(runner.calls[3][0][-4:], ("inspect", "--format", "{{.Id}}", _CONTAINER))
+        self.assertEqual(attach.calls[0][0][-3:], ("attach", "--sig-proxy=false", _CONTAINER))
+        self.assertEqual(attach.process.stdin.writes, [b'{"release":true}\n'])
+        self.assertTrue(attach.process.waited)
+        self.assertEqual(runner.calls[2][0][-4:], ("inspect", "--format", "{{.Id}}", _CONTAINER))
+
+    async def test_attach_rejects_noncanonical_extra_eof_or_oversize_frames(self) -> None:
+        canonical = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode()
+        cases = (canonical, canonical + b"\nextra", canonical + b" \n", b"x" * 1025)
+        for frame in cases:
+            with self.subTest(frame_length=len(frame)):
+                attach = _AttachRunner(_AttachProcess(frame))
+                transport, _ = self._transport([], attach)
+                transport._specifications[_CONTAINER] = _spec()
+                channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+                with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+                    await channel.self_check(control=self._control())
+                await channel.close(control=self._control())
+                self.assertTrue(attach.process.waited)
+                self.assertNotIn("extra", str(raised.exception))
+
+    async def test_attach_release_is_exactly_once_and_reaped(self) -> None:
+        frame = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
+        attach = _AttachRunner(_AttachProcess(frame))
+        transport, _ = self._transport([], attach)
+        transport._specifications[_CONTAINER] = _spec()
+        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        await channel.self_check(control=self._control())
+        await channel.release(control=self._control())
+        with self.assertRaises(RestrictedWorkerError):
+            await channel.release(control=self._control())
+        await channel.close(control=self._control())
+        self.assertEqual(attach.process.stdin.writes, [b'{"release":true}\n'])
 
     async def test_absence_daemon_failure_and_non_absence_are_rejected(self) -> None:
         for result in (_Result(returncode=1, stderr=b"daemon unavailable"), _Result(stdout=(_CONTAINER + "\n").encode())):

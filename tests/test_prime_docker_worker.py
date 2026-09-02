@@ -8,6 +8,7 @@ from collections.abc import Mapping
 
 from asterion.applications.prime_agent.operator.docker_worker import (
     DockerEngineTransport,
+    DockerLauncherChannel,
     DockerWorkerLauncherSelfCheck,
     DockerRestrictedWorkerService,
 )
@@ -35,6 +36,31 @@ def _request(**changes: object) -> RestrictedWorkerRequest:
     return RestrictedWorkerRequest(**values)  # type: ignore[arg-type]
 
 
+class _Channel(DockerLauncherChannel):
+    def __init__(self, transport: "_Transport") -> None:
+        self.transport = transport
+        self.released = False
+        self.closed = False
+
+    async def self_check(self, *, control: object) -> DockerWorkerLauncherSelfCheck:  # type: ignore[override]
+        self.transport.calls.append("launcher_self_check")
+        self.transport.controls.append(control)
+        self.transport._cancel("launcher_self_check")
+        return self.transport.self_check
+
+    async def release(self, *, control: object) -> None:  # type: ignore[override]
+        self.transport.calls.append("release")
+        self.transport.controls.append(control)
+        if self.released:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        self.released = True
+
+    async def close(self, *, control: object) -> None:  # type: ignore[override]
+        self.transport.calls.append("close_channel")
+        self.transport.controls.append(control)
+        self.closed = True
+
+
 class _Transport(DockerEngineTransport):
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -48,6 +74,7 @@ class _Transport(DockerEngineTransport):
         self.absence_error: Exception | None = None
         self.cancel_at: str | None = None
         self.controls: list[object] = []
+        self.channel = _Channel(self)
 
     async def create(self, specification: object, *, control: object) -> str:  # type: ignore[override]
         self.calls.append("create")
@@ -75,14 +102,13 @@ class _Transport(DockerEngineTransport):
         self._cancel("start")
         return self.lease
 
-    async def launcher_self_check(
+    async def open_launcher_channel(
         self, container_id: str, *, control: object
-    ) -> DockerWorkerLauncherSelfCheck:
-        self.calls.append("launcher_self_check")
+    ) -> DockerLauncherChannel:
+        self.calls.append("open_launcher_channel")
         self.controls.append(control)
         self.assert_container_id(container_id)
-        self._cancel("launcher_self_check")
-        return self.self_check
+        return self.channel
 
     async def force_remove(self, container_id: str, *, control: object) -> None:
         self.calls.append("force_remove")
@@ -110,7 +136,7 @@ class _Transport(DockerEngineTransport):
 def _safe_inspection() -> dict[str, object]:
     return {
         "image_id": _IMAGE_DIGEST,
-        "repo_digests": (_IMAGE_DIGEST,),
+        "repo_digests": (),
         "network_mode": "none",
         "ports": (),
         "readonly_rootfs": True,
@@ -226,7 +252,7 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lease, self.transport.lease)
         self.assertEqual(
             self.transport.calls,
-            ["create", "inspect", "start", "inspect", "launcher_self_check"],
+            ["create", "inspect", "start", "inspect", "open_launcher_channel", "launcher_self_check"],
         )
 
     async def test_unsafe_post_start_inspection_never_produces_an_attestation(self) -> None:
@@ -261,7 +287,7 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
                     await self.service.open(_request(run_id="run-2")).__aenter__()
                 self.assertEqual(
                     self.transport.calls,
-                    ["create", "inspect", "start", "inspect", "launcher_self_check", "force_remove", "assert_absent"],
+                    ["create", "inspect", "start", "inspect", "open_launcher_channel", "launcher_self_check", "close_channel", "force_remove", "assert_absent"],
                 )
                 self.assertNotIn("DockerWorkerLauncherSelfCheck", str(raised.exception))
                 with self.assertRaises(RestrictedWorkerError):
@@ -363,7 +389,7 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await context.__aexit__(None, None, None)
 
-        self.assertEqual(self.transport.calls[-3:], ["inspect", "force_remove", "assert_absent"])
+        self.assertEqual(self.transport.calls[-3:], ["close_channel", "force_remove", "assert_absent"])
         with self.assertRaises(RestrictedWorkerError):
             await self.service.cleanup_receipt(lease)
 
@@ -388,8 +414,8 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.transport.calls,
             [
-                "create", "inspect", "start", "inspect", "launcher_self_check",
-                "inspect", "force_remove", "assert_absent",
+                "create", "inspect", "start", "inspect", "open_launcher_channel", "launcher_self_check",
+                "release", "inspect", "close_channel", "force_remove", "assert_absent",
             ],
         )
         self.assertTrue((await self.service.cleanup_receipt(lease)).destroyed)
@@ -406,8 +432,8 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.transport.calls,
             [
-                "create", "inspect", "start", "inspect", "launcher_self_check",
-                "inspect", "force_remove", "assert_absent",
+                "create", "inspect", "start", "inspect", "open_launcher_channel", "launcher_self_check",
+                "release", "inspect", "close_channel", "force_remove", "assert_absent",
             ],
         )
         with self.assertRaises(RestrictedWorkerError):
@@ -422,7 +448,7 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
             await context.__aexit__(None, None, None)
 
         self.assertNotIn("sentinel", str(raised.exception))
-        self.assertEqual(self.transport.calls[-2:], ["inspect", "force_remove"])
+        self.assertEqual(self.transport.calls[-2:], ["close_channel", "force_remove"])
         with self.assertRaises(RestrictedWorkerError):
             await self.service.cleanup_receipt(lease)
 
@@ -435,7 +461,7 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
             await context.__aexit__(None, None, None)
 
         self.assertNotIn("sentinel", str(raised.exception))
-        self.assertEqual(self.transport.calls[-3:], ["inspect", "force_remove", "assert_absent"])
+        self.assertEqual(self.transport.calls[-3:], ["close_channel", "force_remove", "assert_absent"])
         with self.assertRaises(RestrictedWorkerError):
             await self.service.cleanup_receipt(lease)
 
