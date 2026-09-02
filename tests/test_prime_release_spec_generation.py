@@ -246,6 +246,16 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
                 "libc": _RECIPE.libc,
                 "python_dependency_lock_sha256": _RECIPE.python_dependency_lock_sha256,
                 "frontend_recipe_sha256": _RECIPE.frontend_recipe_sha256,
+                "fixture_recipe_sha256": _RECIPE.fixture_recipe_sha256,
+                "artifact_graph_revision": _RECIPE.artifact_graph_revision,
+                "metadata_parsers": {
+                    "node_shasums": _RECIPE.metadata_parsers.node_shasums,
+                    "pypi_json": _RECIPE.metadata_parsers.pypi_json,
+                    "oci_index": _RECIPE.metadata_parsers.oci_index,
+                    "oci_manifest": _RECIPE.metadata_parsers.oci_manifest,
+                    "recipe_output_manifest": _RECIPE.metadata_parsers.recipe_output_manifest,
+                    "claim_binding": _RECIPE.metadata_parsers.claim_binding,
+                },
             },
             "claims": [
                 {

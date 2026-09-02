@@ -413,9 +413,25 @@ def _parse_target(value: object) -> ExactTargetDescriptor:
 def _parse_recipe(value: object) -> release_recipe.ReleaseRecipe:
     expected = release_recipe.PRIME_IPYTHON_RELEASE_RECIPE
     expected_dict = {
-        name: getattr(expected, name) for name in expected.__dataclass_fields__
+        "artifact_graph_revision": expected.artifact_graph_revision,
+        "base_distribution": expected.base_distribution,
+        "fixture_recipe_sha256": expected.fixture_recipe_sha256,
+        "frontend_recipe_sha256": expected.frontend_recipe_sha256,
+        "libc": expected.libc,
+        "metadata_parsers": {
+            "claim_binding": expected.metadata_parsers.claim_binding,
+            "node_shasums": expected.metadata_parsers.node_shasums,
+            "oci_index": expected.metadata_parsers.oci_index,
+            "oci_manifest": expected.metadata_parsers.oci_manifest,
+            "pypi_json": expected.metadata_parsers.pypi_json,
+            "recipe_output_manifest": expected.metadata_parsers.recipe_output_manifest,
+        },
+        "node_version": expected.node_version,
+        "python_dependency_lock_sha256": expected.python_dependency_lock_sha256,
+        "python_major_minor": expected.python_major_minor,
+        "recipe_revision": expected.recipe_revision,
+        "source": _source_dict(expected.source),
     }
-    expected_dict["source"] = _source_dict(expected.source)
     if type(value) is not dict or value != expected_dict:
         raise ValueError
     return expected
