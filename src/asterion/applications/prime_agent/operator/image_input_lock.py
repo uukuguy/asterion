@@ -13,7 +13,10 @@ import os
 from pathlib import Path
 import re
 import stat
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from .release_recipe import ReleaseRecipe
 
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -125,9 +128,7 @@ class ReleaseArtifact:
 class ReleaseSpecification:
     """Exact, caller-injected release inputs; no bundled release is implied."""
 
-    source_commit: str
-    source_tree_sha256: str
-    source_package_lock_sha256: str
+    recipe: ReleaseRecipe
     platform: ImagePlatformDescriptor
     artifacts: tuple[ReleaseArtifact, ...]
 

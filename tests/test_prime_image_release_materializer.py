@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,6 +14,7 @@ from asterion.applications.prime_agent.operator.image_input_lock import (
     ReleaseArtifact,
     ReleaseSpecification,
 )
+from asterion.applications.prime_agent.operator import release_recipe
 from tools import materialize_prime_ipython_inputs as materializer
 
 
@@ -39,30 +41,32 @@ class _Transport:
 
 def _spec(*, url: str = "https://release.example.invalid/node.tar", path: str = "node/node.tar", body: bytes = b"node") -> ReleaseSpecification:
     return ReleaseSpecification(
-        source_commit="a" * 40,
-        source_tree_sha256="b" * 64,
-        source_package_lock_sha256="c" * 64,
-        platform=ImagePlatformDescriptor("linux", "amd64", None),
-        artifacts=(ReleaseArtifact("node-archive", url, path, len(body), sha256(body).hexdigest()),),
+        release_recipe.PRIME_IPYTHON_RELEASE_RECIPE,
+        ImagePlatformDescriptor("linux", "arm64", None),
+        (ReleaseArtifact("node-archive", url, path, len(body), sha256(body).hexdigest()),),
     )
 
 
 class TestPrimeImageReleaseMaterializer(unittest.TestCase):
-    def test_plan_requires_exact_requested_target_and_retains_it(self) -> None:
-        descriptor = ImagePlatformDescriptor("linux", "amd64", None)
+    def test_plan_accepts_candidate_target_without_promoted_lock(self) -> None:
+        descriptor = ImagePlatformDescriptor("linux", "arm64", None)
         with TemporaryDirectory() as directory:
             plan = materializer.plan_materialization(Path(directory) / "fresh", descriptor)
 
         self.assertEqual(plan.platform, descriptor)
+        self.assertEqual(
+            plan.lock_sha256,
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.python_dependency_lock_sha256,
+        )
         with TemporaryDirectory() as directory:
             with self.assertRaises(TypeError):
                 materializer.plan_materialization(Path(directory) / "fresh")  # type: ignore[call-arg]
 
     def test_release_rejects_specification_target_different_from_selected_lock(self) -> None:
-        selected = ImagePlatformDescriptor("linux", "amd64", None)
+        selected = ImagePlatformDescriptor("linux", "arm64", None)
         mismatched = ReleaseSpecification(
-            "a" * 40, "b" * 64, "c" * 64,
-            ImagePlatformDescriptor("linux", "arm64", None),
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE,
+            ImagePlatformDescriptor("linux", "amd64", None),
             (ReleaseArtifact("node-archive", "https://release.example.invalid/node.tar", "node/node.tar", 4, sha256(b"node").hexdigest()),),
         )
         transport = _Transport({mismatched.artifacts[0].url: _Response(mismatched.artifacts[0].url, b"node")})
@@ -73,6 +77,47 @@ class TestPrimeImageReleaseMaterializer(unittest.TestCase):
                     authorization=materializer._mint_release_authorization_from_operator_cli(),
                 )
         self.assertEqual(transport.calls, [])
+
+    def test_release_rejects_non_candidate_recipe_substitute_and_wrong_source_before_fetching(self) -> None:
+        spec = _spec()
+        substituted_recipe = replace(
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE,
+            recipe_revision="prime-ipython-release-recipe/v2",
+        )
+        wrong_source = replace(
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE,
+            source=replace(
+                release_recipe.PRIME_IPYTHON_SOURCE,
+                commit="d" * 40,
+            ),
+        )
+        cases = (
+            (ImagePlatformDescriptor("linux", "s390x", None), spec),
+            (
+                spec.platform,
+                ReleaseSpecification(substituted_recipe, spec.platform, spec.artifacts),
+            ),
+            (
+                spec.platform,
+                ReleaseSpecification(wrong_source, spec.platform, spec.artifacts),
+            ),
+        )
+        for platform, candidate in cases:
+            transport = _Transport(
+                {candidate.artifacts[0].url: _Response(candidate.artifacts[0].url, b"node")}
+            )
+            with TemporaryDirectory() as directory:
+                with self.subTest(platform=platform, candidate=candidate), self.assertRaises(
+                    materializer.PrimeImageMaterializerError
+                ):
+                    materializer.materialize_authorized_release(
+                        Path(directory) / "fresh",
+                        platform,
+                        candidate,
+                        transport,
+                        authorization=materializer._mint_release_authorization_from_operator_cli(),
+                    )
+            self.assertEqual(transport.calls, [])
     def test_requires_explicit_authorization_before_fetching(self) -> None:
         spec = _spec()
         transport = _Transport({spec.artifacts[0].url: _Response(spec.artifacts[0].url, b"node")})
@@ -96,6 +141,7 @@ class TestPrimeImageReleaseMaterializer(unittest.TestCase):
         self.assertEqual(result.digests, (sha256(b"node").hexdigest(),))
         self.assertNotIsInstance(result, materializer.VerifiedImageInputArtifactSet)
         self.assertTrue(result.proposal.untrusted)
+        self.assertNotIn(spec.artifacts[0].url, str(result))
 
     def test_rejects_redirect_and_preserves_no_proposal(self) -> None:
         spec = _spec()
@@ -152,7 +198,7 @@ class TestPrimeImageReleaseMaterializer(unittest.TestCase):
         cases = (
             _spec(url="http://release.example.invalid/node.tar"),
             _spec(path="../node.tar"),
-            ReleaseSpecification(valid.source_commit, valid.source_tree_sha256, valid.source_package_lock_sha256, valid.platform, (valid.artifacts[0], valid.artifacts[0])),
+            ReleaseSpecification(valid.recipe, valid.platform, (valid.artifacts[0], valid.artifacts[0])),
         )
         for value in cases:
             with self.subTest(value=value), self.assertRaises(ValueError):

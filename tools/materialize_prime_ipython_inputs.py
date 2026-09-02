@@ -20,6 +20,7 @@ from asterion.applications.prime_agent.operator.release_recipe import (
     PRIME_IPYTHON_RELEASE_RECIPE,
     PrimeReleaseRecipeError,
     resolve_candidate_target,
+    validate_release_recipe,
 )
 
 
@@ -108,7 +109,6 @@ class ReleaseMaterializationResult:
 
 
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-_COMMIT = re.compile(r"[0-9a-f]{40}")
 _PATH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _MAX_BYTES = 1 << 30
 
@@ -128,6 +128,7 @@ def plan_materialization(output_root: Path, platform: ImagePlatformDescriptor) -
 
     try:
         _validate_fresh_external_target(output_root)
+        validate_release_recipe(PRIME_IPYTHON_RELEASE_RECIPE)
         selected = resolve_candidate_target(platform)
     except (OSError, ValueError, PrimeImageInputLockError, PrimeReleaseRecipeError):
         raise PrimeImageMaterializerError("Prime image materialization target is invalid") from None
@@ -143,13 +144,9 @@ def validate_release_specification(specification: object) -> ReleaseSpecificatio
 
     if type(specification) is not ReleaseSpecification:
         raise ValueError("Prime image release specification is invalid")
-    if (
-        type(specification.source_commit) is not str
-        or _COMMIT.fullmatch(specification.source_commit) is None
-        or any(type(value) is not str or _SHA256.fullmatch(value) is None for value in (specification.source_tree_sha256, specification.source_package_lock_sha256))
-        or not isinstance(specification.artifacts, tuple) or not specification.artifacts
-    ):
+    if not isinstance(specification.artifacts, tuple) or not specification.artifacts:
         raise ValueError("Prime image release specification is invalid")
+    validate_release_recipe(specification.recipe)
     resolve_candidate_target(specification.platform)
     artifacts = specification.artifacts
     if tuple(sorted(artifacts, key=lambda item: item.path)) != artifacts or len({item.url for item in artifacts}) != len(artifacts):
@@ -201,14 +198,23 @@ def materialize_authorized_release(
                 raise ValueError
             _write_checked_file(canonical_root, artifact.path, response.body, artifact.size, artifact.sha256)
         proposal = ReleaseLockProposal(
-            spec.source_commit, spec.source_tree_sha256, spec.source_package_lock_sha256, selected,
+            spec.recipe.source.commit,
+            spec.recipe.source.tree_sha256,
+            spec.recipe.source.package_lock_sha256,
+            selected,
             tuple(ImageArtifact(item.kind, item.path, item.size, item.sha256) for item in spec.artifacts),
         )
         return ReleaseMaterializationResult(
             sha256(str(canonical_root).encode()).hexdigest(), selected,
             len(proposal.artifacts), tuple(item.sha256 for item in proposal.artifacts), proposal,
         )
-    except (OSError, TypeError, ValueError, PrimeImageInputLockError):
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        PrimeImageInputLockError,
+        PrimeReleaseRecipeError,
+    ):
         raise PrimeImageMaterializerError("Prime image materialization target is invalid") from None
 
 
