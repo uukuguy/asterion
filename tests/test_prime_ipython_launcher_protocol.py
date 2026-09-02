@@ -55,3 +55,32 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
         self.assertIn("unproven", launcher)
         for prohibited in ("process.env", "socket", "provider", "transcript"):
             self.assertNotIn(prohibited, launcher.lower())
+
+    def test_launcher_requires_exact_mount_writable_and_credential_checks_before_frame(self) -> None:
+        launcher = (IMAGE / "launcher.mjs").read_text(encoding="utf-8")
+        for required in (
+            "parseMounts",
+            'mountPoint === "/"',
+            'mountPoint === "/workspace"',
+            'options.has("ro")',
+            'options.has("rw")',
+            "workspaceOnlyWritable",
+            "credentialSentinelAbsent",
+            "requireClosedWorker();\nprocess.stdout.write",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, launcher)
+        self.assertNotIn('mounts.includes(" / ")', launcher)
+        self.assertNotIn('mounts.includes(" /workspace ")', launcher)
+
+    def test_launcher_rejects_writable_root_other_mount_and_credential_sentinel(self) -> None:
+        launcher = (IMAGE / "launcher.mjs").read_text(encoding="utf-8")
+        cases = {
+            "writable root": 'if (mountPoint === "/") rootReadOnly = options.has("ro");',
+            "other writable mount": 'options.has("rw") && mountPoint !== "/workspace" && !writableKernelMounts.has(mountPoint)',
+            "credential sentinel": "return credentialSentinels.every((sentinel) => !existsSync(sentinel));",
+            "safe result": "return rootReadOnly && workspaceWritable;",
+        }
+        for name, assertion in cases.items():
+            with self.subTest(name=name):
+                self.assertIn(assertion, launcher)

@@ -138,11 +138,49 @@ def main() -> int:
         args.source_root,
         PrimeSourceLock(args.commit, args.tree_sha256, args.package_lock_sha256),
     )
-    target = args.context_output
-    if not target.is_absolute() or target.is_symlink() or target.resolve(strict=False) == repository_root():
-        raise PrimeIpythonImageError("Prime image input is invalid")
-    target.write_bytes(context.tar_bytes)
+    write_context_output(args.context_output, context.tar_bytes, _absolute_directory(args.source_root))
     return 0
+
+
+def write_context_output(target: Path, payload: bytes, source_root: Path) -> None:
+    """Create one private external context file without replacing any existing path."""
+
+    if not isinstance(target, Path) or not isinstance(payload, bytes):
+        raise PrimeIpythonImageError("Prime image input is invalid")
+    source = _absolute_directory(source_root)
+    try:
+        if not target.is_absolute() or _unsafe_output_path(target):
+            raise ValueError
+        resolved = target.resolve(strict=False)
+        repository = repository_root().resolve(strict=True)
+        if _contained_by(resolved, repository) or _contained_by(resolved, source):
+            raise ValueError
+        parent = resolved.parent.resolve(strict=True)
+        if not parent.is_dir() or parent.is_symlink() or target.exists():
+            raise ValueError
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        directory = os.open(parent, directory_flags)
+        try:
+            descriptor = os.open(
+                resolved.name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=directory,
+            )
+            try:
+                os.fchmod(descriptor, 0o600)
+                offset = 0
+                while offset < len(payload):
+                    written = os.write(descriptor, payload[offset:])
+                    if written <= 0:
+                        raise OSError("incomplete write")
+                    offset += written
+            finally:
+                os.close(descriptor)
+        finally:
+            os.close(directory)
+    except (OSError, ValueError) as error:
+        raise PrimeIpythonImageError("Prime image input is invalid") from error
 
 
 def _absolute_directory(path: Path) -> Path:
@@ -187,6 +225,21 @@ def _digest_files(files: tuple[tuple[str, Path], ...]) -> str:
 
 def _is_config_id(value: object) -> bool:
     return type(value) is str and len(value) == 71 and value.startswith("sha256:") and all(character in "0123456789abcdef" for character in value[7:])
+
+
+def _contained_by(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _unsafe_output_path(path: Path) -> bool:
+    if _excluded_name(path.name):
+        return True
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current /= component
+        if _excluded_name(component) or current.is_symlink():
+            return True
+    return False
 
 
 def _excluded_name(name: str) -> bool:

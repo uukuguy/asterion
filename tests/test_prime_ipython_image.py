@@ -64,3 +64,31 @@ class TestPrimeIpythonImage(unittest.TestCase):
             self.assertEqual(target.stat().st_mode & 0o777, 0o600)
             with self.assertRaises(image.PrimeIpythonImageError):
                 image.write_operator_image_config(image.repository_root() / "image.json", "sha256:" + "d" * 64)
+
+    def test_context_output_is_external_private_new_file_only(self) -> None:
+        payload = b"canonical context"
+        with TemporaryDirectory() as temporary:
+            external = Path(temporary).resolve()
+            source_root = (external / "prime").resolve()
+            source_root.mkdir()
+            target = external / "context.tar"
+            image.write_context_output(target, payload, source_root)
+            self.assertEqual(target.read_bytes(), payload)
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            for unsafe in (
+                target,
+                external / ".env",
+                external / ".env.operator",
+                source_root / "context.tar",
+                image.repository_root() / "context.tar",
+            ):
+                with self.subTest(target=unsafe), self.assertRaises(image.PrimeIpythonImageError):
+                    image.write_context_output(unsafe, payload, source_root)
+            linked = external / "linked.tar"
+            linked.symlink_to(target)
+            with self.assertRaises(image.PrimeIpythonImageError):
+                image.write_context_output(linked, payload, source_root)
+            linked_parent = external / "linked-parent"
+            linked_parent.symlink_to(external)
+            with self.assertRaises(image.PrimeIpythonImageError):
+                image.write_context_output(linked_parent / "context.tar", payload, source_root)
