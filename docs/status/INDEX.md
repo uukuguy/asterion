@@ -20,6 +20,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `DCI-BENCHMARK-INSTANCES.md` | 🟢 active | DCI benchmark implementation and verification backlog. |
 | `PATHLIGHT-DCI-DIAGNOSIS.md` | 🟢 active | Provider-free six-run DCI Pathlight diagnosis; safe numeric observations and unapproved follow-up proposals. |
 | `PRIME-PARITY-LEDGER.md` | 🟢 active | Pinned Prime baseline, stable parity domains, evidence levels and provider gap status. |
+| `PRIME-TYPICAL-APPLICATIONS.md` | 🟢 active | Ordered bounded evidence roadmap for typical Prime applications. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `DECISIONS.md` | 🟢 active | Indexed active architecture, trust-boundary, and cleanup decisions. |
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
@@ -29,7 +30,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 
 | File | Status | What it recorded | Outcome / supersession |
 |---|---|---|---|
-| (empty initially) | | | |
+| `GIT-RECOVERY-CLOSURE-20260830.md` | 🟡 decision-history | Git recovery and worktree cleanup audit | Historical closure; current branch state is in `CURRENT-STATE.md`. |
 
 ## Archived
 

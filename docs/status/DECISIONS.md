@@ -8,6 +8,8 @@
 | D-2026-07-31-02 | 🟢 active | Complete every DCI instance's 50-case result before considering full datasets |
 | D-2026-08-10-03 | 🟢 active | Stage Prime-managed and native kernels as peer control providers |
 | D-2026-08-27-04 | 🟢 active | Quiesce host-owned ecosystem projections before cleanup |
+| D-2026-09-02-05 | 🟢 active | Keep Prime Smoke Core and Smoke Full evidence as distinct closed claims |
+| D-2026-09-02-06 | 🟢 active | Make Prime a full RLM-harness capability program, not a Smoke Full roadmap |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -67,3 +69,31 @@
   descriptor-close failures are terminal and the numeric fd is never retried.
 - Evidence: approved option 1 on 2026-08-27; H-024 Task 2 feasibility audit;
   `docs/superpowers/specs/2026-08-23-asterion-prime-ecosystem-parity-design.md`.
+
+## D-2026-09-02-05 — Closed Smoke Core evidence boundary
+
+- Status: 🟢 active
+- Decision: Treat the passing `prime-smoke-core` receipt as evidence only for
+  its named two-child, active-reconnect application scenario. Smoke Full is a
+  separate bounded typical-application validation scope.
+- Rationale: A passing narrow workflow cannot establish broader application
+  coverage or promote any Prime or Asterion-native parity row.
+- Consequence: Full validation needs its own exact acceptance matrix and
+  public-safe receipts; Core results remain cited only within the Core scope.
+- Evidence: commits `6886d1b`, `72e448f`, `bdd5576`, `56defa9`, `2b59dd6`,
+  `ecb06ef`; `make prime-smoke-core` PASS;
+  `docs/superpowers/specs/2026-09-02-prime-smoke-core-full-research.md`.
+
+## D-2026-09-02-06 — Prime RLM-harness capability program
+
+- Status: 🟢 active
+- Decision: Reproduce Prime's persistent IPython, RLM, and Continual Harness
+  semantics through seven exact end-to-end acceptance products, culminating in
+  ARC-AGI-3. Smoke Core remains a narrow regression gate, not the product
+  roadmap.
+- Rationale: The Prime source and paper center a programmatic long-horizon
+  harness rather than general client-surface parity or an ARC-only product.
+- Consequence: Formal evidence requires an injected restricted worker/sandbox;
+  trusted-local runs cannot satisfy capability acceptance.
+- Evidence: user-approved review on 2026-09-02;
+  `docs/superpowers/specs/2026-09-02-asterion-prime-capability-program-design.md`.

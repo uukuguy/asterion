@@ -5,18 +5,16 @@
 - Project: Asterion
 - Active branch: local `main` at the verified integration head; `origin/main`
   remains unchanged
-- Theme-level focus: Prime system parity through closed, exact evidence
-  packages, followed by Asterion-native kernel parity
+- Theme-level focus: Prime RLM-harness capability program: persistent IPython,
+  recursive RLM, Continual Harness, and staged end-to-end evidence through ARC
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 3.1 is closed at H-038 with
-  `native-controller-core` PASS. Phase 3.2 has provider-free Native
-  Verified-loop evidence and has a configured operator-owned small-verification
-  host. Its initial run stopped at the Prime sidecar descriptor boundary;
-  the corrected operation-host descriptor now reaches the bounded checkpoint
-  manager; its exact idle barrier remains External-limited before the main RLM
-  probe begins.
+- Active work package: the approved Prime capability program replaces the
+  proposed Smoke Full roadmap. Phase 3.2 Native Verified-loop remains
+  External-limited at its exact idle barrier. Prime implementation begins only
+  after the capability-program specification is reviewed and an external
+  restricted-worker/sandbox profile is selected.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -101,6 +99,11 @@
   probe; the two bounded rows remain
   `External-limited`. Native `Verified-loop` and all compound Native rows
   remain Missing.
+- Prime Smoke Core is closed: the real `make prime-smoke-core` receipt is
+  PASS with one completed terminal and proves generated-program admission,
+  depth policy, two-child work, causal messaging, active reconnect,
+  application/oracle, healthy observations, budget, cleanup, and public
+  privacy. This evidence is not Smoke Full or parity promotion evidence.
 
 ## Open Problems
 
@@ -108,6 +111,8 @@
   proves the exact mandatory scenarios.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
+- Establish the restricted-worker/sandbox boundary and seven exact Prime
+  capability acceptance products without widening the closed Smoke Core claim.
 
 ## Key Files
 
@@ -132,7 +137,11 @@
 - `docs/superpowers/plans/2026-08-30-prime-operation-host-callback.md`
 - `docs/superpowers/specs/2026-08-30-asterion-native-controller-core-design.md`
 - `docs/superpowers/plans/2026-08-30-asterion-native-controller-core.md`
+- `docs/superpowers/plans/2026-09-02-prime-smoke-core.md`
+- `docs/superpowers/specs/2026-09-02-prime-smoke-core-full-research.md`
+- `docs/superpowers/specs/2026-09-02-asterion-prime-capability-program-design.md`
 - `docs/status/PRIME-PARITY-LEDGER.md`
+- `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
 - `.superpowers/sdd/client-interfaces-task-10-report.md`
 - `.superpowers/sdd/operational-parity-task-16-report.md`
 - `.superpowers/sdd/native-core-task-10-report.md`
