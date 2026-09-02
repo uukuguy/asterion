@@ -62,6 +62,23 @@ class TestPrimeImageInputLock(unittest.TestCase):
         with self.assertRaises(lock.PrimeImageInputLockError):
             lock.image_input_lock_from_dict({**value, "artifacts": duplicate})
 
+    def test_parser_rejects_non_scalar_artifact_fields_with_public_error(self) -> None:
+        value = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK.as_dict()
+        artifacts = cast(list[dict[str, object]], value["artifacts"])
+        for field, malformed_value in (
+            ("kind", []),
+            ("path", []),
+            ("sha256", []),
+            ("size", True),
+            ("size", "1"),
+        ):
+            replacement = {**artifacts[0], field: malformed_value}
+            malformed = {**value, "artifacts": [replacement, *artifacts[1:]]}
+            with self.subTest(field=field, malformed_value=malformed_value), self.assertRaises(
+                lock.PrimeImageInputLockError
+            ):
+                lock.image_input_lock_from_dict(malformed)
+
     def test_rejects_a_caller_constructed_substitute_lock(self) -> None:
         canonical = lock.PRIME_IPYTHON_IMAGE_INPUT_LOCK
         substitute = lock.ImageInputLock(

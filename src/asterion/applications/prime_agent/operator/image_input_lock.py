@@ -178,10 +178,34 @@ def validate_image_input_lock(lock: object) -> ImageInputLock:
 def _validate_image_input_lock_structure(lock: object) -> ImageInputLock:
     """Reject malformed lock records before inspecting artifact fields."""
 
-    if type(lock) is not ImageInputLock or (lock.source_commit, lock.source_tree_sha256, lock.source_package_lock_sha256) != _SOURCE or lock.platform != _PLATFORM:
+    if (
+        type(lock) is not ImageInputLock
+        or any(
+            type(value) is not str
+            for value in (
+                lock.source_commit,
+                lock.source_tree_sha256,
+                lock.source_package_lock_sha256,
+                lock.platform,
+            )
+        )
+        or (lock.source_commit, lock.source_tree_sha256, lock.source_package_lock_sha256) != _SOURCE
+        or lock.platform != _PLATFORM
+    ):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     artifacts = lock.artifacts
-    if not isinstance(artifacts, tuple) or not artifacts or any(type(artifact) is not ImageArtifact for artifact in artifacts):
+    if (
+        not isinstance(artifacts, tuple)
+        or not artifacts
+        or any(
+            type(artifact) is not ImageArtifact
+            or type(artifact.kind) is not str
+            or type(artifact.path) is not str
+            or type(artifact.size) is not int
+            or type(artifact.sha256) is not str
+            for artifact in artifacts
+        )
+    ):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     if tuple(sorted(artifacts, key=lambda artifact: artifact.path)) != artifacts:
         raise PrimeImageInputLockError("Prime image input lock is invalid")
@@ -190,7 +214,7 @@ def _validate_image_input_lock_structure(lock: object) -> ImageInputLock:
     if {artifact.kind for artifact in artifacts} != _REQUIRED_KINDS or not any(artifact.path.startswith("python/prime_agent_runtime-") for artifact in artifacts):
         raise PrimeImageInputLockError("Prime image input lock is invalid")
     for artifact in artifacts:
-        if type(artifact) is not ImageArtifact or artifact.kind not in _KINDS or type(artifact.path) is not str or _RELATIVE_PATH.fullmatch(artifact.path) is None or "//" in artifact.path or any(part in {".", ".."} for part in artifact.path.split("/")) or type(artifact.size) is not int or isinstance(artifact.size, bool) or artifact.size < 0 or type(artifact.sha256) is not str or _SHA256.fullmatch(artifact.sha256) is None:
+        if artifact.kind not in _KINDS or _RELATIVE_PATH.fullmatch(artifact.path) is None or "//" in artifact.path or any(part in {".", ".."} for part in artifact.path.split("/")) or artifact.size < 0 or _SHA256.fullmatch(artifact.sha256) is None:
             raise PrimeImageInputLockError("Prime image input lock is invalid")
     return lock
 
