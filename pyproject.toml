@@ -24,12 +24,14 @@ asterion-dci = "asterion.applications.dci_agent_lite.cli:main"
 [project.entry-points."asterion.applications"]
 controlled-code = "asterion.applications.controlled_code:create_provider"
 dci-agent-lite = "asterion.applications.dci_agent_lite:create_provider"
+prime-agent = "asterion.applications.prime_agent.provider:create_provider"
 
 [project.entry-points."asterion.application_index"]
 "code.quality__1.0.0" = "asterion.applications.controlled_code:create_provider"
 "dci.complete-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 "dci.local-benchmark-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 "dci.research-capability__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
+"prime.capability-program__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
 
 [project.entry-points."asterion.host_services"]
 "corpus.local-root" = "asterion.capabilities.dci.implementation.services:create_local_corpus_service_factory"
