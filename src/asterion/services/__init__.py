@@ -9,6 +9,7 @@ from asterion.services.bounded_model_session import (
 from asterion.services.restricted_worker import (
     RestrictedWorkerAttestation,
     RestrictedWorkerCleanupReceipt,
+    RestrictedWorkerExecutionReceipt,
     RestrictedWorkerError,
     RestrictedWorkerLease,
     RestrictedWorkerRequest,
@@ -32,6 +33,7 @@ __all__ = [
     "BoundedModelSessionService",
     "RestrictedWorkerAttestation",
     "RestrictedWorkerCleanupReceipt",
+    "RestrictedWorkerExecutionReceipt",
     "RestrictedWorkerError",
     "RestrictedWorkerLease",
     "RestrictedWorkerRequest",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import unittest
 from collections.abc import Mapping
 
@@ -29,6 +30,7 @@ def _request(**changes: object) -> RestrictedWorkerRequest:
         "image_digest": _IMAGE_DIGEST,
         "run_id": "run-1",
         "challenge_digest": _CHALLENGE_DIGEST,
+        "workload_digest": "sha256:" + "c" * 64,
         "max_runtime_seconds": 300,
         "max_output_bytes": 65536,
     }
@@ -55,6 +57,13 @@ class _Channel(DockerLauncherChannel):
             raise RestrictedWorkerError("restricted worker value is invalid")
         self.released = True
 
+    async def completed_result(self, *, control: object) -> bytes:  # type: ignore[override]
+        self.transport.calls.append("launcher_result")
+        self.transport.controls.append(control)
+        if not self.released:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        return self.transport.result
+
     async def close(self, *, control: object) -> None:  # type: ignore[override]
         self.transport.calls.append("close_channel")
         self.transport.controls.append(control)
@@ -65,11 +74,12 @@ class _Transport(DockerEngineTransport):
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.spec: object | None = None
-        self.lease = RestrictedWorkerLease("worker-1", "run-1", _CHALLENGE_DIGEST)
+        self.lease = RestrictedWorkerLease("worker-1", "prime.ipython-coding", "run-1", _CHALLENGE_DIGEST, "sha256:" + "c" * 64)
         self.inspection = _safe_inspection()
         self.post_start_inspection = _safe_inspection()
         self.final_inspection = _safe_inspection()
         self.self_check = _safe_self_check()
+        self.result = b'{"terminal":"completed"}'
         self.force_remove_error: Exception | None = None
         self.absence_error: Exception | None = None
         self.cancel_at: str | None = None
@@ -223,6 +233,7 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
                 "image_digest",
                 "run_id",
                 "challenge_digest",
+                "workload_digest",
                 "max_runtime_seconds",
                 "max_output_bytes",
                 "launcher_id",
@@ -407,6 +418,20 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attestation.image_digest, _IMAGE_DIGEST)
         self.assertTrue(cleanup.destroyed)
 
+    async def test_derives_one_terminal_result_digest_from_the_worker_channel(self) -> None:
+        async with self.service.open(_request()) as lease:
+            execution = await self.service.execution_receipt(lease)
+
+        self.assertEqual(execution.worker_id, lease.worker_id)
+        self.assertEqual(execution.role_id, lease.role_id)
+        self.assertEqual(execution.workload_digest, lease.workload_digest)
+        self.assertEqual(
+            execution.result_digest,
+            "sha256:" + hashlib.sha256(self.transport.result).hexdigest(),
+        )
+        self.assertEqual(execution.terminal, "completed")
+        self.assertEqual(self.transport.calls.count("launcher_result"), 1)
+
     async def test_verified_teardown_inspects_removes_and_proves_absence_in_order(self) -> None:
         async with self.service.open(_request()) as lease:
             pass
@@ -475,7 +500,13 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
             repr(next(iter(self.service._cleanup_tombstones.values()))),
             "_CleanupTombstone(redacted)",
         )
-        forged = RestrictedWorkerLease(lease.worker_id, "run-2", _CHALLENGE_DIGEST)
+        forged = RestrictedWorkerLease(
+            lease.worker_id,
+            lease.role_id,
+            "run-2",
+            _CHALLENGE_DIGEST,
+            lease.workload_digest,
+        )
         with self.assertRaises(RestrictedWorkerError):
             await self.service.cleanup_receipt(forged)
         cleanup = await self.service.cleanup_receipt(lease)

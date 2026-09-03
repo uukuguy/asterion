@@ -17,11 +17,12 @@ from asterion.services.restricted_worker import (
 
 _CHALLENGE = "sha256:" + "b" * 64
 _IMAGE = "sha256:" + "a" * 64
+_WORKLOAD = "sha256:" + "c" * 64
 
 
 def _lease(**changes: object) -> RestrictedWorkerLease:
     values: dict[str, object] = {
-        "worker_id": "worker-1", "run_id": "run-1", "challenge_digest": _CHALLENGE,
+        "worker_id": "worker-1", "role_id": "prime.ipython-coding", "run_id": "run-1", "challenge_digest": _CHALLENGE, "workload_digest": _WORKLOAD,
     }
     values.update(changes)
     return RestrictedWorkerLease(**values)  # type: ignore[arg-type]
@@ -29,7 +30,7 @@ def _lease(**changes: object) -> RestrictedWorkerLease:
 
 def _attestation(**changes: object) -> RestrictedWorkerAttestation:
     values: dict[str, object] = {
-        "worker_id": "worker-1", "run_id": "run-1", "challenge_digest": _CHALLENGE,
+        "worker_id": "worker-1", "role_id": "prime.ipython-coding", "run_id": "run-1", "challenge_digest": _CHALLENGE, "workload_digest": _WORKLOAD,
         "image_digest": _IMAGE, "network_isolated": True, "root_read_only": True,
         "workspace_disposable": True, "credentials_absent": True,
         "kernel_credential_absent": True, "source_read_only": True, "resource_limited": True,
@@ -40,7 +41,7 @@ def _attestation(**changes: object) -> RestrictedWorkerAttestation:
 
 class TestPrimeLauncherBarrier(unittest.TestCase):
     def test_releases_only_once_after_exact_admission(self) -> None:
-        barrier = PrimeLauncherBarrier(run_id="run-1", challenge_digest=_CHALLENGE)
+        barrier = PrimeLauncherBarrier(role_id="prime.ipython-coding", run_id="run-1", challenge_digest=_CHALLENGE, workload_digest=_WORKLOAD)
         released: list[str] = []
 
         with self.assertRaises(PrimeLauncherBarrierError):
@@ -70,10 +71,10 @@ class TestPrimeLauncherBarrier(unittest.TestCase):
         )
         for name, lease, attestation in cases:
             with self.subTest(name=name), self.assertRaises(PrimeLauncherBarrierError):
-                PrimeLauncherBarrier(run_id="run-1", challenge_digest=_CHALLENGE).admit(lease, attestation)
+                PrimeLauncherBarrier(role_id="prime.ipython-coding", run_id="run-1", challenge_digest=_CHALLENGE, workload_digest=_WORKLOAD).admit(lease, attestation)
 
     def test_rejects_release_with_a_substituted_lease(self) -> None:
-        barrier = PrimeLauncherBarrier(run_id="run-1", challenge_digest=_CHALLENGE)
+        barrier = PrimeLauncherBarrier(role_id="prime.ipython-coding", run_id="run-1", challenge_digest=_CHALLENGE, workload_digest=_WORKLOAD)
         barrier.admit(_lease(), _attestation())
         released: list[str] = []
         for lease in (
@@ -86,7 +87,7 @@ class TestPrimeLauncherBarrier(unittest.TestCase):
         self.assertEqual(released, [])
 
     def test_redacts_private_state_and_rejects_unverified_controls(self) -> None:
-        barrier = PrimeLauncherBarrier(run_id="run-1", challenge_digest=_CHALLENGE)
+        barrier = PrimeLauncherBarrier(role_id="prime.ipython-coding", run_id="run-1", challenge_digest=_CHALLENGE, workload_digest=_WORKLOAD)
         attestation = _attestation()
         object.__setattr__(attestation, "network_isolated", False)
         with self.assertRaises(PrimeLauncherBarrierError):

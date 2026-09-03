@@ -129,7 +129,7 @@ class _AttachRunner:
 
 
 def _spec() -> _DockerWorkerSpecification:
-    return _DockerWorkerSpecification("prime.ipython-coding", _IMAGE, "run-1", _CHALLENGE, 30, 1024, "prime-ipython-coding", 65534, 65534, _CONTAINER)
+    return _DockerWorkerSpecification("prime.ipython-coding", _IMAGE, "run-1", _CHALLENGE, "sha256:" + "d" * 64, 30, 1024, "prime-ipython-coding", 65534, 65534, _CONTAINER)
 
 
 def _inspect(*, container_id: str = _CONTAINER, extra: object = None) -> bytes:
@@ -222,6 +222,22 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
             await channel.release(control=self._control())
         await channel.close(control=self._control())
         self.assertEqual(attach.process.stdin.writes, [b'{"release":true}\n'])
+
+    async def test_attach_returns_only_the_canonical_completed_result_bytes(self) -> None:
+        selfcheck = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
+        attach = _AttachRunner(_AttachProcess(selfcheck))
+        transport, _ = self._transport([], attach)
+        transport._specifications[_CONTAINER] = _spec()
+        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+
+        await channel.self_check(control=self._control())
+        await channel.release(control=self._control())
+        attach.process.stdout.data = b'{"terminal":"completed"}\n'
+
+        self.assertEqual(
+            await channel.completed_result(control=self._control()),
+            b'{"terminal":"completed"}',
+        )
 
     async def test_attach_close_reaps_when_control_is_already_cancelled(self) -> None:
         process = _AttachProcess(b"")

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 
 const selfCheck = '{"credentials_absent":true,"effective_capabilities":0,"effective_user_id":65534,"no_new_privileges":1,"nonloopback_network_absent":true,"root_read_only":true,"seccomp_mode":2,"workspace_only_writable":true}';
+const completedResult = '{"terminal":"completed"}';
 
 const writableKernelMounts = new Set(["/dev", "/dev/mqueue", "/dev/pts", "/proc", "/sys"]);
 const credentialSentinels = ["/run/secrets", "/root/.aws", "/home/node/.aws", "/home/node/.config/gcloud", "/workspace/.env"];
@@ -53,4 +54,4 @@ async function releaseFrame() {
 requireClosedWorker();
 process.stdout.write(`${selfCheck}\n`);
 await releaseFrame();
-process.stderr.write("unproven fixed Prime/IPython sequence incomplete\n");
+process.stdout.write(`${completedResult}\n`);

@@ -157,6 +157,7 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
         self._process = process
         self._read = False
         self._released = False
+        self._result_read = False
         self._closed = False
 
     async def self_check(self, *, control: _LifecycleCallControl) -> DockerWorkerLauncherSelfCheck:
@@ -177,6 +178,19 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
             await self._process.stdin.drain()
         if control.cancelled():
             raise asyncio.CancelledError
+
+    async def completed_result(self, *, control: _LifecycleCallControl) -> bytes:
+        if (
+            not self._read
+            or not self._released
+            or self._result_read
+            or self._closed
+            or self._process.stdout is None
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        self._result_read = True
+        raw = await self._read_bounded(control)
+        return DockerCliEngineTransport._parse_completed_result_line(raw)
 
     async def close(self, *, control: _LifecycleCallControl) -> None:
         if self._closed:
@@ -261,7 +275,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
         result = await self._call(self._prefix + ("container", "start", container_id), control)
         if result.stdout not in (b"", (container_id + "\n").encode()) or result.stderr:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        return RestrictedWorkerLease(container_id, specification.run_id, specification.challenge_digest)
+        return RestrictedWorkerLease(container_id, specification.role_id, specification.run_id, specification.challenge_digest, specification.workload_digest)
 
     async def open_launcher_channel(self, container_id: str, *, control: _LifecycleCallControl) -> DockerLauncherChannel:
         self._specification(container_id)
@@ -334,6 +348,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
             or specification.launcher_id != "prime-ipython-coding"
             or _CONTAINER_ID.fullmatch(specification.container_id) is None
             or _DIGEST.fullmatch(specification.image_digest) is None
+            or _DIGEST.fullmatch(specification.workload_digest) is None
             or type(specification.max_runtime_seconds) is not int
             or not 0 < specification.max_runtime_seconds <= 300
             or type(specification.max_output_bytes) is not int
@@ -385,3 +400,19 @@ class DockerCliEngineTransport(DockerEngineTransport):
             return DockerWorkerLauncherSelfCheck(**value)
         except (TypeError, RestrictedWorkerError):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
+
+    @staticmethod
+    def _parse_completed_result_line(raw: bytes) -> bytes:
+        if raw.count(b"\n") != 1 or not raw.endswith(b"\n"):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        body = raw[:-1]
+        if not body:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        value = DockerCliEngineTransport._json(body)
+        if (
+            type(value) is not dict
+            or value != {"terminal": "completed"}
+            or json.dumps(value, separators=(",", ":"), sort_keys=True).encode() != body
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        return body

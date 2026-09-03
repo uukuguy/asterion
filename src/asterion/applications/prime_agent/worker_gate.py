@@ -13,6 +13,7 @@ from asterion.applications.prime_agent.restricted_worker import (
 from asterion.services.restricted_worker import (
     RestrictedWorkerAttestation,
     RestrictedWorkerCleanupReceipt,
+    RestrictedWorkerExecutionReceipt,
     RestrictedWorkerError,
     RestrictedWorkerLease,
     RestrictedWorkerRequest,
@@ -24,33 +25,51 @@ class PrimeWorkerBoundaryError(ValueError):
     """Raised when Prime worker evidence cannot be admitted."""
 
 
+PRIME_SCENARIO_WORKER_ROLES = {
+    "prime.ipython-coding/v1": "prime.ipython-coding",
+    "prime.programmatic-long-context/v1": "prime.programmatic-long-context",
+    "prime.recursive-workflow/v1": "prime.recursive-workflow",
+    "prime.long-session-continuity/v1": "prime.long-session-continuity",
+    "prime.bounded-autonomy/v1": "prime.bounded-autonomy",
+    "prime.continual-improvement/v1": "prime.continual-improvement",
+    "prime.arc-agi-3/v1": "prime.arc-agi-3",
+}
+
+
 @dataclass(frozen=True)
 class PrimeWorkerBoundaryReceipt:
     """Public-safe proof of one admitted restricted-worker lifecycle."""
 
+    scenario_id: str
+    role_id: str
     worker_id: str
     run_id: str
     challenge_digest: str
+    workload_digest: str
+    result_digest: str
     image_digest: str
     status: Literal["PASS"] = field(default="PASS", init=False)
 
 
 def verify_prime_worker_boundary(
+    scenario_id: str,
     profile: PrimeRestrictedWorkerProfile,
     request: RestrictedWorkerRequest,
     lease: RestrictedWorkerLease,
     attestation: RestrictedWorkerAttestation,
+    execution: RestrictedWorkerExecutionReceipt,
     cleanup: RestrictedWorkerCleanupReceipt,
 ) -> PrimeWorkerBoundaryReceipt:
     """Admit only a fully verified worker lifecycle as public-safe evidence."""
     try:
         validate_prime_restricted_worker(profile)
-        verify_restricted_worker_receipts(request, lease, attestation, cleanup)
-    except (PrimeRestrictedWorkerError, RestrictedWorkerError):
+        expected_role = PRIME_SCENARIO_WORKER_ROLES[scenario_id]
+        verify_restricted_worker_receipts(request, lease, attestation, execution, cleanup)
+    except (KeyError, PrimeRestrictedWorkerError, RestrictedWorkerError):
         raise PrimeWorkerBoundaryError("prime worker boundary is invalid") from None
 
     if (
-        request.role_id != "prime.ipython-coding"
+        request.role_id != expected_role
         or request.image_digest != profile.image_digest
         or request.max_runtime_seconds != profile.max_runtime_seconds
         or request.max_output_bytes != profile.max_output_bytes
@@ -71,8 +90,12 @@ def verify_prime_worker_boundary(
         raise PrimeWorkerBoundaryError("prime worker boundary is invalid")
 
     return PrimeWorkerBoundaryReceipt(
+        scenario_id=scenario_id,
+        role_id=expected_role,
         worker_id=lease.worker_id,
         run_id=lease.run_id,
         challenge_digest=lease.challenge_digest,
+        workload_digest=lease.workload_digest,
+        result_digest=execution.result_digest,
         image_digest=profile.image_digest,
     )

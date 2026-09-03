@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 12:12. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 11:26. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -25,15 +25,21 @@
 - Product 3 receipt still cannot claim sandboxing, model work, generated
   programs, arbitrary recursion, or native-Linux isolation.
 - The capability specification requires an injected restricted worker for all
-  seven formal acceptance products. Existing worker gating and Docker launcher
-  are hard-coded to `prime.ipython-coding`, so they cannot yet attest Products
-  2–7. Product-level `bounded-sandboxed` receipts must not be emitted from the
-  trusted-local P5/P6 experiment receipts.
+  seven formal acceptance products. The shared lifecycle now binds role,
+  workload digest, canonical terminal-result digest, isolation, and cleanup;
+  `verify_prime_worker_boundary()` closes the seven exact scenario-to-role
+  pairs. Docker remains `prime.ipython-coding` only; Products 2–7 have no
+  launcher and therefore cannot obtain a worker receipt.
+- Product-level `bounded-sandboxed` receipts must not be emitted from the
+  trusted-local P5/P6 experiment receipts. The worker gate must become the
+  sole issuance path before either product can make that claim.
 
 ## Verification evidence
 
-- Python: 28 tests across recursive receipt/compatibility, RLM adapter, and
-  RLM messaging parity passed.
+- Worker platform: 69 focused Python tests across shared lifecycle, seven-role
+  gate, Docker adapter/CLI, launch barrier, and model broker passed; Node
+  launcher syntax, Ruff, Pyright, and diff checks passed. No Docker, model, or
+  network action occurred.
 - Node: 37 Prime gateway main tests passed, including zero-resource native RLM
   budget clamping and expiry rejection.
 - Ruff, Pyright, Node syntax, and `git diff --check` passed.
@@ -43,10 +49,9 @@
 
 ## Immediate next action
 
-1. Generalize the application-owned restricted worker role and public
-   attestation binding across the seven exact product scenario IDs without
-   relaxing Docker/platform policy. Then remove the invalid P5 trusted-local
-   `bounded-sandboxed` receipt projection.
+1. Commit the restricted-worker lifecycle migration. Then change P5/P6
+   reducers so trusted-local observations remain diagnostic only and
+   `bounded-sandboxed` evidence requires the exact gated worker receipt.
 2. Retain Products 2–4 as provider-free, trusted-local mechanics only.
 3. Only after a real restricted-worker runner exists, re-run Product 5 and
    authorize a separate Product 6 bounded refinement. ARC-AGI-3 remains

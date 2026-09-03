@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
+from hashlib import sha256
 from secrets import token_hex
 from time import monotonic
 from types import TracebackType
@@ -18,6 +19,7 @@ from asterion.runtime.host import CancellationSignal
 from asterion.services.restricted_worker import (
     RestrictedWorkerAttestation,
     RestrictedWorkerCleanupReceipt,
+    RestrictedWorkerExecutionReceipt,
     RestrictedWorkerError,
     RestrictedWorkerLease,
     RestrictedWorkerRequest,
@@ -65,6 +67,7 @@ class _DockerWorkerSpecification:
     image_digest: str
     run_id: str
     challenge_digest: str
+    workload_digest: str
     max_runtime_seconds: int
     max_output_bytes: int
     launcher_id: Literal["prime-ipython-coding"]
@@ -126,6 +129,8 @@ class DockerLauncherChannel(Protocol):
 
     async def release(self, *, control: _LifecycleCallControl) -> None: ...
 
+    async def completed_result(self, *, control: _LifecycleCallControl) -> bytes: ...
+
     async def close(self, *, control: _LifecycleCallControl) -> None: ...
 
 
@@ -164,6 +169,8 @@ class DockerEngineTransport(Protocol):
 class _LeaseState:
     request: RestrictedWorkerRequest
     container_id: str
+    channel: DockerLauncherChannel | None = None
+    execution: RestrictedWorkerExecutionReceipt | None = None
 
 
 @dataclass(frozen=True, repr=False)
@@ -171,8 +178,10 @@ class _CleanupTombstone:
     """Minimal post-destruction identity retained until receipt issuance."""
 
     worker_id: str
+    role_id: str
     run_id: str
     challenge_digest: str
+    workload_digest: str
 
     def __repr__(self) -> str:
         return "_CleanupTombstone(redacted)"
@@ -186,7 +195,8 @@ class DockerRestrictedWorkerService:
             self._role = _DockerWorkerRole(image_digest=image_digest)
             # Reuse the closed shared contract to reject a tag-like image value.
             RestrictedWorkerRequest(
-                _ROLE_ID, image_digest, "role-check", "sha256:" + "0" * 64, 1, 1
+                _ROLE_ID, image_digest, "role-check", "sha256:" + "0" * 64,
+                "sha256:" + "0" * 64, 1, 1
             )
         except RestrictedWorkerError:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
@@ -211,6 +221,7 @@ class DockerRestrictedWorkerService:
             image_digest=self._role.image_digest,
             run_id=request.run_id,
             challenge_digest=request.challenge_digest,
+            workload_digest=request.workload_digest,
             max_runtime_seconds=request.max_runtime_seconds,
             max_output_bytes=request.max_output_bytes,
             launcher_id=self._role.launcher_id,
@@ -231,8 +242,10 @@ class DockerRestrictedWorkerService:
         request = self._request_for_lease(lease)
         return RestrictedWorkerAttestation(
             lease.worker_id,
+            lease.role_id,
             lease.run_id,
             lease.challenge_digest,
+            lease.workload_digest,
             request.image_digest,
             True, True, True, True, True, True, True,
         )
@@ -246,22 +259,62 @@ class DockerRestrictedWorkerService:
         if (
             tombstone is None
             or tombstone.worker_id != lease.worker_id
+            or tombstone.role_id != lease.role_id
             or tombstone.run_id != lease.run_id
             or tombstone.challenge_digest != lease.challenge_digest
+            or tombstone.workload_digest != lease.workload_digest
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         del self._cleanup_tombstones[lease.worker_id]
         return RestrictedWorkerCleanupReceipt(
-            lease.worker_id, lease.run_id, lease.challenge_digest, True
+            lease.worker_id, lease.role_id, lease.run_id, lease.challenge_digest,
+            lease.workload_digest, True
         )
+
+    async def execution_receipt(
+        self, lease: RestrictedWorkerLease
+    ) -> RestrictedWorkerExecutionReceipt:
+        request = self._request_for_lease(lease)
+        state = self._leases[lease.worker_id]
+        if state.execution is not None:
+            return state.execution
+        if state.channel is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, None)
+        try:
+            await self._within_deadline(state.channel.release(control=control), control)
+            result = await self._within_deadline(
+                state.channel.completed_result(control=control), control
+            )
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+        if (
+            type(result) is not bytes
+            or not result
+            or len(result) > request.max_output_bytes
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        state.execution = RestrictedWorkerExecutionReceipt(
+            lease.worker_id,
+            lease.role_id,
+            lease.run_id,
+            lease.challenge_digest,
+            lease.workload_digest,
+            "sha256:" + sha256(result).hexdigest(),
+        )
+        return state.execution
 
     def _admit_lease(
         self, request: RestrictedWorkerRequest, lease: RestrictedWorkerLease
     ) -> RestrictedWorkerLease:
         if (
             type(lease) is not RestrictedWorkerLease
+            or lease.role_id != request.role_id
             or lease.run_id != request.run_id
             or lease.challenge_digest != request.challenge_digest
+            or lease.workload_digest != request.workload_digest
             or lease.worker_id in self._leases
             or lease.worker_id in self._cleanup_tombstones
         ):
@@ -275,17 +328,29 @@ class DockerRestrictedWorkerService:
             raise RestrictedWorkerError("restricted worker value is invalid")
         state.container_id = container_id
 
+    def _bind_channel(self, lease: RestrictedWorkerLease, channel: DockerLauncherChannel) -> None:
+        state = self._leases.get(lease.worker_id)
+        if state is None or state.channel is not None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        state.channel = channel
+
+    def _has_execution_receipt(self, lease: RestrictedWorkerLease) -> bool:
+        return self._request_for_lease(lease) is not None and self._leases[lease.worker_id].execution is not None
+
     def _record_verified_cleanup(self, lease: RestrictedWorkerLease) -> None:
         state = self._leases.get(lease.worker_id)
         if (
             state is None
+            or state.request.role_id != lease.role_id
             or state.request.run_id != lease.run_id
             or state.request.challenge_digest != lease.challenge_digest
+            or state.request.workload_digest != lease.workload_digest
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         del self._leases[lease.worker_id]
         self._cleanup_tombstones[lease.worker_id] = _CleanupTombstone(
-            lease.worker_id, lease.run_id, lease.challenge_digest
+            lease.worker_id, lease.role_id, lease.run_id, lease.challenge_digest,
+            lease.workload_digest,
         )
 
     def _request_for_lease(self, lease: RestrictedWorkerLease) -> RestrictedWorkerRequest:
@@ -297,10 +362,22 @@ class DockerRestrictedWorkerService:
         request = state.request
         if (
             request.run_id != lease.run_id
+            or request.role_id != lease.role_id
             or request.challenge_digest != lease.challenge_digest
+            or request.workload_digest != lease.workload_digest
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         return request
+
+    @staticmethod
+    async def _within_deadline(awaitable: object, control: _LifecycleCallControl) -> object:
+        if control.cancelled() or monotonic() >= control.deadline:
+            raise asyncio.CancelledError
+        async with asyncio.timeout_at(control.deadline):
+            result = await awaitable  # type: ignore[misc]
+        if control.cancelled():
+            raise asyncio.CancelledError
+        return result
 
     def _validate_inspection(self, inspection: Mapping[str, object]) -> None:
         """Validate raw engine evidence without retaining or exposing it."""
@@ -400,6 +477,7 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
             self._service._validate_launcher_self_check(self_check)
             self._lease = self._service._admit_lease(self._request, lease)
             self._service._bind_container(self._lease, container_id)
+            self._service._bind_channel(self._lease, self._channel)
             return self._lease
         except BaseException as error:
             cleanup_error = await self._cleanup_after_rejection()
@@ -419,7 +497,8 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
             raise RestrictedWorkerError("restricted worker value is invalid")
         control = _LifecycleCallControl(monotonic() + _CLEANUP_SECONDS, None)
         try:
-            await self._call_release(control)
+            if not self._service._has_execution_receipt(self._lease):
+                await self._call_release(control)
             inspection = await self._call_inspect(control)
             self._service._validate_inspection(inspection)
         except BaseException as error:

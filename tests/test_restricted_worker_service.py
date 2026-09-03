@@ -12,6 +12,7 @@ from asterion.services.restricted_worker import (
     RestrictedWorkerError,
     RestrictedWorkerLease,
     RestrictedWorkerRequest,
+    RestrictedWorkerExecutionReceipt,
     verify_restricted_worker_receipts,
 )
 
@@ -26,6 +27,7 @@ def _request(**changes: object) -> RestrictedWorkerRequest:
         "image_digest": _IMAGE_DIGEST,
         "run_id": "run-1",
         "challenge_digest": _CHALLENGE_DIGEST,
+        "workload_digest": "sha256:" + "c" * 64,
         "max_runtime_seconds": 300,
         "max_output_bytes": 65536,
     }
@@ -36,8 +38,10 @@ def _request(**changes: object) -> RestrictedWorkerRequest:
 def _lease(**changes: object) -> RestrictedWorkerLease:
     values: dict[str, object] = {
         "worker_id": "worker-1",
+        "role_id": "prime.ipython-coding",
         "run_id": "run-1",
         "challenge_digest": _CHALLENGE_DIGEST,
+        "workload_digest": "sha256:" + "c" * 64,
     }
     values.update(changes)
     return RestrictedWorkerLease(**values)  # type: ignore[arg-type]
@@ -46,8 +50,10 @@ def _lease(**changes: object) -> RestrictedWorkerLease:
 def _attestation(**changes: object) -> RestrictedWorkerAttestation:
     values: dict[str, object] = {
         "worker_id": "worker-1",
+        "role_id": "prime.ipython-coding",
         "run_id": "run-1",
         "challenge_digest": _CHALLENGE_DIGEST,
+        "workload_digest": "sha256:" + "c" * 64,
         "image_digest": _IMAGE_DIGEST,
         "network_isolated": True,
         "root_read_only": True,
@@ -64,19 +70,46 @@ def _attestation(**changes: object) -> RestrictedWorkerAttestation:
 def _cleanup(**changes: object) -> RestrictedWorkerCleanupReceipt:
     values: dict[str, object] = {
         "worker_id": "worker-1",
+        "role_id": "prime.ipython-coding",
         "run_id": "run-1",
         "challenge_digest": _CHALLENGE_DIGEST,
+        "workload_digest": "sha256:" + "c" * 64,
         "destroyed": True,
     }
     values.update(changes)
     return RestrictedWorkerCleanupReceipt(**values)  # type: ignore[arg-type]
 
 
+def _execution(**changes: object) -> RestrictedWorkerExecutionReceipt:
+    values: dict[str, object] = {
+        "worker_id": "worker-1", "role_id": "prime.ipython-coding",
+        "run_id": "run-1", "challenge_digest": _CHALLENGE_DIGEST,
+        "workload_digest": "sha256:" + "c" * 64,
+        "result_digest": "sha256:" + "d" * 64,
+    }
+    values.update(changes)
+    return RestrictedWorkerExecutionReceipt(**values)  # type: ignore[arg-type]
+
+
 class TestRestrictedWorkerValues(unittest.TestCase):
+    def test_execution_receipt_binds_worker_role_workload_and_result(self) -> None:
+        receipt = _execution()
+
+        self.assertEqual(
+            tuple(receipt.__dataclass_fields__),
+            (
+                "worker_id", "role_id", "run_id", "challenge_digest",
+                "workload_digest", "result_digest", "terminal",
+            ),
+        )
+        self.assertEqual(receipt.terminal, "completed")
+        with self.assertRaises(FrozenInstanceError):
+            receipt.result_digest = "sha256:" + "e" * 64  # type: ignore[misc]
+
     def test_receipt_verification_accepts_one_bound_lifecycle(self) -> None:
         self.assertIsNone(
             verify_restricted_worker_receipts(
-                _request(), _lease(), _attestation(), _cleanup()
+                _request(), _lease(), _attestation(), _execution(), _cleanup()
             )
         )
 
@@ -154,15 +187,29 @@ class TestRestrictedWorkerValues(unittest.TestCase):
                     RestrictedWorkerError, "restricted worker value is invalid"
                 ),
             ):
-                verify_restricted_worker_receipts(request, lease, attestation, cleanup)
+                verify_restricted_worker_receipts(request, lease, attestation, _execution(), cleanup)
 
     def test_receipt_verification_rejects_cleanup_not_destroyed(self) -> None:
         with self.assertRaisesRegex(
             RestrictedWorkerError, "restricted worker value is invalid"
         ):
             verify_restricted_worker_receipts(
-                _request(), _lease(), _attestation(), _cleanup(destroyed=False)
+                _request(), _lease(), _attestation(), _execution(), _cleanup(destroyed=False)
             )
+
+    def test_receipt_verification_rejects_role_workload_and_execution_substitution(self) -> None:
+        substitutions = (
+            ("request role", _request(role_id="prime.arc-agi-3"), _lease(), _attestation(), _execution(), _cleanup()),
+            ("lease workload", _request(), _lease(workload_digest="sha256:" + "e" * 64), _attestation(), _execution(), _cleanup()),
+            ("attestation role", _request(), _lease(), _attestation(role_id="prime.arc-agi-3"), _execution(), _cleanup()),
+            ("execution workload", _request(), _lease(), _attestation(), _execution(workload_digest="sha256:" + "e" * 64), _cleanup()),
+            ("cleanup role", _request(), _lease(), _attestation(), _execution(), _cleanup(role_id="prime.arc-agi-3")),
+        )
+        for name, request, lease, attestation, execution, cleanup in substitutions:
+            with self.subTest(name=name), self.assertRaises(RestrictedWorkerError):
+                verify_restricted_worker_receipts(
+                    request, lease, attestation, execution, cleanup
+                )
 
     def test_request_accepts_only_bounded_public_metadata(self) -> None:
         request = _request()
@@ -175,6 +222,7 @@ class TestRestrictedWorkerValues(unittest.TestCase):
                 "image_digest",
                 "run_id",
                 "challenge_digest",
+                "workload_digest",
                 "max_runtime_seconds",
                 "max_output_bytes",
             ),
@@ -185,8 +233,10 @@ class TestRestrictedWorkerValues(unittest.TestCase):
             _request(),
             _lease(),
             _attestation(),
+            _execution(),
             RestrictedWorkerCleanupReceipt(
-                "worker-1", "run-1", _CHALLENGE_DIGEST, True
+                "worker-1", "prime.ipython-coding", "run-1", _CHALLENGE_DIGEST,
+                "sha256:" + "c" * 64, True
             ),
         )
 
@@ -208,7 +258,7 @@ class TestRestrictedWorkerValues(unittest.TestCase):
                     ),
                 ):
                     _request(**{field: value})
-        for field in ("image_digest", "challenge_digest"):
+        for field in ("image_digest", "challenge_digest", "workload_digest"):
             for value in ("latest", "sha256:" + "a" * 63, "sha256:" + "A" * 64):
                 with (
                     self.subTest(field=field, value=value),
@@ -252,8 +302,10 @@ class TestRestrictedWorkerValues(unittest.TestCase):
                 if constructor is RestrictedWorkerCleanupReceipt:
                     values: dict[str, Any] = {
                         "worker_id": "worker-1",
+                        "role_id": "prime.ipython-coding",
                         "run_id": "run-1",
                         "challenge_digest": _CHALLENGE_DIGEST,
+                        "workload_digest": "sha256:" + "c" * 64,
                         "destroyed": True,
                     }
                     values[field] = value
@@ -280,6 +332,7 @@ class TestRestrictedWorkerValues(unittest.TestCase):
             "image_digest": _IMAGE_DIGEST,
             "run_id": "run-1",
             "challenge_digest": _CHALLENGE_DIGEST,
+            "workload_digest": "sha256:" + "c" * 64,
             "max_runtime_seconds": 300,
             "max_output_bytes": 65536,
             "command": "unsafe",

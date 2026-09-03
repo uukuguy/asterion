@@ -1483,3 +1483,6 @@
 - 12:04 Committed continual-improvement evidence closure so ungrounded or provider-free reports cannot pass Product 6 [1b6f48c]
 - 12:12 Corrected capability acceptance scope: trusted-local Prime runs are non-promotable, so Products 1–5 are not formal sandboxed PASS [no code commit]
 - 12:22 User approved the restricted-worker lifecycle correction: all bounded acceptance evidence will bind scenario, workload, result, isolation, and cleanup [pending commit]
+- 12:23 Committed restricted-worker acceptance design to prevent trusted-local evidence elevation [5e35a02]
+- 12:29 Committed a three-task restricted-worker acceptance plan so lifecycle correction can be verified incrementally [7105058]
+- 11:26 Bound Prime worker evidence through role, workload, canonical terminal result, and destruction; 69 focused tests passed [pending commit]

@@ -17,6 +17,7 @@ from asterion.services.restricted_worker import RestrictedWorkerAttestation, Res
 
 
 _CHALLENGE = "sha256:" + "a" * 64
+_WORKLOAD = "sha256:" + "b" * 64
 
 
 def _session(**changes: object) -> BoundedModelSessionRequest:
@@ -27,14 +28,21 @@ def _session(**changes: object) -> BoundedModelSessionRequest:
 
 
 def _worker() -> RestrictedWorkerLease:
-    return RestrictedWorkerLease("worker-1", "run-1", _CHALLENGE)
+    return RestrictedWorkerLease(
+        "worker-1", "prime.ipython-coding", "run-1", _CHALLENGE, _WORKLOAD
+    )
 
 
 def _barrier() -> PrimeLauncherBarrier:
     worker = _worker()
-    barrier = PrimeLauncherBarrier(run_id="run-1", challenge_digest=_CHALLENGE)
+    barrier = PrimeLauncherBarrier(
+        role_id="prime.ipython-coding",
+        run_id="run-1",
+        challenge_digest=_CHALLENGE,
+        workload_digest=_WORKLOAD,
+    )
     barrier.admit(worker, RestrictedWorkerAttestation(
-        worker_id="worker-1", run_id="run-1", challenge_digest=_CHALLENGE,
+        worker_id="worker-1", role_id="prime.ipython-coding", run_id="run-1", challenge_digest=_CHALLENGE, workload_digest=_WORKLOAD,
         image_digest="sha256:" + "b" * 64, network_isolated=True, root_read_only=True,
         workspace_disposable=True, credentials_absent=True, kernel_credential_absent=True,
         source_read_only=True, resource_limited=True))
