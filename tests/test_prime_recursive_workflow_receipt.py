@@ -105,3 +105,4 @@ class TestRecursiveWorkflowTrace(unittest.TestCase):
         self.assertNotIn(sentinel, repr(trace))
         self.assertNotIn(sentinel, str(trace))
         self.assertNotIn(sentinel, str(raised.exception))
+        self.assertNotIn(sentinel, repr(raised.exception))
