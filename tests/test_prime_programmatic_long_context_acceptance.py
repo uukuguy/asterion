@@ -172,6 +172,22 @@ class TestProgrammaticLongContextAcceptance(unittest.IsolatedAsyncioTestCase):
                     broker=_Broker([]), facts=facts,
                 )
 
+    async def test_rejects_open_sandbox_profiles_before_worker_or_broker_admission(self) -> None:
+        cases = (
+            ("network", {"network_mode": "bridge"}),
+            ("workspace", {"workspace_mode": "persistent"}),
+            ("credentials", {"credential_mode": "inherited"}),
+        )
+        for name, changes in cases:
+            worker = _Worker()
+            broker = _Broker(worker.events)
+            with self.subTest(name=name), self.assertRaises(ProgrammaticLongContextAcceptanceError):
+                await accept_programmatic_long_context(
+                    worker=worker, profile=_profile(**changes), request=_request(),
+                    broker=broker, facts=_facts(),
+                )
+            self.assertEqual(worker.events, [])
+
     async def test_rejects_each_broker_identity_or_quiescence_mismatch(self) -> None:
         cases = (
             ("run", {"run_id": "run-2"}),

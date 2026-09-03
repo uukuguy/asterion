@@ -1519,3 +1519,6 @@
 - 16:37 Added sealed P2 worker facade and relay to bind Docker lifecycle safely [e031daf]
 - 16:45 Closed P2 canonical receipt and lifecycle bypasses after review [8216aa0]
 - 17:02 Verified provider-free P2 chain; Docker, model, and network remain unrun [pending commit]
+- 17:03 Sealed P2 acceptance proves fake lifecycle ordering and identity denial [1a51aa5]
+- 17:04 Journal records the sealed acceptance commit for recovery [f668dd4]
+- 17:12 P2 validates closed sandbox profiles before any worker or broker event [pending commit]

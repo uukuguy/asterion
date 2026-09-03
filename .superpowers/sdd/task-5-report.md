@@ -24,3 +24,12 @@ git diff --check
 
 The first command passed 50 tests; the P1 cross-role command passed 63. No
 Docker daemon, model provider, or network execution occurred.
+
+## Review correction
+
+The coordinator now calls `validate_prime_restricted_worker(profile)` before
+`worker.open`. Provider-free denial tests cover open network, persistent
+workspace, and inherited credentials; each fails with no worker or broker
+event. The focused acceptance/profile/gate/worker rerun passed 34 tests, with
+scoped Ruff, Pyright, and `git diff --check` also passing. No Docker daemon,
+model provider, or network execution occurred.

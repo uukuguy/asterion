@@ -41,6 +41,9 @@
   cross-role regressions passed, with scoped Ruff, Pyright, and diff checks.
   These are provider-free fake-service checks only; no Docker daemon, model
   provider, or network action occurred.
+- Review correction: an open network, persistent workspace, or inherited
+  credential profile now rejects in coordinator preflight before worker or
+  broker admission; 34 focused acceptance/profile/gate/worker tests passed.
 - `make promotion-check` remains **not PASS** (stopped before unapproved
   Climb H-001); `make test` remains red on a pre-existing DCI packaged-
   assembly inventory expectation.
