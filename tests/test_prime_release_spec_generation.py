@@ -25,44 +25,65 @@ _NODE_METADATA = (
     "a" * 64 + "  node-v22.8.0-linux-arm64.tar.xz\n"
     + "b" * 64 + "  node-v22.8.0-linux-x64.tar.xz\n"
 ).encode()
-_PYPI_METADATA = json.dumps(
-    {
-        "info": {"name": "ipykernel", "version": "6.29.0"},
-        "urls": [{
-            "filename": "ipykernel-6.29.0-py3-none-any.whl",
-            "packagetype": "bdist_wheel", "size": 11,
-            "digests": {"sha256": "d" * 64},
-        }],
-    }
-).encode()
-_CAPTURES = (
-    generation.ParsedMetadataCapture(
-        "node-archive",
-        "node/node.tar.xz",
-        _NODE_METADATA,
-        release_metadata.parse_node_shasums(
-            _NODE_METADATA,
-            release_metadata.NodeShasumsSelector("22.8.0", _METADATA_TARGET),
-        ),
-        generation.ObjectBlob(
-            "https://release.example.invalid/node.tar.xz", 10, "b" * 64
-        ),
-    ),
-    generation.ParsedMetadataCapture(
+def _python_wheel_capture(
+    requirement: release_recipe.PythonWheelRequirement,
+    index: int,
+) -> generation.ParsedMetadataCapture:
+    filename = f"{requirement.normalized_project.replace('-', '_')}-{requirement.version}-py3-none-any.whl"
+    digest = f"{index:064x}"
+    size = index + 100
+    metadata = json.dumps(
+        {
+            "info": {"name": requirement.normalized_project, "version": requirement.version},
+            "urls": [{
+                "filename": filename,
+                "packagetype": "bdist_wheel", "size": size,
+                "digests": {"sha256": digest},
+            }],
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return generation.ParsedMetadataCapture(
         "python-wheel",
-        "python/ipykernel.whl",
-        _PYPI_METADATA,
+        f"python/{requirement.normalized_project}.whl",
+        metadata,
         release_metadata.parse_pypi_json(
-            _PYPI_METADATA,
+            metadata,
             release_metadata.PyPIFileSelector(
-                "ipykernel", "6.29.0", "ipykernel-6.29.0-py3-none-any.whl", _METADATA_TARGET
+                requirement.normalized_project,
+                requirement.version,
+                filename,
+                _METADATA_TARGET,
             ),
         ),
         generation.ObjectBlob(
-            "https://release.example.invalid/ipykernel.whl", 11, "d" * 64
+            f"https://release.example.invalid/python/{requirement.normalized_project}.whl",
+            size,
+            digest,
         ),
+    )
+
+
+_NODE_CAPTURE = generation.ParsedMetadataCapture(
+    "node-archive",
+    "node/node.tar.xz",
+    _NODE_METADATA,
+    release_metadata.parse_node_shasums(
+        _NODE_METADATA,
+        release_metadata.NodeShasumsSelector("22.8.0", _METADATA_TARGET),
     ),
+    generation.ObjectBlob("https://release.example.invalid/node.tar.xz", 10, "b" * 64),
 )
+_CAPTURES = tuple(sorted((
+    _NODE_CAPTURE,
+    *(
+        _python_wheel_capture(requirement, index)
+        for index, requirement in enumerate(
+            release_recipe.prime_python_wheel_requirements(), 1
+        )
+    ),
+), key=lambda capture: capture.artifact_path))
 
 
 def _local_structural_image_lock() -> image_input_lock.ImageInputLock:
@@ -105,6 +126,35 @@ def _request(**changes: object) -> generation.ReleaseSpecGenerationRequest:
 
 
 class TestPrimeReleaseSpecGeneration(unittest.TestCase):
+    def test_candidate_requires_every_python_wheel_in_the_committed_closure(
+        self,
+    ) -> None:
+        with self.assertRaises(generation.PrimeReleaseSpecGenerationError):
+            generation.generate_release_specification(_request(claims=_CAPTURES[:2]))
+
+    def test_candidate_rejects_a_wheel_substituted_at_an_expected_path(self) -> None:
+        asttokens = next(
+            capture
+            for capture in _CAPTURES
+            if capture.artifact_path == "python/asttokens.whl"
+        )
+        claims = tuple(
+            replace(
+                asttokens,
+                artifact_path="python/ipykernel.whl",
+                object=replace(
+                    asttokens.object,
+                    url="https://release.example.invalid/python/forged-ipykernel.whl",
+                ),
+            )
+            if capture.artifact_path == "python/ipykernel.whl"
+            else capture
+            for capture in _CAPTURES
+        )
+
+        with self.assertRaises(generation.PrimeReleaseSpecGenerationError):
+            generation.generate_release_specification(_request(claims=claims))
+
     def test_distinct_metadata_and_object_blobs_are_untrusted_candidate_claims(
         self,
     ) -> None:
@@ -201,12 +251,14 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
         encoded = generation.canonical_release_spec_generation_json(
             generation.generate_release_specification(
                 _request(
-                    claims=(
+                    claims=tuple(
                         replace(
-                            _CAPTURES[0],
-                            object=replace(_CAPTURES[0].object, url=private_url),
-                        ),
-                        _CAPTURES[1],
+                            capture,
+                            object=replace(capture.object, url=private_url),
+                        )
+                        if capture is _NODE_CAPTURE
+                        else capture
+                        for capture in _CAPTURES
                     )
                 )
             )
@@ -256,12 +308,14 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
         private_url = "https://private-release-sentinel.invalid/secret-path/node.tar.xz"
         result = generation.generate_release_specification(
             _request(
-                claims=(
+                claims=tuple(
                     replace(
-                        _CAPTURES[0],
-                        object=replace(_CAPTURES[0].object, url=private_url),
-                    ),
-                    _CAPTURES[1],
+                        capture,
+                        object=replace(capture.object, url=private_url),
+                    )
+                    if capture is _NODE_CAPTURE
+                    else capture
+                    for capture in _CAPTURES
                 )
             )
         )

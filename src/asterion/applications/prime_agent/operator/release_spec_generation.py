@@ -86,6 +86,7 @@ class MetadataObjectClaim:
     object: ObjectBlob
     declared_object_size: int
     declared_object_sha256: str
+    declared_object_name: str
 
     def as_public_dict(self) -> dict[str, object]:
         return {
@@ -401,7 +402,39 @@ def _validate_claim(value: object) -> MetadataObjectClaim:
         object_blob,
         declaration.declared_size if declaration.declared_size is not None else object_blob.size,
         declaration.declared_sha256,
+        declaration.object_name,
     )
+
+
+def _validate_python_wheel_closure(
+    claims: tuple[MetadataObjectClaim, ...],
+    recipe: release_recipe.ReleaseRecipe,
+) -> None:
+    """Require one parser-backed wheel claim for every committed lock entry."""
+
+    requirements = release_recipe.prime_python_wheel_requirements()
+    expected_paths = {
+        f"python/{requirement.normalized_project}.whl": requirement
+        for requirement in requirements
+    }
+    wheel_claims = {
+        claim.artifact_path: claim
+        for claim in claims
+        if claim.artifact_kind == "python-wheel"
+    }
+    if set(wheel_claims) != set(expected_paths):
+        raise _invalid()
+    for path, requirement in expected_paths.items():
+        claim = wheel_claims[path]
+        expected_filename_prefix = (
+            f"{requirement.normalized_project.replace('-', '_')}-{requirement.version}-"
+        )
+        if (
+            claim.metadata.parser_revision != recipe.metadata_parsers.pypi_json
+            or not claim.declared_object_name.startswith(expected_filename_prefix)
+            or not claim.declared_object_name.endswith(".whl")
+        ):
+            raise _invalid()
 
 
 def _validate_request(value: object) -> ReleaseSpecGenerationRequest:
@@ -444,6 +477,7 @@ def _validate_request(value: object) -> ReleaseSpecGenerationRequest:
         != len(claims)
     ):
         raise _invalid()
+    _validate_python_wheel_closure(claims, recipe)
     return value
 
 
