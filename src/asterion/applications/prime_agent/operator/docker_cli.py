@@ -22,6 +22,9 @@ from asterion.applications.prime_agent.operator.docker_worker import (
     _DockerWorkerSpecification,
     _LifecycleCallControl,
 )
+from asterion.applications.prime_agent.operator.ipython_workload import (
+    PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
+)
 from asterion.services.restricted_worker import (
     RestrictedWorkerError,
     RestrictedWorkerLease,
@@ -154,7 +157,11 @@ class _ProductionAttachRunner:
 class _DockerCliLauncherChannel(DockerLauncherChannel):
     """One private interactive attach process; never expose its stream."""
 
-    _RELEASE = b'{"release":true}\n'
+    _RELEASE = (
+        b'{"release":true,"workload_digest":"'
+        + PRIME_IPYTHON_CODING_WORKLOAD_DIGEST.encode()
+        + b'"}\n'
+    )
 
     def __init__(self, process: DockerCliAttachProcess) -> None:
         self._process = process

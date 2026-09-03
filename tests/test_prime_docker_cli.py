@@ -33,6 +33,11 @@ _CHALLENGE = "sha256:" + "b" * 64
 _CONTAINER = "prime-" + "c" * 32
 _SOCKET = "/var/run/docker.sock"
 _SECCOMP = "/etc/asterion/prime-ipython-coding.json"
+_RELEASE = (
+    b'{"release":true,"workload_digest":"'
+    + PRIME_IPYTHON_CODING_WORKLOAD_DIGEST.encode()
+    + b'"}\n'
+)
 
 
 class _Runner:
@@ -198,7 +203,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(check.effective_user_id, 65534)
         self.assertEqual(runner.calls[1][0][-2:], ("start", _CONTAINER))
         self.assertEqual(attach.calls[0][0][-3:], ("attach", "--sig-proxy=false", _CONTAINER))
-        self.assertEqual(attach.process.stdin.writes, [b'{"release":true}\n'])
+        self.assertEqual(attach.process.stdin.writes, [_RELEASE])
         self.assertTrue(attach.process.waited)
         self.assertEqual(runner.calls[2][0][-4:], ("inspect", "--format", "{{.Id}}", _CONTAINER))
 
@@ -228,7 +233,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RestrictedWorkerError):
             await channel.release(control=self._control())
         await channel.close(control=self._control())
-        self.assertEqual(attach.process.stdin.writes, [b'{"release":true}\n'])
+        self.assertEqual(attach.process.stdin.writes, [_RELEASE])
 
     async def test_attach_returns_only_the_fixed_workload_completion(self) -> None:
         selfcheck = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
