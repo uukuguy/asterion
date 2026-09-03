@@ -11,6 +11,11 @@
   bounded evidence until role-specific real launchers exist.
 - Products 2–7 remain External-limited. Existing P2/P3 provider-free work and
   trusted-local P5 probe are non-promotable mechanics, not sandboxed PASS.
+- P2's sealed acceptance coordinator is covered by a provider-free fake chain.
+  It requires attestation, broker admission/release/revocation, result,
+  destruction, boundary admission, and bounded reduction in that order; this
+  is not Docker, model, or network execution and does not change P2's
+  External-limited live-execution status.
 
 ## Current decision
 
@@ -32,6 +37,10 @@
 - Node: 37 Prime gateway main tests passed, including zero-resource native RLM
   budget clamping and expiry rejection.
 - Ruff, Pyright, Node syntax, and `git diff --check` passed.
+- P2 acceptance: 50 focused P2/worker/broker Python tests and 63 P1
+  cross-role regressions passed, with scoped Ruff, Pyright, and diff checks.
+  These are provider-free fake-service checks only; no Docker daemon, model
+  provider, or network action occurred.
 - `make promotion-check` remains **not PASS** (stopped before unapproved
   Climb H-001); `make test` remains red on a pre-existing DCI packaged-
   assembly inventory expectation.
