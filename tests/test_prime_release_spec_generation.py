@@ -92,6 +92,10 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
         self.assertEqual(result.acquisition_lock.claims[0].metadata.size, 130)
         self.assertEqual(result.artifact_inventory.artifacts[0].object.size, 10)
         self.assertTrue(result.release_proposal.untrusted)
+        self.assertEqual(
+            result.release_proposal.recipe.sha256,
+            release_recipe.release_recipe_sha256(_RECIPE),
+        )
 
     def test_desktop_emulated_and_mismatched_observations_are_external_limited(
         self,
@@ -207,6 +211,13 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
         self.assertNotIn(private_url, encoded)
         self.assertNotIn("private-release-sentinel.invalid", encoded)
         self.assertTrue(value["release_proposal"]["untrusted"])
+        self.assertEqual(
+            value["release_proposal"]["recipe"],
+            {
+                "revision": _RECIPE.recipe_revision,
+                "sha256": release_recipe.release_recipe_sha256(_RECIPE),
+            },
+        )
         with self.assertRaises(image_input_lock.PrimeImageInputLockError):
             image_input_lock.image_input_lock_from_dict(value)
         with self.assertRaises(image_input_lock.PrimeImageInputLockError):

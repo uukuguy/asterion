@@ -136,6 +136,21 @@ class PublicMetadataObjectClaim:
         }
 
 
+@dataclass(frozen=True)
+class RecipeIdentity:
+    """Stable identity of the code-owned recipe that produced a candidate."""
+
+    revision: str
+    sha256: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"revision": self.revision, "sha256": self.sha256}
+
+
+def _recipe_identity(recipe: release_recipe.ReleaseRecipe) -> RecipeIdentity:
+    return RecipeIdentity(recipe.recipe_revision, release_recipe.release_recipe_sha256(recipe))
+
+
 def _public_claim(value: MetadataObjectClaim) -> PublicMetadataObjectClaim:
     return PublicMetadataObjectClaim(
         value.artifact_kind,
@@ -165,6 +180,7 @@ class ReleaseSpecGenerationRequest:
 class UntrustedAcquisitionLock:
     target: ExactTargetDescriptor
     source: PrimeSourceTriple
+    recipe: RecipeIdentity
     claims: tuple[PublicMetadataObjectClaim, ...]
     untrusted: Literal[True] = True
 
@@ -172,6 +188,7 @@ class UntrustedAcquisitionLock:
         return {
             "claims": [claim.as_dict() for claim in self.claims],
             "format": "asterion.prime-ipython-acquisition-lock/v1",
+            "recipe": self.recipe.as_dict(),
             "source": _source_dict(self.source),
             "target": self.target.as_dict(),
             "untrusted": self.untrusted,
@@ -182,6 +199,7 @@ class UntrustedAcquisitionLock:
 class UntrustedArtifactInventory:
     target: ExactTargetDescriptor
     source: PrimeSourceTriple
+    recipe: RecipeIdentity
     artifacts: tuple[PublicMetadataObjectClaim, ...]
     untrusted: Literal[True] = True
 
@@ -189,6 +207,7 @@ class UntrustedArtifactInventory:
         return {
             "artifacts": [artifact.as_dict() for artifact in self.artifacts],
             "format": "asterion.prime-ipython-artifact-inventory/v1",
+            "recipe": self.recipe.as_dict(),
             "source": _source_dict(self.source),
             "target": self.target.as_dict(),
             "untrusted": self.untrusted,
@@ -199,6 +218,7 @@ class UntrustedArtifactInventory:
 class UntrustedReleaseProposal:
     target: ExactTargetDescriptor
     source: PrimeSourceTriple
+    recipe: RecipeIdentity
     artifacts: tuple[PublicMetadataObjectClaim, ...]
     untrusted: Literal[True] = True
 
@@ -206,6 +226,7 @@ class UntrustedReleaseProposal:
         return {
             "artifacts": [artifact.as_dict() for artifact in self.artifacts],
             "format": "asterion.prime-ipython-release-proposal/v1",
+            "recipe": self.recipe.as_dict(),
             "source": _source_dict(self.source),
             "target": self.target.as_dict(),
             "untrusted": self.untrusted,
@@ -216,6 +237,7 @@ class UntrustedReleaseProposal:
 class ProposalProvenance:
     target: ExactTargetDescriptor
     source: PrimeSourceTriple
+    recipe: RecipeIdentity
     observation: SubstrateObservation
     generator_revision: str
     untrusted: Literal[True] = True
@@ -229,6 +251,7 @@ class ProposalProvenance:
                 "substrate": self.observation.substrate,
                 "target": self.observation.target.as_dict(),
             },
+            "recipe": self.recipe.as_dict(),
             "source": _source_dict(self.source),
             "target": self.target.as_dict(),
             "untrusted": self.untrusted,
@@ -416,17 +439,23 @@ def generate_release_specification(request: object) -> ReleaseSpecGenerationResu
     ):
         status = "candidate-native"
     public_claims = tuple(_public_claim(claim) for claim in validated.claims)
-    lock = UntrustedAcquisitionLock(validated.target, validated.source, public_claims)
+    recipe_identity = _recipe_identity(validated.recipe)
+    lock = UntrustedAcquisitionLock(
+        validated.target, validated.source, recipe_identity, public_claims
+    )
     return ReleaseSpecGenerationResult(
         status,
         lock,
         UntrustedArtifactInventory(
-            validated.target, validated.source, public_claims
+            validated.target, validated.source, recipe_identity, public_claims
         ),
-        UntrustedReleaseProposal(validated.target, validated.source, public_claims),
+        UntrustedReleaseProposal(
+            validated.target, validated.source, recipe_identity, public_claims
+        ),
         ProposalProvenance(
             validated.target,
             validated.source,
+            recipe_identity,
             validated.observation,
             validated.generator_revision,
         ),
@@ -462,6 +491,9 @@ def _valid_public_result(result: ReleaseSpecGenerationResult) -> bool:
             or lock.target != proposal.target
             or lock.source != inventory.source
             or lock.source != proposal.source
+            or lock.recipe != inventory.recipe
+            or lock.recipe != proposal.recipe
+            or lock.recipe != provenance.recipe
             or lock.claims != inventory.artifacts
             or lock.claims != proposal.artifacts
             or provenance.target != lock.target
@@ -470,6 +502,8 @@ def _valid_public_result(result: ReleaseSpecGenerationResult) -> bool:
             or _validate_source(lock.source) is not lock.source
             or _validate_target(lock.target) is not lock.target
             or _validate_observation(provenance.observation) is not provenance.observation
+            or type(lock.recipe) is not RecipeIdentity
+            or lock.recipe != _recipe_identity(release_recipe.PRIME_IPYTHON_RELEASE_RECIPE)
         ):
             return False
         expected_status = (

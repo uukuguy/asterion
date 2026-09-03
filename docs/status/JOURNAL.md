@@ -1431,3 +1431,5 @@
 - 08:04 Added pure offline Node, PyPI, OCI, and recipe-output metadata parsers for exact candidate declarations [9f25bf3]
 - 08:08 Redacted private capture locators from all release-result dataclass representations [189e032]
 - 08:15 Replaced returned release claims with URL-free public projections and canonical public-result validation [pending commit]
+- 08:16 Committed URL-free release-result projections and canonical public validation [6a85157]
+- 08:20 Added canonical recipe identity to every public candidate record [pending commit]
