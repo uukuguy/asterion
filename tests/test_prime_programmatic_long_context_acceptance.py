@@ -110,6 +110,15 @@ class _Broker:
         return PrimeModelBrokerReceipt(**values)  # type: ignore[arg-type]
 
 
+class _AttributeProbe:
+    def __init__(self) -> None:
+        self.accesses = 0
+
+    def __getattr__(self, name: str) -> object:
+        self.accesses += 1
+        raise AssertionError(f"unexpected attribute access: {name}")
+
+
 def _request(**changes: object) -> RestrictedWorkerRequest:
     values: dict[str, object] = dict(
         role_id="prime.programmatic-long-context", image_digest=_IMAGE,
@@ -187,6 +196,17 @@ class TestProgrammaticLongContextAcceptance(unittest.IsolatedAsyncioTestCase):
                     broker=broker, facts=_facts(),
                 )
             self.assertEqual(worker.events, [])
+
+    async def test_invalid_profile_does_not_inspect_injected_service_attributes(self) -> None:
+        worker, broker = _AttributeProbe(), _AttributeProbe()
+
+        with self.assertRaises(ProgrammaticLongContextAcceptanceError):
+            await accept_programmatic_long_context(
+                worker=cast("_Worker", worker), profile=_profile(network_mode="bridge"),
+                request=_request(), broker=cast("_Broker", broker), facts=_facts(),
+            )
+
+        self.assertEqual((worker.accesses, broker.accesses), (0, 0))
 
     async def test_rejects_each_broker_identity_or_quiescence_mismatch(self) -> None:
         cases = (

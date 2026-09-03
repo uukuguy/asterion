@@ -102,13 +102,6 @@ async def accept_programmatic_long_context(
         type(profile) is not PrimeRestrictedWorkerProfile
         or type(request) is not RestrictedWorkerRequest
         or type(facts) is not ProgrammaticLongContextAcceptanceFacts
-        or request.role_id != PROGRAMMATIC_LONG_CONTEXT_P2_ROLE_ID
-        or request.workload_digest != PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST
-        or request.image_digest != profile.image_digest
-        or request.max_runtime_seconds != profile.max_runtime_seconds
-        or request.max_output_bytes != profile.max_output_bytes
-        or not all(callable(getattr(worker, name, None)) for name in ("open", "attest", "execution_receipt", "cleanup_receipt"))
-        or not all(callable(getattr(broker, name, None)) for name in ("admit", "release", "revoke"))
     ):
         raise ProgrammaticLongContextAcceptanceError("programmatic long-context acceptance is invalid")
     try:
@@ -117,6 +110,16 @@ async def accept_programmatic_long_context(
         raise ProgrammaticLongContextAcceptanceError(
             "programmatic long-context acceptance is invalid"
         ) from None
+    if (
+        request.role_id != PROGRAMMATIC_LONG_CONTEXT_P2_ROLE_ID
+        or request.workload_digest != PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST
+        or request.image_digest != profile.image_digest
+        or request.max_runtime_seconds != profile.max_runtime_seconds
+        or request.max_output_bytes != profile.max_output_bytes
+        or not all(callable(getattr(worker, name, None)) for name in ("open", "attest", "execution_receipt", "cleanup_receipt"))
+        or not all(callable(getattr(broker, name, None)) for name in ("admit", "release", "revoke"))
+    ):
+        raise ProgrammaticLongContextAcceptanceError("programmatic long-context acceptance is invalid")
 
     admitted = False
     try:

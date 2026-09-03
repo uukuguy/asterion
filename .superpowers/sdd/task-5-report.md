@@ -33,3 +33,9 @@ workspace, and inherited credentials; each fails with no worker or broker
 event. The focused acceptance/profile/gate/worker rerun passed 34 tests, with
 scoped Ruff, Pyright, and `git diff --check` also passing. No Docker daemon,
 model provider, or network execution occurred.
+
+## Low hardening
+
+Closed-profile validation now precedes all injected worker and broker attribute
+inspection. A side-effectful attribute probe confirms an invalid profile causes
+zero attribute accesses; the updated focused suite passed 35 tests.
