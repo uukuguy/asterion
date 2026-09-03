@@ -206,11 +206,14 @@ def parse_node_shasums(data: bytes, selector: object) -> ParsedMetadataDeclarati
         text = data.decode("ascii")
     except (AttributeError, UnicodeDecodeError):
         raise _invalid() from None
-    entries = [
-        (match.group(1), match.group(2))
-        for line in text.splitlines()
-        if (match := re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9._-]+)", line))
-    ]
+    entries: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        if not line:
+            continue
+        match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9._-]+)", line)
+        if match is None:
+            raise _invalid()
+        entries.append((match.group(1), match.group(2)))
     matches = [digest for digest, filename in entries if filename == name]
     if len(matches) != 1 or len([filename for _, filename in entries if filename == name]) != 1:
         raise _invalid()

@@ -1447,3 +1447,5 @@
 - 09:27 Bound untrusted staged release proposals to their canonical recipe identity [pending commit]
 - 09:28 Committed recipe identity binding for staged untrusted proposals [292621b]
 - 09:43 Generated a Python 3.11 Linux wheel dependency hash lock from upstream runtime roots; both Linux ABI resolutions matched [pending commit]
+- 09:44 Committed Python 3.11 kernel dependency closure and recipe binding [aac16c1]
+- 09:52 Hardened Node release metadata parsing to reject every malformed nonempty checksum line [pending commit]

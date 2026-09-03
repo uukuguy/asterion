@@ -52,6 +52,11 @@ class TestPrimeReleaseMetadata(unittest.TestCase):
                 (data + ("c" * 64 + "  node-v22.8.0-linux-arm64.tar.xz\n").encode()),
                 metadata.NodeShasumsSelector("22.8.0", _ARM64),
             )
+        with self.assertRaises(metadata.PrimeReleaseMetadataError):
+            metadata.parse_node_shasums(
+                data + b"malformed-shasums-line\n",
+                metadata.NodeShasumsSelector("22.8.0", _ARM64),
+            )
 
     def test_pypi_json_requires_exact_python311_target_wheel(self) -> None:
         data = json.dumps(
