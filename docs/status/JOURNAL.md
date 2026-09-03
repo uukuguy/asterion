@@ -1459,3 +1459,7 @@
 - 09:13 Required the complete parser-backed per-target candidate graph: Node archive/modules, OCI index-to-manifest/config/layers, 33 locked wheels, runtime, fixture, and frontend; focused Task 22 suites, Ruff, Pyright, and diff check passed [pending commit]
 - 09:14 Committed complete parsed target-closure admission to prevent incomplete or cross-target candidate proposals [836dd34]
 - 09:21 Bound authorized staging to its private complete parsed candidate request before fetch; full deterministic fixture writes and rehashes all 41 objects [pending commit]
+- 09:22 Committed pre-fetch complete-candidate binding so staging cannot acquire incomplete or substituted artifact sets [b10d226]
+- 09:27 P1 provider-free integration matrix passed 95 tests: worker, broker, image protocol, compatibility, and coding receipt; no Docker, model, or network action occurred [no code commit]
+- 09:31 Mapped real Gateway/upstream interfaces for products 2–7; current compatibility fixture proves IPython/compaction but not model-driven programmatic long-context selection [no code commit]
+- 09:36 Added a closed provider-free long-context receipt contract; focused receipt/evidence tests, Ruff, Pyright, and diff check passed [pending commit]

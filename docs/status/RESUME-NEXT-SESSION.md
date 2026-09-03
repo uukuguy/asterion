@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 09:21. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 09:36. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -42,6 +42,12 @@
   private complete candidate request and exact artifact tuple before its first
   fetch. Its deterministic fixture successfully stages and rehashes 41 objects;
   no actual artifacts were acquired.
+- The full P1 provider-free integration matrix passed 95 tests across worker,
+  Docker adapter fakes, launcher, broker, fixed image, compatibility process,
+  and coding receipt. It does not establish `bounded-sandboxed` evidence.
+- `prime.programmatic-long-context/v1` now has a separate closed receipt
+  contract. It can emit only `provider-free` PASS after exact IPython-only,
+  digest/count, executed-program, and oracle facts; it cannot upgrade evidence.
 - `make promotion-check` was stopped before it entered `tools/climb/cycle.sh
   H-001`; that path requires separate benchmark authority. It is **not PASS**.
   Focused recipe tests, Ruff, Pyright, and `git diff --check` passed for
@@ -52,10 +58,9 @@
 
 ## Immediate next action
 
-1. Commit the complete-graph staging admission integration after focused checks.
-2. Continue the seven-product P1 program at the next provider-free worker/broker
-   integration boundary. Do not fetch, build, run, promote, or benchmark an
-   image without separate authority.
+1. Commit the long-context receipt contract, then implement the real pinned
+   Prime/IPython corpus compatibility fixture from its approved P2 plan.
+2. Do not fetch, build, run Docker, promote an image, or invoke a provider.
 
 ## Recovery commands
 
@@ -65,4 +70,6 @@ git log --oneline -12
 uv run python -m unittest -v tests.test_prime_image_release_materializer tests.test_prime_release_metadata tests.test_prime_release_spec_generation tests.test_prime_release_recipe tests.test_prime_image_input_lock
 uv run ruff check src/asterion/applications/prime_agent/operator/image_input_lock.py tools/materialize_prime_ipython_inputs.py tests/prime_release_test_support.py tests/test_prime_image_release_materializer.py
 uv run pyright src/asterion/applications/prime_agent/operator/image_input_lock.py tools/materialize_prime_ipython_inputs.py tests/prime_release_test_support.py tests/test_prime_image_release_materializer.py
+uv run python -m unittest -v tests.test_restricted_worker_service tests.test_bounded_model_session tests.test_prime_worker_gate tests.test_prime_docker_worker tests.test_prime_docker_cli tests.test_prime_launcher_barrier tests.test_prime_linux_probe tests.test_prime_model_broker tests.test_prime_coding_fixture_receipt tests.test_prime_ipython_image tests.test_prime_ipython_launcher_protocol tests.test_prime_ipython_coding_compat
+uv run python -m unittest -v tests.test_prime_programmatic_long_context_receipt tests.test_prime_capability_evidence
 ```
