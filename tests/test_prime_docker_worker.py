@@ -6,12 +6,17 @@ import asyncio
 import hashlib
 import unittest
 from collections.abc import Mapping
+from dataclasses import FrozenInstanceError
 
 from asterion.applications.prime_agent.operator.docker_worker import (
     DockerEngineTransport,
     DockerLauncherChannel,
+    DockerWorkerCompletion,
     DockerWorkerLauncherSelfCheck,
     DockerRestrictedWorkerService,
+)
+from asterion.applications.prime_agent.operator.ipython_workload import (
+    PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
 )
 from asterion.services.restricted_worker import (
     RestrictedWorkerError,
@@ -30,7 +35,7 @@ def _request(**changes: object) -> RestrictedWorkerRequest:
         "image_digest": _IMAGE_DIGEST,
         "run_id": "run-1",
         "challenge_digest": _CHALLENGE_DIGEST,
-        "workload_digest": "sha256:" + "c" * 64,
+        "workload_digest": PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
         "max_runtime_seconds": 300,
         "max_output_bytes": 65536,
     }
@@ -57,12 +62,14 @@ class _Channel(DockerLauncherChannel):
             raise RestrictedWorkerError("restricted worker value is invalid")
         self.released = True
 
-    async def completed_result(self, *, control: object) -> bytes:  # type: ignore[override]
+    async def completed_result(self, *, control: object) -> DockerWorkerCompletion:  # type: ignore[override]
         self.transport.calls.append("launcher_result")
         self.transport.controls.append(control)
         if not self.released:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        return self.transport.result
+        return DockerWorkerCompletion(
+            PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, self.transport.result
+        )
 
     async def close(self, *, control: object) -> None:  # type: ignore[override]
         self.transport.calls.append("close_channel")
@@ -74,7 +81,7 @@ class _Transport(DockerEngineTransport):
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.spec: object | None = None
-        self.lease = RestrictedWorkerLease("worker-1", "prime.ipython-coding", "run-1", _CHALLENGE_DIGEST, "sha256:" + "c" * 64)
+        self.lease = RestrictedWorkerLease("worker-1", "prime.ipython-coding", "run-1", _CHALLENGE_DIGEST, PRIME_IPYTHON_CODING_WORKLOAD_DIGEST)
         self.inspection = _safe_inspection()
         self.post_start_inspection = _safe_inspection()
         self.final_inspection = _safe_inspection()
@@ -201,6 +208,21 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         self.service = DockerRestrictedWorkerService(
             image_digest=_IMAGE_DIGEST, transport=self.transport
         )
+
+    def test_admits_only_the_fixed_workload(self) -> None:
+        self.service.request_for(_request(
+            workload_digest=PRIME_IPYTHON_CODING_WORKLOAD_DIGEST
+        ))
+        with self.assertRaises(RestrictedWorkerError):
+            self.service.request_for(_request(workload_digest="sha256:" + "f" * 64))
+
+    def test_completion_is_private_and_immutable(self) -> None:
+        completion = DockerWorkerCompletion(
+            PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, b'{"fixture":"passed"}'
+        )
+        self.assertEqual(repr(completion), "DockerWorkerCompletion(redacted)")
+        with self.assertRaises(FrozenInstanceError):
+            completion.result_bytes = b"changed"  # type: ignore[misc]
 
     def test_rejects_an_unknown_role(self) -> None:
         with self.assertRaises(RestrictedWorkerError):
