@@ -1525,3 +1525,6 @@
 - 17:13 P2 preflight denies open sandbox profiles before lifecycle side effects [4459ef0]
 - 17:18 Invalid P2 profiles skip injected service attribute inspection [pending commit]
 - 18:25 Integrated P2 acceptance; main verification remains provider-free [pending commit]
+- 18:27 Recorded P2 main verification for accurate recovery state [ff1f496]
+- 18:35 Defined real P3 RLM review workflow to replace shim-only witness [ceaafca]
+- 18:40 Planned sealed P3 implementation in four reviewable tasks [24e15e9]
