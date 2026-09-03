@@ -12,13 +12,14 @@ P7_ARC_AGI_3_USAGE_CEILING: Final = 256
 P7_ARC_AGI_3_MODEL_SHA256: Final = "sha256:" + "a" * 64
 P7_ARC_AGI_3_ORACLE_SHA256: Final = "sha256:" + "b" * 64
 P7_ARC_AGI_3_SCHEMA_SHA256: Final = "sha256:" + "c" * 64
+P7_ARC_AGI_3_FULL_SUITE_SHA256: Final = "sha256:" + "e" * 64
 
 _MANIFEST: Final = {
     "action_ceiling": P7_ARC_AGI_3_ACTION_CEILING,
     "broker_call_ceiling": 8,
     "fixture_sha256": "sha256:" + "d" * 64,
     "format": "asterion.prime-arc-agi-3-workload/v1",
-    "full_suite_sha256": "sha256:" + "e" * 64,
+    "full_suite_sha256": P7_ARC_AGI_3_FULL_SUITE_SHA256,
     "game_ceiling": 1,
     "model_sha256": P7_ARC_AGI_3_MODEL_SHA256,
     "model_tool_names": ["ipython"],
