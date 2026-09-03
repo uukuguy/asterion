@@ -266,6 +266,43 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
             with self.subTest(invalid=invalid), self.assertRaises(RestrictedWorkerError):
                 DockerCliEngineTransport._parse_completed_result_line(invalid)
 
+    def test_completed_result_rejects_non_normalized_content(self) -> None:
+        expected = {"fixture": "passed", "oracle": "passed", "tool": "ipython"}
+
+        def frame_for(result: object) -> bytes:
+            result_bytes = json.dumps(
+                result, separators=(",", ":"), sort_keys=True
+            ).encode()
+            return json.dumps(
+                {
+                    "result": result,
+                    "result_digest": "sha256:" + hashlib.sha256(result_bytes).hexdigest(),
+                    "terminal": "completed",
+                    "workload_digest": PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode() + b"\n"
+
+        for result in (
+            {**expected, "source": "print('sentinel')"},
+            {**expected, "output": "sentinel"},
+            {**expected, "prompt": "sentinel"},
+            {**expected, "credential": "sentinel"},
+            {**expected, "path": "/private/sentinel"},
+            {**expected, "transcript": "sentinel"},
+            {**expected, "detail": {"nested": "sentinel"}},
+            {"fixture": "passed", "oracle": "passed"},
+            {"fixture": "failed", "oracle": "passed", "tool": "ipython"},
+            {"fixture": "passed", "oracle": "failed", "tool": "ipython"},
+            {"fixture": "passed", "oracle": "passed", "tool": "python"},
+            {"fixture": True, "oracle": "passed", "tool": "ipython"},
+            {"fixture": "passed", "oracle": 1, "tool": "ipython"},
+            {"fixture": "passed", "oracle": "passed", "tool": ["ipython"]},
+        ):
+            with self.subTest(result=result), self.assertRaises(RestrictedWorkerError):
+                DockerCliEngineTransport._parse_completed_result_line(frame_for(result))
+
     async def test_attach_close_reaps_when_control_is_already_cancelled(self) -> None:
         process = _AttachProcess(b"")
         attach = _AttachRunner(process)
