@@ -16,6 +16,9 @@ RECURSIVE_CODE_REVIEW_P3_CHILD_ACTION_CEILING: Final = 2
 RECURSIVE_CODE_REVIEW_P3_ROOT_USAGE_CEILING: Final = 256
 RECURSIVE_CODE_REVIEW_P3_CHILD_USAGE_CEILING: Final = 128
 RECURSIVE_CODE_REVIEW_P3_MODEL_TOOL_NAMES: Final = ("ipython",)
+RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256: Final = "sha256:" + "d" * 64
+RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256: Final = "sha256:" + "e" * 64
+RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256: Final = "sha256:" + "0" * 64
 
 
 _MANIFEST: Final = {
@@ -31,15 +34,15 @@ _MANIFEST: Final = {
     "format": "asterion.prime-recursive-code-review-workload/v1",
     "max_frame_bytes": RECURSIVE_CODE_REVIEW_P3_MAX_FRAME_BYTES,
     "model_tool_names": list(RECURSIVE_CODE_REVIEW_P3_MODEL_TOOL_NAMES),
-    "model_sha256": "sha256:" + "d" * 64,
-    "oracle_sha256": "sha256:" + "e" * 64,
+    "model_sha256": RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256,
+    "oracle_sha256": RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256,
     "repository_sha256": "sha256:" + "f" * 64,
     "retained_child_role_id": "prime.recursive-workflow.review",
     "role_id": "prime.recursive-workflow",
     "root_action_ceiling": RECURSIVE_CODE_REVIEW_P3_ROOT_ACTION_CEILING,
     "root_usage_ceiling": RECURSIVE_CODE_REVIEW_P3_ROOT_USAGE_CEILING,
     "scenario_id": "prime.recursive-workflow/v1",
-    "schema_sha256": "sha256:" + "0" * 64,
+    "schema_sha256": RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256,
 }
 
 RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID: Final = _MANIFEST["scenario_id"]

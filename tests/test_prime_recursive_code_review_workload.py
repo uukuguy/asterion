@@ -19,9 +19,12 @@ from asterion.applications.prime_agent.operator.recursive_code_review_workload i
     RECURSIVE_CODE_REVIEW_P3_DEADLINE_SECONDS,
     RECURSIVE_CODE_REVIEW_P3_FOLLOW_UP_ROLE_ID,
     RECURSIVE_CODE_REVIEW_P3_MAX_FRAME_BYTES,
+    RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256,
+    RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256,
     RECURSIVE_CODE_REVIEW_P3_ROLE_ID,
     RECURSIVE_CODE_REVIEW_P3_ROOT_ACTION_CEILING,
     RECURSIVE_CODE_REVIEW_P3_ROOT_USAGE_CEILING,
+    RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256,
     RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID,
     RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
     is_recursive_code_review_workload,
@@ -60,6 +63,9 @@ class TestRecursiveCodeReviewWorkload(unittest.TestCase):
         self.assertEqual(manifest["child_action_ceiling"], RECURSIVE_CODE_REVIEW_P3_CHILD_ACTION_CEILING)
         self.assertEqual(manifest["child_usage_ceiling"], RECURSIVE_CODE_REVIEW_P3_CHILD_USAGE_CEILING)
         self.assertEqual(manifest["model_tool_names"], ["ipython"])
+        self.assertEqual(manifest["model_sha256"], RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256)
+        self.assertEqual(manifest["oracle_sha256"], RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256)
+        self.assertEqual(manifest["schema_sha256"], RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256)
 
     def test_p1_and_p2_workloads_are_not_admitted(self) -> None:
         for workload in (

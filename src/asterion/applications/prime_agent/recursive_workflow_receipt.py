@@ -10,6 +10,11 @@ from asterion.applications.prime_agent.evidence import (
     PrimeEvidenceReceipt,
     validate_prime_evidence_receipt,
 )
+from asterion.applications.prime_agent.operator.recursive_code_review_workload import (
+    RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256,
+    RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256,
+    RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
+)
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
@@ -128,7 +133,7 @@ def verify_real_recursive_workflow_trace(
         or frozenset(vars(trace)) != _TRACE_FIELDS
         or type(requested_level) is not PrimeEvidenceLevel
         or requested_level is not PrimeEvidenceLevel.BOUNDED
-        or not _digest(trace.workload_sha256)
+        or trace.workload_sha256 != RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST
         or not _digest(trace.root_artifact_sha256)
         or not _distinct_two_digests(trace.first_child_role_digests)
         or not _distinct_two_digests(trace.first_child_result_digests)
@@ -139,11 +144,11 @@ def verify_real_recursive_workflow_trace(
                 trace.follow_up_digest,
                 trace.follow_up_result_digest,
                 trace.aggregation_sha256,
-                trace.oracle_sha256,
-                trace.model_sha256,
                 trace.usage_sha256,
             )
         )
+        or trace.oracle_sha256 != RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256
+        or trace.model_sha256 != RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256
         or trace.follow_up_result_digest in trace.first_child_result_digests
         or type(trace.root_to_child_message_count) is not int
         or trace.root_to_child_message_count != _CHILD_COUNT
