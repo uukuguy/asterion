@@ -1508,3 +1508,5 @@
 - 13:14 Wrapped canonical CLI result bytes in the fixed typed completion to satisfy the worker protocol [25513cc]
 - 13:53 Corrected the image-only fixture type check and refreshed its exact lock hash [pending commit]
 - 14:15 Defined P2 sealed restricted-worker design after approved architecture [pending commit]
+- 14:15 Committed P2 sealed restricted-worker contract [b2b165b]
+- 14:25 Planned P2 sealed worker implementation after approved specification [pending commit]
