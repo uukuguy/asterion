@@ -19,6 +19,8 @@ from asterion.services.bounded_model_session import BoundedModelSessionRequest
 
 _CHALLENGE = "sha256:" + "a" * 64
 _IMAGE = "sha256:" + "b" * 64
+_WORKLOAD = "sha256:" + "c" * 64
+_RESULT = "sha256:" + "d" * 64
 
 
 def _session(**changes: object) -> BoundedModelSessionRequest:
@@ -42,7 +44,9 @@ def _broker(**changes: object) -> PrimeModelBrokerReceipt:
 
 def _worker(**changes: object) -> PrimeWorkerBoundaryReceipt:
     values: dict[str, object] = {
+        "scenario_id": "prime.ipython-coding/v1", "role_id": "prime.ipython-coding",
         "worker_id": "worker-1", "run_id": "run-1", "challenge_digest": _CHALLENGE,
+        "workload_digest": _WORKLOAD, "result_digest": _RESULT,
         "image_digest": _IMAGE,
     }
     values.update(changes)
@@ -111,6 +115,8 @@ class TestPrimeCodingFixtureReceipt(unittest.TestCase):
             ("worker-run", {"worker_receipt": _worker(run_id="run-2")}),
             ("worker-id", {"worker_receipt": _worker(worker_id="worker-2")}),
             ("worker-challenge", {"worker_receipt": _worker(challenge_digest="sha256:" + "c" * 64)}),
+            ("worker-scenario", {"worker_receipt": _worker(scenario_id="prime.arc-agi-3/v1")}),
+            ("worker-role", {"worker_receipt": _worker(role_id="prime.arc-agi-3")}),
             ("worker-image", {"worker_receipt": _worker(image_digest="sha256:" + "c" * 64)}),
         )
         for name, changes in cases:

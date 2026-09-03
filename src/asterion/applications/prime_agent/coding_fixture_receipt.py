@@ -185,6 +185,8 @@ def _verify_worker_binding(observation: CodingFixtureObservation) -> None:
     if (
         type(worker) is not PrimeWorkerBoundaryReceipt
         or worker.status != "PASS"
+        or worker.scenario_id != "prime.ipython-coding/v1"
+        or worker.role_id != "prime.ipython-coding"
         or worker.worker_id != broker.worker_id
         or worker.run_id != broker.run_id
         or worker.challenge_digest != broker.challenge_digest
@@ -192,6 +194,8 @@ def _verify_worker_binding(observation: CodingFixtureObservation) -> None:
         or not _identifier(worker.worker_id)
         or not _identifier(worker.run_id)
         or not _digest(worker.challenge_digest)
+        or not _digest(worker.workload_digest)
+        or not _digest(worker.result_digest)
         or not _digest(worker.image_digest)
     ):
         raise CodingFixtureReceiptError("coding fixture receipt is invalid")
