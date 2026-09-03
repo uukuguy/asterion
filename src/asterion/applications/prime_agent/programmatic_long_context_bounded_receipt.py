@@ -11,6 +11,11 @@ from asterion.applications.prime_agent.evidence import (
     PrimeEvidenceReceipt,
 )
 from asterion.applications.prime_agent.operator.model_broker import PrimeModelBrokerReceipt
+from asterion.applications.prime_agent.operator.programmatic_long_context_workload import (
+    PROGRAMMATIC_LONG_CONTEXT_P2_CORPUS_SHA256,
+    PROGRAMMATIC_LONG_CONTEXT_P2_ORACLE_SHA256,
+    PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST,
+)
 from asterion.applications.prime_agent.worker_gate import (
     PrimeWorkerBoundaryReceipt,
     issue_prime_bounded_evidence,
@@ -21,9 +26,9 @@ _DIGEST: Final = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IDENTIFIER: Final = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 
 # These code-owned P2 identities are intentionally not caller-selectable.
-PROGRAMMATIC_LONG_CONTEXT_P2_CORPUS_SHA256: Final = "sha256:" + "e" * 64
-PROGRAMMATIC_LONG_CONTEXT_P2_ORACLE_SHA256: Final = "sha256:" + "f" * 64
-PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_SHA256: Final = "sha256:" + "0" * 64
+PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_SHA256: Final = (
+    PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST
+)
 
 
 class ProgrammaticLongContextBoundedReceiptError(ValueError):
