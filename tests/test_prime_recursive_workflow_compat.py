@@ -20,7 +20,8 @@ from asterion.applications.prime_agent.source_lock import (
     PrimeSourceLock,
     verify_prime_source_lock,
 )
-from asterion.control.authority import AuthorityLedger
+from asterion.control.authority import AuthorityLedger, BudgetLimit
+from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.journal import FileCanonicalJournal
 from asterion.control.manager import ControlHost
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
@@ -28,8 +29,8 @@ from asterion.control.providers.prime.process import (
     PrimeSidecarLaunchOptions,
     PrimeSidecarProcess,
 )
-from tests.test_control_authority import _envelope
-from tests.test_prime_rlm_messaging_parity import _NoopExecutor
+from tests.test_control_authority import _envelope, _proposal as _control_proposal
+from asterion.control.providers.prime.rlm import build_prime_rlm_control_host
 from tests.test_prime_session_context_parity import _closed_environment, _node_22
 from tests.test_prime_verified_loop import _PrivateResolver, _create_command, _prime_plan
 from tools.setup_prime_agent import derive_prime_rlm_runtime
@@ -69,6 +70,20 @@ PUBLIC_KEYS = {
     "workflow_sha256", "aggregation_sha256", "oracle_sha256",
     "root_continued_locally", "aggregation_passed", "disposed", "reaped",
 }
+
+
+class _CountingNoopExecutor:
+    """Fails any effect not claimed by the Prime RLM lifecycle."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute(
+        self, proposal: object, signal: object
+    ) -> ActionExecutionReceipt:
+        del proposal, signal
+        self.calls += 1
+        raise AssertionError("bound Prime RLM effect reached generic execution")
 
 
 def _external_limited(reason: str, *, reaped: bool = False) -> dict[str, object]:
@@ -155,7 +170,15 @@ def _run_compatibility(workspace: Path) -> dict[str, object]:
                     return _external_limited("kernel-start-timeout")
                 await asyncio.sleep(0.025)
             authority = _envelope(
-                allowed_operations=("application.invoke", "child.message", "child.spawn"),
+                allowed_operations=(
+                    "application.invoke",
+                    "child.message",
+                    "child.spawn",
+                    "rlm.child.delete",
+                    "rlm.child.message",
+                    "rlm.child.spawn",
+                ),
+                budget_limit=BudgetLimit(0, 0, 0, 0, 0),
                 execution_domain="trusted-local",
             )
             descriptor = {
@@ -172,11 +195,11 @@ def _run_compatibility(workspace: Path) -> dict[str, object]:
                 "primeSocketPath": str(socket_path), "primeSourceRoot": str(PRIME_ROOT),
                 "provider": "anthropic", "probeReady": False, "rlmMaxChildren": 2,
                 "rlmMaxDepth": 1,
-                "remainingBudget": {"controller_tokens": 2,
-                                    "application_tokens": 2,
-                                    "child_tokens": 2,
-                                    "aggregate_tokens": 2,
-                                    "cost_micros": 2,
+                "remainingBudget": {"controller_tokens": 0,
+                                    "application_tokens": 0,
+                                    "child_tokens": 0,
+                                    "aggregate_tokens": 0,
+                                    "cost_micros": 0,
                                     "deadline_ms": 5_000},
                 "sessionDir": str(session_dir), "sessionId": "session-1",
                 "skillPath": str(ROOT / "src" / "asterion" / "control" / "providers" / "prime" / "resources" / "skills" / "asterion-control"),
@@ -188,11 +211,12 @@ def _run_compatibility(workspace: Path) -> dict[str, object]:
             ))
             resolver = _PrivateResolver()
             client = PrimeControlPlaneClient(process=process, private_content=resolver, private_attachments=resolver)
-            host = ControlHost(
+            executor = _CountingNoopExecutor()
+            host = build_prime_rlm_control_host(
                 session_id="session-1", generation=1, plan=_prime_plan(root),
                 authority=AuthorityLedger(authority),
                 journal=FileCanonicalJournal.open(root / "journal", "session-1"), client=client,
-                action_executor=_NoopExecutor(), clock_ms=lambda: 1_000,
+                action_executor=executor, clock_ms=lambda: 1_000,
             )
             await host.dispatch(_create_command())
             await host.pump()
@@ -210,6 +234,8 @@ def _run_compatibility(workspace: Path) -> dict[str, object]:
                 return _external_limited("unsupported-prime-api")
             if report is None or set(report) != PUBLIC_KEYS:
                 return _external_limited("unsupported-prime-api")
+            if executor.calls != 0:
+                return _external_limited("unbound-host-effect")
             if report["reason"] == "spawn-resolution-rejected":
                 action_reasons = {
                     action.reason
@@ -254,6 +280,49 @@ def _run_compatibility(workspace: Path) -> dict[str, object]:
 
 
 class TestPrimeRecursiveWorkflowCompat(unittest.TestCase):
+    def test_zero_resource_authority_admits_six_provider_free_effects(self) -> None:
+        ledger = AuthorityLedger(
+            _envelope(
+                allowed_operations=("child.spawn",),
+                budget_limit=BudgetLimit(0, 0, 0, 0, 0),
+            )
+        )
+        budget = {
+            "controller_tokens": 0,
+            "application_tokens": 0,
+            "child_tokens": 0,
+            "aggregate_tokens": 0,
+            "cost_micros": 0,
+            "deadline_ms": 1,
+        }
+        for index in range(6):
+            decision = ledger.evaluate(
+                _control_proposal(
+                    action_id=f"zero-action-{index}",
+                    idempotency_key=f"zero-key-{index}",
+                    kind="child.spawn",
+                    target={"kind": "child", "child_id": f"zero-child-{index}"},
+                    expected_artifacts=[],
+                    budget=budget,
+                ),
+                now_ms=1_000,
+            )
+            with self.subTest(index=index):
+                self.assertEqual((decision.status, decision.reason), ("admitted", "authorized"))
+            ledger.reserve(decision)
+        nonzero = ledger.evaluate(
+            _control_proposal(
+                action_id="nonzero-action",
+                idempotency_key="nonzero-key",
+                kind="child.spawn",
+                target={"kind": "child", "child_id": "nonzero-child"},
+                expected_artifacts=[],
+                budget={**budget, "child_tokens": 1},
+            ),
+            now_ms=1_000,
+        )
+        self.assertEqual((nonzero.status, nonzero.reason), ("rejected", "budget-exceeded"))
+
     def test_real_rlm_fixture_is_present_and_does_not_expose_private_inputs(self) -> None:
         self.assertTrue(HARNESS.is_file())
 

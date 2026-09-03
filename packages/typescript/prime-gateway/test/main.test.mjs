@@ -292,6 +292,30 @@ test("native RLM actions reserve a bounded slice and use the unexpired child dea
   assert.equal(budget.cost_micros, 100_000);
 });
 
+test("provider-free native RLM effects preserve a zero resource budget", () => {
+  const budget = boundedRlmActionBudget({
+    controller_tokens: 0,
+    application_tokens: 0,
+    child_tokens: 0,
+    aggregate_tokens: 0,
+    cost_micros: 0,
+    deadline_ms: 5_000,
+  }, 1_020_000, 1_000_000);
+
+  assert.deepEqual(budget, {
+    controller_tokens: 0,
+    application_tokens: 0,
+    child_tokens: 0,
+    aggregate_tokens: 0,
+    cost_micros: 0,
+    deadline_ms: 5_000,
+  });
+  assert.throws(
+    () => boundedRlmActionBudget({ ...budget, deadline_ms: 1 }, 1_000_000, 1_000_000),
+    /failed/,
+  );
+});
+
 test("native RLM deletion is provider-owned only for one started, non-deleted child", () => {
   const started = [{
     type: "rlm.child.started",
