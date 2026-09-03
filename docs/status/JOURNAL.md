@@ -1572,3 +1572,5 @@
 - 05:06 Defined P6 fixed IPython refinement workload identity [pending commit]
 - 05:06 correction: P6 fixed workload commit [3c626e5]
 - 05:14 Bound P6 preserve-or-rollback causal trace to fixed workload [pending commit]
+- 05:14 correction: P6 causal trace commit [8767299]
+- 05:21 Added public Harness projection digests for P6 trace binding [pending commit]
