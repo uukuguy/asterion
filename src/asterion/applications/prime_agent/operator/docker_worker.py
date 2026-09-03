@@ -15,6 +15,9 @@ from time import monotonic
 from types import TracebackType
 from typing import Literal, Mapping, Protocol
 
+from asterion.applications.prime_agent.operator.ipython_workload import (
+    is_prime_ipython_coding_workload,
+)
 from asterion.runtime.host import CancellationSignal
 from asterion.services.restricted_worker import (
     RestrictedWorkerAttestation,
@@ -120,6 +123,25 @@ class DockerWorkerLauncherSelfCheck:
         return "DockerWorkerLauncherSelfCheck(redacted)"
 
 
+@dataclass(frozen=True, repr=False)
+class DockerWorkerCompletion:
+    """Private completed-workload bytes bound to one closed workload identity."""
+
+    workload_digest: str
+    result_bytes: bytes
+
+    def __post_init__(self) -> None:
+        if (
+            not is_prime_ipython_coding_workload(self.workload_digest)
+            or type(self.result_bytes) is not bytes
+            or not self.result_bytes
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+
+    def __repr__(self) -> str:
+        return "DockerWorkerCompletion(redacted)"
+
+
 class DockerLauncherChannel(Protocol):
     """Private, bounded launcher control stream for one opaque container."""
 
@@ -129,7 +151,9 @@ class DockerLauncherChannel(Protocol):
 
     async def release(self, *, control: _LifecycleCallControl) -> None: ...
 
-    async def completed_result(self, *, control: _LifecycleCallControl) -> bytes: ...
+    async def completed_result(
+        self, *, control: _LifecycleCallControl
+    ) -> DockerWorkerCompletion: ...
 
     async def close(self, *, control: _LifecycleCallControl) -> None: ...
 
@@ -212,6 +236,7 @@ class DockerRestrictedWorkerService:
             type(request) is not RestrictedWorkerRequest
             or request.role_id != self._role.role_id
             or request.image_digest != self._role.image_digest
+            or not is_prime_ipython_coding_workload(request.workload_digest)
             or request.max_runtime_seconds > self._role.max_runtime_seconds
             or request.max_output_bytes > self._role.max_output_bytes
         ):
@@ -283,7 +308,7 @@ class DockerRestrictedWorkerService:
         control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, None)
         try:
             await self._within_deadline(state.channel.release(control=control), control)
-            result = await self._within_deadline(
+            completion = await self._within_deadline(
                 state.channel.completed_result(control=control), control
             )
         except asyncio.CancelledError:
@@ -291,9 +316,9 @@ class DockerRestrictedWorkerService:
         except BaseException:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         if (
-            type(result) is not bytes
-            or not result
-            or len(result) > request.max_output_bytes
+            type(completion) is not DockerWorkerCompletion
+            or completion.workload_digest != lease.workload_digest
+            or len(completion.result_bytes) > request.max_output_bytes
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         state.execution = RestrictedWorkerExecutionReceipt(
@@ -302,7 +327,7 @@ class DockerRestrictedWorkerService:
             lease.run_id,
             lease.challenge_digest,
             lease.workload_digest,
-            "sha256:" + sha256(result).hexdigest(),
+            "sha256:" + sha256(completion.result_bytes).hexdigest(),
         )
         return state.execution
 
