@@ -113,6 +113,11 @@
   provider-free acceptance, and authorization-gated live reducer. Its 26-test
   local chain is provider-free only; real session/IPython evidence remains
   External-limited and cannot be promoted to bounded PASS.
+- P5 `prime.bounded-autonomy/v1` has a fixed IPython-only diagnostic-repair
+  workload, identity- and ceiling-bound two-gate trace, replay-fenced
+  host-gate adapter, provider-free acceptance, and a revalidating live reducer.
+  Its local fake chain is verified only; real Prime/IPython worker evidence is
+  External-limited and cannot be promoted to bounded PASS.
 
 ## Open Problems
 
@@ -122,6 +127,8 @@
   reviewed difference records.
 - Implement and verify the P1 workload-result contract without widening the
   closed Smoke Core claim or admitting generic worker execution.
+- Carry the approved P5 boundary forward into the P6 Continual Harness without
+  treating historical harness parity receipts as capability evidence.
 
 ## Key Files
 

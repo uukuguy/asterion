@@ -1563,3 +1563,4 @@
 - 04:31 Bound P5 trace to one fixed workload identity and ceilings [pending commit]
 - 04:31 correction: P5 fixed workload binding commit [506b1c8]
 - 04:36 Redacted unexpected P5 host-gate failures at the public boundary [pending commit]
+- 04:36 correction: P5 host-gate redaction commit [cdd1d01]
