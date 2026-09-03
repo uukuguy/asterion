@@ -236,6 +236,28 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
         self.assertNotIn("private-release-sentinel.invalid", repr(result))
         self.assertNotIn("secret-path", str(result))
 
+    def test_returned_public_claim_has_no_private_locator_attribute(self) -> None:
+        result = generation.generate_release_specification(_request())
+        public_object = result.release_proposal.artifacts[0].object
+
+        self.assertFalse(hasattr(public_object, "url"))
+        self.assertEqual(
+            set(public_object.__dataclass_fields__), {"sha256", "size", "url_sha256"}
+        )
+
+    def test_public_result_canonicalization_rejects_mismatched_projections(self) -> None:
+        result = generation.generate_release_specification(_request())
+        tampered = replace(
+            result,
+            release_proposal=replace(
+                result.release_proposal,
+                artifacts=tuple(reversed(result.release_proposal.artifacts)),
+            ),
+        )
+
+        with self.assertRaises(generation.PrimeReleaseSpecGenerationError):
+            generation.canonical_release_spec_generation_json(tampered)
+
     def test_exact_parser_boundary_rejects_extra_missing_and_wrong_claim_shapes(
         self,
     ) -> None:

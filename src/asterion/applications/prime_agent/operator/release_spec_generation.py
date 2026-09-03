@@ -99,6 +99,59 @@ class MetadataObjectClaim:
 
 
 @dataclass(frozen=True)
+class PublicObjectBlob:
+    """Review-safe object evidence; capture locators never leave the request."""
+
+    size: int
+    sha256: str
+    url_sha256: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "sha256": self.sha256,
+            "size": self.size,
+            "url_sha256": self.url_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class PublicMetadataObjectClaim:
+    """A review-safe projection of an injected, untrusted metadata claim."""
+
+    artifact_kind: str
+    artifact_path: str
+    metadata: MetadataBlob
+    object: PublicObjectBlob
+    declared_object_size: int
+    declared_object_sha256: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "artifact_kind": self.artifact_kind,
+            "artifact_path": self.artifact_path,
+            "declared_object_sha256": self.declared_object_sha256,
+            "declared_object_size": self.declared_object_size,
+            "metadata": self.metadata.as_dict(),
+            "object": self.object.as_dict(),
+        }
+
+
+def _public_claim(value: MetadataObjectClaim) -> PublicMetadataObjectClaim:
+    return PublicMetadataObjectClaim(
+        value.artifact_kind,
+        value.artifact_path,
+        value.metadata,
+        PublicObjectBlob(
+            value.object.size,
+            value.object.sha256,
+            hashlib.sha256(value.object.url.encode("utf-8")).hexdigest(),
+        ),
+        value.declared_object_size,
+        value.declared_object_sha256,
+    )
+
+
+@dataclass(frozen=True)
 class ReleaseSpecGenerationRequest:
     target: ExactTargetDescriptor
     source: PrimeSourceTriple
@@ -112,12 +165,12 @@ class ReleaseSpecGenerationRequest:
 class UntrustedAcquisitionLock:
     target: ExactTargetDescriptor
     source: PrimeSourceTriple
-    claims: tuple[MetadataObjectClaim, ...]
+    claims: tuple[PublicMetadataObjectClaim, ...]
     untrusted: Literal[True] = True
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "claims": [claim.as_public_dict() for claim in self.claims],
+            "claims": [claim.as_dict() for claim in self.claims],
             "format": "asterion.prime-ipython-acquisition-lock/v1",
             "source": _source_dict(self.source),
             "target": self.target.as_dict(),
@@ -129,12 +182,12 @@ class UntrustedAcquisitionLock:
 class UntrustedArtifactInventory:
     target: ExactTargetDescriptor
     source: PrimeSourceTriple
-    artifacts: tuple[MetadataObjectClaim, ...]
+    artifacts: tuple[PublicMetadataObjectClaim, ...]
     untrusted: Literal[True] = True
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "artifacts": [artifact.as_public_dict() for artifact in self.artifacts],
+            "artifacts": [artifact.as_dict() for artifact in self.artifacts],
             "format": "asterion.prime-ipython-artifact-inventory/v1",
             "source": _source_dict(self.source),
             "target": self.target.as_dict(),
@@ -146,12 +199,12 @@ class UntrustedArtifactInventory:
 class UntrustedReleaseProposal:
     target: ExactTargetDescriptor
     source: PrimeSourceTriple
-    artifacts: tuple[MetadataObjectClaim, ...]
+    artifacts: tuple[PublicMetadataObjectClaim, ...]
     untrusted: Literal[True] = True
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "artifacts": [artifact.as_public_dict() for artifact in self.artifacts],
+            "artifacts": [artifact.as_dict() for artifact in self.artifacts],
             "format": "asterion.prime-ipython-release-proposal/v1",
             "source": _source_dict(self.source),
             "target": self.target.as_dict(),
@@ -362,16 +415,15 @@ def generate_release_specification(request: object) -> ReleaseSpecGenerationResu
         and not validated.observation.emulated
     ):
         status = "candidate-native"
-    lock = UntrustedAcquisitionLock(
-        validated.target, validated.source, validated.claims
-    )
+    public_claims = tuple(_public_claim(claim) for claim in validated.claims)
+    lock = UntrustedAcquisitionLock(validated.target, validated.source, public_claims)
     return ReleaseSpecGenerationResult(
         status,
         lock,
         UntrustedArtifactInventory(
-            validated.target, validated.source, validated.claims
+            validated.target, validated.source, public_claims
         ),
-        UntrustedReleaseProposal(validated.target, validated.source, validated.claims),
+        UntrustedReleaseProposal(validated.target, validated.source, public_claims),
         ProposalProvenance(
             validated.target,
             validated.source,
@@ -385,19 +437,101 @@ def canonical_release_spec_generation_json(result: object) -> str:
     """Return canonical review JSON. This is not an ImageInputLock parser."""
     if type(result) is not ReleaseSpecGenerationResult:
         raise _invalid()
-    generated = generate_release_specification(
-        ReleaseSpecGenerationRequest(
-            result.acquisition_lock.target,
-            result.acquisition_lock.source,
-            result.provenance.observation,
-            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE,
-            result.acquisition_lock.claims,
-            result.provenance.generator_revision,
-        )
-    )
-    if result != generated:
+    if not _valid_public_result(result):
         raise _invalid()
     return json.dumps(result.as_dict(), separators=(",", ":"), sort_keys=True)
+
+
+def _valid_public_result(result: ReleaseSpecGenerationResult) -> bool:
+    """Validate public structure without reconstructing private capture locators."""
+    try:
+        if result.status not in {"candidate-native", "External-limited"}:
+            return False
+        lock, inventory, proposal, provenance = (
+            result.acquisition_lock,
+            result.artifact_inventory,
+            result.release_proposal,
+            result.provenance,
+        )
+        if (
+            lock.untrusted is not True
+            or inventory.untrusted is not True
+            or proposal.untrusted is not True
+            or provenance.untrusted is not True
+            or lock.target != inventory.target
+            or lock.target != proposal.target
+            or lock.source != inventory.source
+            or lock.source != proposal.source
+            or lock.claims != inventory.artifacts
+            or lock.claims != proposal.artifacts
+            or provenance.target != lock.target
+            or provenance.source != lock.source
+            or provenance.generator_revision != _GENERATOR_REVISION
+            or _validate_source(lock.source) is not lock.source
+            or _validate_target(lock.target) is not lock.target
+            or _validate_observation(provenance.observation) is not provenance.observation
+        ):
+            return False
+        expected_status = (
+            "candidate-native"
+            if (
+                provenance.observation.target == lock.target
+                and lock.target.os == "linux"
+                and provenance.observation.substrate == "native-linux"
+                and not provenance.observation.emulated
+            )
+            else "External-limited"
+        )
+        if result.status != expected_status or not lock.claims:
+            return False
+        claims = tuple(_validate_public_claim(claim) for claim in lock.claims)
+        if (
+            claims != tuple(sorted(claims, key=lambda claim: claim.artifact_path))
+            or len({claim.artifact_path for claim in claims}) != len(claims)
+            or len({claim.object.url_sha256 for claim in claims}) != len(claims)
+        ):
+            return False
+        return True
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
+def _validate_public_claim(value: object) -> PublicMetadataObjectClaim:
+    if (
+        type(value) is not PublicMetadataObjectClaim
+        or type(value.artifact_kind) is not str
+        or type(value.artifact_path) is not str
+        or type(value.metadata) is not MetadataBlob
+        or type(value.object) is not PublicObjectBlob
+        or type(value.declared_object_size) is not int
+        or type(value.declared_object_sha256) is not str
+        or _KIND.fullmatch(value.artifact_kind) is None
+        or _PATH.fullmatch(value.artifact_path) is None
+        or "//" in value.artifact_path
+        or any(part in {".", ".."} for part in value.artifact_path.split("/"))
+    ):
+        raise ValueError
+    metadata, object_blob = value.metadata, value.object
+    if (
+        type(metadata.parser_revision) is not str
+        or type(metadata.size) is not int
+        or type(metadata.sha256) is not str
+        or metadata.parser_revision != _METADATA_PARSER_REVISION
+        or metadata.size < 0
+        or _SHA256.fullmatch(metadata.sha256) is None
+        or type(object_blob.size) is not int
+        or type(object_blob.sha256) is not str
+        or type(object_blob.url_sha256) is not str
+        or object_blob.size < 0
+        or _SHA256.fullmatch(object_blob.sha256) is None
+        or _SHA256.fullmatch(object_blob.url_sha256) is None
+        or value.declared_object_size < 0
+        or _SHA256.fullmatch(value.declared_object_sha256) is None
+        or value.declared_object_size != object_blob.size
+        or value.declared_object_sha256 != object_blob.sha256
+    ):
+        raise ValueError
+    return value
 
 
 def _parse_target(value: object) -> ExactTargetDescriptor:
