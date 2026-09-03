@@ -1528,3 +1528,18 @@
 - 18:27 Recorded P2 main verification for accurate recovery state [ff1f496]
 - 18:35 Defined real P3 RLM review workflow to replace shim-only witness [ceaafca]
 - 18:40 Planned sealed P3 implementation in four reviewable tasks [24e15e9]
+- 23:52 Required complete real-RLM traces before recursive bounded evidence; compatibility reports remain non-promotable [73a9273]
+- 23:52 Sealed recursive trace fields against hidden private data before bounded issuance [e55c910]
+
+## 2026-09-04
+
+- 00:00 Covered recursive trace error repr redaction against sentinel disclosure [03813c7]
+- 00:04 Hardened child trace structure against equality bypass and duplicate identities [ca3c78b]
+- 00:15 Sealed P3 recursive review workload and canonical trace parser [ccdddf3]
+- 01:19 Demoted static P3 launcher frames to diagnostics; bound follow-up evidence and ceilings [39f4c11]
+- 01:25 Bound recursive bounded evidence to exact P3 workload/model/oracle identities [a34401f]
+- 01:30 Bound recursive bounded evidence to exact P3 schema identity [34a3cae]
+- 01:41 Sealed P3 worker and one-use broker lifecycle for provider-free recursive-review boundary [727a29c]
+- 02:05 Hardened P3 cleanup retries and engine-inspected attestation after review [099449b]
+- 09:15 Preserved P3 cleanup tombstones against forged lease receipt requests [ccb6bb5]
+- 09:35 Added P3 fake full-chain acceptance; bounded evidence remains authorization-gated [pending commit]

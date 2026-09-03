@@ -16,6 +16,11 @@
   destruction, boundary admission, and bounded reduction in that order; this
   is not Docker, model, or network execution and does not change P2's
   External-limited live-execution status.
+- P3's sealed recursive-review acceptance coordinator now drives the fake
+  worker/broker lifecycle through attestation, root admission, one relay,
+  canonical completion, revoke, destruction, and cleanup.  It emits only a
+  provider-free receipt; live P3 evidence requires explicit authorization and
+  a real RLM/IPython observation.
 
 ## Current decision
 
@@ -50,9 +55,9 @@
 
 ## Immediate next action
 
-1. Begin approved P3 recursive-workflow design, preserving P1/P2 sealed
-   role-specific workloads and the fixed IPython-only action surface.
-2. Retain P2 live execution and P3–P7 as External-limited; ARC-AGI-3 remains
+1. Complete P3 recursive-workflow acceptance review and integrate it on main;
+   preserve the fixed IPython-only action surface and sealed P1/P2/P3 roles.
+2. Retain P2/P3 live execution and P4–P7 as External-limited; ARC-AGI-3 remains
    unimplemented and requires a later isolated broker/functional-subset design.
 
 ## Recovery commands
