@@ -1582,3 +1582,4 @@
 - 05:44 Added P6 failed-holdout exact Coordinator rollback acceptance [pending commit]
 - 05:44 correction: P6 failed-holdout rollback commit [dbb71ea]
 - 06:02 Added P6 scope binding and live evidence authorization reducer [pending commit]
+- 06:02 correction: P6 scope-bound live evidence gate commit [e372297]

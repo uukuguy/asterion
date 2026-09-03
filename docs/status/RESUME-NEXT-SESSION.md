@@ -1,71 +1,44 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 13:08. **Session remains active — not a final handoff.**
+> Updated: 2026-09-04 06:02. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The P1 workload-result specification is committed at `23457b7`; Task 1 is
-  committed at `1fd2ad8`, admitting only its fixed IPython fixture digest and
-  binding receipts to redacted immutable completion bytes.
-- The final review correction is committed at `f61a55b`: P5/P6 cannot issue
-  bounded evidence until role-specific real launchers exist.
-- Products 2–7 remain External-limited. Existing P2/P3 provider-free work and
-  trusted-local P5 probe are non-promotable mechanics, not sandboxed PASS.
-- P2's sealed acceptance coordinator is covered by a provider-free fake chain.
-  It requires attestation, broker admission/release/revocation, result,
-  destruction, boundary admission, and bounded reduction in that order; this
-  is not Docker, model, or network execution and does not change P2's
-  External-limited live-execution status.
-- P3's sealed recursive-review acceptance coordinator now drives the fake
-  worker/broker lifecycle through attestation, root admission, one relay,
-  canonical completion, revoke, destruction, and cleanup.  It emits only a
-  provider-free receipt; live P3 evidence requires explicit authorization and
-  a real RLM/IPython observation.
+- P1–P5 are implemented and provider-free verified. None has real
+  Docker/model/network/benchmark evidence; such results remain External-limited.
+- P6 now implements the fixed task-A → one candidate revision → task-B
+  preserve-or-exact-rollback product over `HarnessCoordinator`.
+- `e372297` completes P6’s private live reducer. It binds the worker result,
+  platform lock, task-B attestation, broker quiescence, cleanup, and a separate
+  exact approval only for global scope before issuing bounded evidence.
 
 ## Current decision
 
 - Prime is an IPython-only action surface with recursive `rlm(...)` and a
   versioned Continual Harness—not generic Native/DCI parity.
-- The P1 Docker worker stays fixed to one image-owned fixture. The application
-  supplies no source text, command, prompt, path, or environment values.
-- A terminal `completed` marker by itself is insufficient: the host must bind
-  the canonical result bytes and exact fixture digest to the lease.
-- P5/P6 remain unable to issue bounded evidence. Their future launchers must
-  be role-specific and independently real.
+- Provider-free tests validate causal ordering and rejection boundaries only;
+  they never promote an external runtime claim.
 
 ## Verification evidence
 
-- Worker platform: 69 focused Python tests across shared lifecycle, seven-role
-  gate, Docker adapter/CLI, launch barrier, and model broker passed; Node
-  launcher syntax, Ruff, Pyright, and diff checks passed. No Docker, model, or
-  network action occurred.
-- Node: 37 Prime gateway main tests passed, including zero-resource native RLM
-  budget clamping and expiry rejection.
-- Ruff, Pyright, Node syntax, and `git diff --check` passed.
-- P2 acceptance: 56 focused P2/worker/broker Python tests and 63 P1
-  cross-role regressions passed on main, with scoped Ruff, Pyright, and diff checks.
-  These are provider-free fake-service checks only; no Docker daemon, model
-  provider, or network action occurred.
-- Review correction: an open network, persistent workspace, or inherited
-  credential profile now rejects in coordinator preflight before worker or
-  broker admission; 34 focused acceptance/profile/gate/worker tests passed.
-- `make promotion-check` remains **not PASS** (stopped before unapproved
-  Climb H-001); `make test` remains red on a pre-existing DCI packaged-
-  assembly inventory expectation.
+- `uv run python -m unittest -v tests.test_prime_continual_improvement_workload
+  tests.test_prime_continual_improvement_receipt
+  tests.test_prime_continual_improvement_acceptance
+  tests.test_prime_continual_improvement_live_validation
+  tests.test_prime_worker_gate tests.test_control_harness` passed (44 tests).
+- Scoped Ruff, Pyright, and `git diff --check` passed. No external runtime was
+  started.
 
 ## Immediate next action
 
-1. Complete P3 recursive-workflow acceptance review and integrate it on main;
-   preserve the fixed IPython-only action surface and sealed P1/P2/P3 roles.
-2. Retain P2/P3 live execution and P4–P7 as External-limited; ARC-AGI-3 remains
-   unimplemented and requires a later isolated broker/functional-subset design.
+1. Review P6 against its plan; record provider-free completion but retain
+   External-limited live evidence.
+2. Start the final P7 ARC-AGI-3 scenario design and implementation path.
 
 ## Recovery commands
 
 ```bash
 git status --short
 git log --oneline -12
-make test.prime-long-running.provider-free
-uv run python -m unittest -v tests.test_prime_bounded_autonomy_receipt
-node --test packages/typescript/prime-gateway/test/main.test.mjs
+uv run python -m unittest -v tests.test_prime_continual_improvement_workload tests.test_prime_continual_improvement_receipt tests.test_prime_continual_improvement_acceptance tests.test_prime_continual_improvement_live_validation tests.test_prime_worker_gate tests.test_control_harness
 ```
