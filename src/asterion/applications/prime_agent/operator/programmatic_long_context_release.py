@@ -16,6 +16,8 @@ from .programmatic_long_context_workload import (
     PROGRAMMATIC_LONG_CONTEXT_P2_ROLE_ID,
     PROGRAMMATIC_LONG_CONTEXT_P2_SCENARIO_ID,
     PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST,
+    ProgrammaticLongContextCompletion,
+    canonical_programmatic_long_context_completion_bytes,
 )
 
 
@@ -121,18 +123,16 @@ class ProgrammaticLongContextRelease:
             return {}
         self._terminal = True
         assert self._response_sha256 is not None and self._aggregate_sha256 is not None
-        return {
-            "active_tool_names": ("ipython",),
-            "aggregate_sha256": self._aggregate_sha256,
-            "ipython_cell_executed": True,
-            "oracle_passed": True,
-            "program_sha256": self._response_sha256,
-            "response_sha256": self._response_sha256,
-            "session_disposed": True,
-            "terminal": "completed",
-            "tool_call_count": 1,
-            "workload_digest": PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST,
-        }
+        completion = ProgrammaticLongContextCompletion(
+            response_sha256=self._response_sha256,
+            program_sha256=self._response_sha256,
+            aggregate_sha256=self._aggregate_sha256,
+        )
+        result = json.loads(canonical_programmatic_long_context_completion_bytes(completion))
+        assert type(result) is dict
+        result["terminal"] = "completed"
+        result["tool_call_count"] = 1
+        return result
 
     def _parse(self, raw: object) -> dict[str, object]:
         if type(raw) is not bytes or not raw or len(raw) > PROGRAMMATIC_LONG_CONTEXT_MAX_FRAME_BYTES:
