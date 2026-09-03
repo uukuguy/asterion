@@ -227,8 +227,10 @@ class RecursiveCodeReviewDockerWorker:
         )
 
     async def cleanup_receipt(self, lease: RestrictedWorkerLease) -> RestrictedWorkerCleanupReceipt:
-        if type(lease) is not RestrictedWorkerLease or self._tombstones.pop(lease.worker_id, None) != lease:
+        tombstone = self._tombstones.get(lease.worker_id) if type(lease) is RestrictedWorkerLease else None
+        if tombstone != lease:
             raise RestrictedWorkerError("restricted worker value is invalid")
+        del self._tombstones[lease.worker_id]
         return RestrictedWorkerCleanupReceipt(
             lease.worker_id, lease.role_id, lease.run_id, lease.challenge_digest,
             lease.workload_digest, True,

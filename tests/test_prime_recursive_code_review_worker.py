@@ -135,6 +135,12 @@ class TestRecursiveCodeReviewWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt.result_digest, "sha256:" + sha256(engine.raw).hexdigest())
         self.assertEqual(engine.args, (RECURSIVE_CODE_REVIEW_P3_ROLE_ID, _IMAGE, RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST, (), "/usr/local/bin/prime-recursive-code-review.mjs", "prime-recursive-code-review"))
         self.assertEqual(engine.removed, lease)
+        forged = RestrictedWorkerLease(
+            lease.worker_id, lease.role_id, "forged-run", lease.challenge_digest,
+            lease.workload_digest,
+        )
+        with self.assertRaises(RestrictedWorkerError):
+            await worker.cleanup_receipt(forged)
         self.assertTrue((await worker.cleanup_receipt(lease)).destroyed)
 
     async def test_attestation_requires_engine_observed_exact_controls(self) -> None:
