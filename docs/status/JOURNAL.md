@@ -1580,3 +1580,5 @@
 - 05:36 Bound fixed Coordinator rollback identities into P6 trace [pending commit]
 - 05:36 correction: P6 fixed rollback identity commit [9d0ee61]
 - 05:44 Added P6 failed-holdout exact Coordinator rollback acceptance [pending commit]
+- 05:44 correction: P6 failed-holdout rollback commit [dbb71ea]
+- 06:02 Added P6 scope binding and live evidence authorization reducer [pending commit]

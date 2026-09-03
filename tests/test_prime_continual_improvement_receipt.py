@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 import hashlib
 import json
+from typing import Literal
 import unittest
 
 from asterion.applications.prime_agent.continual_improvement_receipt import (
@@ -32,10 +33,12 @@ def _digest(character: str) -> str:
     return "sha256:" + character * 64
 
 
-def _trace(*, outcome: str = "preserved", rollback_count: int = 0) -> ContinualImprovementTrace:
+def _trace(
+    *, outcome: Literal["preserved", "rolled-back"] = "preserved", rollback_count: int = 0
+) -> ContinualImprovementTrace:
     return ContinualImprovementTrace(
         P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST, _digest("a"), _digest("b"),
-        _digest("c"), _digest("d"), _digest("e"), P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256,
+        _digest("c"), _digest("d"), _digest("e"), _digest("f"), "project", P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256,
         P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256, P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256,
         ("ipython",), 3, 10, 1, 1, rollback_count, outcome, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, 1, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256, True, True, True,
     )
@@ -71,7 +74,7 @@ class TestContinualImprovementReceipt(unittest.TestCase):
             _trace(outcome="preserved", rollback_count=1),
             _trace(outcome="rolled-back", rollback_count=0),
             ContinualImprovementTrace(
-                _digest("0"), _digest("a"), _digest("b"), _digest("c"), _digest("d"), _digest("e"),
+                _digest("0"), _digest("a"), _digest("b"), _digest("c"), _digest("d"), _digest("e"), _digest("f"), "project",
                 P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256, P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256,
                 P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256, ("ipython",), 3, 10, 1, 1, 0,
                 "preserved", P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, 1, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256, True, True, True,

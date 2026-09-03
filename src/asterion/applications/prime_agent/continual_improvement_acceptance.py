@@ -7,7 +7,12 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import cast
 
-from asterion.control.harness import HarnessCoordinator, HarnessRevision, HarnessSnapshot
+from asterion.control.harness import (
+    HarnessCoordinator,
+    HarnessRevision,
+    HarnessScope,
+    HarnessSnapshot,
+)
 from asterion.applications.prime_agent.continual_improvement_receipt import (
     ContinualImprovementTrace,
     validate_continual_improvement_trace,
@@ -38,6 +43,16 @@ def continual_improvement_snapshot_sha256(snapshot: object) -> str:
         "entries": [dict(entry.to_public_mapping()) for entry in snapshot.entries],
         "scope": dict(snapshot.scope.to_mapping()),
     })
+
+
+def continual_improvement_scope_sha256(scope: object) -> str:
+    """Return the canonical public identity for one Harness scope."""
+
+    if type(scope) is not HarnessScope:
+        raise ContinualImprovementAcceptanceError(
+            "continual improvement acceptance is invalid"
+        )
+    return "sha256:" + scope.digest
 
 
 def continual_improvement_revision_sha256(revision: object) -> str:
@@ -82,6 +97,17 @@ async def accept_continual_improvement(
             != trace.candidate_snapshot_sha256
             or continual_improvement_revision_sha256(typed_candidate_revision)
             != trace.candidate_revision_sha256
+            or type(baseline_snapshot) is not HarnessSnapshot
+            or type(candidate_snapshot) is not HarnessSnapshot
+            or continual_improvement_scope_sha256(baseline_snapshot.scope)
+            != trace.scope_sha256
+            or continual_improvement_scope_sha256(candidate_snapshot.scope)
+            != trace.scope_sha256
+            or continual_improvement_scope_sha256(typed_candidate_revision.scope)
+            != trace.scope_sha256
+            or baseline_snapshot.scope.kind != trace.scope_kind
+            or candidate_snapshot.scope.kind != trace.scope_kind
+            or typed_candidate_revision.scope.kind != trace.scope_kind
         ):
             raise ValueError
         evaluate = getattr(gate, "evaluate", None)

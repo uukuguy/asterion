@@ -32,6 +32,7 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _TRACE_FIELDS = frozenset({
     "workload_sha256", "baseline_snapshot_sha256", "candidate_snapshot_sha256",
     "candidate_revision_sha256", "task_a_evidence_sha256", "task_b_result_sha256",
+    "scope_sha256", "scope_kind",
     "oracle_sha256", "model_sha256", "schema_sha256", "tool_names", "action_count",
     "usage_count", "candidate_count", "holdout_count", "rollback_count", "outcome",
     "rollback_authority_id", "rollback_authority_revision", "rollback_proposal_id",
@@ -51,6 +52,8 @@ class ContinualImprovementTrace:
     candidate_revision_sha256: str
     task_a_evidence_sha256: str
     task_b_result_sha256: str
+    scope_sha256: str
+    scope_kind: Literal["session", "project", "global"]
     oracle_sha256: str
     model_sha256: str
     schema_sha256: str
@@ -92,6 +95,7 @@ def validate_continual_improvement_trace(trace: object) -> None:
             or trace.model_sha256 != P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256
             or trace.schema_sha256 != P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256
             or trace.baseline_snapshot_sha256 == trace.candidate_snapshot_sha256
+            or trace.scope_kind not in {"session", "project", "global"}
             or trace.tool_names != ("ipython",)
             or type(trace.action_count) is not int or not 0 < trace.action_count <= 3
             or type(trace.usage_count) is not int or not 0 < trace.usage_count <= 256

@@ -5,6 +5,7 @@ import unittest
 from asterion.applications.prime_agent.continual_improvement_acceptance import (
     accept_continual_improvement,
     continual_improvement_revision_sha256,
+    continual_improvement_scope_sha256,
     continual_improvement_snapshot_sha256,
 )
 from asterion.applications.prime_agent.continual_improvement_receipt import ContinualImprovementTrace
@@ -36,12 +37,21 @@ class TestContinualImprovementAcceptance(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(continual_improvement_revision_sha256(revision), r"^sha256:[0-9a-f]{64}$")
         self.assertNotIn("private:memory-1", repr(snapshot))
 
+    def test_scope_projection_is_canonical_and_rejects_non_scopes(self) -> None:
+        scope = HarnessScope.project("project-1")
+
+        self.assertRegex(
+            continual_improvement_scope_sha256(scope), r"^sha256:[0-9a-f]{64}$"
+        )
+        with self.assertRaises(ValueError):
+            continual_improvement_scope_sha256(object())
+
     async def test_accepts_one_matching_nonregressing_holdout_as_provider_free(self) -> None:
         scope = HarnessScope.project("project-1")
         baseline = HarnessSnapshot("snapshot-0", scope, None, 0, (), None)
         candidate = HarnessSnapshot("snapshot-1", scope, "revision-1", 1, (_entry(),), None)
         revision = HarnessRevision("revision-1", 1, "proposal-1", "d" * 64, scope, "snapshot-0", "snapshot-1", "e" * 64, "succeeded", None, {"aggregate_tokens": 0, "cost_micros": 0, "model_credential_reads": 0, "provider_operations": 0})
-        trace = ContinualImprovementTrace(P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST, continual_improvement_snapshot_sha256(baseline), continual_improvement_snapshot_sha256(candidate), continual_improvement_revision_sha256(revision), "sha256:" + "a" * 64, "sha256:" + "b" * 64, P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256, P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256, P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256, ("ipython",), 3, 10, 1, 1, 0, "preserved", P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, 1, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256, True, True, True)
+        trace = ContinualImprovementTrace(P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST, continual_improvement_snapshot_sha256(baseline), continual_improvement_snapshot_sha256(candidate), continual_improvement_revision_sha256(revision), "sha256:" + "a" * 64, "sha256:" + "b" * 64, continual_improvement_scope_sha256(scope), scope.kind, P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256, P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256, P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256, ("ipython",), 3, 10, 1, 1, 0, "preserved", P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, 1, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256, True, True, True)
 
         class Gate:
             async def evaluate(self, candidate_sha256: str) -> tuple[bool, str]:
@@ -67,7 +77,7 @@ class TestContinualImprovementAcceptance(unittest.IsolatedAsyncioTestCase):
         proposal = __import__("asterion.control.harness", fromlist=["HarnessProposal"]).HarnessProposal("candidate-1", "p6-authority", 1, scope, baseline.snapshot_id, (HarnessEdit.create(_entry()),), ("evidence-1",), "private:candidate", "d" * 64, "e" * 64)
         candidate_revision = coordinator.apply(proposal)
         candidate = coordinator.snapshot()
-        trace = ContinualImprovementTrace(P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST, continual_improvement_snapshot_sha256(baseline), continual_improvement_snapshot_sha256(candidate), continual_improvement_revision_sha256(candidate_revision), "sha256:" + "a" * 64, "sha256:" + "b" * 64, P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256, P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256, P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256, ("ipython",), 3, 10, 1, 1, 1, "rolled-back", P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, 1, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256, True, True, True)
+        trace = ContinualImprovementTrace(P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST, continual_improvement_snapshot_sha256(baseline), continual_improvement_snapshot_sha256(candidate), continual_improvement_revision_sha256(candidate_revision), "sha256:" + "a" * 64, "sha256:" + "b" * 64, continual_improvement_scope_sha256(scope), scope.kind, P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256, P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256, P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256, ("ipython",), 3, 10, 1, 1, 1, "rolled-back", P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, 1, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256, True, True, True)
 
         class Gate:
             async def evaluate(self, candidate_sha256: str) -> tuple[bool, str]:
