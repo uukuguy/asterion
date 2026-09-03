@@ -1566,3 +1566,5 @@
 - 04:36 correction: P5 host-gate redaction commit [cdd1d01]
 - 04:41 Recorded P5 provider-free boundary in structural project state [3f12ecf]
 - 04:52 Specified P6 fixed continual-improvement acceptance over Harness [pending commit]
+- 04:52 correction: P6 continual-improvement design commit [3f35587]
+- 05:00 Planned P6 workload, holdout rollback, and live evidence gates [pending commit]
