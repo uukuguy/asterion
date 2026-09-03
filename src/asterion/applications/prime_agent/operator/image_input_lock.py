@@ -6,7 +6,7 @@ has no environment, network, package-manager, or image-engine dependency.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 import json
 import os
@@ -133,6 +133,7 @@ class ReleaseSpecification:
     recipe: ReleaseRecipe
     platform: ImagePlatformDescriptor
     artifacts: tuple[ReleaseArtifact, ...]
+    candidate_request: object | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

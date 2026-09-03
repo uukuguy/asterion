@@ -23,6 +23,11 @@ from asterion.applications.prime_agent.operator.release_recipe import (
     resolve_candidate_target,
     validate_release_recipe,
 )
+from asterion.applications.prime_agent.operator.release_spec_generation import (
+    ExactTargetDescriptor,
+    ReleaseSpecGenerationRequest,
+    generate_release_specification,
+)
 
 
 class PrimeImageMaterializerError(ValueError):
@@ -148,7 +153,7 @@ def validate_release_specification(specification: object) -> ReleaseSpecificatio
     if not isinstance(specification.artifacts, tuple) or not specification.artifacts:
         raise ValueError("Prime image release specification is invalid")
     validate_release_recipe(specification.recipe)
-    resolve_candidate_target(specification.platform)
+    selected = resolve_candidate_target(specification.platform)
     artifacts = specification.artifacts
     if tuple(sorted(artifacts, key=lambda item: item.path)) != artifacts or len({item.url for item in artifacts}) != len(artifacts):
         raise ValueError("Prime image release specification is invalid")
@@ -168,6 +173,30 @@ def validate_release_specification(specification: object) -> ReleaseSpecificatio
         ):
             raise ValueError("Prime image release specification is invalid")
     if len({item.path for item in artifacts}) != len(artifacts):
+        raise ValueError("Prime image release specification is invalid")
+    request = specification.candidate_request
+    if type(request) is not ReleaseSpecGenerationRequest:
+        raise ValueError("Prime image release specification is invalid")
+    generated = generate_release_specification(request)
+    if (
+        request.recipe is not specification.recipe
+        or request.target
+        != ExactTargetDescriptor(selected.os, selected.architecture, selected.variant)
+    ):
+        raise ValueError("Prime image release specification is invalid")
+    expected_artifacts = tuple(
+        ReleaseArtifact(
+            capture.artifact_kind,
+            capture.object.url,
+            capture.artifact_path,
+            capture.object.size,
+            capture.object.sha256,
+        )
+        for capture in request.claims
+    )
+    if artifacts != expected_artifacts or generated.provenance.recipe.sha256 != release_recipe_sha256(
+        specification.recipe
+    ):
         raise ValueError("Prime image release specification is invalid")
     return specification
 

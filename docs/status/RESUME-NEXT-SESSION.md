@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 09:13. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 09:21. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -38,6 +38,10 @@
   archive/modules, OCI index-selected manifest/config/contiguous layers, all 33
   locked Python wheels, local runtime wheel, fixture, and frontend. The graph
   stays untrusted and contains no fetched or built artifact.
+- Authorized descriptor-relative staging now also accepts only a matching
+  private complete candidate request and exact artifact tuple before its first
+  fetch. Its deterministic fixture successfully stages and rehashes 41 objects;
+  no actual artifacts were acquired.
 - `make promotion-check` was stopped before it entered `tools/climb/cycle.sh
   H-001`; that path requires separate benchmark authority. It is **not PASS**.
   Focused recipe tests, Ruff, Pyright, and `git diff --check` passed for
@@ -48,17 +52,17 @@
 
 ## Immediate next action
 
-1. Commit the complete candidate-graph admission contract after focused checks.
-2. Begin the next planned staging integration: make its pre-fetch validation
-   consume the complete graph, still without downloading, building, or running
-   an image. Artifact acquisition remains a separate authorization boundary.
+1. Commit the complete-graph staging admission integration after focused checks.
+2. Continue the seven-product P1 program at the next provider-free worker/broker
+   integration boundary. Do not fetch, build, run, promote, or benchmark an
+   image without separate authority.
 
 ## Recovery commands
 
 ```bash
 git status --short
 git log --oneline -12
-uv run python -m unittest -v tests.test_prime_release_metadata tests.test_prime_release_spec_generation tests.test_prime_release_recipe tests.test_prime_image_input_lock
-uv run ruff check src/asterion/applications/prime_agent/operator/release_metadata.py src/asterion/applications/prime_agent/operator/release_spec_generation.py tests/test_prime_release_metadata.py tests/test_prime_release_spec_generation.py
-uv run pyright src/asterion/applications/prime_agent/operator/release_metadata.py src/asterion/applications/prime_agent/operator/release_spec_generation.py tests/test_prime_release_metadata.py tests/test_prime_release_spec_generation.py
+uv run python -m unittest -v tests.test_prime_image_release_materializer tests.test_prime_release_metadata tests.test_prime_release_spec_generation tests.test_prime_release_recipe tests.test_prime_image_input_lock
+uv run ruff check src/asterion/applications/prime_agent/operator/image_input_lock.py tools/materialize_prime_ipython_inputs.py tests/prime_release_test_support.py tests/test_prime_image_release_materializer.py
+uv run pyright src/asterion/applications/prime_agent/operator/image_input_lock.py tools/materialize_prime_ipython_inputs.py tests/prime_release_test_support.py tests/test_prime_image_release_materializer.py
 ```

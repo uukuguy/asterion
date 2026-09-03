@@ -1457,3 +1457,5 @@
 - 10:28 Required all parser-backed Python wheel claims before a candidate release specification is admitted [pending commit]
 - 10:29 Enforced complete parser-backed Python wheel closure for candidate release admission [26d532c]
 - 09:13 Required the complete parser-backed per-target candidate graph: Node archive/modules, OCI index-to-manifest/config/layers, 33 locked wheels, runtime, fixture, and frontend; focused Task 22 suites, Ruff, Pyright, and diff check passed [pending commit]
+- 09:14 Committed complete parsed target-closure admission to prevent incomplete or cross-target candidate proposals [836dd34]
+- 09:21 Bound authorized staging to its private complete parsed candidate request before fetch; full deterministic fixture writes and rehashes all 41 objects [pending commit]
