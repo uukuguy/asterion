@@ -45,6 +45,12 @@ def _trace(**changes: object) -> RecursiveWorkflowTrace:
     return RecursiveWorkflowTrace(**values)  # type: ignore[arg-type]
 
 
+class _AlwaysEqual:
+    def __eq__(self, other: object) -> bool:
+        del other
+        return True
+
+
 class TestRecursiveWorkflowTrace(unittest.TestCase):
     def test_emits_only_matching_bounded_receipt(self) -> None:
         receipt = verify_real_recursive_workflow_trace(
@@ -70,6 +76,24 @@ class TestRecursiveWorkflowTrace(unittest.TestCase):
             {"disposed": False},
             {"reaped": False},
             {"model_sha256": _digest("A")},
+        )
+        for changes in cases:
+            with self.subTest(changes=changes), self.assertRaises(
+                RecursiveWorkflowReceiptError
+            ):
+                verify_real_recursive_workflow_trace(_trace(**changes))
+
+    def test_rejects_structural_tool_equality_bypass(self) -> None:
+        with self.assertRaises(RecursiveWorkflowReceiptError):
+            verify_real_recursive_workflow_trace(
+                _trace(child_tool_names=_AlwaysEqual())
+            )
+
+    def test_rejects_duplicate_normalized_child_digests(self) -> None:
+        cases: tuple[dict[str, object], ...] = (
+            {"first_child_role_digests": (_digest("c"), _digest("c"))},
+            {"first_child_result_digests": (_digest("e"), _digest("e"))},
+            {"first_child_usage_digests": (_digest("0"), _digest("0"))},
         )
         for changes in cases:
             with self.subTest(changes=changes), self.assertRaises(
