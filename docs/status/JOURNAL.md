@@ -1564,3 +1564,5 @@
 - 04:31 correction: P5 fixed workload binding commit [506b1c8]
 - 04:36 Redacted unexpected P5 host-gate failures at the public boundary [pending commit]
 - 04:36 correction: P5 host-gate redaction commit [cdd1d01]
+- 04:41 Recorded P5 provider-free boundary in structural project state [3f12ecf]
+- 04:52 Specified P6 fixed continual-improvement acceptance over Harness [pending commit]
