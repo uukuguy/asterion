@@ -1574,3 +1574,5 @@
 - 05:14 Bound P6 preserve-or-rollback causal trace to fixed workload [pending commit]
 - 05:14 correction: P6 causal trace commit [8767299]
 - 05:21 Added public Harness projection digests for P6 trace binding [pending commit]
+- 05:21 correction: P6 public projection binding commit [c3dd2db]
+- 05:29 Added P6 single-holdout preserved provider-free acceptance [pending commit]

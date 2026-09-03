@@ -4,8 +4,19 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+from collections.abc import Awaitable, Callable
+from typing import cast
 
 from asterion.control.harness import HarnessRevision, HarnessSnapshot
+from asterion.applications.prime_agent.continual_improvement_receipt import (
+    ContinualImprovementTrace,
+    validate_continual_improvement_trace,
+)
+from asterion.applications.prime_agent.evidence import (
+    PrimeEvidenceLevel,
+    PrimeEvidenceReceipt,
+    validate_prime_evidence_receipt,
+)
 
 
 class ContinualImprovementAcceptanceError(ValueError):
@@ -48,3 +59,50 @@ def continual_improvement_revision_sha256(revision: object) -> str:
         "status": revision.status,
         "usage": dict(revision.usage),
     })
+
+
+async def accept_continual_improvement(
+    *, gate: object, trace: object, baseline_snapshot: object,
+    candidate_snapshot: object, candidate_revision: object, disposed: object,
+    reaped: object,
+) -> PrimeEvidenceReceipt:
+    """Accept one complete preserved P6 fake chain as provider-free evidence."""
+
+    try:
+        if (
+            type(trace) is not ContinualImprovementTrace
+            or disposed is not True
+            or reaped is not True
+            or trace.outcome != "preserved"
+        ):
+            raise ValueError
+        validate_continual_improvement_trace(trace)
+        if (
+            continual_improvement_snapshot_sha256(baseline_snapshot)
+            != trace.baseline_snapshot_sha256
+            or continual_improvement_snapshot_sha256(candidate_snapshot)
+            != trace.candidate_snapshot_sha256
+            or continual_improvement_revision_sha256(candidate_revision)
+            != trace.candidate_revision_sha256
+        ):
+            raise ValueError
+        evaluate = getattr(gate, "evaluate", None)
+        if not callable(evaluate):
+            raise ValueError
+        passed, result_sha256 = await cast(
+            Callable[[str], Awaitable[tuple[object, object]]], evaluate
+        )(trace.candidate_snapshot_sha256)
+        if (
+            type(passed) is not bool
+            or passed is not True
+            or type(result_sha256) is not str
+            or result_sha256 != trace.task_b_result_sha256
+        ):
+            raise ValueError
+        return validate_prime_evidence_receipt(PrimeEvidenceReceipt(
+            "prime.continual-improvement/v1", PrimeEvidenceLevel.PROVIDER_FREE, "PASS"
+        ))
+    except Exception:
+        raise ContinualImprovementAcceptanceError(
+            "continual improvement acceptance is invalid"
+        ) from None
