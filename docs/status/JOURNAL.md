@@ -1480,3 +1480,6 @@
 - 11:46 Completed the one-call bounded Prime autonomy probe; PASS includes goal completion, host quiescence, and orphan audit [pending commit]
 - 11:47 Committed bounded-autonomy evidence reduction so exactly one finite real provider receipt can support Product 5 [f5e7168]
 - 12:03 Added the closed continual-improvement receipt boundary; provider-free harness evidence remains deliberately non-promotable [pending commit]
+- 12:04 Committed continual-improvement evidence closure so ungrounded or provider-free reports cannot pass Product 6 [1b6f48c]
+- 12:12 Corrected capability acceptance scope: trusted-local Prime runs are non-promotable, so Products 1–5 are not formal sandboxed PASS [no code commit]
+- 12:22 User approved the restricted-worker lifecycle correction: all bounded acceptance evidence will bind scenario, workload, result, isolation, and cleanup [pending commit]

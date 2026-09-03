@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 11:13. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 12:12. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -12,6 +12,8 @@
 - A real local daemon run returned `PASS supported 2 2 2 2 2`: two bound
   children, root-to-child messages, child-to-root results, terminals, and
   deletions. No model/provider invocation occurred.
+- Product 5's one-call model run completed, but it ran trusted-local. It is
+  valuable operational evidence, not formal restricted-worker acceptance.
 
 ## Current decision
 
@@ -22,6 +24,11 @@
   scenario; future model-bearing child work must have explicit child budgets.
 - Product 3 receipt still cannot claim sandboxing, model work, generated
   programs, arbitrary recursion, or native-Linux isolation.
+- The capability specification requires an injected restricted worker for all
+  seven formal acceptance products. Existing worker gating and Docker launcher
+  are hard-coded to `prime.ipython-coding`, so they cannot yet attest Products
+  2–7. Product-level `bounded-sandboxed` receipts must not be emitted from the
+  trusted-local P5/P6 experiment receipts.
 
 ## Verification evidence
 
@@ -36,17 +43,14 @@
 
 ## Immediate next action
 
-1. Product 5, `prime.bounded-autonomy/v1`, now has a closed bounded-sandboxed
-   receipt backed by one authorized real provider operation. Its private
-   evidence reports terminal completion, finite limits, host quiescence, and a
-   clean orphan audit; no model content is public.
-2. Product 4, `prime.long-session-continuity/v1`, has a closed,
-   redacted provider-free receipt bound to the real pinned Prime
-   session-context witness: detach/attach, persisted naming, source resume,
-   exact inactive deletion, identity separation, and public projection
-   redaction all passed without model work.
-3. Start Product 6, `prime.continual-improvement/v1`. Preserve Products 3–5
-   evidence ladders; do not reuse their receipts for P6.
+1. Generalize the application-owned restricted worker role and public
+   attestation binding across the seven exact product scenario IDs without
+   relaxing Docker/platform policy. Then remove the invalid P5 trusted-local
+   `bounded-sandboxed` receipt projection.
+2. Retain Products 2–4 as provider-free, trusted-local mechanics only.
+3. Only after a real restricted-worker runner exists, re-run Product 5 and
+   authorize a separate Product 6 bounded refinement. ARC-AGI-3 remains
+   unimplemented and requires a later isolated broker/functional-subset design.
 
 ## Recovery commands
 
