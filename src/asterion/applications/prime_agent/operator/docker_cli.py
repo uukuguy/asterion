@@ -16,9 +16,13 @@ from typing import Mapping, Protocol, cast
 from asterion.applications.prime_agent.operator.docker_worker import (
     DockerEngineTransport,
     DockerLauncherChannel,
+    DockerWorkerCompletion,
     DockerWorkerLauncherSelfCheck,
     _DockerWorkerSpecification,
     _LifecycleCallControl,
+)
+from asterion.applications.prime_agent.operator.ipython_workload import (
+    PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
 )
 from asterion.services.restricted_worker import (
     RestrictedWorkerError,
@@ -179,7 +183,9 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
         if control.cancelled():
             raise asyncio.CancelledError
 
-    async def completed_result(self, *, control: _LifecycleCallControl) -> bytes:
+    async def completed_result(
+        self, *, control: _LifecycleCallControl
+    ) -> DockerWorkerCompletion:
         if (
             not self._read
             or not self._released
@@ -190,7 +196,10 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._result_read = True
         raw = await self._read_bounded(control)
-        return DockerCliEngineTransport._parse_completed_result_line(raw)
+        return DockerWorkerCompletion(
+            PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
+            DockerCliEngineTransport._parse_completed_result_line(raw),
+        )
 
     async def close(self, *, control: _LifecycleCallControl) -> None:
         if self._closed:
