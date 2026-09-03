@@ -20,6 +20,11 @@ def _hash(letter: str) -> str:
     return "sha256:" + letter * 64
 
 
+class _EqualsIpython(str):
+    def __eq__(self, other: object) -> bool:
+        return True
+
+
 def _trace(**changes: object) -> DiagnosticSessionRecoveryTrace:
     values: dict[str, object] = {
         "workload_sha256": P4_DIAGNOSTIC_RECOVERY_WORKLOAD_DIGEST,
@@ -80,8 +85,10 @@ class TestDiagnosticSessionRecoveryReceipt(unittest.TestCase):
             {"oracle_sha256": _hash("3")},
             {"schema_sha256": _hash("4")},
             {"root_tool_names": ("shell",)},
+            {"child_tool_names": (_EqualsIpython("shell"),)},
             {"child_actions": True},
             {"attach_count": 2},
+            {"detach_count": True},
         )
         for changes in cases:
             with self.subTest(changes=changes), self.assertRaises(DiagnosticSessionRecoveryReceiptError):

@@ -82,7 +82,16 @@ def _positive_int(value: object) -> bool:
 
 
 def _ipython_only(value: object) -> bool:
-    return type(value) is tuple and value == ("ipython",)
+    return (
+        type(value) is tuple
+        and len(value) == 1
+        and type(value[0]) is str
+        and value[0] == "ipython"
+    )
+
+
+def _one(value: object) -> bool:
+    return type(value) is int and value == 1
 
 
 def validate_diagnostic_session_recovery_trace(trace: object) -> None:
@@ -113,7 +122,7 @@ def validate_diagnostic_session_recovery_trace(trace: object) -> None:
             trace.root_post_recovery_actions,
             trace.child_actions,
         ))
-        or any(value != 1 for value in (
+        or any(not _one(value) for value in (
             trace.detach_count,
             trace.attach_count,
             trace.compaction_count,
