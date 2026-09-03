@@ -1524,3 +1524,4 @@
 - 17:12 P2 validates closed sandbox profiles before any worker or broker event [pending commit]
 - 17:13 P2 preflight denies open sandbox profiles before lifecycle side effects [4459ef0]
 - 17:18 Invalid P2 profiles skip injected service attribute inspection [pending commit]
+- 18:25 Integrated P2 acceptance; main verification remains provider-free [pending commit]

@@ -37,8 +37,8 @@
 - Node: 37 Prime gateway main tests passed, including zero-resource native RLM
   budget clamping and expiry rejection.
 - Ruff, Pyright, Node syntax, and `git diff --check` passed.
-- P2 acceptance: 50 focused P2/worker/broker Python tests and 63 P1
-  cross-role regressions passed, with scoped Ruff, Pyright, and diff checks.
+- P2 acceptance: 56 focused P2/worker/broker Python tests and 63 P1
+  cross-role regressions passed on main, with scoped Ruff, Pyright, and diff checks.
   These are provider-free fake-service checks only; no Docker daemon, model
   provider, or network action occurred.
 - Review correction: an open network, persistent workspace, or inherited
@@ -50,10 +50,10 @@
 
 ## Immediate next action
 
-1. Complete the remaining approved P1 launcher and integration tasks, keeping
-   Docker role-specific and preserving the typed workload completion boundary.
-2. Retain P2–P7 as External-limited; ARC-AGI-3 remains unimplemented and
-   requires a later isolated broker/functional-subset design.
+1. Begin approved P3 recursive-workflow design, preserving P1/P2 sealed
+   role-specific workloads and the fixed IPython-only action surface.
+2. Retain P2 live execution and P3–P7 as External-limited; ARC-AGI-3 remains
+   unimplemented and requires a later isolated broker/functional-subset design.
 
 ## Recovery commands
 
