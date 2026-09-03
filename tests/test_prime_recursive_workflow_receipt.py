@@ -94,3 +94,14 @@ class TestRecursiveWorkflowTrace(unittest.TestCase):
         self.assertNotIn("PRIVATE-RLM-WORKLOAD", repr(trace))
         with self.assertRaises(FrozenInstanceError):
             trace.revoked = False  # type: ignore[misc]
+
+    def test_rejects_unrecognized_private_trace_field_without_disclosure(self) -> None:
+        trace = _trace()
+        sentinel = "PRIVATE_RLM_SECRET"
+        object.__setattr__(trace, "private_field", sentinel)
+
+        with self.assertRaises(RecursiveWorkflowReceiptError) as raised:
+            verify_real_recursive_workflow_trace(trace)
+        self.assertNotIn(sentinel, repr(trace))
+        self.assertNotIn(sentinel, str(trace))
+        self.assertNotIn(sentinel, str(raised.exception))

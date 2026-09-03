@@ -14,6 +14,31 @@ from asterion.applications.prime_agent.evidence import (
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _CHILD_COUNT = 2
+_TRACE_FIELDS = frozenset(
+    {
+        "workload_sha256",
+        "root_artifact_sha256",
+        "first_child_role_digests",
+        "first_child_result_digests",
+        "first_child_usage_digests",
+        "follow_up_digest",
+        "aggregation_sha256",
+        "oracle_sha256",
+        "model_sha256",
+        "usage_sha256",
+        "root_to_child_message_count",
+        "child_to_root_result_count",
+        "follow_up_count",
+        "root_deleted_child_count",
+        "root_continued_locally",
+        "root_work_before_children",
+        "child_tool_names",
+        "child_ipython_action_counts",
+        "revoked",
+        "disposed",
+        "reaped",
+    }
+)
 
 
 class RecursiveWorkflowReceiptError(ValueError):
@@ -82,6 +107,7 @@ def verify_real_recursive_workflow_trace(
 
     if (
         type(trace) is not RecursiveWorkflowTrace
+        or frozenset(vars(trace)) != _TRACE_FIELDS
         or type(requested_level) is not PrimeEvidenceLevel
         or requested_level is not PrimeEvidenceLevel.BOUNDED
         or not _digest(trace.workload_sha256)
