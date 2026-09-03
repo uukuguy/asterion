@@ -1514,3 +1514,4 @@
 - 14:49 Required positive broker activity before P2 bounded evidence issues [1e8114c]
 - 16:18 Defined fixed P2 workload and canonical completion to prevent identity substitution [016f5ef]
 - 16:26 Added sealed P2 launcher parser, image locks, and provider-free protocol evidence [acb73e0]
+- 16:37 Added sealed P2 worker facade and relay to bind Docker lifecycle safely [e031daf]
