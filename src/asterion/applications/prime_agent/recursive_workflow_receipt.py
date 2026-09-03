@@ -87,6 +87,10 @@ def _two_digests(value: object) -> bool:
     )
 
 
+def _distinct_two_digests(value: object) -> bool:
+    return _two_digests(value) and value[0] != value[1]  # type: ignore[index]
+
+
 def _positive_child_actions(value: object) -> bool:
     return (
         type(value) is tuple
@@ -96,7 +100,17 @@ def _positive_child_actions(value: object) -> bool:
 
 
 def _ipython_only(value: object) -> bool:
-    return value == (("ipython",), ("ipython",))
+    return (
+        type(value) is tuple
+        and len(value) == _CHILD_COUNT
+        and all(
+            type(child_tools) is tuple
+            and len(child_tools) == 1
+            and type(child_tools[0]) is str
+            and child_tools[0] == "ipython"
+            for child_tools in value
+        )
+    )
 
 
 def verify_real_recursive_workflow_trace(
@@ -112,9 +126,9 @@ def verify_real_recursive_workflow_trace(
         or requested_level is not PrimeEvidenceLevel.BOUNDED
         or not _digest(trace.workload_sha256)
         or not _digest(trace.root_artifact_sha256)
-        or not _two_digests(trace.first_child_role_digests)
-        or not _two_digests(trace.first_child_result_digests)
-        or not _two_digests(trace.first_child_usage_digests)
+        or not _distinct_two_digests(trace.first_child_role_digests)
+        or not _distinct_two_digests(trace.first_child_result_digests)
+        or not _distinct_two_digests(trace.first_child_usage_digests)
         or any(
             not _digest(value)
             for value in (
