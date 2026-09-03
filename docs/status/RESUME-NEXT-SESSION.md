@@ -36,19 +36,24 @@
 
 ## Immediate next action
 
-1. Product 4, `prime.long-session-continuity/v1`, now has a closed,
+1. Product 5, `prime.bounded-autonomy/v1`, now has a closed bounded-sandboxed
+   receipt backed by one authorized real provider operation. Its private
+   evidence reports terminal completion, finite limits, host quiescence, and a
+   clean orphan audit; no model content is public.
+2. Product 4, `prime.long-session-continuity/v1`, has a closed,
    redacted provider-free receipt bound to the real pinned Prime
    session-context witness: detach/attach, persisted naming, source resume,
    exact inactive deletion, identity separation, and public projection
    redaction all passed without model work.
-2. Start Product 5, `prime.bounded-autonomy/v1`. Preserve Products 3 and 4
-   evidence ladders; do not reuse their receipts for P5.
+3. Start Product 6, `prime.continual-improvement/v1`. Preserve Products 3–5
+   evidence ladders; do not reuse their receipts for P6.
 
 ## Recovery commands
 
 ```bash
 git status --short
 git log --oneline -12
-uv run python -m unittest -v tests.test_prime_long_session_continuity_receipt tests.test_prime_session_context_parity.TestPrimeSessionContextParity.test_real_prime_provider_free_scenarios_match_committed_evidence
+make test.prime-long-running.provider-free
+uv run python -m unittest -v tests.test_prime_bounded_autonomy_receipt
 node --test packages/typescript/prime-gateway/test/main.test.mjs
 ```

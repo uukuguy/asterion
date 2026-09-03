@@ -1,0 +1,85 @@
+"""Closed bounded evidence for Prime autonomous goal completion."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+from asterion.applications.prime_agent.evidence import (
+    PrimeEvidenceLevel,
+    PrimeEvidenceReceipt,
+    validate_prime_evidence_receipt,
+)
+from asterion.control.providers.prime.parity_testing import (
+    build_prime_long_running_bounded_observation,
+)
+
+
+class BoundedAutonomyReceiptError(ValueError):
+    """Raised when a bounded autonomy receipt cannot support the claim."""
+
+
+@dataclass(frozen=True, repr=False)
+class BoundedAutonomyObservation:
+    """Private normalized facts without goal, model, or provider content."""
+
+    goal_completed: bool
+    host_quiescent: bool
+    orphan_audit_clean: bool
+    provider_operation_count: int
+    model_credential_read_count: int
+
+    def __repr__(self) -> str:
+        return "BoundedAutonomyObservation(redacted)"
+
+
+def bounded_autonomy_observation_from_receipt(
+    receipt: object,
+) -> BoundedAutonomyObservation:
+    """Reduce one exact finite provider receipt to non-sensitive facts."""
+
+    if not isinstance(receipt, Mapping):
+        raise BoundedAutonomyReceiptError("bounded autonomy receipt is invalid")
+    try:
+        observation = build_prime_long_running_bounded_observation(receipt)
+    except Exception:
+        raise BoundedAutonomyReceiptError("bounded autonomy receipt is invalid") from None
+    if (
+        observation.provider_operations != 1
+        or observation.model_credential_reads != 1
+        or observation.status != "PASS"
+    ):
+        raise BoundedAutonomyReceiptError("bounded autonomy receipt is invalid")
+    return BoundedAutonomyObservation(
+        goal_completed=True,
+        host_quiescent=True,
+        orphan_audit_clean=True,
+        provider_operation_count=1,
+        model_credential_read_count=1,
+    )
+
+
+def verify_bounded_autonomy_receipt(
+    observation: object,
+    requested_level: PrimeEvidenceLevel = PrimeEvidenceLevel.BOUNDED_SANDBOXED,
+) -> PrimeEvidenceReceipt:
+    """Emit the sole bounded-sandboxed receipt for Prime autonomy."""
+
+    if (
+        type(observation) is not BoundedAutonomyObservation
+        or type(requested_level) is not PrimeEvidenceLevel
+        or requested_level is not PrimeEvidenceLevel.BOUNDED_SANDBOXED
+        or observation.goal_completed is not True
+        or observation.host_quiescent is not True
+        or observation.orphan_audit_clean is not True
+        or observation.provider_operation_count != 1
+        or observation.model_credential_read_count != 1
+    ):
+        raise BoundedAutonomyReceiptError("bounded autonomy receipt is invalid")
+    return validate_prime_evidence_receipt(
+        PrimeEvidenceReceipt(
+            scenario_id="prime.bounded-autonomy/v1",
+            level=PrimeEvidenceLevel.BOUNDED_SANDBOXED,
+            status="PASS",
+        )
+    )

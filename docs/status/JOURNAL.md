@@ -1476,3 +1476,5 @@
 - 11:12 Real two-child native RLM flow reached PASS with zero-resource provider-free budgets and provider-owned lifecycle wiring; 28 Python tests, 37 Node tests, Ruff, Pyright, syntax, and diff check passed [pending commit]
 - 11:13 Committed real two-child recursive workflow verification and zero-resource budget contract [8d3978f]
 - 11:31 Bound the real provider-free Prime session-context witness to a closed long-session continuity receipt; five focused tests, Ruff, Pyright, and diff check passed [pending commit]
+- 11:32 Committed closed long-session continuity evidence so only the real provider-free session witness can pass [a520f12]
+- 11:46 Completed the one-call bounded Prime autonomy probe; PASS includes goal completion, host quiescence, and orphan audit [pending commit]
