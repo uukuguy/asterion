@@ -14,6 +14,29 @@ from asterion.applications.prime_agent.evidence import (
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _CHILD_COUNT = 2
+_PUBLIC_REPORT_FIELDS = frozenset(
+    {
+        "format",
+        "status",
+        "reason",
+        "real_prime_runtime",
+        "allowed_tool_names",
+        "active_tool_names",
+        "admitted_child_count",
+        "bound_child_count",
+        "root_to_child_message_count",
+        "child_to_root_result_count",
+        "terminal_child_count",
+        "deleted_child_count",
+        "workflow_sha256",
+        "aggregation_sha256",
+        "oracle_sha256",
+        "root_continued_locally",
+        "aggregation_passed",
+        "disposed",
+        "reaped",
+    }
+)
 
 
 class RecursiveWorkflowReceiptError(ValueError):
@@ -48,6 +71,50 @@ def _digest(value: object) -> bool:
 
 def _fixed_child_count(value: object) -> bool:
     return type(value) is int and value == _CHILD_COUNT
+
+
+def recursive_workflow_observation_from_public_report(
+    report: object,
+) -> RecursiveWorkflowObservation:
+    """Convert only one exact successful compatibility report to private facts."""
+
+    if (
+        type(report) is not dict
+        or frozenset(report) != _PUBLIC_REPORT_FIELDS
+        or report["format"] != "asterion.prime-recursive-workflow-compat/v1"
+        or report["status"] != "PASS"
+        or report["reason"] != "supported"
+        or report["real_prime_runtime"] is not True
+        or report["allowed_tool_names"] != ["ipython"]
+        or report["active_tool_names"] != ["ipython"]
+        or report["root_continued_locally"] is not True
+        or report["aggregation_passed"] is not True
+        or report["disposed"] is not True
+        or report["reaped"] is not True
+    ):
+        raise RecursiveWorkflowReceiptError("recursive workflow receipt is invalid")
+    try:
+        observation = RecursiveWorkflowObservation(
+            built_in_tools=("ipython",),
+            active_tool_names=("ipython",),
+            admitted_child_count=report["admitted_child_count"],
+            bound_child_count=report["bound_child_count"],
+            root_to_child_message_count=report["root_to_child_message_count"],
+            child_to_root_result_count=report["child_to_root_result_count"],
+            terminal_child_count=report["terminal_child_count"],
+            deleted_child_count=report["deleted_child_count"],
+            workflow_sha256=report["workflow_sha256"],
+            aggregation_sha256=report["aggregation_sha256"],
+            oracle_sha256=report["oracle_sha256"],
+            root_continued_locally=True,
+            aggregation_passed=True,
+        )
+        verify_recursive_workflow_receipt(observation)
+    except (KeyError, TypeError, RecursiveWorkflowReceiptError):
+        raise RecursiveWorkflowReceiptError(
+            "recursive workflow receipt is invalid"
+        ) from None
+    return observation
 
 
 def verify_recursive_workflow_receipt(
@@ -92,4 +159,3 @@ def verify_recursive_workflow_receipt(
             status="PASS",
         )
     )
-

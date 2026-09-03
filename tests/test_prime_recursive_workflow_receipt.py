@@ -9,6 +9,7 @@ from asterion.applications.prime_agent.evidence import PrimeEvidenceLevel
 from asterion.applications.prime_agent.recursive_workflow_receipt import (
     RecursiveWorkflowObservation,
     RecursiveWorkflowReceiptError,
+    recursive_workflow_observation_from_public_report,
     verify_recursive_workflow_receipt,
 )
 
@@ -90,3 +91,45 @@ class TestRecursiveWorkflowReceipt(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             observation.deleted_child_count = 1  # type: ignore[misc]
 
+    def test_public_compatibility_report_only_converts_exact_supported_pass(self) -> None:
+        report = {
+            "format": "asterion.prime-recursive-workflow-compat/v1",
+            "status": "PASS",
+            "reason": "supported",
+            "real_prime_runtime": True,
+            "allowed_tool_names": ["ipython"],
+            "active_tool_names": ["ipython"],
+            "admitted_child_count": 2,
+            "bound_child_count": 2,
+            "root_to_child_message_count": 2,
+            "child_to_root_result_count": 2,
+            "terminal_child_count": 2,
+            "deleted_child_count": 2,
+            "workflow_sha256": _digest("a"),
+            "aggregation_sha256": _digest("b"),
+            "oracle_sha256": _digest("c"),
+            "root_continued_locally": True,
+            "aggregation_passed": True,
+            "disposed": True,
+            "reaped": True,
+        }
+
+        observation = recursive_workflow_observation_from_public_report(report)
+        self.assertEqual(
+            verify_recursive_workflow_receipt(observation).scenario_id,
+            "prime.recursive-workflow/v1",
+        )
+        for changes in (
+            {"status": "External-limited", "reason": "missing-prerequisite"},
+            {"bound_child_count": 1},
+            {"deleted_child_count": 1},
+            {"disposed": False},
+            {"reaped": False},
+            {"unexpected": "value"},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(
+                RecursiveWorkflowReceiptError
+            ):
+                recursive_workflow_observation_from_public_report(
+                    {**report, **changes}
+                )
