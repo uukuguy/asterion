@@ -7,10 +7,9 @@
 - P1's fixed workload-result implementation is committed at `a9d6e72`. It
   selects one code-owned `prime.ipython-coding/v1` fixture by exact digest and
   requires a canonical, workload-bound worker result.
-- P1's five focused provider-free suites passed (57 tests); Ruff, launcher
-  byte-compilation, and `git diff --check` passed. The prescribed Pyright scope
-  has one unresolved fixture-local `solution` import, so a full quality-gate
-  PASS is not claimed.
+- P1's five focused provider-free suites passed (57 tests); Ruff, Pyright,
+  launcher byte-compilation, and `git diff --check` passed. This is
+  provider-free-only verification, not Docker/model/network execution.
 - The final review correction is committed at `f61a55b`: P5/P6 cannot issue
   bounded evidence until role-specific real launchers exist.
 - Products 2–7 remain External-limited. Existing P2/P3 provider-free work and
@@ -31,10 +30,9 @@
 
 - P1 fixed workload-result protocol is provider-free test-verified: 57 focused
   Python tests across the Docker worker/CLI, IPython launcher protocol, worker
-  gate, and coding-fixture receipt passed. Ruff, launcher byte-compilation, and
-  `git diff --check` passed; Pyright reported one unresolved fixture-local
-  `solution` import. Docker/model/network execution was not run and is not a
-  PASS claim.
+  gate, and coding-fixture receipt passed. Ruff, Pyright, launcher
+  byte-compilation, and `git diff --check` passed. Docker/model/network
+  execution was not run and is not a PASS claim.
 - Node: 37 Prime gateway main tests passed, including zero-resource native RLM
   budget clamping and expiry rejection.
 - Ruff, Pyright, Node syntax, and `git diff --check` passed.
@@ -44,9 +42,7 @@
 
 ## Immediate next action
 
-1. Resolve or explicitly scope the fixture-local Pyright `solution` import
-   before claiming the P1 quality gate fully passes.
-2. Retain P2–P7 as External-limited; P5/P6 gained no bounded evidence.
+1. Retain P2–P7 as External-limited; P5/P6 gained no bounded evidence.
    ARC-AGI-3 remains unimplemented and requires a later isolated
    broker/functional-subset design.
 
