@@ -1050,7 +1050,9 @@ class AsterionCliTests(unittest.TestCase):
             packaged["unbound_resources"],
             [
                 "applications/dci_agent_lite/assemblies/"
-                "dci-local-research.json"
+                "dci-local-research.json",
+                "applications/prime_agent/assemblies/"
+                "prime-capability-program.json",
             ],
         )
 
