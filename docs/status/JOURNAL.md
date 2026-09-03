@@ -1522,3 +1522,4 @@
   substitutions reject and compatibility remains non-promotable. Focused P2
   (50) and P1 cross-role (63) Python tests plus scoped Ruff, Pyright, and diff
   check passed. No Docker, model, or network action occurred [pending commit]
+- 17:03 Sealed P2 acceptance proves fake lifecycle ordering and identity denial [1a51aa5]
