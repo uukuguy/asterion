@@ -11,6 +11,7 @@ const RUN = "prime-p3-image-run";
 const CHALLENGE = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const RLM = "Prime RLM 0.7.1";
 const TOOL = "IPython 9.4.0";
+const SCHEMA = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 const canonical = (value) => JSON.stringify(value, (_, member) => (
   member && typeof member === "object" && !Array.isArray(member)
     ? Object.fromEntries(Object.entries(member).sort(([left], [right]) => left.localeCompare(right)))
@@ -32,7 +33,7 @@ const usage = digest("usage");
 const aggregate = digest("aggregation");
 const payloads = [
   { credentials_absent: true, effective_capabilities: 0, effective_user_id: 65534, no_new_privileges: 1, nonloopback_network_absent: true, root_read_only: true, seccomp_mode: 2, workspace_only_writable: true },
-  { child_role_ids: CHILDREN, role_id: ROLE, scenario_id: SCENARIO },
+  { child_role_ids: CHILDREN, role_id: ROLE, scenario_id: SCENARIO, schema_sha256: SCHEMA },
   { root_artifact_sha256: root, root_work_before_children: true },
   { child_role_id: CHILDREN[0], child_role_sha256: roleOne, child_usage_sha256: usageOne },
   { child_result_sha256: resultOne, child_role_id: CHILDREN[0], ipython_action_count: 1 },

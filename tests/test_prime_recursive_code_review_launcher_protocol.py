@@ -22,6 +22,7 @@ from asterion.applications.prime_agent.operator.recursive_code_review_workload i
     RECURSIVE_CODE_REVIEW_P3_FOLLOW_UP_ROLE_ID,
     RECURSIVE_CODE_REVIEW_P3_ROLE_ID,
     RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID,
+    RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256,
     RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
 )
 
@@ -47,7 +48,7 @@ def _frames() -> tuple[bytes, ...]:
     implementation, reviewer = RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS
     return (
         _frame(0, "self-check", {"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}),
-        _frame(1, "release", {"child_role_ids": list(RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS), "role_id": RECURSIVE_CODE_REVIEW_P3_ROLE_ID, "scenario_id": RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID}),
+        _frame(1, "release", {"child_role_ids": list(RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS), "role_id": RECURSIVE_CODE_REVIEW_P3_ROLE_ID, "scenario_id": RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID, "schema_sha256": RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256}),
         _frame(2, "root-artifact", {"root_artifact_sha256": _DIGESTS[1], "root_work_before_children": True}),
         _frame(3, "child-admitted", {"child_role_id": implementation, "child_role_sha256": _DIGESTS[2], "child_usage_sha256": _DIGESTS[3]}),
         _frame(4, "child-result", {"child_result_sha256": _DIGESTS[4], "child_role_id": implementation, "ipython_action_count": 1}),
@@ -80,6 +81,13 @@ class TestRecursiveCodeReviewLauncherProtocol(unittest.TestCase):
         self.assertTrue(trace.root_continued_locally)
         self.assertEqual(trace.follow_up_result_digest, _DIGESTS[9])
         self.assertEqual(trace.follow_up_ipython_action_count, 1)
+        self.assertEqual(trace.schema_sha256, RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256)
+
+    def test_rejects_noncanonical_schema_release_binding(self) -> None:
+        frames = list(_frames())
+        frames[1] = _frame(1, "release", {"child_role_ids": list(RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS), "role_id": RECURSIVE_CODE_REVIEW_P3_ROLE_ID, "scenario_id": RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID, "schema_sha256": _DIGESTS[1]})
+        with self.assertRaises(RecursiveCodeReviewReleaseError):
+            parse_recursive_code_review_frames(b"\n".join(frames) + b"\n")
 
     def test_static_fixture_trace_cannot_issue_bounded_real_evidence(self) -> None:
         launched = subprocess.run(

@@ -15,6 +15,7 @@ from .recursive_code_review_workload import (
     RECURSIVE_CODE_REVIEW_P3_MAX_FRAME_BYTES,
     RECURSIVE_CODE_REVIEW_P3_ROLE_ID,
     RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID,
+    RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256,
     RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
 )
 
@@ -55,6 +56,7 @@ class RecursiveCodeReviewFixtureDiagnostic:
     follow_up_result_digest: str
     aggregation_sha256: str
     oracle_sha256: str
+    schema_sha256: str
     model_sha256: str
     usage_sha256: str
     root_to_child_message_count: int
@@ -137,6 +139,7 @@ class _RecursiveCodeReviewRelease:
             first_child_usage_digests=(self._admissions[first][1], self._admissions[second][1]),
             follow_up_digest=self._follow_up, follow_up_result_digest=self._follow_up_result,
             aggregation_sha256=aggregation, oracle_sha256=oracle,
+            schema_sha256=RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256,
             model_sha256=model, usage_sha256=usage, root_to_child_message_count=2,
             child_to_root_result_count=3, follow_up_count=1, root_deleted_child_count=2,
             root_continued_locally=True, root_work_before_children=True,
@@ -171,7 +174,7 @@ class _RecursiveCodeReviewRelease:
         if kind == "self-check":
             valid = payload == _SELF_CHECK
         elif kind == "release":
-            valid = payload == {"child_role_ids": list(RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS), "role_id": RECURSIVE_CODE_REVIEW_P3_ROLE_ID, "scenario_id": RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID}
+            valid = payload == {"child_role_ids": list(RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS), "role_id": RECURSIVE_CODE_REVIEW_P3_ROLE_ID, "scenario_id": RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID, "schema_sha256": RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256}
         elif kind == "root-artifact":
             valid = set(payload) == {"root_artifact_sha256", "root_work_before_children"} and _digest(payload.get("root_artifact_sha256")) and payload.get("root_work_before_children") is True
             if valid:
