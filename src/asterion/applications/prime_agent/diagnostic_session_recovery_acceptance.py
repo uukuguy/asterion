@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from asterion.applications.prime_agent.diagnostic_session_recovery_adapter import (
     recover_diagnostic_session,
 )
+from asterion.applications.prime_agent.diagnostic_session_recovery_receipt import (
+    validate_diagnostic_session_recovery_trace,
+)
 from asterion.applications.prime_agent.operator.diagnostic_session_recovery_completion import (
     DiagnosticSessionRecoveryCompletion,
 )
@@ -37,6 +40,7 @@ async def accept_diagnostic_session_recovery(
             or observation.reaped is not True
         ):
             raise ValueError
+        validate_diagnostic_session_recovery_trace(observation.completion.trace)
         await recover_diagnostic_session(gateway, checkpoint, before_detach)
         return validate_prime_evidence_receipt(
             PrimeEvidenceReceipt(
