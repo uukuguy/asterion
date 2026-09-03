@@ -1478,3 +1478,5 @@
 - 11:31 Bound the real provider-free Prime session-context witness to a closed long-session continuity receipt; five focused tests, Ruff, Pyright, and diff check passed [pending commit]
 - 11:32 Committed closed long-session continuity evidence so only the real provider-free session witness can pass [a520f12]
 - 11:46 Completed the one-call bounded Prime autonomy probe; PASS includes goal completion, host quiescence, and orphan audit [pending commit]
+- 11:47 Committed bounded-autonomy evidence reduction so exactly one finite real provider receipt can support Product 5 [f5e7168]
+- 12:03 Added the closed continual-improvement receipt boundary; provider-free harness evidence remains deliberately non-promotable [pending commit]
