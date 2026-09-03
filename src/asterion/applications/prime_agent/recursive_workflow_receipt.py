@@ -13,6 +13,7 @@ from asterion.applications.prime_agent.evidence import (
 from asterion.applications.prime_agent.operator.recursive_code_review_workload import (
     RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256,
     RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256,
+    RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256,
     RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
 )
 
@@ -30,6 +31,7 @@ _TRACE_FIELDS = frozenset(
         "follow_up_result_digest",
         "aggregation_sha256",
         "oracle_sha256",
+        "schema_sha256",
         "model_sha256",
         "usage_sha256",
         "root_to_child_message_count",
@@ -65,6 +67,7 @@ class RecursiveWorkflowTrace:
     follow_up_result_digest: str
     aggregation_sha256: str
     oracle_sha256: str
+    schema_sha256: str
     model_sha256: str
     usage_sha256: str
     root_to_child_message_count: int
@@ -149,6 +152,7 @@ def verify_real_recursive_workflow_trace(
         )
         or trace.oracle_sha256 != RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256
         or trace.model_sha256 != RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256
+        or trace.schema_sha256 != RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256
         or trace.follow_up_result_digest in trace.first_child_result_digests
         or type(trace.root_to_child_message_count) is not int
         or trace.root_to_child_message_count != _CHILD_COUNT

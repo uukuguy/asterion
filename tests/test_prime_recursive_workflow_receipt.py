@@ -15,6 +15,7 @@ from asterion.applications.prime_agent.operator.programmatic_long_context_worklo
 from asterion.applications.prime_agent.operator.recursive_code_review_workload import (
     RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256,
     RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256,
+    RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256,
     RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
 )
 from asterion.applications.prime_agent.recursive_workflow_receipt import (
@@ -39,6 +40,7 @@ def _trace(**changes: object) -> RecursiveWorkflowTrace:
         "follow_up_result_digest": _digest("7"),
         "aggregation_sha256": _digest("3"),
         "oracle_sha256": RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256,
+        "schema_sha256": RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256,
         "model_sha256": RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256,
         "usage_sha256": _digest("6"),
         "root_to_child_message_count": 2,
@@ -147,6 +149,18 @@ class TestRecursiveWorkflowTrace(unittest.TestCase):
                 RecursiveWorkflowReceiptError
             ):
                 verify_real_recursive_workflow_trace(_trace(**changes))
+
+    def test_rejects_absent_malformed_or_arbitrary_schema_identity(self) -> None:
+        trace = _trace()
+        object.__delattr__(trace, "schema_sha256")
+        cases: tuple[object, ...] = (trace, _trace(schema_sha256="not-a-digest"), _trace(schema_sha256=_digest("a")))
+        for candidate in cases:
+            with self.subTest(candidate=repr(candidate)), self.assertRaises(
+                RecursiveWorkflowReceiptError
+            ):
+                verify_real_recursive_workflow_trace(candidate)
+
+        self.assertNotIn(RECURSIVE_CODE_REVIEW_P3_SCHEMA_SHA256, repr(_trace()))
 
     def test_trace_is_immutable_and_redacts_private_values(self) -> None:
         trace = _trace(workload_sha256="PRIVATE-RLM-WORKLOAD")
