@@ -1463,3 +1463,5 @@
 - 09:27 P1 provider-free integration matrix passed 95 tests: worker, broker, image protocol, compatibility, and coding receipt; no Docker, model, or network action occurred [no code commit]
 - 09:31 Mapped real Gateway/upstream interfaces for products 2–7; current compatibility fixture proves IPython/compaction but not model-driven programmatic long-context selection [no code commit]
 - 09:36 Added a closed provider-free long-context receipt contract; focused receipt/evidence tests, Ruff, Pyright, and diff check passed [pending commit]
+- 09:37 Committed the closed long-context receipt to prevent evidence upgrades or private corpus exposure [e7449cb]
+- 09:47 Added real locked Prime/IPython corpus compatibility and exact PASS-only receipt binding; 17 focused tests, Ruff, Pyright, and diff check passed [pending commit]

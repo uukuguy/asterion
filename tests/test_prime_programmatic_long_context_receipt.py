@@ -9,6 +9,7 @@ from asterion.applications.prime_agent.evidence import PrimeEvidenceLevel
 from asterion.applications.prime_agent.programmatic_long_context_receipt import (
     ProgrammaticLongContextObservation,
     ProgrammaticLongContextReceiptError,
+    programmatic_long_context_observation_from_public_report,
     verify_programmatic_long_context_receipt,
 )
 
@@ -78,3 +79,44 @@ class TestProgrammaticLongContextReceipt(unittest.TestCase):
         self.assertNotIn("PROGRAM-SENTINEL", str(observation))
         with self.assertRaises(FrozenInstanceError):
             observation.corpus_record_count = 9  # type: ignore[misc]
+
+    def test_public_compatibility_report_only_converts_exact_supported_pass(
+        self,
+    ) -> None:
+        report = {
+            "format": "asterion.prime-programmatic-long-context-compat/v1",
+            "status": "PASS",
+            "reason": "supported",
+            "real_prime_runtime": True,
+            "allowed_tool_names": ["ipython"],
+            "active_tool_names": ["ipython"],
+            "corpus_sha256": _digest("a"),
+            "corpus_record_count": 8,
+            "selected_record_count": 3,
+            "program_sha256": _digest("b"),
+            "aggregate_sha256": _digest("c"),
+            "oracle_sha256": _digest("d"),
+            "ipython_cell_executed": True,
+            "oracle_passed": True,
+            "disposed": True,
+            "reaped": True,
+        }
+        observation = programmatic_long_context_observation_from_public_report(report)
+
+        self.assertEqual(
+            verify_programmatic_long_context_receipt(observation).scenario_id,
+            "prime.programmatic-long-context/v1",
+        )
+        for changes in (
+            {"status": "External-limited", "reason": "missing-ipython"},
+            {"allowed_tool_names": ["shell"]},
+            {"disposed": False},
+            {"reaped": False},
+            {"unexpected": "value"},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(
+                ProgrammaticLongContextReceiptError
+            ):
+                programmatic_long_context_observation_from_public_report(
+                    {**report, **changes}
+                )

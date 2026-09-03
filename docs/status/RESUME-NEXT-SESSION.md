@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 09:36. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 09:47. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -48,6 +48,11 @@
 - `prime.programmatic-long-context/v1` now has a separate closed receipt
   contract. It can emit only `provider-free` PASS after exact IPython-only,
   digest/count, executed-program, and oracle facts; it cannot upgrade evidence.
+- A real pinned SDK/IPython compatibility fixture now creates a private local
+  corpus, selects and aggregates it through the only `ipython` tool, and maps
+  an exact public PASS to that receipt. This machine reports
+  `External-limited/missing-prerequisite` without a pre-provisioned kernel;
+  no model, Docker, or network action occurred.
 - `make promotion-check` was stopped before it entered `tools/climb/cycle.sh
   H-001`; that path requires separate benchmark authority. It is **not PASS**.
   Focused recipe tests, Ruff, Pyright, and `git diff --check` passed for
@@ -58,9 +63,10 @@
 
 ## Immediate next action
 
-1. Commit the long-context receipt contract, then implement the real pinned
-   Prime/IPython corpus compatibility fixture from its approved P2 plan.
-2. Do not fetch, build, run Docker, promote an image, or invoke a provider.
+1. Commit the real provider-free long-context compatibility and receipt binding.
+2. Design/implement product 3 (`prime.recursive-workflow/v1`) against the
+   existing RLM child/message/lifecycle bridge, preserving the same evidence
+   ladder. Do not fetch, build, run Docker, promote an image, or invoke a provider.
 
 ## Recovery commands
 
@@ -72,4 +78,5 @@ uv run ruff check src/asterion/applications/prime_agent/operator/image_input_loc
 uv run pyright src/asterion/applications/prime_agent/operator/image_input_lock.py tools/materialize_prime_ipython_inputs.py tests/prime_release_test_support.py tests/test_prime_image_release_materializer.py
 uv run python -m unittest -v tests.test_restricted_worker_service tests.test_bounded_model_session tests.test_prime_worker_gate tests.test_prime_docker_worker tests.test_prime_docker_cli tests.test_prime_launcher_barrier tests.test_prime_linux_probe tests.test_prime_model_broker tests.test_prime_coding_fixture_receipt tests.test_prime_ipython_image tests.test_prime_ipython_launcher_protocol tests.test_prime_ipython_coding_compat
 uv run python -m unittest -v tests.test_prime_programmatic_long_context_receipt tests.test_prime_capability_evidence
+uv run python -m unittest -v tests.test_prime_programmatic_long_context_receipt tests.test_prime_programmatic_long_context_compat tests.test_prime_ipython_coding_compat tests.test_prime_capability_evidence
 ```

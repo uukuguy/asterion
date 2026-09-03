@@ -13,6 +13,26 @@ from asterion.applications.prime_agent.evidence import (
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+_PUBLIC_REPORT_FIELDS = frozenset(
+    {
+        "format",
+        "status",
+        "reason",
+        "real_prime_runtime",
+        "allowed_tool_names",
+        "active_tool_names",
+        "corpus_sha256",
+        "corpus_record_count",
+        "selected_record_count",
+        "program_sha256",
+        "aggregate_sha256",
+        "oracle_sha256",
+        "ipython_cell_executed",
+        "oracle_passed",
+        "disposed",
+        "reaped",
+    }
+)
 
 
 class ProgrammaticLongContextReceiptError(ValueError):
@@ -44,6 +64,50 @@ def _positive_integer(value: object) -> bool:
 
 def _digest(value: object) -> bool:
     return type(value) is str and _DIGEST.fullmatch(value) is not None
+
+
+def programmatic_long_context_observation_from_public_report(
+    report: object,
+) -> ProgrammaticLongContextObservation:
+    """Convert only one exact successful compatibility report to private facts."""
+
+    if (
+        type(report) is not dict
+        or frozenset(report) != _PUBLIC_REPORT_FIELDS
+        or report["format"]
+        != "asterion.prime-programmatic-long-context-compat/v1"
+        or report["status"] != "PASS"
+        or report["reason"] != "supported"
+        or report["real_prime_runtime"] is not True
+        or report["allowed_tool_names"] != ["ipython"]
+        or report["active_tool_names"] != ["ipython"]
+        or report["ipython_cell_executed"] is not True
+        or report["oracle_passed"] is not True
+        or report["disposed"] is not True
+        or report["reaped"] is not True
+    ):
+        raise ProgrammaticLongContextReceiptError(
+            "programmatic long-context receipt is invalid"
+        )
+    try:
+        observation = ProgrammaticLongContextObservation(
+            built_in_tools=("ipython",),
+            active_tool_names=("ipython",),
+            corpus_sha256=report["corpus_sha256"],
+            corpus_record_count=report["corpus_record_count"],
+            selected_record_count=report["selected_record_count"],
+            program_sha256=report["program_sha256"],
+            aggregate_sha256=report["aggregate_sha256"],
+            oracle_sha256=report["oracle_sha256"],
+            ipython_cell_executed=True,
+            oracle_passed=True,
+        )
+        verify_programmatic_long_context_receipt(observation)
+    except (KeyError, TypeError, ProgrammaticLongContextReceiptError):
+        raise ProgrammaticLongContextReceiptError(
+            "programmatic long-context receipt is invalid"
+        ) from None
+    return observation
 
 
 def verify_programmatic_long_context_receipt(
