@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import re
@@ -66,7 +66,7 @@ class MetadataBlob:
 
 @dataclass(frozen=True)
 class ObjectBlob:
-    url: str
+    url: str = field(repr=False)
     size: int
     sha256: str
 

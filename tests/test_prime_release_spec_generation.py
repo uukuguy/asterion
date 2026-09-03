@@ -218,6 +218,24 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
             image_input_lock.validate_image_input_lock(structural_lock), structural_lock
         )
 
+    def test_result_representation_never_exposes_private_capture_locator(self) -> None:
+        private_url = "https://private-release-sentinel.invalid/secret-path/node.tar.xz"
+        result = generation.generate_release_specification(
+            _request(
+                claims=(
+                    replace(
+                        _CLAIMS[0],
+                        object=replace(_CLAIMS[0].object, url=private_url),
+                    ),
+                    _CLAIMS[1],
+                )
+            )
+        )
+
+        self.assertNotIn(private_url, repr(result))
+        self.assertNotIn("private-release-sentinel.invalid", repr(result))
+        self.assertNotIn("secret-path", str(result))
+
     def test_exact_parser_boundary_rejects_extra_missing_and_wrong_claim_shapes(
         self,
     ) -> None:
