@@ -1499,3 +1499,5 @@
 - 12:20 Defined P1 real workload-result contract; P2–P7 remain External-limited [pending commit]
 - 12:20 Committed P1 workload-result contract; fixed workload binding prevents generic execution [23457b7]
 - 12:21 Synchronized Prime state with P1 review gate and External-limited products [pending commit]
+- 12:21 Committed Prime P1 review state and recovery checkpoint [e1d7ed7]
+- 12:25 Planned P1 fixed workload-result implementation after approved design [pending commit]
