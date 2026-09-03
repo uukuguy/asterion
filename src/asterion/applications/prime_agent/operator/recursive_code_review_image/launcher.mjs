@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-// Sealed P3 image entrypoint. Fixed Prime RLM 0.7.1 and IPython 9.4.0 mechanics
-// are image-owned; the only observable records are canonical causal facts.
+// Static P3 protocol fixture. Its output is diagnostic-only and never real-RLM evidence.
 import { createHash } from "node:crypto";
 
 const ROLE = "prime.recursive-workflow";
 const CHILDREN = ["prime.recursive-workflow.implementation", "prime.recursive-workflow.review"];
 const SCENARIO = "prime.recursive-workflow/v1";
-const WORKLOAD = "sha256:4b9f6a3e6a646bd3c805c206466dc2e46826f7bf89d396f9deb560785fed8d6a";
+const WORKLOAD = "sha256:6312f6908eeeb33b25368cc91121c606a45a4c14ff533c02e05c4fd8f75863e5";
 const WORKER = "prime-p3-image-worker";
 const RUN = "prime-p3-image-run";
 const CHALLENGE = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
@@ -26,6 +25,7 @@ const roleTwo = digest("review-role");
 const usageTwo = digest("review-usage");
 const resultTwo = digest("review-result");
 const follow = digest("review-follow-up");
+const followResult = digest("review-follow-up-result");
 const oracle = digest("oracle");
 const model = digest("model");
 const usage = digest("usage");
@@ -39,7 +39,7 @@ const payloads = [
   { child_role_id: CHILDREN[1], child_role_sha256: roleTwo, child_usage_sha256: usageTwo },
   { child_result_sha256: resultTwo, child_role_id: CHILDREN[1], ipython_action_count: 1 },
   { follow_up_digest: follow, target_role_id: CHILDREN[1] },
-  { child_role_id: CHILDREN[1], follow_up_digest: follow },
+  { child_result_sha256: followResult, child_role_id: CHILDREN[1], follow_up_digest: follow, ipython_action_count: 1 },
   { aggregation_sha256: aggregate, model_sha256: model, oracle_sha256: oracle, usage_sha256: usage },
   { child_role_id: CHILDREN[0] },
   { child_role_id: CHILDREN[1] },

@@ -13,9 +13,15 @@ from asterion.applications.prime_agent.operator.programmatic_long_context_worklo
     PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST,
 )
 from asterion.applications.prime_agent.operator.recursive_code_review_workload import (
+    RECURSIVE_CODE_REVIEW_P3_CHILD_ACTION_CEILING,
     RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS,
+    RECURSIVE_CODE_REVIEW_P3_CHILD_USAGE_CEILING,
+    RECURSIVE_CODE_REVIEW_P3_DEADLINE_SECONDS,
     RECURSIVE_CODE_REVIEW_P3_FOLLOW_UP_ROLE_ID,
+    RECURSIVE_CODE_REVIEW_P3_MAX_FRAME_BYTES,
     RECURSIVE_CODE_REVIEW_P3_ROLE_ID,
+    RECURSIVE_CODE_REVIEW_P3_ROOT_ACTION_CEILING,
+    RECURSIVE_CODE_REVIEW_P3_ROOT_USAGE_CEILING,
     RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID,
     RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
     is_recursive_code_review_workload,
@@ -41,6 +47,20 @@ class TestRecursiveCodeReviewWorkload(unittest.TestCase):
         self.assertEqual(len(RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS), 2)
         self.assertIn(RECURSIVE_CODE_REVIEW_P3_FOLLOW_UP_ROLE_ID, RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS)
 
+    def test_manifest_binds_the_fixed_execution_ceilings(self) -> None:
+        manifest = json.loads(recursive_code_review_workload_manifest_bytes())
+
+        self.assertEqual(manifest["child_count"], 2)
+        self.assertEqual(manifest["depth"], 1)
+        self.assertEqual(manifest["retained_child_role_id"], RECURSIVE_CODE_REVIEW_P3_FOLLOW_UP_ROLE_ID)
+        self.assertEqual(manifest["max_frame_bytes"], RECURSIVE_CODE_REVIEW_P3_MAX_FRAME_BYTES)
+        self.assertEqual(manifest["deadline_seconds"], RECURSIVE_CODE_REVIEW_P3_DEADLINE_SECONDS)
+        self.assertEqual(manifest["root_action_ceiling"], RECURSIVE_CODE_REVIEW_P3_ROOT_ACTION_CEILING)
+        self.assertEqual(manifest["root_usage_ceiling"], RECURSIVE_CODE_REVIEW_P3_ROOT_USAGE_CEILING)
+        self.assertEqual(manifest["child_action_ceiling"], RECURSIVE_CODE_REVIEW_P3_CHILD_ACTION_CEILING)
+        self.assertEqual(manifest["child_usage_ceiling"], RECURSIVE_CODE_REVIEW_P3_CHILD_USAGE_CEILING)
+        self.assertEqual(manifest["model_tool_names"], ["ipython"])
+
     def test_p1_and_p2_workloads_are_not_admitted(self) -> None:
         for workload in (
             PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
@@ -50,4 +70,3 @@ class TestRecursiveCodeReviewWorkload(unittest.TestCase):
             with self.subTest(workload=workload):
                 self.assertNotEqual(RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST, workload)
                 self.assertFalse(is_recursive_code_review_workload(workload))
-

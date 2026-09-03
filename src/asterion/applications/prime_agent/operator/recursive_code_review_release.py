@@ -5,21 +5,22 @@ from __future__ import annotations
 import json
 import re
 import time
+from dataclasses import dataclass
 from typing import Callable, Final
 
-from asterion.applications.prime_agent.recursive_workflow_receipt import RecursiveWorkflowTrace
-
 from .recursive_code_review_workload import (
+    RECURSIVE_CODE_REVIEW_P3_DEADLINE_SECONDS,
     RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS,
     RECURSIVE_CODE_REVIEW_P3_FOLLOW_UP_ROLE_ID,
+    RECURSIVE_CODE_REVIEW_P3_MAX_FRAME_BYTES,
     RECURSIVE_CODE_REVIEW_P3_ROLE_ID,
     RECURSIVE_CODE_REVIEW_P3_SCENARIO_ID,
     RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
 )
 
 
-RECURSIVE_CODE_REVIEW_MAX_FRAME_BYTES: Final = 4096
-_DEADLINE_SECONDS: Final = 1.0
+RECURSIVE_CODE_REVIEW_MAX_FRAME_BYTES: Final = RECURSIVE_CODE_REVIEW_P3_MAX_FRAME_BYTES
+_DEADLINE_SECONDS: Final = RECURSIVE_CODE_REVIEW_P3_DEADLINE_SECONDS
 _DIGEST: Final = re.compile(r"sha256:[0-9a-f]{64}")
 _KINDS: Final = (
     "self-check", "release", "root-artifact", "child-admitted", "child-result",
@@ -39,6 +40,38 @@ class RecursiveCodeReviewReleaseError(ValueError):
 
 def _invalid() -> RecursiveCodeReviewReleaseError:
     return RecursiveCodeReviewReleaseError("recursive code-review release is invalid")
+
+
+@dataclass(frozen=True, repr=False)
+class RecursiveCodeReviewFixtureDiagnostic:
+    """Non-promotable static-fixture observation for launcher protocol tests."""
+
+    workload_sha256: str
+    root_artifact_sha256: str
+    first_child_role_digests: tuple[str, str]
+    first_child_result_digests: tuple[str, str]
+    first_child_usage_digests: tuple[str, str]
+    follow_up_digest: str
+    follow_up_result_digest: str
+    aggregation_sha256: str
+    oracle_sha256: str
+    model_sha256: str
+    usage_sha256: str
+    root_to_child_message_count: int
+    child_to_root_result_count: int
+    follow_up_count: int
+    root_deleted_child_count: int
+    root_continued_locally: bool
+    root_work_before_children: bool
+    child_tool_names: tuple[tuple[str], tuple[str]]
+    child_ipython_action_counts: tuple[int, int]
+    follow_up_ipython_action_count: int
+    revoked: bool
+    disposed: bool
+    reaped: bool
+
+    def __repr__(self) -> str:
+        return "RecursiveCodeReviewFixtureDiagnostic(redacted)"
 
 
 def _canonical(value: object) -> bytes:
@@ -76,6 +109,7 @@ class _RecursiveCodeReviewRelease:
         self._results: dict[str, str] = {}
         self._root_artifact: str | None = None
         self._follow_up: str | None = None
+        self._follow_up_result: str | None = None
         self._aggregate: tuple[str, str, str, str] | None = None
         self._deleted: set[str] = set()
 
@@ -88,24 +122,26 @@ class _RecursiveCodeReviewRelease:
         self._validate(value["kind"], value["payload"])
         self._sequence += 1
 
-    def trace(self) -> RecursiveWorkflowTrace:
-        if self._sequence != len(_KINDS) or self._root_artifact is None or self._follow_up is None or self._aggregate is None:
+    def trace(self) -> RecursiveCodeReviewFixtureDiagnostic:
+        if self._sequence != len(_KINDS) or self._root_artifact is None or self._follow_up is None or self._follow_up_result is None or self._aggregate is None:
             raise _invalid()
         if set(self._admissions) != set(RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS) or set(self._results) != set(RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS) or self._deleted != set(RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS):
             raise _invalid()
         first, second = RECURSIVE_CODE_REVIEW_P3_CHILD_ROLE_IDS
         oracle, model, usage, aggregation = self._aggregate
-        return RecursiveWorkflowTrace(
+        return RecursiveCodeReviewFixtureDiagnostic(
             workload_sha256=RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
             root_artifact_sha256=self._root_artifact,
             first_child_role_digests=(self._admissions[first][0], self._admissions[second][0]),
             first_child_result_digests=(self._results[first], self._results[second]),
             first_child_usage_digests=(self._admissions[first][1], self._admissions[second][1]),
-            follow_up_digest=self._follow_up, aggregation_sha256=aggregation, oracle_sha256=oracle,
+            follow_up_digest=self._follow_up, follow_up_result_digest=self._follow_up_result,
+            aggregation_sha256=aggregation, oracle_sha256=oracle,
             model_sha256=model, usage_sha256=usage, root_to_child_message_count=2,
             child_to_root_result_count=3, follow_up_count=1, root_deleted_child_count=2,
             root_continued_locally=True, root_work_before_children=True,
             child_tool_names=(("ipython",), ("ipython",)), child_ipython_action_counts=(1, 1),
+            follow_up_ipython_action_count=1,
             revoked=True, disposed=True, reaped=True,
         )
 
@@ -156,7 +192,17 @@ class _RecursiveCodeReviewRelease:
             if valid:
                 self._follow_up = follow_up  # type: ignore[assignment]
         elif kind == "follow-up-result":
-            valid = payload == {"child_role_id": RECURSIVE_CODE_REVIEW_P3_FOLLOW_UP_ROLE_ID, "follow_up_digest": self._follow_up}
+            result = payload.get("child_result_sha256")
+            valid = (
+                set(payload) == {"child_result_sha256", "child_role_id", "follow_up_digest", "ipython_action_count"}
+                and payload.get("child_role_id") == RECURSIVE_CODE_REVIEW_P3_FOLLOW_UP_ROLE_ID
+                and payload.get("follow_up_digest") == self._follow_up
+                and _digest(result)
+                and result != self._results.get(RECURSIVE_CODE_REVIEW_P3_FOLLOW_UP_ROLE_ID)
+                and payload.get("ipython_action_count") == 1
+            )
+            if valid:
+                self._follow_up_result = result  # type: ignore[assignment]
         elif kind == "aggregation":
             values = tuple(payload.get(name) for name in ("oracle_sha256", "model_sha256", "usage_sha256", "aggregation_sha256"))
             valid = set(payload) == {"oracle_sha256", "model_sha256", "usage_sha256", "aggregation_sha256"} and all(_digest(item) for item in values)
@@ -175,11 +221,13 @@ class _RecursiveCodeReviewRelease:
             raise _invalid()
 
 
-def parse_recursive_code_review_frames(data: bytes, *, clock: Callable[[], float] = time.monotonic) -> RecursiveWorkflowTrace:
-    """Reduce one sealed P3 image stream to its private normalized trace."""
+def parse_recursive_code_review_frames(data: bytes, *, clock: Callable[[], float] = time.monotonic) -> RecursiveCodeReviewFixtureDiagnostic:
+    """Reduce static launcher bytes to a non-promotable protocol diagnostic."""
     if type(data) is not bytes or not data or len(data) > len(_KINDS) * (RECURSIVE_CODE_REVIEW_MAX_FRAME_BYTES + 1):
         raise _invalid()
-    frames = data.splitlines()
+    if not data.endswith(b"\n") or data.endswith(b"\n\n"):
+        raise _invalid()
+    frames = data[:-1].split(b"\n")
     if len(frames) != len(_KINDS):
         raise _invalid()
     first = frames[0]

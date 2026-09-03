@@ -22,6 +22,7 @@ _TRACE_FIELDS = frozenset(
         "first_child_result_digests",
         "first_child_usage_digests",
         "follow_up_digest",
+        "follow_up_result_digest",
         "aggregation_sha256",
         "oracle_sha256",
         "model_sha256",
@@ -34,6 +35,7 @@ _TRACE_FIELDS = frozenset(
         "root_work_before_children",
         "child_tool_names",
         "child_ipython_action_counts",
+        "follow_up_ipython_action_count",
         "revoked",
         "disposed",
         "reaped",
@@ -55,6 +57,7 @@ class RecursiveWorkflowTrace:
     first_child_result_digests: tuple[str, str]
     first_child_usage_digests: tuple[str, str]
     follow_up_digest: str
+    follow_up_result_digest: str
     aggregation_sha256: str
     oracle_sha256: str
     model_sha256: str
@@ -67,6 +70,7 @@ class RecursiveWorkflowTrace:
     root_work_before_children: bool
     child_tool_names: tuple[tuple[str], tuple[str]]
     child_ipython_action_counts: tuple[int, int]
+    follow_up_ipython_action_count: int
     revoked: bool
     disposed: bool
     reaped: bool
@@ -133,12 +137,14 @@ def verify_real_recursive_workflow_trace(
             not _digest(value)
             for value in (
                 trace.follow_up_digest,
+                trace.follow_up_result_digest,
                 trace.aggregation_sha256,
                 trace.oracle_sha256,
                 trace.model_sha256,
                 trace.usage_sha256,
             )
         )
+        or trace.follow_up_result_digest in trace.first_child_result_digests
         or type(trace.root_to_child_message_count) is not int
         or trace.root_to_child_message_count != _CHILD_COUNT
         or type(trace.child_to_root_result_count) is not int
@@ -151,6 +157,8 @@ def verify_real_recursive_workflow_trace(
         or trace.root_work_before_children is not True
         or not _ipython_only(trace.child_tool_names)
         or not _positive_child_actions(trace.child_ipython_action_counts)
+        or type(trace.follow_up_ipython_action_count) is not int
+        or trace.follow_up_ipython_action_count <= 0
         or trace.revoked is not True
         or trace.disposed is not True
         or trace.reaped is not True
