@@ -4,9 +4,13 @@
 
 ## TL;DR
 
-- The P1 workload-result specification is committed at `23457b7`. It selects
-  one code-owned `prime.ipython-coding/v1` fixture by exact digest and requires
-  a canonical, workload-bound worker result.
+- P1's fixed workload-result implementation is committed at `a9d6e72`. It
+  selects one code-owned `prime.ipython-coding/v1` fixture by exact digest and
+  requires a canonical, workload-bound worker result.
+- P1's five focused provider-free suites passed (57 tests); Ruff, launcher
+  byte-compilation, and `git diff --check` passed. The prescribed Pyright scope
+  has one unresolved fixture-local `solution` import, so a full quality-gate
+  PASS is not claimed.
 - The final review correction is committed at `f61a55b`: P5/P6 cannot issue
   bounded evidence until role-specific real launchers exist.
 - Products 2–7 remain External-limited. Existing P2/P3 provider-free work and
@@ -25,10 +29,12 @@
 
 ## Verification evidence
 
-- Worker platform: 69 focused Python tests across shared lifecycle, seven-role
-  gate, Docker adapter/CLI, launch barrier, and model broker passed; Node
-  launcher syntax, Ruff, Pyright, and diff checks passed. No Docker, model, or
-  network action occurred.
+- P1 fixed workload-result protocol is provider-free test-verified: 57 focused
+  Python tests across the Docker worker/CLI, IPython launcher protocol, worker
+  gate, and coding-fixture receipt passed. Ruff, launcher byte-compilation, and
+  `git diff --check` passed; Pyright reported one unresolved fixture-local
+  `solution` import. Docker/model/network execution was not run and is not a
+  PASS claim.
 - Node: 37 Prime gateway main tests passed, including zero-resource native RLM
   budget clamping and expiry rejection.
 - Ruff, Pyright, Node syntax, and `git diff --check` passed.
@@ -38,10 +44,11 @@
 
 ## Immediate next action
 
-1. Obtain review of the committed P1 workload-result specification.
-2. After review, write and approve an implementation plan before code changes.
-3. Retain P2–P7 as External-limited; ARC-AGI-3 remains unimplemented and
-   requires a later isolated broker/functional-subset design.
+1. Resolve or explicitly scope the fixture-local Pyright `solution` import
+   before claiming the P1 quality gate fully passes.
+2. Retain P2–P7 as External-limited; P5/P6 gained no bounded evidence.
+   ARC-AGI-3 remains unimplemented and requires a later isolated
+   broker/functional-subset design.
 
 ## Recovery commands
 

@@ -1503,3 +1503,8 @@
 - 12:25 Planned P1 fixed workload-result implementation after approved design [pending commit]
 - 12:25 Committed P1 workload-result implementation plan [8128239]
 - 12:32 Selected Python/IPython fixed launcher; Node-only image cannot execute P1 fixture [pending commit]
+- 13:19 Parsed canonical IPython result frames to bind digest and fixed workload identity [b4ee1b8]
+- 13:24 Closed P1 result content to exactly normalized IPython pass status [ee86826]
+- 13:31 Replaced Node marker with fixed IPython workload launcher and canonical completion [61c5ed2]
+- 13:37 Bound canonical release digest and immutable Python OCI index [a9d6e72]
+- 13:45 P1 fixed workload-result protocol provider-free tests passed (57 tests); Ruff, launcher byte-compilation, and diff checks passed. The prescribed Pyright scope reported one unresolved fixture-local `solution` import, so full quality-gate PASS is not claimed. No Docker, model, or network execution ran; P2–P7 remain External-limited and P5/P6 gained no bounded evidence [no code commit]
