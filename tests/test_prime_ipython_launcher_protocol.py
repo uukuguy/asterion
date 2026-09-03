@@ -11,6 +11,10 @@ import sys
 from tempfile import TemporaryDirectory
 import unittest
 
+from asterion.applications.prime_agent.operator.ipython_workload import (
+    PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "src/asterion/applications/prime_agent/operator/image"
@@ -45,41 +49,56 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
                 sys.path.remove(str(workspace))
         self.assertEqual(oracle.read_bytes(), immutable_oracle)
 
-    def test_launcher_has_one_canonical_selfcheck_then_one_redacted_release_barrier(self) -> None:
-        launcher = (IMAGE / "launcher.mjs").read_text(encoding="utf-8")
+    def test_python_launcher_has_one_canonical_selfcheck_and_bound_completion(self) -> None:
+        launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
         expected = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True)
         self.assertIn(expected, launcher)
         self.assertIn("1024", launcher)
-        self.assertIn('{"release":true}', launcher)
-        self.assertIn("releaseCount !== 1", launcher)
-        self.assertIn("unproven", launcher)
-        for prohibited in ("process.env", "socket", "provider", "transcript"):
+        self.assertIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
+        self.assertIn("hashlib.sha256", launcher)
+        self.assertIn('"result_digest"', launcher)
+        self.assertNotIn('{"terminal":"completed"}', launcher)
+        self.assertIn('value["workload_digest"] != WORKLOAD_DIGEST', launcher)
+        self.assertLess(
+            launcher.index('value["workload_digest"] != WORKLOAD_DIGEST'),
+            launcher.index("execute_fixture()"),
+        )
+        for prohibited in ("os.environ", "socket", "provider", "transcript", "subprocess"):
             self.assertNotIn(prohibited, launcher.lower())
 
-    def test_launcher_requires_exact_mount_writable_and_credential_checks_before_frame(self) -> None:
-        launcher = (IMAGE / "launcher.mjs").read_text(encoding="utf-8")
+    def test_python_launcher_executes_only_image_owned_fixture_via_ipython(self) -> None:
+        launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
+        dockerfile = (IMAGE / "Dockerfile").read_text(encoding="utf-8")
         for required in (
-            "parseMounts",
-            'mountPoint === "/"',
-            'mountPoint === "/workspace"',
-            'options.has("ro")',
-            'options.has("rw")',
-            "workspaceOnlyWritable",
-            "credentialSentinelAbsent",
-            "requireClosedWorker();\nprocess.stdout.write",
+            "InteractiveShell",
+            "run_line_magic",
+            '"/opt/prime-fixture/starter/solution.py"',
+            '"/opt/prime-fixture/oracle/oracle.py"',
+            '"/workspace/solution.py"',
+            "fixture_source.replace(\"return 0\", \"return 42\", 1)",
+            "execute_fixture()",
+            "emit_completion()",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, launcher)
-        self.assertNotIn('mounts.includes(" / ")', launcher)
-        self.assertNotIn('mounts.includes(" /workspace ")', launcher)
+        for required in (
+            "FROM python:3.11.11-bookworm",
+            "COPY requirements.lock /opt/prime-requirements.lock",
+            "pip install --no-cache-dir --require-hashes",
+            "COPY launcher.py /usr/local/bin/prime-ipython-coding.py",
+            'ENTRYPOINT [\"/usr/local/bin/prime-ipython-coding.py\"]',
+        ):
+            with self.subTest(dockerfile=required):
+                self.assertIn(required, dockerfile)
+        self.assertNotIn("launcher.mjs", dockerfile)
 
-    def test_launcher_rejects_writable_root_other_mount_and_credential_sentinel(self) -> None:
-        launcher = (IMAGE / "launcher.mjs").read_text(encoding="utf-8")
+    def test_python_launcher_keeps_closed_worker_checks_before_selfcheck(self) -> None:
+        launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
         cases = {
-            "writable root": 'if (mountPoint === "/") rootReadOnly = options.has("ro");',
-            "other writable mount": 'options.has("rw") && mountPoint !== "/workspace" && !writableKernelMounts.has(mountPoint)',
-            "credential sentinel": "return credentialSentinels.every((sentinel) => !existsSync(sentinel));",
-            "safe result": "return rootReadOnly && workspaceWritable;",
+            "writable root": 'mount_point == "/"',
+            "other writable mount": 'mount_point != "/workspace"',
+            "credential sentinel": "_CREDENTIAL_SENTINELS",
+            "safe result": "root_read_only and workspace_writable",
         }
         for name, assertion in cases.items():
             with self.subTest(name=name):

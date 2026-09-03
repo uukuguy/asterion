@@ -29,7 +29,7 @@ from asterion.services.restricted_worker import (
 
 
 _ENVIRONMENT = ("HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1")
-_ENTRYPOINT = "/usr/local/bin/prime-ipython-coding"
+_ENTRYPOINT = "/usr/local/bin/prime-ipython-coding.py"
 _TMPFS = "/workspace:rw,nodev,noexec,nosuid,size=67108864"
 _OUTPUT_CAP = 65536
 _CONTAINER_ID = re.compile(r"prime-[0-9a-f]{32}\Z")
