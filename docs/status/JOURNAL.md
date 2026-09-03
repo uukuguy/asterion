@@ -1512,3 +1512,4 @@
 - 14:25 Planned P2 sealed worker implementation after approved specification [pending commit]
 - 14:46 Bound P2 evidence to broker, worker, fixed identities, and cleanup; compatibility remains non-promotable [a231275]
 - 14:49 Required positive broker activity before P2 bounded evidence issues [1e8114c]
+- 16:18 Defined fixed P2 workload and canonical completion to prevent identity substitution [016f5ef]
