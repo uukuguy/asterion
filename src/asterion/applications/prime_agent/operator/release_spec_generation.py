@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import re
-from typing import Final, Literal, cast
+from typing import Final, Literal
 from urllib.parse import urlsplit
 
 from . import release_recipe
+from . import release_metadata
 
 
 _SHA256: Final = re.compile(r"[0-9a-f]{64}")
@@ -17,7 +18,6 @@ _COMMIT: Final = re.compile(r"[0-9a-f]{40}")
 _PATH: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*")
 _KIND: Final = re.compile(r"[a-z][a-z0-9-]*")
 _GENERATOR_REVISION: Final = "prime-release-spec-generator/v1"
-_METADATA_PARSER_REVISION: Final = "prime-release-metadata-parser/v1"
 _FORMAT: Final = "asterion.prime-ipython-release-spec-generation/v1"
 
 
@@ -99,6 +99,17 @@ class MetadataObjectClaim:
 
 
 @dataclass(frozen=True)
+class ParsedMetadataCapture:
+    """Private capture whose object declaration came from offline metadata."""
+
+    artifact_kind: str
+    artifact_path: str
+    metadata_bytes: bytes = field(repr=False)
+    declaration: release_metadata.ParsedMetadataDeclaration
+    object: ObjectBlob
+
+
+@dataclass(frozen=True)
 class PublicObjectBlob:
     """Review-safe object evidence; capture locators never leave the request."""
 
@@ -172,7 +183,7 @@ class ReleaseSpecGenerationRequest:
     source: PrimeSourceTriple
     observation: SubstrateObservation
     recipe: release_recipe.ReleaseRecipe
-    claims: tuple[MetadataObjectClaim, ...]
+    claims: tuple[ParsedMetadataCapture, ...]
     generator_revision: str
 
 
@@ -338,36 +349,34 @@ def _validate_observation(value: object) -> SubstrateObservation:
 
 def _validate_claim(value: object) -> MetadataObjectClaim:
     if (
-        type(value) is not MetadataObjectClaim
+        type(value) is not ParsedMetadataCapture
         or type(value.artifact_kind) is not str
         or type(value.artifact_path) is not str
-        or type(value.metadata) is not MetadataBlob
         or type(value.object) is not ObjectBlob
-        or type(value.declared_object_size) is not int
-        or type(value.declared_object_sha256) is not str
         or _KIND.fullmatch(value.artifact_kind) is None
         or _PATH.fullmatch(value.artifact_path) is None
         or "//" in value.artifact_path
         or any(part in {".", ".."} for part in value.artifact_path.split("/"))
     ):
         raise _invalid()
-    metadata, object_blob = value.metadata, value.object
+    try:
+        declaration = release_metadata.validate_declaration_metadata_bytes(
+            value.declaration, value.metadata_bytes
+        )
+    except release_metadata.PrimeReleaseMetadataError:
+        raise _invalid() from None
+    object_blob = value.object
     if (
-        type(metadata.parser_revision) is not str
-        or type(metadata.size) is not int
-        or type(metadata.sha256) is not str
-        or metadata.parser_revision != _METADATA_PARSER_REVISION
-        or metadata.size < 0
-        or _SHA256.fullmatch(metadata.sha256) is None
-        or type(object_blob.url) is not str
+        type(object_blob.url) is not str
         or type(object_blob.size) is not int
         or type(object_blob.sha256) is not str
         or object_blob.size < 0
         or _SHA256.fullmatch(object_blob.sha256) is None
-        or value.declared_object_size < 0
-        or _SHA256.fullmatch(value.declared_object_sha256) is None
-        or value.declared_object_size != object_blob.size
-        or value.declared_object_sha256 != object_blob.sha256
+        or object_blob.sha256 != declaration.declared_sha256
+        or (
+            declaration.declared_size is not None
+            and object_blob.size != declaration.declared_size
+        )
     ):
         raise _invalid()
     parsed = urlsplit(object_blob.url)
@@ -381,7 +390,18 @@ def _validate_claim(value: object) -> MetadataObjectClaim:
         or not parsed.path.startswith("/")
     ):
         raise _invalid()
-    return value
+    return MetadataObjectClaim(
+        value.artifact_kind,
+        value.artifact_path,
+        MetadataBlob(
+            declaration.parser_revision,
+            declaration.metadata_size,
+            declaration.metadata_sha256,
+        ),
+        object_blob,
+        declaration.declared_size if declaration.declared_size is not None else object_blob.size,
+        declaration.declared_sha256,
+    )
 
 
 def _validate_request(value: object) -> ReleaseSpecGenerationRequest:
@@ -438,7 +458,9 @@ def generate_release_specification(request: object) -> ReleaseSpecGenerationResu
         and not validated.observation.emulated
     ):
         status = "candidate-native"
-    public_claims = tuple(_public_claim(claim) for claim in validated.claims)
+    public_claims = tuple(
+        _public_claim(_validate_claim(claim)) for claim in validated.claims
+    )
     recipe_identity = _recipe_identity(validated.recipe)
     lock = UntrustedAcquisitionLock(
         validated.target, validated.source, recipe_identity, public_claims
@@ -529,7 +551,6 @@ def _valid_public_result(result: ReleaseSpecGenerationResult) -> bool:
     except (AttributeError, TypeError, ValueError):
         return False
 
-
 def _validate_public_claim(value: object) -> PublicMetadataObjectClaim:
     if (
         type(value) is not PublicMetadataObjectClaim
@@ -550,7 +571,13 @@ def _validate_public_claim(value: object) -> PublicMetadataObjectClaim:
         type(metadata.parser_revision) is not str
         or type(metadata.size) is not int
         or type(metadata.sha256) is not str
-        or metadata.parser_revision != _METADATA_PARSER_REVISION
+        or metadata.parser_revision not in {
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.node_shasums,
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.pypi_json,
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.oci_index,
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.oci_manifest,
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.recipe_output_manifest,
+        }
         or metadata.size < 0
         or _SHA256.fullmatch(metadata.sha256) is None
         or type(object_blob.size) is not int
@@ -566,131 +593,3 @@ def _validate_public_claim(value: object) -> PublicMetadataObjectClaim:
     ):
         raise ValueError
     return value
-
-
-def _parse_target(value: object) -> ExactTargetDescriptor:
-    if type(value) is not dict or set(value) != {"architecture", "os", "variant"}:
-        raise ValueError
-    return ExactTargetDescriptor(
-        cast(str, value["os"]),
-        cast(str, value["architecture"]),
-        cast(str | None, value["variant"]),
-    )
-
-
-def _parse_recipe(value: object) -> release_recipe.ReleaseRecipe:
-    expected = release_recipe.PRIME_IPYTHON_RELEASE_RECIPE
-    expected_dict = {
-        "artifact_graph_revision": expected.artifact_graph_revision,
-        "base_distribution": expected.base_distribution,
-        "fixture_recipe_sha256": expected.fixture_recipe_sha256,
-        "frontend_recipe_sha256": expected.frontend_recipe_sha256,
-        "libc": expected.libc,
-        "metadata_parsers": {
-            "claim_binding": expected.metadata_parsers.claim_binding,
-            "node_shasums": expected.metadata_parsers.node_shasums,
-            "oci_index": expected.metadata_parsers.oci_index,
-            "oci_manifest": expected.metadata_parsers.oci_manifest,
-            "pypi_json": expected.metadata_parsers.pypi_json,
-            "recipe_output_manifest": expected.metadata_parsers.recipe_output_manifest,
-        },
-        "node_version": expected.node_version,
-        "python_dependency_lock_sha256": expected.python_dependency_lock_sha256,
-        "python_major_minor": expected.python_major_minor,
-        "recipe_revision": expected.recipe_revision,
-        "source": _source_dict(expected.source),
-    }
-    if type(value) is not dict or value != expected_dict:
-        raise ValueError
-    return expected
-
-
-def release_spec_generation_request_from_dict(
-    value: object,
-) -> ReleaseSpecGenerationRequest:
-    """Strictly parse caller-injected data without reading a file or host state."""
-    try:
-        if type(value) is not dict or set(value) != {
-            "claims",
-            "generator_revision",
-            "observation",
-            "recipe",
-            "source",
-            "target",
-        }:
-            raise ValueError
-        target = _parse_target(value["target"])
-        source_value = cast(dict[str, object], value["source"])
-        observation_value = cast(dict[str, object], value["observation"])
-        claims_value = value["claims"]
-        if (
-            type(source_value) is not dict
-            or set(source_value) != {"commit", "package_lock_sha256", "tree_sha256"}
-            or type(observation_value) is not dict
-            or set(observation_value) != {"emulated", "substrate", "target"}
-            or not isinstance(claims_value, list)
-        ):
-            raise ValueError
-        source = PrimeSourceTriple(
-            cast(str, source_value["commit"]),
-            cast(str, source_value["tree_sha256"]),
-            cast(str, source_value["package_lock_sha256"]),
-        )
-        if source != PRIME_IPYTHON_SOURCE:
-            raise ValueError
-        observation = SubstrateObservation(
-            _parse_target(observation_value["target"]),
-            cast(
-                Literal["native-linux", "desktop-vm", "emulated"],
-                observation_value["substrate"],
-            ),
-            cast(bool, observation_value["emulated"]),
-        )
-        claims: list[MetadataObjectClaim] = []
-        for item in claims_value:
-            if type(item) is not dict or set(item) != {
-                "artifact_kind",
-                "artifact_path",
-                "declared_object_sha256",
-                "declared_object_size",
-                "metadata",
-                "object",
-            }:
-                raise ValueError
-            metadata_value, object_value = item["metadata"], item["object"]
-            if (
-                type(metadata_value) is not dict
-                or set(metadata_value) != {"parser_revision", "sha256", "size"}
-                or type(object_value) is not dict
-                or set(object_value) != {"sha256", "size", "url"}
-            ):
-                raise ValueError
-            claims.append(
-                MetadataObjectClaim(
-                    cast(str, item["artifact_kind"]),
-                    cast(str, item["artifact_path"]),
-                    MetadataBlob(
-                        cast(str, metadata_value["parser_revision"]),
-                        cast(int, metadata_value["size"]),
-                        cast(str, metadata_value["sha256"]),
-                    ),
-                    ObjectBlob(
-                        cast(str, object_value["url"]),
-                        cast(int, object_value["size"]),
-                        cast(str, object_value["sha256"]),
-                    ),
-                    cast(int, item["declared_object_size"]),
-                    cast(str, item["declared_object_sha256"]),
-                )
-            )
-        request = ReleaseSpecGenerationRequest(
-            target,
-            PRIME_IPYTHON_SOURCE,
-            observation,
-            _parse_recipe(value["recipe"]),
-            tuple(claims),
-            cast(str, value["generator_revision"]),
-        )
-    except (KeyError, TypeError, ValueError):
-        raise _invalid() from None
-    return _validate_request(request)

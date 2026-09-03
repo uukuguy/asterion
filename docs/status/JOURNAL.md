@@ -1436,3 +1436,5 @@
 - 08:21 Committed canonical recipe identity for every public candidate record [3086aa8]
 - 08:24 Full provider-free regression exposed a stale DCI packaged-assemblies expectation after Prime assembly installation; Prime focused suites remain green [no code commit]
 - 08:31 Bound guarded parser declarations to exact captured metadata bytes before generator migration [pending commit]
+- 08:32 Committed parser-declaration and captured-metadata binding [cc903ce]
+- 08:48 Replaced free release claims with parser-produced private metadata captures [pending commit]

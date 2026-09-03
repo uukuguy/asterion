@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 from asterion.applications.prime_agent.operator import image_input_lock
+from asterion.applications.prime_agent.operator import release_metadata
 from asterion.applications.prime_agent.operator import release_recipe
 from asterion.applications.prime_agent.operator import (
     release_spec_generation as generation,
@@ -16,29 +17,50 @@ from asterion.applications.prime_agent.operator import (
 
 
 _TARGET = generation.ExactTargetDescriptor("linux", "amd64", None)
+_METADATA_TARGET = image_input_lock.ImagePlatformDescriptor("linux", "amd64", None)
 _SOURCE = generation.PRIME_IPYTHON_SOURCE
 _OBSERVATION = generation.SubstrateObservation(_TARGET, "native-linux", False)
 _RECIPE = release_recipe.PRIME_IPYTHON_RELEASE_RECIPE
-_CLAIMS = (
-    generation.MetadataObjectClaim(
+_NODE_METADATA = (
+    "a" * 64 + "  node-v22.8.0-linux-arm64.tar.xz\n"
+    + "b" * 64 + "  node-v22.8.0-linux-x64.tar.xz\n"
+).encode()
+_PYPI_METADATA = json.dumps(
+    {
+        "info": {"name": "ipykernel", "version": "6.29.0"},
+        "urls": [{
+            "filename": "ipykernel-6.29.0-py3-none-any.whl",
+            "packagetype": "bdist_wheel", "size": 11,
+            "digests": {"sha256": "d" * 64},
+        }],
+    }
+).encode()
+_CAPTURES = (
+    generation.ParsedMetadataCapture(
         "node-archive",
         "node/node.tar.xz",
-        generation.MetadataBlob("prime-release-metadata-parser/v1", 130, "a" * 64),
+        _NODE_METADATA,
+        release_metadata.parse_node_shasums(
+            _NODE_METADATA,
+            release_metadata.NodeShasumsSelector("22.8.0", _METADATA_TARGET),
+        ),
         generation.ObjectBlob(
             "https://release.example.invalid/node.tar.xz", 10, "b" * 64
         ),
-        10,
-        "b" * 64,
     ),
-    generation.MetadataObjectClaim(
+    generation.ParsedMetadataCapture(
         "python-wheel",
         "python/ipykernel.whl",
-        generation.MetadataBlob("prime-release-metadata-parser/v1", 131, "c" * 64),
+        _PYPI_METADATA,
+        release_metadata.parse_pypi_json(
+            _PYPI_METADATA,
+            release_metadata.PyPIFileSelector(
+                "ipykernel", "6.29.0", "ipykernel-6.29.0-py3-none-any.whl", _METADATA_TARGET
+            ),
+        ),
         generation.ObjectBlob(
             "https://release.example.invalid/ipykernel.whl", 11, "d" * 64
         ),
-        11,
-        "d" * 64,
     ),
 )
 
@@ -75,7 +97,7 @@ def _request(**changes: object) -> generation.ReleaseSpecGenerationRequest:
             _SOURCE,
             _OBSERVATION,
             _RECIPE,
-            _CLAIMS,
+            _CAPTURES,
             "prime-release-spec-generator/v1",
         ),
         **changes,
@@ -89,7 +111,9 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
         result = generation.generate_release_specification(_request())
 
         self.assertEqual(result.status, "candidate-native")
-        self.assertEqual(result.acquisition_lock.claims[0].metadata.size, 130)
+        self.assertEqual(
+            result.acquisition_lock.claims[0].metadata.size, len(_NODE_METADATA)
+        )
         self.assertEqual(result.artifact_inventory.artifacts[0].object.size, 10)
         self.assertTrue(result.release_proposal.untrusted)
         self.assertEqual(
@@ -120,34 +144,33 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
 
     def test_rejects_claim_and_recipe_policy_admission_failures(self) -> None:
         cases: tuple[object, ...] = (
-            tuple(reversed(_CLAIMS)),
-            (_CLAIMS[0], _CLAIMS[0]),
-            (replace(_CLAIMS[0], metadata=None), _CLAIMS[1]),
+            tuple(reversed(_CAPTURES)),
+            (_CAPTURES[0], _CAPTURES[0]),
+            (replace(_CAPTURES[0], metadata_bytes=b"wrong"), _CAPTURES[1]),
+            (replace(_CAPTURES[0], declaration=None), _CAPTURES[1]),
             (
                 replace(
-                    _CLAIMS[0],
-                    metadata=replace(_CLAIMS[0].metadata, parser_revision="other/v1"),
+                    _CAPTURES[0],
+                    object=replace(_CAPTURES[0].object, sha256="e" * 64),
                 ),
-                _CLAIMS[1],
-            ),
-            (replace(_CLAIMS[0], declared_object_size=9), _CLAIMS[1]),
-            (replace(_CLAIMS[0], declared_object_sha256="e" * 64), _CLAIMS[1]),
-            (
-                replace(
-                    _CLAIMS[0],
-                    object=replace(_CLAIMS[0].object, url=_CLAIMS[1].object.url),
-                ),
-                _CLAIMS[1],
+                _CAPTURES[1],
             ),
             (
                 replace(
-                    _CLAIMS[0],
+                    _CAPTURES[0],
+                    object=replace(_CAPTURES[0].object, url=_CAPTURES[1].object.url),
+                ),
+                _CAPTURES[1],
+            ),
+            (
+                replace(
+                    _CAPTURES[0],
                     object=replace(
-                        _CLAIMS[0].object,
+                        _CAPTURES[0].object,
                         url="http://release.example.invalid/node.tar.xz",
                     ),
                 ),
-                _CLAIMS[1],
+                _CAPTURES[1],
             ),
         )
         for claims in cases:
@@ -180,10 +203,10 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
                 _request(
                     claims=(
                         replace(
-                            _CLAIMS[0],
-                            object=replace(_CLAIMS[0].object, url=private_url),
+                            _CAPTURES[0],
+                            object=replace(_CAPTURES[0].object, url=private_url),
                         ),
-                        _CLAIMS[1],
+                        _CAPTURES[1],
                     )
                 )
             )
@@ -198,9 +221,9 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
         self.assertEqual(
             entry["metadata"],
             {
-                "parser_revision": "prime-release-metadata-parser/v1",
-                "sha256": "a" * 64,
-                "size": 130,
+                "parser_revision": _RECIPE.metadata_parsers.node_shasums,
+                "sha256": hashlib.sha256(_NODE_METADATA).hexdigest(),
+                "size": len(_NODE_METADATA),
             },
         )
         self.assertEqual(
@@ -235,10 +258,10 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
             _request(
                 claims=(
                     replace(
-                        _CLAIMS[0],
-                        object=replace(_CLAIMS[0].object, url=private_url),
+                        _CAPTURES[0],
+                        object=replace(_CAPTURES[0].object, url=private_url),
                     ),
-                    _CLAIMS[1],
+                    _CAPTURES[1],
                 )
             )
         )
@@ -268,82 +291,6 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
 
         with self.assertRaises(generation.PrimeReleaseSpecGenerationError):
             generation.canonical_release_spec_generation_json(tampered)
-
-    def test_exact_parser_boundary_rejects_extra_missing_and_wrong_claim_shapes(
-        self,
-    ) -> None:
-        value = {
-            "target": {"os": "linux", "architecture": "amd64", "variant": None},
-            "source": {
-                "commit": _SOURCE.commit,
-                "tree_sha256": _SOURCE.tree_sha256,
-                "package_lock_sha256": _SOURCE.package_lock_sha256,
-            },
-            "observation": {
-                "target": {"os": "linux", "architecture": "amd64", "variant": None},
-                "substrate": "native-linux",
-                "emulated": False,
-            },
-            "recipe": {
-                "source": {
-                    "commit": _SOURCE.commit,
-                    "tree_sha256": _SOURCE.tree_sha256,
-                    "package_lock_sha256": _SOURCE.package_lock_sha256,
-                },
-                "recipe_revision": _RECIPE.recipe_revision,
-                "python_major_minor": _RECIPE.python_major_minor,
-                "node_version": _RECIPE.node_version,
-                "base_distribution": _RECIPE.base_distribution,
-                "libc": _RECIPE.libc,
-                "python_dependency_lock_sha256": _RECIPE.python_dependency_lock_sha256,
-                "frontend_recipe_sha256": _RECIPE.frontend_recipe_sha256,
-                "fixture_recipe_sha256": _RECIPE.fixture_recipe_sha256,
-                "artifact_graph_revision": _RECIPE.artifact_graph_revision,
-                "metadata_parsers": {
-                    "node_shasums": _RECIPE.metadata_parsers.node_shasums,
-                    "pypi_json": _RECIPE.metadata_parsers.pypi_json,
-                    "oci_index": _RECIPE.metadata_parsers.oci_index,
-                    "oci_manifest": _RECIPE.metadata_parsers.oci_manifest,
-                    "recipe_output_manifest": _RECIPE.metadata_parsers.recipe_output_manifest,
-                    "claim_binding": _RECIPE.metadata_parsers.claim_binding,
-                },
-            },
-            "claims": [
-                {
-                    "artifact_kind": claim.artifact_kind,
-                    "artifact_path": claim.artifact_path,
-                    "metadata": {
-                        "parser_revision": claim.metadata.parser_revision,
-                        "size": claim.metadata.size,
-                        "sha256": claim.metadata.sha256,
-                    },
-                    "object": {
-                        "url": claim.object.url,
-                        "size": claim.object.size,
-                        "sha256": claim.object.sha256,
-                    },
-                    "declared_object_size": claim.declared_object_size,
-                    "declared_object_sha256": claim.declared_object_sha256,
-                }
-                for claim in _CLAIMS
-            ],
-            "generator_revision": "prime-release-spec-generator/v1",
-        }
-        self.assertEqual(
-            generation.release_spec_generation_request_from_dict(value), _request()
-        )
-        for mutate in (
-            lambda item: item.update({"extra": True}),
-            lambda item: item.pop("metadata"),
-            lambda item: item.update({"metadata": {"size": 130, "sha256": "a" * 64}}),
-        ):
-            invalid = json.loads(json.dumps(value, default=lambda item: item.__dict__))
-            mutate(invalid["claims"][0])
-            with (
-                self.subTest(mutate=mutate),
-                self.assertRaises(generation.PrimeReleaseSpecGenerationError),
-            ):
-                generation.release_spec_generation_request_from_dict(invalid)
 
     def test_generation_never_uses_host_or_effectful_services(self) -> None:
         forbidden = RuntimeError("effectful access")
