@@ -1585,3 +1585,4 @@
 - 06:02 correction: P6 scope-bound live evidence gate commit [e372297]
 - 06:03 correction: recorded P6 recovery checkpoint commit [9b4d8e2]
 - 06:10 Defined P7 ARC-AGI-3 broker and evidence design [pending commit]
+- 06:18 Defined P7 single-game workload and redacted causal trace [pending commit]
