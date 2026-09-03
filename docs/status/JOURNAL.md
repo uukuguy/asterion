@@ -1510,3 +1510,4 @@
 - 14:15 Defined P2 sealed restricted-worker design after approved architecture [pending commit]
 - 14:15 Committed P2 sealed restricted-worker contract [b2b165b]
 - 14:25 Planned P2 sealed worker implementation after approved specification [pending commit]
+- 14:46 Bound P2 evidence to broker, worker, fixed identities, and cleanup; compatibility remains non-promotable [a231275]
