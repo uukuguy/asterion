@@ -21,3 +21,18 @@ git diff --check
 ```
 
 No Docker daemon, model provider, network, or benchmark execution occurred.
+
+## Review correction
+
+The facade now parses the fixed P2 completion schema and requires canonical
+re-encoding byte equality before deriving its result digest.  It retains an
+execution-only, one-shot cleanup tombstone; rejects execution after confirmed
+destruction; removes any returned lease rejected after launch; and makes the
+broker relay consumed after its first request.  Engine removal runs in a
+separate task behind a repeated shield loop, so outer cancellation is
+re-raised only after removal has completed and destruction state is recorded.
+
+New provider-free regressions cover arbitrary completion bytes, lifecycle
+ordering and one-shot cleanup, mismatched returned lease cleanup, sequential
+relay reuse, and cancellation during cleanup.  The focused command above now
+passes 14 tests.

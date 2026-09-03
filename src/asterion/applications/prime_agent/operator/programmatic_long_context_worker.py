@@ -10,11 +10,15 @@ import asyncio
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from hashlib import sha256
+import json
 from typing import Protocol
 
 from asterion.applications.prime_agent.operator.programmatic_long_context_workload import (
     PROGRAMMATIC_LONG_CONTEXT_P2_ROLE_ID,
     PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST,
+    ProgrammaticLongContextCompletion,
+    ProgrammaticLongContextWorkloadError,
+    canonical_programmatic_long_context_completion_bytes,
 )
 from asterion.runtime.host import CancellationSignal
 from asterion.services.restricted_worker import (
@@ -55,12 +59,12 @@ class ProgrammaticLongContextBrokerRelay:
     """One-use worker relay; closure means broker revocation has completed."""
 
     def __init__(self, broker: ProgrammaticLongContextBroker) -> None:
-        self._broker, self._closed, self._inflight = broker, False, False
+        self._broker, self._closed, self._consumed = broker, False, False
 
     async def request(self, body: bytes) -> bytes:
-        if self._closed or self._inflight or type(body) is not bytes:
+        if self._closed or self._consumed or type(body) is not bytes:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        self._inflight = True
+        self._consumed = True
         try:
             result = await self._broker.request(body)
             if type(result) is not bytes or self._closed:
@@ -73,8 +77,6 @@ class ProgrammaticLongContextBrokerRelay:
             raise
         except BaseException:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
-        finally:
-            self._inflight = False
 
     async def close(self) -> None:
         if self._closed:
@@ -103,6 +105,7 @@ class ProgrammaticLongContextDockerWorker:
         if type(image_digest) is not str or not image_digest.startswith("sha256:"):
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._image, self._engine, self._states = image_digest, engine, {}
+        self._tombstones: dict[str, RestrictedWorkerLease] = {}
 
     def request_for(self, request: RestrictedWorkerRequest) -> RestrictedWorkerRequest:
         if (
@@ -143,6 +146,7 @@ class ProgrammaticLongContextDockerWorker:
                 or len(raw) > state.request.max_output_bytes
             ):
                 raise RestrictedWorkerError("restricted worker value is invalid")
+            self._canonical_completion(raw)
             state.execution = RestrictedWorkerExecutionReceipt(
                 lease.worker_id,
                 lease.role_id,
@@ -174,8 +178,10 @@ class ProgrammaticLongContextDockerWorker:
     async def cleanup_receipt(
         self, lease: RestrictedWorkerLease
     ) -> RestrictedWorkerCleanupReceipt:
-        state = self._state(lease)
-        if not state.destroyed:
+        if (
+            type(lease) is not RestrictedWorkerLease
+            or self._tombstones.pop(lease.worker_id, None) != lease
+        ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         return RestrictedWorkerCleanupReceipt(
             lease.worker_id,
@@ -192,9 +198,37 @@ class ProgrammaticLongContextDockerWorker:
             type(lease) is not RestrictedWorkerLease
             or state is None
             or state.lease != lease
+            or state.destroyed
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         return state
+
+    @staticmethod
+    def _canonical_completion(raw: bytes) -> None:
+        try:
+            value = json.loads(raw.decode("utf-8"))
+            if type(value) is not dict:
+                raise ValueError
+            completion = ProgrammaticLongContextCompletion(
+                response_sha256=value["response_sha256"],
+                program_sha256=value["program_sha256"],
+                aggregate_sha256=value["aggregate_sha256"],
+                active_tool_names=tuple(value["active_tool_names"]),
+                ipython_cell_executed=value["ipython_cell_executed"],
+                oracle_passed=value["oracle_passed"],
+                session_disposed=value["session_disposed"],
+            )
+            if canonical_programmatic_long_context_completion_bytes(completion) != raw:
+                raise ValueError
+        except (
+            KeyError,
+            TypeError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            ProgrammaticLongContextWorkloadError,
+            ValueError,
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
 
 
 class _Context(AbstractAsyncContextManager[RestrictedWorkerLease]):
@@ -228,14 +262,22 @@ class _Context(AbstractAsyncContextManager[RestrictedWorkerLease]):
             raise
         except BaseException:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
-        if (
+        valid = (
             type(lease) is not RestrictedWorkerLease
             or lease.role_id != self._request.role_id
             or lease.run_id != self._request.run_id
             or lease.challenge_digest != self._request.challenge_digest
             or lease.workload_digest != self._request.workload_digest
             or lease.worker_id in self._service._states
-        ):
+        )
+        if valid:
+            cleanup_error = await self._remove_after_rejection(lease)
+            if isinstance(cleanup_error, asyncio.CancelledError):
+                raise cleanup_error
+            if cleanup_error is not None:
+                raise RestrictedWorkerError(
+                    "restricted worker value is invalid"
+                ) from None
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._lease = lease
         self._service._states[lease.worker_id] = _State(self._request, lease)
@@ -245,8 +287,37 @@ class _Context(AbstractAsyncContextManager[RestrictedWorkerLease]):
         if self._lease is None:
             raise RestrictedWorkerError("restricted worker value is invalid")
         state = self._service._state(self._lease)
-        try:
-            await asyncio.shield(self._service._engine.remove(self._lease))
-        except BaseException:
+        cleanup_error = await self._remove_after_rejection(self._lease)
+        if cleanup_error is not None and not isinstance(
+            cleanup_error, asyncio.CancelledError
+        ):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         state.destroyed = True
+        del self._service._states[self._lease.worker_id]
+        if state.execution is None:
+            if isinstance(cleanup_error, asyncio.CancelledError):
+                raise cleanup_error
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        self._service._tombstones[self._lease.worker_id] = self._lease
+        if isinstance(cleanup_error, asyncio.CancelledError):
+            raise cleanup_error
+
+    async def _remove_after_rejection(
+        self, lease: RestrictedWorkerLease
+    ) -> BaseException | None:
+        task = asyncio.create_task(self._service._engine.remove(lease))
+        cancellation: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as error:
+                cancellation = error
+            except BaseException as error:
+                return error
+        if task.cancelled():
+            return asyncio.CancelledError()
+        try:
+            task.result()
+        except BaseException as error:
+            return error
+        return cancellation

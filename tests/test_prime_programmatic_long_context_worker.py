@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from hashlib import sha256
 import unittest
 
@@ -11,6 +12,8 @@ from asterion.applications.prime_agent.operator.programmatic_long_context_worker
 )
 from asterion.applications.prime_agent.operator.programmatic_long_context_workload import (
     PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST,
+    ProgrammaticLongContextCompletion,
+    canonical_programmatic_long_context_completion_bytes,
 )
 from asterion.services.restricted_worker import (
     RestrictedWorkerError,
@@ -39,7 +42,16 @@ def _request(**changes: object) -> RestrictedWorkerRequest:
 class _Engine:
     def __init__(self) -> None:
         self.removed = False
+        self.removed_lease: RestrictedWorkerLease | None = None
         self.env: object = None
+        self.raw = canonical_programmatic_long_context_completion_bytes(
+            ProgrammaticLongContextCompletion(
+                "sha256:" + "c" * 64,
+                "sha256:" + "c" * 64,
+                "sha256:" + "d" * 64,
+            )
+        )
+        self.lease: RestrictedWorkerLease | None = None
 
     async def launch(
         self,
@@ -61,15 +73,17 @@ class _Engine:
             "prime-programmatic-long-context",
         ):
             raise ValueError
-        return RestrictedWorkerLease(
+        self.lease = RestrictedWorkerLease(
             "worker-1", role_id, "run-1", _CHALLENGE, workload_digest
         )
+        return self.lease
 
     async def completion_bytes(self, lease: RestrictedWorkerLease) -> bytes:
-        return b'{"canonical":"p2-completion"}'
+        return self.raw
 
     async def remove(self, lease: RestrictedWorkerLease) -> None:
         self.removed = True
+        self.removed_lease = lease
 
 
 class _Broker:
@@ -85,6 +99,17 @@ class _Broker:
         self.quiescent = True
 
 
+class _BlockingRemoveEngine(_Engine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started, self.release = asyncio.Event(), asyncio.Event()
+
+    async def remove(self, lease: RestrictedWorkerLease) -> None:
+        self.started.set()
+        await self.release.wait()
+        await super().remove(lease)
+
+
 class TestProgrammaticLongContextWorker(unittest.IsolatedAsyncioTestCase):
     async def test_exact_p2_admission_empty_environment_and_canonical_receipt(
         self,
@@ -98,7 +123,7 @@ class TestProgrammaticLongContextWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engine.env, ())
         self.assertEqual(
             receipt.result_digest,
-            "sha256:" + sha256(b'{"canonical":"p2-completion"}').hexdigest(),
+            "sha256:" + sha256(engine.raw).hexdigest(),
         )
         self.assertTrue(engine.removed)
 
@@ -124,3 +149,97 @@ class TestProgrammaticLongContextWorker(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(broker.revoked and broker.quiescent)
         with self.assertRaises(RestrictedWorkerError):
             await relay.request(b"again")
+
+    async def test_rejects_noncanonical_completion_and_execution_after_destruction(
+        self,
+    ) -> None:
+        engine = _Engine()
+        service = ProgrammaticLongContextDockerWorker(
+            image_digest=_IMAGE, engine=engine
+        )
+        context = service.open(_request())
+        lease = await context.__aenter__()
+        engine.raw = b'{"arbitrary":"result"}'
+        with self.assertRaises(RestrictedWorkerError):
+            await service.execution_receipt(lease)
+        with self.assertRaises(RestrictedWorkerError):
+            await context.__aexit__(None, None, None)
+        with self.assertRaises(RestrictedWorkerError):
+            await service.execution_receipt(lease)
+        with self.assertRaises(RestrictedWorkerError):
+            await service.cleanup_receipt(lease)
+
+    async def test_cleanup_receipt_requires_execution_and_is_one_shot(self) -> None:
+        engine = _Engine()
+        service = ProgrammaticLongContextDockerWorker(
+            image_digest=_IMAGE, engine=engine
+        )
+        with self.assertRaises(RestrictedWorkerError):
+            async with service.open(_request()) as lease:
+                pass
+        self.assertTrue(engine.removed)
+        engine = _Engine()
+        service = ProgrammaticLongContextDockerWorker(
+            image_digest=_IMAGE, engine=engine
+        )
+        async with service.open(_request()) as lease:
+            await service.execution_receipt(lease)
+        self.assertTrue((await service.cleanup_receipt(lease)).destroyed)
+        with self.assertRaises(RestrictedWorkerError):
+            await service.cleanup_receipt(lease)
+
+    async def test_rejecting_returned_lease_still_removes_it(self) -> None:
+        engine = _Engine()
+        service = ProgrammaticLongContextDockerWorker(
+            image_digest=_IMAGE, engine=engine
+        )
+        original = engine.launch
+
+        async def wrong_lease(**kwargs: object) -> RestrictedWorkerLease:
+            lease = await original(**kwargs)  # type: ignore[arg-type]
+            return RestrictedWorkerLease(
+                "worker-2",
+                lease.role_id,
+                "wrong-run",
+                lease.challenge_digest,
+                lease.workload_digest,
+            )
+
+        engine.launch = wrong_lease  # type: ignore[method-assign]
+        with self.assertRaises(RestrictedWorkerError):
+            async with service.open(_request()):
+                pass
+        self.assertTrue(engine.removed)
+        self.assertEqual(
+            engine.removed_lease.worker_id if engine.removed_lease else None, "worker-2"
+        )
+
+    async def test_relay_consumes_one_request_even_when_the_request_fails(self) -> None:
+        broker = _Broker()
+        relay = ProgrammaticLongContextBrokerRelay(broker)
+        self.assertEqual(await relay.request(b"one"), b"response")
+        with self.assertRaises(RestrictedWorkerError):
+            await relay.request(b"two")
+        await relay.close()
+        self.assertTrue(broker.revoked)
+
+    async def test_cancellation_waits_for_removal_then_preserves_cancellation(
+        self,
+    ) -> None:
+        engine = _BlockingRemoveEngine()
+        service = ProgrammaticLongContextDockerWorker(
+            image_digest=_IMAGE, engine=engine
+        )
+        context = service.open(_request())
+        lease = await context.__aenter__()
+        await service.execution_receipt(lease)
+        exiting = asyncio.create_task(context.__aexit__(None, None, None))
+        await engine.started.wait()
+        exiting.cancel()
+        await asyncio.sleep(0)
+        self.assertFalse(engine.removed)
+        engine.release.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await exiting
+        self.assertTrue(engine.removed)
+        self.assertTrue((await service.cleanup_receipt(lease)).destroyed)
