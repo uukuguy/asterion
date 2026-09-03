@@ -13,9 +13,9 @@ from pathlib import Path
 
 from asterion.applications.prime_agent.recursive_workflow_receipt import (
     RecursiveWorkflowReceiptError,
-    recursive_workflow_observation_from_public_report,
-    verify_recursive_workflow_receipt,
+    verify_real_recursive_workflow_trace,
 )
+from asterion.applications.prime_agent.evidence import PrimeEvidenceLevel
 from asterion.applications.prime_agent.source_lock import (
     PrimeSourceLock,
     verify_prime_source_lock,
@@ -136,10 +136,15 @@ def _public_report(stdout: bytes) -> dict[str, object] | None:
 
 
 def _run_compatibility(workspace: Path) -> dict[str, object]:
-    verify_prime_source_lock(PRIME_ROOT, PINNED_LOCK)
     node, kernel_python = _node_22(), _kernel_python()
-    if node is None or kernel_python is None or not SIDECAR_ENTRY.is_file():
+    if (
+        node is None
+        or kernel_python is None
+        or not SIDECAR_ENTRY.is_file()
+        or not PRIME_ROOT.is_dir()
+    ):
         return _external_limited("missing-prerequisite")
+    verify_prime_source_lock(PRIME_ROOT, PINNED_LOCK)
     runtime_entry = derive_prime_rlm_runtime(PRIME_ROOT, lock_path=ARTIFACT_LOCK)
     if not runtime_entry.is_file():
         return _external_limited("missing-prerequisite")
@@ -353,12 +358,9 @@ class TestPrimeRecursiveWorkflowCompat(unittest.TestCase):
             self.assertEqual(report["active_tool_names"], ["ipython"])
             self.assertTrue(report["disposed"])
             self.assertTrue(report["reaped"])
-            self.assertEqual(
-                verify_recursive_workflow_receipt(
-                    recursive_workflow_observation_from_public_report(report)
-                ).scenario_id,
-                "prime.recursive-workflow/v1",
-            )
+            with self.assertRaises(RecursiveWorkflowReceiptError):
+                # A public compatibility report is not a real-RLM trace.
+                verify_real_recursive_workflow_trace(report, PrimeEvidenceLevel.BOUNDED)
         else:
             self.assertIn(
                 report["reason"],
@@ -374,8 +376,14 @@ class TestPrimeRecursiveWorkflowCompat(unittest.TestCase):
                     "native-admission-contract-limited",
                 },
             )
-            with self.assertRaises(RecursiveWorkflowReceiptError):
-                recursive_workflow_observation_from_public_report(report)
+
+    def test_compatibility_pass_cannot_issue_p3_evidence(self) -> None:
+        report = _external_limited("missing-prerequisite")
+        report.update(
+            {"status": "PASS", "reason": "supported", "real_prime_runtime": True}
+        )
+        with self.assertRaises(RecursiveWorkflowReceiptError):
+            verify_real_recursive_workflow_trace(report, PrimeEvidenceLevel.BOUNDED)
 
 
 if __name__ == "__main__":

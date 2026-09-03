@@ -30,6 +30,7 @@ class PrimeEvidenceLevel(str, Enum):
 
     PROVIDER_FREE = "provider-free"
     BOUNDED_SANDBOXED = "bounded-sandboxed"
+    BOUNDED = "bounded"
     FULL_AUTHORIZED = "full-authorized"
 
 

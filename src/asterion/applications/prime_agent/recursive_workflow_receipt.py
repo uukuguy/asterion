@@ -1,4 +1,4 @@
-"""Closed provider-free evidence for Prime recursive workflows."""
+"""Closed bounded evidence for an observed real Prime recursive workflow."""
 
 from __future__ import annotations
 
@@ -14,148 +14,112 @@ from asterion.applications.prime_agent.evidence import (
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _CHILD_COUNT = 2
-_PUBLIC_REPORT_FIELDS = frozenset(
-    {
-        "format",
-        "status",
-        "reason",
-        "real_prime_runtime",
-        "allowed_tool_names",
-        "active_tool_names",
-        "admitted_child_count",
-        "bound_child_count",
-        "root_to_child_message_count",
-        "child_to_root_result_count",
-        "terminal_child_count",
-        "deleted_child_count",
-        "workflow_sha256",
-        "aggregation_sha256",
-        "oracle_sha256",
-        "root_continued_locally",
-        "aggregation_passed",
-        "disposed",
-        "reaped",
-    }
-)
 
 
 class RecursiveWorkflowReceiptError(ValueError):
-    """Raised when recursive workflow facts cannot support the fixed receipt."""
+    """Raised when a real recursive-workflow trace is incomplete or invalid."""
 
 
 @dataclass(frozen=True, repr=False)
-class RecursiveWorkflowObservation:
-    """Private normalized facts; child identities and messages are never retained."""
+class RecursiveWorkflowTrace:
+    """Private, normalized facts for the one bounded real-RLM workflow."""
 
-    built_in_tools: tuple[str, ...]
-    active_tool_names: tuple[str, ...]
-    admitted_child_count: int
-    bound_child_count: int
-    root_to_child_message_count: int
-    child_to_root_result_count: int
-    terminal_child_count: int
-    deleted_child_count: int
-    workflow_sha256: str
+    workload_sha256: str
+    root_artifact_sha256: str
+    first_child_role_digests: tuple[str, str]
+    first_child_result_digests: tuple[str, str]
+    first_child_usage_digests: tuple[str, str]
+    follow_up_digest: str
     aggregation_sha256: str
     oracle_sha256: str
+    model_sha256: str
+    usage_sha256: str
+    root_to_child_message_count: int
+    child_to_root_result_count: int
+    follow_up_count: int
+    root_deleted_child_count: int
     root_continued_locally: bool
-    aggregation_passed: bool
+    root_work_before_children: bool
+    child_tool_names: tuple[tuple[str], tuple[str]]
+    child_ipython_action_counts: tuple[int, int]
+    revoked: bool
+    disposed: bool
+    reaped: bool
 
     def __repr__(self) -> str:
-        return "RecursiveWorkflowObservation(redacted)"
+        return "RecursiveWorkflowTrace(redacted)"
 
 
 def _digest(value: object) -> bool:
     return type(value) is str and _DIGEST.fullmatch(value) is not None
 
 
-def _fixed_child_count(value: object) -> bool:
-    return type(value) is int and value == _CHILD_COUNT
+def _two_digests(value: object) -> bool:
+    return (
+        type(value) is tuple
+        and len(value) == _CHILD_COUNT
+        and all(_digest(item) for item in value)
+    )
 
 
-def recursive_workflow_observation_from_public_report(
-    report: object,
-) -> RecursiveWorkflowObservation:
-    """Convert only one exact successful compatibility report to private facts."""
-
-    if (
-        type(report) is not dict
-        or frozenset(report) != _PUBLIC_REPORT_FIELDS
-        or report["format"] != "asterion.prime-recursive-workflow-compat/v1"
-        or report["status"] != "PASS"
-        or report["reason"] != "supported"
-        or report["real_prime_runtime"] is not True
-        or report["allowed_tool_names"] != ["ipython"]
-        or report["active_tool_names"] != ["ipython"]
-        or report["root_continued_locally"] is not True
-        or report["aggregation_passed"] is not True
-        or report["disposed"] is not True
-        or report["reaped"] is not True
-    ):
-        raise RecursiveWorkflowReceiptError("recursive workflow receipt is invalid")
-    try:
-        observation = RecursiveWorkflowObservation(
-            built_in_tools=("ipython",),
-            active_tool_names=("ipython",),
-            admitted_child_count=report["admitted_child_count"],
-            bound_child_count=report["bound_child_count"],
-            root_to_child_message_count=report["root_to_child_message_count"],
-            child_to_root_result_count=report["child_to_root_result_count"],
-            terminal_child_count=report["terminal_child_count"],
-            deleted_child_count=report["deleted_child_count"],
-            workflow_sha256=report["workflow_sha256"],
-            aggregation_sha256=report["aggregation_sha256"],
-            oracle_sha256=report["oracle_sha256"],
-            root_continued_locally=True,
-            aggregation_passed=True,
-        )
-        verify_recursive_workflow_receipt(observation)
-    except (KeyError, TypeError, RecursiveWorkflowReceiptError):
-        raise RecursiveWorkflowReceiptError(
-            "recursive workflow receipt is invalid"
-        ) from None
-    return observation
+def _positive_child_actions(value: object) -> bool:
+    return (
+        type(value) is tuple
+        and len(value) == _CHILD_COUNT
+        and all(type(item) is int and item > 0 for item in value)
+    )
 
 
-def verify_recursive_workflow_receipt(
-    observation: object,
-    requested_level: PrimeEvidenceLevel = PrimeEvidenceLevel.PROVIDER_FREE,
+def _ipython_only(value: object) -> bool:
+    return value == (("ipython",), ("ipython",))
+
+
+def verify_real_recursive_workflow_trace(
+    trace: object,
+    requested_level: PrimeEvidenceLevel = PrimeEvidenceLevel.BOUNDED,
 ) -> PrimeEvidenceReceipt:
-    """Emit the sole provider-free receipt for one fixed recursive workflow."""
+    """Issue bounded evidence only for the complete fixed real-RLM trace."""
 
     if (
-        type(observation) is not RecursiveWorkflowObservation
+        type(trace) is not RecursiveWorkflowTrace
         or type(requested_level) is not PrimeEvidenceLevel
-        or requested_level is not PrimeEvidenceLevel.PROVIDER_FREE
-        or observation.built_in_tools != ("ipython",)
-        or observation.active_tool_names != ("ipython",)
-        or any(
-            not _fixed_child_count(value)
-            for value in (
-                observation.admitted_child_count,
-                observation.bound_child_count,
-                observation.root_to_child_message_count,
-                observation.child_to_root_result_count,
-                observation.terminal_child_count,
-                observation.deleted_child_count,
-            )
-        )
+        or requested_level is not PrimeEvidenceLevel.BOUNDED
+        or not _digest(trace.workload_sha256)
+        or not _digest(trace.root_artifact_sha256)
+        or not _two_digests(trace.first_child_role_digests)
+        or not _two_digests(trace.first_child_result_digests)
+        or not _two_digests(trace.first_child_usage_digests)
         or any(
             not _digest(value)
             for value in (
-                observation.workflow_sha256,
-                observation.aggregation_sha256,
-                observation.oracle_sha256,
+                trace.follow_up_digest,
+                trace.aggregation_sha256,
+                trace.oracle_sha256,
+                trace.model_sha256,
+                trace.usage_sha256,
             )
         )
-        or observation.root_continued_locally is not True
-        or observation.aggregation_passed is not True
+        or type(trace.root_to_child_message_count) is not int
+        or trace.root_to_child_message_count != _CHILD_COUNT
+        or type(trace.child_to_root_result_count) is not int
+        or trace.child_to_root_result_count != 3
+        or type(trace.follow_up_count) is not int
+        or trace.follow_up_count != 1
+        or type(trace.root_deleted_child_count) is not int
+        or trace.root_deleted_child_count != _CHILD_COUNT
+        or trace.root_continued_locally is not True
+        or trace.root_work_before_children is not True
+        or not _ipython_only(trace.child_tool_names)
+        or not _positive_child_actions(trace.child_ipython_action_counts)
+        or trace.revoked is not True
+        or trace.disposed is not True
+        or trace.reaped is not True
     ):
-        raise RecursiveWorkflowReceiptError("recursive workflow receipt is invalid")
+        raise RecursiveWorkflowReceiptError("real recursive workflow trace is invalid")
     return validate_prime_evidence_receipt(
         PrimeEvidenceReceipt(
             scenario_id="prime.recursive-workflow/v1",
-            level=PrimeEvidenceLevel.PROVIDER_FREE,
+            level=PrimeEvidenceLevel.BOUNDED,
             status="PASS",
         )
     )
