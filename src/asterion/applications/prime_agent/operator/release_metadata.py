@@ -146,6 +146,54 @@ def _declaration(
     )
 
 
+def validate_parsed_metadata_declaration(
+    value: object,
+) -> ParsedMetadataDeclaration:
+    """Accept only a well-formed declaration minted by an offline parser.
+
+    This validates the public structural evidence at the hand-off boundary.  The
+    constructor remains token-guarded, so callers cannot make a declaration by
+    copying fields from a JSON response.
+    """
+
+    if type(value) is not ParsedMetadataDeclaration:
+        raise _invalid()
+    expected_revisions = {
+        "node-shasums": release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.node_shasums,
+        "oci-index": release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.oci_index,
+        "oci-manifest": release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.oci_manifest,
+        "pypi-json": release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.pypi_json,
+        "recipe-output-manifest": release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.metadata_parsers.recipe_output_manifest,
+    }
+    if (
+        type(value.parser_kind) is not str
+        or value.parser_kind not in expected_revisions
+        or value.parser_revision != expected_revisions[value.parser_kind]
+        or type(value.metadata_size) is not int
+        or value.metadata_size < 0
+        or _SHA256.fullmatch(value.metadata_sha256) is None
+        or type(value.object_name) is not str
+        or not value.object_name
+        or _SHA256.fullmatch(value.declared_sha256) is None
+        or (value.declared_size is not None and (type(value.declared_size) is not int or value.declared_size < 0))
+        or (value.media_type is not None and type(value.media_type) is not str)
+    ):
+        raise _invalid()
+    return value
+
+
+def validate_declaration_metadata_bytes(
+    declaration: object, data: object
+) -> ParsedMetadataDeclaration:
+    """Bind a parser declaration to the exact bytes it was parsed from."""
+
+    value = validate_parsed_metadata_declaration(declaration)
+    size, digest = _metadata_identity(data)
+    if size != value.metadata_size or digest != value.metadata_sha256:
+        raise _invalid()
+    return value
+
+
 def parse_node_shasums(data: bytes, selector: object) -> ParsedMetadataDeclaration:
     """Select the one target-derived Node archive from SHASUMS256 bytes."""
 
@@ -360,4 +408,3 @@ def parse_recipe_output_manifest(data: bytes, selector: object) -> ParsedMetadat
         _size(value["size"]),
         None,
     )
-

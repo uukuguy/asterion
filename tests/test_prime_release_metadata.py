@@ -30,6 +30,23 @@ class TestPrimeReleaseMetadata(unittest.TestCase):
         self.assertEqual(arm.declared_sha256, "a" * 64)
         self.assertIsNone(arm.declared_size)
         self.assertEqual(amd.object_name, "node-v22.8.0-linux-x64.tar.xz")
+        self.assertIs(metadata.validate_parsed_metadata_declaration(arm), arm)
+        self.assertIs(
+            metadata.validate_declaration_metadata_bytes(arm, data), arm
+        )
+        with self.assertRaises(metadata.PrimeReleaseMetadataError):
+            metadata.validate_declaration_metadata_bytes(arm, data + b"#")
+        with self.assertRaises(metadata.PrimeReleaseMetadataError):
+            metadata.ParsedMetadataDeclaration(
+                arm.parser_kind,
+                arm.parser_revision,
+                arm.metadata_size,
+                arm.metadata_sha256,
+                arm.object_name,
+                arm.declared_sha256,
+                arm.declared_size,
+                arm.media_type,
+            )
         with self.assertRaises(metadata.PrimeReleaseMetadataError):
             metadata.parse_node_shasums(
                 (data + ("c" * 64 + "  node-v22.8.0-linux-arm64.tar.xz\n").encode()),
@@ -155,4 +172,3 @@ class TestPrimeReleaseMetadata(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
