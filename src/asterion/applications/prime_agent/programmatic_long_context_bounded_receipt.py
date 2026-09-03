@@ -134,14 +134,12 @@ def _verify_broker_and_worker_binding(
                 worker.image_digest,
             )
         )
-        or any(
-            type(value) is not int or value < 0
-            for value in (
-                broker.request_count,
-                broker.input_bytes,
-                broker.output_bytes,
-            )
-        )
+        or type(broker.request_count) is not int
+        or broker.request_count <= 0
+        or type(broker.output_bytes) is not int
+        or broker.output_bytes <= 0
+        or type(broker.input_bytes) is not int
+        or broker.input_bytes < 0
     ):
         raise ProgrammaticLongContextBoundedReceiptError(
             "programmatic long-context bounded receipt is invalid"

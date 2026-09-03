@@ -94,6 +94,8 @@ class TestProgrammaticLongContextBoundedReceipt(unittest.TestCase):
             ("executed", {"ipython_cell_executed": False}),
             ("oracle-passed", {"oracle_passed": False}),
             ("broker-cleanup", {"broker_receipt": _broker(status="active")}),
+            ("broker-no-requests", {"broker_receipt": _broker(request_count=0)}),
+            ("broker-no-output", {"broker_receipt": _broker(output_bytes=0)}),
             ("broker-run", {"broker_receipt": _broker(run_id="run-2")}),
             ("broker-worker", {"broker_receipt": _broker(worker_id="worker-2")}),
             ("broker-challenge", {"broker_receipt": _broker(challenge_digest=_digest("d"))}),
@@ -120,3 +122,15 @@ class TestProgrammaticLongContextBoundedReceipt(unittest.TestCase):
         self.assertNotIn("SECRET-RESPONSE", str(observation))
         with self.assertRaises(FrozenInstanceError):
             observation.program_sha256 = _digest("d")  # type: ignore[misc]
+
+    def test_redacts_invalid_private_sentinels_from_observation_and_error(self) -> None:
+        observation = _observation(
+            program_sha256="SECRET-PROGRAM",
+            response_sha256="SECRET-PROGRAM",
+        )
+
+        self.assertNotIn("SECRET-PROGRAM", repr(observation))
+        self.assertNotIn("SECRET-PROGRAM", str(observation))
+        with self.assertRaises(ProgrammaticLongContextBoundedReceiptError) as raised:
+            verify_programmatic_long_context_bounded_receipt(observation)
+        self.assertNotIn("SECRET-PROGRAM", str(raised.exception))
