@@ -19,6 +19,7 @@ from asterion.applications.prime_agent.operator.image_input_lock import (
 from asterion.applications.prime_agent.operator.release_recipe import (
     PRIME_IPYTHON_RELEASE_RECIPE,
     PrimeReleaseRecipeError,
+    release_recipe_sha256,
     resolve_candidate_target,
     validate_release_recipe,
 )
@@ -92,7 +93,7 @@ def materialize_release_from_operator_cli(
 class MaterializationPlan:
     output_root: Path
     platform: ImagePlatformDescriptor
-    lock_sha256: str
+    recipe_sha256: str
     commands: tuple[tuple[str, ...], ...]
     notice: str
 
@@ -117,10 +118,10 @@ def repository_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def lock_sha256() -> str:
-    """Return the pinned dependency-lock identifier for a candidate release."""
+def recipe_sha256() -> str:
+    """Return the full pinned recipe identity for a candidate release."""
 
-    return PRIME_IPYTHON_RELEASE_RECIPE.python_dependency_lock_sha256
+    return release_recipe_sha256(PRIME_IPYTHON_RELEASE_RECIPE)
 
 
 def plan_materialization(output_root: Path, platform: ImagePlatformDescriptor) -> MaterializationPlan:
@@ -133,8 +134,8 @@ def plan_materialization(output_root: Path, platform: ImagePlatformDescriptor) -
     except (OSError, ValueError, PrimeImageInputLockError, PrimeReleaseRecipeError):
         raise PrimeImageMaterializerError("Prime image materialization target is invalid") from None
     return MaterializationPlan(
-        output_root, selected, lock_sha256(),
-        (("asterion-prime-authorized-release-materialize", "--lock-sha256", lock_sha256(), "--output-root", str(output_root)),),
+        output_root, selected, recipe_sha256(),
+        (("asterion-prime-authorized-release-materialize", "--recipe-sha256", recipe_sha256(), "--output-root", str(output_root)),),
         "This is only a command plan; a separately authorized release workflow must materialize and verify the artifact set.",
     )
 

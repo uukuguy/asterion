@@ -71,8 +71,10 @@ class TestPrimeImageReleaseMaterializer(unittest.TestCase):
 
         self.assertEqual(plan.platform, descriptor)
         self.assertEqual(
-            plan.lock_sha256,
-            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.python_dependency_lock_sha256,
+            plan.recipe_sha256,
+            release_recipe.release_recipe_sha256(
+                release_recipe.PRIME_IPYTHON_RELEASE_RECIPE
+            ),
         )
         with TemporaryDirectory() as directory:
             with self.assertRaises(TypeError):

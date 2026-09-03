@@ -1441,3 +1441,5 @@
 - 08:49 Committed parser-produced metadata capture requirement [e0847fb]
 - 09:02 Complete target closure is blocked at its source: the Asterion image requirements lock is intentionally empty, while upstream runtime dependencies are unresolved [no code commit]
 - 09:10 Replaced path-based candidate staging with descriptor-relative no-follow traversal and fail-closed platform checks [pending commit]
+- 09:11 Committed descriptor-relative no-follow candidate staging [c29b703]
+- 09:17 Bound materialization plans to complete canonical release-recipe digests rather than dependency-lock fragments [pending commit]
