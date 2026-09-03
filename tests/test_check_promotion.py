@@ -574,6 +574,7 @@ class PromotionCheckTests(unittest.TestCase):
             "applications/dci_agent_lite/assemblies/dci-local-research.json",
             "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
             "applications/dci_agent_lite/assemblies/dci-research-capability.json",
+            "applications/prime_agent/assemblies/prime-capability-program.json",
             "capabilities/controlled_code/capability-package.json",
             "capabilities/controlled_code/manifests/code-quality-evaluation.json",
             "capabilities/controlled_code/manifests/code-quality-workflow.json",
