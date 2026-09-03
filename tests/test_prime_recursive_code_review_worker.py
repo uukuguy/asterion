@@ -12,6 +12,7 @@ from asterion.applications.prime_agent.operator.recursive_code_review_release im
 )
 from asterion.applications.prime_agent.operator.recursive_code_review_worker import (
     RecursiveCodeReviewBroker, RecursiveCodeReviewDockerWorker,
+    RecursiveCodeReviewInspection,
 )
 from asterion.applications.prime_agent.operator.recursive_code_review_workload import (
     RECURSIVE_CODE_REVIEW_P3_ROLE_ID, RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
@@ -65,6 +66,13 @@ class _Engine:
     async def completion_bytes(self, lease: RestrictedWorkerLease) -> bytes:
         return self.raw
 
+    async def inspect(self, lease: RestrictedWorkerLease) -> RecursiveCodeReviewInspection:
+        return RecursiveCodeReviewInspection(
+            lease.worker_id, lease.role_id, lease.run_id, lease.challenge_digest,
+            lease.workload_digest, _IMAGE, "/usr/local/bin/prime-recursive-code-review.mjs",
+            "prime-recursive-code-review", (), True, True, True, True, True, True, True,
+        )
+
     async def remove(self, lease: RestrictedWorkerLease) -> None:
         self.removed = lease
 
@@ -82,6 +90,29 @@ class _Endpoint:
 
     async def revoke(self) -> None:
         self.events.append("revoke")
+
+
+class _RetryEndpoint(_Endpoint):
+    def __init__(self, result: bytes) -> None:
+        super().__init__(result)
+        self.fail_revoke = True
+        self.started, self.release = asyncio.Event(), asyncio.Event()
+        self.block_revoke = False
+
+    async def revoke(self) -> None:
+        self.events.append("revoke")
+        if self.fail_revoke:
+            self.fail_revoke = False
+            raise RuntimeError("retry")
+        if self.block_revoke:
+            self.started.set()
+            await self.release.wait()
+
+
+class _CancelledRelayEndpoint(_Endpoint):
+    async def relay_once(self, body: bytes) -> bytes:
+        self.events.append("relay")
+        raise asyncio.CancelledError
 
 
 class _BlockingEngine(_Engine):
@@ -106,6 +137,29 @@ class TestRecursiveCodeReviewWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(engine.removed, lease)
         self.assertTrue((await worker.cleanup_receipt(lease)).destroyed)
 
+    async def test_attestation_requires_engine_observed_exact_controls(self) -> None:
+        engine = _Engine()
+        worker = RecursiveCodeReviewDockerWorker(image_digest=_IMAGE, engine=engine)
+        async with worker.open(_request()) as lease:
+            self.assertTrue((await worker.attest(lease)).network_isolated)
+            await worker.execution_receipt(lease)
+        worker = RecursiveCodeReviewDockerWorker(image_digest=_IMAGE, engine=engine)
+        original = engine.inspect
+
+        async def forged(lease: RestrictedWorkerLease) -> RecursiveCodeReviewInspection:
+            value = await original(lease)
+            return RecursiveCodeReviewInspection(
+                value.worker_id, value.role_id, value.run_id, value.challenge_digest,
+                value.workload_digest, value.image_digest, value.entrypoint, value.seccomp,
+                ("SECRET=forged",), True, True, True, True, True, True, True,
+            )
+
+        engine.inspect = forged  # type: ignore[method-assign]
+        async with worker.open(_request()) as lease:
+            with self.assertRaises(RestrictedWorkerError):
+                await worker.attest(lease)
+            await worker.execution_receipt(lease)
+
     async def test_rejects_p1_p2_and_noncanonical_bytes(self) -> None:
         worker = RecursiveCodeReviewDockerWorker(image_digest=_IMAGE, engine=_Engine())
         for request in (_request(role_id="prime.ipython-coding"), _request(role_id="prime.programmatic-long-context")):
@@ -127,6 +181,33 @@ class TestRecursiveCodeReviewWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await broker.relay_once(b"sealed"), _completion())
         with self.assertRaises(RestrictedWorkerError):
             await broker.relay_once(b"again")
+        await broker.revoke()
+        self.assertEqual(endpoint.events, ["admit", "relay", "revoke"])
+
+    async def test_broker_revoke_retries_after_failure_and_finishes_under_cancellation(self) -> None:
+        endpoint = _RetryEndpoint(_completion())
+        broker = RecursiveCodeReviewBroker(endpoint)
+        lease = RestrictedWorkerLease("worker-1", RECURSIVE_CODE_REVIEW_P3_ROLE_ID, "run-1", _CHALLENGE, RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST)
+        await broker.admit_root(lease)
+        with self.assertRaises(RestrictedWorkerError):
+            await broker.revoke()
+        endpoint.block_revoke = True
+        revoking = asyncio.create_task(broker.revoke())
+        await endpoint.started.wait()
+        revoking.cancel()
+        endpoint.release.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await revoking
+        with self.assertRaises(RestrictedWorkerError):
+            await broker.revoke()
+
+    async def test_cancelled_relay_remains_cleanup_revokeable(self) -> None:
+        endpoint = _CancelledRelayEndpoint(_completion())
+        broker = RecursiveCodeReviewBroker(endpoint)
+        lease = RestrictedWorkerLease("worker-1", RECURSIVE_CODE_REVIEW_P3_ROLE_ID, "run-1", _CHALLENGE, RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST)
+        await broker.admit_root(lease)
+        with self.assertRaises(asyncio.CancelledError):
+            await broker.relay_once(b"sealed")
         await broker.revoke()
         self.assertEqual(endpoint.events, ["admit", "relay", "revoke"])
 
