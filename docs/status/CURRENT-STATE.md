@@ -108,6 +108,11 @@
   IPython fixture only. Its worker must return a canonical workload-bound
   result before a P1 receipt can be issued; no Docker/model/network execution
   has been authorized or run for that contract.
+- P4 `prime.long-session-continuity/v1` has a fixed IPython diagnostic
+  workload, canonical redacted completion parser, replay-free recovery adapter,
+  provider-free acceptance, and authorization-gated live reducer. Its 26-test
+  local chain is provider-free only; real session/IPython evidence remains
+  External-limited and cannot be promoted to bounded PASS.
 
 ## Open Problems
 
