@@ -1522,3 +1522,5 @@
 - 17:03 Sealed P2 acceptance proves fake lifecycle ordering and identity denial [1a51aa5]
 - 17:04 Journal records the sealed acceptance commit for recovery [f668dd4]
 - 17:12 P2 validates closed sandbox profiles before any worker or broker event [pending commit]
+- 17:13 P2 preflight denies open sandbox profiles before lifecycle side effects [4459ef0]
+- 17:18 Invalid P2 profiles skip injected service attribute inspection [pending commit]
