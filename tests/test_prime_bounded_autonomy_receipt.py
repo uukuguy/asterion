@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+import hashlib
+import json
 import unittest
 
 from asterion.applications.prime_agent.bounded_autonomy_receipt import (
@@ -12,6 +14,7 @@ from asterion.applications.prime_agent.bounded_autonomy_receipt import (
     verify_bounded_autonomy_receipt,
 )
 from asterion.applications.prime_agent.evidence import PrimeEvidenceLevel
+from asterion.applications.prime_agent.worker_gate import PrimeWorkerBoundaryReceipt
 
 
 def _receipt(**changes: object) -> dict[str, object]:
@@ -39,9 +42,27 @@ def _receipt(**changes: object) -> dict[str, object]:
 
 
 class TestBoundedAutonomyReceipt(unittest.TestCase):
-    def test_exact_bounded_receipt_emits_bounded_evidence_only(self) -> None:
+    def test_trusted_local_receipt_cannot_emit_bounded_evidence(self) -> None:
+        source = _receipt()
+        observation = bounded_autonomy_observation_from_receipt(source)
+
+        with self.assertRaises(BoundedAutonomyReceiptError):
+            verify_bounded_autonomy_receipt(observation)
+        self.assertEqual(
+            observation.source_receipt_digest,
+            "sha256:" + hashlib.sha256(json.dumps(
+                source, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
+            ).encode()).hexdigest(),
+        )
+
+    def test_matching_worker_result_emits_bounded_evidence(self) -> None:
         observation = bounded_autonomy_observation_from_receipt(_receipt())
-        receipt = verify_bounded_autonomy_receipt(observation)
+        worker = PrimeWorkerBoundaryReceipt(
+            "prime.bounded-autonomy/v1", "prime.bounded-autonomy", "worker-1",
+            "run-1", "sha256:" + "b" * 64, "sha256:" + "c" * 64,
+            observation.source_receipt_digest, "sha256:" + "d" * 64,
+        )
+        receipt = verify_bounded_autonomy_receipt(observation, worker)
 
         self.assertEqual(receipt.scenario_id, "prime.bounded-autonomy/v1")
         self.assertIs(receipt.level, PrimeEvidenceLevel.BOUNDED_SANDBOXED)
@@ -67,6 +88,7 @@ class TestBoundedAutonomyReceipt(unittest.TestCase):
             orphan_audit_clean=True,
             provider_operation_count=1,
             model_credential_read_count=1,
+            source_receipt_digest="sha256:" + "a" * 64,
         )
 
         with self.assertRaises(BoundedAutonomyReceiptError):

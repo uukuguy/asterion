@@ -1488,3 +1488,5 @@
 - 11:26 Bound Prime worker evidence through role, workload, canonical terminal result, and destruction; 69 focused tests passed [pending commit]
 - 11:26 Committed Prime worker result binding and seven-role gate [ca76d82]
 - 11:31 Bound the provider-free coding fixture to the worker receipt's exact scenario and role [pending commit]
+- 11:31 Committed coding-fixture scenario and role receipt binding [33ee0ca]
+- 11:38 Required matching restricted-worker result digests before P5/P6 may emit bounded evidence; trusted-local remains diagnostic [pending commit]

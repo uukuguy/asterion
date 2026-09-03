@@ -12,6 +12,7 @@ from asterion.applications.prime_agent.restricted_worker import (
 from asterion.applications.prime_agent.worker_gate import (
     PRIME_SCENARIO_WORKER_ROLES,
     PrimeWorkerBoundaryError,
+    issue_prime_bounded_evidence,
     verify_prime_worker_boundary,
 )
 from asterion.services.restricted_worker import (
@@ -138,6 +139,31 @@ class TestPrimeWorkerBoundary(unittest.TestCase):
                     _cleanup(role_id=role_id),
                 )
                 self.assertEqual((receipt.scenario_id, receipt.role_id), (scenario_id, role_id))
+
+    def test_issues_bounded_evidence_only_from_the_matching_worker_result(self) -> None:
+        worker = verify_prime_worker_boundary(
+            "prime.bounded-autonomy/v1",
+            _profile(),
+            _request(role_id="prime.bounded-autonomy"),
+            _lease(role_id="prime.bounded-autonomy"),
+            _attestation(role_id="prime.bounded-autonomy"),
+            _execution(role_id="prime.bounded-autonomy"),
+            _cleanup(role_id="prime.bounded-autonomy"),
+        )
+
+        receipt = issue_prime_bounded_evidence(
+            "prime.bounded-autonomy/v1", _RESULT_DIGEST, worker
+        )
+        self.assertEqual(receipt.scenario_id, "prime.bounded-autonomy/v1")
+        self.assertEqual(receipt.level.value, "bounded-sandboxed")
+        for scenario_id, source_digest in (
+            ("prime.continual-improvement/v1", _RESULT_DIGEST),
+            ("prime.bounded-autonomy/v1", "sha256:" + "e" * 64),
+        ):
+            with self.subTest(scenario_id=scenario_id), self.assertRaises(
+                PrimeWorkerBoundaryError
+            ):
+                issue_prime_bounded_evidence(scenario_id, source_digest, worker)
 
     def test_admits_only_a_fully_bound_restricted_worker_lifecycle(self) -> None:
         receipt = verify_prime_worker_boundary(

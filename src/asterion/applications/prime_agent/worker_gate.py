@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Literal
 
 from asterion.applications.prime_agent.restricted_worker import (
     PrimeRestrictedWorkerError,
     PrimeRestrictedWorkerProfile,
     validate_prime_restricted_worker,
+)
+from asterion.applications.prime_agent.evidence import (
+    PrimeEvidenceLevel,
+    PrimeEvidenceReceipt,
+    validate_prime_evidence_receipt,
 )
 from asterion.services.restricted_worker import (
     RestrictedWorkerAttestation,
@@ -34,6 +40,7 @@ PRIME_SCENARIO_WORKER_ROLES = {
     "prime.continual-improvement/v1": "prime.continual-improvement",
     "prime.arc-agi-3/v1": "prime.arc-agi-3",
 }
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -99,3 +106,29 @@ def verify_prime_worker_boundary(
         result_digest=execution.result_digest,
         image_digest=profile.image_digest,
     )
+
+
+def issue_prime_bounded_evidence(
+    scenario_id: str,
+    source_receipt_digest: str,
+    worker_receipt: PrimeWorkerBoundaryReceipt,
+) -> PrimeEvidenceReceipt:
+    """Issue bounded evidence only from the exact worker-bound source result."""
+    try:
+        expected_role = PRIME_SCENARIO_WORKER_ROLES[scenario_id]
+        if (
+            _DIGEST.fullmatch(source_receipt_digest) is None
+            or type(worker_receipt) is not PrimeWorkerBoundaryReceipt
+            or worker_receipt.status != "PASS"
+            or worker_receipt.scenario_id != scenario_id
+            or worker_receipt.role_id != expected_role
+            or worker_receipt.result_digest != source_receipt_digest
+        ):
+            raise ValueError
+        return validate_prime_evidence_receipt(PrimeEvidenceReceipt(
+            scenario_id=scenario_id,
+            level=PrimeEvidenceLevel.BOUNDED_SANDBOXED,
+            status="PASS",
+        ))
+    except (KeyError, TypeError, ValueError):
+        raise PrimeWorkerBoundaryError("prime worker boundary is invalid") from None

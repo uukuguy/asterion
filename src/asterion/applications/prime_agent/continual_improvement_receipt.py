@@ -4,14 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import hashlib
+import json
 
 from asterion.applications.prime_agent.evidence import (
     PrimeEvidenceLevel,
     PrimeEvidenceReceipt,
-    validate_prime_evidence_receipt,
 )
 from asterion.control.providers.prime.parity_testing import (
     build_prime_harness_bounded_observation,
+)
+from asterion.applications.prime_agent.worker_gate import (
+    PrimeWorkerBoundaryError,
+    PrimeWorkerBoundaryReceipt,
+    issue_prime_bounded_evidence,
 )
 
 
@@ -28,6 +34,7 @@ class ContinualImprovementObservation:
     snapshot_activated: bool
     provider_operation_count: int
     model_credential_read_count: int
+    source_receipt_digest: str
 
     def __repr__(self) -> str:
         return "ContinualImprovementObservation(redacted)"
@@ -62,11 +69,15 @@ def continual_improvement_observation_from_receipt(
         snapshot_activated=True,
         provider_operation_count=1,
         model_credential_read_count=1,
+        source_receipt_digest="sha256:" + hashlib.sha256(json.dumps(
+            dict(receipt), ensure_ascii=True, separators=(",", ":"), sort_keys=True,
+        ).encode()).hexdigest(),
     )
 
 
 def verify_continual_improvement_receipt(
     observation: object,
+    worker_receipt: PrimeWorkerBoundaryReceipt | None = None,
     requested_level: PrimeEvidenceLevel = PrimeEvidenceLevel.BOUNDED_SANDBOXED,
 ) -> PrimeEvidenceReceipt:
     """Emit the sole bounded-sandboxed receipt for continual improvement."""
@@ -84,10 +95,12 @@ def verify_continual_improvement_receipt(
         raise ContinualImprovementReceiptError(
             "continual improvement receipt is invalid"
         )
-    return validate_prime_evidence_receipt(
-        PrimeEvidenceReceipt(
-            scenario_id="prime.continual-improvement/v1",
-            level=PrimeEvidenceLevel.BOUNDED_SANDBOXED,
-            status="PASS",
+    try:
+        return issue_prime_bounded_evidence(
+            "prime.continual-improvement/v1", observation.source_receipt_digest,
+            worker_receipt,  # type: ignore[arg-type]
         )
-    )
+    except PrimeWorkerBoundaryError:
+        raise ContinualImprovementReceiptError(
+            "continual improvement receipt is invalid"
+        ) from None
