@@ -7,8 +7,9 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+from typing import NoReturn
 
-from IPython.core.interactiveshell import InteractiveShell
+from IPython.core.interactiveshell import InteractiveShell  # type: ignore[reportMissingImports]
 
 
 WORKLOAD_DIGEST = "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"
@@ -31,7 +32,7 @@ def canonical(value: object) -> bytes:
     return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
 
 
-def invalid_worker() -> None:
+def invalid_worker() -> NoReturn:
     raise RuntimeError("worker check failed")
 
 
