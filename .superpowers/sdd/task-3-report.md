@@ -12,9 +12,15 @@ directories, immutable fixture lock hash, and a digest-pinned base image. Its
 static source contains no generic command, configuration, or caller-supplied
 program surface.
 
+Review correction: the image entrypoint now emits the complete fixed canonical
+seven-frame sequence without stdin or caller-selected behavior. The Python
+reducer now builds its terminal result through the workload module's canonical
+completion encoder, retaining role/scenario, corpus and oracle identities and
+counts, schema format, and workload identity.
+
 Verification (provider-free):
 
-- `uv run python -m unittest -v tests.test_prime_programmatic_long_context_launcher_protocol` — PASS
+- `uv run python -m unittest -v tests.test_prime_programmatic_long_context_launcher_protocol` — PASS (5 tests)
 - `uv run ruff check src/asterion/applications/prime_agent/operator/programmatic_long_context_release.py tests/test_prime_programmatic_long_context_launcher_protocol.py` — PASS
 - `uv run pyright src/asterion/applications/prime_agent/operator/programmatic_long_context_release.py tests/test_prime_programmatic_long_context_launcher_protocol.py` — PASS
 - `node --check src/asterion/applications/prime_agent/operator/programmatic_long_context_image/launcher.mjs` — PASS
