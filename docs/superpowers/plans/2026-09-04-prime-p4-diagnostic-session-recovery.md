@@ -77,10 +77,7 @@ def diagnostic_session_recovery_workload_manifest_bytes() -> bytes:
     return _MANIFEST_BYTES
 def is_diagnostic_session_recovery_workload(value: object) -> bool:
     return type(value) is str and value == P4_DIAGNOSTIC_RECOVERY_WORKLOAD_DIGEST
-def verify_diagnostic_session_recovery_trace(
-    trace: object,
-    requested_level: PrimeEvidenceLevel = PrimeEvidenceLevel.BOUNDED,
-) -> PrimeEvidenceReceipt:
+def validate_diagnostic_session_recovery_trace(trace: object) -> None:
     raise DiagnosticSessionRecoveryReceiptError("diagnostic session recovery trace is invalid")
 ~~~
 
@@ -95,14 +92,13 @@ self.assertEqual(manifest["attach_count"], 1)
 self.assertEqual(manifest["compaction_count"], 1)
 self.assertEqual(manifest["supervisor_recovery_count"], 1)
 
-receipt = verify_diagnostic_session_recovery_trace(_trace())
-self.assertIs(receipt.level, PrimeEvidenceLevel.BOUNDED)
+validate_diagnostic_session_recovery_trace(_trace())
 for field in ("checkpoint_cursor_matches_attach", "compaction_on_active_path",
               "same_session_identity", "same_transcript_identity",
               "recovery_required_before_continue", "durable_assets_only",
               "uncertain_effect_fenced", "oracle_passed", "disposed", "reaped"):
     with self.subTest(field=field), self.assertRaises(DiagnosticSessionRecoveryReceiptError):
-        verify_diagnostic_session_recovery_trace(replace(_trace(), **{field: False}))
+        validate_diagnostic_session_recovery_trace(replace(_trace(), **{field: False}))
 ~~~
 
 Assert canonical bytes/digest stability, a fixed fixture/root/child/model/oracle/schema identity, finite positive ceilings, and no prompt/path/environment/credential manifest field. Reject extra trace fields introduced through `object.__setattr__`, malformed/substituted digests, unequal pre/post root artifact digests, non-`ipython` tool tuples, bool/zero counts, nonexact lifecycle counts, evidence-level downgrade/upgrade, and mutation. Assert repr and errors omit a private sentinel.
@@ -115,9 +111,9 @@ Expected: FAIL because P4 workload and trace modules do not exist.
 
 - [ ] **Step 3: Implement the closed boundary.**
 
-Build a sorted compact JSON manifest with `json.dumps(value, sort_keys=True, separators=(",", ":"))` and derive its SHA-256. The trace verifier must require exact dataclass type and field set, full `sha256:[0-9a-f]{64}` values, exact P4 workload/model/oracle/schema identities, equal root artifact projections, both `("ipython",)` tuples, one of every lifecycle event, positive integer actions, and true required booleans. It returns only a bounded receipt through `validate_prime_evidence_receipt`.
+Build a sorted compact JSON manifest with `json.dumps(value, sort_keys=True, separators=(",", ":"))` and derive its SHA-256. The trace validator must require exact dataclass type and field set, full `sha256:[0-9a-f]{64}` values, exact P4 workload/model/oracle/schema identities, equal root artifact projections, both `("ipython",)` tuples, one of every lifecycle event, positive integer actions, and true required booleans. It validates only: a trace is not authority to issue bounded evidence.
 
-Retain `LongSessionContinuityObservation` as provider-free compatibility evidence. Its verifier remains provider-free only and never calls this bounded verifier.
+Retain `LongSessionContinuityObservation` as provider-free compatibility evidence. Its verifier remains provider-free only and never calls the P4 validator.
 
 - [ ] **Step 4: Verify GREEN and commit.**
 
@@ -177,7 +173,7 @@ Expected: FAIL because parser and fixture do not exist.
 
 - [ ] **Step 3: Implement the canonical parser.**
 
-Require an exact dict field set and `asterion.prime-diagnostic-session-recovery/v1`; normalize only the exact JSON `["ipython"]` arrays to tuples; construct the Task 1 trace; call `verify_diagnostic_session_recovery_trace` before return. Convert parsing/receipt failures to the one redacted completion error. Static fixture digests derive from nonsecret labels and do not imply any gateway/kernel/provider execution.
+Require an exact dict field set and `asterion.prime-diagnostic-session-recovery/v1`; normalize only the exact JSON `["ipython"]` arrays to tuples; construct the Task 1 trace; call `validate_diagnostic_session_recovery_trace` before return. Convert parsing/receipt failures to the one redacted completion error. Static fixture digests derive from nonsecret labels and do not imply any gateway/kernel/provider execution.
 
 - [ ] **Step 4: Verify GREEN and commit.**
 
@@ -318,6 +314,21 @@ class DiagnosticSessionRecoveryLiveAuthorization:
     broker_quiescent: bool
     worker_destroyed: bool
 
+@dataclass(frozen=True, repr=False, init=False)
+class DiagnosticSessionRecoveryLiveObservation:
+    trace: DiagnosticSessionRecoveryTrace
+    platform_lock_sha256: str
+    worker_boundary: PrimeWorkerBoundaryReceipt
+
+    @classmethod
+    def _admit(
+        cls, *, trace: object, platform_lock_sha256: object,
+        worker_boundary: object,
+    ) -> "DiagnosticSessionRecoveryLiveObservation":
+        raise DiagnosticSessionRecoveryLiveValidationError(
+            "diagnostic session recovery live evidence is invalid"
+        )
+
 def validate_diagnostic_session_recovery_live_result(
     observation: object,
     authorization: object,
@@ -343,7 +354,7 @@ with self.assertRaises(DiagnosticSessionRecoveryLiveValidationError):
     validate_diagnostic_session_recovery_live_result(object(), authorization)
 ~~~
 
-Use a probe gateway to prove malformed checkpoint/state/observation denies before injected-service access. Reject false cleanup and every false authorization field. Assert acceptance never returns bounded evidence and all fakes lack model invocation, process launch, Docker, network, continuation, and replay operations.
+Use a probe gateway to prove malformed checkpoint/state/observation denies before injected-service access. Reject false cleanup and every false authorization field. Assert direct live-observation construction, a forged worker boundary, or a raw completion trace cannot issue bounded evidence. Assert acceptance never returns bounded evidence and all fakes lack model invocation, process launch, Docker, network, continuation, and replay operations.
 
 - [ ] **Step 2: Verify RED.**
 
@@ -353,7 +364,7 @@ Expected: FAIL because acceptance and live reducer modules do not exist.
 
 - [ ] **Step 3: Implement the two evidence boundaries.**
 
-Acceptance validates an exact observation/cleanup, invokes Task 3 recovery, parses/verifies Task 2 completion, and returns only provider-free P4 evidence. The live reducer requires exact authorization type, full SHA-256 lock, every attestation true, exact completion type, then calls `verify_diagnostic_session_recovery_trace(completion.trace, PrimeEvidenceLevel.BOUNDED)`. It is pure: no gateway, broker, worker, Docker, model, or provider object is injected or started.
+Acceptance validates an exact observation/cleanup, invokes Task 3 recovery, parses/verifies Task 2 completion, and returns only provider-free P4 evidence. `DiagnosticSessionRecoveryLiveObservation._admit` requires an exact validated trace, full lock digest, and an existing admitted `PrimeWorkerBoundaryReceipt`; it is the only construction route. The live reducer requires this exact observation, matching lock digest, and every attestation true before it returns bounded P4 evidence through `validate_prime_evidence_receipt`. It is pure: no gateway, broker, worker, Docker, model, or provider object is injected or started.
 
 Update `CURRENT-STATE.md` to name P4 recovery as an active structural boundary and mark provider-free verification non-promotable; real P4 execution remains External-limited.
 
@@ -376,4 +387,4 @@ Expected: PASS with provider-free fakes only. Do not run Docker, model, network,
 
 - Spec coverage: Task 1 locks P4 identity and redacted trace while preserving old compatibility evidence; Task 2 admits only canonical completion data; Task 3 enforces lifecycle ordering, identity/cursor/generation binding, durability, and no replay; Task 4 proves fake full-chain behavior and isolates real bounded issuance behind authorization.
 - Placeholder scan: no unspecified implementation, deferred work marker, or implicit error-handling instruction remains.
-- Type consistency: Task 2 creates Task 1's trace; Task 3 exports the checkpoint/state consumed by Task 4; Task 4 consumes Task 2 completion and Task 1 verifier.
+- Type consistency: Task 2 creates Task 1's trace; Task 3 exports the checkpoint/state consumed by Task 4; Task 4 consumes Task 2 completion, Task 1 validator, and the existing admitted `PrimeWorkerBoundaryReceipt`.
