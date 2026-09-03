@@ -5,6 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+import subprocess
 import unittest
 
 from asterion.applications.prime_agent.operator.programmatic_long_context_release import (
@@ -14,6 +15,12 @@ from asterion.applications.prime_agent.operator.programmatic_long_context_releas
     canonical_programmatic_long_context_frame,
 )
 from asterion.applications.prime_agent.operator.programmatic_long_context_workload import (
+    PROGRAMMATIC_LONG_CONTEXT_P2_CORPUS_RECORD_COUNT,
+    PROGRAMMATIC_LONG_CONTEXT_P2_CORPUS_SHA256,
+    PROGRAMMATIC_LONG_CONTEXT_P2_ORACLE_SHA256,
+    PROGRAMMATIC_LONG_CONTEXT_P2_ROLE_ID,
+    PROGRAMMATIC_LONG_CONTEXT_P2_SCENARIO_ID,
+    PROGRAMMATIC_LONG_CONTEXT_P2_SELECTED_RECORD_COUNT,
     PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST,
 )
 
@@ -55,8 +62,15 @@ class TestProgrammaticLongContextLauncherProtocol(unittest.TestCase):
         for frame in _valid_frames():
             result = release.consume(frame)
         self.assertEqual(result["terminal"], "completed")
-        self.assertEqual(result["active_tool_names"], ("ipython",))
+        self.assertEqual(result["active_tool_names"], ["ipython"])
         self.assertEqual(result["workload_digest"], PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST)
+        self.assertEqual(result["role_id"], PROGRAMMATIC_LONG_CONTEXT_P2_ROLE_ID)
+        self.assertEqual(result["scenario_id"], PROGRAMMATIC_LONG_CONTEXT_P2_SCENARIO_ID)
+        self.assertEqual(result["corpus_sha256"], PROGRAMMATIC_LONG_CONTEXT_P2_CORPUS_SHA256)
+        self.assertEqual(result["corpus_record_count"], PROGRAMMATIC_LONG_CONTEXT_P2_CORPUS_RECORD_COUNT)
+        self.assertEqual(result["selected_record_count"], PROGRAMMATIC_LONG_CONTEXT_P2_SELECTED_RECORD_COUNT)
+        self.assertEqual(result["oracle_sha256"], PROGRAMMATIC_LONG_CONTEXT_P2_ORACLE_SHA256)
+        self.assertEqual(result["format"], "asterion.prime-programmatic-long-context-result/v1")
         self.assertNotIn("prompt", result)
         self.assertNotIn("program", result)
         self.assertNotIn("path", result)
@@ -100,3 +114,22 @@ class TestProgrammaticLongContextLauncherProtocol(unittest.TestCase):
         self.assertIn("corpus", dockerfile)
         self.assertIn("oracle", dockerfile)
         self.assertEqual(sha256((IMAGE / "fixture-lock.json").read_bytes()).hexdigest(), (IMAGE / "fixture-lock.sha256").read_text(encoding="ascii").strip())
+
+    def test_image_launcher_emits_the_one_fixed_canonical_sequence(self) -> None:
+        launched = subprocess.run(
+            ["node", str(IMAGE / "launcher.mjs")],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(launched.stderr, "")
+        frames = tuple(launched.stdout.encode().splitlines())
+        self.assertEqual(len(frames), 7)
+        release = ProgrammaticLongContextRelease(
+            "prime-p2-image-worker", "prime-p2-image-run", "sha256:" + "c" * 64
+        )
+        terminal: dict[str, object] = {}
+        for frame in frames:
+            terminal = release.consume(frame)
+        self.assertEqual(terminal["terminal"], "completed")
+        self.assertEqual(terminal["tool_call_count"], 1)
