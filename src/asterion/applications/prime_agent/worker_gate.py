@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import re
+from types import MappingProxyType
 from typing import Literal
 
 from asterion.applications.prime_agent.restricted_worker import (
@@ -31,7 +32,7 @@ class PrimeWorkerBoundaryError(ValueError):
     """Raised when Prime worker evidence cannot be admitted."""
 
 
-PRIME_SCENARIO_WORKER_ROLES = {
+PRIME_SCENARIO_WORKER_ROLES = MappingProxyType({
     "prime.ipython-coding/v1": "prime.ipython-coding",
     "prime.programmatic-long-context/v1": "prime.programmatic-long-context",
     "prime.recursive-workflow/v1": "prime.recursive-workflow",
@@ -39,11 +40,11 @@ PRIME_SCENARIO_WORKER_ROLES = {
     "prime.bounded-autonomy/v1": "prime.bounded-autonomy",
     "prime.continual-improvement/v1": "prime.continual-improvement",
     "prime.arc-agi-3/v1": "prime.arc-agi-3",
-}
+})
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class PrimeWorkerBoundaryReceipt:
     """Public-safe proof of one admitted restricted-worker lifecycle."""
 
@@ -56,6 +57,34 @@ class PrimeWorkerBoundaryReceipt:
     result_digest: str
     image_digest: str
     status: Literal["PASS"] = field(default="PASS", init=False)
+
+    @classmethod
+    def _admit(
+        cls,
+        *,
+        scenario_id: str,
+        role_id: str,
+        worker_id: str,
+        run_id: str,
+        challenge_digest: str,
+        workload_digest: str,
+        result_digest: str,
+        image_digest: str,
+    ) -> "PrimeWorkerBoundaryReceipt":
+        receipt = object.__new__(cls)
+        for field_name, value in (
+            ("scenario_id", scenario_id),
+            ("role_id", role_id),
+            ("worker_id", worker_id),
+            ("run_id", run_id),
+            ("challenge_digest", challenge_digest),
+            ("workload_digest", workload_digest),
+            ("result_digest", result_digest),
+            ("image_digest", image_digest),
+            ("status", "PASS"),
+        ):
+            object.__setattr__(receipt, field_name, value)
+        return receipt
 
 
 def verify_prime_worker_boundary(
@@ -96,7 +125,7 @@ def verify_prime_worker_boundary(
     ):
         raise PrimeWorkerBoundaryError("prime worker boundary is invalid")
 
-    return PrimeWorkerBoundaryReceipt(
+    return PrimeWorkerBoundaryReceipt._admit(
         scenario_id=scenario_id,
         role_id=expected_role,
         worker_id=lease.worker_id,

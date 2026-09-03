@@ -1492,3 +1492,6 @@
 - 11:38 Required matching restricted-worker result digests before P5/P6 may emit bounded evidence; trusted-local remains diagnostic [pending commit]
 - 11:38 Committed worker-gated bounded evidence for P5/P6 [3dbfdfc]
 - 11:44 Verified P5/P6 reject wrong worker scenario or result digest; 42 long-running/harness regressions passed [pending commit]
+- 11:44 Committed P5/P6 worker mismatch coverage [499c471]
+- 11:48 Final review found P5/P6 worker receipts forgeable and Docker result non-workload-bound; bounded PASS remains unapproved [no code commit]
+- 11:55 Closed P5/P6 bounded issuance pending real role launchers; sealed worker receipt constructor and froze role map [pending commit]

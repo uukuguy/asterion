@@ -50,7 +50,7 @@ def _worker(**changes: object) -> PrimeWorkerBoundaryReceipt:
         "image_digest": _IMAGE,
     }
     values.update(changes)
-    return PrimeWorkerBoundaryReceipt(**values)  # type: ignore[arg-type]
+    return PrimeWorkerBoundaryReceipt._admit(**values)  # type: ignore[arg-type]
 
 
 def _observation(**changes: object) -> CodingFixtureObservation:

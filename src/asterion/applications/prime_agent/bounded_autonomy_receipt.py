@@ -14,11 +14,6 @@ from asterion.applications.prime_agent.evidence import (
 from asterion.control.providers.prime.parity_testing import (
     build_prime_long_running_bounded_observation,
 )
-from asterion.applications.prime_agent.worker_gate import (
-    PrimeWorkerBoundaryError,
-    PrimeWorkerBoundaryReceipt,
-    issue_prime_bounded_evidence,
-)
 
 
 class BoundedAutonomyReceiptError(ValueError):
@@ -71,7 +66,7 @@ def bounded_autonomy_observation_from_receipt(
 
 def verify_bounded_autonomy_receipt(
     observation: object,
-    worker_receipt: PrimeWorkerBoundaryReceipt | None = None,
+    worker_receipt: object | None = None,
     requested_level: PrimeEvidenceLevel = PrimeEvidenceLevel.BOUNDED_SANDBOXED,
 ) -> PrimeEvidenceReceipt:
     """Emit the sole bounded-sandboxed receipt for Prime autonomy."""
@@ -87,10 +82,4 @@ def verify_bounded_autonomy_receipt(
         or observation.model_credential_read_count != 1
     ):
         raise BoundedAutonomyReceiptError("bounded autonomy receipt is invalid")
-    try:
-        return issue_prime_bounded_evidence(
-            "prime.bounded-autonomy/v1", observation.source_receipt_digest,
-            worker_receipt,  # type: ignore[arg-type]
-        )
-    except PrimeWorkerBoundaryError:
-        raise BoundedAutonomyReceiptError("bounded autonomy receipt is invalid") from None
+    raise BoundedAutonomyReceiptError("bounded autonomy receipt is unavailable")

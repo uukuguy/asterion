@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError
 import hashlib
 import json
 import unittest
@@ -14,7 +14,6 @@ from asterion.applications.prime_agent.continual_improvement_receipt import (
     verify_continual_improvement_receipt,
 )
 from asterion.applications.prime_agent.evidence import PrimeEvidenceLevel
-from asterion.applications.prime_agent.worker_gate import PrimeWorkerBoundaryReceipt
 
 
 def _receipt(**changes: object) -> dict[str, object]:
@@ -53,26 +52,10 @@ class TestContinualImprovementReceipt(unittest.TestCase):
             ).encode()).hexdigest(),
         )
 
-    def test_matching_worker_result_emits_bounded_evidence(self) -> None:
+    def test_no_worker_receipt_can_promote_until_the_role_has_a_real_launcher(self) -> None:
         observation = continual_improvement_observation_from_receipt(_receipt())
-        worker = PrimeWorkerBoundaryReceipt(
-            "prime.continual-improvement/v1", "prime.continual-improvement", "worker-1",
-            "run-1", "sha256:" + "b" * 64, "sha256:" + "c" * 64,
-            observation.source_receipt_digest, "sha256:" + "d" * 64,
-        )
-        receipt = verify_continual_improvement_receipt(observation, worker)
-
-        self.assertEqual(receipt.scenario_id, "prime.continual-improvement/v1")
-        self.assertIs(receipt.level, PrimeEvidenceLevel.BOUNDED_SANDBOXED)
-
-        for worker_receipt in (
-            replace(worker, scenario_id="prime.bounded-autonomy/v1"),
-            replace(worker, result_digest="sha256:" + "e" * 64),
-        ):
-            with self.subTest(worker_receipt=worker_receipt), self.assertRaises(
-                ContinualImprovementReceiptError
-            ):
-                verify_continual_improvement_receipt(observation, worker_receipt)
+        with self.assertRaises(ContinualImprovementReceiptError):
+            verify_continual_improvement_receipt(observation, object())
 
     def test_rejects_unbounded_ungrounded_or_nonactivated_refinement(self) -> None:
         for changes in (

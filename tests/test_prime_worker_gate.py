@@ -12,6 +12,7 @@ from asterion.applications.prime_agent.restricted_worker import (
 from asterion.applications.prime_agent.worker_gate import (
     PRIME_SCENARIO_WORKER_ROLES,
     PrimeWorkerBoundaryError,
+    PrimeWorkerBoundaryReceipt,
     issue_prime_bounded_evidence,
     verify_prime_worker_boundary,
 )
@@ -116,6 +117,14 @@ def _execution(**changes: object) -> RestrictedWorkerExecutionReceipt:
 
 
 class TestPrimeWorkerBoundary(unittest.TestCase):
+    def test_boundary_receipt_has_no_public_constructor(self) -> None:
+        with self.assertRaises(TypeError):
+            PrimeWorkerBoundaryReceipt(
+                "prime.ipython-coding/v1", "prime.ipython-coding", "worker-1",
+                "run-1", _CHALLENGE_DIGEST, _WORKLOAD_DIGEST, _RESULT_DIGEST,
+                _IMAGE_DIGEST,
+            )
+
     def test_accepts_only_the_closed_scenario_role_pairs(self) -> None:
         expected = (
             ("prime.ipython-coding/v1", "prime.ipython-coding"),
@@ -139,6 +148,9 @@ class TestPrimeWorkerBoundary(unittest.TestCase):
                     _cleanup(role_id=role_id),
                 )
                 self.assertEqual((receipt.scenario_id, receipt.role_id), (scenario_id, role_id))
+
+        with self.assertRaises(TypeError):
+            PRIME_SCENARIO_WORKER_ROLES["prime.arc-agi-3/v1"] = "other.role"  # type: ignore[index]
 
     def test_issues_bounded_evidence_only_from_the_matching_worker_result(self) -> None:
         worker = verify_prime_worker_boundary(

@@ -14,11 +14,6 @@ from asterion.applications.prime_agent.evidence import (
 from asterion.control.providers.prime.parity_testing import (
     build_prime_harness_bounded_observation,
 )
-from asterion.applications.prime_agent.worker_gate import (
-    PrimeWorkerBoundaryError,
-    PrimeWorkerBoundaryReceipt,
-    issue_prime_bounded_evidence,
-)
 
 
 class ContinualImprovementReceiptError(ValueError):
@@ -77,7 +72,7 @@ def continual_improvement_observation_from_receipt(
 
 def verify_continual_improvement_receipt(
     observation: object,
-    worker_receipt: PrimeWorkerBoundaryReceipt | None = None,
+    worker_receipt: object | None = None,
     requested_level: PrimeEvidenceLevel = PrimeEvidenceLevel.BOUNDED_SANDBOXED,
 ) -> PrimeEvidenceReceipt:
     """Emit the sole bounded-sandboxed receipt for continual improvement."""
@@ -95,12 +90,6 @@ def verify_continual_improvement_receipt(
         raise ContinualImprovementReceiptError(
             "continual improvement receipt is invalid"
         )
-    try:
-        return issue_prime_bounded_evidence(
-            "prime.continual-improvement/v1", observation.source_receipt_digest,
-            worker_receipt,  # type: ignore[arg-type]
-        )
-    except PrimeWorkerBoundaryError:
-        raise ContinualImprovementReceiptError(
-            "continual improvement receipt is invalid"
-        ) from None
+    raise ContinualImprovementReceiptError(
+        "continual improvement receipt is unavailable"
+    )
