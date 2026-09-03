@@ -106,6 +106,16 @@
   IPython fixture only. Its worker must return a canonical workload-bound
   result before a P1 receipt can be issued; no Docker/model/network execution
   has been authorized or run for that contract.
+- P2 `prime.programmatic-long-context/v1` has a fixed IPython-only corpus
+  workload, sealed completion protocol, exact worker/broker acceptance chain,
+  and worker-bound bounded-evidence reducer. Its compatibility and fake-chain
+  tests are provider-free only; real restricted-worker evidence remains
+  External-limited.
+- P3 `prime.recursive-workflow/v1` has a fixed depth-one two-child IPython
+  review workload, causal aggregation trace, sealed worker/launcher facades,
+  provider-free acceptance, and a live authorization reducer. Its local chain
+  is provider-free only; real recursive-worker evidence remains
+  External-limited.
 - P4 `prime.long-session-continuity/v1` has a fixed IPython diagnostic
   workload, canonical redacted completion parser, replay-free recovery adapter,
   provider-free acceptance, and authorization-gated live reducer. Its 26-test
