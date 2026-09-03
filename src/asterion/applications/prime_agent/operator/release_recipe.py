@@ -73,7 +73,7 @@ PRIME_IPYTHON_RELEASE_RECIPE: Final = ReleaseRecipe(
     "22.8.0",
     "debian-bookworm",
     "glibc",
-    "c2b0455a4746b1b6274602b933b1492a7c04689288571f0dbd03347042c197f2",
+    "5942da67c4f6dcbe719b0db04a14db6fd944d7b53fb622fd26cd8e8cd43619a0",
     "60f9f4f3e26c14a3ac6fd0703400506835392b81d7b3d22755d7e68c1881ec84",
     "e7d1c4f41d328f3c602cd4f63d0d21aab6e4f1398aec2c03931e3da53ba39374",
     "f692e4caef89d47bb7e1d9f95f7bea4cd6d4fcbb3696f00de6e40f2a4f39f7b0",

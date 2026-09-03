@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from hashlib import sha256
 import json
+from pathlib import Path
 import unittest
 
 from asterion.applications.prime_agent.operator import release_recipe as recipe
@@ -14,6 +15,24 @@ from asterion.applications.prime_agent.operator.image_input_lock import (
 
 
 class TestPrimeReleaseRecipe(unittest.TestCase):
+    def test_recipe_binds_the_committed_python311_hash_lock(self) -> None:
+        lock = (
+            Path(__file__).resolve().parents[1]
+            / "src/asterion/applications/prime_agent/operator/image/requirements.lock"
+        )
+        content = lock.read_bytes()
+
+        self.assertEqual(
+            recipe.PRIME_IPYTHON_RELEASE_RECIPE.python_dependency_lock_sha256,
+            sha256(content).hexdigest(),
+        )
+        text = content.decode("utf-8")
+        self.assertIn("ipykernel==", text)
+        self.assertIn("nest-asyncio==", text)
+        self.assertIn("tyro==", text)
+        self.assertNotIn("# Static, intentionally empty", text)
+        self.assertGreaterEqual(text.count("--hash=sha256:"), 33)
+
     def test_recipe_pins_prime_source_and_has_no_platform_field(self) -> None:
         value = recipe.PRIME_IPYTHON_RELEASE_RECIPE
         self.assertEqual(
