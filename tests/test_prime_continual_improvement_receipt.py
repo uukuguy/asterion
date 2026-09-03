@@ -8,12 +8,33 @@ import json
 import unittest
 
 from asterion.applications.prime_agent.continual_improvement_receipt import (
+    ContinualImprovementTrace,
     ContinualImprovementObservation,
     ContinualImprovementReceiptError,
     continual_improvement_observation_from_receipt,
     verify_continual_improvement_receipt,
+    validate_continual_improvement_trace,
 )
 from asterion.applications.prime_agent.evidence import PrimeEvidenceLevel
+from asterion.applications.prime_agent.operator.continual_improvement_workload import (
+    P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256,
+    P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256,
+    P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256,
+    P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST,
+)
+
+
+def _digest(character: str) -> str:
+    return "sha256:" + character * 64
+
+
+def _trace(*, outcome: str = "preserved", rollback_count: int = 0) -> ContinualImprovementTrace:
+    return ContinualImprovementTrace(
+        P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST, _digest("a"), _digest("b"),
+        _digest("c"), _digest("d"), _digest("e"), P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256,
+        P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256, P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256,
+        ("ipython",), 3, 10, 1, 1, rollback_count, outcome, True, True, True,
+    )
 
 
 def _receipt(**changes: object) -> dict[str, object]:
@@ -39,6 +60,22 @@ def _receipt(**changes: object) -> dict[str, object]:
 
 
 class TestContinualImprovementReceipt(unittest.TestCase):
+    def test_trace_binds_fixed_workload_and_exact_outcome_branch(self) -> None:
+        validate_continual_improvement_trace(_trace())
+        validate_continual_improvement_trace(_trace(outcome="rolled-back", rollback_count=1))
+        for trace in (
+            _trace(outcome="preserved", rollback_count=1),
+            _trace(outcome="rolled-back", rollback_count=0),
+            ContinualImprovementTrace(
+                _digest("0"), _digest("a"), _digest("b"), _digest("c"), _digest("d"), _digest("e"),
+                P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256, P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256,
+                P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256, ("ipython",), 3, 10, 1, 1, 0,
+                "preserved", True, True, True,
+            ),
+        ):
+            with self.subTest(trace=trace), self.assertRaises(ContinualImprovementReceiptError):
+                validate_continual_improvement_trace(trace)
+
     def test_trusted_local_receipt_cannot_emit_bounded_evidence(self) -> None:
         source = _receipt()
         observation = continual_improvement_observation_from_receipt(source)

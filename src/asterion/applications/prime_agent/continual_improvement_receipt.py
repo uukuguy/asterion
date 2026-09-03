@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import json
+import re
+from typing import Literal
 
 from asterion.applications.prime_agent.evidence import (
     PrimeEvidenceLevel,
@@ -14,10 +16,86 @@ from asterion.applications.prime_agent.evidence import (
 from asterion.control.providers.prime.parity_testing import (
     build_prime_harness_bounded_observation,
 )
+from asterion.applications.prime_agent.operator.continual_improvement_workload import (
+    P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256,
+    P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256,
+    P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256,
+    P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST,
+)
+
+
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+_TRACE_FIELDS = frozenset({
+    "workload_sha256", "baseline_snapshot_sha256", "candidate_snapshot_sha256",
+    "candidate_revision_sha256", "task_a_evidence_sha256", "task_b_result_sha256",
+    "oracle_sha256", "model_sha256", "schema_sha256", "tool_names", "action_count",
+    "usage_count", "candidate_count", "holdout_count", "rollback_count", "outcome",
+    "terminal", "disposed", "reaped",
+})
 
 
 class ContinualImprovementReceiptError(ValueError):
     """Raised when a bounded refinement cannot support the product claim."""
+
+
+@dataclass(frozen=True, repr=False)
+class ContinualImprovementTrace:
+    workload_sha256: str
+    baseline_snapshot_sha256: str
+    candidate_snapshot_sha256: str
+    candidate_revision_sha256: str
+    task_a_evidence_sha256: str
+    task_b_result_sha256: str
+    oracle_sha256: str
+    model_sha256: str
+    schema_sha256: str
+    tool_names: tuple[str]
+    action_count: int
+    usage_count: int
+    candidate_count: int
+    holdout_count: int
+    rollback_count: int
+    outcome: Literal["preserved", "rolled-back"]
+    terminal: bool
+    disposed: bool
+    reaped: bool
+
+    def __repr__(self) -> str:
+        return "ContinualImprovementTrace(redacted)"
+
+
+def validate_continual_improvement_trace(trace: object) -> None:
+    """Validate the fixed P6 causal trace without issuing evidence."""
+
+    try:
+        if (
+            type(trace) is not ContinualImprovementTrace
+            or frozenset(vars(trace)) != _TRACE_FIELDS
+            or any(
+                type(getattr(trace, name)) is not str
+                or _DIGEST.fullmatch(getattr(trace, name)) is None
+                for name in _TRACE_FIELDS
+                if name.endswith("_sha256")
+            )
+            or trace.workload_sha256 != P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST
+            or trace.oracle_sha256 != P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256
+            or trace.model_sha256 != P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256
+            or trace.schema_sha256 != P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256
+            or trace.baseline_snapshot_sha256 == trace.candidate_snapshot_sha256
+            or trace.tool_names != ("ipython",)
+            or type(trace.action_count) is not int or not 0 < trace.action_count <= 3
+            or type(trace.usage_count) is not int or not 0 < trace.usage_count <= 256
+            or type(trace.candidate_count) is not int or trace.candidate_count != 1
+            or type(trace.holdout_count) is not int or trace.holdout_count != 1
+            or type(trace.rollback_count) is not int
+            or trace.outcome not in {"preserved", "rolled-back"}
+            or (trace.outcome == "preserved" and trace.rollback_count != 0)
+            or (trace.outcome == "rolled-back" and trace.rollback_count != 1)
+            or any(getattr(trace, name) is not True for name in ("terminal", "disposed", "reaped"))
+        ):
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
+        raise ContinualImprovementReceiptError("continual improvement trace is invalid") from None
 
 
 @dataclass(frozen=True, repr=False)

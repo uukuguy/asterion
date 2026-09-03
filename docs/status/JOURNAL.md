@@ -1570,3 +1570,5 @@
 - 05:00 Planned P6 workload, holdout rollback, and live evidence gates [pending commit]
 - 05:00 correction: P6 implementation plan commit [0868660]
 - 05:06 Defined P6 fixed IPython refinement workload identity [pending commit]
+- 05:06 correction: P6 fixed workload commit [3c626e5]
+- 05:14 Bound P6 preserve-or-rollback causal trace to fixed workload [pending commit]
