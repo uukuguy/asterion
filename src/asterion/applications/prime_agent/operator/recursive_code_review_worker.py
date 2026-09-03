@@ -41,6 +41,7 @@ class RecursiveCodeReviewEngine(Protocol):
         signal: CancellationSignal | None,
     ) -> RestrictedWorkerLease: ...
 
+    async def inspect(self, lease: RestrictedWorkerLease) -> "RecursiveCodeReviewInspection": ...
     async def completion_bytes(self, lease: RestrictedWorkerLease) -> bytes: ...
     async def remove(self, lease: RestrictedWorkerLease) -> None: ...
 
@@ -49,6 +50,31 @@ class _RlmEndpoint(Protocol):
     async def admit_root(self, lease: RestrictedWorkerLease) -> None: ...
     async def relay_once(self, body: bytes) -> bytes: ...
     async def revoke(self) -> None: ...
+
+
+@dataclass(frozen=True, repr=False)
+class RecursiveCodeReviewInspection:
+    """Engine-observed controls for one P3 lease; never a host assertion."""
+
+    worker_id: str
+    role_id: str
+    run_id: str
+    challenge_digest: str
+    workload_digest: str
+    image_digest: str
+    entrypoint: str
+    seccomp: str
+    env: tuple[str, ...]
+    network_isolated: bool
+    root_read_only: bool
+    workspace_disposable: bool
+    credentials_absent: bool
+    kernel_credential_absent: bool
+    source_read_only: bool
+    resource_limited: bool
+
+    def __repr__(self) -> str:
+        return "RecursiveCodeReviewInspection(redacted)"
 
 
 class RecursiveCodeReviewBroker:
@@ -92,28 +118,48 @@ class RecursiveCodeReviewBroker:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     async def revoke(self) -> None:
-        if (
-            self._root is None or not self._used or self._revoked
-            or self._usage_sha256 is None
-        ):
+        if self._root is None or self._revoked:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        # The parser admitted the fixed 13-frame trace: usage, follow-up, and both
-        # child-deletions all precede its terminal revoked frame.
-        self._revoked = True
-        try:
-            await self._endpoint.revoke()
-        except asyncio.CancelledError:
-            raise
-        except BaseException:
+        error = await _complete_cleanup(self._endpoint.revoke())
+        if isinstance(error, asyncio.CancelledError):
+            self._revoked = True
+            raise error
+        if error is not None:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
+        # Mark closed only after the endpoint acknowledgement.  A failed revoke is
+        # retryable, and a cancelled caller cannot interrupt endpoint cleanup.
+        self._revoked = True
 
 
 @dataclass
 class _State:
     request: RestrictedWorkerRequest
     lease: RestrictedWorkerLease
+    inspection: RecursiveCodeReviewInspection | None = None
     execution: RestrictedWorkerExecutionReceipt | None = None
     destroyed: bool = False
+
+
+async def _complete_cleanup(operation: object) -> BaseException | None:
+    """Complete an awaitable cleanup even when its caller is cancelled."""
+    if not hasattr(operation, "__await__"):
+        return RestrictedWorkerError("restricted worker value is invalid")
+    task = asyncio.ensure_future(operation)  # type: ignore[arg-type]
+    cancelled: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = asyncio.CancelledError()
+        except BaseException as error:
+            return error
+    if task.cancelled():
+        return RestrictedWorkerError("restricted worker value is invalid")
+    try:
+        task.result()
+    except BaseException as error:
+        return error
+    return cancelled
 
 
 class RecursiveCodeReviewDockerWorker:
@@ -164,6 +210,16 @@ class RecursiveCodeReviewDockerWorker:
 
     async def attest(self, lease: RestrictedWorkerLease) -> RestrictedWorkerAttestation:
         state = self._state(lease)
+        if state.inspection is None:
+            try:
+                inspection = await self._engine.inspect(lease)
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                raise RestrictedWorkerError("restricted worker value is invalid") from None
+            if not _matches_inspection(inspection, state):
+                raise RestrictedWorkerError("restricted worker value is invalid")
+            state.inspection = inspection
         return RestrictedWorkerAttestation(
             lease.worker_id, lease.role_id, lease.run_id, lease.challenge_digest,
             lease.workload_digest, state.request.image_digest, True, True, True,
@@ -230,22 +286,7 @@ class _Context(AbstractAsyncContextManager[RestrictedWorkerLease]):
             raise error
 
     async def _remove(self, lease: RestrictedWorkerLease) -> BaseException | None:
-        task = asyncio.create_task(self._service._engine.remove(lease))
-        cancelled: asyncio.CancelledError | None = None
-        while not task.done():
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError as error:
-                cancelled = error
-            except BaseException as error:
-                return error
-        if task.cancelled():
-            return asyncio.CancelledError()
-        try:
-            task.result()
-        except BaseException as error:
-            return error
-        return cancelled
+        return await _complete_cleanup(self._service._engine.remove(lease))
 
 
 def _p3_lease(lease: object) -> TypeGuard[RestrictedWorkerLease]:
@@ -254,3 +295,19 @@ def _p3_lease(lease: object) -> TypeGuard[RestrictedWorkerLease]:
 
 def _matches(request: RestrictedWorkerRequest, lease: object) -> bool:
     return _p3_lease(lease) and lease.run_id == request.run_id and lease.challenge_digest == request.challenge_digest
+
+
+def _matches_inspection(value: object, state: _State) -> bool:
+    if type(value) is not RecursiveCodeReviewInspection:
+        return False
+    lease, request = state.lease, state.request
+    return (
+        value.worker_id == lease.worker_id and value.role_id == lease.role_id
+        and value.run_id == lease.run_id and value.challenge_digest == lease.challenge_digest
+        and value.workload_digest == lease.workload_digest and value.image_digest == request.image_digest
+        and value.entrypoint == _ENTRYPOINT and value.seccomp == _SECCOMP and value.env == ()
+        and value.network_isolated is True and value.root_read_only is True
+        and value.workspace_disposable is True and value.credentials_absent is True
+        and value.kernel_credential_absent is True and value.source_read_only is True
+        and value.resource_limited is True
+    )
