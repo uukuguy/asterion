@@ -38,6 +38,9 @@ PINNED_LOCK = PrimeSourceLock(
 )
 
 
+_MODULE = __name__
+
+
 def _external_limited(reason: str, *, reaped: bool = False) -> dict[str, object]:
     return {
         "format": "asterion.prime-ipython-coding-compat/v1",
@@ -164,7 +167,7 @@ class TestPrimeIpythonCodingCompat(unittest.TestCase):
     def test_missing_preprovisioned_kernel_returns_external_limited_without_node(self) -> None:
         with (
             mock.patch.dict(os.environ, {}, clear=True),
-            mock.patch("tests.test_prime_ipython_coding_compat.subprocess.Popen") as popen,
+            mock.patch(f"{_MODULE}.subprocess.Popen") as popen,
         ):
             report, stderr, returncode = _run_compatibility(Path("/tmp/workspace"))
         self.assertEqual(report, _external_limited("missing-prerequisite"))
@@ -177,9 +180,9 @@ class TestPrimeIpythonCodingCompat(unittest.TestCase):
         process = mock.Mock(pid=123, returncode=None)
         process.communicate.side_effect = [subprocess.TimeoutExpired(("node",), 15, output=valid, stderr="private"), (valid, "private")]
         with (
-            mock.patch("tests.test_prime_ipython_coding_compat.subprocess.Popen", return_value=process),
-            mock.patch("tests.test_prime_ipython_coding_compat.os.killpg", side_effect=[None, ProcessLookupError]),
-            mock.patch("tests.test_prime_ipython_coding_compat._kernel_python", return_value="/tmp/python"),
+            mock.patch(f"{_MODULE}.subprocess.Popen", return_value=process),
+            mock.patch(f"{_MODULE}.os.killpg", side_effect=[None, ProcessLookupError]),
+            mock.patch(f"{_MODULE}._kernel_python", return_value="/tmp/python"),
         ):
             report, stderr, returncode = _run_compatibility(Path("/tmp/workspace"))
         self.assertEqual(report, _external_limited("missing-ipython", reaped=True))
@@ -190,9 +193,9 @@ class TestPrimeIpythonCodingCompat(unittest.TestCase):
         process = mock.Mock(pid=123, returncode=0)
         process.communicate.return_value = (json.dumps(_external_limited("missing-ipython", reaped=True)) + "\n", "private")
         with (
-            mock.patch("tests.test_prime_ipython_coding_compat.subprocess.Popen", return_value=process),
-            mock.patch("tests.test_prime_ipython_coding_compat.os.killpg", return_value=None) as killpg,
-            mock.patch("tests.test_prime_ipython_coding_compat._kernel_python", return_value="/tmp/python"),
+            mock.patch(f"{_MODULE}.subprocess.Popen", return_value=process),
+            mock.patch(f"{_MODULE}.os.killpg", return_value=None) as killpg,
+            mock.patch(f"{_MODULE}._kernel_python", return_value="/tmp/python"),
         ):
             report, _, _ = _run_compatibility(Path("/tmp/workspace"))
         self.assertFalse(report["reaped"])
@@ -202,9 +205,9 @@ class TestPrimeIpythonCodingCompat(unittest.TestCase):
         process = mock.Mock(pid=123, returncode=None)
         process.communicate.side_effect = [subprocess.TimeoutExpired(("node",), 15), ("", "")]
         with (
-            mock.patch("tests.test_prime_ipython_coding_compat.subprocess.Popen", return_value=process),
-            mock.patch("tests.test_prime_ipython_coding_compat.os.killpg", side_effect=[None, None, None, ProcessLookupError]) as killpg,
-            mock.patch("tests.test_prime_ipython_coding_compat._kernel_python", return_value="/tmp/python"),
+            mock.patch(f"{_MODULE}.subprocess.Popen", return_value=process),
+            mock.patch(f"{_MODULE}.os.killpg", side_effect=[None, None, None, ProcessLookupError]) as killpg,
+            mock.patch(f"{_MODULE}._kernel_python", return_value="/tmp/python"),
         ):
             report, _, _ = _run_compatibility(Path("/tmp/workspace"))
         self.assertTrue(report["reaped"])
@@ -215,8 +218,8 @@ class TestPrimeIpythonCodingCompat(unittest.TestCase):
 
     def test_source_lock_is_verified_before_node_process_starts(self) -> None:
         with (
-            mock.patch("tests.test_prime_ipython_coding_compat.verify_prime_source_lock", side_effect=ValueError("invalid")) as verify,
-            mock.patch("tests.test_prime_ipython_coding_compat.subprocess.Popen") as popen,
+            mock.patch(f"{_MODULE}.verify_prime_source_lock", side_effect=ValueError("invalid")) as verify,
+            mock.patch(f"{_MODULE}.subprocess.Popen") as popen,
         ):
             with self.assertRaises(ValueError):
                 _run_compatibility(Path("/tmp/workspace"))
@@ -227,9 +230,9 @@ class TestPrimeIpythonCodingCompat(unittest.TestCase):
         process = mock.Mock(pid=123, returncode=0)
         process.communicate.return_value = (json.dumps(_external_limited("missing-ipython")) + "\n", "")
         with (
-            mock.patch("tests.test_prime_ipython_coding_compat.subprocess.Popen", return_value=process) as popen,
-            mock.patch("tests.test_prime_ipython_coding_compat.os.killpg", side_effect=ProcessLookupError),
-            mock.patch("tests.test_prime_ipython_coding_compat._kernel_python", return_value="/tmp/python"),
+            mock.patch(f"{_MODULE}.subprocess.Popen", return_value=process) as popen,
+            mock.patch(f"{_MODULE}.os.killpg", side_effect=ProcessLookupError),
+            mock.patch(f"{_MODULE}._kernel_python", return_value="/tmp/python"),
         ):
             _run_compatibility(Path("/tmp/workspace"))
         env = popen.call_args.kwargs["env"]

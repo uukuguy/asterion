@@ -22,7 +22,7 @@ class TestPrimeImageMaterializer(unittest.TestCase):
 
         self.assertEqual(plan.output_root, output)
         self.assertEqual(plan.platform, _INITIAL_PLATFORM)
-        self.assertEqual(plan.lock_sha256, materializer.lock_sha256())
+        self.assertEqual(plan.recipe_sha256, materializer.recipe_sha256())
         self.assertTrue(plan.commands)
         self.assertTrue(all(isinstance(command, tuple) for command in plan.commands))
         self.assertTrue(all("docker" not in command and "pip" not in command and "npm" not in command and "uv" not in command for command in plan.commands))
