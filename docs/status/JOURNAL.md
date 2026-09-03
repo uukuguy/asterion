@@ -1438,3 +1438,6 @@
 - 08:31 Bound guarded parser declarations to exact captured metadata bytes before generator migration [pending commit]
 - 08:32 Committed parser-declaration and captured-metadata binding [cc903ce]
 - 08:48 Replaced free release claims with parser-produced private metadata captures [pending commit]
+- 08:49 Committed parser-produced metadata capture requirement [e0847fb]
+- 09:02 Complete target closure is blocked at its source: the Asterion image requirements lock is intentionally empty, while upstream runtime dependencies are unresolved [no code commit]
+- 09:10 Replaced path-based candidate staging with descriptor-relative no-follow traversal and fail-closed platform checks [pending commit]

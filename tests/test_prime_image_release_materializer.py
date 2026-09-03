@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Iterable
 import unittest
+from unittest import mock
 
 from asterion.applications.prime_agent.operator.image_input_lock import (
     ImagePlatformDescriptor,
@@ -48,6 +49,21 @@ def _spec(*, url: str = "https://release.example.invalid/node.tar", path: str = 
 
 
 class TestPrimeImageReleaseMaterializer(unittest.TestCase):
+    def test_staging_fails_closed_without_descriptor_relative_directory_open(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / "fresh"
+            root.mkdir(mode=0o700)
+            with (
+                mock.patch.object(materializer.os, "O_DIRECTORY", None),
+                self.assertRaises(ValueError),
+            ):
+                materializer._write_checked_file(
+                    root, "node/node.tar", (b"node",), 4, sha256(b"node").hexdigest()
+                )
+            self.assertFalse((root / "node/node.tar").exists())
+
     def test_plan_accepts_candidate_target_without_promoted_lock(self) -> None:
         descriptor = ImagePlatformDescriptor("linux", "arm64", None)
         with TemporaryDirectory() as directory:

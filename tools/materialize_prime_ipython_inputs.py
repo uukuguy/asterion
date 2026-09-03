@@ -230,14 +230,37 @@ def _validate_fresh_external_target(output_root: Path) -> Path:
 
 
 def _write_checked_file(root: Path, relative: str, chunks: Iterable[bytes], expected_size: int, expected_sha256: str) -> None:
-    destination = root / relative
-    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    # All directories below ``root`` were just created from the validated
-    # relative path; do not mistake the platform's own /var compatibility link
-    # for a caller-controlled staging symlink.
-    if destination.parent.is_symlink():
+    """Write a leaf through pinned, no-follow directory descriptors only."""
+
+    directory_flags = _directory_open_flags()
+    components = relative.split("/")
+    if not components or any(not component for component in components):
         raise ValueError
-    descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    directory = os.open(root, directory_flags)
+    try:
+        for component in components[:-1]:
+            try:
+                os.mkdir(component, mode=0o700, dir_fd=directory)
+            except FileExistsError:
+                pass
+            next_directory = os.open(component, directory_flags, dir_fd=directory)
+            try:
+                if not stat.S_ISDIR(os.fstat(next_directory).st_mode):
+                    raise ValueError
+            except BaseException:
+                os.close(next_directory)
+                raise
+            os.close(directory)
+            directory = next_directory
+        descriptor = os.open(
+            components[-1],
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | _close_on_exec_flag(),
+            0o600,
+            dir_fd=directory,
+        )
+    except BaseException:
+        os.close(directory)
+        raise
     try:
         digest = sha256()
         size = 0
@@ -251,7 +274,12 @@ def _write_checked_file(root: Path, relative: str, chunks: Iterable[bytes], expe
             raise ValueError
     finally:
         os.close(descriptor)
-    descriptor = os.open(destination, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        descriptor = os.open(
+            components[-1], os.O_RDONLY | os.O_NOFOLLOW | _close_on_exec_flag(), dir_fd=directory
+        )
+    finally:
+        os.close(directory)
     try:
         info = os.fstat(descriptor)
         digest = sha256()
@@ -261,6 +289,20 @@ def _write_checked_file(root: Path, relative: str, chunks: Iterable[bytes], expe
             raise ValueError
     finally:
         os.close(descriptor)
+
+
+def _close_on_exec_flag() -> int:
+    value = getattr(os, "O_CLOEXEC", None)
+    if type(value) is not int:
+        raise ValueError
+    return value
+
+
+def _directory_open_flags() -> int:
+    value = getattr(os, "O_DIRECTORY", None)
+    if type(value) is not int:
+        raise ValueError
+    return os.O_RDONLY | os.O_NOFOLLOW | _close_on_exec_flag() | value
 
 
 def _write_all(descriptor: int, chunk: bytes) -> None:
