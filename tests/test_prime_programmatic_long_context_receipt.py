@@ -12,6 +12,10 @@ from asterion.applications.prime_agent.programmatic_long_context_receipt import 
     programmatic_long_context_observation_from_public_report,
     verify_programmatic_long_context_receipt,
 )
+from asterion.applications.prime_agent.programmatic_long_context_bounded_receipt import (
+    ProgrammaticLongContextBoundedReceiptError,
+    verify_programmatic_long_context_bounded_receipt,
+)
 
 
 def _digest(value: str) -> str:
@@ -120,3 +124,32 @@ class TestProgrammaticLongContextReceipt(unittest.TestCase):
                 programmatic_long_context_observation_from_public_report(
                     {**report, **changes}
                 )
+
+    def test_compatibility_report_and_provider_free_observation_cannot_issue_bounded_evidence(
+        self,
+    ) -> None:
+        report = {
+            "format": "asterion.prime-programmatic-long-context-compat/v1",
+            "status": "PASS",
+            "reason": "supported",
+            "real_prime_runtime": True,
+            "allowed_tool_names": ["ipython"],
+            "active_tool_names": ["ipython"],
+            "corpus_sha256": _digest("a"),
+            "corpus_record_count": 8,
+            "selected_record_count": 3,
+            "program_sha256": _digest("b"),
+            "aggregate_sha256": _digest("c"),
+            "oracle_sha256": _digest("d"),
+            "ipython_cell_executed": True,
+            "oracle_passed": True,
+            "disposed": True,
+            "reaped": True,
+        }
+        observation = programmatic_long_context_observation_from_public_report(report)
+
+        for value in (report, observation):
+            with self.subTest(value_type=type(value).__name__), self.assertRaises(
+                ProgrammaticLongContextBoundedReceiptError
+            ):
+                verify_programmatic_long_context_bounded_receipt(value)
