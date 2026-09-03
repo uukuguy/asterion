@@ -1561,3 +1561,5 @@
 - 04:19 Bound P5 acceptance to normalized gate outputs and revalidated live evidence [pending commit]
 - 04:19 correction: P5 normalized-gate and live-revalidation commit [6677c2a]
 - 04:31 Bound P5 trace to one fixed workload identity and ceilings [pending commit]
+- 04:31 correction: P5 fixed workload binding commit [506b1c8]
+- 04:36 Redacted unexpected P5 host-gate failures at the public boundary [pending commit]

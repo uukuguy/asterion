@@ -17,7 +17,18 @@ class _Gate:
         return False, "sha256:" + "a" * 64
 
 
+class _FailingGate:
+    async def evaluate(self, workspace_sha256: str) -> tuple[bool, str]:
+        raise RuntimeError("private gate failure")
+
+
 class TestBoundedAutonomyGate(unittest.IsolatedAsyncioTestCase):
+    async def test_redacts_unexpected_gate_failures(self) -> None:
+        with self.assertRaisesRegex(BoundedAutonomyGateError, "gate is invalid"):
+            await run_bounded_autonomy_gate(
+                _FailingGate(), "sha256:" + "b" * 64, frozenset()
+            )
+
     async def test_rejects_seen_workspace_before_gate_access(self) -> None:
         gate = _Gate()
         digest = "sha256:" + "b" * 64

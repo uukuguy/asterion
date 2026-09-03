@@ -38,5 +38,5 @@ async def run_bounded_autonomy_gate(
         if type(passed) is not bool or type(result_sha256) is not str or _DIGEST.fullmatch(result_sha256) is None:
             raise ValueError
         return BoundedAutonomyGateResult(workspace_sha256, passed, result_sha256)
-    except (AttributeError, TypeError, ValueError):
+    except Exception:
         raise BoundedAutonomyGateError("bounded autonomy gate is invalid") from None
