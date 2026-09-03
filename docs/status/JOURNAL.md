@@ -1523,3 +1523,5 @@
   (50) and P1 cross-role (63) Python tests plus scoped Ruff, Pyright, and diff
   check passed. No Docker, model, or network action occurred [pending commit]
 - 17:03 Sealed P2 acceptance proves fake lifecycle ordering and identity denial [1a51aa5]
+- 17:04 Journal records the sealed acceptance commit for recovery [f668dd4]
+- 17:12 P2 validates closed sandbox profiles before any worker or broker event [pending commit]

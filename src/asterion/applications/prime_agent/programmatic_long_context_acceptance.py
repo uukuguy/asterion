@@ -24,7 +24,11 @@ from asterion.applications.prime_agent.programmatic_long_context_bounded_receipt
     ProgrammaticLongContextBoundedReceiptError,
     verify_programmatic_long_context_bounded_receipt,
 )
-from asterion.applications.prime_agent.restricted_worker import PrimeRestrictedWorkerProfile
+from asterion.applications.prime_agent.restricted_worker import (
+    PrimeRestrictedWorkerError,
+    PrimeRestrictedWorkerProfile,
+    validate_prime_restricted_worker,
+)
 from asterion.applications.prime_agent.worker_gate import (
     PrimeWorkerBoundaryError,
     verify_prime_worker_boundary,
@@ -107,6 +111,12 @@ async def accept_programmatic_long_context(
         or not all(callable(getattr(broker, name, None)) for name in ("admit", "release", "revoke"))
     ):
         raise ProgrammaticLongContextAcceptanceError("programmatic long-context acceptance is invalid")
+    try:
+        validate_prime_restricted_worker(profile)
+    except PrimeRestrictedWorkerError:
+        raise ProgrammaticLongContextAcceptanceError(
+            "programmatic long-context acceptance is invalid"
+        ) from None
 
     admitted = False
     try:
