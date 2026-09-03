@@ -33,6 +33,35 @@ class TestPrimeReleaseRecipe(unittest.TestCase):
         self.assertNotIn("# Static, intentionally empty", text)
         self.assertGreaterEqual(text.count("--hash=sha256:"), 33)
 
+    def test_python_wheel_closure_is_package_owned_complete_and_sorted(self) -> None:
+        requirements = recipe.prime_python_wheel_requirements()
+
+        self.assertEqual(len(requirements), 33)
+        self.assertEqual(
+            tuple(item.normalized_project for item in requirements),
+            tuple(sorted(item.normalized_project for item in requirements)),
+        )
+        self.assertEqual(
+            {(item.normalized_project, item.version) for item in requirements}
+            & {("ipykernel", "7.3.0"), ("nest-asyncio", "1.6.0"), ("tyro", "1.0.16")},
+            {("ipykernel", "7.3.0"), ("nest-asyncio", "1.6.0"), ("tyro", "1.0.16")},
+        )
+
+    def test_python_wheel_closure_rejects_missing_hashes_and_noncanonical_lines(
+        self,
+    ) -> None:
+        valid_hash = "a" * 64
+        invalid_locks = (
+            "alpha==1.0 \\",
+            f"alpha==1.0 \\\nbeta==2.0 \\\n    --hash=sha256:{valid_hash}",
+            f"alpha==1.0 \\\n    --hash=sha256:{valid_hash} ",
+            f"beta==2.0 \\\n    --hash=sha256:{valid_hash}\\\nalpha==1.0 \\\n    --hash=sha256:{valid_hash}",
+        )
+
+        for lock in invalid_locks:
+            with self.subTest(lock=lock), self.assertRaises(recipe.PrimeReleaseRecipeError):
+                recipe._parse_python_wheel_requirements(lock)
+
     def test_recipe_pins_prime_source_and_has_no_platform_field(self) -> None:
         value = recipe.PRIME_IPYTHON_RELEASE_RECIPE
         self.assertEqual(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+from importlib.resources import files
 import json
 import re
 from typing import Final
@@ -16,6 +17,8 @@ from .image_input_lock import (
 
 _COMMIT: Final = re.compile(r"[0-9a-f]{40}")
 _SHA256: Final = re.compile(r"[0-9a-f]{64}")
+_PYTHON_REQUIREMENT: Final = re.compile(r"([a-z0-9][a-z0-9-]*)==([A-Za-z0-9.+!_-]+) \\")
+_PYTHON_HASH: Final = re.compile(r"    --hash=sha256:([0-9a-f]{64})( \\)?")
 
 
 class PrimeReleaseRecipeError(ValueError):
@@ -61,6 +64,14 @@ class CandidateTargetPolicy:
     targets: tuple[ImagePlatformDescriptor, ...]
 
 
+@dataclass(frozen=True)
+class PythonWheelRequirement:
+    """One exact project/version selected by the committed Python lock."""
+
+    normalized_project: str
+    version: str
+
+
 PRIME_IPYTHON_SOURCE: Final = PrimeSourceTriple(
     "a18809e00ea30638584d87b3afea7285a9d7296c",
     "93a4b02ecc0cc114865fa3d336521cf214047cf4de471b36b51fe610c84ab686",
@@ -92,6 +103,51 @@ PRIME_IPYTHON_CANDIDATE_TARGET_POLICY: Final = CandidateTargetPolicy(
         ImagePlatformDescriptor("linux", "amd64", None),
     )
 )
+
+
+def prime_python_wheel_requirements() -> tuple[PythonWheelRequirement, ...]:
+    """Read the package-owned, hash-pinned Python 3.11 closure strictly."""
+
+    try:
+        text = (
+            files("asterion.applications.prime_agent.operator")
+            .joinpath("image/requirements.lock")
+            .read_text(encoding="utf-8")
+        )
+    except (FileNotFoundError, OSError, UnicodeError):
+        raise _invalid() from None
+    return _parse_python_wheel_requirements(text)
+
+
+def _parse_python_wheel_requirements(text: str) -> tuple[PythonWheelRequirement, ...]:
+    """Parse only the canonical ``uv pip compile --generate-hashes`` subset."""
+
+    requirements: list[PythonWheelRequirement] = []
+    current_hashes = 0
+    requires_hash = False
+    for line in text.splitlines():
+        if match := _PYTHON_REQUIREMENT.fullmatch(line):
+            if requires_hash:
+                raise _invalid()
+            requirements.append(PythonWheelRequirement(match.group(1), match.group(2)))
+            current_hashes = 0
+            requires_hash = True
+        elif match := _PYTHON_HASH.fullmatch(line):
+            if not requirements or not requires_hash:
+                raise _invalid()
+            current_hashes += 1
+            requires_hash = match.group(2) is not None
+        else:
+            raise _invalid()
+    if (
+        not requirements
+        or current_hashes == 0
+        or requires_hash
+        or requirements != sorted(requirements, key=lambda item: item.normalized_project)
+        or len({item.normalized_project for item in requirements}) != len(requirements)
+    ):
+        raise _invalid()
+    return tuple(requirements)
 
 
 def _invalid() -> PrimeReleaseRecipeError:
