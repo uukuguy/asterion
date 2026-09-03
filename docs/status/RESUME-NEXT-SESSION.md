@@ -1,82 +1,54 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 09:47. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 11:13. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Smoke Core is closed as a narrow regression gate; it is not the Prime roadmap.
-- The approved Prime program has seven end-to-end products through ARC-AGI-3.
-- P1 source/worker, RLM, and continual-harness contracts are implemented, but
-  `bounded-sandboxed` still requires a real native-Linux worker, exact offline
-  image, host broker, and fixed coding scenario.
-- Candidate release authority is platform-neutral: `linux/arm64` plus
-  `linux/amd64`; the promoted catalog remains empty.
-- Recent corrective work binds recipe identity, parser-produced private captures,
-  public URL-free projections, descriptor-relative staging, and materialization
-  plans. Python 3.11's real hash-pinned 33-package closure is committed at
-  `aac16c1` and strictly read from package resources at `659e355`.
+- Product 2 programmatic long context is committed at `4639d11`.
+- Product 3 recursive workflow is now provider-free E2E PASS:
+  receipt `db6fdeb`, strict report binding `e21b8a5`, real compatibility
+  witness `cb7bab3`, and native lifecycle/zero-resource verification
+  `8d3978f`.
+- A real local daemon run returned `PASS supported 2 2 2 2 2`: two bound
+  children, root-to-child messages, child-to-root results, terminals, and
+  deletions. No model/provider invocation occurred.
 
 ## Current decision
 
 - Prime is an IPython-only action surface with recursive `rlm(...)` and a
   versioned Continual Harness—not generic Native/DCI parity.
-- Python owns authority, budget, recovery, and evidence; TypeScript retains
-  upstream kernel/session/RLM mechanisms. The pinned upstream checkout is
-  read-only.
-- Candidate specifications must become a complete per-target graph before any
-  artifact is fetched. A lock alone is not materialized evidence or a promoted
-  image lock.
-- Docker Desktop/OrbStack evidence stays `External-limited`; supported-native
-  claims require matching native Linux execution.
+- Provider-free recursive mechanics use zero token/cost resources with a
+  finite positive deadline. This is correct only for the no-model mechanical
+  scenario; future model-bearing child work must have explicit child budgets.
+- Product 3 receipt still cannot claim sandboxing, model work, generated
+  programs, arbitrary recursion, or native-Linux isolation.
 
-## In-flight constraints
+## Verification evidence
 
-- `prime_python_wheel_requirements()` parses only canonical hash-pinned lock
-  syntax and returns all 33 exact project/version requirements. It performs no
-  network or materialization.
-- Candidate admission now requires the complete parser-backed graph: target Node
-  archive/modules, OCI index-selected manifest/config/contiguous layers, all 33
-  locked Python wheels, local runtime wheel, fixture, and frontend. The graph
-  stays untrusted and contains no fetched or built artifact.
-- Authorized descriptor-relative staging now also accepts only a matching
-  private complete candidate request and exact artifact tuple before its first
-  fetch. Its deterministic fixture successfully stages and rehashes 41 objects;
-  no actual artifacts were acquired.
-- The full P1 provider-free integration matrix passed 95 tests across worker,
-  Docker adapter fakes, launcher, broker, fixed image, compatibility process,
-  and coding receipt. It does not establish `bounded-sandboxed` evidence.
-- `prime.programmatic-long-context/v1` now has a separate closed receipt
-  contract. It can emit only `provider-free` PASS after exact IPython-only,
-  digest/count, executed-program, and oracle facts; it cannot upgrade evidence.
-- A real pinned SDK/IPython compatibility fixture now creates a private local
-  corpus, selects and aggregates it through the only `ipython` tool, and maps
-  an exact public PASS to that receipt. This machine reports
-  `External-limited/missing-prerequisite` without a pre-provisioned kernel;
-  no model, Docker, or network action occurred.
-- `make promotion-check` was stopped before it entered `tools/climb/cycle.sh
-  H-001`; that path requires separate benchmark authority. It is **not PASS**.
-  Focused recipe tests, Ruff, Pyright, and `git diff --check` passed for
-  `659e355`.
-- `make test` remains red on a pre-existing DCI packaged-assembly inventory
-  expectation exposed by Prime installation; leave it unchanged unless
-  separately authorized.
+- Python: 28 tests across recursive receipt/compatibility, RLM adapter, and
+  RLM messaging parity passed.
+- Node: 37 Prime gateway main tests passed, including zero-resource native RLM
+  budget clamping and expiry rejection.
+- Ruff, Pyright, Node syntax, and `git diff --check` passed.
+- `make promotion-check` remains **not PASS** (stopped before unapproved
+  Climb H-001); `make test` remains red on a pre-existing DCI packaged-
+  assembly inventory expectation.
 
 ## Immediate next action
 
-1. Commit the real provider-free long-context compatibility and receipt binding.
-2. Design/implement product 3 (`prime.recursive-workflow/v1`) against the
-   existing RLM child/message/lifecycle bridge, preserving the same evidence
-   ladder. Do not fetch, build, run Docker, promote an image, or invoke a provider.
+1. Product 4, `prime.long-session-continuity/v1`, now has a closed,
+   redacted provider-free receipt bound to the real pinned Prime
+   session-context witness: detach/attach, persisted naming, source resume,
+   exact inactive deletion, identity separation, and public projection
+   redaction all passed without model work.
+2. Start Product 5, `prime.bounded-autonomy/v1`. Preserve Products 3 and 4
+   evidence ladders; do not reuse their receipts for P5.
 
 ## Recovery commands
 
 ```bash
 git status --short
 git log --oneline -12
-uv run python -m unittest -v tests.test_prime_image_release_materializer tests.test_prime_release_metadata tests.test_prime_release_spec_generation tests.test_prime_release_recipe tests.test_prime_image_input_lock
-uv run ruff check src/asterion/applications/prime_agent/operator/image_input_lock.py tools/materialize_prime_ipython_inputs.py tests/prime_release_test_support.py tests/test_prime_image_release_materializer.py
-uv run pyright src/asterion/applications/prime_agent/operator/image_input_lock.py tools/materialize_prime_ipython_inputs.py tests/prime_release_test_support.py tests/test_prime_image_release_materializer.py
-uv run python -m unittest -v tests.test_restricted_worker_service tests.test_bounded_model_session tests.test_prime_worker_gate tests.test_prime_docker_worker tests.test_prime_docker_cli tests.test_prime_launcher_barrier tests.test_prime_linux_probe tests.test_prime_model_broker tests.test_prime_coding_fixture_receipt tests.test_prime_ipython_image tests.test_prime_ipython_launcher_protocol tests.test_prime_ipython_coding_compat
-uv run python -m unittest -v tests.test_prime_programmatic_long_context_receipt tests.test_prime_capability_evidence
-uv run python -m unittest -v tests.test_prime_programmatic_long_context_receipt tests.test_prime_programmatic_long_context_compat tests.test_prime_ipython_coding_compat tests.test_prime_capability_evidence
+uv run python -m unittest -v tests.test_prime_long_session_continuity_receipt tests.test_prime_session_context_parity.TestPrimeSessionContextParity.test_real_prime_provider_free_scenarios_match_committed_evidence
+node --test packages/typescript/prime-gateway/test/main.test.mjs
 ```

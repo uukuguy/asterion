@@ -14,6 +14,10 @@ from dataclasses import replace
 from pathlib import Path
 
 from asterion.control.parity import validate_parity_ledger
+from asterion.applications.prime_agent.long_session_continuity_receipt import (
+    long_session_continuity_observation_from_public_report,
+    verify_long_session_continuity_receipt,
+)
 from asterion.control.parity_testing import ParityScenarioRegistryError
 from asterion.control.providers.prime.parity_testing import (
     PRIME_SESSION_CONTEXT_ARTIFACT_LOCK,
@@ -892,6 +896,15 @@ class TestPrimeSessionContextParity(unittest.TestCase):
             "PRIVATE_TREE_LABEL",
         ):
             self.assertNotIn(sentinel, completed.stdout)
+
+        if not bounded:
+            continuity = long_session_continuity_observation_from_public_report(
+                payload
+            )
+            self.assertEqual(
+                verify_long_session_continuity_receipt(continuity).scenario_id,
+                "prime.long-session-continuity/v1",
+            )
 
         observed_checks = payload["scenario_checks"]
         expected_scenario_ids = (
