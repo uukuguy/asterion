@@ -11,10 +11,10 @@
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
 - Active work package: the approved Prime capability program replaces the
-  proposed Smoke Full roadmap. Phase 3.2 Native Verified-loop remains
-  External-limited at its exact idle barrier. Prime implementation begins only
-  after the capability-program specification is reviewed and an external
-  restricted-worker/sandbox profile is selected.
+  proposed Smoke Full roadmap. Its P1 `prime.ipython-coding/v1` workload-result
+  contract is reviewed in source and awaits implementation-plan review; P2–P7
+  remain External-limited. Phase 3.2 Native Verified-loop remains
+  External-limited at its exact idle barrier.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -104,6 +104,10 @@
   depth policy, two-child work, causal messaging, active reconnect,
   application/oracle, healthy observations, budget, cleanup, and public
   privacy. This evidence is not Smoke Full or parity promotion evidence.
+- P1's restricted-worker contract admits one code-owned, digest-selected
+  IPython fixture only. Its worker must return a canonical workload-bound
+  result before a P1 receipt can be issued; no Docker/model/network execution
+  has been authorized or run for that contract.
 
 ## Open Problems
 
@@ -111,8 +115,8 @@
   proves the exact mandatory scenarios.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
-- Establish the restricted-worker/sandbox boundary and seven exact Prime
-  capability acceptance products without widening the closed Smoke Core claim.
+- Implement and verify the P1 workload-result contract without widening the
+  closed Smoke Core claim or admitting generic worker execution.
 
 ## Key Files
 
@@ -140,6 +144,7 @@
 - `docs/superpowers/plans/2026-09-02-prime-smoke-core.md`
 - `docs/superpowers/specs/2026-09-02-prime-smoke-core-full-research.md`
 - `docs/superpowers/specs/2026-09-02-asterion-prime-capability-program-design.md`
+- `docs/superpowers/specs/2026-09-03-prime-ipython-workload-result-design.md`
 - `docs/status/PRIME-PARITY-LEDGER.md`
 - `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
 - `.superpowers/sdd/client-interfaces-task-10-report.md`

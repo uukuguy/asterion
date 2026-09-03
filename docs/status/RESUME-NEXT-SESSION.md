@@ -1,38 +1,27 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 11:26. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 12:20. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Product 2 programmatic long context is committed at `4639d11`.
-- Product 3 recursive workflow is now provider-free E2E PASS:
-  receipt `db6fdeb`, strict report binding `e21b8a5`, real compatibility
-  witness `cb7bab3`, and native lifecycle/zero-resource verification
-  `8d3978f`.
-- A real local daemon run returned `PASS supported 2 2 2 2 2`: two bound
-  children, root-to-child messages, child-to-root results, terminals, and
-  deletions. No model/provider invocation occurred.
-- Product 5's one-call model run completed, but it ran trusted-local. It is
-  valuable operational evidence, not formal restricted-worker acceptance.
+- The P1 workload-result specification is committed at `23457b7`. It selects
+  one code-owned `prime.ipython-coding/v1` fixture by exact digest and requires
+  a canonical, workload-bound worker result.
+- The final review correction is committed at `f61a55b`: P5/P6 cannot issue
+  bounded evidence until role-specific real launchers exist.
+- Products 2–7 remain External-limited. Existing P2/P3 provider-free work and
+  trusted-local P5 probe are non-promotable mechanics, not sandboxed PASS.
 
 ## Current decision
 
 - Prime is an IPython-only action surface with recursive `rlm(...)` and a
   versioned Continual Harness—not generic Native/DCI parity.
-- Provider-free recursive mechanics use zero token/cost resources with a
-  finite positive deadline. This is correct only for the no-model mechanical
-  scenario; future model-bearing child work must have explicit child budgets.
-- Product 3 receipt still cannot claim sandboxing, model work, generated
-  programs, arbitrary recursion, or native-Linux isolation.
-- The capability specification requires an injected restricted worker for all
-  seven formal acceptance products. The shared lifecycle now binds role,
-  workload digest, canonical terminal-result digest, isolation, and cleanup;
-  `verify_prime_worker_boundary()` closes the seven exact scenario-to-role
-  pairs. Docker remains `prime.ipython-coding` only; Products 2–7 have no
-  launcher and therefore cannot obtain a worker receipt.
-- Product-level `bounded-sandboxed` receipts must not be emitted from the
-  trusted-local P5/P6 experiment receipts. The worker gate must become the
-  sole issuance path before either product can make that claim.
+- The P1 Docker worker stays fixed to one image-owned fixture. The application
+  supplies no source text, command, prompt, path, or environment values.
+- A terminal `completed` marker by itself is insufficient: the host must bind
+  the canonical result bytes and exact fixture digest to the lease.
+- P5/P6 remain unable to issue bounded evidence. Their future launchers must
+  be role-specific and independently real.
 
 ## Verification evidence
 
@@ -49,13 +38,10 @@
 
 ## Immediate next action
 
-1. Commit the restricted-worker lifecycle migration. Then change P5/P6
-   reducers so trusted-local observations remain diagnostic only and
-   `bounded-sandboxed` evidence requires the exact gated worker receipt.
-2. Retain Products 2–4 as provider-free, trusted-local mechanics only.
-3. Only after a real restricted-worker runner exists, re-run Product 5 and
-   authorize a separate Product 6 bounded refinement. ARC-AGI-3 remains
-   unimplemented and requires a later isolated broker/functional-subset design.
+1. Obtain review of the committed P1 workload-result specification.
+2. After review, write and approve an implementation plan before code changes.
+3. Retain P2–P7 as External-limited; ARC-AGI-3 remains unimplemented and
+   requires a later isolated broker/functional-subset design.
 
 ## Recovery commands
 

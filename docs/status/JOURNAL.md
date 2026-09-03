@@ -1497,3 +1497,5 @@
 - 11:55 Closed P5/P6 bounded issuance pending real role launchers; sealed worker receipt constructor and froze role map [pending commit]
 - 11:55 Committed denial of unbacked P5/P6 bounded evidence [f61a55b]
 - 12:20 Defined P1 real workload-result contract; P2–P7 remain External-limited [pending commit]
+- 12:20 Committed P1 workload-result contract; fixed workload binding prevents generic execution [23457b7]
+- 12:21 Synchronized Prime state with P1 review gate and External-limited products [pending commit]
