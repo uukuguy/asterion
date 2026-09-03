@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 10:20. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 09:13. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -34,9 +34,10 @@
 - `prime_python_wheel_requirements()` parses only canonical hash-pinned lock
   syntax and returns all 33 exact project/version requirements. It performs no
   network or materialization.
-- Python wheel closure is enforced, but do not claim the full graph: Node module,
-  OCI config/manifest/layers, local runtime, fixture, and frontend remain to be
-  required before candidate admission.
+- Candidate admission now requires the complete parser-backed graph: target Node
+  archive/modules, OCI index-selected manifest/config/contiguous layers, all 33
+  locked Python wheels, local runtime wheel, fixture, and frontend. The graph
+  stays untrusted and contains no fetched or built artifact.
 - `make promotion-check` was stopped before it entered `tools/climb/cycle.sh
   H-001`; that path requires separate benchmark authority. It is **not PASS**.
   Focused recipe tests, Ruff, Pyright, and `git diff --check` passed for
@@ -47,17 +48,17 @@
 
 ## Immediate next action
 
-1. Extend the closure to Node, OCI child config and all layers, local runtime,
-   fixture, and frontend—without downloading bytes.
-2. Only then request distinct authorization to fetch/verify target artifacts and
-   later assemble an offline image. Do not build or run an image now.
+1. Commit the complete candidate-graph admission contract after focused checks.
+2. Begin the next planned staging integration: make its pre-fetch validation
+   consume the complete graph, still without downloading, building, or running
+   an image. Artifact acquisition remains a separate authorization boundary.
 
 ## Recovery commands
 
 ```bash
 git status --short
 git log --oneline -12
-uv run python -m unittest -v tests.test_prime_release_recipe
-uv run ruff check src/asterion/applications/prime_agent/operator/release_recipe.py tests/test_prime_release_recipe.py
-uv run pyright src/asterion/applications/prime_agent/operator/release_recipe.py tests/test_prime_release_recipe.py
+uv run python -m unittest -v tests.test_prime_release_metadata tests.test_prime_release_spec_generation tests.test_prime_release_recipe tests.test_prime_image_input_lock
+uv run ruff check src/asterion/applications/prime_agent/operator/release_metadata.py src/asterion/applications/prime_agent/operator/release_spec_generation.py tests/test_prime_release_metadata.py tests/test_prime_release_spec_generation.py
+uv run pyright src/asterion/applications/prime_agent/operator/release_metadata.py src/asterion/applications/prime_agent/operator/release_spec_generation.py tests/test_prime_release_metadata.py tests/test_prime_release_spec_generation.py
 ```

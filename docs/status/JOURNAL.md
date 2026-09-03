@@ -1455,3 +1455,5 @@
 - 10:18 Stopped promotion-check before its unapproved Climb cycle; it is not PASS and no image or benchmark ran [no code commit]
 - 10:20 Parsed the 33-wheel target closure from the committed lock for deterministic candidate graph admission [659e355]
 - 10:28 Required all parser-backed Python wheel claims before a candidate release specification is admitted [pending commit]
+- 10:29 Enforced complete parser-backed Python wheel closure for candidate release admission [26d532c]
+- 09:13 Required the complete parser-backed per-target candidate graph: Node archive/modules, OCI index-to-manifest/config/layers, 33 locked wheels, runtime, fixture, and frontend; focused Task 22 suites, Ruff, Pyright, and diff check passed [pending commit]

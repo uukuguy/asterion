@@ -174,6 +174,37 @@ class TestPrimeReleaseMetadata(unittest.TestCase):
                 ),
             )
 
+    def test_recipe_output_manifest_accepts_recipe_shared_output_without_target(
+        self,
+    ) -> None:
+        recipe = release_recipe.PRIME_IPYTHON_RELEASE_RECIPE
+        data = json.dumps(
+            {
+                "format": "asterion.prime-recipe-output-manifest/v1",
+                "recipe_sha256": release_recipe.release_recipe_sha256(recipe),
+                "source": {
+                    "commit": recipe.source.commit,
+                    "tree_sha256": recipe.source.tree_sha256,
+                    "package_lock_sha256": recipe.source.package_lock_sha256,
+                },
+                "scope": "recipe-shared",
+                "target": None,
+                "path": "fixture/fixture-lock.json",
+                "size": 12,
+                "sha256": "2" * 64,
+            }
+        ).encode()
+
+        selected = metadata.parse_recipe_output_manifest(
+            data,
+            metadata.RecipeOutputSelector(
+                recipe, "recipe-shared", None, "fixture/fixture-lock.json"
+            ),
+        )
+
+        self.assertEqual(selected.object_name, "fixture/fixture-lock.json")
+        self.assertEqual(selected.declared_sha256, "2" * 64)
+
 
 if __name__ == "__main__":
     unittest.main()

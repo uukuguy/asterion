@@ -420,7 +420,7 @@ def _validate_python_wheel_closure(
     wheel_claims = {
         claim.artifact_path: claim
         for claim in claims
-        if claim.artifact_kind == "python-wheel"
+        if claim.artifact_kind == "python-wheel" and claim.artifact_path in expected_paths
     }
     if set(wheel_claims) != set(expected_paths):
         raise _invalid()
@@ -435,6 +435,195 @@ def _validate_python_wheel_closure(
             or not claim.declared_object_name.endswith(".whl")
         ):
             raise _invalid()
+
+
+def _metadata_target(
+    target: ExactTargetDescriptor,
+) -> release_recipe.ImagePlatformDescriptor:
+    return release_recipe.ImagePlatformDescriptor(
+        target.os, target.architecture, target.variant
+    )
+
+
+def _require_parser_declaration(
+    capture: ParsedMetadataCapture,
+    declaration: release_metadata.ParsedMetadataDeclaration,
+) -> None:
+    if declaration != capture.declaration:
+        raise _invalid()
+
+
+def _validate_recipe_output_capture(
+    capture: ParsedMetadataCapture,
+    recipe: release_recipe.ReleaseRecipe,
+    scope: Literal["target-specific", "recipe-shared"],
+    target: ExactTargetDescriptor | None,
+) -> None:
+    try:
+        _require_parser_declaration(
+            capture,
+            release_metadata.parse_recipe_output_manifest(
+                capture.metadata_bytes,
+                release_metadata.RecipeOutputSelector(
+                    recipe,
+                    scope,
+                    None if target is None else _metadata_target(target),
+                    capture.artifact_path,
+                ),
+            ),
+        )
+    except release_metadata.PrimeReleaseMetadataError:
+        raise _invalid() from None
+
+
+def _validate_complete_target_artifact_graph(
+    captures: tuple[ParsedMetadataCapture, ...],
+    claims: tuple[MetadataObjectClaim, ...],
+    recipe: release_recipe.ReleaseRecipe,
+    target: ExactTargetDescriptor,
+) -> None:
+    """Require the exact parsed closure for one candidate target."""
+
+    captures_by_path = {capture.artifact_path: capture for capture in captures}
+    claims_by_path = {claim.artifact_path: claim for claim in claims}
+    metadata_target = _metadata_target(target)
+    requirements = release_recipe.prime_python_wheel_requirements()
+    expected_wheel_paths = {
+        f"python/{requirement.normalized_project}.whl" for requirement in requirements
+    }
+    required_paths = {
+        "build-frontend/launcher.mjs",
+        "fixture/fixture-lock.json",
+        "node/node.tar.xz",
+        f"node/node-modules-{target.os}-{target.architecture}.tar",
+        "oci/config.json",
+        "oci/manifest.json",
+        "python/prime_agent_runtime-0.1.0-py3-none-any.whl",
+        *expected_wheel_paths,
+    }
+    layer_paths = {
+        claim.artifact_path
+        for claim in claims
+        if claim.artifact_kind == "oci-layer"
+    }
+    if set(claims_by_path) != required_paths | layer_paths:
+        raise _invalid()
+    if set(captures_by_path) != set(claims_by_path):
+        raise _invalid()
+
+    def require(path: str, kind: str, parser_revision: str) -> tuple[
+        ParsedMetadataCapture, MetadataObjectClaim
+    ]:
+        try:
+            capture, claim = captures_by_path[path], claims_by_path[path]
+        except KeyError:
+            raise _invalid() from None
+        if claim.artifact_kind != kind or claim.metadata.parser_revision != parser_revision:
+            raise _invalid()
+        return capture, claim
+
+    node_capture, node_claim = require(
+        "node/node.tar.xz", "node-archive", recipe.metadata_parsers.node_shasums
+    )
+    node_suffix = "arm64" if target.architecture == "arm64" else "x64"
+    expected_node_name = f"node-v{recipe.node_version}-linux-{node_suffix}.tar.xz"
+    try:
+        _require_parser_declaration(
+            node_capture,
+            release_metadata.parse_node_shasums(
+                node_capture.metadata_bytes,
+                release_metadata.NodeShasumsSelector(recipe.node_version, metadata_target),
+            ),
+        )
+    except release_metadata.PrimeReleaseMetadataError:
+        raise _invalid() from None
+    if node_claim.declared_object_name != expected_node_name:
+        raise _invalid()
+
+    modules_path = f"node/node-modules-{target.os}-{target.architecture}.tar"
+    modules_capture, _ = require(
+        modules_path, "node-modules", recipe.metadata_parsers.recipe_output_manifest
+    )
+    _validate_recipe_output_capture(modules_capture, recipe, "target-specific", target)
+
+    runtime_capture, runtime_claim = require(
+        "python/prime_agent_runtime-0.1.0-py3-none-any.whl",
+        "python-wheel",
+        recipe.metadata_parsers.recipe_output_manifest,
+    )
+    _validate_recipe_output_capture(runtime_capture, recipe, "recipe-shared", None)
+    if runtime_claim.declared_object_name != runtime_claim.artifact_path:
+        raise _invalid()
+    for path, kind in (
+        ("fixture/fixture-lock.json", "fixture"),
+        ("build-frontend/launcher.mjs", "frontend"),
+    ):
+        capture, _ = require(path, kind, recipe.metadata_parsers.recipe_output_manifest)
+        _validate_recipe_output_capture(capture, recipe, "recipe-shared", None)
+
+    manifest_capture, manifest_claim = require(
+        "oci/manifest.json", "oci-manifest", recipe.metadata_parsers.oci_index
+    )
+    try:
+        _require_parser_declaration(
+            manifest_capture,
+            release_metadata.parse_oci_index_descriptor(
+                manifest_capture.metadata_bytes,
+                release_metadata.OCIIndexSelector(metadata_target),
+            ),
+        )
+    except release_metadata.PrimeReleaseMetadataError:
+        raise _invalid() from None
+    if manifest_claim.declared_object_name != "child-manifest":
+        raise _invalid()
+
+    config_capture, config_claim = require(
+        "oci/config.json", "oci-config", recipe.metadata_parsers.oci_manifest
+    )
+    if config_claim.metadata.sha256 != manifest_claim.object.sha256:
+        raise _invalid()
+    try:
+        _require_parser_declaration(
+            config_capture,
+            release_metadata.parse_oci_manifest_descriptor(
+                config_capture.metadata_bytes,
+                release_metadata.OCIManifestSelector("config", None),
+            ),
+        )
+    except release_metadata.PrimeReleaseMetadataError:
+        raise _invalid() from None
+    if config_claim.declared_object_name != "config":
+        raise _invalid()
+
+    layers: list[tuple[int, ParsedMetadataCapture, MetadataObjectClaim]] = []
+    for path in layer_paths:
+        capture, claim = require(path, "oci-layer", recipe.metadata_parsers.oci_manifest)
+        match = re.fullmatch(r"oci/layer-([0-9]+)\.tar\.gz", path)
+        name_match = re.fullmatch(r"layer/([0-9]+)", claim.declared_object_name)
+        if (
+            match is None
+            or name_match is None
+            or match.group(1) != name_match.group(1)
+            or claim.metadata.sha256 != manifest_claim.object.sha256
+        ):
+            raise _invalid()
+        ordinal = int(match.group(1))
+        try:
+            _require_parser_declaration(
+                capture,
+                release_metadata.parse_oci_manifest_descriptor(
+                    capture.metadata_bytes,
+                    release_metadata.OCIManifestSelector("layer", ordinal),
+                ),
+            )
+        except release_metadata.PrimeReleaseMetadataError:
+            raise _invalid() from None
+        layers.append((ordinal, capture, claim))
+    if not layers or {ordinal for ordinal, _, _ in layers} != set(range(len(layers))):
+        raise _invalid()
+
+    _validate_python_wheel_closure(claims, recipe)
+
 
 
 def _validate_request(value: object) -> ReleaseSpecGenerationRequest:
@@ -477,7 +666,7 @@ def _validate_request(value: object) -> ReleaseSpecGenerationRequest:
         != len(claims)
     ):
         raise _invalid()
-    _validate_python_wheel_closure(claims, recipe)
+    _validate_complete_target_artifact_graph(value.claims, claims, recipe, target)
     return value
 
 

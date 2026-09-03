@@ -400,8 +400,6 @@ def parse_recipe_output_manifest(data: bytes, selector: object) -> ParsedMetadat
             raise _invalid()
     elif selector.target is not None or value["target"] is not None:
         raise _invalid()
-    else:
-        raise _invalid()
     return _declaration(
         "recipe-output-manifest",
         recipe.metadata_parsers.recipe_output_manifest,

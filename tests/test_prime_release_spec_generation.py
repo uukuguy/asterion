@@ -75,8 +75,135 @@ _NODE_CAPTURE = generation.ParsedMetadataCapture(
     ),
     generation.ObjectBlob("https://release.example.invalid/node.tar.xz", 10, "b" * 64),
 )
+
+
+def _recipe_shared_output_capture(
+    artifact_kind: str,
+    artifact_path: str,
+    size: int,
+    digest: str,
+) -> generation.ParsedMetadataCapture:
+    metadata = json.dumps(
+        {
+            "format": "asterion.prime-recipe-output-manifest/v1",
+            "recipe_sha256": release_recipe.release_recipe_sha256(_RECIPE),
+            "source": {
+                "commit": _RECIPE.source.commit,
+                "tree_sha256": _RECIPE.source.tree_sha256,
+                "package_lock_sha256": _RECIPE.source.package_lock_sha256,
+            },
+            "scope": "recipe-shared",
+            "target": None,
+            "path": artifact_path,
+            "size": size,
+            "sha256": digest,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return generation.ParsedMetadataCapture(
+        artifact_kind,
+        artifact_path,
+        metadata,
+        release_metadata.parse_recipe_output_manifest(
+            metadata,
+            release_metadata.RecipeOutputSelector(
+                _RECIPE, "recipe-shared", None, artifact_path
+            ),
+        ),
+        generation.ObjectBlob(
+            f"https://release.example.invalid/{artifact_path}", size, digest
+        ),
+    )
+
+
+_RUNTIME_CAPTURE = _recipe_shared_output_capture(
+    "python-wheel", "python/prime_agent_runtime-0.1.0-py3-none-any.whl", 15, "1" * 64
+)
+_FIXTURE_CAPTURE = _recipe_shared_output_capture(
+    "fixture", "fixture/fixture-lock.json", 16, "2" * 64
+)
+_FRONTEND_CAPTURE = _recipe_shared_output_capture(
+    "frontend", "build-frontend/launcher.mjs", 17, "3" * 64
+)
+_NODE_MODULES_PATH = "node/node-modules-linux-amd64.tar"
+_NODE_MODULES_METADATA = json.dumps(
+    {
+        "format": "asterion.prime-recipe-output-manifest/v1",
+        "recipe_sha256": release_recipe.release_recipe_sha256(_RECIPE),
+        "source": {
+            "commit": _RECIPE.source.commit,
+            "tree_sha256": _RECIPE.source.tree_sha256,
+            "package_lock_sha256": _RECIPE.source.package_lock_sha256,
+        },
+        "scope": "target-specific",
+        "target": _METADATA_TARGET.as_dict(),
+        "path": _NODE_MODULES_PATH,
+        "size": 12,
+        "sha256": "c" * 64,
+    }, separators=(",", ":"), sort_keys=True,
+).encode()
+_NODE_MODULES_CAPTURE = generation.ParsedMetadataCapture(
+    "node-modules", _NODE_MODULES_PATH, _NODE_MODULES_METADATA,
+    release_metadata.parse_recipe_output_manifest(
+        _NODE_MODULES_METADATA,
+        release_metadata.RecipeOutputSelector(
+            _RECIPE, "target-specific", _METADATA_TARGET, _NODE_MODULES_PATH,
+        ),
+    ),
+    generation.ObjectBlob(
+        "https://release.example.invalid/node/node-modules-linux-amd64.tar", 12, "c" * 64,
+    ),
+)
+_OCI_MANIFEST_METADATA = json.dumps(
+    {"schemaVersion": 2, "config": {
+        "mediaType": "application/vnd.oci.image.config.v1+json",
+        "digest": "sha256:" + "d" * 64, "size": 13,
+    }, "layers": [{
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:" + "e" * 64, "size": 14,
+    }]}, separators=(",", ":"), sort_keys=True,
+).encode()
+_OCI_MANIFEST_SHA256 = hashlib.sha256(_OCI_MANIFEST_METADATA).hexdigest()
+_OCI_INDEX_METADATA = json.dumps({"schemaVersion": 2, "manifests": [{
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:" + _OCI_MANIFEST_SHA256, "size": len(_OCI_MANIFEST_METADATA),
+    "platform": _METADATA_TARGET.as_dict(),
+}]}, separators=(",", ":"), sort_keys=True).encode()
+_OCI_MANIFEST_CAPTURE = generation.ParsedMetadataCapture(
+    "oci-manifest", "oci/manifest.json", _OCI_INDEX_METADATA,
+    release_metadata.parse_oci_index_descriptor(
+        _OCI_INDEX_METADATA, release_metadata.OCIIndexSelector(_METADATA_TARGET),
+    ),
+    generation.ObjectBlob(
+        "https://registry.example.invalid/oci/manifest.json",
+        len(_OCI_MANIFEST_METADATA),
+        _OCI_MANIFEST_SHA256,
+    ),
+)
+_OCI_CONFIG_CAPTURE = generation.ParsedMetadataCapture(
+    "oci-config", "oci/config.json", _OCI_MANIFEST_METADATA,
+    release_metadata.parse_oci_manifest_descriptor(
+        _OCI_MANIFEST_METADATA, release_metadata.OCIManifestSelector("config", None),
+    ),
+    generation.ObjectBlob("https://registry.example.invalid/oci/config.json", 13, "d" * 64),
+)
+_OCI_LAYER_CAPTURE = generation.ParsedMetadataCapture(
+    "oci-layer", "oci/layer-0.tar.gz", _OCI_MANIFEST_METADATA,
+    release_metadata.parse_oci_manifest_descriptor(
+        _OCI_MANIFEST_METADATA, release_metadata.OCIManifestSelector("layer", 0),
+    ),
+    generation.ObjectBlob("https://registry.example.invalid/oci/layer-0.tar.gz", 14, "e" * 64),
+)
 _CAPTURES = tuple(sorted((
     _NODE_CAPTURE,
+    _NODE_MODULES_CAPTURE,
+    _RUNTIME_CAPTURE,
+    _FIXTURE_CAPTURE,
+    _FRONTEND_CAPTURE,
+    _OCI_MANIFEST_CAPTURE,
+    _OCI_CONFIG_CAPTURE,
+    _OCI_LAYER_CAPTURE,
     *(
         _python_wheel_capture(requirement, index)
         for index, requirement in enumerate(
@@ -126,6 +253,37 @@ def _request(**changes: object) -> generation.ReleaseSpecGenerationRequest:
 
 
 class TestPrimeReleaseSpecGeneration(unittest.TestCase):
+    def test_candidate_requires_every_non_python_target_artifact_slot(self) -> None:
+        for missing in (
+            _NODE_CAPTURE,
+            _NODE_MODULES_CAPTURE,
+            _OCI_MANIFEST_CAPTURE,
+            _OCI_CONFIG_CAPTURE,
+            _OCI_LAYER_CAPTURE,
+            _RUNTIME_CAPTURE,
+            _FIXTURE_CAPTURE,
+            _FRONTEND_CAPTURE,
+        ):
+            with self.subTest(missing=missing.artifact_path):
+                with self.assertRaises(generation.PrimeReleaseSpecGenerationError):
+                    generation.generate_release_specification(
+                        _request(
+                            claims=tuple(
+                                capture
+                                for capture in _CAPTURES
+                                if capture is not missing
+                            )
+                        )
+                    )
+
+    def test_candidate_rejects_a_target_artifact_graph_reused_for_arm64(self) -> None:
+        with self.assertRaises(generation.PrimeReleaseSpecGenerationError):
+            generation.generate_release_specification(
+                _request(
+                    target=generation.ExactTargetDescriptor("linux", "arm64", None)
+                )
+            )
+
     def test_candidate_requires_every_python_wheel_in_the_committed_closure(
         self,
     ) -> None:
@@ -161,10 +319,13 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
         result = generation.generate_release_specification(_request())
 
         self.assertEqual(result.status, "candidate-native")
-        self.assertEqual(
-            result.acquisition_lock.claims[0].metadata.size, len(_NODE_METADATA)
+        node_claim = next(
+            claim
+            for claim in result.acquisition_lock.claims
+            if claim.artifact_path == _NODE_CAPTURE.artifact_path
         )
-        self.assertEqual(result.artifact_inventory.artifacts[0].object.size, 10)
+        self.assertEqual(node_claim.metadata.size, len(_NODE_METADATA))
+        self.assertEqual(node_claim.object.size, 10)
         self.assertTrue(result.release_proposal.untrusted)
         self.assertEqual(
             result.release_proposal.recipe.sha256,
@@ -269,7 +430,11 @@ class TestPrimeReleaseSpecGeneration(unittest.TestCase):
             json.dumps(json.loads(encoded), separators=(",", ":"), sort_keys=True),
         )
         value = json.loads(encoded)
-        entry = value["acquisition_lock"]["claims"][0]
+        entry = next(
+            claim
+            for claim in value["acquisition_lock"]["claims"]
+            if claim["artifact_path"] == _NODE_CAPTURE.artifact_path
+        )
         self.assertEqual(
             entry["metadata"],
             {
