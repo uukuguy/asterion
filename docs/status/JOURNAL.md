@@ -1508,3 +1508,4 @@
 - 13:31 Replaced Node marker with fixed IPython workload launcher and canonical completion [61c5ed2]
 - 13:37 Bound canonical release digest and immutable Python OCI index [a9d6e72]
 - 13:45 P1 fixed workload-result protocol provider-free tests passed (57 tests); Ruff, launcher byte-compilation, and diff checks passed. The prescribed Pyright scope reported one unresolved fixture-local `solution` import, so full quality-gate PASS is not claimed. No Docker, model, or network execution ran; P2–P7 remain External-limited and P5/P6 gained no bounded evidence [no code commit]
+- 13:46 Recorded provider-free P1 checkpoint and Pyright boundary [1bd0313]
