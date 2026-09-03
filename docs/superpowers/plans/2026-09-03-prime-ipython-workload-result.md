@@ -4,9 +4,14 @@
 
 **Goal:** Make the sole prime.ipython-coding/v1 Docker worker issue a receipt only from a fixed, code-owned IPython workload's canonical result.
 
-**Architecture:** A small registry admits one exact workload digest. The fixed Node launcher executes its image-owned fixture after the release barrier and emits one bounded canonical completion frame. The Docker adapter validates that frame, binds it to its lease, then derives the execution receipt digest from private normalized result bytes.
+**Architecture:** A small registry admits one exact workload digest. The fixed
+Python/IPython launcher executes its image-owned fixture after the release
+barrier and emits one bounded canonical completion frame. The Docker adapter
+validates that frame, binds it to its lease, then derives the execution receipt
+digest from private normalized result bytes.
 
-**Tech Stack:** Python 3.11 dataclasses/unittest, Node ESM built-ins, Docker CLI adapter, SHA-256.
+**Tech Stack:** Python 3.11 dataclasses/unittest, IPython, Docker CLI adapter,
+SHA-256.
 
 ## Global Constraints
 
@@ -188,11 +193,14 @@ git add src/asterion/applications/prime_agent/operator/docker_cli.py tests/test_
 git commit -m "feat(prime): parse canonical IPython result"
 ~~~
 
-### Task 3: Execute the image-owned fixture and emit its normalized result
+### Task 3: Execute the image-owned fixture through a Python/IPython launcher
 
 **Files:**
-- Modify: src/asterion/applications/prime_agent/operator/image/launcher.mjs
+- Create: src/asterion/applications/prime_agent/operator/image/launcher.py
+- Modify: src/asterion/applications/prime_agent/operator/image/Dockerfile
+- Modify: src/asterion/applications/prime_agent/operator/docker_cli.py
 - Modify: tests/test_prime_ipython_launcher_protocol.py
+- Modify: tests/test_prime_docker_cli.py
 
 **Interfaces:**
 - Consumes one canonical release frame with release true and fixed workload digest.
@@ -202,10 +210,10 @@ git commit -m "feat(prime): parse canonical IPython result"
 
 ~~~python
 self.assertIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
-self.assertIn('createHash("sha256")', launcher)
+self.assertIn("hashlib.sha256", launcher)
 self.assertIn('"result_digest"', launcher)
 self.assertNotIn('{"terminal":"completed"}', launcher)
-for forbidden in ("process.env", "socket", "provider", "transcript", "child_process"):
+for forbidden in ("os.environ", "socket", "provider", "transcript", "subprocess"):
     self.assertNotIn(forbidden, launcher.lower())
 ~~~
 
@@ -216,38 +224,48 @@ literal before executing the fixture.
 
 Run: uv run python -m unittest -v tests.test_prime_ipython_launcher_protocol
 
-Expected: FAIL because the launcher emits a fixed unbound completion marker.
+Expected: FAIL because the Node launcher emits a fixed unbound completion
+marker and the Docker entrypoint does not name the Python launcher.
 
-- [ ] **Step 3: Replace the marker with fixture execution and canonical emission**
+- [ ] **Step 3: Create the Python/IPython launcher and point the fixed image at it**
 
-~~~javascript
-const workloadDigest = "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022";
-const result = { fixture: "passed", oracle: "passed", tool: "ipython" };
-const resultBytes = Buffer.from(JSON.stringify(result));
-const completion = {
-  result,
-  result_digest: "sha256:" + createHash("sha256").update(resultBytes).digest("hex"),
-  terminal: "completed",
-  workload_digest: workloadDigest,
-};
-process.stdout.write(JSON.stringify(completion) + "\n");
+~~~python
+WORKLOAD_DIGEST = "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"
+RESULT = {"fixture": "passed", "oracle": "passed", "tool": "ipython"}
+
+def canonical(value: object) -> bytes:
+    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+
+def emit_completion() -> None:
+    result_bytes = canonical(RESULT)
+    completion = {
+        "result": RESULT,
+        "result_digest": "sha256:" + hashlib.sha256(result_bytes).hexdigest(),
+        "terminal": "completed",
+        "workload_digest": WORKLOAD_DIGEST,
+    }
+    sys.stdout.buffer.write(canonical(completion) + b"\n")
 ~~~
 
-Import only Node createHash and use the image’s existing code-owned
-fixture/oracle invocation mechanism before the snippet. A failed fixture exits
-through the redacted invalid-worker path without serializing output. Require
-one canonical release line with exactly release and workload_digest, where
-release is true and digest exactly matches workloadDigest.
+Use an exact Python base image and install the already locked IPython
+requirements during image construction. The Dockerfile copies launcher.py at
+the exact entrypoint path and must not retain launcher.mjs as an executable
+surface. Before emit_completion(), execute the code-owned fixture and oracle
+directly through IPython APIs (not subprocess); a fixture failure exits through
+the redacted invalid-worker path without serializing output. Require one
+canonical release line with exactly release and workload_digest, where release
+is true and digest exactly matches WORKLOAD_DIGEST. Update the Docker CLI
+expected entrypoint from prime-ipython-coding to prime-ipython-coding.py.
 
 - [ ] **Step 4: Run static/syntax checks and commit**
 
-Run: uv run python -m unittest -v tests.test_prime_ipython_launcher_protocol && node --check src/asterion/applications/prime_agent/operator/image/launcher.mjs
+Run: uv run python -m unittest -v tests.test_prime_ipython_launcher_protocol tests.test_prime_docker_cli && uv run python -m py_compile src/asterion/applications/prime_agent/operator/image/launcher.py
 
 Expected: PASS; this command does not start the launcher or Docker.
 
 ~~~bash
-git add src/asterion/applications/prime_agent/operator/image/launcher.mjs tests/test_prime_ipython_launcher_protocol.py
-git commit -m "feat(prime): emit fixed IPython workload result"
+git add src/asterion/applications/prime_agent/operator/image/launcher.py src/asterion/applications/prime_agent/operator/image/Dockerfile src/asterion/applications/prime_agent/operator/docker_cli.py tests/test_prime_ipython_launcher_protocol.py tests/test_prime_docker_cli.py
+git commit -m "feat(prime): run fixed IPython workload"
 ~~~
 
 ### Task 4: Verify the closed P1 protocol and checkpoint its boundary
@@ -265,7 +283,7 @@ git commit -m "feat(prime): emit fixed IPython workload result"
 
 - [ ] **Step 1: Run the exact provider-free verification set**
 
-Run: uv run python -m unittest -v tests.test_prime_docker_worker tests.test_prime_docker_cli tests.test_prime_ipython_launcher_protocol tests.test_prime_worker_gate tests.test_prime_coding_fixture_receipt && uv run ruff check src/asterion/applications/prime_agent/operator tests/test_prime_docker_worker.py tests/test_prime_docker_cli.py tests/test_prime_ipython_launcher_protocol.py && uv run pyright src/asterion/applications/prime_agent/operator && node --check src/asterion/applications/prime_agent/operator/image/launcher.mjs && git diff --check
+Run: uv run python -m unittest -v tests.test_prime_docker_worker tests.test_prime_docker_cli tests.test_prime_ipython_launcher_protocol tests.test_prime_worker_gate tests.test_prime_coding_fixture_receipt && uv run ruff check src/asterion/applications/prime_agent/operator tests/test_prime_docker_worker.py tests/test_prime_docker_cli.py tests/test_prime_ipython_launcher_protocol.py && uv run pyright src/asterion/applications/prime_agent/operator && uv run python -m py_compile src/asterion/applications/prime_agent/operator/image/launcher.py && git diff --check
 
 Expected: all named checks PASS. Do not run make test, Docker, a model,
 network operation, or benchmark.
@@ -289,7 +307,7 @@ git commit -m "docs(prime): record P1 protocol verification"
 
 **Spec coverage:** Task 1 makes workload admission and receipt derivation exact;
 Task 2 validates canonical, bounded private result frames; Task 3 executes only
-the image-owned fixture after the release barrier; Task 4 records
+the image-owned fixture through Python/IPython after the release barrier; Task 4 records
 provider-free-only evidence. The plan adds no generic executor and leaves
 P2–P7 outside the P1 path.
 
