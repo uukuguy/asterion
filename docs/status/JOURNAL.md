@@ -1503,3 +1503,6 @@
 - 12:25 Planned P1 fixed workload-result implementation after approved design [pending commit]
 - 12:25 Committed P1 workload-result implementation plan [8128239]
 - 12:32 Selected Python/IPython fixed launcher; Node-only image cannot execute P1 fixture [pending commit]
+- 13:08 Bound Docker receipts to the fixed IPython workload and redacted immutable completion bytes [1fd2ad8]
+- 12:32 Committed Python/IPython launcher decision for real P1 fixture [1252cb6]
+- 13:14 Wrapped canonical CLI result bytes in the fixed typed completion to satisfy the worker protocol [25513cc]

@@ -1,12 +1,12 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 12:20. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 13:08. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The P1 workload-result specification is committed at `23457b7`. It selects
-  one code-owned `prime.ipython-coding/v1` fixture by exact digest and requires
-  a canonical, workload-bound worker result.
+- The P1 workload-result specification is committed at `23457b7`; Task 1 is
+  committed at `1fd2ad8`, admitting only its fixed IPython fixture digest and
+  binding receipts to redacted immutable completion bytes.
 - The final review correction is committed at `f61a55b`: P5/P6 cannot issue
   bounded evidence until role-specific real launchers exist.
 - Products 2–7 remain External-limited. Existing P2/P3 provider-free work and
@@ -38,9 +38,9 @@
 
 ## Immediate next action
 
-1. Obtain review of the committed P1 workload-result specification.
-2. After review, write and approve an implementation plan before code changes.
-3. Retain P2–P7 as External-limited; ARC-AGI-3 remains unimplemented and
+1. Complete the remaining approved P1 launcher and integration tasks, keeping
+   Docker role-specific and preserving the typed workload completion boundary.
+2. Retain P2–P7 as External-limited; ARC-AGI-3 remains unimplemented and
    requires a later isolated broker/functional-subset design.
 
 ## Recovery commands
