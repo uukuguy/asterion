@@ -12,6 +12,12 @@ from asterion.applications.prime_agent.bounded_autonomy_receipt import (
     BoundedAutonomyTrace,
 )
 from asterion.applications.prime_agent.worker_gate import PrimeWorkerBoundaryReceipt
+from asterion.applications.prime_agent.operator.bounded_autonomy_workload import (
+    P5_BOUNDED_AUTONOMY_MODEL_SHA256,
+    P5_BOUNDED_AUTONOMY_ORACLE_SHA256,
+    P5_BOUNDED_AUTONOMY_SCHEMA_SHA256,
+    P5_BOUNDED_AUTONOMY_WORKLOAD_DIGEST,
+)
 
 
 def _digest(character: str) -> str:
@@ -20,8 +26,8 @@ def _digest(character: str) -> str:
 
 def _trace() -> BoundedAutonomyTrace:
     return BoundedAutonomyTrace(
-        _digest("a"), _digest("b"), _digest("c"), _digest("d"), _digest("e"),
-        _digest("f"), _digest("0"), _digest("1"), ("ipython",), 2, 2, 2, 1,
+        P5_BOUNDED_AUTONOMY_WORKLOAD_DIGEST, _digest("b"), _digest("c"), _digest("d"), _digest("e"),
+        P5_BOUNDED_AUTONOMY_ORACLE_SHA256, P5_BOUNDED_AUTONOMY_MODEL_SHA256, P5_BOUNDED_AUTONOMY_SCHEMA_SHA256, ("ipython",), 2, 2, 2, 1,
         True, True, True, True, True, True,
     )
 

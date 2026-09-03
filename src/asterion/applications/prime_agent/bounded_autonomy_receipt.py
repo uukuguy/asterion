@@ -15,6 +15,14 @@ from asterion.applications.prime_agent.evidence import (
 from asterion.control.providers.prime.parity_testing import (
     build_prime_long_running_bounded_observation,
 )
+from asterion.applications.prime_agent.operator.bounded_autonomy_workload import (
+    P5_BOUNDED_AUTONOMY_ACTION_CEILING,
+    P5_BOUNDED_AUTONOMY_MODEL_SHA256,
+    P5_BOUNDED_AUTONOMY_ORACLE_SHA256,
+    P5_BOUNDED_AUTONOMY_SCHEMA_SHA256,
+    P5_BOUNDED_AUTONOMY_USAGE_CEILING,
+    P5_BOUNDED_AUTONOMY_WORKLOAD_DIGEST,
+)
 
 
 class BoundedAutonomyReceiptError(ValueError):
@@ -67,9 +75,14 @@ def validate_bounded_autonomy_trace(trace: object) -> None:
             "workload_sha256", "initial_workspace_sha256", "repaired_workspace_sha256",
             "failure_feedback_sha256", "gate_result_sha256", "oracle_sha256", "model_sha256", "schema_sha256",
         ))
+        or trace.workload_sha256 != P5_BOUNDED_AUTONOMY_WORKLOAD_DIGEST
+        or trace.model_sha256 != P5_BOUNDED_AUTONOMY_MODEL_SHA256
+        or trace.oracle_sha256 != P5_BOUNDED_AUTONOMY_ORACLE_SHA256
+        or trace.schema_sha256 != P5_BOUNDED_AUTONOMY_SCHEMA_SHA256
         or trace.initial_workspace_sha256 == trace.repaired_workspace_sha256
         or type(trace.tool_names) is not tuple or len(trace.tool_names) != 1 or type(trace.tool_names[0]) is not str or trace.tool_names[0] != "ipython"
-        or any(type(getattr(trace, name)) is not int or getattr(trace, name) <= 0 for name in ("action_count", "usage_count"))
+        or type(trace.action_count) is not int or not 0 < trace.action_count <= P5_BOUNDED_AUTONOMY_ACTION_CEILING
+        or type(trace.usage_count) is not int or not 0 < trace.usage_count <= P5_BOUNDED_AUTONOMY_USAGE_CEILING
         or type(trace.gate_count) is not int or trace.gate_count != 2
         or type(trace.feedback_count) is not int or trace.feedback_count != 1
         or any(getattr(trace, name) is not True for name in ("terminal", "first_gate_failed", "second_gate_passed", "workspace_changed_before_second_gate", "disposed", "reaped"))

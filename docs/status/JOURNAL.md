@@ -1559,3 +1559,5 @@
 - 03:52 Added P5 workspace-digest gate replay fence [ff43fb6]
 - 04:07 Added P5 fail-closed acceptance and live evidence gates [372fd00]
 - 04:19 Bound P5 acceptance to normalized gate outputs and revalidated live evidence [pending commit]
+- 04:19 correction: P5 normalized-gate and live-revalidation commit [6677c2a]
+- 04:31 Bound P5 trace to one fixed workload identity and ceilings [pending commit]
