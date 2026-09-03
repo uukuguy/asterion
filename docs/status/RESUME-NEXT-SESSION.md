@@ -1,15 +1,15 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-03 12:20. **Session remains active — not a final handoff.**
+> Updated: 2026-09-03 13:49. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - P1's fixed workload-result implementation is committed at `a9d6e72`. It
   selects one code-owned `prime.ipython-coding/v1` fixture by exact digest and
   requires a canonical, workload-bound worker result.
-- P1's five focused provider-free suites passed (57 tests); Ruff, Pyright,
-  launcher byte-compilation, and `git diff --check` passed. This is
-  provider-free-only verification, not Docker/model/network execution.
+- Final P1 provider-free verification boundary: five focused suites passed
+  (57 tests), along with Ruff, Pyright, launcher byte-compilation, and
+  `git diff --check`. This is not Docker/model/network execution.
 - The final review correction is committed at `f61a55b`: P5/P6 cannot issue
   bounded evidence until role-specific real launchers exist.
 - Products 2–7 remain External-limited. Existing P2/P3 provider-free work and

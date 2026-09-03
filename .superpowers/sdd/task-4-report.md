@@ -32,3 +32,9 @@ git diff --check
 P1 is provider-free test-verified only. Docker/model/network execution was not
 run and is not a PASS claim. P2–P7 remain External-limited; P5/P6 gained no
 bounded evidence.
+
+## State precision correction
+
+The live checkpoint timestamp was refreshed to `2026-09-03 13:49` and its TL;DR
+now explicitly labels the final P1 provider-free verification boundary. `git
+diff --check` passed after this documentation-only correction.

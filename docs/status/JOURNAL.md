@@ -1511,3 +1511,4 @@
 - 13:46 Recorded provider-free P1 checkpoint and Pyright boundary [1bd0313]
 - 14:05 Resolved the fixture-local Pyright import diagnostic; all P1 named provider-free checks passed. No Docker, model, or network execution ran [pending commit]
 - 14:06 Suppressed the dynamic fixture import and refreshed its lock for green P1 static verification [5e057fe]
+- 13:49 correction: refreshed the live P1 checkpoint timestamp and named its final provider-free verification boundary [pending commit]
