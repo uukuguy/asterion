@@ -1516,3 +1516,9 @@
 - 16:26 Added sealed P2 launcher parser, image locks, and provider-free protocol evidence [acb73e0]
 - 16:37 Added sealed P2 worker facade and relay to bind Docker lifecycle safely [e031daf]
 - 16:45 Closed P2 canonical receipt and lifecycle bypasses after review [8216aa0]
+- 17:02 Verified provider-free P2 sealed acceptance orchestration: fake
+  attestation → broker admission/release → canonical result → broker revoke →
+  destruction → boundary gate → bounded reducer; identity and quiescence
+  substitutions reject and compatibility remains non-promotable. Focused P2
+  (50) and P1 cross-role (63) Python tests plus scoped Ruff, Pyright, and diff
+  check passed. No Docker, model, or network action occurred [pending commit]
