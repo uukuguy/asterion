@@ -1578,3 +1578,5 @@
 - 05:29 Added P6 single-holdout preserved provider-free acceptance [pending commit]
 - 05:29 correction: P6 preserved acceptance commit [9878686]
 - 05:36 Bound fixed Coordinator rollback identities into P6 trace [pending commit]
+- 05:36 correction: P6 fixed rollback identity commit [9d0ee61]
+- 05:44 Added P6 failed-holdout exact Coordinator rollback acceptance [pending commit]

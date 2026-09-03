@@ -7,7 +7,7 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import cast
 
-from asterion.control.harness import HarnessRevision, HarnessSnapshot
+from asterion.control.harness import HarnessCoordinator, HarnessRevision, HarnessSnapshot
 from asterion.applications.prime_agent.continual_improvement_receipt import (
     ContinualImprovementTrace,
     validate_continual_improvement_trace,
@@ -36,10 +36,7 @@ def continual_improvement_snapshot_sha256(snapshot: object) -> str:
         raise ContinualImprovementAcceptanceError("continual improvement acceptance is invalid")
     return _digest({
         "entries": [dict(entry.to_public_mapping()) for entry in snapshot.entries],
-        "revision_id": snapshot.revision_id,
         "scope": dict(snapshot.scope.to_mapping()),
-        "sequence": snapshot.sequence,
-        "snapshot_id": snapshot.snapshot_id,
     })
 
 
@@ -64,7 +61,7 @@ def continual_improvement_revision_sha256(revision: object) -> str:
 async def accept_continual_improvement(
     *, gate: object, trace: object, baseline_snapshot: object,
     candidate_snapshot: object, candidate_revision: object, disposed: object,
-    reaped: object,
+    reaped: object, coordinator: object | None = None,
 ) -> PrimeEvidenceReceipt:
     """Accept one complete preserved P6 fake chain as provider-free evidence."""
 
@@ -73,16 +70,17 @@ async def accept_continual_improvement(
             type(trace) is not ContinualImprovementTrace
             or disposed is not True
             or reaped is not True
-            or trace.outcome != "preserved"
+            or type(candidate_revision) is not HarnessRevision
         ):
             raise ValueError
         validate_continual_improvement_trace(trace)
+        typed_candidate_revision = cast(HarnessRevision, candidate_revision)
         if (
             continual_improvement_snapshot_sha256(baseline_snapshot)
             != trace.baseline_snapshot_sha256
             or continual_improvement_snapshot_sha256(candidate_snapshot)
             != trace.candidate_snapshot_sha256
-            or continual_improvement_revision_sha256(candidate_revision)
+            or continual_improvement_revision_sha256(typed_candidate_revision)
             != trace.candidate_revision_sha256
         ):
             raise ValueError
@@ -94,10 +92,33 @@ async def accept_continual_improvement(
         )(trace.candidate_snapshot_sha256)
         if (
             type(passed) is not bool
-            or passed is not True
             or type(result_sha256) is not str
             or result_sha256 != trace.task_b_result_sha256
         ):
+            raise ValueError
+        if trace.outcome == "preserved":
+            if passed is not True:
+                raise ValueError
+        elif trace.outcome == "rolled-back":
+            if passed is not False or type(coordinator) is not HarnessCoordinator:
+                raise ValueError
+            rollback = coordinator.rollback(
+                proposal_id=trace.rollback_proposal_id,
+                authority_id=trace.rollback_authority_id,
+                authority_revision=trace.rollback_authority_revision,
+                target_revision_id=typed_candidate_revision.revision_id,
+                rationale_ref="private:p6-rollback",
+                rationale_digest=trace.rollback_rationale_sha256.removeprefix("sha256:"),
+                expected_outcome_digest=trace.rollback_outcome_sha256.removeprefix("sha256:"),
+            )
+            if (
+                rollback.status != "succeeded"
+                or rollback.rollback_revision_id != typed_candidate_revision.revision_id
+                or continual_improvement_snapshot_sha256(coordinator.snapshot())
+                != trace.baseline_snapshot_sha256
+            ):
+                raise ValueError
+        else:
             raise ValueError
         return validate_prime_evidence_receipt(PrimeEvidenceReceipt(
             "prime.continual-improvement/v1", PrimeEvidenceLevel.PROVIDER_FREE, "PASS"

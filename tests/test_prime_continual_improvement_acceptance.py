@@ -10,11 +10,16 @@ from asterion.applications.prime_agent.continual_improvement_acceptance import (
 from asterion.applications.prime_agent.continual_improvement_receipt import ContinualImprovementTrace
 from asterion.applications.prime_agent.operator.continual_improvement_workload import P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256, P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256, P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256, P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256
 from asterion.control.harness import (
+    HarnessCoordinator,
+    HarnessEdit,
+    HarnessEffectReceipt,
     HarnessEntryDescriptor,
     HarnessRevision,
     HarnessScope,
     HarnessSnapshot,
+    harness_effect_digest,
 )
+from asterion.control.journal import JournalRecord, MemoryCanonicalJournal
 
 
 def _entry() -> HarnessEntryDescriptor:
@@ -47,3 +52,27 @@ class TestContinualImprovementAcceptance(unittest.IsolatedAsyncioTestCase):
         receipt = await accept_continual_improvement(gate=gate, trace=trace, baseline_snapshot=baseline, candidate_snapshot=candidate, candidate_revision=revision, disposed=True, reaped=True)
         self.assertEqual(receipt.level.value, "provider-free")
         self.assertEqual(gate.seen, trace.candidate_snapshot_sha256)
+
+    async def test_rolls_back_one_failing_holdout_with_the_real_coordinator(self) -> None:
+        scope = HarnessScope.project("project-1")
+        journal = MemoryCanonicalJournal("p6")
+        journal.append(0, JournalRecord.system_bound(system_id="p6", system_version="1.0.0"))
+        journal.append(1, JournalRecord.authority_bound(authority_id="p6-authority", authority_revision=1))
+
+        def send(proposal):
+            return HarnessEffectReceipt.succeeded(proposal, effect_digest=harness_effect_digest(proposal), result_entries=tuple(edit.replacement for edit in proposal.edits if edit.replacement is not None))
+
+        coordinator = HarnessCoordinator(journal, scope, send)
+        baseline = coordinator.snapshot()
+        proposal = __import__("asterion.control.harness", fromlist=["HarnessProposal"]).HarnessProposal("candidate-1", "p6-authority", 1, scope, baseline.snapshot_id, (HarnessEdit.create(_entry()),), ("evidence-1",), "private:candidate", "d" * 64, "e" * 64)
+        candidate_revision = coordinator.apply(proposal)
+        candidate = coordinator.snapshot()
+        trace = ContinualImprovementTrace(P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST, continual_improvement_snapshot_sha256(baseline), continual_improvement_snapshot_sha256(candidate), continual_improvement_revision_sha256(candidate_revision), "sha256:" + "a" * 64, "sha256:" + "b" * 64, P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256, P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256, P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256, ("ipython",), 3, 10, 1, 1, 1, "rolled-back", P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, 1, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256, True, True, True)
+
+        class Gate:
+            async def evaluate(self, candidate_sha256: str) -> tuple[bool, str]:
+                return False, trace.task_b_result_sha256
+
+        receipt = await accept_continual_improvement(gate=Gate(), trace=trace, baseline_snapshot=baseline, candidate_snapshot=candidate, candidate_revision=candidate_revision, coordinator=coordinator, disposed=True, reaped=True)
+        self.assertEqual(receipt.level.value, "provider-free")
+        self.assertEqual(continual_improvement_snapshot_sha256(coordinator.snapshot()), trace.baseline_snapshot_sha256)
