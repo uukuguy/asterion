@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 
 from asterion.applications.prime_agent.evidence import (
     PrimeEvidenceLevel,
@@ -18,6 +19,62 @@ from asterion.control.providers.prime.parity_testing import (
 
 class BoundedAutonomyReceiptError(ValueError):
     """Raised when a bounded autonomy receipt cannot support the claim."""
+
+
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+_TRACE_FIELDS = frozenset({
+    "workload_sha256", "initial_workspace_sha256", "repaired_workspace_sha256",
+    "failure_feedback_sha256", "gate_result_sha256", "oracle_sha256", "model_sha256",
+    "schema_sha256", "tool_names", "action_count", "usage_count", "gate_count",
+    "feedback_count", "terminal", "first_gate_failed", "second_gate_passed",
+    "workspace_changed_before_second_gate", "disposed", "reaped",
+})
+
+
+@dataclass(frozen=True, repr=False)
+class BoundedAutonomyTrace:
+    workload_sha256: str
+    initial_workspace_sha256: str
+    repaired_workspace_sha256: str
+    failure_feedback_sha256: str
+    gate_result_sha256: str
+    oracle_sha256: str
+    model_sha256: str
+    schema_sha256: str
+    tool_names: tuple[str]
+    action_count: int
+    usage_count: int
+    gate_count: int
+    feedback_count: int
+    terminal: bool
+    first_gate_failed: bool
+    second_gate_passed: bool
+    workspace_changed_before_second_gate: bool
+    disposed: bool
+    reaped: bool
+
+    def __repr__(self) -> str:
+        return "BoundedAutonomyTrace(redacted)"
+
+
+def validate_bounded_autonomy_trace(trace: object) -> None:
+    """Validate the fixed two-gate P5 causal trace without issuing evidence."""
+
+    if (
+        type(trace) is not BoundedAutonomyTrace
+        or frozenset(vars(trace)) != _TRACE_FIELDS
+        or any(type(getattr(trace, name)) is not str or _DIGEST.fullmatch(getattr(trace, name)) is None for name in (
+            "workload_sha256", "initial_workspace_sha256", "repaired_workspace_sha256",
+            "failure_feedback_sha256", "gate_result_sha256", "oracle_sha256", "model_sha256", "schema_sha256",
+        ))
+        or trace.initial_workspace_sha256 == trace.repaired_workspace_sha256
+        or type(trace.tool_names) is not tuple or len(trace.tool_names) != 1 or type(trace.tool_names[0]) is not str or trace.tool_names[0] != "ipython"
+        or any(type(getattr(trace, name)) is not int or getattr(trace, name) <= 0 for name in ("action_count", "usage_count"))
+        or type(trace.gate_count) is not int or trace.gate_count != 2
+        or type(trace.feedback_count) is not int or trace.feedback_count != 1
+        or any(getattr(trace, name) is not True for name in ("terminal", "first_gate_failed", "second_gate_passed", "workspace_changed_before_second_gate", "disposed", "reaped"))
+    ):
+        raise BoundedAutonomyReceiptError("bounded autonomy trace is invalid")
 
 
 @dataclass(frozen=True, repr=False)
