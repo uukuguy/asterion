@@ -21,6 +21,10 @@ from asterion.applications.prime_agent.operator.continual_improvement_workload i
     P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256,
     P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256,
     P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST,
+    P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID,
+    P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID,
+    P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256,
+    P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256,
 )
 
 
@@ -30,7 +34,8 @@ _TRACE_FIELDS = frozenset({
     "candidate_revision_sha256", "task_a_evidence_sha256", "task_b_result_sha256",
     "oracle_sha256", "model_sha256", "schema_sha256", "tool_names", "action_count",
     "usage_count", "candidate_count", "holdout_count", "rollback_count", "outcome",
-    "terminal", "disposed", "reaped",
+    "rollback_authority_id", "rollback_authority_revision", "rollback_proposal_id",
+    "rollback_rationale_sha256", "rollback_outcome_sha256", "terminal", "disposed", "reaped",
 })
 
 
@@ -56,6 +61,11 @@ class ContinualImprovementTrace:
     holdout_count: int
     rollback_count: int
     outcome: Literal["preserved", "rolled-back"]
+    rollback_authority_id: str
+    rollback_authority_revision: int
+    rollback_proposal_id: str
+    rollback_rationale_sha256: str
+    rollback_outcome_sha256: str
     terminal: bool
     disposed: bool
     reaped: bool
@@ -91,6 +101,11 @@ def validate_continual_improvement_trace(trace: object) -> None:
             or trace.outcome not in {"preserved", "rolled-back"}
             or (trace.outcome == "preserved" and trace.rollback_count != 0)
             or (trace.outcome == "rolled-back" and trace.rollback_count != 1)
+            or trace.rollback_authority_id != P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID
+            or type(trace.rollback_authority_revision) is not int or trace.rollback_authority_revision != 1
+            or trace.rollback_proposal_id != P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID
+            or trace.rollback_rationale_sha256 != P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256
+            or trace.rollback_outcome_sha256 != P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256
             or any(getattr(trace, name) is not True for name in ("terminal", "disposed", "reaped"))
         ):
             raise ValueError

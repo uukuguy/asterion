@@ -1576,3 +1576,5 @@
 - 05:21 Added public Harness projection digests for P6 trace binding [pending commit]
 - 05:21 correction: P6 public projection binding commit [c3dd2db]
 - 05:29 Added P6 single-holdout preserved provider-free acceptance [pending commit]
+- 05:29 correction: P6 preserved acceptance commit [9878686]
+- 05:36 Bound fixed Coordinator rollback identities into P6 trace [pending commit]

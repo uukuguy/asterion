@@ -21,6 +21,10 @@ from asterion.applications.prime_agent.operator.continual_improvement_workload i
     P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256,
     P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256,
     P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST,
+    P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID,
+    P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID,
+    P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256,
+    P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256,
 )
 
 
@@ -33,7 +37,7 @@ def _trace(*, outcome: str = "preserved", rollback_count: int = 0) -> ContinualI
         P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST, _digest("a"), _digest("b"),
         _digest("c"), _digest("d"), _digest("e"), P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256,
         P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256, P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256,
-        ("ipython",), 3, 10, 1, 1, rollback_count, outcome, True, True, True,
+        ("ipython",), 3, 10, 1, 1, rollback_count, outcome, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, 1, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256, True, True, True,
     )
 
 
@@ -70,7 +74,7 @@ class TestContinualImprovementReceipt(unittest.TestCase):
                 _digest("0"), _digest("a"), _digest("b"), _digest("c"), _digest("d"), _digest("e"),
                 P6_CONTINUAL_IMPROVEMENT_ORACLE_SHA256, P6_CONTINUAL_IMPROVEMENT_MODEL_SHA256,
                 P6_CONTINUAL_IMPROVEMENT_SCHEMA_SHA256, ("ipython",), 3, 10, 1, 1, 0,
-                "preserved", True, True, True,
+                "preserved", P6_CONTINUAL_IMPROVEMENT_ROLLBACK_AUTHORITY_ID, 1, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_PROPOSAL_ID, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_RATIONALE_SHA256, P6_CONTINUAL_IMPROVEMENT_ROLLBACK_OUTCOME_SHA256, True, True, True,
             ),
         ):
             with self.subTest(trace=trace), self.assertRaises(ContinualImprovementReceiptError):
