@@ -202,6 +202,8 @@ def materialize_authorized_release(
             spec.recipe.source.commit,
             spec.recipe.source.tree_sha256,
             spec.recipe.source.package_lock_sha256,
+            spec.recipe.recipe_revision,
+            release_recipe_sha256(spec.recipe),
             selected,
             tuple(ImageArtifact(item.kind, item.path, item.size, item.sha256) for item in spec.artifacts),
         )

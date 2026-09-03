@@ -142,6 +142,8 @@ class ReleaseLockProposal:
     source_commit: str
     source_tree_sha256: str
     source_package_lock_sha256: str
+    recipe_revision: str
+    recipe_sha256: str
     platform: ImagePlatformDescriptor
     artifacts: tuple[ImageArtifact, ...]
     untrusted: bool = True
@@ -151,6 +153,8 @@ class ReleaseLockProposal:
             "artifacts": [artifact.as_dict() for artifact in self.artifacts],
             "format": "asterion.image-input-release-proposal/v1",
             "platform": self.platform.as_dict(),
+            "recipe_revision": self.recipe_revision,
+            "recipe_sha256": self.recipe_sha256,
             "source_commit": self.source_commit,
             "source_package_lock_sha256": self.source_package_lock_sha256,
             "source_tree_sha256": self.source_tree_sha256,
@@ -162,6 +166,13 @@ def canonical_release_lock_proposal_json(proposal: ReleaseLockProposal) -> str:
     """Return a canonical display/review form, never verification evidence."""
 
     if type(proposal) is not ReleaseLockProposal or proposal.untrusted is not True:
+        raise PrimeImageInputLockError("Prime image release proposal is invalid")
+    if (
+        type(proposal.recipe_revision) is not str
+        or not proposal.recipe_revision
+        or type(proposal.recipe_sha256) is not str
+        or _SHA256.fullmatch(proposal.recipe_sha256) is None
+    ):
         raise PrimeImageInputLockError("Prime image release proposal is invalid")
     validate_image_platform_descriptor(proposal.platform)
     return json.dumps(proposal.as_dict(), separators=(",", ":"), sort_keys=True)

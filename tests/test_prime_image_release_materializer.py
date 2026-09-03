@@ -159,6 +159,16 @@ class TestPrimeImageReleaseMaterializer(unittest.TestCase):
         self.assertEqual(result.digests, (sha256(b"node").hexdigest(),))
         self.assertNotIsInstance(result, materializer.VerifiedImageInputArtifactSet)
         self.assertTrue(result.proposal.untrusted)
+        self.assertEqual(
+            result.proposal.recipe_revision,
+            release_recipe.PRIME_IPYTHON_RELEASE_RECIPE.recipe_revision,
+        )
+        self.assertEqual(
+            result.proposal.recipe_sha256,
+            release_recipe.release_recipe_sha256(
+                release_recipe.PRIME_IPYTHON_RELEASE_RECIPE
+            ),
+        )
         self.assertNotIn(spec.artifacts[0].url, str(result))
 
     def test_rejects_redirect_and_preserves_no_proposal(self) -> None:

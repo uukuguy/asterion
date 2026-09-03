@@ -159,6 +159,8 @@ class TestPrimeImageInputLock(unittest.TestCase):
             "a" * 40,
             "b" * 64,
             "c" * 64,
+            "prime-ipython-release-recipe/v1",
+            "d" * 64,
             lock.ImagePlatformDescriptor("linux", "arm64", None),
             (),
         )

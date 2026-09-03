@@ -1443,3 +1443,5 @@
 - 09:10 Replaced path-based candidate staging with descriptor-relative no-follow traversal and fail-closed platform checks [pending commit]
 - 09:11 Committed descriptor-relative no-follow candidate staging [c29b703]
 - 09:17 Bound materialization plans to complete canonical release-recipe digests rather than dependency-lock fragments [pending commit]
+- 09:18 Committed canonical recipe-digest materialization plan binding [ed78254]
+- 09:27 Bound untrusted staged release proposals to their canonical recipe identity [pending commit]
