@@ -10,11 +10,9 @@
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: the approved Prime capability program replaces the
-  proposed Smoke Full roadmap. Its P1 `prime.ipython-coding/v1` workload-result
-  contract is reviewed in source and awaits implementation-plan review; P2–P7
-  remain External-limited. Phase 3.2 Native Verified-loop remains
-  External-limited at its exact idle barrier.
+- Active work package: all seven approved Prime capability products now have
+  provider-free acceptance implementations. Their real restricted-worker,
+  model, Docker, benchmark, and ARC executions remain External-limited.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -118,6 +116,12 @@
   host-gate adapter, provider-free acceptance, and a revalidating live reducer.
   Its local fake chain is verified only; real Prime/IPython worker evidence is
   External-limited and cannot be promoted to bounded PASS.
+- P6 `prime.continual-improvement/v1` has the fixed task-A/candidate/task-B
+  preserve-or-exact-rollback chain over `HarnessCoordinator`, scoped evidence,
+  and a global-approval-aware live reducer. It is provider-free verified only.
+- P7 `prime.arc-agi-3/v1` has a single-game IPython broker trace, host score
+  replay, provider-free acceptance, and distinct subset/full authorization
+  reducers. No real game, model, or full-suite claim has been promoted.
 
 ## Open Problems
 
@@ -125,10 +129,10 @@
   proves the exact mandatory scenarios.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
-- Implement and verify the P1 workload-result contract without widening the
-  closed Smoke Core claim or admitting generic worker execution.
-- Carry the approved P5 boundary forward into the P6 Continual Harness without
-  treating historical harness parity receipts as capability evidence.
+- Obtain separately authorized real restricted-worker evidence for the seven
+  Prime products; do not infer it from local fake-chain tests or Smoke Core.
+- Run final provider-free repository verification and keep any real ARC-AGI-3
+  full-suite reproduction behind an exact finite operator authorization.
 
 ## Key Files
 

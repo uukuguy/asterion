@@ -1,16 +1,20 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-04 06:02. **Session remains active — not a final handoff.**
+> Updated: 2026-09-04. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- P1–P5 are implemented and provider-free verified. None has real
-  Docker/model/network/benchmark evidence; such results remain External-limited.
-- P6 now implements the fixed task-A → one candidate revision → task-B
-  preserve-or-exact-rollback product over `HarnessCoordinator`.
-- `e372297` completes P6’s private live reducer. It binds the worker result,
-  platform lock, task-B attestation, broker quiescence, cleanup, and a separate
-  exact approval only for global scope before issuing bounded evidence.
+- P1–P7 have provider-free acceptance implementations. None has real
+  Docker/model/network/benchmark/ARC execution evidence; such results remain
+  External-limited.
+- P6 implements the fixed task-A → one candidate revision → task-B
+  preserve-or-exact-rollback product over `HarnessCoordinator`; `e372297`
+  binds scope, worker result, lock, task-B attestation, quiescence, cleanup,
+  and global-scope approval before bounded evidence issuance.
+- P7 implements a one-game IPython-only ARC-AGI-3 broker trace, injected host
+  score replay, provider-free acceptance, and separate subset/full evidence
+  reducers. `5f11dc5` never starts a worker or game; full evidence needs an
+  exact finite operator authorization and remains unclaimed.
 
 ## Current decision
 
@@ -21,24 +25,24 @@
 
 ## Verification evidence
 
-- `uv run python -m unittest -v tests.test_prime_continual_improvement_workload
-  tests.test_prime_continual_improvement_receipt
-  tests.test_prime_continual_improvement_acceptance
-  tests.test_prime_continual_improvement_live_validation
-  tests.test_prime_worker_gate tests.test_control_harness` passed (44 tests).
-- Scoped Ruff, Pyright, and `git diff --check` passed. No external runtime was
-  started.
+- Focused P7 verification passed: 26 tests across workload, redacted trace,
+  broker, acceptance, live reducers, worker gate, and evidence contract;
+  scoped Ruff, Pyright, and `git diff --check` passed.
+- Repository-wide provider-free `make test` passed (2,897 tests). It rebuilt
+  pinned local Node fixtures but started no model, Docker, game, provider, or
+  network operation.
 
 ## Immediate next action
 
-1. Review P6 against its plan; record provider-free completion but retain
-   External-limited live evidence.
-2. Start the final P7 ARC-AGI-3 scenario design and implementation path.
+1. Retain all external Prime evidence as External-limited.
+2. Do not run a real ARC-AGI-3 suite without separately scoped authorization.
 
 ## Recovery commands
 
 ```bash
 git status --short
 git log --oneline -12
-uv run python -m unittest -v tests.test_prime_continual_improvement_workload tests.test_prime_continual_improvement_receipt tests.test_prime_continual_improvement_acceptance tests.test_prime_continual_improvement_live_validation tests.test_prime_worker_gate tests.test_control_harness
+test -f /tmp/asterion-final-make-test.status && cat /tmp/asterion-final-make-test.status
+tail -n 40 /tmp/asterion-final-make-test.log
+uv run python -m unittest -v tests.test_prime_arc_agi_3_workload tests.test_prime_arc_agi_3_receipt tests.test_prime_arc_agi_3_broker tests.test_prime_arc_agi_3_acceptance tests.test_prime_arc_agi_3_live_validation tests.test_prime_worker_gate tests.test_prime_capability_evidence
 ```
