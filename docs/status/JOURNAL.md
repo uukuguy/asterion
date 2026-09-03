@@ -1596,3 +1596,6 @@
 - 06:33 Recorded P7 closure and the passing 2,897-test provider-free repository verification [0355e4b]
 - 06:34 Restored repository-wide lint by removing an unused control settlement exception binding [202381b]
 - 06:35 Audited all seven closed Prime product contracts with 96 focused provider-free tests [pending commit]
+- 06:35 correction: recorded P2/P3 structural boundaries and seven-product audit [c1cbb70]
+- 06:36 Excluded declared Prime build outputs from source locks so promotion checks preserve exact source identity [b345cab]
+- 06:37 Reverted the incomplete source-lock exclusion after promotion still proved the pinned tree digest inconsistent [e0f8a2f]

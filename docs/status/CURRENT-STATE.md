@@ -139,6 +139,11 @@
   proves the exact mandatory scenarios.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
+- The pinned Prime source-lock tree digest currently does not reproduce from
+  the declared `a18809e...` checkout although its commit and package-lock
+  digest match. `make promotion-check` therefore fails closed in isolated
+  compatibility tests; repair or reissue that operator-owned artifact lock
+  before claiming promotion verification.
 - Obtain separately authorized real restricted-worker evidence for the seven
   Prime products; do not infer it from local fake-chain tests or Smoke Core.
 - Run final provider-free repository verification and keep any real ARC-AGI-3
