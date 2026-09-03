@@ -1127,7 +1127,7 @@ class ControlHost:
                         reason_code="provider-owned-terminal",
                         receipt_ref=None,
                     )
-        except Exception as error:
+        except Exception:
             raise ControlHostError(
                 "provider-owned action lifecycle settlement is invalid"
             ) from None
