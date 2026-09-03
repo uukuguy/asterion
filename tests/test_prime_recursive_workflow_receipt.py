@@ -6,6 +6,17 @@ from dataclasses import FrozenInstanceError
 import unittest
 
 from asterion.applications.prime_agent.evidence import PrimeEvidenceLevel
+from asterion.applications.prime_agent.operator.ipython_workload import (
+    PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
+)
+from asterion.applications.prime_agent.operator.programmatic_long_context_workload import (
+    PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST,
+)
+from asterion.applications.prime_agent.operator.recursive_code_review_workload import (
+    RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256,
+    RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256,
+    RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
+)
 from asterion.applications.prime_agent.recursive_workflow_receipt import (
     RecursiveWorkflowReceiptError,
     RecursiveWorkflowTrace,
@@ -19,7 +30,7 @@ def _digest(value: str) -> str:
 
 def _trace(**changes: object) -> RecursiveWorkflowTrace:
     values: dict[str, object] = {
-        "workload_sha256": _digest("a"),
+        "workload_sha256": RECURSIVE_CODE_REVIEW_P3_WORKLOAD_DIGEST,
         "root_artifact_sha256": _digest("b"),
         "first_child_role_digests": (_digest("c"), _digest("d")),
         "first_child_result_digests": (_digest("e"), _digest("f")),
@@ -27,8 +38,8 @@ def _trace(**changes: object) -> RecursiveWorkflowTrace:
         "follow_up_digest": _digest("2"),
         "follow_up_result_digest": _digest("7"),
         "aggregation_sha256": _digest("3"),
-        "oracle_sha256": _digest("4"),
-        "model_sha256": _digest("5"),
+        "oracle_sha256": RECURSIVE_CODE_REVIEW_P3_ORACLE_SHA256,
+        "model_sha256": RECURSIVE_CODE_REVIEW_P3_MODEL_SHA256,
         "usage_sha256": _digest("6"),
         "root_to_child_message_count": 2,
         "child_to_root_result_count": 3,
@@ -115,6 +126,27 @@ class TestRecursiveWorkflowTrace(unittest.TestCase):
                 RecursiveWorkflowReceiptError
             ):
                 verify_real_recursive_workflow_trace(_trace(), level)
+
+    def test_rejects_arbitrary_or_cross_product_workload_identities(self) -> None:
+        for workload in (
+            _digest("a"),
+            PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
+            PROGRAMMATIC_LONG_CONTEXT_P2_WORKLOAD_DIGEST,
+        ):
+            with self.subTest(workload=workload), self.assertRaises(
+                RecursiveWorkflowReceiptError
+            ):
+                verify_real_recursive_workflow_trace(_trace(workload_sha256=workload))
+
+    def test_rejects_noncanonical_model_or_oracle_identity(self) -> None:
+        for changes in (
+            {"model_sha256": _digest("a")},
+            {"oracle_sha256": _digest("b")},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(
+                RecursiveWorkflowReceiptError
+            ):
+                verify_real_recursive_workflow_trace(_trace(**changes))
 
     def test_trace_is_immutable_and_redacts_private_values(self) -> None:
         trace = _trace(workload_sha256="PRIVATE-RLM-WORKLOAD")
