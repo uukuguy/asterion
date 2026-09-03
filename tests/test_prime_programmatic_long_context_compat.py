@@ -29,7 +29,7 @@ PRIME_ROOT = ROOT / "3th-party" / "prime-agent"
 HARNESS = ROOT / "tests/fixtures/prime_gateway/v1/prime-programmatic-long-context-compat.mjs"
 PINNED_LOCK = PrimeSourceLock(
     "a18809e00ea30638584d87b3afea7285a9d7296c",
-    "93a4b02ecc0cc114865fa3d336521cf214047cf4de471b36b51fe610c84ab686",
+    "01ce3c9f3b7e747fde1bdc36086358434cb9349e706b3c913e5997edfd26712c",
     "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8",
 )
 PUBLIC_KEYS = {

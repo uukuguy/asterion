@@ -55,6 +55,28 @@ class TestPrimeSourceLock(unittest.TestCase):
 
             self.assertEqual(verify_prime_source_lock(source_root, lock), lock)
 
+    def test_ignores_declared_generated_build_outputs(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            source_root = (Path(temporary_directory) / "prime-agent").resolve()
+            source_root.mkdir()
+            _write_source(source_root)
+            lock = _lock(source_root)
+            (source_root / "dist").mkdir()
+            (source_root / "dist" / "main.js").write_text("generated\n")
+            (source_root / "packages" / "agent" / "dist").mkdir(parents=True)
+            (source_root / "packages" / "agent" / "dist" / "main.js").write_text(
+                "generated\n"
+            )
+            (source_root / "build.tsbuildinfo").write_text("generated\n")
+            (source_root / "src" / "__pycache__").mkdir()
+            (source_root / "src" / "__pycache__" / "main.cpython-311.pyc").write_bytes(
+                b"generated"
+            )
+            (source_root / ".husky" / "_").mkdir(parents=True)
+            (source_root / ".husky" / "_" / "generated").write_text("generated\n")
+
+            self.assertEqual(verify_prime_source_lock(source_root, lock), lock)
+
     def test_lock_is_frozen(self) -> None:
         lock = PrimeSourceLock(_COMMIT, "a" * 64, "b" * 64)
 

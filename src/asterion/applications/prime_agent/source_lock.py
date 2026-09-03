@@ -17,6 +17,9 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 _REF_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
 _LOCK_FIELDS: Final = frozenset({"commit", "tree_sha256", "package_lock_sha256"})
 _EXCLUDED_SOURCE_NAMES: Final = frozenset({".git", "node_modules", "package-lock.json"})
+_GENERATED_SOURCE_DIRECTORY_NAMES: Final = frozenset(
+    {"__pycache__", "dist", "dist-chrome", "dist-firefox"}
+)
 
 
 class PrimeSourceLockError(ValueError):
@@ -35,10 +38,11 @@ class PrimeSourceLock:
 def verify_prime_source_lock(root: Path, lock: PrimeSourceLock) -> PrimeSourceLock:
     """Fail closed unless *root* exactly matches the declared immutable lock.
 
-    The source digest covers regular tracked-source inputs only: all files below
-    the root except Git metadata, installed dependencies, and the separately
-    declared ``package-lock.json``.  Paths and bytes are delimited and sorted
-    so platform directory iteration cannot affect the result.
+    The source digest covers regular source inputs only: all files below the
+    root except Git metadata, installed dependencies, declared build outputs,
+    and the separately declared ``package-lock.json``. Paths and bytes are
+    delimited and sorted so platform directory iteration cannot affect the
+    result.
     """
 
     _validate_lock(lock)
@@ -156,12 +160,16 @@ def _tree_sha256(root: Path) -> str:
                 name
                 for name in directory_names
                 if name not in _EXCLUDED_SOURCE_NAMES
+                and name not in _GENERATED_SOURCE_DIRECTORY_NAMES
+                and not (directory_path == root / ".husky" and name == "_")
             )
             for name in sorted(file_names):
                 path = directory_path / name
                 if not _regular_file(path):
                     raise PrimeSourceLockError("Prime source lock is invalid")
-                if path.name in _EXCLUDED_SOURCE_NAMES:
+                if path.name in _EXCLUDED_SOURCE_NAMES or path.name.endswith(
+                    ".tsbuildinfo"
+                ):
                     continue
                 files.append(path)
     except OSError as error:

@@ -69,7 +69,7 @@ class TestPrimeReleaseRecipe(unittest.TestCase):
         )
         self.assertEqual(
             value.source.tree_sha256,
-            "93a4b02ecc0cc114865fa3d336521cf214047cf4de471b36b51fe610c84ab686",
+            "01ce3c9f3b7e747fde1bdc36086358434cb9349e706b3c913e5997edfd26712c",
         )
         self.assertEqual(
             value.source.package_lock_sha256,

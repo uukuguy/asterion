@@ -27,6 +27,9 @@ from asterion.applications.prime_agent.source_lock import (
 
 _EXCLUDED_NAMES: Final = frozenset({".git", "node_modules", ".cache", "cache", ".pytest_cache", "__pycache__"})
 _SOURCE_LOCK_EXCLUDED_NAMES: Final = frozenset({".git", "node_modules"})
+_GENERATED_SOURCE_DIRECTORY_NAMES: Final = frozenset(
+    {"__pycache__", "dist", "dist-chrome", "dist-firefox"}
+)
 _IMAGE_PREFIX: Final = "src/asterion/applications/prime_agent/operator/image"
 
 
@@ -223,7 +226,13 @@ def _capture_files(root: Path, *, source: bool) -> tuple[_CapturedFile, ...]:
             names[:] = sorted(
                 name
                 for name in names
-                if not (name in _SOURCE_LOCK_EXCLUDED_NAMES if source else _excluded_name(name))
+                if not (
+                    name in _SOURCE_LOCK_EXCLUDED_NAMES
+                    or name in _GENERATED_SOURCE_DIRECTORY_NAMES
+                    or (directory_path == root / ".husky" and name == "_")
+                    if source
+                    else _excluded_name(name)
+                )
             )
             for name in sorted(file_names):
                 path = directory_path / name
@@ -262,7 +271,8 @@ def _capture_file(path: Path, relative: str) -> _CapturedFile:
 def _source_tree_digest(files: tuple[_CapturedFile, ...]) -> str:
     digest = sha256()
     for captured in files:
-        if captured.relative.rsplit("/", 1)[-1] == "package-lock.json":
+        name = captured.relative.rsplit("/", 1)[-1]
+        if name == "package-lock.json" or name.endswith(".tsbuildinfo"):
             continue
         digest.update(captured.relative.encode())
         digest.update(b"\0")
