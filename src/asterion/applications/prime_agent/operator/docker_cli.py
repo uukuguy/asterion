@@ -34,6 +34,7 @@ _TMPFS = "/workspace:rw,nodev,noexec,nosuid,size=67108864"
 _OUTPUT_CAP = 65536
 _CONTAINER_ID = re.compile(r"prime-[0-9a-f]{32}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_NORMALIZED_RESULT = {"fixture": "passed", "oracle": "passed", "tool": "ipython"}
 
 
 @dataclass(frozen=True)
@@ -419,6 +420,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
             or set(value) != fields
             or value["terminal"] != "completed"
             or type(value["result"]) is not dict
+            or value["result"] != _NORMALIZED_RESULT
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         result_bytes = json.dumps(
