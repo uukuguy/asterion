@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import unittest
 from typing import cast
@@ -238,15 +239,32 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
 
         await channel.self_check(control=self._control())
         await channel.release(control=self._control())
-        attach.process.stdout.data = b'{"terminal":"completed"}\n'
+        result = b'{"fixture":"passed","oracle":"passed","tool":"ipython"}'
+        digest = "sha256:" + hashlib.sha256(result).hexdigest()
+        frame = json.dumps(
+            {
+                "result": json.loads(result),
+                "result_digest": digest,
+                "terminal": "completed",
+                "workload_digest": PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode() + b"\n"
+        attach.process.stdout.data = frame
 
         self.assertEqual(
             await channel.completed_result(control=self._control()),
-            DockerWorkerCompletion(
-                PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
-                b'{"terminal":"completed"}',
-            ),
+            DockerWorkerCompletion(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, result),
         )
+        for invalid in (
+            frame.replace(digest.encode(), b"sha256:" + b"0" * 64),
+            frame.replace(b'"completed"', b'"failed"'),
+            frame[:-1] + b" \n",
+            frame + b"extra\n",
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(RestrictedWorkerError):
+                DockerCliEngineTransport._parse_completed_result_line(invalid)
 
     async def test_attach_close_reaps_when_control_is_already_cancelled(self) -> None:
         process = _AttachProcess(b"")

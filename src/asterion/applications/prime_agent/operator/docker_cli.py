@@ -10,6 +10,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass
+from hashlib import sha256
 from time import monotonic
 from typing import Mapping, Protocol, cast
 
@@ -20,9 +21,6 @@ from asterion.applications.prime_agent.operator.docker_worker import (
     DockerWorkerLauncherSelfCheck,
     _DockerWorkerSpecification,
     _LifecycleCallControl,
-)
-from asterion.applications.prime_agent.operator.ipython_workload import (
-    PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
 )
 from asterion.services.restricted_worker import (
     RestrictedWorkerError,
@@ -196,10 +194,7 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._result_read = True
         raw = await self._read_bounded(control)
-        return DockerWorkerCompletion(
-            PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
-            DockerCliEngineTransport._parse_completed_result_line(raw),
-        )
+        return DockerCliEngineTransport._parse_completed_result_line(raw)
 
     async def close(self, *, control: _LifecycleCallControl) -> None:
         if self._closed:
@@ -411,17 +406,30 @@ class DockerCliEngineTransport(DockerEngineTransport):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     @staticmethod
-    def _parse_completed_result_line(raw: bytes) -> bytes:
+    def _parse_completed_result_line(raw: bytes) -> DockerWorkerCompletion:
         if raw.count(b"\n") != 1 or not raw.endswith(b"\n"):
             raise RestrictedWorkerError("restricted worker value is invalid")
         body = raw[:-1]
         if not body:
             raise RestrictedWorkerError("restricted worker value is invalid")
         value = DockerCliEngineTransport._json(body)
+        fields = {"workload_digest", "result", "result_digest", "terminal"}
         if (
             type(value) is not dict
-            or value != {"terminal": "completed"}
-            or json.dumps(value, separators=(",", ":"), sort_keys=True).encode() != body
+            or set(value) != fields
+            or value["terminal"] != "completed"
+            or type(value["result"]) is not dict
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
-        return body
+        result_bytes = json.dumps(
+            value["result"], separators=(",", ":"), sort_keys=True
+        ).encode()
+        if (
+            json.dumps(value, separators=(",", ":"), sort_keys=True).encode() != body
+            or value["result_digest"] != "sha256:" + sha256(result_bytes).hexdigest()
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        try:
+            return DockerWorkerCompletion(value["workload_digest"], result_bytes)
+        except RestrictedWorkerError:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
