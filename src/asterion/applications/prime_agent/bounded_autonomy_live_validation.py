@@ -19,6 +19,13 @@ from asterion.applications.prime_agent.worker_gate import PrimeWorkerBoundaryRec
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+_AUTHORIZATION_FIELDS = frozenset({
+    "platform_lock_sha256", "real_prime_ipython_attested", "gate_attested",
+    "broker_quiescent", "worker_destroyed",
+})
+_OBSERVATION_FIELDS = frozenset({
+    "trace", "platform_lock_sha256", "worker_boundary",
+})
 
 
 class BoundedAutonomyLiveValidationError(ValueError):
@@ -74,18 +81,41 @@ def validate_bounded_autonomy_live_result(
     if (
         type(observation) is not BoundedAutonomyLiveObservation
         or type(authorization) is not BoundedAutonomyLiveAuthorization
+        or frozenset(vars(observation)) != _OBSERVATION_FIELDS
+        or frozenset(vars(authorization)) != _AUTHORIZATION_FIELDS
+        or type(observation.platform_lock_sha256) is not str
+        or _DIGEST.fullmatch(observation.platform_lock_sha256) is None
+        or observation.platform_lock_sha256 != authorization.platform_lock_sha256
         or type(authorization.platform_lock_sha256) is not str
         or _DIGEST.fullmatch(authorization.platform_lock_sha256) is None
-        or not all((
-            authorization.real_prime_ipython_attested,
-            authorization.gate_attested,
-            authorization.broker_quiescent,
-            authorization.worker_destroyed,
-        ))
     ):
         raise BoundedAutonomyLiveValidationError(
             "bounded autonomy live evidence is invalid"
         )
+    try:
+        validate_bounded_autonomy_trace(observation.trace)
+        worker = observation.worker_boundary
+        if (
+            type(worker) is not PrimeWorkerBoundaryReceipt
+            or worker.scenario_id != "prime.bounded-autonomy/v1"
+            or worker.role_id != "prime.bounded-autonomy"
+            or worker.status != "PASS"
+            or type(worker.result_digest) is not str
+            or _DIGEST.fullmatch(worker.result_digest) is None
+            or worker.result_digest != observation.trace.gate_result_sha256
+            or any(
+                getattr(authorization, name) is not True
+                for name in (
+                    "real_prime_ipython_attested", "gate_attested",
+                    "broker_quiescent", "worker_destroyed",
+                )
+            )
+        ):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise BoundedAutonomyLiveValidationError(
+            "bounded autonomy live evidence is invalid"
+        ) from None
     return validate_prime_evidence_receipt(
         PrimeEvidenceReceipt(
             "prime.bounded-autonomy/v1", PrimeEvidenceLevel.BOUNDED, "PASS"

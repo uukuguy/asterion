@@ -34,11 +34,15 @@ async def accept_bounded_autonomy(
         ):
             raise ValueError
         validate_bounded_autonomy_trace(trace)
-        if first_workspace != trace.initial_workspace_sha256 or second_workspace != trace.repaired_workspace_sha256:
-            raise ValueError
         first = await run_bounded_autonomy_gate(gate, first_workspace, frozenset())
         second = await run_bounded_autonomy_gate(gate, second_workspace, frozenset({first_workspace}))
-        if first.passed is not False or second.passed is not True or second.result_sha256 != trace.gate_result_sha256:
+        if (
+            first.workspace_sha256 != trace.initial_workspace_sha256
+            or second.workspace_sha256 != trace.repaired_workspace_sha256
+            or first.passed is not False
+            or second.passed is not True
+            or second.result_sha256 != trace.gate_result_sha256
+        ):
             raise ValueError
         return validate_prime_evidence_receipt(PrimeEvidenceReceipt(
             "prime.bounded-autonomy/v1", PrimeEvidenceLevel.PROVIDER_FREE, "PASS"
