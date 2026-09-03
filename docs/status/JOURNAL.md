@@ -1490,3 +1490,5 @@
 - 11:31 Bound the provider-free coding fixture to the worker receipt's exact scenario and role [pending commit]
 - 11:31 Committed coding-fixture scenario and role receipt binding [33ee0ca]
 - 11:38 Required matching restricted-worker result digests before P5/P6 may emit bounded evidence; trusted-local remains diagnostic [pending commit]
+- 11:38 Committed worker-gated bounded evidence for P5/P6 [3dbfdfc]
+- 11:44 Verified P5/P6 reject wrong worker scenario or result digest; 42 long-running/harness regressions passed [pending commit]

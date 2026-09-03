@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import hashlib
 import json
 import unittest
@@ -64,6 +64,15 @@ class TestContinualImprovementReceipt(unittest.TestCase):
 
         self.assertEqual(receipt.scenario_id, "prime.continual-improvement/v1")
         self.assertIs(receipt.level, PrimeEvidenceLevel.BOUNDED_SANDBOXED)
+
+        for worker_receipt in (
+            replace(worker, scenario_id="prime.bounded-autonomy/v1"),
+            replace(worker, result_digest="sha256:" + "e" * 64),
+        ):
+            with self.subTest(worker_receipt=worker_receipt), self.assertRaises(
+                ContinualImprovementReceiptError
+            ):
+                verify_continual_improvement_receipt(observation, worker_receipt)
 
     def test_rejects_unbounded_ungrounded_or_nonactivated_refinement(self) -> None:
         for changes in (

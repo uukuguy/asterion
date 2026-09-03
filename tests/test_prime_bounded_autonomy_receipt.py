@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import hashlib
 import json
 import unittest
@@ -66,6 +66,15 @@ class TestBoundedAutonomyReceipt(unittest.TestCase):
 
         self.assertEqual(receipt.scenario_id, "prime.bounded-autonomy/v1")
         self.assertIs(receipt.level, PrimeEvidenceLevel.BOUNDED_SANDBOXED)
+
+        for worker_receipt in (
+            replace(worker, scenario_id="prime.continual-improvement/v1"),
+            replace(worker, result_digest="sha256:" + "e" * 64),
+        ):
+            with self.subTest(worker_receipt=worker_receipt), self.assertRaises(
+                BoundedAutonomyReceiptError
+            ):
+                verify_bounded_autonomy_receipt(observation, worker_receipt)
 
     def test_rejects_missing_model_or_finite_autonomy_facts(self) -> None:
         for changes in (
