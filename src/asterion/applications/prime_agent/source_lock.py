@@ -17,6 +17,7 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 _REF_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
 _LOCK_FIELDS: Final = frozenset({"commit", "tree_sha256", "package_lock_sha256"})
 _EXCLUDED_SOURCE_NAMES: Final = frozenset({".git", "node_modules", "package-lock.json"})
+_GENERATED_SOURCE_DIRECTORIES: Final = frozenset({"dist", "dist-chrome", "dist-firefox"})
 
 
 class PrimeSourceLockError(ValueError):
@@ -156,12 +157,13 @@ def _tree_sha256(root: Path) -> str:
                 name
                 for name in directory_names
                 if name not in _EXCLUDED_SOURCE_NAMES
+                and name not in _GENERATED_SOURCE_DIRECTORIES
             )
             for name in sorted(file_names):
                 path = directory_path / name
                 if not _regular_file(path):
                     raise PrimeSourceLockError("Prime source lock is invalid")
-                if path.name in _EXCLUDED_SOURCE_NAMES:
+                if path.name in _EXCLUDED_SOURCE_NAMES or path.name.endswith(".tsbuildinfo"):
                     continue
                 files.append(path)
     except OSError as error:
