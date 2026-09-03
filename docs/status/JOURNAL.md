@@ -1495,3 +1495,5 @@
 - 11:44 Committed P5/P6 worker mismatch coverage [499c471]
 - 11:48 Final review found P5/P6 worker receipts forgeable and Docker result non-workload-bound; bounded PASS remains unapproved [no code commit]
 - 11:55 Closed P5/P6 bounded issuance pending real role launchers; sealed worker receipt constructor and froze role map [pending commit]
+- 11:55 Committed denial of unbacked P5/P6 bounded evidence [f61a55b]
+- 12:20 Defined P1 real workload-result contract; P2–P7 remain External-limited [pending commit]
