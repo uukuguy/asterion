@@ -45,4 +45,7 @@ def canonical_diagnostic_session_recovery_completion_bytes(
     payload.update(vars(trace))
     payload["root_tool_names"] = list(trace.root_tool_names)
     payload["child_tool_names"] = list(trace.child_tool_names)
-    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return (
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        + b"\n"
+    )

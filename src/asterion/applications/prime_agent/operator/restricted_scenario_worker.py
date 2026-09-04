@@ -275,10 +275,9 @@ class _Context(AbstractAsyncContextManager[RestrictedWorkerLease]):
             or lease.workload_digest != self._request.workload_digest
             or lease.worker_id in self._worker._states
         ):
-            try:
-                await self._worker._engine.remove(lease)
-            except BaseException:
-                pass
+            error = await _complete_cleanup(self._worker._engine.remove(lease))
+            if isinstance(error, asyncio.CancelledError):
+                raise error
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._lease = lease
         self._worker._states[lease.worker_id] = _State(self._request, lease)

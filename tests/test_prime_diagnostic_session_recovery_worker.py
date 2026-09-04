@@ -25,3 +25,14 @@ class TestDiagnosticSessionRecoveryWorker(unittest.TestCase):
              / "prime-diagnostic-session-recovery.json").read_text(encoding="utf-8")
         )
         self.assertFalse(_parse(json.dumps(payload, indent=2).encode("utf-8")))
+
+    def test_adapter_accepts_the_canonical_completion_fixture(self) -> None:
+        from pathlib import Path
+
+        from asterion.applications.prime_agent.operator.diagnostic_session_recovery_worker import (
+            _parse,
+        )
+
+        raw = (Path(__file__).parent / "fixtures" / "prime_gateway" / "v1"
+               / "prime-diagnostic-session-recovery.json").read_bytes()
+        self.assertTrue(_parse(raw))

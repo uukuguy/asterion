@@ -7,6 +7,7 @@ from typing import cast
 
 from asterion.applications.prime_agent.operator.restricted_scenario_worker import (
     RestrictedScenarioEngine,
+    RestrictedScenarioInspection,
 )
 from asterion.services.restricted_worker import (
     RestrictedWorkerLease,
@@ -174,6 +175,55 @@ class TestRestrictedScenarioWorker(unittest.IsolatedAsyncioTestCase):
                 await worker.execution_receipt(lease)
 
         task = asyncio.create_task(lifecycle())
+        await engine.remove_started.wait()
+        task.cancel()
+        engine.allow_remove.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertTrue(engine.removed)
+
+    async def test_rejected_lease_cleanup_completes_before_cancellation(self) -> None:
+        from asterion.applications.prime_agent.operator.restricted_scenario_worker import (
+            RestrictedScenarioAdapter,
+            RestrictedScenarioWorker,
+        )
+
+        class Engine:
+            def __init__(self) -> None:
+                self.remove_started = asyncio.Event()
+                self.allow_remove = asyncio.Event()
+                self.removed = False
+
+            async def launch(self, **kwargs: object) -> RestrictedWorkerLease:
+                return RestrictedWorkerLease(
+                    "worker-foreign", "prime.other", "run-1", _DIGEST, _DIGEST
+                )
+
+            async def completion_bytes(self, lease: RestrictedWorkerLease) -> bytes:
+                raise AssertionError("not used")
+
+            async def inspect(
+                self, lease: RestrictedWorkerLease
+            ) -> RestrictedScenarioInspection:
+                raise AssertionError("not used")
+
+            async def remove(self, lease: RestrictedWorkerLease) -> None:
+                self.remove_started.set()
+                await self.allow_remove.wait()
+                self.removed = True
+
+        adapter = RestrictedScenarioAdapter(
+            "prime.test/v1", "prime.test", _DIGEST, "/entry", "test-seccomp", 3, 8,
+            lambda raw: raw == b"ok",
+        )
+        engine = Engine()
+        worker = RestrictedScenarioWorker(
+            image_digest=_IMAGE, engine=engine, adapter=adapter
+        )
+        request = RestrictedWorkerRequest(
+            "prime.test", _IMAGE, "run-1", _DIGEST, _DIGEST, 1, 8
+        )
+        task = asyncio.create_task(worker.open(request).__aenter__())
         await engine.remove_started.wait()
         task.cancel()
         engine.allow_remove.set()
