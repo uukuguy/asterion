@@ -1620,3 +1620,5 @@
 - 11:40 Marked completed P4–P7 worker plan steps; retained unverified full-suite gate [de9d488]
 - 11:50 Confirmed promotion subprocess sanitization prevents offline npm workaround [no commit]
 - 12:10 Designed declared offline npm-cache ingress without weakening promotion isolation [0807a59]
+- 12:35 Added fail-closed declared npm-cache validation and sealed npm environment [7db1678]
+- 02:13 Added declared-cache validation and sealed offline npm environment for hermetic promotion [7db1678]
