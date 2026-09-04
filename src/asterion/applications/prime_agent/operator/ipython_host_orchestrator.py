@@ -160,7 +160,9 @@ async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHost
     identity, lease = live_run._identity, live_run._lease
     operations, signal = live_run._operations, live_run._signal
     supervisor: IpythonHostSupervisor | None = None
+    post: DockerWorkerWorkspaceSnapshot | None = None
     broker_revoked = False
+    body_error: BaseException | None = None
     try:
         supervisor = _new_ipython_host_supervisor(identity)
         _check_cancel(signal, supervisor)
@@ -183,30 +185,37 @@ async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHost
     except asyncio.CancelledError:
         if supervisor is not None:
             _cancel(supervisor)
-        raise asyncio.CancelledError() from None
+        body_error = asyncio.CancelledError()
     except Exception:
         if supervisor is not None:
             _cancel(supervisor)
-        raise IpythonHostOrchestrationError("ipython host orchestration is unavailable") from None
-    finally:
-        cleanup_error = await _cleanup(operations, lease, broker_revoked)
+        body_error = IpythonHostOrchestrationError(
+            "ipython host orchestration is unavailable"
+        )
 
-    if cleanup_error is not None:
-        if isinstance(cleanup_error, asyncio.CancelledError):
-            raise cleanup_error
+    cleanup_error = await _cleanup(operations, lease, broker_revoked)
+
+    if isinstance(cleanup_error, asyncio.CancelledError):
+        raise asyncio.CancelledError() from None
+    if isinstance(body_error, asyncio.CancelledError):
+        raise asyncio.CancelledError() from None
+    if cleanup_error is not None or body_error is not None:
         raise IpythonHostOrchestrationError("ipython host orchestration is unavailable") from None
+    if supervisor is None or post is None:
+        _reject()
+    typed_supervisor = cast(IpythonHostSupervisor, supervisor)
+    typed_post = cast(DockerWorkerWorkspaceSnapshot, post)
     try:
-        assert supervisor is not None
-        supervisor.record_cleanup(supervisor._attest_cleanup_and_absence())  # noqa: SLF001
-        _check_cancel(signal, supervisor)
+        typed_supervisor.record_cleanup(typed_supervisor._attest_cleanup_and_absence())  # noqa: SLF001
+        _check_cancel(signal, typed_supervisor)
         # This is intentionally after broker quiescence and verified absence.
-        final = supervisor._attest_final_oracle(post.source)  # noqa: SLF001
-        return supervisor.complete(final)
+        final = typed_supervisor._attest_final_oracle(typed_post.source)  # noqa: SLF001
+        return typed_supervisor.complete(final)
     except asyncio.CancelledError:
-        _cancel(supervisor)
+        _cancel(typed_supervisor)
         raise asyncio.CancelledError() from None
     except (IpythonHostSupervisorError, Exception):
-        _cancel(supervisor)
+        _cancel(typed_supervisor)
         raise IpythonHostOrchestrationError("ipython host orchestration is unavailable") from None
 
 
@@ -308,7 +317,7 @@ async def _cleanup(
 async def _bounded_cleanup_step(
     operation: Callable[[RestrictedWorkerLease], Awaitable[None]], lease: RestrictedWorkerLease
 ) -> BaseException | None:
-    """Bound each cleanup operation, then reap its task before the next proof."""
+    """Bound each cleanup operation and give cancellation a finite reaping grace."""
     async def invoke() -> None:
         await operation(lease)
 
@@ -325,9 +334,21 @@ async def _bounded_cleanup_step(
 
 
 async def _reap_cleanup_task(task: asyncio.Task[None]) -> None:
-    """Observe a canceled cleanup task so timeout cannot leave task state behind."""
+    """Observe a canceled task briefly; detach it if it ignores cancellation."""
     try:
-        await task
+        await asyncio.wait_for(
+            asyncio.shield(task), timeout=_CLEANUP_SECONDS / 3
+        )
+    except TimeoutError:
+        task.add_done_callback(_observe_cleanup_task)
+    except BaseException:
+        pass
+
+
+def _observe_cleanup_task(task: asyncio.Task[None]) -> None:
+    """Consume a detached cleanup task outcome without exposing it publicly."""
+    try:
+        task.exception()
     except BaseException:
         pass
 

@@ -140,6 +140,61 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(operations.calls, ["revoke_broker", "force_remove", "assert_absent"])
         self.assertTrue(operations.revoke_reaped)
 
+    async def test_cancellation_resistant_cleanup_is_bounded_and_still_attempts_removal_and_absence(self) -> None:
+        operations = _HostOperations(_identity())
+        release_revoke = asyncio.Event()
+
+        async def cancellation_resistant_revoke(lease: RestrictedWorkerLease) -> None:
+            del lease
+            operations.calls.append("revoke_broker")
+            while not release_revoke.is_set():
+                try:
+                    await release_revoke.wait()
+                except asyncio.CancelledError:
+                    pass
+
+        operations.revoke_broker = cancellation_resistant_revoke  # type: ignore[method-assign]
+        signal = _Signal()
+        signal.cancelled_value = True
+        with patch.object(subject, "_CLEANUP_SECONDS", 0.03):
+            task = asyncio.create_task(_issued(operations, signal=signal).complete())
+            try:
+                await asyncio.sleep(0.06)
+                self.assertEqual(operations.calls, ["revoke_broker", "force_remove", "assert_absent"])
+            finally:
+                release_revoke.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        release_revoke.set()
+        await asyncio.sleep(0)
+
+    async def test_caller_cancellation_during_cleanup_overrides_body_failure(self) -> None:
+        operations = _HostOperations(_identity())
+        cleanup_started = asyncio.Event()
+        release_cleanup = asyncio.Event()
+
+        async def failed_snapshot(lease: RestrictedWorkerLease) -> DockerWorkerWorkspaceSnapshot:
+            del lease
+            operations.calls.append("snapshot")
+            raise RuntimeError("SENTINEL-BODY-FAILURE")
+
+        async def blocked_revoke(lease: RestrictedWorkerLease) -> None:
+            del lease
+            operations.calls.append("revoke_broker")
+            cleanup_started.set()
+            await release_cleanup.wait()
+
+        operations.snapshot = failed_snapshot  # type: ignore[method-assign]
+        operations.revoke_broker = blocked_revoke  # type: ignore[method-assign]
+        task = asyncio.create_task(_issued(operations).complete())
+        await cleanup_started.wait()
+        task.cancel("SENTINEL-CANCELLATION")
+        release_cleanup.set()
+        with self.assertRaises(asyncio.CancelledError) as raised:
+            await task
+        self.assertEqual(raised.exception.args, ())
+        self.assertEqual(operations.calls, ["snapshot", "revoke_broker", "force_remove", "assert_absent"])
+
     async def test_adapter_cancellation_is_fresh_redacted_and_cleanup_is_reaped(self) -> None:
         operations = _HostOperations(_identity())
 
