@@ -344,6 +344,47 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
             ("unpause", daemon_id),
         ])
 
+    async def test_snapshot_reraises_outer_cancellation_after_successful_unpause(self) -> None:
+        daemon_id = "a" * 64
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w") as output:
+            info = tarfile.TarInfo("solution.py")
+            info.size = 1
+            output.addfile(info, io.BytesIO(b"x"))
+
+        class _BlockingUnpauseRunner(_Runner):
+            def __init__(self) -> None:
+                super().__init__([_Result(), _Result(stdout=archive.getvalue()), _Result()])
+                self.unpause_started = asyncio.Event()
+                self.allow_unpause = asyncio.Event()
+
+            async def run(self, **kwargs: object) -> _Result:  # type: ignore[override]
+                result = await super().run(**kwargs)  # type: ignore[arg-type]
+                if cast(tuple[str, ...], kwargs["argv"])[-2:] == ("unpause", daemon_id):
+                    self.unpause_started.set()
+                    await self.allow_unpause.wait()
+                return result
+
+        runner = _BlockingUnpauseRunner()
+        transport = DockerCliEngineTransport(
+            docker_executable="/usr/local/bin/docker", socket_path=_SOCKET,
+            seccomp_profile=_SECCOMP, runner=runner,
+        )
+        transport._specifications[daemon_id] = _spec()
+
+        snapshot = asyncio.create_task(
+            transport.snapshot_solution(daemon_id, control=self._control())
+        )
+        await runner.unpause_started.wait()
+        snapshot.cancel()
+        runner.allow_unpause.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await snapshot
+        self.assertEqual([call[0][-2:] for call in runner.calls], [
+            ("pause", daemon_id), (daemon_id + ":/workspace/solution.py", "-"),
+            ("unpause", daemon_id),
+        ])
+
     async def test_snapshot_unpause_failure_force_removes_and_proves_absence(self) -> None:
         daemon_id = "a" * 64
         transport, runner = self._transport([

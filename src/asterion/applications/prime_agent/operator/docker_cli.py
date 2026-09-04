@@ -434,6 +434,8 @@ class DockerCliEngineTransport(DockerEngineTransport):
             await self._shield_cleanup(
                 self._call(self._prefix + ("container", "unpause", container_id), control)
             )
+        except asyncio.CancelledError:
+            raise
         except BaseException:
             await self._destroy_after_uncertain_pause(container_id)
             raise RestrictedWorkerError("restricted worker value is invalid") from None
@@ -449,12 +451,16 @@ class DockerCliEngineTransport(DockerEngineTransport):
     @staticmethod
     async def _shield_cleanup(awaitable: object) -> object:
         task = asyncio.create_task(awaitable)  # type: ignore[arg-type]
+        cancelled = False
         while not task.done():
             try:
                 await asyncio.shield(task)
             except asyncio.CancelledError:
-                continue
-        return task.result()
+                cancelled = True
+        result = task.result()
+        if cancelled:
+            raise asyncio.CancelledError
+        return result
 
     async def _preflight(self, control: _LifecycleCallControl) -> None:
         for argv in (
