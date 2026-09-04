@@ -26,6 +26,10 @@ _CHALLENGE = "sha256:" + "a" * 64
 _WORKLOAD = "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"
 
 
+class _HostCallbackSentinel(BaseException):
+    pass
+
+
 def _identity(**changes: object) -> IpythonHostExpectedIdentity:
     values: dict[str, object] = {
         "assembly_id": "prime.capability-program@1.0.0", "package_id": "prime-agent@1.0.0",
@@ -129,6 +133,20 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
             await _issued(operations).complete()
         self.assertEqual(operations.calls[-2:], ["force_remove", "assert_absent"])
         self.assertNotIn("SECRET", str(raised.exception))
+
+    async def test_non_cancellation_base_exception_is_cleaned_up_and_redacted(self) -> None:
+        operations = _HostOperations(_identity())
+
+        async def failed_snapshot(lease: RestrictedWorkerLease) -> DockerWorkerWorkspaceSnapshot:
+            del lease
+            operations.calls.append("snapshot")
+            raise _HostCallbackSentinel("SENTINEL-HOST-CALLBACK")
+
+        operations.snapshot = failed_snapshot  # type: ignore[method-assign]
+        with self.assertRaises(subject.IpythonHostOrchestrationError) as raised:
+            await _issued(operations).complete()
+        self.assertEqual(operations.calls, ["snapshot", "revoke_broker", "force_remove", "assert_absent"])
+        self.assertNotIn("SENTINEL", str(raised.exception))
 
     async def test_hanging_cleanup_revocation_still_attempts_removal_and_absence(self) -> None:
         operations = _HostOperations(_identity())

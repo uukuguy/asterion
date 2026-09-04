@@ -186,7 +186,7 @@ async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHost
         if supervisor is not None:
             _cancel(supervisor)
         body_error = asyncio.CancelledError()
-    except Exception:
+    except BaseException:
         if supervisor is not None:
             _cancel(supervisor)
         body_error = IpythonHostOrchestrationError(
