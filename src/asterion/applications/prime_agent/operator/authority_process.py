@@ -210,7 +210,7 @@ def admit_retained_authority_descriptors(
         )
         retained = True
         return admitted
-    except (OSError, OverflowError, TypeError, ValueError, struct.error):
+    except (MemoryError, OSError, OverflowError, TypeError, ValueError, struct.error):
         _unavailable()
     finally:
         if connection is not None and not retained:

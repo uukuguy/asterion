@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import unittest
 import socket as socket_module
+import threading
+from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.authority_process import (
     AuthorityLaunchContract,
@@ -30,6 +32,43 @@ class _Socket:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_concurrent_consumers_have_exactly_one_owner(self) -> None:
+        admitted = admit_retained_authority_descriptors(
+            AuthorityLaunchContract(10, 11, 12, 100, 200, 300, 400),
+            platform_name="linux", effective_uid=lambda: 100, process_id=lambda: 200,
+            socket_factory=lambda _: _Socket(peer=(300, 400)), get_fd_flags=lambda _: 1,
+            peer_credentials=lambda _: (300, 400), close_fd=lambda _: None,
+            seqpacket_type=5, peercred_option=17,
+        )
+        barrier = threading.Barrier(3)
+        results: list[object] = []
+        def consume() -> None:
+            barrier.wait()
+            try:
+                results.append(admitted.consume_session_key_fd())
+            except PrimeP1AuthorityBootstrapError:
+                results.append("unavailable")
+        threads = [threading.Thread(target=consume), threading.Thread(target=consume)]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join()
+        self.assertCountEqual(results, [11, "unavailable"])
+
+    def test_constructor_failure_closes_every_inherited_descriptor(self) -> None:
+        closed: list[int] = []
+        connection = _Socket(peer=(300, 400))
+        with patch("asterion.applications.prime_agent.operator.authority_process.AdmittedAuthorityDescriptors", side_effect=MemoryError):
+            with self.assertRaises(PrimeP1AuthorityBootstrapError):
+                admit_retained_authority_descriptors(
+                    AuthorityLaunchContract(10, 11, 12, 100, 200, 300, 400), platform_name="linux",
+                    effective_uid=lambda: 100, process_id=lambda: 200, socket_factory=lambda _: connection,
+                    get_fd_flags=lambda _: 1, peer_credentials=lambda _: (300, 400), close_fd=closed.append,
+                    seqpacket_type=5, peercred_option=17,
+                )
+        self.assertTrue(connection.closed)
+        self.assertEqual(closed, [11, 12])
     def test_retained_bundle_transfers_each_descriptor_once_and_closes_only_unconsumed(
         self,
     ) -> None:
