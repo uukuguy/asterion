@@ -43,6 +43,24 @@ failure followed by final success; mutation after a model-produced IPython
 call; and worker/broker cleanup.  A fixture, fake broker, deterministic patch,
 or manually issued cell cannot mint this receipt.
 
+## Trusted completion boundary
+
+The model container is untrusted: its stdout, stderr, exit status, claimed
+terminal frames, and Python imports cannot prove task success. A Prime
+application host supervisor is the sole completion/evidence author. It binds
+an actual bounded-model receipt and sent-cell digest to Docker-daemon-attested
+pre/post snapshots of the fixed workspace file, force-removes the container
+before verification, and runs a host-owned data-only AST oracle for the fixed
+`answer() == 42` fixture. It never imports or executes model-owned Python.
+Untrusted output can cause only rejection.
+
+This replaces the rejected same-container launcher design: redirected child
+stdout does not prevent `/proc/<parent>/fd/1` writes, and an oracle importing
+model-owned code cannot trust its exit status. Docker transport must retain
+daemon container ID separately from requested name and use a fixed inspect
+projection. A default-off native Docker probe qualifies this isolation; only a
+separately authorized real broker run may mint P1 PASS.
+
 ## Product sequencing
 
 P2–P7 extend this exact spine: long context, recursive workflow, continuity,
