@@ -30,6 +30,13 @@ _CAPABILITY_ID = "model.bounded-session"
 _PROVIDER_ID = "prime-agent"
 _APPLICATION_ID = "prime.ipython-coding"
 _APPLICATION_VERSION = "1.0.0"
+_P1_MAX_REQUESTS = 1
+_P1_MAX_INPUT_TOKENS = 1024
+_P1_MAX_OUTPUT_TOKENS = 1024
+_P1_MAX_INPUT_BYTES = 4096
+_P1_MAX_OUTPUT_BYTES = 4096
+_P1_MAX_COST_MICROUNITS = 10_000
+_P1_DEADLINE_SECONDS = 60
 
 
 class PrimeModelSessionHostError(ValueError):
@@ -51,31 +58,29 @@ class _PrimeBoundedModelSessionService(BoundedModelSessionService):
 
     _config: _PrivatePrimeModelConfig
     _next_session: int = 0
-    _active: set[str] = field(default_factory=set)
+    _active: dict[str, BoundedModelSessionLease] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         return "PrimeBoundedModelSessionService(redacted)"
 
     def open(self, request: BoundedModelSessionRequest) -> BoundedModelSessionLease:
-        if type(request) is not BoundedModelSessionRequest:
+        if not _is_p1_request(request):
             raise PrimeModelSessionHostError("prime model session is unavailable")
         self._next_session += 1
         lease = BoundedModelSessionLease(
             session_id=f"prime-session-{self._next_session}", run_id=request.run_id
         )
-        self._active.add(lease.session_id)
+        self._active[lease.session_id] = lease
         return lease
 
     def revoke(self, lease: BoundedModelSessionLease) -> BoundedModelSessionReceipt:
-        if (
-            type(lease) is not BoundedModelSessionLease
-            or lease.session_id not in self._active
-        ):
+        issued = self._active.get(lease.session_id) if type(lease) is BoundedModelSessionLease else None
+        if issued is None or lease != issued:
             raise PrimeModelSessionHostError("prime model session is unavailable")
-        self._active.remove(lease.session_id)
+        del self._active[issued.session_id]
         return BoundedModelSessionReceipt(
-            session_id=lease.session_id,
-            run_id=lease.run_id,
+            session_id=issued.session_id,
+            run_id=issued.run_id,
             request_count=0,
             input_tokens=0,
             output_tokens=0,
@@ -123,6 +128,19 @@ def _validate_context(context: object) -> None:
         or dict(context.options)
     ):
         raise PrimeModelSessionHostError("prime model session is unavailable")
+
+
+def _is_p1_request(request: object) -> bool:
+    return (
+        type(request) is BoundedModelSessionRequest
+        and request.max_requests == _P1_MAX_REQUESTS
+        and request.max_input_tokens == _P1_MAX_INPUT_TOKENS
+        and request.max_output_tokens == _P1_MAX_OUTPUT_TOKENS
+        and request.max_input_bytes == _P1_MAX_INPUT_BYTES
+        and request.max_output_bytes == _P1_MAX_OUTPUT_BYTES
+        and request.max_cost_microunits == _P1_MAX_COST_MICROUNITS
+        and request.deadline_seconds == _P1_DEADLINE_SECONDS
+    )
 
 
 def _load_private_config(env_path: Path) -> _PrivatePrimeModelConfig:

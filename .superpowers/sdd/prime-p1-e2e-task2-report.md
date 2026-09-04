@@ -34,3 +34,39 @@ The existing broker remains the framed-byte/cancellation mediator and has no
 network provider in this task. A later task must bind real provider usage into
 the terminal receipt and enforce its measured token/cost counters before a
 provider-backed CLI result can be claimed.
+
+## Review fix: exact P1 admission and issued-lease identity
+
+- The Prime host now names the fixed P1 limits and rejects every non-identical
+  request limit before advancing its session counter or issuing a lease.
+- Active sessions retain their originally issued lease. Revocation compares the
+  full stored identity, rejects a same-session forged run ID without consuming
+  the valid lease, and emits receipt identity from the stored lease.
+- The host test casts the registry's intentionally generic factory result to
+  its declared bounded-session protocol, closing the focused Pyright errors.
+
+### Test-first evidence
+
+The new regressions were run before the implementation:
+
+```text
+uv run python -m unittest -v tests.test_prime_model_session_host
+# FAILED as expected: every altered P1 limit opened a lease, and a same-session
+# forged run ID revoked the active session.
+```
+
+After the focused fix:
+
+```text
+uv run python -m unittest -v tests.test_bounded_model_session tests.test_prime_model_session_host tests.test_prime_model_broker tests.test_prime_coding_fixture_receipt
+# 23 tests, OK
+
+uv run ruff check src/asterion/services/bounded_model_session.py src/asterion/services/__init__.py src/asterion/applications/prime_agent/operator/model_session_host.py tests/test_bounded_model_session.py tests/test_prime_model_session_host.py tests/test_prime_model_broker.py tests/test_prime_coding_fixture_receipt.py
+# All checks passed
+
+uv run pyright src/asterion/applications/prime_agent/operator/model_session_host.py tests/test_prime_model_session_host.py
+# 0 errors, 0 warnings, 0 informations
+
+git diff --check
+# exit 0
+```
