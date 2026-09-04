@@ -23,19 +23,22 @@ _CELL = b"def answer() -> int:\n    return 42\n\n"
 
 def _identity(**changes: object) -> IpythonHostExpectedIdentity:
     values: dict[str, object] = {
-        "assembly_id": "prime-p1",
-        "package_id": "prime-agent",
-        "implementation_id": "prime-ipython",
+        "assembly_id": "prime.capability-program@1.0.0",
+        "package_id": "prime-agent@1.0.0",
+        "implementation_id": "prime.ipython-coding@1.0.0",
         "image_digest": "sha256:" + "a" * 64,
-        "workload_id": "prime-p1-answer-42",
-        "oracle_id": "prime-answer-42-ast-v1",
+        "workload_digest": "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022",
+        "oracle_digest": "sha256:85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b31639fa3c4eb",
+        "starter_digest": "sha256:4f8e0bca0f70582bad96caa292823ac29577633bebd9f76257617dc92ab6832f",
+        "source_digest": "sha256:486a083f857430c7d6a452ebf881d1b8c46063c128b51162ffdebef0c1f71c7a",
     }
     values.update(changes)
     return IpythonHostExpectedIdentity(**values)  # type: ignore[arg-type]
 
 
 def _complete(supervisor: IpythonHostSupervisor) -> IpythonHostCompletion:
-    initial = supervisor._attest_snapshot(_INITIAL, is_regular_file=True)
+    initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
+    supervisor.record_initial_snapshot(initial)
     cell = supervisor._attest_brokered_cell(
         identity=supervisor._expected,
         cell=_CELL,
@@ -44,13 +47,12 @@ def _complete(supervisor: IpythonHostSupervisor) -> IpythonHostCompletion:
         input_bytes=1,
         output_bytes=1,
     )
-    post = supervisor._attest_snapshot(_FINAL, is_regular_file=True)
-    supervisor.record_initial_snapshot(initial)
     supervisor.record_brokered_cell(cell)
+    post = supervisor._attest_post_snapshot(_FINAL, is_regular_file=True)
     supervisor.record_post_snapshot(post)
-    supervisor.record_broker_revoked(cell)
-    supervisor.record_cleanup(cleanup_verified=True, absence_verified=True)
-    return supervisor.complete(supervisor._attest_oracle(_FINAL))
+    supervisor.record_broker_revoked(supervisor._attest_broker_revocation())
+    supervisor.record_cleanup(supervisor._attest_cleanup_and_absence())
+    return supervisor.complete(supervisor._attest_final_oracle(_FINAL))
 
 
 class _HostileEquality:
@@ -73,7 +75,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
         supervisor = IpythonHostSupervisor(_identity())
         with self.assertRaises(IpythonHostSupervisorError):
             supervisor.record_initial_snapshot(
-                supervisor._attest_snapshot(_FINAL, is_regular_file=True)
+                supervisor._attest_initial_snapshot(_FINAL, is_regular_file=True)
             )
         with self.assertRaises(IpythonHostSupervisorError):
             supervisor.record_cleanup(cleanup_verified=True, absence_verified=True)
@@ -81,10 +83,10 @@ class TestIpythonHostSupervisor(unittest.TestCase):
     def test_binds_expected_identity_and_rejects_cancellation(self) -> None:
         supervisor = IpythonHostSupervisor(_identity())
         supervisor.record_initial_snapshot(
-            supervisor._attest_snapshot(_INITIAL, is_regular_file=True)
+            supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         )
         for identity, cancelled in (
-            (_identity(workload_id="other-workload"), False),
+            (_identity(workload_digest="sha256:" + "c" * 64), False),
             (_identity(), True),
         ):
             with self.assertRaises(IpythonHostSupervisorError):
@@ -108,7 +110,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
     def test_rejects_false_regular_file_post_attestation(self) -> None:
         supervisor = IpythonHostSupervisor(_identity())
         supervisor.record_initial_snapshot(
-            supervisor._attest_snapshot(_INITIAL, is_regular_file=True)
+            supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         )
         cell = supervisor._attest_brokered_cell(
             identity=_identity(),
@@ -121,7 +123,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
         supervisor.record_brokered_cell(cell)
         with self.assertRaises(IpythonHostSupervisorError):
             supervisor.record_post_snapshot(
-                supervisor._attest_snapshot(_FINAL, is_regular_file=False)
+                supervisor._attest_post_snapshot(_FINAL, is_regular_file=False)
             )
 
     def test_oracle_strictly_decodes_utf8_and_checks_size_before_hashing(self) -> None:
@@ -136,9 +138,112 @@ class TestIpythonHostSupervisor(unittest.TestCase):
     def test_evidence_digest_covers_all_public_evidence_facts(self) -> None:
         baseline = _complete(IpythonHostSupervisor(_identity())).evidence_digest
         changed = _complete(
-            IpythonHostSupervisor(_identity(oracle_id="prime-answer-42-ast-v2"))
+            IpythonHostSupervisor(_identity(image_digest="sha256:" + "d" * 64))
         ).evidence_digest
         self.assertNotEqual(baseline, changed)
+
+    def test_attestations_cannot_be_created_before_their_stage(self) -> None:
+        supervisor = IpythonHostSupervisor(_identity())
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor._attest_brokered_cell(
+                identity=_identity(), cell=_CELL,
+                bounded_model_digest="sha256:" + "b" * 64,
+                request_count=1, input_bytes=1, output_bytes=1,
+            )
+        initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
+        supervisor.record_initial_snapshot(initial)
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor._attest_final_oracle(_FINAL)
+
+    def test_final_oracle_requires_revocation_cleanup_and_absence(self) -> None:
+        supervisor = IpythonHostSupervisor(_identity())
+        initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
+        supervisor.record_initial_snapshot(initial)
+        cell = supervisor._attest_brokered_cell(
+            identity=_identity(), cell=_CELL,
+            bounded_model_digest="sha256:" + "b" * 64,
+            request_count=1, input_bytes=1, output_bytes=1,
+        )
+        supervisor.record_brokered_cell(cell)
+        post = supervisor._attest_post_snapshot(_FINAL, is_regular_file=True)
+        supervisor.record_post_snapshot(post)
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor._attest_final_oracle(_FINAL)
+
+    def test_late_cancellation_latches_and_blocks_completion(self) -> None:
+        supervisor = IpythonHostSupervisor(_identity())
+        initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
+        supervisor.record_initial_snapshot(initial)
+        cell = supervisor._attest_brokered_cell(
+            identity=_identity(), cell=_CELL,
+            bounded_model_digest="sha256:" + "b" * 64,
+            request_count=1, input_bytes=1, output_bytes=1,
+        )
+        supervisor.record_brokered_cell(cell)
+        supervisor.cancel()
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor._attest_post_snapshot(_FINAL, is_regular_file=True)
+
+    def test_cancellation_after_final_attestation_blocks_complete(self) -> None:
+        supervisor = IpythonHostSupervisor(_identity())
+        initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
+        supervisor.record_initial_snapshot(initial)
+        cell = supervisor._attest_brokered_cell(
+            identity=_identity(), cell=_CELL,
+            bounded_model_digest="sha256:" + "b" * 64,
+            request_count=1, input_bytes=1, output_bytes=1,
+        )
+        supervisor.record_brokered_cell(cell)
+        supervisor.record_post_snapshot(
+            supervisor._attest_post_snapshot(_FINAL, is_regular_file=True)
+        )
+        supervisor.record_broker_revoked(supervisor._attest_broker_revocation())
+        supervisor.record_cleanup(supervisor._attest_cleanup_and_absence())
+        oracle = supervisor._attest_final_oracle(_FINAL)
+        supervisor.cancel()
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.complete(oracle)
+
+    def test_rejects_caller_selected_identity_aliases_and_versions(self) -> None:
+        for changes in (
+            {"assembly_id": "prime.capability-program@2.0.0"},
+            {"package_id": "prime-agent@9.9.9"},
+            {"implementation_id": "prime.ipython-coding@1.2.3"},
+            {"workload_digest": "sha256:" + "e" * 64},
+            {"oracle_digest": "sha256:" + "e" * 64},
+            {"starter_digest": "sha256:" + "e" * 64},
+            {"source_digest": "sha256:" + "e" * 64},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(IpythonHostSupervisorError):
+                IpythonHostSupervisor(_identity(**changes))
+
+    def test_completion_is_single_mint_terminal_and_immutable(self) -> None:
+        supervisor = IpythonHostSupervisor(_identity())
+        completion = _complete(supervisor)
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.complete(object())
+        with self.assertRaises((AttributeError, TypeError)):
+            completion._digest = "sha256:" + "0" * 64  # type: ignore[attr-defined]
+        self.assertRegex(completion.evidence_digest, r"^sha256:[0-9a-f]{64}$")
+
+    def test_revocation_and_cleanup_reject_cells_and_raw_booleans(self) -> None:
+        supervisor = IpythonHostSupervisor(_identity())
+        initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
+        supervisor.record_initial_snapshot(initial)
+        cell = supervisor._attest_brokered_cell(
+            identity=_identity(), cell=_CELL,
+            bounded_model_digest="sha256:" + "b" * 64,
+            request_count=1, input_bytes=1, output_bytes=1,
+        )
+        supervisor.record_brokered_cell(cell)
+        post = supervisor._attest_post_snapshot(_FINAL, is_regular_file=True)
+        supervisor.record_post_snapshot(post)
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.record_broker_revoked(cell)
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.record_broker_revoked(True)
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.record_cleanup(cleanup_verified=True, absence_verified=True)
 
     def test_public_api_does_not_offer_generic_receipts_snapshots_or_reducer(
         self,

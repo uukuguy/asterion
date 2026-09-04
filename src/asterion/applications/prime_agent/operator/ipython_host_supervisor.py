@@ -17,6 +17,14 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9-]*$")
 _MAX_SOURCE_BYTES = 16 * 1024
 _SEAL = object()
+_ATTESTATION_VERSION = "prime-ipython-host-attestation/v1"
+_ASSEMBLY_ID = "prime.capability-program@1.0.0"
+_PACKAGE_ID = "prime-agent@1.0.0"
+_IMPLEMENTATION_ID = "prime.ipython-coding@1.0.0"
+_WORKLOAD_DIGEST = "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"
+_ORACLE_DIGEST = "sha256:85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b31639fa3c4eb"
+_STARTER_DIGEST = "sha256:4f8e0bca0f70582bad96caa292823ac29577633bebd9f76257617dc92ab6832f"
+_SOURCE_DIGEST = "sha256:486a083f857430c7d6a452ebf881d1b8c46063c128b51162ffdebef0c1f71c7a"
 __all__ = (
     "IpythonHostCompletion",
     "IpythonHostExpectedIdentity",
@@ -36,20 +44,25 @@ class IpythonHostExpectedIdentity:
     package_id: str
     implementation_id: str
     image_digest: str
-    workload_id: str
-    oracle_id: str
+    workload_digest: str
+    oracle_digest: str
+    starter_digest: str
+    source_digest: str
 
     def __repr__(self) -> str:
         return "IpythonHostExpectedIdentity(redacted)"
 
 
 class IpythonHostCompletion:
-    __slots__ = ("_digest",)
+    __slots__ = ("__digest",)
 
     def __init__(self, *, _seal: object, evidence_digest: str) -> None:
         if _seal is not _SEAL or not _valid_digest(evidence_digest):
             _invalid()
-        self._digest = evidence_digest
+        object.__setattr__(self, "_IpythonHostCompletion__digest", evidence_digest)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise TypeError("ipython host completion is immutable")
 
     @property
     def status(self) -> Literal["PASS"]:
@@ -57,7 +70,7 @@ class IpythonHostCompletion:
 
     @property
     def evidence_digest(self) -> str:
-        return self._digest
+        return self.__digest
 
     def __repr__(self) -> str:
         return "IpythonHostCompletion(PASS)"
@@ -66,6 +79,9 @@ class IpythonHostCompletion:
 @dataclass(frozen=True, repr=False)
 class _Snapshot:
     issuer: object
+    version: str
+    stage: str
+    sequence: int
     digest: str
     regular_file: bool
     oracle_passed: bool
@@ -77,6 +93,9 @@ class _Snapshot:
 @dataclass(frozen=True, repr=False)
 class _Cell:
     issuer: object
+    version: str
+    stage: str
+    sequence: int
     identity: IpythonHostExpectedIdentity
     digest: str
     model_digest: str
@@ -93,11 +112,36 @@ class _Cell:
 @dataclass(frozen=True, repr=False)
 class _Oracle:
     issuer: object
+    version: str
+    stage: str
+    sequence: int
     digest: str
     passed: bool
 
     def __repr__(self) -> str:
         return "_Oracle(redacted)"
+
+
+@dataclass(frozen=True, repr=False)
+class _Revocation:
+    issuer: object
+    version: str
+    stage: str
+    sequence: int
+
+    def __repr__(self) -> str:
+        return "_Revocation(redacted)"
+
+
+@dataclass(frozen=True, repr=False)
+class _Cleanup:
+    issuer: object
+    version: str
+    stage: str
+    sequence: int
+
+    def __repr__(self) -> str:
+        return "_Cleanup(redacted)"
 
 
 def inspect_answer_source(source: object) -> bool:
@@ -144,12 +188,34 @@ class IpythonHostSupervisor:
         self._initial: _Snapshot | None = None
         self._cell: _Cell | None = None
         self._post: _Snapshot | None = None
-        self._revoked = self._cleanup = self._absence = False
+        self._revocation: _Revocation | None = None
+        self._cleanup: _Cleanup | None = None
+        self._cancelled = self._completed = False
+        self._sequence = 0
         self._stages: list[str] = []
 
     # Private producer hooks for future Docker/broker adapters, not public
     # generic receipt/snapshot APIs.
-    def _attest_snapshot(self, source: object, *, is_regular_file: object) -> _Snapshot:
+    def cancel(self) -> None:
+        """Latch host-observed cancellation; it can never be cleared."""
+        self._require_active()
+        self._cancelled = True
+
+    def _attest_initial_snapshot(
+        self, source: object, *, is_regular_file: object
+    ) -> _Snapshot:
+        self._require_stage(0)
+        return self._make_snapshot(source, is_regular_file, "initial", 1)
+
+    def _attest_post_snapshot(
+        self, source: object, *, is_regular_file: object
+    ) -> _Snapshot:
+        self._require_stage(2)
+        return self._make_snapshot(source, is_regular_file, "post", 3)
+
+    def _make_snapshot(
+        self, source: object, is_regular_file: object, stage: str, sequence: int
+    ) -> _Snapshot:
         if (
             type(source) is not bytes
             or type(is_regular_file) is not bool
@@ -159,16 +225,23 @@ class IpythonHostSupervisor:
         data = cast(bytes, source)
         return _Snapshot(
             self._issuer,
+            _ATTESTATION_VERSION,
+            stage,
+            sequence,
             _sha256(data),
             cast(bool, is_regular_file),
             inspect_answer_source(data),
         )
 
-    def _attest_oracle(self, source: object) -> _Oracle:
+    def _attest_final_oracle(self, source: object) -> _Oracle:
+        self._require_stage(5)
         if type(source) is not bytes or len(source) > _MAX_SOURCE_BYTES:
             _invalid()
         data = cast(bytes, source)
-        return _Oracle(self._issuer, _sha256(data), inspect_answer_source(data))
+        return _Oracle(
+            self._issuer, _ATTESTATION_VERSION, "final-oracle", 6,
+            _sha256(data), inspect_answer_source(data),
+        )
 
     def _attest_brokered_cell(
         self,
@@ -181,6 +254,7 @@ class IpythonHostSupervisor:
         output_bytes: object,
         cancelled: object = False,
     ) -> _Cell:
+        self._require_stage(1)
         if (
             not _valid_identity(identity)
             or type(cell) is not bytes
@@ -198,6 +272,9 @@ class IpythonHostSupervisor:
             _invalid()
         return _Cell(
             self._issuer,
+            _ATTESTATION_VERSION,
+            "cell",
+            2,
             cast(IpythonHostExpectedIdentity, identity),
             _sha256(cast(bytes, cell)),
             cast(str, bounded_model_digest),
@@ -208,69 +285,67 @@ class IpythonHostSupervisor:
             cast(bool, cancelled),
         )
 
+    def _attest_broker_revocation(self) -> _Revocation:
+        self._require_stage(3)
+        return _Revocation(self._issuer, _ATTESTATION_VERSION, "revocation", 4)
+
+    def _attest_cleanup_and_absence(self) -> _Cleanup:
+        self._require_stage(4)
+        return _Cleanup(self._issuer, _ATTESTATION_VERSION, "cleanup", 5)
+
     def record_initial_snapshot(self, snapshot: object) -> None:
-        if self._initial is not None or not _valid_snapshot(snapshot, self._issuer):
+        self._require_stage(0)
+        if self._initial is not None or not _valid_snapshot(snapshot, self._issuer, "initial", 1):
             _invalid()
         attestation = cast(_Snapshot, snapshot)
         if not attestation.regular_file or attestation.oracle_passed:
             _invalid()
         self._initial = attestation
+        self._sequence = 1
         self._stages.append("initial-daemon-snapshot-and-failed-host-ast")
 
     def record_brokered_cell(self, receipt: object) -> None:
-        if (
-            self._initial is None
-            or self._cell is not None
-            or not _valid_cell(receipt, self._issuer)
-        ):
+        self._require_stage(1)
+        if self._cell is not None or not _valid_cell(receipt, self._issuer, "cell", 2):
             _invalid()
         attestation = cast(_Cell, receipt)
         if attestation.cancelled or attestation.identity != self._expected:
             _invalid()
         self._cell = attestation
+        self._sequence = 2
         self._stages.append("genuine-brokered-ipython-cell")
 
     def record_post_snapshot(self, snapshot: object) -> None:
-        if (
-            self._cell is None
-            or self._post is not None
-            or not _valid_snapshot(snapshot, self._issuer)
-        ):
+        self._require_stage(2)
+        if self._post is not None or not _valid_snapshot(snapshot, self._issuer, "post", 3):
             _invalid()
         attestation = cast(_Snapshot, snapshot)
         initial = cast(_Snapshot, self._initial)
         if not attestation.regular_file or attestation.digest == initial.digest:
             _invalid()
         self._post = attestation
+        self._sequence = 3
         self._stages.append("changed-post-daemon-snapshot")
 
     def record_broker_revoked(self, receipt: object) -> None:
-        if self._post is None or self._revoked or receipt is not self._cell:
+        self._require_stage(3)
+        if not _valid_revocation(receipt, self._issuer, 4):
             _invalid()
-        self._revoked = True
+        self._revocation = cast(_Revocation, receipt)
+        self._sequence = 4
         self._stages.append("broker-revoked-and-quiescent")
 
-    def record_cleanup(
-        self, *, cleanup_verified: object, absence_verified: object
-    ) -> None:
-        if (
-            not self._revoked
-            or self._cleanup
-            or type(cleanup_verified) is not bool
-            or type(absence_verified) is not bool
-            or cleanup_verified is not True
-            or absence_verified is not True
-        ):
+    def record_cleanup(self, receipt: object = None, **unused: object) -> None:
+        self._require_stage(4)
+        if unused or not _valid_cleanup(receipt, self._issuer, 5):
             _invalid()
-        self._cleanup = self._absence = True
+        self._cleanup = cast(_Cleanup, receipt)
+        self._sequence = 5
         self._stages.append("cleanup-and-absence-verified")
 
     def complete(self, final_oracle: object) -> IpythonHostCompletion:
-        if (
-            not self._cleanup
-            or not self._absence
-            or not _valid_oracle(final_oracle, self._issuer)
-        ):
+        self._require_stage(5)
+        if not _valid_oracle(final_oracle, self._issuer, "final-oracle", 6):
             _invalid()
         attestation = cast(_Oracle, final_oracle)
         post = cast(_Snapshot, self._post)
@@ -280,7 +355,11 @@ class IpythonHostSupervisor:
         cell = cast(_Cell, self._cell)
         post = cast(_Snapshot, self._post)
         oracle = attestation
+        revocation = cast(_Revocation, self._revocation)
+        cleanup = cast(_Cleanup, self._cleanup)
         self._stages.append("final-host-ast-success")
+        self._completed = True
+        self._sequence = 6
         evidence = {
             "version": "prime-ipython-host-evidence/v1",
             "identity": (
@@ -288,8 +367,10 @@ class IpythonHostSupervisor:
                 self._expected.package_id,
                 self._expected.implementation_id,
                 self._expected.image_digest,
-                self._expected.workload_id,
-                self._expected.oracle_id,
+                self._expected.workload_digest,
+                self._expected.oracle_digest,
+                self._expected.starter_digest,
+                self._expected.source_digest,
             ),
             "model": (
                 cell.model_digest,
@@ -300,15 +381,17 @@ class IpythonHostSupervisor:
                 cell.tools,
                 cell.cancelled,
             ),
-            "snapshots": (
-                initial.digest,
-                initial.regular_file,
-                initial.oracle_passed,
-                post.digest,
-                post.regular_file,
+            "attestations": (
+                (initial.version, initial.stage, initial.sequence),
+                (cell.version, cell.stage, cell.sequence),
+                (post.version, post.stage, post.sequence),
+                (revocation.version, revocation.stage, revocation.sequence),
+                (cleanup.version, cleanup.stage, cleanup.sequence),
+                (oracle.version, oracle.stage, oracle.sequence),
             ),
+            "snapshots": (initial.digest, initial.regular_file, initial.oracle_passed, post.digest, post.regular_file),
             "oracle": (oracle.digest, oracle.passed),
-            "cleanup": (self._revoked, self._cleanup, self._absence),
+            "cleanup": (True, True, True),
             "stages": tuple(self._stages),
         }
         return IpythonHostCompletion(
@@ -320,23 +403,38 @@ class IpythonHostSupervisor:
             ),
         )
 
+    def _require_active(self) -> None:
+        if self._cancelled or self._completed:
+            _invalid()
 
-def _valid_snapshot(value: object, issuer: object) -> bool:
+    def _require_stage(self, expected: int) -> None:
+        self._require_active()
+        if self._sequence != expected:
+            _invalid()
+
+
+def _valid_snapshot(value: object, issuer: object, stage: str, sequence: int) -> bool:
     return (
         type(value) is _Snapshot
         and value.issuer is issuer
+        and value.version == _ATTESTATION_VERSION
+        and value.stage == stage
+        and value.sequence == sequence
         and _valid_digest(value.digest)
         and type(value.regular_file) is bool
         and type(value.oracle_passed) is bool
     )
 
 
-def _valid_cell(value: object, issuer: object) -> bool:
+def _valid_cell(value: object, issuer: object, stage: str, sequence: int) -> bool:
     if type(value) is not _Cell or value.issuer is not issuer:
         return False
     tools = value.tools
     return (
         _valid_identity(value.identity)
+        and value.version == _ATTESTATION_VERSION
+        and value.stage == stage
+        and value.sequence == sequence
         and _valid_digest(value.digest)
         and _valid_digest(value.model_digest)
         and type(value.request_count) is int
@@ -353,10 +451,13 @@ def _valid_cell(value: object, issuer: object) -> bool:
     )
 
 
-def _valid_oracle(value: object, issuer: object) -> bool:
+def _valid_oracle(value: object, issuer: object, stage: str, sequence: int) -> bool:
     return (
         type(value) is _Oracle
         and value.issuer is issuer
+        and value.version == _ATTESTATION_VERSION
+        and value.stage == stage
+        and value.sequence == sequence
         and _valid_digest(value.digest)
         and type(value.passed) is bool
     )
@@ -365,18 +466,23 @@ def _valid_oracle(value: object, issuer: object) -> bool:
 def _valid_identity(value: object) -> bool:
     return (
         type(value) is IpythonHostExpectedIdentity
-        and all(
-            _valid_identifier(part)
-            for part in (
-                value.assembly_id,
-                value.package_id,
-                value.implementation_id,
-                value.workload_id,
-                value.oracle_id,
-            )
-        )
+        and value.assembly_id == _ASSEMBLY_ID
+        and value.package_id == _PACKAGE_ID
+        and value.implementation_id == _IMPLEMENTATION_ID
         and _valid_digest(value.image_digest)
+        and value.workload_digest == _WORKLOAD_DIGEST
+        and value.oracle_digest == _ORACLE_DIGEST
+        and value.starter_digest == _STARTER_DIGEST
+        and value.source_digest == _SOURCE_DIGEST
     )
+
+
+def _valid_revocation(value: object, issuer: object, sequence: int) -> bool:
+    return type(value) is _Revocation and value.issuer is issuer and value.version == _ATTESTATION_VERSION and value.stage == "revocation" and value.sequence == sequence
+
+
+def _valid_cleanup(value: object, issuer: object, sequence: int) -> bool:
+    return type(value) is _Cleanup and value.issuer is issuer and value.version == _ATTESTATION_VERSION and value.stage == "cleanup" and value.sequence == sequence
 
 
 def _is_int(node: ast.expr | None) -> bool:
