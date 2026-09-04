@@ -28,21 +28,21 @@
 - Produces `_resolve_promotion_npm_cache(raw: str) -> Path`.
 - Produces `_closed_npm_subprocess_environment(workspace: Path, npm_cache: Path) -> dict[str, str]`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Add subtests for relative, missing, and symlink cache roots. Assert each raises
 `PromotionError` before a runner observes a command. Add a hostile environment
 test which requires only the resolved cache, `NPM_CONFIG_OFFLINE=true`, and
 the fixed registry, while rejecting proxy, token, HOME, and npm config values.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `uv run python -m unittest -v tests.test_check_promotion`
 
 Expected: FAIL because cache validation and the restricted npm environment do
 not exist.
 
-- [ ] **Step 3: Implement minimal validation**
+- [x] **Step 3: Implement minimal validation**
 
 Resolve only an absolute existing non-symlink directory, returning a canonical
 `Path`; map every invalid form to the one redacted `PromotionError`. Build the
@@ -50,13 +50,13 @@ npm environment from `_closed_prime_subprocess_environment`, replacing only
 its private cache with the canonical declared cache and adding offline plus the
 fixed registry.
 
-- [ ] **Step 4: Run focused verification**
+- [x] **Step 4: Run focused verification**
 
 Run: `uv run python -m unittest -v tests.test_check_promotion`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run: `git add tools/check_promotion.py tests/test_check_promotion.py && git commit -m "feat(promotion): validate declared offline npm cache"`
 
