@@ -1609,3 +1609,4 @@
 - 09:25 Aligned P4–P7 worker plan with existing reducer digest bindings [6dca17d]
 - 09:30 Added sealed shared worker lifecycle and fixed P4 continuity adapter [9545c26, 403056f, bb51a9d]
 - 09:42 Sealed P4 completion bytes and cancellation-safe worker cleanup [5476d5a]
+- 10:05 Closed P4 review gaps for rejected-lease cleanup and canonical fixture bytes [7c56f93]
