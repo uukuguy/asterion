@@ -12,9 +12,9 @@
 
 **Files:** Create Prime capability package payload/manifest/implementation; add `prime.agent` runtime factory; update exact registry, assembly, and tests.
 
-- [ ] Write failing package-resolution and runtime tests proving `prime-agent@1.0.0`, `prime.ipython-coding@1.0.0`, and only `prime.tool.ipython` resolve through the standard composition path.
-- [ ] Implement one exact package binding and a frame-only runtime adapter; reject alternate tools, ambiguous bindings, and undeclared runtime IDs before execution.
-- [ ] Run focused package/runtime/assembly tests, Ruff, Pyright, and commit.
+- [x] Write failing package-resolution and runtime tests proving `prime-agent@1.0.0`, `prime.ipython-coding@1.0.0`, and only `prime.tool.ipython` resolve through the standard composition path.
+- [x] Implement one exact package binding and a frame-only runtime adapter; reject alternate tools, ambiguous bindings, and undeclared runtime IDs before execution.
+- [x] Run focused package/runtime/assembly tests, Ruff, Pyright, and commit.
 
 ### Task 2: Bounded model-session service and private operator integration
 
