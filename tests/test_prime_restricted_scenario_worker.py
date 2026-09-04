@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from typing import cast
 
+from asterion.applications.prime_agent.operator.restricted_scenario_worker import (
+    RestrictedScenarioEngine,
+)
 from asterion.services.restricted_worker import (
     RestrictedWorkerLease,
     RestrictedWorkerRequest,
@@ -111,7 +115,9 @@ class TestRestrictedScenarioWorker(unittest.IsolatedAsyncioTestCase):
             lambda raw: raw == b"ok",
         )
         worker = RestrictedScenarioWorker(
-            image_digest=_IMAGE, engine=Engine(), adapter=adapter
+            image_digest=_IMAGE,
+            engine=cast("RestrictedScenarioEngine", Engine()),
+            adapter=adapter,
         )
         request = RestrictedWorkerRequest(
             "prime.test", _IMAGE, "run-1", _DIGEST, _DIGEST, 1, 8
