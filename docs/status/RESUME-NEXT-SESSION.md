@@ -1,23 +1,18 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-04 08:50. **Session remains active — not a final handoff.**
+> Updated: 2026-09-04 13:25. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- P1–P7 have provider-free acceptance implementations. None has real
-  Docker/model/network/benchmark/ARC execution evidence; such results remain
-  External-limited.
-- The repaired Prime source lock and installed-wheel resource closure now pass
-  `make promotion-check`: 28 provider-free commands, zero provider operations,
-  and no full dataset.
-- P6 implements the fixed task-A → one candidate revision → task-B
-  preserve-or-exact-rollback product over `HarnessCoordinator`; `e372297`
-  binds scope, worker result, lock, task-B attestation, quiescence, cleanup,
-  and global-scope approval before bounded evidence issuance.
-- P7 implements a one-game IPython-only ARC-AGI-3 broker trace, injected host
-  score replay, provider-free acceptance, and separate subset/full evidence
-  reducers. `5f11dc5` never starts a worker or game; full evidence needs an
-  exact finite operator authorization and remains unclaimed.
+- P1–P7 retain provider-free acceptance implementations; real Docker/model/
+  network/benchmark/ARC evidence remains External-limited.
+- P4–P7 now also have sealed restricted-worker facades. P4 has canonical
+  diagnostic completion and cancellation-safe cleanup; P5/P6/P7 have strict,
+  scenario-specific canonical completions that reject forged traces.
+- P7 adds a source-lock-preflighted, inert injected-engine factory. It permits
+  only the fixed one-game ARC adapter at exactly 300 seconds and 4096 bytes.
+- Cross-scenario isolation passed: every P4–P7 foreign role/workload pair is
+  rejected before launch. P4 and P7 independent reviews passed.
 
 ## Current decision
 
@@ -28,29 +23,29 @@
 
 ## Verification evidence
 
-- Focused P7 verification passed: 26 tests across workload, redacted trace,
-  broker, acceptance, live reducers, worker gate, and evidence contract;
-  scoped Ruff, Pyright, and `git diff --check` passed.
-- Repository-wide provider-free `make test` passed (2,897 tests). It rebuilt
-  pinned local Node fixtures but started no model, Docker, game, provider, or
-  network operation.
-- The full isolated `make promotion-check` passed after aligning one stale
-  gateway test with the established sparse native-cursor contract.
+- Focused P4–P7 worker, acceptance, trace, live-reducer, gate, and integration
+  suites passed; scoped Ruff, Pyright, and `git diff --check` passed.
+- A new whole-repository `make test` attempt was stopped after a non-Prime
+  hard-link loop exceeded 14 minutes. A new `make promotion-check` attempt was
+  stopped after its proxy-backed `npm ci` stalled. Both are **Not rerun**, not
+  PASS or FAIL.
+- Earlier clean repository evidence remains historical only: promotion passed
+  before the new worker facade commits; it does not verify this head.
 
 ## Immediate next action
 
-1. Retain all external Prime evidence as External-limited.
-2. Do not run a real ARC-AGI-3 suite without separately scoped authorization.
-3. Continue only with provider-free implementation or review work unless an
-   operator separately authorizes a finite real worker/model/benchmark run.
+1. Diagnose/bound the unrelated full-suite hard-link loop before claiming a new
+   repository-wide test PASS.
+2. Retry promotion only after npm's local proxy path is responsive; retain its
+   result as Not rerun until an exit code and output are captured.
+3. Keep real Prime worker/model/ARC runs External-limited absent a separately
+   scoped operator authorization.
 
 ## Recovery commands
 
 ```bash
 git status --short
-git log --oneline -12
-test -f /tmp/asterion-final-make-test.status && cat /tmp/asterion-final-make-test.status
-tail -n 40 /tmp/asterion-final-make-test.log
-uv run python -m unittest -v tests.test_prime_arc_agi_3_workload tests.test_prime_arc_agi_3_receipt tests.test_prime_arc_agi_3_broker tests.test_prime_arc_agi_3_acceptance tests.test_prime_arc_agi_3_live_validation tests.test_prime_worker_gate tests.test_prime_capability_evidence
+git log --oneline -16
+uv run python -m unittest -v tests.test_prime_restricted_scenario_worker tests.test_prime_restricted_scenario_worker_integration tests.test_prime_diagnostic_session_recovery_worker tests.test_prime_bounded_autonomy_worker tests.test_prime_continual_improvement_worker tests.test_prime_arc_agi_3_worker tests.test_prime_application_provider tests.test_prime_worker_gate
 make promotion-check
 ```
