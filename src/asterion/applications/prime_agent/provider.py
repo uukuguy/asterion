@@ -71,7 +71,7 @@ def create_provider() -> InstalledApplicationProvider:
                     / "applications/prime_agent/assemblies/prime-capability-program.json",
                 ),
                 capability_packages=(CapabilityPackageRef("prime-agent", "1.0.0"),),
-                runtime_ids=("prime.restricted-worker",),
+                runtime_ids=("prime.agent",),
             ),
         ),
     )

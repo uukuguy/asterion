@@ -2,12 +2,12 @@
   "protocol": "asterion.application-assembly/v1",
   "application_id": "prime.capability-program",
   "version": "1.0.0",
-  "runtime_id": "prime.restricted-worker",
+  "runtime_id": "prime.agent",
   "capability_packages": [
     {"package_id": "prime-agent", "version": "1.0.0"}
   ],
   "capabilities": [
-    {"capability_id": "prime.capability-program", "version": "1.0.0"}
+    {"capability_id": "prime.ipython-coding", "version": "1.0.0"}
   ],
   "host_capabilities": [],
   "host_policies": [],

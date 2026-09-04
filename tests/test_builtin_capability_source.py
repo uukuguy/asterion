@@ -24,6 +24,7 @@ from asterion.capability_sdk import run_capability_conformance
 
 CONTROLLED_CODE = CapabilityPackageRef("controlled-code", "1.0.0")
 DCI = CapabilityPackageRef("dci", "1.0.0")
+PRIME_AGENT = CapabilityPackageRef("prime-agent", "1.0.0")
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "extensions" / "minimal" / "payload"
 
 
@@ -73,7 +74,7 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
 
         self.assertEqual(
             tuple(item.package_ref for item in registrations),
-            (CONTROLLED_CODE, DCI),
+            (CONTROLLED_CODE, DCI, PRIME_AGENT),
         )
         self.assertNotIn(
             CapabilityPackageRef("dci-agent-lite", "1.0.0"),

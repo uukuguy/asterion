@@ -20,6 +20,11 @@ from asterion.runtime.factory import (
 from asterion.runtime.working_directory import ProcessDirectoryAuthority
 from asterion.runtimes.claude_code import ClaudeCodeRuntimeClient
 from asterion.runtimes.pi import PiRuntimeClient, prepare_pi_evidence_root
+from asterion.runtimes.prime_agent import (
+    PRIME_IPYTHON_CAPABILITY,
+    PRIME_RUNTIME_ID,
+    PrimeAgentRuntimeClient,
+)
 
 
 PI_CAPABILITIES = ("filesystem.read", "pi.tool.grep")
@@ -74,8 +79,23 @@ def default_runtime_factory_registry() -> RuntimeFactoryRegistry:
                 capabilities=CLAUDE_CAPABILITIES,
                 factory=_create_claude_code_runtime,
             ),
+            RuntimeFactoryBinding(
+                runtime_id=PRIME_RUNTIME_ID,
+                capabilities=(PRIME_IPYTHON_CAPABILITY,),
+                factory=_create_prime_agent_runtime,
+            ),
         )
     )
+
+
+def _create_prime_agent_runtime(context: RuntimeFactoryContext) -> PrimeAgentRuntimeClient:
+    if (
+        context.runtime_id != PRIME_RUNTIME_ID
+        or context.options
+        or context.host_services
+    ):
+        raise RuntimeFactoryError("Prime runtime configuration is invalid")
+    return PrimeAgentRuntimeClient()
 
 
 def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:

@@ -17,6 +17,7 @@ from asterion.capabilities.execution import CapabilityImplementationBinding
 CONTROLLED_CODE_PACKAGE = CapabilityPackageRef("controlled-code", "1.0.0")
 CONTROLLED_CODE_SOURCE_ID = "controlled-code.builtin"
 DCI_PACKAGE = CapabilityPackageRef("dci", "1.0.0")
+PRIME_AGENT_PACKAGE = CapabilityPackageRef("prime-agent", "1.0.0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,11 @@ def builtin_capability_sources() -> tuple[BuiltinCapabilityRegistration, ...]:
             DCI_PACKAGE,
             package_root / "dci/payload",
             create_dci_package,
+        ),
+        BuiltinCapabilityRegistration(
+            PRIME_AGENT_PACKAGE,
+            package_root / "prime_agent/payload",
+            create_prime_agent_package,
         ),
     )
 
@@ -89,9 +95,18 @@ def create_dci_package() -> InstalledCapabilityPackage:
     return create_provider()
 
 
+def create_prime_agent_package() -> InstalledCapabilityPackage:
+    """Load the selected Prime package after its payload is validated."""
+
+    from asterion.capabilities.prime_agent import create_prime_agent_package as create
+
+    return create()
+
+
 __all__ = (
     "BuiltinCapabilityRegistration",
     "builtin_capability_sources",
     "create_controlled_code_package",
     "create_dci_package",
+    "create_prime_agent_package",
 )
