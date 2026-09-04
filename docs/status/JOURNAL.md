@@ -1599,3 +1599,6 @@
 - 06:35 correction: recorded P2/P3 structural boundaries and seven-product audit [c1cbb70]
 - 06:36 Excluded declared Prime build outputs from source locks so promotion checks preserve exact source identity [b345cab]
 - 06:37 Reverted the incomplete source-lock exclusion after promotion still proved the pinned tree digest inconsistent [e0f8a2f]
+- 06:38 Recorded the reproducible Prime source-lock mismatch that blocks promotion verification [8911297]
+- 07:01 Reissued reproducible Prime source lock excluding declared generated outputs [0780008]
+- 07:35 Added Prime assembly to installed-wheel promotion resource check [242b508]

@@ -3193,7 +3193,7 @@ test("gateway persists body-free client observations across reopen and resumes t
   }
 });
 
-test("gateway retains a client observation sequence gap across reopen", async () => {
+test("gateway retains sparse client observation cursors across reopen", async () => {
   const state = await fixture({ clientObservations: true });
   let reopened;
   try {
@@ -3213,9 +3213,9 @@ test("gateway retains a client observation sequence gap across reopen", async ()
     });
     await state.gateway.settle();
     assert.deepEqual(state.gateway.clientObservationHealth(), {
-      status: "degraded", reason_code: "native-sequence-gap",
-      observed_through_native_sequence: 0,
-      first_missing_native_sequence: 1, resync_required: false,
+      status: "healthy", reason_code: null,
+      observed_through_native_sequence: 2,
+      first_missing_native_sequence: null, resync_required: false,
     });
     await state.gateway.close();
 
@@ -3248,7 +3248,21 @@ test("gateway retains a client observation sequence gap across reopen", async ()
       },
     });
     await reopened.settle();
-    assert.deepEqual(reopened.clientObservationsAfterCursor({ generation: 1, sequence: 0 }), []);
+    assert.deepEqual(
+      reopened.clientObservationsAfterCursor({ generation: 1, sequence: 0 }).map((observation) => ({
+        observation_id: observation.observation_id,
+        source_sequence: observation.source_sequence,
+      })),
+      [
+        { observation_id: "prime-client-1-1", source_sequence: 1 },
+        { observation_id: "prime-client-1-2", source_sequence: 2 },
+      ],
+    );
+    assert.deepEqual(reopened.clientObservationHealth(), {
+      status: "healthy", reason_code: null,
+      observed_through_native_sequence: 3,
+      first_missing_native_sequence: null, resync_required: false,
+    });
   } finally {
     await reopened?.close().catch(() => undefined);
     await state.cleanup({ allowCloseFailure: true });
