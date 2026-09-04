@@ -46,9 +46,19 @@ _NORMALIZED_RESULT = {"fixture": "passed", "oracle": "passed", "tool": "ipython"
 # Do not accept Docker's evolving full inspect document.  This is a fixed,
 # operator-owned JSON projection; the parser below rejects anything outside it.
 _INSPECT_PROJECTION = (
-    '[{"Id":{{json .Id}},"Image":{{json .Image}},"RepoDigests":{{json .RepoDigests}},'
-    '"Config":{{json .Config}},"HostConfig":{{json .HostConfig}},'
-    '"Mounts":{{json .Mounts}},"State":{{json .State}}}]'
+    '[{"Id":{{json .Id}},"Image":{{json .Image}},'
+    '"User":{{json .Config.User}},"Env":{{json .Config.Env}},'
+    '"Entrypoint":{{json .Config.Entrypoint}},"Labels":{{json .Config.Labels}},'
+    '"NetworkMode":{{json .HostConfig.NetworkMode}},"PortBindings":{{json .HostConfig.PortBindings}},'
+    '"ReadonlyRootfs":{{json .HostConfig.ReadonlyRootfs}},"Privileged":{{json .HostConfig.Privileged}},'
+    '"CapAdd":{{json .HostConfig.CapAdd}},"CapDrop":{{json .HostConfig.CapDrop}},'
+    '"SecurityOpt":{{json .HostConfig.SecurityOpt}},"Binds":{{json .HostConfig.Binds}},'
+    '"VolumesFrom":{{json .HostConfig.VolumesFrom}},"Tmpfs":{{json .HostConfig.Tmpfs}},'
+    '"PidsLimit":{{json .HostConfig.PidsLimit}},"Memory":{{json .HostConfig.Memory}},'
+    '"MemorySwap":{{json .HostConfig.MemorySwap}},"NanoCpus":{{json .HostConfig.NanoCpus}},'
+    '"PidMode":{{json .HostConfig.PidMode}},"IpcMode":{{json .HostConfig.IpcMode}},'
+    '"UTSMode":{{json .HostConfig.UTSMode}},"RestartPolicy":{{json .HostConfig.RestartPolicy}},'
+    '"Mounts":{{json .Mounts}},"Running":{{json .State.Running}}}]'
 )
 
 
@@ -356,7 +366,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
             self._prefix + ("container", "inspect", "--format", _INSPECT_PROJECTION, container_id),
             control,
         )
-        return self._parse_inspection(result.stdout, specification)
+        return self._parse_inspection(result.stdout, container_id, specification)
 
     async def start(self, container_id: str, *, control: _LifecycleCallControl) -> RestrictedWorkerLease:
         specification = self._specification(container_id)
@@ -401,18 +411,50 @@ class DockerCliEngineTransport(DockerEngineTransport):
     async def snapshot_solution(self, container_id: str, *, control: _LifecycleCallControl) -> bytes:
         """Return the sole host-private workspace snapshot while the worker lives."""
         self._specification(container_id)
-        await self._call(self._prefix + ("container", "pause", container_id), control)
+        pause_attempted = True
+        paused = False
         try:
+            await self._call(self._prefix + ("container", "pause", container_id), control)
+            paused = True
             archive = await self._call(
                 self._prefix + ("container", "cp", container_id + ":/workspace/solution.py", "-"), control
             )
             return self._parse_solution_archive(archive.stdout)
         finally:
-            # A failed archive must not leave an admitted worker indefinitely paused.
+            # The original lease may have been cancelled while copying.  Cleanup
+            # is a separate bounded operator action and must still run.
+            if paused:
+                await self._resume_or_destroy(container_id)
+            elif pause_attempted:
+                await self._destroy_after_uncertain_pause(container_id)
+
+    async def _resume_or_destroy(self, container_id: str) -> None:
+        control = _LifecycleCallControl(monotonic() + 30, None)
+        try:
+            await self._shield_cleanup(
+                self._call(self._prefix + ("container", "unpause", container_id), control)
+            )
+        except BaseException:
+            await self._destroy_after_uncertain_pause(container_id)
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+
+    async def _destroy_after_uncertain_pause(self, container_id: str) -> None:
+        control = _LifecycleCallControl(monotonic() + 30, None)
+        try:
+            await self._shield_cleanup(self.force_remove(container_id, control=control))
+            await self._shield_cleanup(self.assert_absent(container_id, control=control))
+        except BaseException:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+
+    @staticmethod
+    async def _shield_cleanup(awaitable: object) -> object:
+        task = asyncio.create_task(awaitable)  # type: ignore[arg-type]
+        while not task.done():
             try:
-                await self._call(self._prefix + ("container", "unpause", container_id), control)
-            except BaseException:
-                raise RestrictedWorkerError("restricted worker value is invalid") from None
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+        return task.result()
 
     async def _preflight(self, control: _LifecycleCallControl) -> None:
         for argv in (
@@ -456,7 +498,12 @@ class DockerCliEngineTransport(DockerEngineTransport):
 
     @staticmethod
     def _parse_solution_archive(raw: bytes) -> bytes:
-        if type(raw) is not bytes or not raw or len(raw) > _SNAPSHOT_CAP:
+        if (
+            type(raw) is not bytes
+            or not raw
+            or len(raw) > _SNAPSHOT_CAP
+            or len(raw) % tarfile.BLOCKSIZE != 0
+        ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         try:
             with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
@@ -464,13 +511,27 @@ class DockerCliEngineTransport(DockerEngineTransport):
                 if len(members) != 1:
                     raise ValueError
                 member = members[0]
-                if member.name != "solution.py" or not member.isreg() or member.size < 0 or member.size > _SNAPSHOT_CAP:
+                if (
+                    member.name != "solution.py"
+                    or not member.isreg()
+                    or member.pax_headers
+                    or member.size < 0
+                    or member.size > _SNAPSHOT_CAP
+                ):
                     raise ValueError
                 source = archive.extractfile(member)
                 if source is None:
                     raise ValueError
                 data = source.read(_SNAPSHOT_CAP + 1)
                 if len(data) != member.size or len(data) > _SNAPSHOT_CAP:
+                    raise ValueError
+                data_end = member.offset_data + member.size
+                padded_end = (data_end + tarfile.BLOCKSIZE - 1) // tarfile.BLOCKSIZE * tarfile.BLOCKSIZE
+                if (
+                    len(raw) < padded_end + 2 * tarfile.BLOCKSIZE
+                    or any(raw[data_end:padded_end])
+                    or any(raw[padded_end:])
+                ):
                     raise ValueError
                 return data
         except (tarfile.TarError, OSError, ValueError):
@@ -501,19 +562,27 @@ class DockerCliEngineTransport(DockerEngineTransport):
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
 
-    def _parse_inspection(self, raw: bytes, specification: _DockerWorkerSpecification) -> Mapping[str, object]:
+    def _parse_inspection(
+        self, raw: bytes, container_id: str, specification: _DockerWorkerSpecification
+    ) -> Mapping[str, object]:
         value = self._json(raw)
         try:
             if type(value) is not list or len(value) != 1 or type(value[0]) is not dict:
                 raise ValueError
             item = value[0]
-            if set(item) != {"Id", "Image", "RepoDigests", "Config", "HostConfig", "Mounts", "State"} or item["Id"] != specification.container_id or item["Image"] != specification.image_digest or item["RepoDigests"] != [] or item["Mounts"] != [] or item["State"] not in ({"Running": False}, {"Running": True}):
+            fields = {
+                "Id", "Image", "User", "Env", "Entrypoint", "Labels", "NetworkMode",
+                "PortBindings", "ReadonlyRootfs", "Privileged", "CapAdd", "CapDrop",
+                "SecurityOpt", "Binds", "VolumesFrom", "Tmpfs", "PidsLimit", "Memory",
+                "MemorySwap", "NanoCpus", "PidMode", "IpcMode", "UTSMode", "RestartPolicy",
+                "Mounts", "Running",
+            }
+            if set(item) != fields or item["Id"] != container_id or item["Image"] != specification.image_digest or item["Mounts"] != [] or type(item["Running"]) is not bool:
                 raise ValueError
-            config, host = item["Config"], item["HostConfig"]
-            if type(config) is not dict or set(config) != {"User", "Env", "Entrypoint", "Labels"} or config["User"] != "65534:65534" or config["Env"] != list(_ENVIRONMENT) or config["Entrypoint"] != [_ENTRYPOINT] or type(config["Labels"]) is not dict or any("run" in key.lower() or "challenge" in key.lower() for key in config["Labels"]):
+            if item["User"] != "65534:65534" or item["Env"] != list(_ENVIRONMENT) or item["Entrypoint"] != [_ENTRYPOINT] or type(item["Labels"]) is not dict or any("run" in key.lower() or "challenge" in key.lower() for key in item["Labels"]):
                 raise ValueError
             expected = {"NetworkMode": "none", "PortBindings": None, "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true", "seccomp=" + self._seccomp_profile], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": _TMPFS.removeprefix("/workspace:")}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "private", "IpcMode": "private", "UTSMode": "private", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}}
-            if type(host) is not dict or host != expected:
+            if any(item[name] != expected[name] for name in expected):
                 raise ValueError
         except (KeyError, TypeError, ValueError):
             raise RestrictedWorkerError("restricted worker value is invalid") from None

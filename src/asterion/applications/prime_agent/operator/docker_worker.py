@@ -253,6 +253,8 @@ class DockerEngineTransport(Protocol):
 class _LeaseState:
     request: RestrictedWorkerRequest
     container_id: str
+    signal: CancellationSignal | None = None
+    cancellation_latched: bool = False
     channel: DockerLauncherChannel | None = None
     execution: RestrictedWorkerExecutionReceipt | None = None
 
@@ -372,12 +374,18 @@ class DockerRestrictedWorkerService:
         state = self._leases.get(lease.worker_id)
         if state is None:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, None)
+        if state.cancellation_latched or (state.signal is not None and state.signal.cancelled):
+            state.cancellation_latched = True
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, state.signal)
         try:
             source = await asyncio.wait_for(
                 self._transport.snapshot_solution(state.container_id, control=control),
                 timeout=_LIFECYCLE_SECONDS,
             )
+            if control.cancelled():
+                state.cancellation_latched = True
+                raise asyncio.CancelledError
             return DockerWorkerWorkspaceSnapshot(source)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
@@ -387,7 +395,8 @@ class DockerRestrictedWorkerService:
             raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     def _admit_lease(
-        self, request: RestrictedWorkerRequest, lease: RestrictedWorkerLease
+        self, request: RestrictedWorkerRequest, lease: RestrictedWorkerLease,
+        signal: CancellationSignal | None,
     ) -> RestrictedWorkerLease:
         if (
             type(lease) is not RestrictedWorkerLease
@@ -399,7 +408,7 @@ class DockerRestrictedWorkerService:
             or lease.worker_id in self._cleanup_tombstones
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
-        self._leases[lease.worker_id] = _LeaseState(request, "")
+        self._leases[lease.worker_id] = _LeaseState(request, "", signal)
         return lease
 
     def _bind_container(self, lease: RestrictedWorkerLease, container_id: str) -> None:
@@ -557,7 +566,7 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
             self._channel = await self._call_open_launcher_channel()
             self_check = await self._call_self_check()
             self._service._validate_launcher_self_check(self_check)
-            self._lease = self._service._admit_lease(self._request, lease)
+            self._lease = self._service._admit_lease(self._request, lease, self._signal)
             self._service._bind_container(self._lease, container_id)
             self._service._bind_channel(self._lease, self._channel)
             return self._lease

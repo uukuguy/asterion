@@ -161,6 +161,41 @@ def _inspect(*, container_id: str = _CONTAINER, extra: object = None) -> bytes:
     return json.dumps([value]).encode()
 
 
+def _projected_inspect(*, container_id: str = _CONTAINER, extra: object = None) -> bytes:
+    """The deliberately small response emitted by the fixed inspect format."""
+    value: dict[str, object] = {
+        "Id": container_id,
+        "Image": _IMAGE,
+        "User": "65534:65534",
+        "Env": ["HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1"],
+        "Entrypoint": ["/usr/local/bin/prime-ipython-coding.py"],
+        "Labels": {},
+        "NetworkMode": "none",
+        "PortBindings": None,
+        "ReadonlyRootfs": True,
+        "Privileged": False,
+        "CapAdd": None,
+        "CapDrop": ["ALL"],
+        "SecurityOpt": ["no-new-privileges:true", f"seccomp={_SECCOMP}"],
+        "Binds": None,
+        "VolumesFrom": None,
+        "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864"},
+        "PidsLimit": 256,
+        "Memory": 536870912,
+        "MemorySwap": 536870912,
+        "NanoCpus": 1000000000,
+        "PidMode": "private",
+        "IpcMode": "private",
+        "UTSMode": "private",
+        "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
+        "Mounts": [],
+        "Running": False,
+    }
+    if extra is not None:
+        value["unexpected"] = extra
+    return json.dumps([value]).encode()
+
+
 class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
     def _transport(self, results: list[_Result], attach: _AttachRunner | None = None) -> tuple[DockerCliEngineTransport, _Runner]:
         runner = _Runner(results)
@@ -186,6 +221,28 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await transport.create(_spec(), control=self._control()), daemon_id)
         self.assertEqual(runner.calls[-1][0][runner.calls[-1][0].index("--name") + 1], _CONTAINER)
         self.assertNotIn(daemon_id, runner.calls[-1][0])
+
+    async def test_create_then_inspect_uses_daemon_id_and_real_projected_shape(self) -> None:
+        daemon_id = "a" * 64
+        transport, runner = self._transport([
+            _Result(stdout=b"{}"), _Result(stdout=b"{}"),
+            _Result(stdout=(daemon_id + "\n").encode()),
+            _Result(stdout=_projected_inspect(container_id=daemon_id)),
+        ])
+
+        created = await transport.create(_spec(), control=self._control())
+        inspection = await transport.inspect(created, control=self._control())
+
+        self.assertEqual(created, daemon_id)
+        self.assertEqual(inspection["image_id"], _IMAGE)
+        self.assertEqual(runner.calls[-1][0][-1], daemon_id)
+
+    async def test_inspect_rejects_full_container_document_and_requires_leaf_projection(self) -> None:
+        transport, _ = self._transport([_Result(stdout=_inspect())])
+        transport._specifications[_CONTAINER] = _spec()
+
+        with self.assertRaises(RestrictedWorkerError):
+            await transport.inspect(_CONTAINER, control=self._control())
 
     async def test_snapshot_pauses_archives_exact_solution_and_resumes(self) -> None:
         daemon_id = "a" * 64
@@ -217,8 +274,132 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
                     await transport.snapshot_solution(daemon_id, control=self._control())
                 self.assertEqual(runner.calls[-1][0][-2:], ("unpause", daemon_id))
 
+    async def test_snapshot_rejects_truncated_multiple_hardlink_pax_and_trailing_archives(self) -> None:
+        daemon_id = "a" * 64
+        archives: list[bytes] = []
+        normal = io.BytesIO()
+        with tarfile.open(fileobj=normal, mode="w") as output:
+            info = tarfile.TarInfo("solution.py")
+            info.size = 1
+            output.addfile(info, io.BytesIO(b"x"))
+        archives.extend((normal.getvalue()[:-513], normal.getvalue() + b"trailing"))
+        multiple = io.BytesIO()
+        with tarfile.open(fileobj=multiple, mode="w") as output:
+            for name in ("solution.py", "extra.py"):
+                info = tarfile.TarInfo(name)
+                info.size = 1
+                output.addfile(info, io.BytesIO(b"x"))
+        archives.append(multiple.getvalue())
+        hardlink = io.BytesIO()
+        with tarfile.open(fileobj=hardlink, mode="w") as output:
+            info = tarfile.TarInfo("solution.py")
+            info.type = tarfile.LNKTYPE
+            info.linkname = "other.py"
+            output.addfile(info)
+        archives.append(hardlink.getvalue())
+        pax = io.BytesIO()
+        with tarfile.open(fileobj=pax, mode="w", format=tarfile.PAX_FORMAT) as output:
+            info = tarfile.TarInfo("solution.py")
+            info.pax_headers = {"comment": "untrusted"}
+            info.size = 1
+            output.addfile(info, io.BytesIO(b"x"))
+        archives.append(pax.getvalue())
+        over_budget = io.BytesIO()
+        with tarfile.open(fileobj=over_budget, mode="w") as output:
+            info = tarfile.TarInfo("solution.py")
+            info.size = 65536
+            output.addfile(info, io.BytesIO(b"x" * info.size))
+        # The file alone meets the cap, but its tar metadata exceeds the
+        # bounded transport budget and must not be accepted.
+        archives.append(over_budget.getvalue())
+        for archive in archives:
+            with self.subTest(length=len(archive)):
+                transport, _ = self._transport([_Result(), _Result(stdout=archive), _Result()])
+                transport._specifications[daemon_id] = _spec()
+                with self.assertRaises(RestrictedWorkerError):
+                    await transport.snapshot_solution(daemon_id, control=self._control())
+
+    async def test_snapshot_unpauses_with_fresh_control_after_copy_cancels(self) -> None:
+        daemon_id = "a" * 64
+        signal = _Signal()
+
+        class _CancellingRunner(_Runner):
+            async def run(self, **kwargs: object) -> _Result:  # type: ignore[override]
+                result = await super().run(**kwargs)  # type: ignore[arg-type]
+                if cast(tuple[str, ...], kwargs["argv"])[-2:] == (daemon_id + ":/workspace/solution.py", "-"):
+                    signal.cancelled = True
+                return result
+
+        runner = _CancellingRunner([_Result(), _Result(stdout=b"invalid"), _Result()])
+        transport = DockerCliEngineTransport(
+            docker_executable="/usr/local/bin/docker", socket_path=_SOCKET,
+            seccomp_profile=_SECCOMP, runner=runner,
+        )
+        transport._specifications[daemon_id] = _spec()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await transport.snapshot_solution(daemon_id, control=self._control(signal))
+        self.assertEqual([call[0][-2:] for call in runner.calls], [
+            ("pause", daemon_id), (daemon_id + ":/workspace/solution.py", "-"),
+            ("unpause", daemon_id),
+        ])
+
+    async def test_snapshot_unpause_failure_force_removes_and_proves_absence(self) -> None:
+        daemon_id = "a" * 64
+        transport, runner = self._transport([
+            _Result(), _Result(stdout=b"invalid"), _Result(returncode=1), _Result(),
+            _Result(returncode=1, stderr=("No such container: " + daemon_id).encode()),
+        ])
+        transport._specifications[daemon_id] = _spec()
+
+        with self.assertRaises(RestrictedWorkerError):
+            await transport.snapshot_solution(daemon_id, control=self._control())
+        self.assertEqual([call[0][-2:] for call in runner.calls], [
+            ("pause", daemon_id), (daemon_id + ":/workspace/solution.py", "-"),
+            ("unpause", daemon_id), ("--force", daemon_id), ("{{.Id}}", daemon_id),
+        ])
+
+    async def test_failed_pause_response_force_removes_and_proves_absence(self) -> None:
+        daemon_id = "a" * 64
+        transport, runner = self._transport([
+            _Result(returncode=1), _Result(),
+            _Result(returncode=1, stderr=("No such container: " + daemon_id).encode()),
+        ])
+        transport._specifications[daemon_id] = _spec()
+        with self.assertRaises(RestrictedWorkerError):
+            await transport.snapshot_solution(daemon_id, control=self._control())
+        self.assertEqual([call[0][-2:] for call in runner.calls], [
+            ("pause", daemon_id), ("--force", daemon_id), ("{{.Id}}", daemon_id),
+        ])
+
+    async def test_cancelled_pause_response_force_removes_and_proves_absence(self) -> None:
+        daemon_id = "a" * 64
+        signal = _Signal()
+
+        class _CancellingRunner(_Runner):
+            async def run(self, **kwargs: object) -> _Result:  # type: ignore[override]
+                result = await super().run(**kwargs)  # type: ignore[arg-type]
+                if cast(tuple[str, ...], kwargs["argv"])[-2:] == ("pause", daemon_id):
+                    signal.cancelled = True
+                return result
+
+        runner = _CancellingRunner([
+            _Result(), _Result(),
+            _Result(returncode=1, stderr=("No such container: " + daemon_id).encode()),
+        ])
+        transport = DockerCliEngineTransport(
+            docker_executable="/usr/local/bin/docker", socket_path=_SOCKET,
+            seccomp_profile=_SECCOMP, runner=runner,
+        )
+        transport._specifications[daemon_id] = _spec()
+        with self.assertRaises(asyncio.CancelledError):
+            await transport.snapshot_solution(daemon_id, control=self._control(signal))
+        self.assertEqual([call[0][-2:] for call in runner.calls], [
+            ("pause", daemon_id), ("--force", daemon_id), ("{{.Id}}", daemon_id),
+        ])
+
     async def test_inspect_rejects_unknown_or_mismatched_raw_json_without_leaking_it(self) -> None:
-        cases = (_inspect(extra=True), _inspect(container_id="other"), b"not-json", b"{}")
+        cases = (_projected_inspect(extra=True), _projected_inspect(container_id="other"), b"not-json", b"{}")
         for raw in cases:
             with self.subTest(raw=raw):
                 transport, _ = self._transport([_Result(stdout=raw)])
@@ -228,19 +409,20 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("other", str(raised.exception))
 
     async def test_inspect_uses_the_fixed_host_owned_projection(self) -> None:
-        transport, runner = self._transport([_Result(stdout=_inspect())])
+        transport, runner = self._transport([_Result(stdout=_projected_inspect())])
         transport._specifications[_CONTAINER] = _spec()
 
         await transport.inspect(_CONTAINER, control=self._control())
         argv = runner.calls[0][0]
         self.assertEqual(argv[-3], "--format")
-        self.assertIn('"HostConfig":{{json .HostConfig}}', argv[-2])
+        self.assertIn('"NetworkMode":{{json .HostConfig.NetworkMode}}', argv[-2])
+        self.assertNotIn("RepoDigests", argv[-2])
         self.assertEqual(argv[-1], _CONTAINER)
 
     async def test_lifecycle_operations_are_closed_and_parse_only_narrow_evidence(self) -> None:
         selfcheck = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
         attach = _AttachRunner(_AttachProcess(selfcheck))
-        transport, runner = self._transport([_Result(stdout=_inspect()), _Result(), _Result(returncode=1, stderr=("No such container: " + _CONTAINER).encode())], attach)
+        transport, runner = self._transport([_Result(stdout=_projected_inspect()), _Result(), _Result(returncode=1, stderr=("No such container: " + _CONTAINER).encode())], attach)
         transport._specifications[_CONTAINER] = _spec()
         inspection = await transport.inspect(_CONTAINER, control=self._control())
         lease = await transport.start(_CONTAINER, control=self._control())

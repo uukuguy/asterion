@@ -20,6 +20,7 @@ from asterion.applications.prime_agent.operator.docker_worker import (
 from asterion.applications.prime_agent.operator.ipython_workload import (
     PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
 )
+from asterion.runtime.host import CancellationSignal
 from asterion.services.restricted_worker import (
     RestrictedWorkerError,
     RestrictedWorkerLease,
@@ -178,6 +179,18 @@ class _Transport(DockerEngineTransport):
             raise AssertionError("unexpected container identity")
 
 
+class _Signal(CancellationSignal):
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+
 def _safe_inspection() -> dict[str, object]:
     return {
         "image_id": _IMAGE_DIGEST,
@@ -314,6 +327,17 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot, DockerWorkerWorkspaceSnapshot(self.transport.snapshot))
         self.assertEqual(repr(snapshot), "DockerWorkerWorkspaceSnapshot(redacted)")
         self.assertEqual(self.transport.calls[-1], "snapshot_solution")
+
+    async def test_cancelled_lease_cannot_take_a_private_snapshot(self) -> None:
+        signal = _Signal()
+        context = self.service.open(_request(), signal=signal)
+        lease = await context.__aenter__()
+        self.addAsyncCleanup(context.__aexit__, None, None, None)
+        signal.cancel()
+
+        with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid"):
+            await self.service._snapshot_solution(lease)
+        self.assertNotIn("snapshot_solution", self.transport.calls)
 
     async def test_revalidates_engine_safety_after_start_before_admission(self) -> None:
         context = self.service.open(_request())
