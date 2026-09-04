@@ -15,7 +15,8 @@ PROTOCOL = "asterion.prime-p1-authority-ipc/v1"
 _DOMAIN = b"asterion.prime-p1-authority-ipc/v1\0"
 _RECEIPT_FORMAT = "asterion.prime-p1-authority-receipt/v1"
 _RECEIPT_DOMAIN = b"asterion.prime-p1-authority-receipt/v1\0"
-_MAX_PACKET_BYTES, _MAX_RUN_ID = 8192, 128
+_MAX_PACKET_BYTES, _MAX_RUN_ID, _MAX_JSON_DEPTH = 8192, 128, 32
+_REASONS = frozenset({"completed", "failed", "cancelled", "unavailable"})
 _SESSION_ID, _SHA256 = re.compile(r"[0-9a-f]{64}\Z"), re.compile(r"[0-9a-f]{64}\Z")
 _RUN_ID, _REASON = (
     re.compile(r"[a-z][a-z0-9.-]{0,127}\Z"),
@@ -104,12 +105,14 @@ class AuthoritySession:
         resource_set_sha256: str,
         *,
         replay_ledger: ReplayLedger | None = None,
+        receipt_hmac_key: bytes | None = None,
     ) -> None:
         if not (
             _is_session_id(session_id)
             and _is_key(session_key)
             and _is_sha256(request_contract_sha256)
             and _is_sha256(resource_set_sha256)
+            and (receipt_hmac_key is None or _is_key(receipt_hmac_key))
         ):
             _unavailable()
         (
@@ -118,6 +121,9 @@ class AuthoritySession:
             self._contract,
             self._resource,
             self._ledger,
+            self._receipt_key,
+            self._run_id,
+            self._application,
             self._state,
         ) = (
             session_id,
@@ -125,6 +131,9 @@ class AuthoritySession:
             request_contract_sha256,
             resource_set_sha256,
             replay_ledger,
+            receipt_hmac_key,
+            None,
+            None,
             "await-execute",
         )
 
@@ -163,13 +172,18 @@ class AuthoritySession:
         if not valid:
             _unavailable()
         self._claim(frame)
+        if frame.kind == "execute":
+            self._run_id = frame.payload["run_id"]
+            self._application = frame.payload["application_request_sha256"]
         self._state = next_state
         return frame
 
     def terminal_packet(self, receipt: Mapping[str, object]) -> bytes:
         if self._state not in {"await-cancel-or-terminal", "cancelled"}:
             _unavailable()
-        _receipt(receipt, self._session_id, self._contract, None)
+        if self._receipt_key is None or not isinstance(self._run_id, str) or not isinstance(self._application, str):
+            _unavailable()
+        _receipt(receipt, self._session_id, self._contract, self._receipt_key, self._run_id, self._application, self._resource)
         self._state = "terminal-emitted"
         return encode_frame(self._session_key, self._session_id, 1, "terminal", receipt)
 
@@ -199,7 +213,7 @@ class SupervisorSession:
             _is_session_id(session_id)
             and _is_key(session_key)
             and _is_sha256(request_contract_sha256)
-            and (receipt_hmac_key is None or _is_key(receipt_hmac_key))
+            and _is_key(receipt_hmac_key)
         ):
             _unavailable()
         (
@@ -208,12 +222,16 @@ class SupervisorSession:
             self._contract,
             self._receipt_key,
             self._state,
+            self._run_id,
+            self._application,
         ) = (
             session_id,
             session_key,
             request_contract_sha256,
             receipt_hmac_key,
             "await-ready",
+            None,
+            None,
         )
 
     def accept_authority_packet(self, packet: bytes) -> TerminalReceipt | None:
@@ -232,9 +250,13 @@ class SupervisorSession:
         if self._state in {"await-terminal", "cancel-sent"}:
             if frame.sequence != 1 or frame.kind != "terminal":
                 _unavailable()
-            result = _receipt(
-                frame.payload, self._session_id, self._contract, self._receipt_key
-            )
+            if not (
+                isinstance(self._receipt_key, bytes)
+                and isinstance(self._run_id, str)
+                and isinstance(self._application, str)
+            ):
+                _unavailable()
+            result = _receipt(frame.payload, self._session_id, self._contract, self._receipt_key, self._run_id, self._application)
             self._state = "terminal-received"
             return result
         _unavailable()
@@ -247,6 +269,7 @@ class SupervisorSession:
         ):
             _unavailable()
         self._state = "await-terminal"
+        self._run_id, self._application = run_id, application_request_sha256
         return encode_frame(
             self._session_key,
             self._session_id,
@@ -306,7 +329,9 @@ def decode_frame(packet: bytes, key: bytes) -> AuthorityFrame:
             or not 1 <= len(packet) <= _MAX_PACKET_BYTES
         ):
             raise ValueError
-        value = json.loads(packet.decode("utf-8"))
+        text = packet.decode("utf-8")
+        _ensure_json_depth(text)
+        value = json.loads(text, parse_constant=_reject_json_constant)
         if type(value) is not dict or set(value) != _FRAME_KEYS:
             raise ValueError
         supplied = value.pop("frame_hmac_sha256")
@@ -371,7 +396,7 @@ def _execute(value: Mapping[str, object], contract: str | None) -> bool:
 
 
 def _receipt(
-    value: Mapping[str, object], session: str, contract: str, key: bytes | None
+    value: Mapping[str, object], session: str, contract: str, key: bytes, run_id: str, application: str, resource: str | None = None
 ) -> TerminalReceipt:
     try:
         if (
@@ -382,7 +407,9 @@ def _receipt(
             or not _is_reason(value.get("reason_code"))
             or value.get("session_id") != session
             or value.get("request_contract_sha256") != contract
-            or not _is_run_id(value.get("run_id"))
+            or value.get("run_id") != run_id
+            or value.get("application_request_sha256") != application
+            or not _is_sha256(value.get("application_request_sha256"))
         ):
             raise ValueError
         _exact(
@@ -469,6 +496,8 @@ def _receipt(
             },
         )
         _receipt_values(value)
+        if resource is not None and value["authority"]["production_resource_set_sha256"] != resource:  # type: ignore[index]
+            raise ValueError
         unsigned = {
             name: item
             for name, item in value.items()
@@ -489,7 +518,7 @@ def _receipt(
             "evidence_id": value["evidence_id"],
             "receipt_sha256": digest,
         }
-        if key is not None and not hmac.compare_digest(
+        if not hmac.compare_digest(
             receipt_hmac,
             hmac.new(key, _RECEIPT_DOMAIN + _json(signed), "sha256").hexdigest(),
         ):
@@ -638,7 +667,7 @@ def _receipt_values(v: Mapping[str, object]) -> None:
         )
     ):
         raise ValueError
-    if v["status"] == "PASS" and not (
+    passed = (
         m["request_count"] == m["max_requests"] == 1
         and m["transport_reaped"] is True
         and w["worker_count"] == w["model_tool_calls"] == w["ipython_tool_calls"] == 1
@@ -653,7 +682,8 @@ def _receipt_values(v: Mapping[str, object]) -> None:
                 "daemon_absence_verified",
             )
         )
-    ):
+    )
+    if (v["status"] == "PASS") != passed:
         raise ValueError
 
 
@@ -673,9 +703,45 @@ def _freeze(value: object) -> Mapping[str, object]:
 
 
 def _json(value: object) -> bytes:
+    _ensure_value_depth(value)
     return json.dumps(
-        _thaw(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        _thaw(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False
     ).encode("utf-8")
+
+
+def _ensure_value_depth(value: object) -> None:
+    stack = [(value, 1)]
+    while stack:
+        item, depth = stack.pop()
+        if depth > _MAX_JSON_DEPTH:
+            raise ValueError
+        if isinstance(item, Mapping):
+            stack.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, (list, tuple)):
+            stack.extend((child, depth + 1) for child in item)
+
+
+def _ensure_json_depth(text: str) -> None:
+    depth = 0
+    in_string = escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            if depth > _MAX_JSON_DEPTH:
+                raise ValueError
+        elif char in "]}":
+            depth -= 1
+    if in_string or escaped or depth != 0:
+        raise ValueError
 
 
 def _thaw(value: object) -> object:
@@ -707,7 +773,11 @@ def _is_run_id(value: object) -> bool:
 
 
 def _is_reason(value: object) -> bool:
-    return type(value) is str and _REASON.fullmatch(value) is not None
+    return type(value) is str and value in _REASONS and _REASON.fullmatch(value) is not None
+
+
+def _reject_json_constant(_: str) -> NoReturn:
+    raise ValueError
 
 
 def _nonnegative_int(value: object) -> bool:

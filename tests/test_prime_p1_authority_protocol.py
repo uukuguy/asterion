@@ -122,7 +122,59 @@ def _receipt() -> dict[str, object]:
     return receipt
 
 
+def _resign(receipt: dict[str, object]) -> None:
+    unsigned = {name: value for name, value in receipt.items() if name not in {"evidence_id", "receipt_sha256", "receipt_hmac_sha256"}}
+    digest = hashlib.sha256(b"asterion.prime-p1-authority-receipt/v1\0" + _canonical(unsigned)).hexdigest()
+    receipt["evidence_id"] = "prime-p1-" + digest
+    receipt["receipt_sha256"] = digest
+    receipt["receipt_hmac_sha256"] = hmac.new(RECEIPT_KEY, b"asterion.prime-p1-authority-receipt/v1\0" + _canonical({**unsigned, "evidence_id": receipt["evidence_id"], "receipt_sha256": digest}), "sha256").hexdigest()
+
+
 class TestPrimeP1AuthorityProtocol(unittest.TestCase):
+    def test_terminal_acceptance_requires_the_receipt_key(self) -> None:
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            SupervisorSession(SESSION, KEY, CONTRACT)
+
+    def test_rejects_unbound_receipt_run_request_and_resource(self) -> None:
+        authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET, receipt_hmac_key=RECEIPT_KEY)
+        supervisor = SupervisorSession(SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY)
+        supervisor.accept_authority_packet(authority.ready_packet())
+        authority.accept_supervisor_packet(supervisor.execute_packet("run-1", APPLICATION))
+        for field, value in (("run_id", "run-2"), ("application_request_sha256", "not-a-digest"), ("reason_code", "invented"), ("status", "FAIL")):
+            with self.subTest(field=field):
+                receipt = _receipt()
+                receipt[field] = value
+                _resign(receipt)
+                with self.assertRaises(PrimeP1AuthorityProtocolError):
+                    supervisor.accept_authority_packet(encode_frame(KEY, SESSION, 1, "terminal", receipt))
+        receipt = _receipt()
+        receipt["authority"]["production_resource_set_sha256"] = "0" * 64  # type: ignore[index]
+        _resign(receipt)
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            authority.terminal_packet(receipt)
+
+    def test_rejects_non_json_constants_and_deeply_nested_frames(self) -> None:
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            encode_frame(KEY, SESSION, 1, "terminal", {"value": float("nan")})
+        value: object = []
+        for _ in range(40):
+            value = [value]
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            encode_frame(KEY, SESSION, 1, "terminal", {"value": value})
+        payload = '{"value":' + "[" * 40 + "0" + "]" * 40 + "}"
+        body = f'{{"kind":"terminal","payload":{payload},"protocol":"asterion.prime-p1-authority-ipc/v1","sequence":1,"session_id":"{SESSION}"}}'.encode()
+        mac = hmac.new(KEY, b"asterion.prime-p1-authority-ipc/v1\0" + body, "sha256").hexdigest()
+        packet = b'{"frame_hmac_sha256":"' + mac.encode() + b'",' + body[1:]
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            decode_frame(packet, KEY)
+
+    def test_authority_does_not_emit_an_unsigned_terminal_receipt(self) -> None:
+        authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
+        supervisor = SupervisorSession(SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY)
+        supervisor.accept_authority_packet(authority.ready_packet())
+        authority.accept_supervisor_packet(supervisor.execute_packet("run-1", APPLICATION))
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            authority.terminal_packet(_receipt())
     def test_frame_is_canonical_authenticated_and_has_exact_execute_shape(self) -> None:
         packet = encode_frame(
             key=KEY,
@@ -255,7 +307,7 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
         self,
     ) -> None:
         authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
-        supervisor = SupervisorSession(SESSION, KEY, CONTRACT)
+        supervisor = SupervisorSession(SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY)
         supervisor.accept_authority_packet(authority.ready_packet())
         execute = supervisor.execute_packet("run-1", APPLICATION)
         authority.accept_supervisor_packet(execute)
