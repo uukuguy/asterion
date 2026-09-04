@@ -38,6 +38,9 @@ _MANIFEST: Final = {
     "usage_ceiling": 256,
 }
 
+P6_CONTINUAL_IMPROVEMENT_SCENARIO_ID: Final = _MANIFEST["scenario_id"]
+P6_CONTINUAL_IMPROVEMENT_ROLE_ID: Final = _MANIFEST["role_id"]
+
 P6_CONTINUAL_IMPROVEMENT_WORKLOAD_DIGEST: Final = "sha256:" + sha256(
     json.dumps(_MANIFEST, sort_keys=True, separators=(",", ":")).encode("utf-8")
 ).hexdigest()
