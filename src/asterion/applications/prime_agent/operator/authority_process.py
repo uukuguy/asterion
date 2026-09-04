@@ -9,6 +9,7 @@ import os
 import socket
 import struct
 import sys
+import threading
 from typing import Any, NoReturn, cast
 
 
@@ -58,6 +59,7 @@ class AdmittedAuthorityDescriptors:
         self._config_fd: int | None = config_fd
         self._close_fd = close_fd
         self._closed = False
+        self._lock = threading.Lock()
 
     def __repr__(self) -> str:
         return "AdmittedAuthorityDescriptors(redacted)"
@@ -72,19 +74,20 @@ class AdmittedAuthorityDescriptors:
         return cast(int, self._take("_config_fd"))
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        connection = self._connection
-        self._connection = None
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            connection = self._connection
+            self._connection = None
+            fds = (self._session_key_fd, self._config_fd)
+            self._session_key_fd = self._config_fd = None
         if connection is not None:
             try:
                 _close_socket(connection)
             except OSError:
                 pass
-        for attribute in ("_session_key_fd", "_config_fd"):
-            fd = getattr(self, attribute)
-            setattr(self, attribute, None)
+        for fd in fds:
             if fd is not None:
                 try:
                     self._close_fd(fd)
@@ -92,13 +95,14 @@ class AdmittedAuthorityDescriptors:
                     pass
 
     def _take(self, attribute: str) -> object:
-        if self._closed:
-            _unavailable()
-        value = getattr(self, attribute)
-        if value is None:
-            _unavailable()
-        setattr(self, attribute, None)
-        return value
+        with self._lock:
+            if self._closed:
+                _unavailable()
+            value = getattr(self, attribute)
+            if value is None:
+                _unavailable()
+            setattr(self, attribute, None)
+            return value
 
 
 def admit_authority_launch(
@@ -201,10 +205,11 @@ def admit_retained_authority_descriptors(
         )
         if peer != (contract.supervisor_uid, contract.supervisor_pid):
             _unavailable()
-        retained = True
-        return AdmittedAuthorityDescriptors(
+        admitted = AdmittedAuthorityDescriptors(
             opened, contract.session_key_fd, contract.config_fd, close_fd
         )
+        retained = True
+        return admitted
     except (OSError, OverflowError, TypeError, ValueError, struct.error):
         _unavailable()
     finally:
