@@ -154,6 +154,27 @@ class PromotionCheckTests(unittest.TestCase):
                 else:
                     self.assertNotIn(key, environment)
 
+    def test_closed_npm_environment_uses_explicit_node_without_ambient_resolution(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            workspace = temporary / "workspace"
+            workspace.mkdir()
+            cache = temporary / "cache"
+            cache.mkdir()
+            with mock.patch(
+                "tools.check_promotion._resolve_operational_node",
+                side_effect=AssertionError("sealed promotion environment resolved Node"),
+            ):
+                environment = _closed_npm_subprocess_environment(
+                    workspace,
+                    _resolve_promotion_npm_cache(str(cache)),
+                    node_executable=Path("/node22/bin/node"),
+                )
+
+        self.assertEqual(environment["PATH"].split(os.pathsep)[0], "/node22/bin")
+
     def test_wheel_resource_smoke_requires_the_locked_client_module(self) -> None:
         from tools.check_promotion import (
             WHEEL_OPERATIONAL_RESOURCE_SMOKE,
@@ -730,11 +751,17 @@ class PromotionCheckTests(unittest.TestCase):
             with (
                 mock.patch(
                     "tools.check_promotion._resolve_operational_node",
-                    return_value=Path("/node22/bin/node"),
+                    side_effect=AssertionError(
+                        "sealed promotion npm execution resolved Node"
+                    ),
                 ),
                 mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
             ):
-                run_promotion(source_root=source, npm_cache=cache)
+                run_promotion(
+                    source_root=source,
+                    npm_cache=cache,
+                    node_executable=Path("/node22/bin/node"),
+                )
 
         npm_calls = tuple(
             (command, environment)
@@ -869,7 +896,9 @@ class PromotionCheckTests(unittest.TestCase):
         commands: list[tuple[tuple[str, ...], Path]] = []
         with mock.patch(
             "tools.check_promotion._run_prime_binding_command",
-            side_effect=lambda command, cwd, _cache: commands.append((command, cwd)),
+            side_effect=lambda command, cwd, _cache, **_kwargs: commands.append(
+                (command, cwd)
+            ),
         ):
             _prepare_external_prime_checkout(
                 Path("/external/prime"),

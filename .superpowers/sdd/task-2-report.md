@@ -45,3 +45,39 @@ changed for implementation/testing. Existing unrelated untracked plan files
 were preserved. This establishes offline npm preparation when the declared
 operator cache is warm; it intentionally does not make uv, cargo, or other
 non-npm commands hermetic.
+
+## Review fix: explicit Node for sealed promotion preparation
+
+- The promotion CLI resolves the operational Node executable once at its
+  boundary and passes that exact path into `run_promotion`.
+- Promotion preparation threads the explicit executable through Prime binding,
+  operational checkout preparation, and closed npm/Prime environment builders.
+  Those sealed paths therefore do not call `_resolve_operational_node()` while
+  preparing npm or Prime commands.
+- Non-promotion callers retain the optional resolver fallback for compatibility.
+
+### Regression evidence
+
+TDD red phase:
+
+```text
+test_closed_npm_environment_uses_explicit_node_without_ambient_resolution ... ERROR
+TypeError: _closed_npm_subprocess_environment() got an unexpected keyword
+argument 'node_executable'
+```
+
+The copied-project npm regression injects an explicit Node path and mocks the
+ambient resolver to raise; successful execution proves sealed promotion npm
+commands never invoke the ambient resolver.
+
+```text
+uv run python -m unittest -v tests.test_check_promotion tests.test_standalone_repository
+Ran 46 tests in 3.089s
+OK
+
+uv run ruff check tools/check_promotion.py tests/test_check_promotion.py
+All checks passed!
+
+git diff --check
+PASS
+```

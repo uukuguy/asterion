@@ -504,8 +504,9 @@ def _closed_prime_subprocess_environment(
     workspace: Path | None = None,
     *,
     temporary_root: Path | None = None,
+    node_executable: Path | None = None,
 ) -> dict[str, str]:
-    node = _resolve_operational_node()
+    node = node_executable or _resolve_operational_node()
     path_entries = dict.fromkeys(
         (str(node.parent), *PRIME_CLOSED_SYSTEM_PATHS)
     )
@@ -545,9 +546,11 @@ def _closed_prime_subprocess_environment(
 
 
 def _closed_npm_subprocess_environment(
-    workspace: Path, npm_cache: Path
+    workspace: Path, npm_cache: Path, *, node_executable: Path | None = None
 ) -> dict[str, str]:
-    environment = _closed_prime_subprocess_environment(workspace)
+    environment = _closed_prime_subprocess_environment(
+        workspace, node_executable=node_executable
+    )
     environment.pop("HOME", None)
     environment["NPM_CONFIG_CACHE"] = str(npm_cache)
     environment["NPM_CONFIG_OFFLINE"] = "true"
@@ -755,7 +758,11 @@ def _verify_locked_prime_runtime(target: Path, lock: PrimeArtifactLock) -> None:
 
 
 def _run_prime_binding_command(
-    command: tuple[str, ...], cwd: Path, npm_cache: Path
+    command: tuple[str, ...],
+    cwd: Path,
+    npm_cache: Path,
+    *,
+    node_executable: Path | None = None,
 ) -> None:
     environment = {
         key: value
@@ -763,9 +770,11 @@ def _run_prime_binding_command(
         if (value := os.environ.get(key)) is not None
     }
     if command[0] == "npm":
-        environment = _closed_npm_subprocess_environment(cwd.parent, npm_cache)
+        environment = _closed_npm_subprocess_environment(
+            cwd.parent, npm_cache, node_executable=node_executable
+        )
     else:
-        node = _resolve_operational_node()
+        node = node_executable or _resolve_operational_node()
         environment["PATH"] = f"{node.parent}:{environment.get('PATH', '')}"
     try:
         completed = subprocess.run(
@@ -784,12 +793,20 @@ def _run_prime_binding_command(
 
 
 def _run_prime_operational_prepare_command(
-    command: tuple[str, ...], cwd: Path, npm_cache: Path
+    command: tuple[str, ...],
+    cwd: Path,
+    npm_cache: Path,
+    *,
+    node_executable: Path | None = None,
 ) -> None:
     environment = (
-        _closed_npm_subprocess_environment(cwd.parent, npm_cache)
+        _closed_npm_subprocess_environment(
+            cwd.parent, npm_cache, node_executable=node_executable
+        )
         if command[0] == "npm"
-        else _closed_prime_subprocess_environment(cwd.parent)
+        else _closed_prime_subprocess_environment(
+            cwd.parent, node_executable=node_executable
+        )
     )
     try:
         completed = subprocess.run(
@@ -812,6 +829,8 @@ def _prepare_external_prime_checkout(
     target: Path,
     source_commit: str,
     npm_cache: Path,
+    *,
+    node_executable: Path | None = None,
 ) -> None:
     _run_prime_binding_command(
         (
@@ -825,14 +844,18 @@ def _prepare_external_prime_checkout(
         ),
         target.parent.parent,
         npm_cache,
+        node_executable=node_executable,
     )
     _run_prime_binding_command(
         ("git", "checkout", "--detach", source_commit),
         target,
         npm_cache,
+        node_executable=node_executable,
     )
     for command in PRIME_PREPARE_COMMANDS:
-        _run_prime_binding_command(command, target, npm_cache)
+        _run_prime_binding_command(
+            command, target, npm_cache, node_executable=node_executable
+        )
     _ignore_generated_prime_checkout_paths(target)
 
 
@@ -910,10 +933,14 @@ def _prepare_external_operational_prime_checkout(
     source_commit: str,
     resource_root: Path,
     npm_cache: Path,
+    *,
+    node_executable: Path | None = None,
 ) -> None:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        environment = _closed_prime_subprocess_environment(target.parent)
+        environment = _closed_prime_subprocess_environment(
+            target.parent, node_executable=node_executable
+        )
         clone = subprocess.run(
             (
                 "git",
@@ -943,7 +970,9 @@ def _prepare_external_operational_prime_checkout(
     except (OSError, subprocess.SubprocessError):
         raise PromotionError("external Prime checkout could not be created") from None
     for command in PRIME_PREPARE_COMMANDS:
-        _run_prime_operational_prepare_command(command, target, npm_cache)
+        _run_prime_operational_prepare_command(
+            command, target, npm_cache, node_executable=node_executable
+        )
     _ignore_generated_prime_checkout_paths(target)
     _materialize_operational_dependency_tree(target)
     try:
@@ -960,6 +989,7 @@ def _bind_external_prime_source(
     *,
     operational_workspace: Path | None = None,
     npm_cache: Path,
+    node_executable: Path | None = None,
 ) -> None:
     prime_source = _external_prime_source_root(source_root)
     if prime_source is None:
@@ -974,7 +1004,11 @@ def _bind_external_prime_source(
         artifact_lock_path = resource_root / "prime-artifact-lock.json"
         lock = load_prime_artifact_lock(artifact_lock_path)
         _prepare_external_prime_checkout(
-            prime_source, target, lock.source_commit, npm_cache
+            prime_source,
+            target,
+            lock.source_commit,
+            npm_cache,
+            node_executable=node_executable,
         )
         verify_prime_checkout(target, lock_path=artifact_lock_path)
         _verify_locked_prime_runtime(target, lock)
@@ -992,6 +1026,7 @@ def _bind_external_prime_source(
                 lock.source_commit,
                 resource_root,
                 npm_cache,
+                node_executable=node_executable,
             )
     except (OSError, RuntimeError, PrimeSetupError):
         raise PromotionError("external Prime source binding could not be created") from None
@@ -1342,11 +1377,21 @@ def run_promotion(
     npm_cache: Path,
     quick: bool = False,
     runner: Runner = _default_runner,
+    node_executable: Path | None = None,
 ) -> int:
     source = source_root.resolve()
     if not source.is_dir():
         raise PromotionError("standalone source root is unavailable")
     cache = _resolve_promotion_npm_cache(str(npm_cache))
+    requires_node = runner is _default_runner or bool(
+        os.environ.get(PRIME_SOURCE_ENV)
+    ) or (source / DEFAULT_PRIME_SOURCE).exists()
+    try:
+        node = node_executable or (
+            _resolve_operational_node() if requires_node else None
+        )
+    except (OSError, RuntimeError):
+        raise PromotionError("Prime operational Node runtime is unavailable") from None
 
     def promotion_runner(
         command: tuple[str, ...], cwd: Path
@@ -1355,7 +1400,9 @@ def run_promotion(
             return _default_runner(
                 command,
                 cwd,
-                environment=_closed_npm_subprocess_environment(cwd.parent, cache),
+                environment=_closed_npm_subprocess_environment(
+                    cwd.parent, cache, node_executable=node
+                ),
             )
         return runner(command, cwd)
 
@@ -1369,6 +1416,7 @@ def run_promotion(
             source,
             operational_workspace=raw_workspace,
             npm_cache=cache,
+            node_executable=node,
         )
         _audit_copy(copy_root)
         command_count = (
@@ -1389,8 +1437,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_root=Path(__file__).resolve().parents[1],
             npm_cache=_resolve_promotion_npm_cache(arguments.npm_cache),
             quick=arguments.quick,
+            node_executable=_resolve_operational_node(),
         )
-    except PromotionError as error:
+    except (PromotionError, OperationalHarnessError) as error:
         print(f"promotion check failed: {error}", file=sys.stderr)
         return 1
     mode = "quick" if arguments.quick else "full"
