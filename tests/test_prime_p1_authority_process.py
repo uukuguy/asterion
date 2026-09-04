@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.authority_process import (
     AuthorityLaunchContract,
+    AdmittedAuthorityDescriptors,
     PrimeP1AuthorityBootstrapError,
     admit_authority_launch,
     admit_retained_authority_descriptors,
@@ -32,6 +33,29 @@ class _Socket:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_consume_wins_over_close_without_closing_returned_fd(self) -> None:
+        entered, release = threading.Event(), threading.Event()
+        closed: list[int] = []
+        bundle = AdmittedAuthorityDescriptors(_Socket(peer=(300, 400)), 11, 12, closed.append, _before_take=lambda: (entered.set(), release.wait()))
+        result: list[int] = []
+        consumer = threading.Thread(target=lambda: result.append(bundle.consume_session_key_fd()))
+        consumer.start()
+        self.assertTrue(entered.wait(1))
+        closer = threading.Thread(target=bundle.close)
+        closer.start()
+        release.set()
+        consumer.join()
+        closer.join()
+        self.assertEqual(result, [11])
+        self.assertEqual(closed, [12])
+
+    def test_close_wins_before_consume_closes_fd_once(self) -> None:
+        closed: list[int] = []
+        bundle = AdmittedAuthorityDescriptors(_Socket(peer=(300, 400)), 11, 12, closed.append)
+        bundle.close()
+        with self.assertRaises(PrimeP1AuthorityBootstrapError):
+            bundle.consume_session_key_fd()
+        self.assertEqual(closed, [11, 12])
     def test_concurrent_consumers_have_exactly_one_owner(self) -> None:
         admitted = admit_retained_authority_descriptors(
             AuthorityLaunchContract(10, 11, 12, 100, 200, 300, 400),

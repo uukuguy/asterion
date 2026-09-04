@@ -53,6 +53,7 @@ class AdmittedAuthorityDescriptors:
         session_key_fd: int,
         config_fd: int,
         close_fd: Callable[[int], object],
+        _before_take: Callable[[], object] | None = None,
     ) -> None:
         self._connection: object | None = connection
         self._session_key_fd: int | None = session_key_fd
@@ -60,6 +61,7 @@ class AdmittedAuthorityDescriptors:
         self._close_fd = close_fd
         self._closed = False
         self._lock = threading.Lock()
+        self._before_take = _before_take
 
     def __repr__(self) -> str:
         return "AdmittedAuthorityDescriptors(redacted)"
@@ -101,6 +103,8 @@ class AdmittedAuthorityDescriptors:
             value = getattr(self, attribute)
             if value is None:
                 _unavailable()
+            if self._before_take is not None:
+                self._before_take()
             setattr(self, attribute, None)
             return value
 
