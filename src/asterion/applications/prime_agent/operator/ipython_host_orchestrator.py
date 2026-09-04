@@ -25,7 +25,10 @@ from asterion.applications.prime_agent.operator.ipython_host_supervisor import (
     IpythonHostSupervisorError,
     _new_ipython_host_supervisor,
 )
-from asterion.applications.prime_agent.operator.model_broker import PrimeModelBrokerUsage
+from asterion.applications.prime_agent.operator.model_broker import (
+    PrimeModelBrokerReceipt,
+    PrimeModelBrokerUsage,
+)
 from asterion.runtime.host import CancellationSignal
 from asterion.services.restricted_worker import RestrictedWorkerLease
 
@@ -75,7 +78,7 @@ class _IpythonHostOperations:
         _seal: object,
         snapshot: Callable[[RestrictedWorkerLease], Awaitable[DockerWorkerWorkspaceSnapshot]],
         brokered_cell: Callable[[RestrictedWorkerLease], Awaitable[_IpythonBrokeredCell]],
-        revoke_broker: Callable[[RestrictedWorkerLease], Awaitable[None]],
+        revoke_broker: Callable[[RestrictedWorkerLease], Awaitable[PrimeModelBrokerReceipt]],
         force_remove: Callable[[RestrictedWorkerLease], Awaitable[None]],
         assert_absent: Callable[[RestrictedWorkerLease], Awaitable[None]],
     ) -> None:
@@ -178,9 +181,9 @@ async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHost
         _record_post(supervisor, post)
         _check_cancel(signal, supervisor)
 
-        await operations.revoke_broker(lease)
+        revocation = await operations.revoke_broker(lease)
         broker_revoked = True
-        supervisor.record_broker_revoked(supervisor._attest_broker_revocation())  # noqa: SLF001
+        _record_broker_revocation(supervisor, lease, revocation)
         _check_cancel(signal, supervisor)
     except asyncio.CancelledError:
         if supervisor is not None:
@@ -280,6 +283,29 @@ def _record_post(supervisor: IpythonHostSupervisor, snapshot: object) -> None:
     )
 
 
+def _record_broker_revocation(
+    supervisor: IpythonHostSupervisor, lease: RestrictedWorkerLease, receipt: object
+) -> None:
+    if (
+        type(receipt) is not PrimeModelBrokerReceipt
+        or receipt.status != "revoked"
+        or receipt.run_id != lease.run_id
+        or receipt.worker_id != lease.worker_id
+        or receipt.challenge_digest != lease.challenge_digest
+        or receipt.request_count != 1
+        or receipt.input_bytes <= 0
+        or receipt.output_bytes <= 0
+    ):
+        _reject()
+    typed_receipt = cast(PrimeModelBrokerReceipt, receipt)
+    supervisor.record_broker_revoked(
+        supervisor._attest_broker_revocation(  # noqa: SLF001
+            session_id=typed_receipt.session_id, request_count=typed_receipt.request_count,
+            input_bytes=typed_receipt.input_bytes, output_bytes=typed_receipt.output_bytes,
+        )
+    )
+
+
 async def _cleanup(
     operations: _IpythonHostOperations, lease: RestrictedWorkerLease, broker_revoked: bool
 ) -> BaseException | None:
@@ -315,7 +341,7 @@ async def _cleanup(
 
 
 async def _bounded_cleanup_step(
-    operation: Callable[[RestrictedWorkerLease], Awaitable[None]], lease: RestrictedWorkerLease
+    operation: Callable[[RestrictedWorkerLease], Awaitable[object]], lease: RestrictedWorkerLease
 ) -> BaseException | None:
     """Bound each cleanup operation and give cancellation a finite reaping grace."""
     async def invoke() -> None:

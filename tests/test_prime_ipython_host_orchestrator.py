@@ -14,7 +14,10 @@ from asterion.applications.prime_agent.operator.docker_worker import (
     DockerWorkerWorkspaceSnapshot,
 )
 from asterion.applications.prime_agent.operator.ipython_host_supervisor import IpythonHostExpectedIdentity
-from asterion.applications.prime_agent.operator.model_broker import PrimeModelBrokerUsage
+from asterion.applications.prime_agent.operator.model_broker import (
+    PrimeModelBrokerReceipt,
+    PrimeModelBrokerUsage,
+)
 from asterion.runtime.host import CancellationSignal
 from asterion.services.restricted_worker import RestrictedWorkerLease
 
@@ -91,14 +94,17 @@ class _HostOperations:
             usage=PrimeModelBrokerUsage("session-1", lease.run_id, lease.worker_id, lease.challenge_digest, 1, 3, len(_CELL.encode())),
         )
 
-    async def revoke_broker(self, lease: RestrictedWorkerLease) -> None:
-        del lease
+    async def revoke_broker(self, lease: RestrictedWorkerLease) -> PrimeModelBrokerReceipt:
         self.calls.append("revoke_broker")
         if self.hang_revoke:
             try:
                 await asyncio.Event().wait()
             finally:
                 self.revoke_reaped = True
+        return PrimeModelBrokerReceipt(
+            "session-1", lease.run_id, lease.worker_id, lease.challenge_digest,
+            1, 3, len(_CELL.encode()), "revoked",
+        )
 
     async def force_remove(self, lease: RestrictedWorkerLease) -> None:
         del lease

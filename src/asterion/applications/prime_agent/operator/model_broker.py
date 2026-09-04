@@ -124,6 +124,26 @@ class PrimeModelChannel:
         return await self._transport.exchange(_Frame(self._identity, body, reply))
 
 
+_HOST_BROKER_ARTIFACT_SEAL = object()
+
+
+@dataclass(frozen=True, repr=False)
+class _PrimeBrokerHostArtifacts:
+    """One activated broker/channel pair, minted only by its coordinator."""
+
+    coordinator: object
+    worker: RestrictedWorkerLease
+    channel: PrimeModelChannel
+    _seal: object
+
+    def __post_init__(self) -> None:
+        if self._seal is not _HOST_BROKER_ARTIFACT_SEAL:
+            raise PrimeModelBrokerError("prime model broker is unavailable")
+
+    def __repr__(self) -> str:
+        return "_PrimeBrokerHostArtifacts(redacted)"
+
+
 class _HostModelCoordinator:
     """Host TCB: validates frames and owns lifecycle/provider execution."""
 
@@ -181,6 +201,23 @@ class _HostModelCoordinator:
     def usage(self) -> PrimeModelBrokerUsage:
         return PrimeModelBrokerUsage(self._lease.session_id, self._session.run_id, self._worker.worker_id,
             self._worker.challenge_digest, self._requests, self._input_bytes, self._output_bytes)
+
+    def _host_artifacts(self, worker: RestrictedWorkerLease) -> _PrimeBrokerHostArtifacts:
+        """Activate exactly once and seal the channel to the admitted worker."""
+        if type(worker) is not RestrictedWorkerLease or worker is not self._worker:
+            raise PrimeModelBrokerError("prime model broker is unavailable")
+        return _PrimeBrokerHostArtifacts(self, worker, self._activate(), _HOST_BROKER_ARTIFACT_SEAL)
+
+    def _host_validate_artifacts(self, artifacts: object) -> _PrimeBrokerHostArtifacts:
+        if (
+            type(artifacts) is not _PrimeBrokerHostArtifacts
+            or artifacts._seal is not _HOST_BROKER_ARTIFACT_SEAL
+            or artifacts.coordinator is not self
+            or artifacts.worker is not self._worker
+            or type(artifacts.channel) is not PrimeModelChannel
+        ):
+            raise PrimeModelBrokerError("prime model broker is unavailable")
+        return artifacts
 
     async def revoke(self) -> PrimeModelBrokerReceipt:
         async with self._lock:

@@ -132,6 +132,10 @@ class _Revocation:
     version: str
     stage: str
     sequence: int
+    session_id: str
+    request_count: int
+    input_bytes: int
+    output_bytes: int
 
     def __repr__(self) -> str:
         return "_Revocation(redacted)"
@@ -292,9 +296,23 @@ class IpythonHostSupervisor:
             cast(bool, cancelled),
         )
 
-    def _attest_broker_revocation(self) -> _Revocation:
+    def _attest_broker_revocation(
+        self, *, session_id: object = "host-attested", request_count: object = 1,
+        input_bytes: object = 1, output_bytes: object = 1,
+    ) -> _Revocation:
         self._require_stage(3)
-        return _Revocation(self._issuer, _ATTESTATION_VERSION, "revocation", 4)
+        if (
+            type(session_id) is not str or not session_id
+            or type(request_count) is not int or request_count != 1
+            or type(input_bytes) is not int or input_bytes <= 0
+            or type(output_bytes) is not int or output_bytes <= 0
+        ):
+            _invalid()
+        return _Revocation(
+            self._issuer, _ATTESTATION_VERSION, "revocation", 4,
+            cast(str, session_id), cast(int, request_count), cast(int, input_bytes),
+            cast(int, output_bytes),
+        )
 
     def _attest_cleanup_and_absence(self) -> _Cleanup:
         self._require_stage(4)
@@ -399,7 +417,8 @@ class IpythonHostSupervisor:
                 (initial.version, initial.stage, initial.sequence),
                 (cell.version, cell.stage, cell.sequence),
                 (post.version, post.stage, post.sequence),
-                (revocation.version, revocation.stage, revocation.sequence),
+                (revocation.version, revocation.stage, revocation.sequence, revocation.session_id,
+                 revocation.request_count, revocation.input_bytes, revocation.output_bytes),
                 (cleanup.version, cleanup.stage, cleanup.sequence),
                 (oracle.version, oracle.stage, oracle.sequence),
             ),
@@ -505,7 +524,14 @@ def _valid_identity(value: object) -> bool:
 
 
 def _valid_revocation(value: object, issuer: object, sequence: int) -> bool:
-    return type(value) is _Revocation and value.issuer is issuer and value.version == _ATTESTATION_VERSION and value.stage == "revocation" and value.sequence == sequence
+    return (
+        type(value) is _Revocation and value.issuer is issuer
+        and value.version == _ATTESTATION_VERSION and value.stage == "revocation"
+        and value.sequence == sequence and type(value.session_id) is str and bool(value.session_id)
+        and type(value.request_count) is int and value.request_count == 1
+        and type(value.input_bytes) is int and value.input_bytes > 0
+        and type(value.output_bytes) is int and value.output_bytes > 0
+    )
 
 
 def _valid_cleanup(value: object, issuer: object, sequence: int) -> bool:
