@@ -1662,3 +1662,5 @@
 - 06:54 Added authenticated P1 IPC and descriptor-safe external config loader, separating parsing from authority [5bf1feb]
 - 07:10 Hardened P1 operator configuration admission to consume only a live-authority-owned close-on-exec descriptor [pending commit]
 - 07:05 correction: descriptor-only P1 config admission commit [2592e97]
+- 07:08 Hardened P1 authority frames and receipt validation to reject replay and forged terminal evidence [d5b588a]
+- 07:08 correction: authority protocol hardening commit amended [cf6f525]
