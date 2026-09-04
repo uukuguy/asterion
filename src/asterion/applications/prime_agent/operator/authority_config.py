@@ -67,13 +67,13 @@ def load_operator_config(config_fd: int) -> PrimeP1OperatorConfig:
         if _stable_identity(before) != _stable_identity(after):
             raise ValueError
         return PrimeP1OperatorConfig(MappingProxyType(_parse_verified_bytes(data)))
-    except (OSError, TypeError, UnicodeError, ValueError):
+    except (OSError, OverflowError, TypeError, UnicodeError, ValueError):
         raise PrimeP1OperatorConfigError() from None
     finally:
         if fd is not None:
             try:
                 os.close(fd)
-            except OSError:
+            except (OSError, OverflowError):
                 pass
 
 

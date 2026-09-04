@@ -52,6 +52,10 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
         with self.assertRaises(TypeError):
             load_operator_config(0, authority_uid=os.getuid())  # type: ignore[call-arg]
 
+    def test_normalizes_an_oversized_descriptor(self) -> None:
+        with self.assertRaises(PrimeP1OperatorConfigError):
+            load_operator_config(10**100)
+
     def test_rejects_insecure_file_contracts(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
             root = Path(temp)
@@ -73,6 +77,8 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
                             os.link(root / "operator.env", root / "operator-link.env")
                     with self.assertRaisesRegex(PrimeP1OperatorConfigError, "unavailable"):
                         load_operator_config(fd)
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
 
     def test_rejects_a_descriptor_not_owned_by_the_live_authority_identity(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
