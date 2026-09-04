@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+import socket as socket_module
 
 from asterion.applications.prime_agent.operator.authority_process import (
     AuthorityLaunchContract,
@@ -56,7 +57,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             peercred_option=17,
         )
         self.assertEqual(repr(bootstrap), "AuthorityBootstrap(redacted)")
-        self.assertEqual(closed, [10, 11, 12])
+        self.assertEqual(closed, [11, 12])
         self.assertTrue(socket.closed)
 
     def test_rejects_duplicate_or_noninteger_descriptors_and_closes_unique_integer_fds(
@@ -99,8 +100,23 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                     str(raised.exception), "prime P1 authority bootstrap is unavailable"
                 )
                 self.assertNotIn("999", repr(raised.exception))
-                self.assertEqual(closed, [10, 11, 12])
+                self.assertEqual(closed, [11, 12] if flags else [10, 11, 12])
                 self.assertEqual(socket.closed, flags != 0)
+
+    def test_accepts_socketkind_constant_and_rejects_identity_collisions(self) -> None:
+        contract = AuthorityLaunchContract(10, 11, 12, 100, 200, 300, 400)
+        admitted = admit_authority_launch(
+            contract, platform_name="linux", effective_uid=lambda: 100,
+            process_id=lambda: 200, socket_factory=lambda _: _Socket(peer=(300, 400)),
+            get_fd_flags=lambda _: 1, peer_credentials=lambda _: (300, 400),
+            close_fd=lambda _: None, seqpacket_type=socket_module.SOCK_SEQPACKET,
+            peercred_option=17,
+        )
+        self.assertEqual(repr(admitted), "AuthorityBootstrap(redacted)")
+        for authority_uid, authority_pid, supervisor_uid, supervisor_pid in ((100, 200, 100, 400), (100, 200, 300, 200), (100, 0, 300, 400)):
+            with self.subTest(values=(authority_uid, authority_pid, supervisor_uid, supervisor_pid)):
+                with self.assertRaises(PrimeP1AuthorityBootstrapError):
+                    admit_authority_launch(AuthorityLaunchContract(10, 11, 12, authority_uid, authority_pid, supervisor_uid, supervisor_pid), platform_name="linux", close_fd=lambda _: None)
 
 
 if __name__ == "__main__":

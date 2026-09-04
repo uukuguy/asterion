@@ -79,15 +79,17 @@ def admit_authority_launch(
         if (
             os.name != "posix"
             or platform_name != "linux"
-            or type(seqpacket) is not int
-            or type(peercred) is not int
+            or isinstance(seqpacket, bool)
+            or not isinstance(seqpacket, int)
+            or isinstance(peercred, bool)
+            or not isinstance(peercred, int)
         ):
             _unavailable()
         _validate_contract(contract)
         flags = get_fd_flags or _get_fd_flags
         if not all(
             flags(fd) & fcntl.FD_CLOEXEC
-            for fd in (contract.session_key_fd, contract.config_fd)
+            for fd in (contract.socket_fd, contract.session_key_fd, contract.config_fd)
         ):
             _unavailable()
         factory = socket_factory or _socket_from_fd
@@ -120,6 +122,8 @@ def admit_authority_launch(
             except OSError:
                 pass
         for fd in fds:
+            if connection is not None and fd == contract.socket_fd:
+                continue
             try:
                 close_fd(fd)
             except (OSError, OverflowError, TypeError):
@@ -150,6 +154,10 @@ def _validate_contract(contract: object) -> None:
     if (
         any(type(value) is not int or value < 0 for value in values)
         or len({contract.socket_fd, contract.session_key_fd, contract.config_fd}) != 3
+        or contract.authority_pid <= 0
+        or contract.supervisor_pid <= 0
+        or contract.authority_uid == contract.supervisor_uid
+        or contract.authority_pid == contract.supervisor_pid
     ):
         raise ValueError
 
@@ -164,11 +172,11 @@ def _socket_from_fd(fd: int) -> socket.socket:
 
 def _peer_credentials(connection: object, peercred_option: int) -> tuple[int, int]:
     raw = _getsockopt(
-        connection, socket.SOL_SOCKET, peercred_option, struct.calcsize("3i")
+        connection, socket.SOL_SOCKET, peercred_option, struct.calcsize("iII")
     )
     if type(raw) is not bytes:
         raise ValueError
-    pid, uid, _gid = struct.unpack("3i", raw)
+    pid, uid, _gid = struct.unpack("iII", raw)
     return uid, pid
 
 
