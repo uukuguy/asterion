@@ -214,6 +214,28 @@ class RestrictedScenarioWorker:
         )
 
 
+async def _complete_cleanup(operation: object) -> BaseException | None:
+    """Finish engine cleanup even if its caller is cancelled."""
+    if not hasattr(operation, "__await__"):
+        return RestrictedWorkerError("restricted worker value is invalid")
+    task = asyncio.ensure_future(operation)  # type: ignore[arg-type]
+    cancelled: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = asyncio.CancelledError()
+        except BaseException as error:
+            return error
+    if task.cancelled():
+        return RestrictedWorkerError("restricted worker value is invalid")
+    try:
+        task.result()
+    except BaseException as error:
+        return error
+    return cancelled
+
+
 class _Context(AbstractAsyncContextManager[RestrictedWorkerLease]):
     def __init__(
         self,
@@ -266,13 +288,14 @@ class _Context(AbstractAsyncContextManager[RestrictedWorkerLease]):
         if self._lease is None:
             raise RestrictedWorkerError("restricted worker value is invalid")
         state = self._worker._state(self._lease)
-        try:
-            await self._worker._engine.remove(self._lease)
-        except asyncio.CancelledError:
-            raise
-        except BaseException:
-            raise RestrictedWorkerError("restricted worker value is invalid") from None
+        error = await _complete_cleanup(self._worker._engine.remove(self._lease))
         del self._worker._states[self._lease.worker_id]
+        if error is not None and not isinstance(error, asyncio.CancelledError):
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
         if state.execution is None:
+            if isinstance(error, asyncio.CancelledError):
+                raise error
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._worker._tombstones[self._lease.worker_id] = self._lease
+        if isinstance(error, asyncio.CancelledError):
+            raise error

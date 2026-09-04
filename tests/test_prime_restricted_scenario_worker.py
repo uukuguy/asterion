@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from dataclasses import replace
 from typing import cast
@@ -124,3 +125,58 @@ class TestRestrictedScenarioWorker(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(ValueError):
             worker.open(replace(request, role_id="prime.other"))
+
+    async def test_cleanup_completes_before_cancelled_caller_exits(self) -> None:
+        from asterion.applications.prime_agent.operator.restricted_scenario_worker import (
+            RestrictedScenarioAdapter,
+            RestrictedScenarioInspection,
+            RestrictedScenarioWorker,
+        )
+
+        class Engine:
+            def __init__(self) -> None:
+                self.remove_started = asyncio.Event()
+                self.allow_remove = asyncio.Event()
+                self.removed = False
+
+            async def launch(self, **kwargs: object) -> RestrictedWorkerLease:
+                return RestrictedWorkerLease(
+                    "worker-1", "prime.test", "run-1", _DIGEST, _DIGEST
+                )
+
+            async def completion_bytes(self, lease: RestrictedWorkerLease) -> bytes:
+                return b"ok"
+
+            async def inspect(
+                self, lease: RestrictedWorkerLease
+            ) -> RestrictedScenarioInspection:
+                raise AssertionError("not used")
+
+            async def remove(self, lease: RestrictedWorkerLease) -> None:
+                self.remove_started.set()
+                await self.allow_remove.wait()
+                self.removed = True
+
+        adapter = RestrictedScenarioAdapter(
+            "prime.test/v1", "prime.test", _DIGEST, "/entry", "test-seccomp", 3, 8,
+            lambda raw: raw == b"ok",
+        )
+        engine = Engine()
+        worker = RestrictedScenarioWorker(
+            image_digest=_IMAGE, engine=engine, adapter=adapter
+        )
+        request = RestrictedWorkerRequest(
+            "prime.test", _IMAGE, "run-1", _DIGEST, _DIGEST, 1, 8
+        )
+
+        async def lifecycle() -> None:
+            async with worker.open(request) as lease:
+                await worker.execution_receipt(lease)
+
+        task = asyncio.create_task(lifecycle())
+        await engine.remove_started.wait()
+        task.cancel()
+        engine.allow_remove.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertTrue(engine.removed)

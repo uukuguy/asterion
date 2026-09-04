@@ -1,6 +1,7 @@
 """Strict parser for the fixed P4 diagnostic-recovery completion."""
 from __future__ import annotations
 from dataclasses import dataclass
+import json
 from asterion.applications.prime_agent.diagnostic_session_recovery_receipt import DiagnosticSessionRecoveryReceiptError, DiagnosticSessionRecoveryTrace, validate_diagnostic_session_recovery_trace
 
 class DiagnosticSessionRecoveryCompletionError(ValueError):
@@ -27,3 +28,21 @@ def parse_diagnostic_session_recovery_completion(payload: object) -> DiagnosticS
         return DiagnosticSessionRecoveryCompletion(trace)
     except (KeyError, TypeError, ValueError, DiagnosticSessionRecoveryReceiptError):
         raise DiagnosticSessionRecoveryCompletionError("diagnostic session recovery completion is invalid") from None
+
+
+def canonical_diagnostic_session_recovery_completion_bytes(
+    completion: DiagnosticSessionRecoveryCompletion,
+) -> bytes:
+    """Render the only accepted, body-bounded P4 completion encoding."""
+    if type(completion) is not DiagnosticSessionRecoveryCompletion:
+        raise DiagnosticSessionRecoveryCompletionError(
+            "diagnostic session recovery completion is invalid"
+        )
+    trace = completion.trace
+    payload: dict[str, object] = {
+        "format": "asterion.prime-diagnostic-session-recovery/v1"
+    }
+    payload.update(vars(trace))
+    payload["root_tool_names"] = list(trace.root_tool_names)
+    payload["child_tool_names"] = list(trace.child_tool_names)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")

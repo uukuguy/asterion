@@ -5,6 +5,7 @@ import json
 
 from asterion.applications.prime_agent.operator.diagnostic_session_recovery_completion import (
     DiagnosticSessionRecoveryCompletionError,
+    canonical_diagnostic_session_recovery_completion_bytes,
     parse_diagnostic_session_recovery_completion,
 )
 from asterion.applications.prime_agent.operator.diagnostic_session_recovery_workload import (
@@ -21,8 +22,10 @@ from asterion.applications.prime_agent.operator.restricted_scenario_worker impor
 
 def _parse(raw: bytes) -> bool:
     try:
-        parse_diagnostic_session_recovery_completion(json.loads(raw.decode("utf-8")))
-        return True
+        completion = parse_diagnostic_session_recovery_completion(
+            json.loads(raw.decode("utf-8"))
+        )
+        return raw == canonical_diagnostic_session_recovery_completion_bytes(completion)
     except (DiagnosticSessionRecoveryCompletionError, UnicodeDecodeError, json.JSONDecodeError):
         return False
 
