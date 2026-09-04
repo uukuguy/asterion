@@ -131,13 +131,26 @@ def _resign(receipt: dict[str, object]) -> None:
 
 
 class TestPrimeP1AuthorityProtocol(unittest.TestCase):
-    def test_terminal_acceptance_requires_the_receipt_key(self) -> None:
+    def test_supervisor_keeps_receipt_hmac_key_out_of_its_api(self) -> None:
+        with self.assertRaises(TypeError):
+            SupervisorSession(SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY)  # type: ignore[call-arg]
+
+    def test_cancelled_sessions_only_accept_cancelled_receipts(self) -> None:
+        authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET, receipt_hmac_key=RECEIPT_KEY)
+        supervisor = SupervisorSession(SESSION, KEY, CONTRACT)
+        supervisor.accept_authority_packet(authority.ready_packet())
+        authority.accept_supervisor_packet(supervisor.execute_packet("run-1", APPLICATION))
+        authority.accept_supervisor_packet(supervisor.cancel_packet())
         with self.assertRaises(PrimeP1AuthorityProtocolError):
-            SupervisorSession(SESSION, KEY, CONTRACT)
+            authority.terminal_packet(_receipt())
+
+    def test_authority_terminal_signing_requires_the_receipt_key(self) -> None:
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET).terminal_packet(_receipt())
 
     def test_rejects_unbound_receipt_run_request_and_resource(self) -> None:
         authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET, receipt_hmac_key=RECEIPT_KEY)
-        supervisor = SupervisorSession(SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY)
+        supervisor = SupervisorSession(SESSION, KEY, CONTRACT)
         supervisor.accept_authority_packet(authority.ready_packet())
         authority.accept_supervisor_packet(supervisor.execute_packet("run-1", APPLICATION))
         for field, value in (("run_id", "run-2"), ("application_request_sha256", "not-a-digest"), ("reason_code", "invented"), ("status", "FAIL")):
@@ -168,9 +181,17 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
         with self.assertRaises(PrimeP1AuthorityProtocolError):
             decode_frame(packet, KEY)
 
+    def test_encoder_rejects_cycles_and_non_native_json_values(self) -> None:
+        cycle: list[object] = []
+        cycle.append(cycle)
+        for payload in ({"value": cycle}, {"value": object()}):
+            with self.subTest(payload=repr(payload)):
+                with self.assertRaises(PrimeP1AuthorityProtocolError):
+                    encode_frame(KEY, SESSION, 1, "terminal", payload)
+
     def test_authority_does_not_emit_an_unsigned_terminal_receipt(self) -> None:
         authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
-        supervisor = SupervisorSession(SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY)
+        supervisor = SupervisorSession(SESSION, KEY, CONTRACT)
         supervisor.accept_authority_packet(authority.ready_packet())
         authority.accept_supervisor_packet(supervisor.execute_packet("run-1", APPLICATION))
         with self.assertRaises(PrimeP1AuthorityProtocolError):
@@ -307,7 +328,7 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
         self,
     ) -> None:
         authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
-        supervisor = SupervisorSession(SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY)
+        supervisor = SupervisorSession(SESSION, KEY, CONTRACT)
         supervisor.accept_authority_packet(authority.ready_packet())
         execute = supervisor.execute_packet("run-1", APPLICATION)
         authority.accept_supervisor_packet(execute)
@@ -320,9 +341,7 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
 
     def test_supervisor_accepts_only_authenticated_exact_terminal_receipt(self) -> None:
         authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
-        supervisor = SupervisorSession(
-            SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY
-        )
+        supervisor = SupervisorSession(SESSION, KEY, CONTRACT)
         supervisor.accept_authority_packet(authority.ready_packet())
         authority.accept_supervisor_packet(
             supervisor.execute_packet("run-1", APPLICATION)
@@ -341,16 +360,14 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
     def test_supervisor_rejects_malformed_terminal_receipt_digest_and_hmac(
         self,
     ) -> None:
-        for field in ("receipt_sha256", "receipt_hmac_sha256", "evidence_id"):
+        for field in ("receipt_sha256", "evidence_id"):
             with self.subTest(field=field):
                 receipt = _receipt()
                 receipt[field] = (
                     "0" * 64 if field != "evidence_id" else "prime-p1-" + "0" * 64
                 )
                 packet = encode_frame(KEY, SESSION, 1, "terminal", receipt)
-                supervisor = SupervisorSession(
-                    SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY
-                )
+                supervisor = SupervisorSession(SESSION, KEY, CONTRACT)
                 authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
                 supervisor.accept_authority_packet(authority.ready_packet())
                 authority.accept_supervisor_packet(

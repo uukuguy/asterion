@@ -183,7 +183,12 @@ class AuthoritySession:
             _unavailable()
         if self._receipt_key is None or not isinstance(self._run_id, str) or not isinstance(self._application, str):
             _unavailable()
-        _receipt(receipt, self._session_id, self._contract, self._receipt_key, self._run_id, self._application, self._resource)
+        result = _receipt(
+            receipt, self._session_id, self._contract, self._receipt_key,
+            self._run_id, self._application, self._resource,
+        )
+        if self._state == "cancelled" and result.status != "CANCELLED":
+            _unavailable()
         self._state = "terminal-emitted"
         return encode_frame(self._session_key, self._session_id, 1, "terminal", receipt)
 
@@ -199,37 +204,34 @@ class AuthoritySession:
 
 
 class SupervisorSession:
-    """Supervisor-side direction and sequence validation; parsed data grants no authority."""
+    """Supervisor-side frame validation; receipt HMAC remains opaque authority audit data."""
 
     def __init__(
         self,
         session_id: str,
         session_key: bytes,
         request_contract_sha256: str,
-        *,
-        receipt_hmac_key: bytes | None = None,
     ) -> None:
         if not (
             _is_session_id(session_id)
             and _is_key(session_key)
             and _is_sha256(request_contract_sha256)
-            and _is_key(receipt_hmac_key)
         ):
             _unavailable()
         (
             self._session_id,
             self._session_key,
             self._contract,
-            self._receipt_key,
             self._state,
+            self._resource,
             self._run_id,
             self._application,
         ) = (
             session_id,
             session_key,
             request_contract_sha256,
-            receipt_hmac_key,
             "await-ready",
+            None,
             None,
             None,
         )
@@ -245,18 +247,24 @@ class SupervisorSession:
                 or not _ready(frame.payload, self._contract)
             ):
                 _unavailable()
+            self._resource = frame.payload["resource_set_sha256"]
             self._state = "ready"
             return None
         if self._state in {"await-terminal", "cancel-sent"}:
             if frame.sequence != 1 or frame.kind != "terminal":
                 _unavailable()
             if not (
-                isinstance(self._receipt_key, bytes)
+                isinstance(self._resource, str)
                 and isinstance(self._run_id, str)
                 and isinstance(self._application, str)
             ):
                 _unavailable()
-            result = _receipt(frame.payload, self._session_id, self._contract, self._receipt_key, self._run_id, self._application)
+            result = _receipt(
+                frame.payload, self._session_id, self._contract, None,
+                self._run_id, self._application, self._resource,
+            )
+            if self._state == "cancel-sent" and result.status != "CANCELLED":
+                _unavailable()
             self._state = "terminal-received"
             return result
         _unavailable()
@@ -396,7 +404,7 @@ def _execute(value: Mapping[str, object], contract: str | None) -> bool:
 
 
 def _receipt(
-    value: Mapping[str, object], session: str, contract: str, key: bytes, run_id: str, application: str, resource: str | None = None
+    value: Mapping[str, object], session: str, contract: str, key: bytes | None, run_id: str, application: str, resource: str | None = None
 ) -> TerminalReceipt:
     try:
         if (
@@ -503,7 +511,7 @@ def _receipt(
             for name, item in value.items()
             if name not in {"evidence_id", "receipt_sha256", "receipt_hmac_sha256"}
         }
-        digest = hashlib.sha256(_RECEIPT_DOMAIN + _json(unsigned)).hexdigest()
+        digest = hashlib.sha256(_RECEIPT_DOMAIN + _json(_thaw(unsigned))).hexdigest()
         if (
             value.get("receipt_sha256") != digest
             or value.get("evidence_id") != "prime-p1-" + digest
@@ -518,9 +526,9 @@ def _receipt(
             "evidence_id": value["evidence_id"],
             "receipt_sha256": digest,
         }
-        if not hmac.compare_digest(
+        if key is not None and not hmac.compare_digest(
             receipt_hmac,
-            hmac.new(key, _RECEIPT_DOMAIN + _json(signed), "sha256").hexdigest(),
+            hmac.new(key, _RECEIPT_DOMAIN + _json(_thaw(signed)), "sha256").hexdigest(),
         ):
             raise ValueError
         return TerminalReceipt(status, digest, _freeze(value))
@@ -683,7 +691,19 @@ def _receipt_values(v: Mapping[str, object]) -> None:
             )
         )
     )
-    if (v["status"] == "PASS") != passed:
+    if (v["status"], v["reason_code"]) not in {
+        ("PASS", "completed"), ("FAIL", "failed"),
+        ("CANCELLED", "cancelled"), ("UNAVAILABLE", "unavailable"),
+    } or (v["status"] == "PASS") != passed:
+        raise ValueError
+    if v["status"] == "PASS" and not (
+        all(_positive_int(m[n]) for n in ("max_input_bytes", "max_output_bytes", "max_input_tokens", "max_output_tokens", "max_cost_microunits", "deadline_milliseconds"))
+        and _within(m["input_bytes"], m["max_input_bytes"])
+        and _within(m["output_bytes"], m["max_output_bytes"])
+        and _within(m["provider_reported_input_tokens"], m["max_input_tokens"])
+        and _within(m["provider_reported_output_tokens"], m["max_output_tokens"])
+        and m["charged_cost_microunits"] == m["max_cost_microunits"]
+    ):
         raise ValueError
 
 
@@ -703,22 +723,35 @@ def _freeze(value: object) -> Mapping[str, object]:
 
 
 def _json(value: object) -> bytes:
-    _ensure_value_depth(value)
+    _ensure_native_json_tree(value)
     return json.dumps(
-        _thaw(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False
+        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True, allow_nan=False
     ).encode("utf-8")
 
 
-def _ensure_value_depth(value: object) -> None:
+def _ensure_native_json_tree(value: object) -> None:
     stack = [(value, 1)]
+    ancestors: set[int] = set()
     while stack:
         item, depth = stack.pop()
+        if item is None or type(item) in {bool, int, float, str}:
+            continue
         if depth > _MAX_JSON_DEPTH:
             raise ValueError
-        if isinstance(item, Mapping):
+        if type(item) is dict:
+            identifier = id(item)
+            if identifier in ancestors or not all(type(key) is str for key in item):
+                raise ValueError
+            ancestors.add(identifier)
             stack.extend((child, depth + 1) for child in item.values())
-        elif isinstance(item, (list, tuple)):
+        elif type(item) is list:
+            identifier = id(item)
+            if identifier in ancestors:
+                raise ValueError
+            ancestors.add(identifier)
             stack.extend((child, depth + 1) for child in item)
+        else:
+            raise ValueError
 
 
 def _ensure_json_depth(text: str) -> None:
@@ -786,6 +819,10 @@ def _nonnegative_int(value: object) -> bool:
 
 def _positive_int(value: object) -> bool:
     return type(value) is int and value >= 1
+
+
+def _within(value: object, maximum: object) -> bool:
+    return type(value) is int and type(maximum) is int and value <= maximum
 
 
 def _unavailable() -> NoReturn:
