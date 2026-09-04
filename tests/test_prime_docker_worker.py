@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import unittest
 from collections.abc import Mapping
 from dataclasses import FrozenInstanceError
@@ -13,6 +12,8 @@ from asterion.applications.prime_agent.operator.docker_worker import (
     DockerLauncherChannel,
     DockerWorkerCompletion,
     DockerWorkerLauncherSelfCheck,
+    DockerWorkerModelRequest,
+    DockerWorkerModelResponse,
     DockerRestrictedWorkerService,
 )
 from asterion.applications.prime_agent.operator.ipython_workload import (
@@ -61,6 +62,21 @@ class _Channel(DockerLauncherChannel):
         if self.released:
             raise RestrictedWorkerError("restricted worker value is invalid")
         self.released = True
+
+    async def model_request(self, *, control: object) -> DockerWorkerModelRequest:  # type: ignore[override]
+        self.transport.calls.append("model_request")
+        self.transport.controls.append(control)
+        if not self.released:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        return DockerWorkerModelRequest(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST)
+
+    async def model_response(  # type: ignore[override]
+        self, response: DockerWorkerModelResponse, *, control: object
+    ) -> None:
+        self.transport.calls.append("model_response")
+        self.transport.controls.append(control)
+        if not self.released or type(response) is not DockerWorkerModelResponse:
+            raise RestrictedWorkerError("restricted worker value is invalid")
 
     async def completed_result(self, *, control: object) -> DockerWorkerCompletion:  # type: ignore[override]
         self.transport.calls.append("launcher_result")
@@ -440,19 +456,12 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(attestation.image_digest, _IMAGE_DIGEST)
         self.assertTrue(cleanup.destroyed)
 
-    async def test_derives_one_terminal_result_digest_from_the_worker_channel(self) -> None:
+    async def test_rejects_direct_terminal_completion_without_host_model_mediation(self) -> None:
         async with self.service.open(_request()) as lease:
-            execution = await self.service.execution_receipt(lease)
+            with self.assertRaises(RestrictedWorkerError):
+                await self.service.execution_receipt(lease)
 
-        self.assertEqual(execution.worker_id, lease.worker_id)
-        self.assertEqual(execution.role_id, lease.role_id)
-        self.assertEqual(execution.workload_digest, lease.workload_digest)
-        self.assertEqual(
-            execution.result_digest,
-            "sha256:" + hashlib.sha256(self.transport.result).hexdigest(),
-        )
-        self.assertEqual(execution.terminal, "completed")
-        self.assertEqual(self.transport.calls.count("launcher_result"), 1)
+        self.assertNotIn("launcher_result", self.transport.calls)
 
     async def test_verified_teardown_inspects_removes_and_proves_absence_in_order(self) -> None:
         async with self.service.open(_request()) as lease:

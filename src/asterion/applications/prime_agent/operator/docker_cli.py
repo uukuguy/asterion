@@ -19,6 +19,8 @@ from asterion.applications.prime_agent.operator.docker_worker import (
     DockerLauncherChannel,
     DockerWorkerCompletion,
     DockerWorkerLauncherSelfCheck,
+    DockerWorkerModelRequest,
+    DockerWorkerModelResponse,
     _DockerWorkerSpecification,
     _LifecycleCallControl,
 )
@@ -157,8 +159,8 @@ class _ProductionAttachRunner:
 class _DockerCliLauncherChannel(DockerLauncherChannel):
     """One private interactive attach process; never expose its stream."""
 
-    _RELEASE = (
-        b'{"release":true,"workload_digest":"'
+    _CONTROL = (
+        b'{"control":"begin","prime_sdk_session":"prime-agent@0.7.1","workload_digest":"'
         + PRIME_IPYTHON_CODING_WORKLOAD_DIGEST.encode()
         + b'"}\n'
     )
@@ -168,6 +170,9 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
         self._read = False
         self._released = False
         self._result_read = False
+        self._model_request_read = False
+        self._model_response_sent = False
+        self._pending = b""
         self._closed = False
 
     async def self_check(self, *, control: _LifecycleCallControl) -> DockerWorkerLauncherSelfCheck:
@@ -183,11 +188,44 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
         self._released = True
         if control.cancelled() or monotonic() >= control.deadline:
             raise asyncio.CancelledError
-        self._process.stdin.write(self._RELEASE)
+        self._process.stdin.write(self._CONTROL)
         async with asyncio.timeout_at(control.deadline):
             await self._process.stdin.drain()
         if control.cancelled():
             raise asyncio.CancelledError
+
+    async def model_request(
+        self, *, control: _LifecycleCallControl
+    ) -> DockerWorkerModelRequest:
+        if not self._released or self._model_request_read or self._closed:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        self._model_request_read = True
+        return DockerCliEngineTransport._parse_model_request_line(
+            await self._read_bounded(control)
+        )
+
+    async def model_response(
+        self, response: DockerWorkerModelResponse, *, control: _LifecycleCallControl
+    ) -> None:
+        if (
+            not self._model_request_read
+            or self._model_response_sent
+            or self._closed
+            or self._process.stdin is None
+            or type(response) is not DockerWorkerModelResponse
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        raw = json.dumps(
+            {"cell": response.cell, "kind": "model-response", "tool": "ipython",
+             "workload_digest": response.workload_digest},
+            separators=(",", ":"), sort_keys=True,
+        ).encode() + b"\n"
+        if len(raw) > _OUTPUT_CAP or control.cancelled() or monotonic() >= control.deadline:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        self._model_response_sent = True
+        self._process.stdin.write(raw)
+        async with asyncio.timeout_at(control.deadline):
+            await self._process.stdin.drain()
 
     async def completed_result(
         self, *, control: _LifecycleCallControl
@@ -195,6 +233,7 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
         if (
             not self._read
             or not self._released
+            or not self._model_response_sent
             or self._result_read
             or self._closed
             or self._process.stdout is None
@@ -234,11 +273,24 @@ class _DockerCliLauncherChannel(DockerLauncherChannel):
     async def _read_bounded(self, control: _LifecycleCallControl) -> bytes:
         if control.cancelled() or monotonic() >= control.deadline:
             raise asyncio.CancelledError
-        async with asyncio.timeout_at(control.deadline):
-            raw = await self._process.stdout.read(1025)  # type: ignore[union-attr]
-        if control.cancelled() or type(raw) is not bytes or not raw or len(raw) > 1024:
+        raw = self._pending
+        self._pending = b""
+        while b"\n" not in raw and len(raw) <= 1024:
+            async with asyncio.timeout_at(control.deadline):
+                chunk = await self._process.stdout.read(1025)  # type: ignore[union-attr]
+            if type(chunk) is not bytes or not chunk:
+                break
+            raw += chunk
+        newline = raw.find(b"\n")
+        if newline >= 0:
+            frame, self._pending = raw[:newline + 1], raw[newline + 1:]
+            if self._pending and b"\n" not in self._pending:
+                raise RestrictedWorkerError("restricted worker value is invalid")
+        else:
+            frame = raw
+        if control.cancelled() or type(frame) is not bytes or not frame or len(frame) > 1024:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        return raw
+        return frame
 
 
 class DockerCliEngineTransport(DockerEngineTransport):
@@ -414,6 +466,26 @@ class DockerCliEngineTransport(DockerEngineTransport):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     @staticmethod
+    def _parse_model_request_line(raw: bytes) -> DockerWorkerModelRequest:
+        if raw.count(b"\n") != 1 or not raw.endswith(b"\n"):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        body = raw[:-1]
+        value = DockerCliEngineTransport._json(body)
+        if (
+            type(value) is not dict
+            or set(value) != {"kind", "prime_sdk_session", "tools", "workload_digest"}
+            or value["kind"] != "model-request"
+            or value["prime_sdk_session"] != "prime-agent@0.7.1"
+            or value["tools"] != ["ipython"]
+            or json.dumps(value, separators=(",", ":"), sort_keys=True).encode() != body
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        try:
+            return DockerWorkerModelRequest(value["workload_digest"])
+        except RestrictedWorkerError:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+
+    @staticmethod
     def _parse_completed_result_line(raw: bytes) -> DockerWorkerCompletion:
         if raw.count(b"\n") != 1 or not raw.endswith(b"\n"):
             raise RestrictedWorkerError("restricted worker value is invalid")
@@ -421,13 +493,22 @@ class DockerCliEngineTransport(DockerEngineTransport):
         if not body:
             raise RestrictedWorkerError("restricted worker value is invalid")
         value = DockerCliEngineTransport._json(body)
-        fields = {"workload_digest", "result", "result_digest", "terminal"}
+        fields = {
+            "host_model_operations", "model_caused_ipython_mutation",
+            "oracle_eventually_passed", "oracle_initially_failed", "result",
+            "result_digest", "terminal", "tools", "workload_digest",
+        }
         if (
             type(value) is not dict
             or set(value) != fields
             or value["terminal"] != "completed"
             or type(value["result"]) is not dict
             or value["result"] != _NORMALIZED_RESULT
+            or value["host_model_operations"] != 1
+            or value["model_caused_ipython_mutation"] is not True
+            or value["oracle_initially_failed"] is not True
+            or value["oracle_eventually_passed"] is not True
+            or value["tools"] != ["ipython"]
         ):
             raise RestrictedWorkerError("restricted worker value is invalid")
         result_bytes = json.dumps(

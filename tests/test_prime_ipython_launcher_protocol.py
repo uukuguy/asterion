@@ -53,20 +53,20 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
         launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
         expected = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True)
         self.assertIn(expected, launcher)
-        self.assertIn("1024", launcher)
+        self.assertIn("_FRAME_LIMIT", launcher)
         self.assertIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
         self.assertIn("hashlib.sha256", launcher)
         self.assertIn('"result_digest"', launcher)
         self.assertNotIn('{"terminal":"completed"}', launcher)
-        self.assertIn('value["workload_digest"] != WORKLOAD_DIGEST', launcher)
+        self.assertIn('value.get("workload_digest") != WORKLOAD_DIGEST', launcher)
         self.assertLess(
-            launcher.index('value["workload_digest"] != WORKLOAD_DIGEST'),
-            launcher.index("execute_fixture()"),
+            launcher.index('value.get("workload_digest") != WORKLOAD_DIGEST'),
+            launcher.index("emit_model_request()"),
         )
         for prohibited in ("os.environ", "socket", "provider", "transcript", "subprocess"):
             self.assertNotIn(prohibited, launcher.lower())
 
-    def test_python_launcher_executes_only_image_owned_fixture_via_ipython(self) -> None:
+    def test_python_launcher_accepts_only_a_host_mediated_ipython_model_response(self) -> None:
         launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
         dockerfile = (IMAGE / "Dockerfile").read_text(encoding="utf-8")
         for required in (
@@ -75,8 +75,13 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
             '"/opt/prime-fixture/starter/solution.py"',
             '"/opt/prime-fixture/oracle/oracle.py"',
             '"/workspace/solution.py"',
-            "fixture_source.replace(\"return 0\", \"return 42\", 1)",
-            "execute_fixture()",
+            "initial_oracle_failure",
+            "read_control()",
+            "emit_model_request()",
+            "read_model_response()",
+            'value["tool"] != "ipython"',
+            "shell.run_cell",
+            "final_oracle_success",
             "emit_completion()",
         ):
             with self.subTest(required=required):
@@ -90,7 +95,30 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
         ):
             with self.subTest(dockerfile=required):
                 self.assertIn(required, dockerfile)
+        for prohibited in (
+            'replace("return 0", "return 42", 1)',
+            "def answer()",
+            "execute_fixture()",
+            "manual",
+            "fake",
+        ):
+            with self.subTest(prohibited=prohibited):
+                self.assertNotIn(prohibited, launcher.lower())
         self.assertNotIn("launcher.mjs", dockerfile)
+
+    def test_launcher_frames_are_closed_duplex_and_terminal_facts_are_causal(self) -> None:
+        launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
+        for required in (
+            '"control"', '"model-request"', '"model-response"', '"completed"',
+            '"host_model_operations": 1', '"tools": ["ipython"]',
+            '"model_caused_ipython_mutation": True',
+            '"oracle_initially_failed": True', '"oracle_eventually_passed": True',
+            "PRIME_SDK_SESSION_PIN", "_FRAME_LIMIT", "canonical(value)",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, launcher)
+        self.assertLess(launcher.rindex("initial_oracle_failure(shell)"), launcher.rindex("emit_model_request()"))
+        self.assertLess(launcher.rindex("read_model_response()"), launcher.rindex("final_oracle_success(shell)"))
 
     def test_python_launcher_keeps_closed_worker_checks_before_selfcheck(self) -> None:
         launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")

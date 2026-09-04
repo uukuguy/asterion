@@ -16,7 +16,7 @@ from asterion.applications.prime_agent.operator.docker_cli import (
     _ProductionRunner,
 )
 from asterion.applications.prime_agent.operator.docker_worker import (
-    DockerWorkerCompletion,
+    DockerWorkerCompletion, DockerWorkerModelRequest, DockerWorkerModelResponse,
 )
 from asterion.applications.prime_agent.operator.ipython_workload import (
     PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
@@ -33,8 +33,8 @@ _CHALLENGE = "sha256:" + "b" * 64
 _CONTAINER = "prime-" + "c" * 32
 _SOCKET = "/var/run/docker.sock"
 _SECCOMP = "/etc/asterion/prime-ipython-coding.json"
-_RELEASE = (
-    b'{"release":true,"workload_digest":"'
+_CONTROL = (
+    b'{"control":"begin","prime_sdk_session":"prime-agent@0.7.1","workload_digest":"'
     + PRIME_IPYTHON_CODING_WORKLOAD_DIGEST.encode()
     + b'"}\n'
 )
@@ -203,7 +203,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(check.effective_user_id, 65534)
         self.assertEqual(runner.calls[1][0][-2:], ("start", _CONTAINER))
         self.assertEqual(attach.calls[0][0][-3:], ("attach", "--sig-proxy=false", _CONTAINER))
-        self.assertEqual(attach.process.stdin.writes, [_RELEASE])
+        self.assertEqual(attach.process.stdin.writes, [_CONTROL])
         self.assertTrue(attach.process.waited)
         self.assertEqual(runner.calls[2][0][-4:], ("inspect", "--format", "{{.Id}}", _CONTAINER))
 
@@ -233,24 +233,47 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RestrictedWorkerError):
             await channel.release(control=self._control())
         await channel.close(control=self._control())
-        self.assertEqual(attach.process.stdin.writes, [_RELEASE])
+        self.assertEqual(attach.process.stdin.writes, [_CONTROL])
 
-    async def test_attach_returns_only_the_fixed_workload_completion(self) -> None:
+    async def test_attach_relays_only_closed_model_frames_between_host_and_launcher(self) -> None:
         selfcheck = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
-        attach = _AttachRunner(_AttachProcess(selfcheck))
+        request = json.dumps({"kind": "model-request", "prime_sdk_session": "prime-agent@0.7.1", "tools": ["ipython"], "workload_digest": PRIME_IPYTHON_CODING_WORKLOAD_DIGEST}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
+        attach = _AttachRunner(_AttachProcess(selfcheck + request))
         transport, _ = self._transport([], attach)
         transport._specifications[_CONTAINER] = _spec()
         channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
 
         await channel.self_check(control=self._control())
         await channel.release(control=self._control())
+        self.assertEqual(await channel.model_request(control=self._control()), DockerWorkerModelRequest(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST))
+        await channel.model_response(DockerWorkerModelResponse(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, "ipython", "private cell"), control=self._control())
+        self.assertNotIn(b"private cell", repr(channel).encode())
+        self.assertIn(b'"model-response"', attach.process.stdin.writes[-1])
+
+    async def test_attach_returns_only_the_fixed_workload_completion(self) -> None:
+        selfcheck = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
+        request = json.dumps({"kind": "model-request", "prime_sdk_session": "prime-agent@0.7.1", "tools": ["ipython"], "workload_digest": PRIME_IPYTHON_CODING_WORKLOAD_DIGEST}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
+        attach = _AttachRunner(_AttachProcess(selfcheck + request))
+        transport, _ = self._transport([], attach)
+        transport._specifications[_CONTAINER] = _spec()
+        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+
+        await channel.self_check(control=self._control())
+        await channel.release(control=self._control())
+        await channel.model_request(control=self._control())
+        await channel.model_response(DockerWorkerModelResponse(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, "ipython", "private cell"), control=self._control())
         result = b'{"fixture":"passed","oracle":"passed","tool":"ipython"}'
         digest = "sha256:" + hashlib.sha256(result).hexdigest()
         frame = json.dumps(
             {
+                "host_model_operations": 1,
+                "model_caused_ipython_mutation": True,
+                "oracle_eventually_passed": True,
+                "oracle_initially_failed": True,
                 "result": json.loads(result),
                 "result_digest": digest,
                 "terminal": "completed",
+                "tools": ["ipython"],
                 "workload_digest": PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
             },
             separators=(",", ":"),

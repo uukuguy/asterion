@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, replace
-from hashlib import sha256
 from secrets import token_hex
 from time import monotonic
 from types import TracebackType
@@ -142,6 +141,41 @@ class DockerWorkerCompletion:
         return "DockerWorkerCompletion(redacted)"
 
 
+@dataclass(frozen=True, repr=False)
+class DockerWorkerModelRequest:
+    """Body-free worker request admitted only for the fixed workload."""
+
+    workload_digest: str
+
+    def __post_init__(self) -> None:
+        if not is_prime_ipython_coding_workload(self.workload_digest):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+
+    def __repr__(self) -> str:
+        return "DockerWorkerModelRequest(redacted)"
+
+
+@dataclass(frozen=True, repr=False)
+class DockerWorkerModelResponse:
+    """Private host-mediated IPython cell; it never becomes worker evidence."""
+
+    workload_digest: str
+    tool: Literal["ipython"]
+    cell: str
+
+    def __post_init__(self) -> None:
+        if (
+            not is_prime_ipython_coding_workload(self.workload_digest)
+            or self.tool != "ipython"
+            or type(self.cell) is not str
+            or not self.cell
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+
+    def __repr__(self) -> str:
+        return "DockerWorkerModelResponse(redacted)"
+
+
 class DockerLauncherChannel(Protocol):
     """Private, bounded launcher control stream for one opaque container."""
 
@@ -150,6 +184,14 @@ class DockerLauncherChannel(Protocol):
     ) -> DockerWorkerLauncherSelfCheck: ...
 
     async def release(self, *, control: _LifecycleCallControl) -> None: ...
+
+    async def model_request(
+        self, *, control: _LifecycleCallControl
+    ) -> DockerWorkerModelRequest: ...
+
+    async def model_response(
+        self, response: DockerWorkerModelResponse, *, control: _LifecycleCallControl
+    ) -> None: ...
 
     async def completed_result(
         self, *, control: _LifecycleCallControl
@@ -299,37 +341,10 @@ class DockerRestrictedWorkerService:
     async def execution_receipt(
         self, lease: RestrictedWorkerLease
     ) -> RestrictedWorkerExecutionReceipt:
-        request = self._request_for_lease(lease)
-        state = self._leases[lease.worker_id]
-        if state.execution is not None:
-            return state.execution
-        if state.channel is None:
-            raise RestrictedWorkerError("restricted worker value is invalid")
-        control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, None)
-        try:
-            await self._within_deadline(state.channel.release(control=control), control)
-            completion = await self._within_deadline(
-                state.channel.completed_result(control=control), control
-            )
-        except asyncio.CancelledError:
-            raise
-        except BaseException:
-            raise RestrictedWorkerError("restricted worker value is invalid") from None
-        if (
-            type(completion) is not DockerWorkerCompletion
-            or completion.workload_digest != lease.workload_digest
-            or len(completion.result_bytes) > request.max_output_bytes
-        ):
-            raise RestrictedWorkerError("restricted worker value is invalid")
-        state.execution = RestrictedWorkerExecutionReceipt(
-            lease.worker_id,
-            lease.role_id,
-            lease.run_id,
-            lease.challenge_digest,
-            lease.workload_digest,
-            "sha256:" + sha256(completion.result_bytes).hexdigest(),
-        )
-        return state.execution
+        # A direct worker completion would bypass the host model mediator.
+        # The product verifier owns the model→IPython relay.
+        del lease
+        raise RestrictedWorkerError("restricted worker value is invalid")
 
     def _admit_lease(
         self, request: RestrictedWorkerRequest, lease: RestrictedWorkerLease
