@@ -34,6 +34,37 @@ git diff --check
 PASS
 ```
 
+## Review fix: installed-wheel smoke receives the sealed Node
+
+- Full promotion now requires its already-validated Node executable even with a
+  custom runner, because the installed-wheel operational smoke invokes the
+  Node-backed harness.
+- The full runner renders that exact path into the wheel smoke and supplies it
+  directly to `_closed_prime_subprocess_environment()`. The smoke has no
+  environment-carried Node value and cannot fall back to
+  `_resolve_operational_node()`.
+
+### Regression evidence
+
+TDD red phase:
+
+```text
+test_default_plan_runs_every_provider_free_gate_from_the_copy ... FAIL
+AssertionError: node_executable=Path('/sealed/node22/bin/node') not found
+```
+
+The full-runner test passes an explicit Node while making the ambient resolver
+raise. It asserts the emitted installed-wheel operational smoke passes that
+exact path to the closed-environment constructor.
+
+```text
+uv run python -m unittest -v tests.test_check_promotion tests.test_standalone_repository
+Ran 48 tests ... OK
+
+uv run ruff check tools/check_promotion.py tests/test_check_promotion.py
+All checks passed!
+```
+
 New/expanded focused assertions cover exact `npm ci` flags, closed
 environments with canonical cache and `NPM_CONFIG_OFFLINE=true`, absence of
 `--prefer-offline`, and a cache-miss failure that makes exactly one npm call.

@@ -688,6 +688,7 @@ class PromotionCheckTests(unittest.TestCase):
     def test_default_plan_runs_every_provider_free_gate_from_the_copy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             source = make_source(Path(temporary_directory))
+            node = Path("/sealed/node22/bin/node")
             commands: list[tuple[str, ...]] = []
             roots: list[Path] = []
 
@@ -702,9 +703,19 @@ class PromotionCheckTests(unittest.TestCase):
                     (dist / "asterion-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
                 return completed(command, acceptance_stdout(command))
 
-            run_promotion(
-                source_root=source, npm_cache=source, quick=False, runner=runner
-            )
+            with mock.patch(
+                "tools.check_promotion._resolve_operational_node",
+                side_effect=AssertionError("full promotion resolved ambient Node"),
+            ) as ambient_resolver:
+                run_promotion(
+                    source_root=source,
+                    npm_cache=source,
+                    quick=False,
+                    runner=runner,
+                    node_executable=node,
+                )
+
+        ambient_resolver.assert_not_called()
 
         rendered = tuple(" ".join(command) for command in commands)
         for expected in (
@@ -758,6 +769,11 @@ class PromotionCheckTests(unittest.TestCase):
             and "prime-operational-harness.mjs" in command[2]
         )
         self.assertEqual(len(operational_smokes), 1)
+        operational_smoke_source = operational_smokes[0][2]
+        self.assertIn(
+            "node_executable=Path('/sealed/node22/bin/node')",
+            operational_smoke_source,
+        )
         smoke_source = protocol_smokes[0][2]
         self.assertIn("'applications/*/assemblies/*.json'", smoke_source)
         self.assertIn("'capabilities/*/capability-package.json'", smoke_source)
@@ -952,7 +968,11 @@ class PromotionCheckTests(unittest.TestCase):
                 return completed(command, acceptance_stdout(command))
 
             run_promotion(
-                source_root=source, npm_cache=source, quick=False, runner=runner
+                source_root=source,
+                npm_cache=source,
+                quick=False,
+                runner=runner,
+                node_executable=Path("/node22/bin/node"),
             )
 
         self.assertLess(
@@ -1183,6 +1203,7 @@ class PromotionCheckTests(unittest.TestCase):
                         npm_cache=source,
                         quick=False,
                         runner=runner,
+                        node_executable=Path("/node22/bin/node"),
                     )
 
 

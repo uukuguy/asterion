@@ -335,7 +335,8 @@ assert not external_prime_root.is_relative_to(Path.cwd().resolve())
 root = Path(str(resources.files('asterion')))
 resource_root = root / 'control/providers/prime/resources'
 environment = _closed_prime_subprocess_environment(
-    temporary_root=_operational_temporary_root(resource_root, external_prime_root)
+    temporary_root=_operational_temporary_root(resource_root, external_prime_root),
+    node_executable=Path(__ASTERION_PROMOTION_NODE_EXECUTABLE__),
 )
 required_resources = (
     'prime-operational-harness.mjs',
@@ -383,6 +384,19 @@ assert all(
     for observation in observations
 )
 """
+
+
+def _wheel_operational_resource_smoke(node_executable: Path) -> str:
+    return WHEEL_OPERATIONAL_RESOURCE_SMOKE.replace(
+        "__ASTERION_PROMOTION_NODE_EXECUTABLE__", repr(str(node_executable))
+    )
+
+
+def _is_wheel_operational_resource_smoke(source: str) -> bool:
+    prefix, marker, suffix = WHEEL_OPERATIONAL_RESOURCE_SMOKE.partition(
+        "__ASTERION_PROMOTION_NODE_EXECUTABLE__"
+    )
+    return bool(marker) and source.startswith(prefix) and source.endswith(suffix)
 
 ROOT_EXCLUDED_NAMES = frozenset(
     {
@@ -735,7 +749,7 @@ def _run(
         if (
             len(normalized) == 3
             and normalized[1] == "-c"
-            and normalized[2] == WHEEL_OPERATIONAL_RESOURCE_SMOKE
+            and _is_wheel_operational_resource_smoke(normalized[2])
         ):
             raise PromotionError(
                 "promotion command failed: installed Prime operational evidence is invalid"
@@ -1272,7 +1286,9 @@ def _run_quick(copy_root: Path, runner: Runner) -> int:
     return len(commands) + 1
 
 
-def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
+def _run_full(
+    copy_root: Path, venv_root: Path, runner: Runner, *, node_executable: Path
+) -> int:
     initial_commands = (
         ("uv", "sync", "--frozen"),
         (
@@ -1325,7 +1341,7 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
         ("uv", "pip", "install", "--python", str(python), str(wheels[0])),
         (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
         (str(python), "-c", WHEEL_PROTOCOL_RESOURCE_SMOKE),
-        (str(python), "-c", WHEEL_OPERATIONAL_RESOURCE_SMOKE),
+        (str(python), "-c", _wheel_operational_resource_smoke(node_executable)),
         (str(asterion), "list"),
         (
             str(asterion),
@@ -1416,7 +1432,8 @@ def run_promotion(
     cache = _resolve_promotion_npm_cache(str(npm_cache))
     node = node_executable
     if node is None and (
-        runner is _default_runner
+        not quick
+        or runner is _default_runner
         or bool(os.environ.get(PRIME_SOURCE_ENV))
         or (source / DEFAULT_PRIME_SOURCE).exists()
     ):
@@ -1451,7 +1468,12 @@ def run_promotion(
         command_count = (
             _run_quick(copy_root, promotion_runner)
             if quick
-            else _run_full(copy_root, workspace / "wheel-venv", promotion_runner)
+            else _run_full(
+                copy_root,
+                workspace / "wheel-venv",
+                promotion_runner,
+                node_executable=node,
+            )
         )
     return command_count
 
