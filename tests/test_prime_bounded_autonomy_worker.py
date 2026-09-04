@@ -7,6 +7,7 @@ from asterion.applications.prime_agent.bounded_autonomy_receipt import (
 )
 from asterion.applications.prime_agent.operator.bounded_autonomy_completion import (
     BoundedAutonomyCompletion,
+    BoundedAutonomyCompletionError,
     canonical_bounded_autonomy_completion_bytes,
 )
 from asterion.applications.prime_agent.operator.bounded_autonomy_worker import (
@@ -21,6 +22,7 @@ from asterion.applications.prime_agent.operator.bounded_autonomy_workload import
 )
 from asterion.applications.prime_agent.operator.continual_improvement_completion import (
     ContinualImprovementCompletion,
+    ContinualImprovementCompletionError,
     canonical_continual_improvement_completion_bytes,
 )
 from asterion.applications.prime_agent.continual_improvement_receipt import (
@@ -51,6 +53,19 @@ def _digest(letter: str) -> str:
 
 
 class TestBoundedAutonomyWorker(unittest.IsolatedAsyncioTestCase):
+    def test_completion_encoders_reject_forged_private_traces(self) -> None:
+        class ForgedTrace:
+            private = "PRIVATE_COMPLETION_BODY"
+
+        with self.assertRaises(BoundedAutonomyCompletionError):
+            canonical_bounded_autonomy_completion_bytes(
+                BoundedAutonomyCompletion(ForgedTrace())  # type: ignore[arg-type]
+            )
+        with self.assertRaises(ContinualImprovementCompletionError):
+            canonical_continual_improvement_completion_bytes(
+                ContinualImprovementCompletion(ForgedTrace())  # type: ignore[arg-type]
+            )
+
     async def test_p5_worker_rejects_a_p6_completion(self) -> None:
         p5 = BoundedAutonomyTrace(
             P5_BOUNDED_AUTONOMY_WORKLOAD_DIGEST, _digest("a"), _digest("b"),

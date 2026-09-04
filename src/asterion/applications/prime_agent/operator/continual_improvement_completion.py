@@ -57,6 +57,12 @@ def canonical_continual_improvement_completion_bytes(
         raise ContinualImprovementCompletionError(
             "continual improvement completion is invalid"
         )
+    try:
+        validate_continual_improvement_trace(completion.trace)
+    except ContinualImprovementReceiptError:
+        raise ContinualImprovementCompletionError(
+            "continual improvement completion is invalid"
+        ) from None
     payload: dict[str, object] = {
         "format": "asterion.prime-continual-improvement/v1"
     }

@@ -53,6 +53,12 @@ def canonical_bounded_autonomy_completion_bytes(
 ) -> bytes:
     if type(completion) is not BoundedAutonomyCompletion:
         raise BoundedAutonomyCompletionError("bounded autonomy completion is invalid")
+    try:
+        validate_bounded_autonomy_trace(completion.trace)
+    except BoundedAutonomyReceiptError:
+        raise BoundedAutonomyCompletionError(
+            "bounded autonomy completion is invalid"
+        ) from None
     payload: dict[str, object] = {"format": "asterion.prime-bounded-autonomy/v1"}
     payload.update(vars(completion.trace))
     payload["tool_names"] = list(completion.trace.tool_names)

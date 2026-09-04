@@ -15,10 +15,17 @@ from asterion.applications.discovery import (
     select_application_provider_id,
 )
 from asterion.applications.prime_agent.preflight import prime_preflight
-from asterion.applications.prime_agent.provider import create_provider
+from asterion.applications.prime_agent.provider import (
+    preflight_arc_agi_3_worker_factory,
+    create_provider,
+)
+from asterion.applications.prime_agent.operator.restricted_scenario_worker import (
+    RestrictedScenarioInspection,
+)
 from asterion.applications.prime_agent.restricted_worker import (
     PrimeRestrictedWorkerProfile,
 )
+from asterion.services.restricted_worker import RestrictedWorkerLease
 from asterion.applications.prime_agent.source_lock import PrimeSourceLock
 
 
@@ -69,6 +76,52 @@ def _write_source(root: Path) -> PrimeSourceLock:
 
 
 class TestPrimeApplicationProvider(unittest.TestCase):
+    def test_p7_preflight_returns_an_inert_fixed_worker_factory(self) -> None:
+        class Engine:
+            async def launch(self, **kwargs: object) -> RestrictedWorkerLease:
+                raise AssertionError("factory launched a worker")
+
+            async def completion_bytes(self, lease: RestrictedWorkerLease) -> bytes:
+                raise AssertionError("factory read a worker")
+
+            async def inspect(
+                self, lease: RestrictedWorkerLease
+            ) -> RestrictedScenarioInspection:
+                raise AssertionError("factory inspected a worker")
+
+            async def remove(self, lease: RestrictedWorkerLease) -> None:
+                raise AssertionError("factory removed a worker")
+
+        with TemporaryDirectory() as temporary_directory:
+            source_root = (Path(temporary_directory) / "prime-agent").resolve()
+            source_root.mkdir()
+            result = preflight_arc_agi_3_worker_factory(
+                profile=_profile(max_runtime_seconds=300, max_output_bytes=4096),
+                expected_source_lock=_write_source(source_root),
+                source_root=source_root,
+            )
+        self.assertEqual(result.status, "PASS")
+        self.assertIsNotNone(result.factory)
+        worker = result.factory(engine=Engine())  # type: ignore[union-attr]
+        self.assertEqual(worker._adapter.scenario_id, "prime.arc-agi-3/v1")
+
+    def test_p7_preflight_rejects_profiles_outside_its_fixed_limits(self) -> None:
+        for profile in (
+            _profile(max_runtime_seconds=299, max_output_bytes=4096),
+            _profile(max_runtime_seconds=300, max_output_bytes=4095),
+        ):
+            with TemporaryDirectory() as temporary_directory:
+                source_root = (Path(temporary_directory) / "prime-agent").resolve()
+                source_root.mkdir()
+                with self.subTest(profile=profile):
+                    result = preflight_arc_agi_3_worker_factory(
+                        profile=profile,
+                        expected_source_lock=_write_source(source_root),
+                        source_root=source_root,
+                    )
+                    self.assertEqual(result.status, "worker-invalid")
+                    self.assertIsNone(result.factory)
+
     def test_provider_declares_one_metadata_only_application(self) -> None:
         provider = create_provider()
 
