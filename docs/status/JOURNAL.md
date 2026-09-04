@@ -1606,3 +1606,6 @@
 - 08:50 Verified full Prime promotion closure after source-lock and sparse-cursor repairs [78a0ec9]
 - 09:05 Designed sealed shared lifecycle envelope for executable P4–P7 workers [f1acd9a]
 - 09:20 Planned test-first P4–P7 sealed worker implementation and integration closure [7f8f799]
+- 09:25 Aligned P4–P7 worker plan with existing reducer digest bindings [6dca17d]
+- 09:30 Added sealed shared worker lifecycle and fixed P4 continuity adapter [9545c26, 403056f, bb51a9d]
+- 09:42 Sealed P4 completion bytes and cancellation-safe worker cleanup [5476d5a]
