@@ -44,13 +44,15 @@ class TestRestrictedScenarioWorkerIntegration(unittest.TestCase):
         self,
     ) -> None:
         class Engine:
-            pass
+            def __init__(self) -> None:
+                self.launch_count = 0
 
         for adapter in _ADAPTERS:
             with self.subTest(adapter=adapter.scenario_id):
+                engine = Engine()
                 worker = RestrictedScenarioWorker(
                     image_digest=_IMAGE,
-                    engine=cast(RestrictedScenarioEngine, Engine()),
+                    engine=cast(RestrictedScenarioEngine, engine),
                     adapter=adapter,
                 )
                 request = RestrictedWorkerRequest(
@@ -75,6 +77,7 @@ class TestRestrictedScenarioWorkerIntegration(unittest.TestCase):
                                 workload_digest=foreign.workload_digest,
                             )
                         )
+                self.assertEqual(engine.launch_count, 0)
 
     def test_adapter_identities_are_unique_fixed_pairs(self) -> None:
         pairs = tuple((adapter.role_id, adapter.workload_digest) for adapter in _ADAPTERS)
