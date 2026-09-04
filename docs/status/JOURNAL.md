@@ -1658,3 +1658,4 @@
 - 06:07 Issued P1 live runs only from sealed Docker/broker artifacts to bind real lifecycle evidence [f82b22f]
 - 06:16 Demoted P1 fake completion to trace-only; production issuer unavailable [5b82f3e]
 - 06:33 Added fail-closed production P1 authority, concrete host factories, and quiescent broker receipts [15160b7]
+- 06:47 Designed separate P1 process authority so import-capable application code cannot forge production PASS [4e2fff0]
