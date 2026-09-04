@@ -8,10 +8,10 @@ from unittest.mock import patch
 
 import asterion.applications.prime_agent.operator.ipython_host_supervisor as subject
 from asterion.applications.prime_agent.operator.ipython_host_supervisor import (
-    IpythonHostCompletion,
     IpythonHostExpectedIdentity,
     IpythonHostSupervisor,
     IpythonHostSupervisorError,
+    IpythonHostTrace,
     inspect_answer_source,
 )
 
@@ -36,7 +36,7 @@ def _identity(**changes: object) -> IpythonHostExpectedIdentity:
     return IpythonHostExpectedIdentity(**values)  # type: ignore[arg-type]
 
 
-def _complete(supervisor: IpythonHostSupervisor) -> IpythonHostCompletion:
+def _complete(supervisor: IpythonHostSupervisor) -> IpythonHostTrace:
     initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
     supervisor.record_initial_snapshot(initial)
     cell = supervisor._attest_brokered_cell(
@@ -52,7 +52,7 @@ def _complete(supervisor: IpythonHostSupervisor) -> IpythonHostCompletion:
     supervisor.record_post_snapshot(post)
     supervisor.record_broker_revoked(supervisor._attest_broker_revocation())
     supervisor.record_cleanup(supervisor._attest_cleanup_and_absence())
-    return supervisor.complete(supervisor._attest_final_oracle(_FINAL))
+    return supervisor.finalize_trace(supervisor._attest_final_oracle(_FINAL))
 
 
 class _HostileEquality:
@@ -64,12 +64,12 @@ class _HostileEquality:
 
 
 class TestIpythonHostSupervisor(unittest.TestCase):
-    def test_ordered_host_supervisor_mints_a_body_free_pass(self) -> None:
-        completion = _complete(subject._new_ipython_host_supervisor(_identity()))  # noqa: SLF001
-        self.assertEqual(completion.status, "PASS")
-        self.assertRegex(completion.evidence_digest, r"^sha256:[0-9a-f]{64}$")
-        with self.assertRaises(TypeError):
-            IpythonHostCompletion("PASS", completion.evidence_digest)  # type: ignore[call-arg]
+    def test_ordered_host_supervisor_mints_an_immutable_body_free_trace(self) -> None:
+        trace = _complete(subject._new_ipython_host_supervisor(_identity()))  # noqa: SLF001
+        self.assertFalse(hasattr(trace, "status"))
+        self.assertRegex(trace.evidence_digest, r"^sha256:[0-9a-f]{64}$")
+        self.assertNotIn("PASS", repr(trace))
+        self.assertFalse(hasattr(subject, "IpythonHostCompletion"))
 
     def test_rejects_initially_passing_source_and_out_of_order_stages(self) -> None:
         supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
@@ -180,12 +180,12 @@ class TestIpythonHostSupervisor(unittest.TestCase):
         with self.assertRaises(IpythonHostSupervisorError):
             supervisor._attest_post_snapshot(_FINAL, is_regular_file=True)
         with self.assertRaises(IpythonHostSupervisorError):
-            supervisor.complete(object())
+            supervisor.finalize_trace(object())
 
     def test_cell_digest_is_distinct_from_final_source_digest(self) -> None:
         completion = _complete(subject._new_ipython_host_supervisor(_identity()))  # noqa: SLF001
         self.assertNotEqual(sha256(_CELL).hexdigest(), sha256(_FINAL).hexdigest())
-        self.assertEqual(completion.status, "PASS")
+        self.assertFalse(hasattr(completion, "status"))
 
     def test_rejects_false_regular_file_post_attestation(self) -> None:
         supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
@@ -282,7 +282,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
         oracle = supervisor._attest_final_oracle(_FINAL)
         supervisor.cancel()
         with self.assertRaises(IpythonHostSupervisorError):
-            supervisor.complete(oracle)
+            supervisor.finalize_trace(oracle)
 
     def test_rejects_caller_selected_identity_aliases_and_versions(self) -> None:
         for changes in (
@@ -301,12 +301,12 @@ class TestIpythonHostSupervisor(unittest.TestCase):
         supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         completion = _complete(supervisor)
         with self.assertRaises(IpythonHostSupervisorError):
-            supervisor.complete(object())
+            supervisor.finalize_trace(object())
         with self.assertRaises((AttributeError, TypeError)):
             completion._digest = "sha256:" + "0" * 64  # type: ignore[attr-defined]
         for name in (
             "_digest",
-            "_IpythonHostCompletion__digest",
+            "_IpythonHostTrace__digest",
             "evidence_digest",
             "new_attribute",
         ):
@@ -338,6 +338,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
     ) -> None:
         for name in (
             "mint_ipython_host_completion",
+            "IpythonHostCompletion",
             "IpythonHostCompletionInputs",
             "IpythonHostModelReceipt",
             "IpythonHostWorkspaceSnapshot",

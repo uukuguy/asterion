@@ -22,9 +22,17 @@ class TestIpythonHostIssuer(unittest.TestCase):
         self.assertEqual(subject.__all__, ())
         self.assertFalse(hasattr(subject, "issue_live_run"))
 
+    def test_manual_production_capability_cannot_issue_a_live_run(self) -> None:
+        import asterion.applications.prime_agent.operator.ipython_host_issuer as subject
+
+        with self.assertRaisesRegex(Exception, "unavailable"):
+            subject._issue_production_ipython_host_live_run(  # noqa: SLF001
+                capability=object()
+            )
+
 
 class TestConcreteIpythonHostIssuer(unittest.IsolatedAsyncioTestCase):
-    async def test_issues_only_from_live_docker_and_broker_observations(self) -> None:
+    async def test_fake_docker_and_provider_cannot_issue_a_public_pass(self) -> None:
         import asterion.applications.prime_agent.operator.ipython_host_issuer as subject
         from asterion.applications.prime_agent.operator.docker_worker import DockerRestrictedWorkerService
 
@@ -68,10 +76,8 @@ class TestConcreteIpythonHostIssuer(unittest.IsolatedAsyncioTestCase):
                 "sha256:4f8e0bca0f70582bad96caa292823ac29577633bebd9f76257617dc92ab6832f",
                 "sha256:486a083f857430c7d6a452ebf881d1b8c46063c128b51162ffdebef0c1f71c7a",
             )
-            completion = await subject._issue_docker_model_live_run(  # noqa: SLF001
-                service=service, lease=lease, identity=identity, broker=broker,
-            ).complete()
-        self.assertEqual(completion.status, "PASS")
-        snapshots_seen = [index for index, call in enumerate(transport.calls) if call == "snapshot_solution"]
-        self.assertLess(transport.calls.index("model_response"), snapshots_seen[1])
-        self.assertLess(transport.calls.index("force_remove"), transport.calls.index("assert_absent"))
+            with self.assertRaisesRegex(Exception, "unavailable"):
+                subject._issue_docker_model_live_run(  # noqa: SLF001
+                    service=service, lease=lease, identity=identity, broker=broker,
+                )
+        self.assertNotIn("model_response", transport.calls)

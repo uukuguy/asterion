@@ -19,10 +19,10 @@ from asterion.applications.prime_agent.operator.docker_worker import (
     DockerWorkerWorkspaceSnapshot,
 )
 from asterion.applications.prime_agent.operator.ipython_host_supervisor import (
-    IpythonHostCompletion,
     IpythonHostExpectedIdentity,
     IpythonHostSupervisor,
     IpythonHostSupervisorError,
+    IpythonHostTrace,
     _new_ipython_host_supervisor,
 )
 from asterion.applications.prime_agent.operator.model_broker import (
@@ -102,7 +102,7 @@ class _IpythonHostOperations:
 
 
 class IpythonHostLiveRun:
-    """Sealed concrete host context; this is the sole public PASS producer."""
+    """Sealed concrete host context that can produce a validated trace only."""
 
     __slots__ = ("_identity", "_lease", "_operations", "_signal", "_sealed")
 
@@ -138,8 +138,8 @@ class IpythonHostLiveRun:
         del name
         raise AttributeError("sealed live run")
 
-    async def complete(self) -> IpythonHostCompletion:
-        return await _complete_issued_live_run(self)
+    async def trace(self) -> IpythonHostTrace:
+        return await _trace_issued_live_run(self)
 
 
 def _issue_ipython_host_live_run(
@@ -153,8 +153,8 @@ def _issue_ipython_host_live_run(
     )
 
 
-async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHostCompletion:
-    """Mint P1 completion only from the closed, host-observed causal chain."""
+async def _trace_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHostTrace:
+    """Validate the closed host-observed causal chain and return its trace."""
     if (
         type(live_run) is not IpythonHostLiveRun
     ):
@@ -213,7 +213,7 @@ async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHost
         _check_cancel(signal, typed_supervisor)
         # This is intentionally after broker quiescence and verified absence.
         final = typed_supervisor._attest_final_oracle(typed_post.source)  # noqa: SLF001
-        return typed_supervisor.complete(final)
+        return typed_supervisor.finalize_trace(final)
     except asyncio.CancelledError:
         _cancel(typed_supervisor)
         raise asyncio.CancelledError() from None

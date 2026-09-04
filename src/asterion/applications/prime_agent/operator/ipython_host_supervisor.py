@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 import re
-from typing import Literal, cast
+from typing import cast
 
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -27,10 +27,10 @@ _ORACLE_DIGEST = "sha256:85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b316
 _STARTER_DIGEST = "sha256:4f8e0bca0f70582bad96caa292823ac29577633bebd9f76257617dc92ab6832f"
 _SOURCE_DIGEST = "sha256:486a083f857430c7d6a452ebf881d1b8c46063c128b51162ffdebef0c1f71c7a"
 __all__ = (
-    "IpythonHostCompletion",
     "IpythonHostExpectedIdentity",
     "IpythonHostSupervisor",
     "IpythonHostSupervisorError",
+    "IpythonHostTrace",
     "inspect_answer_source",
 )
 
@@ -54,13 +54,13 @@ class IpythonHostExpectedIdentity:
         return "IpythonHostExpectedIdentity(redacted)"
 
 
-class IpythonHostCompletion:
+class IpythonHostTrace:
     __slots__ = ("__digest",)
 
     def __init__(self, *, _seal: object, evidence_digest: str) -> None:
         if _seal is not _SEAL or not _valid_digest(evidence_digest):
             _invalid()
-        object.__setattr__(self, "_IpythonHostCompletion__digest", evidence_digest)
+        object.__setattr__(self, "_IpythonHostTrace__digest", evidence_digest)
 
     def __setattr__(self, name: str, value: object) -> None:
         raise TypeError("ipython host completion is immutable")
@@ -69,15 +69,11 @@ class IpythonHostCompletion:
         raise TypeError("ipython host completion is immutable")
 
     @property
-    def status(self) -> Literal["PASS"]:
-        return "PASS"
-
-    @property
     def evidence_digest(self) -> str:
         return self.__digest
 
     def __repr__(self) -> str:
-        return "IpythonHostCompletion(PASS)"
+        return "IpythonHostTrace(redacted)"
 
 
 @dataclass(frozen=True, repr=False)
@@ -186,7 +182,7 @@ def inspect_answer_source(source: object) -> bool:
 
 
 class IpythonHostSupervisor:
-    """The only public PASS path, in fixed causal order."""
+    """Validates the fixed causal lifecycle and emits a body-free trace only."""
 
     def __init__(self, expected_identity: object, *, _seal: object = None) -> None:
         if _seal is not _SUPERVISOR_SEAL or not _valid_identity(expected_identity):
@@ -375,7 +371,7 @@ class IpythonHostSupervisor:
         self._sequence = 5
         self._stages.append("cleanup-and-absence-verified")
 
-    def complete(self, final_oracle: object) -> IpythonHostCompletion:
+    def finalize_trace(self, final_oracle: object) -> IpythonHostTrace:
         self._require_stage(5)
         if not _valid_oracle(final_oracle, self._issuer, "final-oracle", 6):
             _invalid()
@@ -427,7 +423,7 @@ class IpythonHostSupervisor:
             "cleanup": (True, True, True),
             "stages": tuple(self._stages),
         }
-        return IpythonHostCompletion(
+        return IpythonHostTrace(
             _seal=_SEAL,
             evidence_digest=_sha256(
                 json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode(

@@ -130,12 +130,13 @@ def _issued(operations: _HostOperations, *, signal: CancellationSignal | None = 
 
 
 class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
-    async def test_orders_host_attestations_and_returns_body_free_completion(self) -> None:
+    async def test_fake_host_operations_can_return_only_a_body_free_trace(self) -> None:
         operations = _HostOperations(_identity())
-        completion = await _issued(operations).complete()
-        self.assertEqual(completion.status, "PASS")
+        trace = await _issued(operations).trace()
+        self.assertFalse(hasattr(trace, "status"))
         self.assertEqual(operations.calls, ["snapshot", "brokered_cell", "snapshot", "revoke_broker", "force_remove", "assert_absent"])
-        self.assertNotIn(_CELL, repr(completion))
+        self.assertNotIn(_CELL, repr(trace))
+        self.assertNotIn("PASS", repr(trace))
 
     async def test_issued_context_and_operations_cannot_be_mutated(self) -> None:
         live_run = _issued(_HostOperations(_identity()))
@@ -148,7 +149,7 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
         operations = _HostOperations(_identity())
         operations.fail_remove = RuntimeError("SECRET-CONTAINER-PATH")
         with self.assertRaises(subject.IpythonHostOrchestrationError) as raised:
-            await _issued(operations).complete()
+            await _issued(operations).trace()
         self.assertEqual(operations.calls[-2:], ["force_remove", "assert_absent"])
         self.assertNotIn("SECRET", str(raised.exception))
 
@@ -162,7 +163,7 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
 
         operations.snapshot = failed_snapshot  # type: ignore[method-assign]
         with self.assertRaises(subject.IpythonHostOrchestrationError) as raised:
-            await _issued(operations).complete()
+            await _issued(operations).trace()
         self.assertEqual(operations.calls, ["snapshot", "revoke_broker", "force_remove", "assert_absent"])
         self.assertNotIn("SENTINEL", str(raised.exception))
 
@@ -170,7 +171,7 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
         operations = _HostOperations(_identity())
         signal = _LateHostCallbackSignal()
         with self.assertRaises(subject.IpythonHostOrchestrationError) as raised:
-            await _issued(operations, signal=signal).complete()
+            await _issued(operations, signal=signal).trace()
         self.assertEqual(signal.reads, 6)
         self.assertEqual(operations.calls, ["snapshot", "brokered_cell", "snapshot", "revoke_broker", "force_remove", "assert_absent"])
         self.assertNotIn("SENTINEL", str(raised.exception))
@@ -181,7 +182,7 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
         signal = _Signal()
         signal.cancelled_value = True
         with patch.object(subject, "_CLEANUP_SECONDS", 0.03), self.assertRaises(asyncio.CancelledError):
-            await _issued(operations, signal=signal).complete()
+            await _issued(operations, signal=signal).trace()
         self.assertEqual(operations.calls, ["revoke_broker", "force_remove", "assert_absent"])
         self.assertTrue(operations.revoke_reaped)
 
@@ -202,7 +203,7 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
         signal = _Signal()
         signal.cancelled_value = True
         with patch.object(subject, "_CLEANUP_SECONDS", 0.03):
-            task = asyncio.create_task(_issued(operations, signal=signal).complete())
+            task = asyncio.create_task(_issued(operations, signal=signal).trace())
             try:
                 await asyncio.sleep(0.06)
                 self.assertEqual(operations.calls, ["revoke_broker", "force_remove", "assert_absent"])
@@ -231,7 +232,7 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
 
         operations.snapshot = failed_snapshot  # type: ignore[method-assign]
         operations.revoke_broker = blocked_revoke  # type: ignore[method-assign]
-        task = asyncio.create_task(_issued(operations).complete())
+        task = asyncio.create_task(_issued(operations).trace())
         await cleanup_started.wait()
         task.cancel("SENTINEL-CANCELLATION")
         release_cleanup.set()
@@ -250,7 +251,7 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
 
         operations.snapshot = cancelled_snapshot  # type: ignore[method-assign]
         with self.assertRaises(asyncio.CancelledError) as raised:
-            await _issued(operations).complete()
+            await _issued(operations).trace()
         self.assertEqual(raised.exception.args, ())
         self.assertEqual(operations.calls, ["snapshot", "revoke_broker", "force_remove", "assert_absent"])
         self.assertNotIn("SENTINEL", repr(raised.exception))
@@ -267,7 +268,7 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
             raise AssertionError("unreachable")
 
         operations.snapshot = blocked_snapshot  # type: ignore[method-assign]
-        task = asyncio.create_task(_issued(operations).complete())
+        task = asyncio.create_task(_issued(operations).trace())
         await snapshot_started.wait()
         task.cancel("SENTINEL-SECRET")
         with self.assertRaises(asyncio.CancelledError) as raised:
@@ -291,3 +292,4 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
     async def test_public_surface_exports_no_generic_adapter_or_runner(self) -> None:
         self.assertEqual(subject.__all__, ("IpythonHostOrchestrationError", "IpythonHostLiveRun"))
         self.assertFalse(hasattr(subject, "_IpythonHostAdapter"))
+        self.assertFalse(hasattr(subject, "IpythonHostCompletion"))
