@@ -17,6 +17,7 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9-]*$")
 _MAX_SOURCE_BYTES = 16 * 1024
 _SEAL = object()
+_SUPERVISOR_SEAL = object()
 _ATTESTATION_VERSION = "prime-ipython-host-attestation/v1"
 _ASSEMBLY_ID = "prime.capability-program@1.0.0"
 _PACKAGE_ID = "prime-agent@1.0.0"
@@ -183,8 +184,8 @@ def inspect_answer_source(source: object) -> bool:
 class IpythonHostSupervisor:
     """The only public PASS path, in fixed causal order."""
 
-    def __init__(self, expected_identity: object) -> None:
-        if not _valid_identity(expected_identity):
+    def __init__(self, expected_identity: object, *, _seal: object = None) -> None:
+        if _seal is not _SUPERVISOR_SEAL or not _valid_identity(expected_identity):
             _invalid()
         self._expected = cast(IpythonHostExpectedIdentity, expected_identity)
         self._issuer = object()
@@ -424,6 +425,11 @@ class IpythonHostSupervisor:
         self._require_active()
         if self._sequence != expected:
             _invalid()
+
+
+def _new_ipython_host_supervisor(expected_identity: object) -> IpythonHostSupervisor:
+    """Private TCB factory; public construction cannot mint a completion."""
+    return IpythonHostSupervisor(expected_identity, _seal=_SUPERVISOR_SEAL)
 
 
 def _valid_snapshot(value: object, issuer: object, stage: str, sequence: int) -> bool:

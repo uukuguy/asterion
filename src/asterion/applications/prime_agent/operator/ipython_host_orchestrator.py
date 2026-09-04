@@ -12,7 +12,7 @@ import asyncio
 from dataclasses import dataclass
 from hashlib import sha256
 import re
-from typing import Protocol, cast, runtime_checkable
+from typing import Awaitable, Callable, cast
 
 from asterion.applications.prime_agent.operator.docker_worker import (
     DockerWorkerModelResponse,
@@ -23,6 +23,7 @@ from asterion.applications.prime_agent.operator.ipython_host_supervisor import (
     IpythonHostExpectedIdentity,
     IpythonHostSupervisor,
     IpythonHostSupervisorError,
+    _new_ipython_host_supervisor,
 )
 from asterion.applications.prime_agent.operator.model_broker import PrimeModelBrokerUsage
 from asterion.runtime.host import CancellationSignal
@@ -30,10 +31,11 @@ from asterion.services.restricted_worker import RestrictedWorkerLease
 
 
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_CLEANUP_SECONDS = 30.0
 
 __all__ = (
     "IpythonHostOrchestrationError",
-    "run_ipython_host_orchestration",
+    "IpythonHostLiveRun",
 )
 
 
@@ -55,55 +57,106 @@ class _IpythonBrokeredCell:
         return "_IpythonBrokeredCell(redacted)"
 
 
-@runtime_checkable
-class _IpythonHostAdapter(Protocol):
-    """Private host operations; implementations must not expose worker output."""
-
-    async def snapshot(self, lease: RestrictedWorkerLease) -> DockerWorkerWorkspaceSnapshot: ...
-
-    async def brokered_cell(self, lease: RestrictedWorkerLease) -> _IpythonBrokeredCell: ...
-
-    async def revoke_broker(self, lease: RestrictedWorkerLease) -> None: ...
-
-    async def force_remove(self, lease: RestrictedWorkerLease) -> None: ...
-
-    async def assert_absent(self, lease: RestrictedWorkerLease) -> None: ...
+_LIVE_RUN_SEAL = object()
 
 
-async def run_ipython_host_orchestration(
-    identity: IpythonHostExpectedIdentity,
-    lease: RestrictedWorkerLease,
-    adapter: _IpythonHostAdapter,
-    *,
-    signal: CancellationSignal | None = None,
-) -> IpythonHostCompletion:
+class _IpythonHostOperations:
+    """TCB-owned operations, minted by the concrete application host only.
+
+    This is deliberately a nominal object rather than a protocol: shape-compatible
+    values (including fakes) cannot enter the public completion path.
+    """
+
+    __slots__ = ("snapshot", "brokered_cell", "revoke_broker", "force_remove", "assert_absent")
+
+    def __init__(
+        self,
+        *,
+        _seal: object,
+        snapshot: Callable[[RestrictedWorkerLease], Awaitable[DockerWorkerWorkspaceSnapshot]],
+        brokered_cell: Callable[[RestrictedWorkerLease], Awaitable[_IpythonBrokeredCell]],
+        revoke_broker: Callable[[RestrictedWorkerLease], Awaitable[None]],
+        force_remove: Callable[[RestrictedWorkerLease], Awaitable[None]],
+        assert_absent: Callable[[RestrictedWorkerLease], Awaitable[None]],
+    ) -> None:
+        if _seal is not _LIVE_RUN_SEAL:
+            _reject()
+        self.snapshot = snapshot
+        self.brokered_cell = brokered_cell
+        self.revoke_broker = revoke_broker
+        self.force_remove = force_remove
+        self.assert_absent = assert_absent
+
+
+class IpythonHostLiveRun:
+    """Sealed concrete host context; this is the sole public PASS producer."""
+
+    __slots__ = ("_identity", "_lease", "_operations", "_signal")
+
+    def __init__(
+        self,
+        *,
+        _seal: object = None,
+        identity: object = None,
+        lease: object = None,
+        operations: object = None,
+        signal: CancellationSignal | None = None,
+    ) -> None:
+        if (
+            _seal is not _LIVE_RUN_SEAL
+            or type(identity) is not IpythonHostExpectedIdentity
+            or type(lease) is not RestrictedWorkerLease
+            or type(operations) is not _IpythonHostOperations
+            or identity.workload_digest != lease.workload_digest
+        ):
+            _reject()
+        self._identity: IpythonHostExpectedIdentity = cast(IpythonHostExpectedIdentity, identity)
+        self._lease: RestrictedWorkerLease = cast(RestrictedWorkerLease, lease)
+        self._operations: _IpythonHostOperations = cast(_IpythonHostOperations, operations)
+        self._signal = signal
+
+    async def complete(self) -> IpythonHostCompletion:
+        return await _complete_issued_live_run(self)
+
+
+def _issue_ipython_host_live_run(
+    *, identity: IpythonHostExpectedIdentity, lease: RestrictedWorkerLease,
+    operations: _IpythonHostOperations, signal: CancellationSignal | None = None,
+) -> IpythonHostLiveRun:
+    """Private concrete-factory hook for the Docker/model application host."""
+    return IpythonHostLiveRun(
+        _seal=_LIVE_RUN_SEAL, identity=identity, lease=lease,
+        operations=operations, signal=signal,
+    )
+
+
+async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHostCompletion:
     """Mint P1 completion only from the closed, host-observed causal chain."""
     if (
-        type(identity) is not IpythonHostExpectedIdentity
-        or type(lease) is not RestrictedWorkerLease
-        or not isinstance(adapter, _IpythonHostAdapter)
-        or identity.workload_digest != lease.workload_digest
+        type(live_run) is not IpythonHostLiveRun
     ):
         _reject()
 
+    identity, lease = live_run._identity, live_run._lease
+    operations, signal = live_run._operations, live_run._signal
     supervisor: IpythonHostSupervisor | None = None
     broker_revoked = False
     try:
-        supervisor = IpythonHostSupervisor(identity)
+        supervisor = _new_ipython_host_supervisor(identity)
         _check_cancel(signal, supervisor)
-        initial = await adapter.snapshot(lease)
+        initial = await operations.snapshot(lease)
         _record_initial(supervisor, initial)
         _check_cancel(signal, supervisor)
 
-        observed = await adapter.brokered_cell(lease)
+        observed = await operations.brokered_cell(lease)
         _record_brokered_cell(supervisor, identity, lease, observed)
         _check_cancel(signal, supervisor)
 
-        post = await adapter.snapshot(lease)
+        post = await operations.snapshot(lease)
         _record_post(supervisor, post)
         _check_cancel(signal, supervisor)
 
-        await adapter.revoke_broker(lease)
+        await operations.revoke_broker(lease)
         broker_revoked = True
         supervisor.record_broker_revoked(supervisor._attest_broker_revocation())  # noqa: SLF001
         _check_cancel(signal, supervisor)
@@ -116,7 +169,7 @@ async def run_ipython_host_orchestration(
             _cancel(supervisor)
         raise IpythonHostOrchestrationError("ipython host orchestration is unavailable") from None
     finally:
-        cleanup_error = await _cleanup(adapter, lease, broker_revoked)
+        cleanup_error = await _cleanup(operations, lease, broker_revoked)
 
     if cleanup_error is not None:
         if isinstance(cleanup_error, asyncio.CancelledError):
@@ -199,25 +252,46 @@ def _record_post(supervisor: IpythonHostSupervisor, snapshot: object) -> None:
 
 
 async def _cleanup(
-    adapter: _IpythonHostAdapter, lease: RestrictedWorkerLease, broker_revoked: bool
+    operations: _IpythonHostOperations, lease: RestrictedWorkerLease, broker_revoked: bool
 ) -> BaseException | None:
     async def run() -> None:
         revocation_error: BaseException | None = None
         if not broker_revoked:
             try:
-                await adapter.revoke_broker(lease)
+                await operations.revoke_broker(lease)
             except BaseException as error:
                 revocation_error = error
-        await adapter.force_remove(lease)
-        await adapter.assert_absent(lease)
+        # Absence is independently attempted even when force removal fails.
+        removal_error: BaseException | None = None
+        try:
+            await operations.force_remove(lease)
+        except BaseException as error:
+            removal_error = error
+        absence_error: BaseException | None = None
+        try:
+            await operations.assert_absent(lease)
+        except BaseException as error:
+            absence_error = error
+        if removal_error is not None:
+            raise removal_error
+        if absence_error is not None:
+            raise absence_error
         if revocation_error is not None:
             raise revocation_error
 
     task = asyncio.create_task(run())
+    deadline = asyncio.get_running_loop().time() + _CLEANUP_SECONDS
     cancellation: asyncio.CancelledError | None = None
     while not task.done():
         try:
-            await asyncio.shield(task)
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                task.cancel()
+                return IpythonHostOrchestrationError("ipython host orchestration is unavailable")
+            await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+        except TimeoutError:
+            task.cancel()
+            return IpythonHostOrchestrationError("ipython host orchestration is unavailable")
         except asyncio.CancelledError as error:
             cancellation = error
         except BaseException:

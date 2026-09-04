@@ -65,14 +65,14 @@ class _HostileEquality:
 
 class TestIpythonHostSupervisor(unittest.TestCase):
     def test_ordered_host_supervisor_mints_a_body_free_pass(self) -> None:
-        completion = _complete(IpythonHostSupervisor(_identity()))
+        completion = _complete(subject._new_ipython_host_supervisor(_identity()))  # noqa: SLF001
         self.assertEqual(completion.status, "PASS")
         self.assertRegex(completion.evidence_digest, r"^sha256:[0-9a-f]{64}$")
         with self.assertRaises(TypeError):
             IpythonHostCompletion("PASS", completion.evidence_digest)  # type: ignore[call-arg]
 
     def test_rejects_initially_passing_source_and_out_of_order_stages(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         with self.assertRaises(IpythonHostSupervisorError):
             supervisor.record_initial_snapshot(
                 supervisor._attest_initial_snapshot(_FINAL, is_regular_file=True)
@@ -81,7 +81,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             supervisor.record_cleanup(cleanup_verified=True, absence_verified=True)
 
     def test_initial_snapshot_requires_the_locked_starter_digest(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         wrong_starter = b"def answer() -> int:\n    return 1\n"
         self.assertNotEqual(
             "sha256:" + sha256(wrong_starter).hexdigest(),
@@ -95,7 +95,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             )
 
     def test_binds_expected_identity_and_rejects_cancellation(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         supervisor.record_initial_snapshot(
             supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         )
@@ -117,7 +117,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
                 )
 
     def test_cancelled_valid_cell_latches_before_rejection(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         supervisor.record_initial_snapshot(
             supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         )
@@ -144,7 +144,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             )
 
     def test_discarded_cancelled_cell_blocks_replacement_and_completion(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         supervisor.record_initial_snapshot(
             supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         )
@@ -183,12 +183,12 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             supervisor.complete(object())
 
     def test_cell_digest_is_distinct_from_final_source_digest(self) -> None:
-        completion = _complete(IpythonHostSupervisor(_identity()))
+        completion = _complete(subject._new_ipython_host_supervisor(_identity()))  # noqa: SLF001
         self.assertNotEqual(sha256(_CELL).hexdigest(), sha256(_FINAL).hexdigest())
         self.assertEqual(completion.status, "PASS")
 
     def test_rejects_false_regular_file_post_attestation(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         supervisor.record_initial_snapshot(
             supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         )
@@ -216,14 +216,14 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             self.assertFalse(inspect_answer_source(b"x" * (16 * 1024 + 1)))
 
     def test_evidence_digest_covers_all_public_evidence_facts(self) -> None:
-        baseline = _complete(IpythonHostSupervisor(_identity())).evidence_digest
+        baseline = _complete(subject._new_ipython_host_supervisor(_identity())).evidence_digest  # noqa: SLF001
         changed = _complete(
-            IpythonHostSupervisor(_identity(image_digest="sha256:" + "d" * 64))
+            subject._new_ipython_host_supervisor(_identity(image_digest="sha256:" + "d" * 64))  # noqa: SLF001
         ).evidence_digest
         self.assertNotEqual(baseline, changed)
 
     def test_attestations_cannot_be_created_before_their_stage(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         with self.assertRaises(IpythonHostSupervisorError):
             supervisor._attest_brokered_cell(
                 identity=_identity(), cell=_CELL,
@@ -236,7 +236,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             supervisor._attest_final_oracle(_FINAL)
 
     def test_final_oracle_requires_revocation_cleanup_and_absence(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         supervisor.record_initial_snapshot(initial)
         cell = supervisor._attest_brokered_cell(
@@ -251,7 +251,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             supervisor._attest_final_oracle(_FINAL)
 
     def test_late_cancellation_latches_and_blocks_completion(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         supervisor.record_initial_snapshot(initial)
         cell = supervisor._attest_brokered_cell(
@@ -265,7 +265,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             supervisor._attest_post_snapshot(_FINAL, is_regular_file=True)
 
     def test_cancellation_after_final_attestation_blocks_complete(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         supervisor.record_initial_snapshot(initial)
         cell = supervisor._attest_brokered_cell(
@@ -295,10 +295,10 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             {"source_digest": "sha256:" + "e" * 64},
         ):
             with self.subTest(changes=changes), self.assertRaises(IpythonHostSupervisorError):
-                IpythonHostSupervisor(_identity(**changes))
+                subject._new_ipython_host_supervisor(_identity(**changes))  # noqa: SLF001
 
     def test_completion_is_single_mint_terminal_and_immutable(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         completion = _complete(supervisor)
         with self.assertRaises(IpythonHostSupervisorError):
             supervisor.complete(object())
@@ -315,7 +315,7 @@ class TestIpythonHostSupervisor(unittest.TestCase):
         self.assertRegex(completion.evidence_digest, r"^sha256:[0-9a-f]{64}$")
 
     def test_revocation_and_cleanup_reject_cells_and_raw_booleans(self) -> None:
-        supervisor = IpythonHostSupervisor(_identity())
+        supervisor = subject._new_ipython_host_supervisor(_identity())  # noqa: SLF001
         initial = supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         supervisor.record_initial_snapshot(initial)
         cell = supervisor._attest_brokered_cell(
@@ -346,15 +346,15 @@ class TestIpythonHostSupervisor(unittest.TestCase):
 
     def test_malformed_and_hostile_inputs_become_body_free_errors(self) -> None:
         with self.assertRaises(IpythonHostSupervisorError) as raised:
-            IpythonHostSupervisor(_HostileEquality())
+            subject._new_ipython_host_supervisor(_HostileEquality())  # noqa: SLF001
         self.assertEqual(str(raised.exception), "ipython host completion is invalid")
 
     def test_hostile_identity_fields_become_body_free_errors(self) -> None:
         with self.assertRaises(IpythonHostSupervisorError) as raised:
-            IpythonHostSupervisor(_identity(assembly_id=_HostileEquality()))
+            subject._new_ipython_host_supervisor(_identity(assembly_id=_HostileEquality()))  # noqa: SLF001
         self.assertEqual(str(raised.exception), "ipython host completion is invalid")
         with self.assertRaises(IpythonHostSupervisorError) as raised:
-            IpythonHostSupervisor(_identity()).record_initial_snapshot(
+            subject._new_ipython_host_supervisor(_identity()).record_initial_snapshot(  # noqa: SLF001
                 _HostileEquality()
             )
         self.assertEqual(str(raised.exception), "ipython host completion is invalid")
