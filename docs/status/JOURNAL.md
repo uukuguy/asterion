@@ -1656,3 +1656,4 @@
 - 05:55 Normalize non-cancellation host BaseException after cleanup; prevent sentinel leak [d8dec1b]
 - 05:58 Catch late final-signal BaseException and redact orchestration failure [b36f4c3]
 - 06:07 Issued P1 live runs only from sealed Docker/broker artifacts to bind real lifecycle evidence [f82b22f]
+- 06:16 Demoted P1 fake completion to trace-only; production issuer unavailable [5b82f3e]
