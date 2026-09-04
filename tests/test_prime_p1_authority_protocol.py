@@ -155,6 +155,12 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
         with self.assertRaises(PrimeP1AuthorityProtocolError):
             supervisor.execute_packet("run-1", APPLICATION)
 
+    def test_authority_rejects_second_ready(self) -> None:
+        authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
+        authority.ready_packet()
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            authority.ready_packet()
+
     def test_shared_native_json_tree_is_not_a_cycle(self) -> None:
         shared = {"value": [1]}
         packet = encode_frame(KEY, SESSION, 1, "terminal", {"left": shared, "right": shared})
@@ -200,6 +206,16 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
         authority.accept_supervisor_packet(supervisor.cancel_packet())
         with self.assertRaises(PrimeP1AuthorityProtocolError):
             authority.terminal_packet(_receipt())
+        _, supervisor = self._live_pair()
+        supervisor.cancel_packet()
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            supervisor.accept_authority_packet(
+                encode_frame(KEY, SESSION, 1, "terminal", _receipt())
+            )
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            supervisor.accept_authority_packet(
+                encode_frame(KEY, SESSION, 1, "terminal", _receipt())
+            )
         for field, value in (("input_bytes", 2), ("charged_cost_microunits", 0)):
             with self.subTest(field=field):
                 _, supervisor = self._live_pair()
