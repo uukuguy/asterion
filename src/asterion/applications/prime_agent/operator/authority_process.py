@@ -43,6 +43,64 @@ class AuthorityBootstrap:
         return "AuthorityBootstrap(redacted)"
 
 
+class AdmittedAuthorityDescriptors:
+    """Sole owner of admitted descriptors until each is explicitly consumed."""
+
+    def __init__(
+        self,
+        connection: object,
+        session_key_fd: int,
+        config_fd: int,
+        close_fd: Callable[[int], object],
+    ) -> None:
+        self._connection: object | None = connection
+        self._session_key_fd: int | None = session_key_fd
+        self._config_fd: int | None = config_fd
+        self._close_fd = close_fd
+        self._closed = False
+
+    def __repr__(self) -> str:
+        return "AdmittedAuthorityDescriptors(redacted)"
+
+    def consume_socket(self) -> object:
+        return self._take("_connection")
+
+    def consume_session_key_fd(self) -> int:
+        return cast(int, self._take("_session_key_fd"))
+
+    def consume_config_fd(self) -> int:
+        return cast(int, self._take("_config_fd"))
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        connection = self._connection
+        self._connection = None
+        if connection is not None:
+            try:
+                _close_socket(connection)
+            except OSError:
+                pass
+        for attribute in ("_session_key_fd", "_config_fd"):
+            fd = getattr(self, attribute)
+            setattr(self, attribute, None)
+            if fd is not None:
+                try:
+                    self._close_fd(fd)
+                except (OSError, OverflowError, TypeError):
+                    pass
+
+    def _take(self, attribute: str) -> object:
+        if self._closed:
+            _unavailable()
+        value = getattr(self, attribute)
+        if value is None:
+            _unavailable()
+        setattr(self, attribute, None)
+        return value
+
+
 def admit_authority_launch(
     contract: AuthorityLaunchContract,
     *,
@@ -61,8 +119,39 @@ def admit_authority_launch(
     All inherited descriptors are consumed and closed in every outcome.  The
     intentionally injectable calls are test seams, not application settings.
     """
+    admitted = admit_retained_authority_descriptors(
+        contract,
+        platform_name=platform_name,
+        effective_uid=effective_uid,
+        process_id=process_id,
+        socket_factory=socket_factory,
+        get_fd_flags=get_fd_flags,
+        peer_credentials=peer_credentials,
+        close_fd=close_fd,
+        seqpacket_type=seqpacket_type,
+        peercred_option=peercred_option,
+    )
+    admitted.close()
+    return AuthorityBootstrap()
+
+
+def admit_retained_authority_descriptors(
+    contract: AuthorityLaunchContract,
+    *,
+    platform_name: str | None = None,
+    effective_uid: Callable[[], int] = os.geteuid,
+    process_id: Callable[[], int] = os.getpid,
+    socket_factory: Callable[[int], object] | None = None,
+    get_fd_flags: Callable[[int], int] | None = None,
+    peer_credentials: Callable[[object], tuple[int, int]] | None = None,
+    close_fd: Callable[[int], object] = os.close,
+    seqpacket_type: int | None = None,
+    peercred_option: int | None = None,
+) -> AdmittedAuthorityDescriptors:
+    """Validate and transfer sole descriptor ownership to a narrow bundle."""
     fds = _unique_integer_fds(contract)
     connection: object | None = None
+    retained = False
     try:
         if platform_name is None:
             platform_name = sys.platform
@@ -112,22 +201,26 @@ def admit_authority_launch(
         )
         if peer != (contract.supervisor_uid, contract.supervisor_pid):
             _unavailable()
-        return AuthorityBootstrap()
+        retained = True
+        return AdmittedAuthorityDescriptors(
+            opened, contract.session_key_fd, contract.config_fd, close_fd
+        )
     except (OSError, OverflowError, TypeError, ValueError, struct.error):
         _unavailable()
     finally:
-        if connection is not None:
+        if connection is not None and not retained:
             try:
                 _close_socket(connection)
             except OSError:
                 pass
-        for fd in fds:
-            if connection is not None and fd == contract.socket_fd:
-                continue
-            try:
-                close_fd(fd)
-            except (OSError, OverflowError, TypeError):
-                pass
+        if not retained:
+            for fd in fds:
+                if connection is not None and fd == contract.socket_fd:
+                    continue
+                try:
+                    close_fd(fd)
+                except (OSError, OverflowError, TypeError):
+                    pass
 
 
 def _unique_integer_fds(contract: object) -> tuple[int, ...]:
