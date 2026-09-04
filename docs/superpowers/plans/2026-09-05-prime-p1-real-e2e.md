@@ -24,13 +24,14 @@
 - [x] Implement application-only dotenv resolution and a revocable model session. It returns framed bytes plus body-free usage receipts; worker receives no credential/environment provider configuration.
 - [x] Run focused tests/static checks and commit.
 
-### Task 3: Real Prime/IPython worker protocol
+### Task 3: Trusted host supervisor and untrusted IPython worker
 
-**Files:** Replace deterministic P1 launcher path; extend worker/image framing and oracle fixture; add protocol/worker tests.
+**Files:** Replace the launcher-completion path with an application-owned supervisor, a data-only host AST oracle, daemon-attested workspace snapshots, and untrusted worker hints; extend Docker transport and tests.
 
-- [ ] Write failing tests requiring initial oracle failure, nonzero host-model operations, Prime tool set exactly `("ipython",)`, model-caused IPython mutation, final oracle success, cleanup, and rejection of deterministic/manual/fake paths.
-- [ ] Implement duplex closed frames: control, model request/response, and terminal completion. Pin real Prime SDK session and relay model frames only via the host service; perform oracle checks in launcher.
-- [ ] Run provider-free protocol/image tests and commit. Do not execute a live model in this task.
+- [ ] Write failing tests requiring host-supervisor-only completion, initial oracle failure, an actual bounded-model receipt bound to the sent-cell digest, Prime tool set exactly `("ipython",)`, model-caused mutation ordering, final host AST-oracle success, cleanup, and rejection of deterministic/manual/fake/forged-frame paths.
+- [ ] Implement the host-owned supervisor. Container stdout, stderr, exit status, and claimed terminal frames are untrusted hints only. The supervisor snapshots the exact regular workspace file through Docker before and after the brokered cell, destroys the container and confirms absence before evaluating a bounded data-only AST oracle for fixed `answer() == 42`; it never imports or executes model-owned Python.
+- [ ] Keep requested container name distinct from daemon container ID; project inspect responses to a fixed checked shape. Reject archive symlinks, multiple files, oversized input, malformed snapshots, cancellation, missing broker receipt, and failed cleanup. Pin the Prime SDK session and relay model frames only through the host service.
+- [ ] Run provider-free supervisor/transport tests and commit. Do not execute a live model in this task.
 
 ### Task 4: Prime product verifier and CLI basic preset
 
