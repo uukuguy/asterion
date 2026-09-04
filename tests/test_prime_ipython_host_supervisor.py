@@ -80,6 +80,20 @@ class TestIpythonHostSupervisor(unittest.TestCase):
         with self.assertRaises(IpythonHostSupervisorError):
             supervisor.record_cleanup(cleanup_verified=True, absence_verified=True)
 
+    def test_initial_snapshot_requires_the_locked_starter_digest(self) -> None:
+        supervisor = IpythonHostSupervisor(_identity())
+        wrong_starter = b"def answer() -> int:\n    return 1\n"
+        self.assertNotEqual(
+            "sha256:" + sha256(wrong_starter).hexdigest(),
+            _identity().starter_digest,
+        )
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.record_initial_snapshot(
+                supervisor._attest_initial_snapshot(
+                    wrong_starter, is_regular_file=True
+                )
+            )
+
     def test_binds_expected_identity_and_rejects_cancellation(self) -> None:
         supervisor = IpythonHostSupervisor(_identity())
         supervisor.record_initial_snapshot(
@@ -101,6 +115,34 @@ class TestIpythonHostSupervisor(unittest.TestCase):
                         cancelled=cancelled,
                     )
                 )
+
+    def test_cancelled_valid_cell_latches_before_rejection(self) -> None:
+        supervisor = IpythonHostSupervisor(_identity())
+        supervisor.record_initial_snapshot(
+            supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
+        )
+        cancelled = supervisor._attest_brokered_cell(
+            identity=_identity(),
+            cell=_CELL,
+            bounded_model_digest="sha256:" + "b" * 64,
+            request_count=1,
+            input_bytes=1,
+            output_bytes=1,
+            cancelled=True,
+        )
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.record_brokered_cell(cancelled)
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.record_brokered_cell(
+                supervisor._attest_brokered_cell(
+                    identity=_identity(),
+                    cell=_CELL,
+                    bounded_model_digest="sha256:" + "b" * 64,
+                    request_count=1,
+                    input_bytes=1,
+                    output_bytes=1,
+                )
+            )
 
     def test_cell_digest_is_distinct_from_final_source_digest(self) -> None:
         completion = _complete(IpythonHostSupervisor(_identity()))
@@ -224,6 +266,14 @@ class TestIpythonHostSupervisor(unittest.TestCase):
             supervisor.complete(object())
         with self.assertRaises((AttributeError, TypeError)):
             completion._digest = "sha256:" + "0" * 64  # type: ignore[attr-defined]
+        for name in (
+            "_digest",
+            "_IpythonHostCompletion__digest",
+            "evidence_digest",
+            "new_attribute",
+        ):
+            with self.subTest(name=name), self.assertRaises(TypeError):
+                delattr(completion, name)
         self.assertRegex(completion.evidence_digest, r"^sha256:[0-9a-f]{64}$")
 
     def test_revocation_and_cleanup_reject_cells_and_raw_booleans(self) -> None:
@@ -259,6 +309,11 @@ class TestIpythonHostSupervisor(unittest.TestCase):
     def test_malformed_and_hostile_inputs_become_body_free_errors(self) -> None:
         with self.assertRaises(IpythonHostSupervisorError) as raised:
             IpythonHostSupervisor(_HostileEquality())
+        self.assertEqual(str(raised.exception), "ipython host completion is invalid")
+
+    def test_hostile_identity_fields_become_body_free_errors(self) -> None:
+        with self.assertRaises(IpythonHostSupervisorError) as raised:
+            IpythonHostSupervisor(_identity(assembly_id=_HostileEquality()))
         self.assertEqual(str(raised.exception), "ipython host completion is invalid")
         with self.assertRaises(IpythonHostSupervisorError) as raised:
             IpythonHostSupervisor(_identity()).record_initial_snapshot(

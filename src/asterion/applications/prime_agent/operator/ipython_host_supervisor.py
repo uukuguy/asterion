@@ -64,6 +64,9 @@ class IpythonHostCompletion:
     def __setattr__(self, name: str, value: object) -> None:
         raise TypeError("ipython host completion is immutable")
 
+    def __delattr__(self, name: str) -> None:
+        raise TypeError("ipython host completion is immutable")
+
     @property
     def status(self) -> Literal["PASS"]:
         return "PASS"
@@ -298,7 +301,11 @@ class IpythonHostSupervisor:
         if self._initial is not None or not _valid_snapshot(snapshot, self._issuer, "initial", 1):
             _invalid()
         attestation = cast(_Snapshot, snapshot)
-        if not attestation.regular_file or attestation.oracle_passed:
+        if (
+            not attestation.regular_file
+            or attestation.oracle_passed
+            or attestation.digest != _STARTER_DIGEST
+        ):
             _invalid()
         self._initial = attestation
         self._sequence = 1
@@ -309,7 +316,10 @@ class IpythonHostSupervisor:
         if self._cell is not None or not _valid_cell(receipt, self._issuer, "cell", 2):
             _invalid()
         attestation = cast(_Cell, receipt)
-        if attestation.cancelled or attestation.identity != self._expected:
+        if attestation.identity != self._expected:
+            _invalid()
+        if attestation.cancelled:
+            self._cancelled = True
             _invalid()
         self._cell = attestation
         self._sequence = 2
@@ -466,6 +476,14 @@ def _valid_oracle(value: object, issuer: object, stage: str, sequence: int) -> b
 def _valid_identity(value: object) -> bool:
     return (
         type(value) is IpythonHostExpectedIdentity
+        and type(value.assembly_id) is str
+        and type(value.package_id) is str
+        and type(value.implementation_id) is str
+        and type(value.image_digest) is str
+        and type(value.workload_digest) is str
+        and type(value.oracle_digest) is str
+        and type(value.starter_digest) is str
+        and type(value.source_digest) is str
         and value.assembly_id == _ASSEMBLY_ID
         and value.package_id == _PACKAGE_ID
         and value.implementation_id == _IMPLEMENTATION_ID
