@@ -214,7 +214,7 @@ async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHost
     except asyncio.CancelledError:
         _cancel(typed_supervisor)
         raise asyncio.CancelledError() from None
-    except (IpythonHostSupervisorError, Exception):
+    except BaseException:
         _cancel(typed_supervisor)
         raise IpythonHostOrchestrationError("ipython host orchestration is unavailable") from None
 

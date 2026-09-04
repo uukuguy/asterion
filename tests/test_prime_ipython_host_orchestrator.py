@@ -56,6 +56,18 @@ class _Signal(CancellationSignal):
         return self.cancelled_value
 
 
+class _LateHostCallbackSignal(CancellationSignal):
+    def __init__(self) -> None:
+        self.reads = 0
+
+    @property
+    def cancelled(self) -> bool:
+        self.reads += 1
+        if self.reads == 6:
+            raise _HostCallbackSentinel("SENTINEL-LATE-HOST-CALLBACK")
+        return False
+
+
 class _HostOperations:
     def __init__(self, identity: IpythonHostExpectedIdentity) -> None:
         self.identity = identity
@@ -146,6 +158,15 @@ class TestIpythonHostOrchestrator(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(subject.IpythonHostOrchestrationError) as raised:
             await _issued(operations).complete()
         self.assertEqual(operations.calls, ["snapshot", "revoke_broker", "force_remove", "assert_absent"])
+        self.assertNotIn("SENTINEL", str(raised.exception))
+
+    async def test_late_signal_base_exception_after_cleanup_is_redacted(self) -> None:
+        operations = _HostOperations(_identity())
+        signal = _LateHostCallbackSignal()
+        with self.assertRaises(subject.IpythonHostOrchestrationError) as raised:
+            await _issued(operations, signal=signal).complete()
+        self.assertEqual(signal.reads, 6)
+        self.assertEqual(operations.calls, ["snapshot", "brokered_cell", "snapshot", "revoke_broker", "force_remove", "assert_absent"])
         self.assertNotIn("SENTINEL", str(raised.exception))
 
     async def test_hanging_cleanup_revocation_still_attempts_removal_and_absence(self) -> None:
