@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import NoReturn
 
@@ -24,6 +25,12 @@ _SELF_CHECK = b'{"credentials_absent":true,"effective_capabilities":0,"effective
 _STARTER = Path("/opt/prime-fixture/starter/solution.py")
 _ORACLE = Path("/opt/prime-fixture/oracle/oracle.py")
 _WORKSPACE_SOLUTION = Path("/workspace/solution.py")
+_FINAL_ORACLE_PROGRAM = (
+    "/usr/local/bin/python", "-I", "-S", "-B", "-c",
+    "import runpy, sys; sys.path.insert(0, sys.argv[1]); "
+    "runpy.run_path(sys.argv[2], run_name='__main__')",
+)
+_FINAL_ORACLE_TIMEOUT_SECONDS = 5
 _WRITABLE_KERNEL_MOUNTS = {"/dev", "/dev/mqueue", "/dev/pts", "/proc", "/sys"}
 _CREDENTIAL_SENTINELS = (Path("/run/secrets"), Path("/root/.aws"), Path("/home/node/.aws"), Path("/home/node/.config/gcloud"), Path("/workspace/.env"))
 
@@ -148,7 +155,20 @@ def execute_model_ipython_cell(shell: InteractiveShell, cell: str) -> None:
 
 
 def final_oracle_success(shell: InteractiveShell) -> None:
-    if not _run_oracle(shell):
+    del shell
+    try:
+        completed = subprocess.run(
+            (*_FINAL_ORACLE_PROGRAM, str(_WORKSPACE_SOLUTION.parent), str(_ORACLE)),
+            cwd=_WORKSPACE_SOLUTION.parent,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=_FINAL_ORACLE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        invalid_worker()
+    if completed.returncode != 0:
         invalid_worker()
 
 

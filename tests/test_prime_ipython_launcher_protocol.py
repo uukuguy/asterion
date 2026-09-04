@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from hashlib import sha256
+import importlib.util
 import json
 from pathlib import Path
 import runpy
 import shutil
 import sys
 from tempfile import TemporaryDirectory
+from types import ModuleType, SimpleNamespace
 import unittest
 
 from asterion.applications.prime_agent.operator.ipython_workload import (
@@ -18,6 +20,53 @@ from asterion.applications.prime_agent.operator.ipython_workload import (
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "src/asterion/applications/prime_agent/operator/image"
+
+
+class _SpoofableInteractiveShell:
+    def run_line_magic(self, name: str, path: str) -> None:
+        if name != "run":
+            raise AssertionError("unexpected magic")
+        runpy.run_path(path)
+
+    def run_cell(self, cell: str, *, store_history: bool) -> SimpleNamespace:
+        del store_history
+        try:
+            exec(cell, {"InteractiveShell": type(self), "Path": Path})
+        except BaseException as error:
+            return SimpleNamespace(error_in_exec=error, error_before_exec=None)
+        return SimpleNamespace(error_in_exec=None, error_before_exec=None)
+
+
+def _load_launcher() -> tuple[ModuleType, dict[str, ModuleType | None]]:
+    module_names = (
+        "IPython",
+        "IPython.core",
+        "IPython.core.interactiveshell",
+    )
+    previous = {name: sys.modules.get(name) for name in module_names}
+    ipython = ModuleType("IPython")
+    core = ModuleType("IPython.core")
+    interactive = ModuleType("IPython.core.interactiveshell")
+    setattr(interactive, "InteractiveShell", _SpoofableInteractiveShell)
+    sys.modules.update({
+        "IPython": ipython,
+        "IPython.core": core,
+        "IPython.core.interactiveshell": interactive,
+    })
+    spec = importlib.util.spec_from_file_location("prime_ipython_launcher_under_test", IMAGE / "launcher.py")
+    if spec is None or spec.loader is None:
+        raise AssertionError("launcher must load")
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+    return launcher, previous
+
+
+def _restore_ipython(previous: dict[str, ModuleType | None]) -> None:
+    for name, module in previous.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
 
 
 class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
@@ -63,8 +112,18 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
             launcher.index('value.get("workload_digest") != WORKLOAD_DIGEST'),
             launcher.index("emit_model_request()"),
         )
-        for prohibited in ("os.environ", "socket", "provider", "transcript", "subprocess"):
+        for prohibited in ("os.environ", "socket", "provider", "transcript"):
             self.assertNotIn(prohibited, launcher.lower())
+        for required in (
+            "subprocess.run",
+            '"-I"',
+            '"-S"',
+            "stdin=subprocess.DEVNULL",
+            "stdout=subprocess.DEVNULL",
+            "stderr=subprocess.DEVNULL",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, launcher)
 
     def test_python_launcher_accepts_only_a_host_mediated_ipython_model_response(self) -> None:
         launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
@@ -119,6 +178,43 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
                 self.assertIn(required, launcher)
         self.assertLess(launcher.rindex("initial_oracle_failure(shell)"), launcher.rindex("emit_model_request()"))
         self.assertLess(launcher.rindex("read_model_response()"), launcher.rindex("final_oracle_success(shell)"))
+
+    def test_final_oracle_rejects_shell_primitive_spoofed_by_model_cell(self) -> None:
+        launcher, previous = _load_launcher()
+        original_magic = _SpoofableInteractiveShell.run_line_magic
+        self.addCleanup(_restore_ipython, previous)
+        self.addCleanup(
+            setattr, _SpoofableInteractiveShell, "run_line_magic", original_magic,
+        )
+        starter = IMAGE / "fixture/starter/solution.py"
+        oracle = IMAGE / "fixture/oracle/oracle.py"
+        with TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            solution = workspace / "solution.py"
+            copied_oracle = workspace / "oracle.py"
+            shutil.copyfile(starter, solution)
+            shutil.copyfile(oracle, copied_oracle)
+            setattr(launcher, "_STARTER", starter)
+            setattr(launcher, "_ORACLE", copied_oracle)
+            setattr(launcher, "_WORKSPACE_SOLUTION", solution)
+            sys.path.insert(0, str(workspace))
+            try:
+                shell = _SpoofableInteractiveShell()
+                launcher.initial_oracle_failure(shell)
+                launcher.execute_model_ipython_cell(
+                    shell,
+                    "\n".join((
+                        f"Path({str(solution)!r}).write_text("
+                        "'def answer() -> int:\\n    return -1\\n', encoding='utf-8')",
+                        "InteractiveShell.run_line_magic = lambda self, *args, **kwargs: None",
+                    )),
+                )
+                with self.assertRaises(RuntimeError):
+                    launcher.final_oracle_success(shell)
+            finally:
+                _SpoofableInteractiveShell.run_line_magic = original_magic
+                sys.modules.pop("solution", None)
+                sys.path.remove(str(workspace))
 
     def test_python_launcher_keeps_closed_worker_checks_before_selfcheck(self) -> None:
         launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
