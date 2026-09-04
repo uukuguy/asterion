@@ -36,6 +36,7 @@ prime-agent = "asterion.applications.prime_agent.provider:create_provider"
 [project.entry-points."asterion.host_services"]
 "corpus.local-root" = "asterion.capabilities.dci.implementation.services:create_local_corpus_service_factory"
 "evaluation.answer-judge" = "asterion.capabilities.dci.implementation.services:create_answer_judge_service_factory"
+"model.bounded-session" = "asterion.applications.prime_agent.operator.model_session_host:create_host_service_factory"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/asterion"]

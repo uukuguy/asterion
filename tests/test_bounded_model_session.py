@@ -8,6 +8,7 @@ import unittest
 from asterion.services.bounded_model_session import (
     BoundedModelSessionError,
     BoundedModelSessionLease,
+    BoundedModelSessionReceipt,
     BoundedModelSessionRequest,
     BoundedModelSessionService,
 )
@@ -17,8 +18,11 @@ def _request(**changes: object) -> BoundedModelSessionRequest:
     values: dict[str, object] = {
         "run_id": "run-1",
         "max_requests": 2,
+        "max_input_tokens": 4096,
+        "max_output_tokens": 4096,
         "max_input_bytes": 32768,
         "max_output_bytes": 32768,
+        "max_cost_microunits": 250000,
         "deadline_seconds": 300,
     }
     values.update(changes)
@@ -35,8 +39,11 @@ class TestBoundedModelSessionValues(unittest.TestCase):
             (
                 "run_id",
                 "max_requests",
+                "max_input_tokens",
+                "max_output_tokens",
                 "max_input_bytes",
                 "max_output_bytes",
+                "max_cost_microunits",
                 "deadline_seconds",
             ),
         )
@@ -44,8 +51,11 @@ class TestBoundedModelSessionValues(unittest.TestCase):
     def test_request_rejects_boolean_and_non_positive_budgets(self) -> None:
         for field in (
             "max_requests",
+            "max_input_tokens",
+            "max_output_tokens",
             "max_input_bytes",
             "max_output_bytes",
+            "max_cost_microunits",
             "deadline_seconds",
         ):
             for value in (True, 0, -1, 1.5):
@@ -109,8 +119,11 @@ class TestBoundedModelSessionValues(unittest.TestCase):
             BoundedModelSessionRequest(
                 run_id="run-1",
                 max_requests=2,
+                max_input_tokens=4096,
+                max_output_tokens=4096,
                 max_input_bytes=32768,
                 max_output_bytes=32768,
+                max_cost_microunits=250000,
                 deadline_seconds=300,
                 model="unsafe",  # type: ignore[call-arg]
             )
@@ -120,3 +133,24 @@ class TestBoundedModelSessionValues(unittest.TestCase):
             {name for name in BoundedModelSessionService.__dict__ if not name.startswith("_")},
             {"open", "revoke"},
         )
+
+    def test_terminal_receipt_is_body_free_and_rejects_negative_usage(self) -> None:
+        receipt = BoundedModelSessionReceipt(
+            session_id="session-1", run_id="run-1", request_count=1,
+            input_tokens=10, output_tokens=20, input_bytes=30, output_bytes=40,
+            cost_microunits=50,
+        )
+        self.assertEqual(receipt.terminal, "revoked")
+        self.assertNotIn("body", receipt.__dataclass_fields__)
+        for field in (
+            "request_count", "input_tokens", "output_tokens", "input_bytes",
+            "output_bytes", "cost_microunits",
+        ):
+            with self.subTest(field=field), self.assertRaises(BoundedModelSessionError):
+                values = {
+                    "session_id": "session-1", "run_id": "run-1",
+                    "request_count": 0, "input_tokens": 0, "output_tokens": 0,
+                    "input_bytes": 0, "output_bytes": 0, "cost_microunits": 0,
+                }
+                values[field] = -1
+                BoundedModelSessionReceipt(**values)

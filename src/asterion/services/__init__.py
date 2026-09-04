@@ -3,6 +3,7 @@
 from asterion.services.bounded_model_session import (
     BoundedModelSessionError,
     BoundedModelSessionLease,
+    BoundedModelSessionReceipt,
     BoundedModelSessionRequest,
     BoundedModelSessionService,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "HOST_SERVICE_ENTRY_POINT_GROUP",
     "BoundedModelSessionError",
     "BoundedModelSessionLease",
+    "BoundedModelSessionReceipt",
     "BoundedModelSessionRequest",
     "BoundedModelSessionService",
     "RestrictedWorkerAttestation",

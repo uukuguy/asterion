@@ -21,8 +21,9 @@ _WORKLOAD = "sha256:" + "b" * 64
 
 
 def _session(**changes: object) -> BoundedModelSessionRequest:
-    values: dict[str, object] = {"run_id": "run-1", "max_requests": 2, "max_input_bytes": 12,
-        "max_output_bytes": 12, "deadline_seconds": 10}
+    values: dict[str, object] = {"run_id": "run-1", "max_requests": 2,
+        "max_input_tokens": 12, "max_output_tokens": 12, "max_input_bytes": 12,
+        "max_output_bytes": 12, "max_cost_microunits": 12, "deadline_seconds": 10}
     values.update(changes)
     return BoundedModelSessionRequest(**values)  # type: ignore[arg-type]
 
