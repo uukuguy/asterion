@@ -19,7 +19,7 @@ from asterion.services.restricted_worker import RestrictedWorkerLease
 
 
 Provider = Callable[[bytes], Awaitable[bytes]]
-__all__ = ["PrimeModelBrokerError", "PrimeModelBrokerUsage", "PrimeModelBrokerReceipt", "PrimeModelChannel", "Provider"]
+__all__ = ["PrimeModelBrokerError", "PrimeModelBrokerUsage", "PrimeModelBrokerReceipt", "PrimeModelBrokerTokenUsage", "PrimeModelChannel", "Provider"]
 
 
 class PrimeModelBrokerError(ValueError):
@@ -41,8 +41,35 @@ class PrimeModelBrokerUsage:
 
 
 @dataclass(frozen=True, repr=False)
+class PrimeModelBrokerTokenUsage:
+    """Body-free provider accounting admitted into a terminal broker receipt."""
+
+    input_tokens: int
+    output_tokens: int
+    cost_microunits: int
+
+    def __post_init__(self) -> None:
+        if any(
+            type(value) is not int or value < 0
+            for value in (
+                self.input_tokens,
+                self.output_tokens,
+                self.cost_microunits,
+            )
+        ):
+            raise PrimeModelBrokerError("prime model broker is unavailable")
+
+    def __repr__(self) -> str:
+        return "PrimeModelBrokerTokenUsage(redacted)"
+
+
+@dataclass(frozen=True, repr=False)
 class PrimeModelBrokerReceipt(PrimeModelBrokerUsage):
     status: Literal["revoked"]
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_microunits: int = 0
+    quiesced: Literal[True] = True
 
     def __repr__(self) -> str:
         return "PrimeModelBrokerReceipt(redacted)"
@@ -150,18 +177,19 @@ class _HostModelCoordinator:
     __slots__ = (
         "_lease", "_session", "_worker", "_barrier", "_provider", "_deadline", "_grace", "_host",
         "_lock", "_activated", "_revoked", "_cleanup_uncertain", "_requests", "_input_bytes",
-        "_output_bytes", "_inflight_task", "_server_task", "_identity",
+        "_output_bytes", "_inflight_task", "_server_task", "_identity", "_terminal_usage",
     )
 
     def __init__(self, *, lease: BoundedModelSessionLease, session: BoundedModelSessionRequest,
         worker: RestrictedWorkerLease, barrier: PrimeLauncherBarrier, provider: Provider, session_id: str,
-        worker_id: str, run_id: str, challenge_digest: str, cleanup_grace_seconds: float) -> None:
+        worker_id: str, run_id: str, challenge_digest: str, cleanup_grace_seconds: float,
+        terminal_usage: Callable[[], PrimeModelBrokerTokenUsage] | None = None) -> None:
         if (type(lease) is not BoundedModelSessionLease or type(session) is not BoundedModelSessionRequest
                 or type(worker) is not RestrictedWorkerLease or type(barrier) is not PrimeLauncherBarrier
                 or not callable(provider) or lease.run_id != session.run_id or worker.run_id != session.run_id
                 or lease.session_id != session_id or worker.worker_id != worker_id or session.run_id != run_id
                 or worker.challenge_digest != challenge_digest or type(cleanup_grace_seconds) not in (int, float)
-                or cleanup_grace_seconds <= 0):
+                or cleanup_grace_seconds <= 0 or terminal_usage is not None and not callable(terminal_usage)):
             raise PrimeModelBrokerError("prime model broker is unavailable")
         self._lease, self._session, self._worker = lease, session, worker
         self._barrier, self._provider = barrier, provider
@@ -169,6 +197,7 @@ class _HostModelCoordinator:
         state = _TransportState()
         self._host = _HostEndpoint(state)
         self._identity = _FrameIdentity(session_id, run_id, worker_id, challenge_digest)
+        self._terminal_usage = terminal_usage
         self._lock = asyncio.Lock()
         self._activated = self._revoked = self._cleanup_uncertain = False
         self._requests = self._input_bytes = self._output_bytes = 0
@@ -228,9 +257,45 @@ class _HostModelCoordinator:
             task = self._inflight_task
         if task is not None and not await self._cancel_with_grace(task):
             raise PrimeModelBrokerError("prime model broker is unavailable")
+        if not await self._await_server_quiescence():
+            async with self._lock:
+                self._cleanup_uncertain = True
+            raise PrimeModelBrokerError("prime model broker is unavailable")
+        token_usage = (
+            PrimeModelBrokerTokenUsage(0, 0, 0)
+            if self._terminal_usage is None
+            else self._terminal_usage()
+        )
+        if (
+            type(token_usage) is not PrimeModelBrokerTokenUsage
+            or token_usage.input_tokens > self._session.max_input_tokens
+            or token_usage.output_tokens > self._session.max_output_tokens
+            or token_usage.cost_microunits > self._session.max_cost_microunits
+        ):
+            raise PrimeModelBrokerError("prime model broker is unavailable")
         usage = self.usage()
         return PrimeModelBrokerReceipt(usage.session_id, usage.run_id, usage.worker_id,
-            usage.challenge_digest, usage.request_count, usage.input_bytes, usage.output_bytes, "revoked")
+            usage.challenge_digest, usage.request_count, usage.input_bytes, usage.output_bytes,
+            "revoked", token_usage.input_tokens, token_usage.output_tokens,
+            token_usage.cost_microunits, True)
+
+    async def _await_server_quiescence(self) -> bool:
+        task = self._server_task
+        if task is None:
+            return True
+        done, _ = await asyncio.wait((task,), timeout=self._grace)
+        if not done:
+            task.cancel()
+            done, _ = await asyncio.wait((task,), timeout=self._grace)
+        if not done:
+            return False
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return True
+        except Exception:
+            return False
+        return True
 
     async def _serve(self) -> None:
         while True:

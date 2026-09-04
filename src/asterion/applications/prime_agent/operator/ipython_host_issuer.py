@@ -20,23 +20,23 @@ from asterion.runtime.host import CancellationSignal
 __all__: tuple[()] = ()
 
 
-class _ProductionIpythonHostCapability:
-    """Nominal future capability; no provider-free construction exists."""
-
-    __slots__ = ()
-
-
-def _issue_production_ipython_host_live_run(
+async def _issue_production_ipython_host_live_run(
     *,
     capability: object,
     signal: CancellationSignal | None = None,
 ) -> IpythonHostLiveRun:
-    """Reserved for the exact operator-owned production host integration."""
+    """Consume only a production run authority; live execution is not wired yet."""
+    from asterion.applications.prime_agent.operator.production_host import (
+        _consume_production_authority,
+    )
+
     del signal
-    if type(capability) is not _ProductionIpythonHostCapability:
+    try:
+        _consume_production_authority(capability)
+    except BaseException:
         _reject()
-    # The production capability and its Docker/provider invocation are not
-    # implemented in this provider-free slice.
+    # This slice deliberately stops before Docker/model execution.  The consumed
+    # authority cannot be replayed when the live integration is added.
     _reject()
 
 
@@ -50,7 +50,8 @@ def _issue_docker_model_live_run(
 ) -> IpythonHostLiveRun:
     """Compatibility-shaped private entry point that fails until production exists."""
     del service, lease, identity, broker
-    return _issue_production_ipython_host_live_run(capability=None, signal=signal)
+    del signal
+    _reject()
 
 
 def _reject() -> NoReturn:

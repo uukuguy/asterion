@@ -289,6 +289,7 @@ def _record_broker_revocation(
     if (
         type(receipt) is not PrimeModelBrokerReceipt
         or receipt.status != "revoked"
+        or receipt.quiesced is not True
         or receipt.run_id != lease.run_id
         or receipt.worker_id != lease.worker_id
         or receipt.challenge_digest != lease.challenge_digest

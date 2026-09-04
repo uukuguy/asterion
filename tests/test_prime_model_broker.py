@@ -9,7 +9,7 @@ import unittest
 import asterion.applications.prime_agent.operator.model_broker as model_broker
 from asterion.applications.prime_agent.operator.launcher_barrier import PrimeLauncherBarrier
 from asterion.applications.prime_agent.operator.model_broker import (
-    PrimeModelBrokerError, PrimeModelChannel, Provider, _HostModelCoordinator,
+    PrimeModelBrokerError, PrimeModelBrokerTokenUsage, PrimeModelChannel, Provider, _HostModelCoordinator,
     _new_host_coordinator,
 )
 from asterion.services.bounded_model_session import BoundedModelSessionLease, BoundedModelSessionRequest
@@ -69,7 +69,8 @@ class TestPrimeModelBroker(unittest.IsolatedAsyncioTestCase):
         channel = host._activate()
         self.assertIsInstance(channel, PrimeModelChannel)
         self.assertEqual(set(model_broker.__all__), {
-            "PrimeModelBrokerError", "PrimeModelBrokerUsage", "PrimeModelBrokerReceipt", "PrimeModelChannel", "Provider"})
+            "PrimeModelBrokerError", "PrimeModelBrokerUsage", "PrimeModelBrokerReceipt",
+            "PrimeModelBrokerTokenUsage", "PrimeModelChannel", "Provider"})
         self.assertEqual({name for name in dir(channel) if not name.startswith("_")}, {"request"})
         for name in dir(channel):
             self.assertFalse(any(word in name.lower() for word in (
@@ -185,8 +186,35 @@ class TestPrimeModelBroker(unittest.IsolatedAsyncioTestCase):
         channel = host._activate()
         request = asyncio.create_task(channel.request(b"one"))
         await started.wait()
-        self.assertEqual((await host.revoke()).status, "revoked")
+        receipt = await host.revoke()
+        self.assertEqual(receipt.status, "revoked")
+        self.assertIs(receipt.quiesced, True)
+        self.assertTrue(host._server_task is not None and host._server_task.done())
         with self.assertRaises(PrimeModelBrokerError):
             await channel.request(b"two")
         with self.assertRaises(PrimeModelBrokerError):
             await request
+
+    async def test_terminal_receipt_carries_bounded_provider_usage_only_after_quiescence(self) -> None:
+        async def provider(_body: bytes) -> bytes:
+            return b"ok"
+
+        host = _new_host_coordinator(
+            lease=BoundedModelSessionLease("session-1", "run-1"),
+            session=_session(), worker=_worker(), barrier=_barrier(), provider=provider,
+            session_id="session-1", worker_id="worker-1", run_id="run-1",
+            challenge_digest=_CHALLENGE, cleanup_grace_seconds=0.05,
+            terminal_usage=lambda: PrimeModelBrokerTokenUsage(3, 4, 5),
+        )
+        channel = host._activate()
+        self.assertEqual(await channel.request(b"one"), b"ok")
+        receipt = await host.revoke()
+        self.assertEqual(
+            (
+                receipt.input_tokens,
+                receipt.output_tokens,
+                receipt.cost_microunits,
+                receipt.quiesced,
+            ),
+            (3, 4, 5, True),
+        )

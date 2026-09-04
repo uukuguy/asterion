@@ -35,7 +35,7 @@ class _HostCallbackSentinel(BaseException):
 
 def _identity(**changes: object) -> IpythonHostExpectedIdentity:
     values: dict[str, object] = {
-        "assembly_id": "prime.capability-program@1.0.0", "package_id": "prime-agent@1.0.0",
+        "assembly_id": "prime.ipython-coding@1.0.0", "package_id": "prime-agent@1.0.0",
         "implementation_id": "prime.ipython-coding@1.0.0", "image_digest": "sha256:" + "b" * 64,
         "workload_digest": _WORKLOAD,
         "oracle_digest": "sha256:85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b31639fa3c4eb",

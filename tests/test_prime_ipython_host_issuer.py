@@ -15,18 +15,18 @@ _INITIAL = b"def answer() -> int:\n    return 0\n"
 _FINAL = b"def answer() -> int:\n    return 42\n"
 
 
-class TestIpythonHostIssuer(unittest.TestCase):
+class TestIpythonHostIssuer(unittest.IsolatedAsyncioTestCase):
     def test_issuer_has_no_public_generic_factory(self) -> None:
         import asterion.applications.prime_agent.operator.ipython_host_issuer as subject
 
         self.assertEqual(subject.__all__, ())
         self.assertFalse(hasattr(subject, "issue_live_run"))
 
-    def test_manual_production_capability_cannot_issue_a_live_run(self) -> None:
+    async def test_manual_production_capability_cannot_issue_a_live_run(self) -> None:
         import asterion.applications.prime_agent.operator.ipython_host_issuer as subject
 
         with self.assertRaisesRegex(Exception, "unavailable"):
-            subject._issue_production_ipython_host_live_run(  # noqa: SLF001
+            await subject._issue_production_ipython_host_live_run(  # noqa: SLF001
                 capability=object()
             )
 
@@ -70,7 +70,7 @@ class TestConcreteIpythonHostIssuer(unittest.IsolatedAsyncioTestCase):
                 challenge_digest=lease.challenge_digest, cleanup_grace_seconds=0.1,
             )
             identity = IpythonHostExpectedIdentity(
-                "prime.capability-program@1.0.0", "prime-agent@1.0.0",
+                "prime.ipython-coding@1.0.0", "prime-agent@1.0.0",
                 "prime.ipython-coding@1.0.0", _IMAGE_DIGEST, lease.workload_digest,
                 "sha256:85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b31639fa3c4eb",
                 "sha256:4f8e0bca0f70582bad96caa292823ac29577633bebd9f76257617dc92ab6832f",

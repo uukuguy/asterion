@@ -122,13 +122,16 @@ class TestPrimeApplicationProvider(unittest.TestCase):
                     self.assertEqual(result.status, "worker-invalid")
                     self.assertIsNone(result.factory)
 
-    def test_provider_declares_one_metadata_only_application(self) -> None:
+    def test_provider_declares_program_metadata_and_selected_p1_application(self) -> None:
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-agent")
         self.assertEqual(
             [(item.application_id, item.version) for item in provider.applications],
-            [("prime.capability-program", "1.0.0")],
+            [
+                ("prime.capability-program", "1.0.0"),
+                ("prime.ipython-coding", "1.0.0"),
+            ],
         )
 
     def test_installed_entry_point_discovers_and_loads_prime_provider(self) -> None:
@@ -141,6 +144,10 @@ class TestPrimeApplicationProvider(unittest.TestCase):
         self.assertEqual(load_application_provider("prime-agent").provider_id, "prime-agent")
         self.assertEqual(
             select_application_provider_id("prime.capability-program@1.0.0"),
+            "prime-agent",
+        )
+        self.assertEqual(
+            select_application_provider_id("prime.ipython-coding@1.0.0"),
             "prime-agent",
         )
 

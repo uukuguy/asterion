@@ -6,8 +6,9 @@ from contextlib import AsyncExitStack
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import cast
+from typing import Any, cast
 import unittest
+from unittest import mock
 
 from asterion.applications.prime_agent.operator.model_session_host import (
     PrimeModelSessionHostError,
@@ -46,7 +47,8 @@ class TestPrimeModelSessionHost(unittest.IsolatedAsyncioTestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env").write_text(
-                "PRIME_MODEL_API_KEY=" + sentinel + "\nPRIME_MODEL_ID=operator-model\n",
+                "DEEPSEEK_API_KEY=" + sentinel
+                + "\nASTERION_PRIME_EXPERIMENT_MODEL=deepseek-v4-flash\n",
                 encoding="utf-8",
             )
             binding = create_bounded_model_session_factory(repo_root=root)
@@ -82,7 +84,7 @@ class TestPrimeModelSessionHost(unittest.IsolatedAsyncioTestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env").write_text(
-                "PRIME_MODEL_API_KEY=key\nPRIME_MODEL_ID=operator-model\n",
+                "DEEPSEEK_API_KEY=key\nASTERION_PRIME_EXPERIMENT_MODEL=deepseek-v4-flash\n",
                 encoding="utf-8",
             )
             binding = create_bounded_model_session_factory(repo_root=root)
@@ -101,7 +103,7 @@ class TestPrimeModelSessionHost(unittest.IsolatedAsyncioTestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".env").write_text(
-                "PRIME_MODEL_API_KEY=key\nPRIME_MODEL_ID=operator-model\n",
+                "DEEPSEEK_API_KEY=key\nASTERION_PRIME_EXPERIMENT_MODEL=deepseek-v4-flash\n",
                 encoding="utf-8",
             )
             binding = create_bounded_model_session_factory(repo_root=root)
@@ -118,7 +120,12 @@ class TestPrimeModelSessionHost(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((receipt.session_id, receipt.run_id), (lease.session_id, "run-1"))
 
     async def test_factory_fails_closed_when_private_configuration_is_absent_or_invalid(self) -> None:
-        for contents in (None, "PRIME_MODEL_API_KEY=\n", "PRIME_MODEL_API_KEY=key\nPRIME_MODEL_ID=\n"):
+        for contents in (
+            None,
+            "DEEPSEEK_API_KEY=\n",
+            "DEEPSEEK_API_KEY=key\nASTERION_PRIME_EXPERIMENT_MODEL=\n",
+            "DEEPSEEK_API_KEY=key\nASTERION_PRIME_EXPERIMENT_MODEL=other\n",
+        ):
             with self.subTest(contents=contents), TemporaryDirectory() as directory:
                 root = Path(directory)
                 if contents is not None:
@@ -139,3 +146,23 @@ class TestPrimeModelSessionHost(unittest.IsolatedAsyncioTestCase):
                 async with binding.factory(_context()):
                     pass
             self.assertNotIn(sentinel, repr(binding))
+
+    async def test_factory_owns_a_concrete_provider_adapter_without_invoking_it(self) -> None:
+        from asterion.applications.prime_agent.operator import model_session_host as subject
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text(
+                "DEEPSEEK_API_KEY=key\n"
+                "ASTERION_PRIME_EXPERIMENT_MODEL=deepseek-v4-flash\n",
+                encoding="utf-8",
+            )
+            binding = create_bounded_model_session_factory(repo_root=root)
+            with mock.patch.object(subject, "_open_provider_request") as opened:
+                async with binding.factory(_context()) as raw_service:
+                    service = cast(Any, raw_service)
+                    lease = service.open(_request())
+                    provider = service._production_provider(lease)  # type: ignore[attr-defined]
+                    self.assertEqual(type(provider).__name__, "_PrimeP1Provider")
+                    self.assertFalse(hasattr(provider, "transport"))
+                opened.assert_not_called()

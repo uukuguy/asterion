@@ -23,7 +23,7 @@ _CELL = b"def answer() -> int:\n    return 42\n\n"
 
 def _identity(**changes: object) -> IpythonHostExpectedIdentity:
     values: dict[str, object] = {
-        "assembly_id": "prime.capability-program@1.0.0",
+        "assembly_id": "prime.ipython-coding@1.0.0",
         "package_id": "prime-agent@1.0.0",
         "implementation_id": "prime.ipython-coding@1.0.0",
         "image_digest": "sha256:" + "a" * 64,

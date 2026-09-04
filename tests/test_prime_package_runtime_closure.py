@@ -44,6 +44,16 @@ class TestPrimePackageRuntimeClosure(unittest.TestCase):
             (CapabilityRef("prime.ipython-coding", "1.0.0"),),
         )
 
+        selected = next(
+            item
+            for item in resolved.applications
+            if item.application_id == "prime.ipython-coding"
+        )
+        self.assertEqual(
+            selected.assemblies[0].plan.host_capabilities,
+            ("prime.ipython-production",),
+        )
+
     def test_resolution_rejects_runtime_with_an_alternate_tool(self) -> None:
         binding = default_runtime_factory_registry().select("prime.agent")
         factories = RuntimeFactoryRegistry(
