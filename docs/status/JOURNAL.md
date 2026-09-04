@@ -1603,3 +1603,4 @@
 - 07:01 Reissued reproducible Prime source lock excluding declared generated outputs [0780008]
 - 07:35 Added Prime assembly to installed-wheel promotion resource check [242b508]
 - 08:12 Aligned stale gateway reopen test with sparse-cursor contract, unblocking promotion [07e870c]
+- 08:50 Verified full Prime promotion closure after source-lock and sparse-cursor repairs [pending commit]
