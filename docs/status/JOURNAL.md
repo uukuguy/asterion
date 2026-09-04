@@ -1664,3 +1664,4 @@
 - 07:05 correction: descriptor-only P1 config admission commit [2592e97]
 - 07:08 Hardened P1 authority frames and receipt validation to reject replay and forged terminal evidence [d5b588a]
 - 07:08 correction: authority protocol hardening commit amended [cf6f525]
+- 07:11 Normalized oversized P1 config descriptors to public-safe errors [2797497]
