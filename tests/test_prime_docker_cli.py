@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
+import tarfile
 import unittest
 from typing import cast
 from unittest import mock
@@ -168,13 +170,52 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         return _LifecycleCallControl(asyncio.get_running_loop().time() + 10, signal)
 
     async def test_create_preflights_and_uses_only_the_fixed_argv_and_empty_environment(self) -> None:
-        transport, runner = self._transport([_Result(stdout=b"{}"), _Result(stdout=b"{}"), _Result(stdout=(_CONTAINER + "\n").encode())])
+        daemon_id = "a" * 64
+        transport, runner = self._transport([_Result(stdout=b"{}"), _Result(stdout=b"{}"), _Result(stdout=(daemon_id + "\n").encode())])
 
-        self.assertEqual(await transport.create(_spec(), control=self._control()), _CONTAINER)
+        self.assertEqual(await transport.create(_spec(), control=self._control()), daemon_id)
         self.assertEqual(runner.calls[0][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "version", "--format", "{{json .Server}}"))
         self.assertEqual(runner.calls[1][0][-3:], ("info", "--format", "{{json .}}"))
         self.assertEqual(runner.calls[2][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "create", "--name", _CONTAINER, "--pull=never", "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", f"seccomp={_SECCOMP}", "--tmpfs", "/workspace:rw,nodev,noexec,nosuid,size=67108864", "--env", "HOME=/workspace", "--env", "PATH=/usr/local/bin:/usr/bin:/bin", "--env", "PYTHONDONTWRITEBYTECODE=1", "--pid", "private", "--ipc", "private", "--uts", "private", "--pids-limit", "256", "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no", "--entrypoint", "/usr/local/bin/prime-ipython-coding.py", _IMAGE))
         self.assertTrue(all(env == {} for _, env, _, _ in runner.calls))
+
+    async def test_create_keeps_requested_name_separate_from_daemon_id(self) -> None:
+        daemon_id = "a" * 64
+        transport, runner = self._transport([_Result(stdout=b"{}"), _Result(stdout=b"{}"), _Result(stdout=(daemon_id + "\n").encode())])
+
+        self.assertEqual(await transport.create(_spec(), control=self._control()), daemon_id)
+        self.assertEqual(runner.calls[-1][0][runner.calls[-1][0].index("--name") + 1], _CONTAINER)
+        self.assertNotIn(daemon_id, runner.calls[-1][0])
+
+    async def test_snapshot_pauses_archives_exact_solution_and_resumes(self) -> None:
+        daemon_id = "a" * 64
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w") as output:
+            info = tarfile.TarInfo("solution.py")
+            body = b"def answer(): return 42\n"
+            info.size = len(body)
+            output.addfile(info, io.BytesIO(body))
+        transport, runner = self._transport([_Result(), _Result(stdout=archive.getvalue()), _Result()])
+        transport._specifications[daemon_id] = _spec()
+
+        snapshot = await transport.snapshot_solution(daemon_id, control=self._control())
+        self.assertEqual(snapshot, b"def answer(): return 42\n")
+        self.assertEqual([call[0][-2:] for call in runner.calls], [("pause", daemon_id), (daemon_id + ":/workspace/solution.py", "-"), ("unpause", daemon_id)])
+
+    async def test_snapshot_rejects_archive_attacks_and_still_resumes(self) -> None:
+        daemon_id = "a" * 64
+        for kind in (tarfile.SYMTYPE, tarfile.DIRTYPE):
+            with self.subTest(kind=kind):
+                archive = io.BytesIO()
+                with tarfile.open(fileobj=archive, mode="w") as output:
+                    info = tarfile.TarInfo("solution.py")
+                    info.type = kind
+                    output.addfile(info)
+                transport, runner = self._transport([_Result(), _Result(stdout=archive.getvalue()), _Result()])
+                transport._specifications[daemon_id] = _spec()
+                with self.assertRaises(RestrictedWorkerError):
+                    await transport.snapshot_solution(daemon_id, control=self._control())
+                self.assertEqual(runner.calls[-1][0][-2:], ("unpause", daemon_id))
 
     async def test_inspect_rejects_unknown_or_mismatched_raw_json_without_leaking_it(self) -> None:
         cases = (_inspect(extra=True), _inspect(container_id="other"), b"not-json", b"{}")
@@ -185,6 +226,16 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
                     await transport.inspect(_CONTAINER, control=self._control())
                 self.assertNotIn("other", str(raised.exception))
+
+    async def test_inspect_uses_the_fixed_host_owned_projection(self) -> None:
+        transport, runner = self._transport([_Result(stdout=_inspect())])
+        transport._specifications[_CONTAINER] = _spec()
+
+        await transport.inspect(_CONTAINER, control=self._control())
+        argv = runner.calls[0][0]
+        self.assertEqual(argv[-3], "--format")
+        self.assertIn('"HostConfig":{{json .HostConfig}}', argv[-2])
+        self.assertEqual(argv[-1], _CONTAINER)
 
     async def test_lifecycle_operations_are_closed_and_parse_only_narrow_evidence(self) -> None:
         selfcheck = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"

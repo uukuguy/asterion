@@ -7,8 +7,10 @@ Nothing supplied by an application request is permitted to alter a command.
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import re
+import tarfile
 from dataclasses import dataclass
 from hashlib import sha256
 from time import monotonic
@@ -37,9 +39,17 @@ _ENVIRONMENT = ("HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHOND
 _ENTRYPOINT = "/usr/local/bin/prime-ipython-coding.py"
 _TMPFS = "/workspace:rw,nodev,noexec,nosuid,size=67108864"
 _OUTPUT_CAP = 65536
+_SNAPSHOT_CAP = 65536
 _CONTAINER_ID = re.compile(r"prime-[0-9a-f]{32}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _NORMALIZED_RESULT = {"fixture": "passed", "oracle": "passed", "tool": "ipython"}
+# Do not accept Docker's evolving full inspect document.  This is a fixed,
+# operator-owned JSON projection; the parser below rejects anything outside it.
+_INSPECT_PROJECTION = (
+    '[{"Id":{{json .Id}},"Image":{{json .Image}},"RepoDigests":{{json .RepoDigests}},'
+    '"Config":{{json .Config}},"HostConfig":{{json .HostConfig}},'
+    '"Mounts":{{json .Mounts}},"State":{{json .State}}}]'
+)
 
 
 @dataclass(frozen=True)
@@ -313,6 +323,11 @@ class DockerCliEngineTransport(DockerEngineTransport):
 
     async def create(self, specification: _DockerWorkerSpecification, *, control: _LifecycleCallControl) -> str:
         self._valid_specification(specification)
+        if specification.container_id in self._specifications:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        # Keep the requested name only long enough to compensate an uncertain
+        # create; successful creation is immediately re-keyed by daemon ID.
+        self._specifications[specification.container_id] = specification
         await self._preflight(control)
         argv = self._prefix + (
             "create", "--name", specification.container_id, "--pull=never", "--network", "none",
@@ -323,15 +338,24 @@ class DockerCliEngineTransport(DockerEngineTransport):
             "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no",
             "--entrypoint", _ENTRYPOINT, specification.image_digest,
         )
-        result = await self._call(argv, control)
-        if result.stdout != (specification.container_id + "\n").encode():
+        try:
+            result = await self._call(argv, control)
+        except BaseException:
+            raise
+        daemon_id = self._parse_daemon_id(result.stdout)
+        if daemon_id in self._specifications:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        self._specifications[specification.container_id] = specification
-        return specification.container_id
+        # Docker create prints the daemon's opaque ID, never the requested name.
+        del self._specifications[specification.container_id]
+        self._specifications[daemon_id] = specification
+        return daemon_id
 
     async def inspect(self, container_id: str, *, control: _LifecycleCallControl) -> Mapping[str, object]:
         specification = self._specification(container_id)
-        result = await self._call(self._prefix + ("container", "inspect", container_id), control)
+        result = await self._call(
+            self._prefix + ("container", "inspect", "--format", _INSPECT_PROJECTION, container_id),
+            control,
+        )
         return self._parse_inspection(result.stdout, specification)
 
     async def start(self, container_id: str, *, control: _LifecycleCallControl) -> RestrictedWorkerLease:
@@ -374,6 +398,22 @@ class DockerCliEngineTransport(DockerEngineTransport):
             raise RestrictedWorkerError("restricted worker value is invalid")
         del self._specifications[container_id]
 
+    async def snapshot_solution(self, container_id: str, *, control: _LifecycleCallControl) -> bytes:
+        """Return the sole host-private workspace snapshot while the worker lives."""
+        self._specification(container_id)
+        await self._call(self._prefix + ("container", "pause", container_id), control)
+        try:
+            archive = await self._call(
+                self._prefix + ("container", "cp", container_id + ":/workspace/solution.py", "-"), control
+            )
+            return self._parse_solution_archive(archive.stdout)
+        finally:
+            # A failed archive must not leave an admitted worker indefinitely paused.
+            try:
+                await self._call(self._prefix + ("container", "unpause", container_id), control)
+            except BaseException:
+                raise RestrictedWorkerError("restricted worker value is invalid") from None
+
     async def _preflight(self, control: _LifecycleCallControl) -> None:
         for argv in (
             self._prefix + ("version", "--format", "{{json .Server}}"),
@@ -403,6 +443,38 @@ class DockerCliEngineTransport(DockerEngineTransport):
         if type(container_id) is not str or container_id not in self._specifications:
             raise RestrictedWorkerError("restricted worker value is invalid")
         return self._specifications[container_id]
+
+    @staticmethod
+    def _parse_daemon_id(raw: bytes) -> str:
+        try:
+            value = raw.decode("ascii")
+        except UnicodeDecodeError:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+        if not re.fullmatch(r"[0-9a-f]{64}\n", value):
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        return value[:-1]
+
+    @staticmethod
+    def _parse_solution_archive(raw: bytes) -> bytes:
+        if type(raw) is not bytes or not raw or len(raw) > _SNAPSHOT_CAP:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        try:
+            with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as archive:
+                members = archive.getmembers()
+                if len(members) != 1:
+                    raise ValueError
+                member = members[0]
+                if member.name != "solution.py" or not member.isreg() or member.size < 0 or member.size > _SNAPSHOT_CAP:
+                    raise ValueError
+                source = archive.extractfile(member)
+                if source is None:
+                    raise ValueError
+                data = source.read(_SNAPSHOT_CAP + 1)
+                if len(data) != member.size or len(data) > _SNAPSHOT_CAP:
+                    raise ValueError
+                return data
+        except (tarfile.TarError, OSError, ValueError):
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     @staticmethod
     def _valid_specification(specification: _DockerWorkerSpecification) -> None:

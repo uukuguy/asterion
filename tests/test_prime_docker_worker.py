@@ -15,6 +15,7 @@ from asterion.applications.prime_agent.operator.docker_worker import (
     DockerWorkerModelRequest,
     DockerWorkerModelResponse,
     DockerRestrictedWorkerService,
+    DockerWorkerWorkspaceSnapshot,
 )
 from asterion.applications.prime_agent.operator.ipython_workload import (
     PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
@@ -108,13 +109,16 @@ class _Transport(DockerEngineTransport):
         self.cancel_at: str | None = None
         self.controls: list[object] = []
         self.channel = _Channel(self)
+        self.daemon_id = "d" * 64
+        self.snapshot = b"def answer(): return 42\n"
+        self.snapshot_error: Exception | None = None
 
     async def create(self, specification: object, *, control: object) -> str:  # type: ignore[override]
         self.calls.append("create")
         self.spec = specification
         self.controls.append(control)
         self._cancel("create")
-        return specification.container_id  # type: ignore[union-attr]
+        return self.daemon_id
 
     async def inspect(self, container_id: str, *, control: object) -> Mapping[str, object]:
         self.calls.append("inspect")
@@ -157,12 +161,20 @@ class _Transport(DockerEngineTransport):
         if self.absence_error is not None:
             raise self.absence_error
 
+    async def snapshot_solution(self, container_id: str, *, control: object) -> bytes:
+        self.calls.append("snapshot_solution")
+        self.controls.append(control)
+        self.assert_container_id(container_id)
+        if self.snapshot_error is not None:
+            raise self.snapshot_error
+        return self.snapshot
+
     def _cancel(self, operation: str) -> None:
         if self.cancel_at == operation:
             raise asyncio.CancelledError
 
     def assert_container_id(self, container_id: str) -> None:
-        if self.spec is None or container_id != self.spec.container_id:  # type: ignore[union-attr]
+        if self.spec is None or container_id not in (self.daemon_id, self.spec.container_id):  # type: ignore[union-attr]
             raise AssertionError("unexpected container identity")
 
 
@@ -292,6 +304,16 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lease, self.transport.lease)
         self.assertEqual(self.transport.calls[:2], ["create", "inspect"])
         self.assertIn("start", self.transport.calls)
+
+    async def test_private_snapshot_is_bound_to_live_lease_and_redacted(self) -> None:
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+        self.addAsyncCleanup(context.__aexit__, None, None, None)
+
+        snapshot = await self.service._snapshot_solution(lease)
+        self.assertEqual(snapshot, DockerWorkerWorkspaceSnapshot(self.transport.snapshot))
+        self.assertEqual(repr(snapshot), "DockerWorkerWorkspaceSnapshot(redacted)")
+        self.assertEqual(self.transport.calls[-1], "snapshot_solution")
 
     async def test_revalidates_engine_safety_after_start_before_admission(self) -> None:
         context = self.service.open(_request())

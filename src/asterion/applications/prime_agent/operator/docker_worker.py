@@ -142,6 +142,20 @@ class DockerWorkerCompletion:
 
 
 @dataclass(frozen=True, repr=False)
+class DockerWorkerWorkspaceSnapshot:
+    """Host-private bytes for the one fixed workspace file."""
+
+    source: bytes
+
+    def __post_init__(self) -> None:
+        if type(self.source) is not bytes or not self.source or len(self.source) > 65536:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+
+    def __repr__(self) -> str:
+        return "DockerWorkerWorkspaceSnapshot(redacted)"
+
+
+@dataclass(frozen=True, repr=False)
 class DockerWorkerModelRequest:
     """Body-free worker request admitted only for the fixed workload."""
 
@@ -229,6 +243,10 @@ class DockerEngineTransport(Protocol):
     async def assert_absent(
         self, container_id: str, *, control: _LifecycleCallControl
     ) -> None: ...
+
+    async def snapshot_solution(
+        self, container_id: str, *, control: _LifecycleCallControl
+    ) -> bytes: ...
 
 
 @dataclass
@@ -345,6 +363,28 @@ class DockerRestrictedWorkerService:
         # The product verifier owns the model→IPython relay.
         del lease
         raise RestrictedWorkerError("restricted worker value is invalid")
+
+    async def _snapshot_solution(
+        self, lease: RestrictedWorkerLease
+    ) -> DockerWorkerWorkspaceSnapshot:
+        """Private transport bridge for the trusted host supervisor only."""
+        self._request_for_lease(lease)
+        state = self._leases.get(lease.worker_id)
+        if state is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, None)
+        try:
+            source = await asyncio.wait_for(
+                self._transport.snapshot_solution(state.container_id, control=control),
+                timeout=_LIFECYCLE_SECONDS,
+            )
+            return DockerWorkerWorkspaceSnapshot(source)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+        except RestrictedWorkerError:
+            raise
+        except BaseException:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     def _admit_lease(
         self, request: RestrictedWorkerRequest, lease: RestrictedWorkerLease
@@ -496,8 +536,9 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
         self._request = request
         self._specification = specification
         self._signal = signal
-        self._container_id = "prime-" + token_hex(16)
-        self._specification = replace(specification, container_id=self._container_id)
+        self._requested_container_name = "prime-" + token_hex(16)
+        self._container_id = self._requested_container_name
+        self._specification = replace(specification, container_id=self._requested_container_name)
         self._control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, signal)
         self._lease: RestrictedWorkerLease | None = None
         self._channel: DockerLauncherChannel | None = None
@@ -505,8 +546,9 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
     async def __aenter__(self) -> RestrictedWorkerLease:
         try:
             container_id = await self._call_create()
-            if container_id != self._container_id:
+            if type(container_id) is not str or not container_id or container_id == self._requested_container_name:
                 raise RestrictedWorkerError("restricted worker value is invalid")
+            self._container_id = container_id
             inspection = await self._call_inspect(self._control)
             self._service._validate_inspection(inspection)
             lease = await self._call_start()
