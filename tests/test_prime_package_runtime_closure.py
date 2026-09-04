@@ -17,7 +17,7 @@ from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.prime_agent.provider import create_prime_agent_package
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
-from asterion.runtime.host import RunRequest
+from asterion.runtime.host import RunEvent, RunRequest
 from asterion.runtimes.prime_agent import PrimeAgentRuntimeClient, PrimeAgentRuntimeError
 
 
@@ -120,3 +120,46 @@ class TestPrimePackageRuntimeClosure(unittest.TestCase):
 
         with self.assertRaisesRegex(PrimeAgentRuntimeError, "not declared"):
             asyncio.run(collect())
+
+    def test_runtime_collects_exact_unavailable_frames_for_ipython_tool(self) -> None:
+        run_id = "prime-runtime-unavailable"
+
+        async def collect() -> tuple[RunEvent, ...]:
+            runtime = PrimeAgentRuntimeClient()
+            return tuple(
+                [
+                    event
+                    async for event in runtime.run(
+                        RunRequest(
+                            run_id=run_id,
+                            input_text="unused",
+                            requested_capabilities=("prime.tool.ipython",),
+                        )
+                    )
+                ]
+            )
+
+        events = asyncio.run(collect())
+        self.assertEqual(
+            events,
+            (
+                RunEvent(
+                    run_id=run_id,
+                    sequence=1,
+                    type="run.started",
+                    payload={"capabilities": ["prime.tool.ipython"]},
+                ),
+                RunEvent(
+                    run_id=run_id,
+                    sequence=2,
+                    type="run.failed",
+                    payload={
+                        "code": "runtime-unavailable",
+                        "message": "Prime worker is unavailable",
+                    },
+                ),
+            ),
+        )
+        self.assertEqual(tuple(event.sequence for event in events), (1, 2))
+        self.assertEqual(tuple(event.run_id for event in events), (run_id, run_id))
+        self.assertEqual(events[-1].payload["code"], "runtime-unavailable")
