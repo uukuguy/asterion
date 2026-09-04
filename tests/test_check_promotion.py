@@ -17,6 +17,7 @@ from tools.check_promotion import (
     _prepare_external_prime_checkout,
     _resolve_promotion_npm_cache,
     _run,
+    main,
     run_promotion,
 )
 from tools.setup_prime_agent import PrimeSetupError
@@ -90,6 +91,124 @@ def completed(
 
 @mock.patch.dict(os.environ, {"ASTERION_PRIME_SOURCE_ROOT": ""})
 class PromotionCheckTests(unittest.TestCase):
+    def test_main_uses_only_the_declared_node_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            cache = temporary / "cache"
+            cache.mkdir()
+            node = temporary / "node"
+            node.write_text("node\n", encoding="utf-8")
+            node.chmod(0o700)
+            with (
+                mock.patch(
+                    "tools.check_promotion._resolve_operational_node",
+                    side_effect=AssertionError("promotion used ambient Node resolver"),
+                ) as ambient_resolver,
+                mock.patch(
+                    "tools.check_promotion.subprocess.run",
+                    return_value=subprocess.CompletedProcess(
+                        (str(node), "--version"), 0, stdout="v22.16.0\n", stderr=""
+                    ),
+                ) as run,
+                mock.patch("tools.check_promotion.run_promotion", return_value=3) as promotion,
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "--quick",
+                            "--npm-cache",
+                            str(cache),
+                            "--node-executable",
+                            str(node),
+                        ]
+                    ),
+                    0,
+                )
+
+        ambient_resolver.assert_not_called()
+        self.assertEqual(run.call_args.args[0], (str(node.resolve()), "--version"))
+        self.assertEqual(
+            run.call_args.kwargs["env"],
+            {
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "NO_COLOR": "1",
+                "PATH": os.pathsep.join(
+                    (
+                        str(node.resolve().parent),
+                        "/opt/homebrew/bin",
+                        "/usr/local/bin",
+                        "/usr/bin",
+                        "/bin",
+                        "/usr/sbin",
+                        "/sbin",
+                    )
+                ),
+            },
+        )
+        self.assertEqual(
+            promotion.call_args.kwargs["node_executable"], node.resolve()
+        )
+
+    def test_main_rejects_invalid_declared_node_before_promotion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            cache = temporary / "cache"
+            cache.mkdir()
+            node = temporary / "node"
+            node.write_text("node\n", encoding="utf-8")
+            node.chmod(0o700)
+            linked_node = temporary / "linked-node"
+            try:
+                linked_node.symlink_to(node)
+            except OSError as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+
+            with mock.patch("tools.check_promotion.run_promotion") as promotion:
+                with self.assertRaises(SystemExit):
+                    main(["--npm-cache", str(cache)])
+            promotion.assert_not_called()
+
+            cases = (
+                ("relative-node", None),
+                (str(temporary / "missing-node"), None),
+                (str(linked_node), None),
+                (str(node), "v21.9.0\n"),
+            )
+            for raw, version in cases:
+                with self.subTest(raw=raw, version=version):
+                    with (
+                        mock.patch(
+                            "tools.check_promotion._resolve_operational_node",
+                            side_effect=AssertionError(
+                                "promotion used ambient Node resolver"
+                            ),
+                        ) as ambient_resolver,
+                        mock.patch("tools.check_promotion.run_promotion") as promotion,
+                        mock.patch(
+                            "tools.check_promotion.subprocess.run",
+                            return_value=subprocess.CompletedProcess(
+                                (str(node), "--version"),
+                                0,
+                                stdout=version or "",
+                                stderr="",
+                            ),
+                        ),
+                    ):
+                        self.assertEqual(
+                            main(
+                                [
+                                    "--npm-cache",
+                                    str(cache),
+                                    "--node-executable",
+                                    raw,
+                                ]
+                            ),
+                            1,
+                        )
+                        ambient_resolver.assert_not_called()
+                        promotion.assert_not_called()
+
     def test_promotion_npm_cache_rejects_invalid_roots_before_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary = Path(temporary_directory)
@@ -802,12 +921,16 @@ class PromotionCheckTests(unittest.TestCase):
             with (
                 mock.patch(
                     "tools.check_promotion._resolve_operational_node",
-                    return_value=Path("/node22/bin/node"),
+                    side_effect=AssertionError("promotion used ambient Node resolver"),
                 ),
                 mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
                 self.assertRaises(PromotionError),
             ):
-                run_promotion(source_root=source, npm_cache=cache)
+                run_promotion(
+                    source_root=source,
+                    npm_cache=cache,
+                    node_executable=Path("/node22/bin/node"),
+                )
 
         self.assertEqual(len(npm_commands), 1)
         self.assertEqual(npm_commands[0][:2], ("npm", "ci"))
@@ -884,7 +1007,11 @@ class PromotionCheckTests(unittest.TestCase):
                 mock.patch("tools.check_promotion.PRIME_PREPARE_COMMANDS", ()),
             ):
                 run_promotion(
-                    source_root=source, npm_cache=source, quick=True, runner=runner
+                    source_root=source,
+                    npm_cache=source,
+                    quick=True,
+                    runner=runner,
+                    node_executable=Path("/node22/bin/node"),
                 )
 
         resolver.assert_called_once()

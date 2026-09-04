@@ -500,6 +500,37 @@ def _resolve_promotion_npm_cache(raw: str) -> Path:
     return resolved
 
 
+def _resolve_promotion_node_executable(raw: str) -> Path:
+    candidate = Path(raw)
+    try:
+        if not candidate.is_absolute() or candidate.is_symlink():
+            raise OSError
+        resolved = candidate.resolve(strict=True)
+        if not resolved.is_file() or not os.access(resolved, os.X_OK):
+            raise OSError
+        completed = subprocess.run(
+            (str(resolved), "--version"),
+            cwd="/",
+            env={
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "NO_COLOR": "1",
+                "PATH": os.pathsep.join((str(resolved.parent), *PRIME_CLOSED_SYSTEM_PATHS)),
+            },
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if completed.returncode != 0 or not re.fullmatch(
+            r"v22\.\d+\.\d+\n?", completed.stdout
+        ):
+            raise OSError
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        raise PromotionError("declared Node executable is invalid") from None
+    return resolved
+
+
 def _closed_prime_subprocess_environment(
     workspace: Path | None = None,
     *,
@@ -1383,15 +1414,13 @@ def run_promotion(
     if not source.is_dir():
         raise PromotionError("standalone source root is unavailable")
     cache = _resolve_promotion_npm_cache(str(npm_cache))
-    requires_node = runner is _default_runner or bool(
-        os.environ.get(PRIME_SOURCE_ENV)
-    ) or (source / DEFAULT_PRIME_SOURCE).exists()
-    try:
-        node = node_executable or (
-            _resolve_operational_node() if requires_node else None
-        )
-    except (OSError, RuntimeError):
-        raise PromotionError("Prime operational Node runtime is unavailable") from None
+    node = node_executable
+    if node is None and (
+        runner is _default_runner
+        or bool(os.environ.get(PRIME_SOURCE_ENV))
+        or (source / DEFAULT_PRIME_SOURCE).exists()
+    ):
+        raise PromotionError("declared Node executable is required for promotion")
 
     def promotion_runner(
         command: tuple[str, ...], cwd: Path
@@ -1431,13 +1460,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--quick", action="store_true")
     parser.add_argument("--npm-cache", required=True)
+    parser.add_argument("--node-executable", required=True)
     arguments = parser.parse_args(argv)
     try:
         command_count = run_promotion(
             source_root=Path(__file__).resolve().parents[1],
             npm_cache=_resolve_promotion_npm_cache(arguments.npm_cache),
             quick=arguments.quick,
-            node_executable=_resolve_operational_node(),
+            node_executable=_resolve_promotion_node_executable(
+                arguments.node_executable
+            ),
         )
     except (PromotionError, OperationalHarnessError) as error:
         print(f"promotion check failed: {error}", file=sys.stderr)

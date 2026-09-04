@@ -81,3 +81,31 @@ All checks passed!
 git diff --check
 PASS
 ```
+
+## Review fix: sealed explicit Node CLI boundary
+
+- Promotion now requires `--node-executable`; `main()` never invokes the
+  ambient operational Node resolver.
+- The supplied path must be absolute, non-symlinked, canonical, an existing
+  executable file, and report an exact Node 22 semver from `--version`.
+  Version probing runs with a fresh minimal environment rather than host HOME
+  or npm configuration.
+- `run_promotion()` no longer falls back to ambient Node discovery. When its
+  sealed execution needs Node, the caller must supply the already validated
+  executable path.
+- New regression coverage rejects a missing argument, relative/missing/symlink
+  paths, and Node 21 before `run_promotion()` can execute; it also makes the
+  ambient resolver raise, proving the explicit Node path is the only source.
+
+### Verification
+
+```text
+uv run python -m unittest -v tests.test_check_promotion tests.test_standalone_repository
+Ran 48 tests ... OK
+
+uv run ruff check tools/check_promotion.py tests/test_check_promotion.py
+All checks passed!
+
+git diff --check
+PASS
+```
