@@ -67,7 +67,7 @@ class _IpythonHostOperations:
     values (including fakes) cannot enter the public completion path.
     """
 
-    __slots__ = ("snapshot", "brokered_cell", "revoke_broker", "force_remove", "assert_absent")
+    __slots__ = ("snapshot", "brokered_cell", "revoke_broker", "force_remove", "assert_absent", "_sealed")
 
     def __init__(
         self,
@@ -86,12 +86,22 @@ class _IpythonHostOperations:
         self.revoke_broker = revoke_broker
         self.force_remove = force_remove
         self.assert_absent = assert_absent
+        object.__setattr__(self, "_sealed", True)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if getattr(self, "_sealed", False):
+            raise AttributeError("sealed host operations")
+        object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        del name
+        raise AttributeError("sealed host operations")
 
 
 class IpythonHostLiveRun:
     """Sealed concrete host context; this is the sole public PASS producer."""
 
-    __slots__ = ("_identity", "_lease", "_operations", "_signal")
+    __slots__ = ("_identity", "_lease", "_operations", "_signal", "_sealed")
 
     def __init__(
         self,
@@ -114,6 +124,16 @@ class IpythonHostLiveRun:
         self._lease: RestrictedWorkerLease = cast(RestrictedWorkerLease, lease)
         self._operations: _IpythonHostOperations = cast(_IpythonHostOperations, operations)
         self._signal = signal
+        object.__setattr__(self, "_sealed", True)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if getattr(self, "_sealed", False):
+            raise AttributeError("sealed live run")
+        object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        del name
+        raise AttributeError("sealed live run")
 
     async def complete(self) -> IpythonHostCompletion:
         return await _complete_issued_live_run(self)
@@ -163,7 +183,7 @@ async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHost
     except asyncio.CancelledError:
         if supervisor is not None:
             _cancel(supervisor)
-        raise
+        raise asyncio.CancelledError() from None
     except Exception:
         if supervisor is not None:
             _cancel(supervisor)
@@ -184,7 +204,7 @@ async def _complete_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHost
         return supervisor.complete(final)
     except asyncio.CancelledError:
         _cancel(supervisor)
-        raise
+        raise asyncio.CancelledError() from None
     except (IpythonHostSupervisorError, Exception):
         _cancel(supervisor)
         raise IpythonHostOrchestrationError("ipython host orchestration is unavailable") from None
@@ -257,21 +277,10 @@ async def _cleanup(
     async def run() -> None:
         revocation_error: BaseException | None = None
         if not broker_revoked:
-            try:
-                await operations.revoke_broker(lease)
-            except BaseException as error:
-                revocation_error = error
+            revocation_error = await _bounded_cleanup_step(operations.revoke_broker, lease)
         # Absence is independently attempted even when force removal fails.
-        removal_error: BaseException | None = None
-        try:
-            await operations.force_remove(lease)
-        except BaseException as error:
-            removal_error = error
-        absence_error: BaseException | None = None
-        try:
-            await operations.assert_absent(lease)
-        except BaseException as error:
-            absence_error = error
+        removal_error = await _bounded_cleanup_step(operations.force_remove, lease)
+        absence_error = await _bounded_cleanup_step(operations.assert_absent, lease)
         if removal_error is not None:
             raise removal_error
         if absence_error is not None:
@@ -280,26 +289,47 @@ async def _cleanup(
             raise revocation_error
 
     task = asyncio.create_task(run())
-    deadline = asyncio.get_running_loop().time() + _CLEANUP_SECONDS
-    cancellation: asyncio.CancelledError | None = None
+    cancellation = False
     while not task.done():
         try:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                task.cancel()
-                return IpythonHostOrchestrationError("ipython host orchestration is unavailable")
-            await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
-        except TimeoutError:
-            task.cancel()
-            return IpythonHostOrchestrationError("ipython host orchestration is unavailable")
-        except asyncio.CancelledError as error:
-            cancellation = error
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancellation = True
         except BaseException:
             break
     if task.cancelled():
         return asyncio.CancelledError()
     error = task.exception() if task.done() else None
-    return error if error is not None else cancellation
+    if isinstance(error, asyncio.CancelledError) or cancellation:
+        return asyncio.CancelledError()
+    return error
+
+
+async def _bounded_cleanup_step(
+    operation: Callable[[RestrictedWorkerLease], Awaitable[None]], lease: RestrictedWorkerLease
+) -> BaseException | None:
+    """Bound each cleanup operation, then reap its task before the next proof."""
+    async def invoke() -> None:
+        await operation(lease)
+
+    task = asyncio.create_task(invoke())
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=_CLEANUP_SECONDS / 3)
+    except TimeoutError:
+        task.cancel()
+        await _reap_cleanup_task(task)
+        return IpythonHostOrchestrationError("ipython host orchestration is unavailable")
+    except BaseException as error:
+        return error
+    return None
+
+
+async def _reap_cleanup_task(task: asyncio.Task[None]) -> None:
+    """Observe a canceled cleanup task so timeout cannot leave task state behind."""
+    try:
+        await task
+    except BaseException:
+        pass
 
 
 def _check_cancel(signal: CancellationSignal | None, supervisor: IpythonHostSupervisor) -> None:
