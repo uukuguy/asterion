@@ -20,9 +20,9 @@
 
 **Files:** Create narrow bounded model-session protocol/receipt and Prime application host factory; update host-service registration and tests.
 
-- [ ] Write failing tests for fixed request/token/byte/cost/deadline ceilings, cancellation, terminal receipt, sentinel redaction, and missing private configuration.
-- [ ] Implement application-only dotenv resolution and a revocable model session. It returns framed bytes plus body-free usage receipts; worker receives no credential/environment provider configuration.
-- [ ] Run focused tests/static checks and commit.
+- [x] Write failing tests for fixed request/token/byte/cost/deadline ceilings, cancellation, terminal receipt, sentinel redaction, and missing private configuration.
+- [x] Implement application-only dotenv resolution and a revocable model session. It returns framed bytes plus body-free usage receipts; worker receives no credential/environment provider configuration.
+- [x] Run focused tests/static checks and commit.
 
 ### Task 3: Real Prime/IPython worker protocol
 
