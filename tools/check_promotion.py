@@ -487,6 +487,19 @@ class PromotionError(RuntimeError):
     pass
 
 
+def _resolve_promotion_npm_cache(raw: str) -> Path:
+    candidate = Path(raw)
+    try:
+        if not candidate.is_absolute() or candidate.is_symlink():
+            raise OSError
+        resolved = candidate.resolve(strict=True)
+        if not resolved.is_dir():
+            raise OSError
+    except (OSError, RuntimeError, ValueError):
+        raise PromotionError("declared npm cache is invalid") from None
+    return resolved
+
+
 def _closed_prime_subprocess_environment(
     workspace: Path | None = None,
     *,
@@ -528,6 +541,17 @@ def _closed_prime_subprocess_environment(
             temporary_root = temporary
     if temporary_root is not None:
         environment["TMPDIR"] = str(temporary_root)
+    return environment
+
+
+def _closed_npm_subprocess_environment(
+    workspace: Path, npm_cache: Path
+) -> dict[str, str]:
+    environment = _closed_prime_subprocess_environment(workspace)
+    environment.pop("HOME", None)
+    environment["NPM_CONFIG_CACHE"] = str(npm_cache)
+    environment["NPM_CONFIG_OFFLINE"] = "true"
+    environment["NPM_CONFIG_REGISTRY"] = "https://registry.npmjs.org/"
     return environment
 
 

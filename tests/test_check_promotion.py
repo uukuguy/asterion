@@ -10,10 +10,12 @@ from unittest import mock
 
 from tools.check_promotion import (
     PromotionError,
+    _closed_npm_subprocess_environment,
     _default_runner,
     _load_operational_package_receipt,
     _prepare_external_operational_prime_checkout,
     _prepare_external_prime_checkout,
+    _resolve_promotion_npm_cache,
     _run,
     run_promotion,
 )
@@ -88,6 +90,70 @@ def completed(
 
 @mock.patch.dict(os.environ, {"ASTERION_PRIME_SOURCE_ROOT": ""})
 class PromotionCheckTests(unittest.TestCase):
+    def test_promotion_npm_cache_rejects_invalid_roots_before_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            cache = temporary / "cache"
+            cache.mkdir()
+            linked_cache = temporary / "linked-cache"
+            try:
+                linked_cache.symlink_to(cache, target_is_directory=True)
+            except OSError as error:
+                self.skipTest(f"symlinks unavailable: {error}")
+
+            for raw in ("relative-cache", str(temporary / "missing"), str(linked_cache)):
+                with self.subTest(raw=raw):
+                    with self.assertRaisesRegex(
+                        PromotionError, "declared npm cache is invalid"
+                    ):
+                        _resolve_promotion_npm_cache(raw)
+
+    def test_closed_npm_environment_uses_only_declared_cache_configuration(self) -> None:
+        hostile_environment = {
+            "HOME": "/host/home",
+            "HTTP_PROXY": "http://proxy.invalid",
+            "HTTPS_PROXY": "http://proxy.invalid",
+            "NO_PROXY": "private.invalid",
+            "NODE_AUTH_TOKEN": "npm-secret",
+            "NPM_CONFIG_CACHE": "/host/npm-cache",
+            "NPM_CONFIG_REGISTRY": "https://private.invalid/",
+            "NPM_CONFIG_USERCONFIG": "/host/.npmrc",
+            "NPM_TOKEN": "npm-secret",
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            workspace = temporary / "workspace"
+            workspace.mkdir()
+            cache = temporary / "cache"
+            cache.mkdir()
+            with (
+                mock.patch.dict(os.environ, hostile_environment, clear=False),
+                mock.patch(
+                    "tools.check_promotion._resolve_operational_node",
+                    return_value=Path("/node22/bin/node"),
+                ),
+            ):
+                environment = _closed_npm_subprocess_environment(
+                    workspace, _resolve_promotion_npm_cache(str(cache))
+                )
+
+        self.assertEqual(environment["NPM_CONFIG_CACHE"], str(cache.resolve()))
+        self.assertEqual(environment["NPM_CONFIG_OFFLINE"], "true")
+        self.assertEqual(
+            environment["NPM_CONFIG_REGISTRY"], "https://registry.npmjs.org/"
+        )
+        self.assertNotIn("HOME", environment)
+        for key in hostile_environment:
+            with self.subTest(key=key):
+                if key in {
+                    "NPM_CONFIG_CACHE",
+                    "NPM_CONFIG_REGISTRY",
+                    "NPM_CONFIG_USERCONFIG",
+                }:
+                    self.assertNotEqual(environment.get(key), hostile_environment[key])
+                else:
+                    self.assertNotIn(key, environment)
+
     def test_wheel_resource_smoke_requires_the_locked_client_module(self) -> None:
         from tools.check_promotion import (
             WHEEL_OPERATIONAL_RESOURCE_SMOKE,
