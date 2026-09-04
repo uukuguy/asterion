@@ -229,11 +229,13 @@ class PromotionCheckTests(unittest.TestCase):
             "OPENAI_API_KEY": "review-sentinel",
         }
         subprocess_environments: list[dict[str, str] | None] = []
+        subprocess_commands: list[tuple[str, ...]] = []
 
         def fake_run(
             command: tuple[str, ...],
             **kwargs: object,
         ) -> subprocess.CompletedProcess[str]:
+            subprocess_commands.append(command)
             subprocess_environments.append(kwargs.get("env"))  # type: ignore[arg-type]
             return completed(command)
 
@@ -241,6 +243,8 @@ class PromotionCheckTests(unittest.TestCase):
             temporary = Path(temporary_directory)
             resource_root = temporary / "resources"
             resource_root.mkdir()
+            cache = temporary / "npm-cache"
+            cache.mkdir()
             target = temporary / "external-prime/prime-agent"
             with (
                 mock.patch.dict(os.environ, hostile_environment, clear=False),
@@ -262,6 +266,7 @@ class PromotionCheckTests(unittest.TestCase):
                     target,
                     "a" * 40,
                     resource_root,
+                    cache.resolve(),
                 )
 
         self.assertEqual(len(subprocess_environments), 7)
@@ -276,6 +281,9 @@ class PromotionCheckTests(unittest.TestCase):
                 )
                 for key in hostile_environment:
                     self.assertNotIn(key, environment)
+                if subprocess_commands[index][0] == "npm":
+                    self.assertEqual(environment["NPM_CONFIG_CACHE"], str(cache.resolve()))
+                    self.assertEqual(environment["NPM_CONFIG_OFFLINE"], "true")
 
     def test_installed_operational_harness_uses_closed_environment(self) -> None:
         hostile_environment = {
@@ -476,7 +484,9 @@ class PromotionCheckTests(unittest.TestCase):
                     self.assertFalse((cwd / name).exists(), name)
                 return completed(command, acceptance_stdout(command))
 
-            run_promotion(source_root=source, quick=True, runner=runner)
+            run_promotion(
+                source_root=source, npm_cache=source, quick=True, runner=runner
+            )
 
         self.assertTrue(observed_roots)
         self.assertEqual(len(set(observed_roots)), 1)
@@ -496,6 +506,7 @@ class PromotionCheckTests(unittest.TestCase):
             with self.assertRaises(PromotionError):
                 run_promotion(
                     source_root=source,
+                    npm_cache=source,
                     quick=True,
                     runner=lambda command, cwd: calls.append(command)
                     or completed(command),
@@ -517,6 +528,7 @@ class PromotionCheckTests(unittest.TestCase):
             with self.assertRaises(PromotionError):
                 run_promotion(
                     source_root=source,
+                    npm_cache=source,
                     quick=True,
                     runner=lambda command, cwd: completed(command),
                 )
@@ -528,6 +540,7 @@ class PromotionCheckTests(unittest.TestCase):
                     with self.assertRaises(PromotionError):
                         run_promotion(
                             source_root=source,
+                            npm_cache=source,
                             quick=True,
                             runner=lambda command, cwd: completed(command),
                         )
@@ -549,7 +562,9 @@ class PromotionCheckTests(unittest.TestCase):
                     (dist / "asterion-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
                 return completed(command, acceptance_stdout(command))
 
-            run_promotion(source_root=source, quick=False, runner=runner)
+            run_promotion(
+                source_root=source, npm_cache=source, quick=False, runner=runner
+            )
 
         rendered = tuple(" ".join(command) for command in commands)
         for expected in (
@@ -560,10 +575,10 @@ class PromotionCheckTests(unittest.TestCase):
             "uv run ruff check src tests tools",
             "uv build .",
             "uv run python tools/check_docs.py",
-            "npm ci --prefix packages/typescript/asterion-runtime",
+            "npm ci --offline --ignore-scripts --no-audit --no-fund --prefix packages/typescript/asterion-runtime",
             "npm test --prefix packages/typescript/asterion-runtime",
             "npm test --prefix packages/typescript/dci-context-extension",
-            "npm ci --prefix packages/typescript/prime-gateway",
+            "npm ci --offline --ignore-scripts --no-audit --no-fund --prefix packages/typescript/prime-gateway",
             "npm run build --prefix packages/typescript/prime-gateway",
             "npm test --prefix packages/typescript/prime-gateway",
             "uv run python tools/verify_prime_loop.py --level provider-free",
@@ -690,6 +705,87 @@ class PromotionCheckTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, command_text)
 
+    def test_copied_project_npm_commands_use_the_declared_offline_cache(self) -> None:
+        calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+        def fake_run(
+            command: tuple[str, ...], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            environment = kwargs["env"]
+            assert isinstance(environment, dict)
+            calls.append((command, environment))
+            cwd = kwargs["cwd"]
+            assert isinstance(cwd, Path)
+            if command == ("uv", "build", "."):
+                dist = cwd / "dist"
+                dist.mkdir()
+                (dist / "asterion-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
+            return completed(command, acceptance_stdout(command))
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            source = make_source(temporary)
+            cache = temporary / "operator-npm-cache"
+            cache.mkdir()
+            with (
+                mock.patch(
+                    "tools.check_promotion._resolve_operational_node",
+                    return_value=Path("/node22/bin/node"),
+                ),
+                mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
+            ):
+                run_promotion(source_root=source, npm_cache=cache)
+
+        npm_calls = tuple(
+            (command, environment)
+            for command, environment in calls
+            if command[0] == "npm"
+        )
+        self.assertTrue(npm_calls)
+        for command, environment in npm_calls:
+            with self.subTest(command=command):
+                self.assertEqual(environment["NPM_CONFIG_CACHE"], str(cache.resolve()))
+                self.assertEqual(environment["NPM_CONFIG_OFFLINE"], "true")
+                self.assertNotIn("--prefer-offline", command)
+        for command, _ in npm_calls:
+            if command[:2] == ("npm", "ci"):
+                self.assertEqual(
+                    command[2:6],
+                    ("--offline", "--ignore-scripts", "--no-audit", "--no-fund"),
+                )
+
+    def test_npm_cache_miss_does_not_retry_online(self) -> None:
+        npm_commands: list[tuple[str, ...]] = []
+
+        def fake_run(
+            command: tuple[str, ...], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            if command[0] == "npm":
+                npm_commands.append(command)
+                return subprocess.CompletedProcess(
+                    command, 1, stdout="", stderr="cache miss"
+                )
+            return completed(command, acceptance_stdout(command))
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            source = make_source(temporary)
+            cache = temporary / "operator-npm-cache"
+            cache.mkdir()
+            with (
+                mock.patch(
+                    "tools.check_promotion._resolve_operational_node",
+                    return_value=Path("/node22/bin/node"),
+                ),
+                mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
+                self.assertRaises(PromotionError),
+            ):
+                run_promotion(source_root=source, npm_cache=cache)
+
+        self.assertEqual(len(npm_commands), 1)
+        self.assertEqual(npm_commands[0][:2], ("npm", "ci"))
+        self.assertIn("--offline", npm_commands[0])
+
     def test_full_plan_builds_prime_gateway_before_python_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             source = make_source(Path(temporary_directory))
@@ -705,7 +801,9 @@ class PromotionCheckTests(unittest.TestCase):
                     (dist / "asterion-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
                 return completed(command, acceptance_stdout(command))
 
-            run_promotion(source_root=source, quick=False, runner=runner)
+            run_promotion(
+                source_root=source, npm_cache=source, quick=False, runner=runner
+            )
 
         self.assertLess(
             commands.index(
@@ -758,7 +856,9 @@ class PromotionCheckTests(unittest.TestCase):
                 ),
                 mock.patch("tools.check_promotion.PRIME_PREPARE_COMMANDS", ()),
             ):
-                run_promotion(source_root=source, quick=True, runner=runner)
+                run_promotion(
+                    source_root=source, npm_cache=source, quick=True, runner=runner
+                )
 
         resolver.assert_called_once()
         self.assertEqual(verifier.call_count, 2)
@@ -769,18 +869,26 @@ class PromotionCheckTests(unittest.TestCase):
         commands: list[tuple[tuple[str, ...], Path]] = []
         with mock.patch(
             "tools.check_promotion._run_prime_binding_command",
-            side_effect=lambda command, cwd: commands.append((command, cwd)),
+            side_effect=lambda command, cwd, _cache: commands.append((command, cwd)),
         ):
             _prepare_external_prime_checkout(
                 Path("/external/prime"),
                 Path("/copy/3th-party/prime-agent"),
                 "1" * 40,
+                Path("/operator/npm-cache"),
             )
 
         self.assertEqual(
             tuple(command for command, _ in commands[2:]),
             (
-                ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
+                (
+                    "npm",
+                    "ci",
+                    "--offline",
+                    "--ignore-scripts",
+                    "--no-audit",
+                    "--no-fund",
+                ),
                 ("npm", "--prefix", "packages/tui", "run", "build"),
                 (
                     "node_modules/.bin/tsgo",
@@ -815,6 +923,7 @@ class PromotionCheckTests(unittest.TestCase):
             ):
                 run_promotion(
                     source_root=source,
+                    npm_cache=source,
                     quick=True,
                     runner=lambda command, cwd: calls.append(command)
                     or completed(command),
@@ -838,6 +947,7 @@ class PromotionCheckTests(unittest.TestCase):
             ):
                 run_promotion(
                     source_root=source,
+                    npm_cache=source,
                     quick=True,
                     runner=lambda command, cwd: calls.append(command)
                     or completed(command),
@@ -856,7 +966,9 @@ class PromotionCheckTests(unittest.TestCase):
                 commands.append(command)
                 return completed(command, acceptance_stdout(command))
 
-            run_promotion(source_root=source, quick=True, runner=runner)
+            run_promotion(
+                source_root=source, npm_cache=source, quick=True, runner=runner
+            )
 
         self.assertIn(("uv", "run", "asterion", "list"), commands)
         self.assertIn(
@@ -910,7 +1022,12 @@ class PromotionCheckTests(unittest.TestCase):
                     return completed(command, stdout)
 
                 with self.assertRaises(PromotionError):
-                    run_promotion(source_root=source, quick=False, runner=runner)
+                    run_promotion(
+                        source_root=source,
+                        npm_cache=source,
+                        quick=False,
+                        runner=runner,
+                    )
 
 
 def is_acceptance(command: tuple[str, ...]) -> bool:

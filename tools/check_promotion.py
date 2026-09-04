@@ -475,7 +475,7 @@ PRIME_CLOSED_SYSTEM_PATHS = (
     "/sbin",
 )
 PRIME_PREPARE_COMMANDS = (
-    ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
+    ("npm", "ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"),
     ("npm", "--prefix", "packages/tui", "run", "build"),
     ("node_modules/.bin/tsgo", "-p", "packages/ai/tsconfig.build.json"),
     ("npm", "--prefix", "packages/agent", "run", "build"),
@@ -575,9 +575,9 @@ def _operational_temporary_root(
 
 
 def _default_runner(
-    command: tuple[str, ...], cwd: Path
+    command: tuple[str, ...], cwd: Path, *, environment: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    environment = os.environ.copy()
+    environment = os.environ.copy() if environment is None else environment.copy()
     for name in (
         "PYTHONHOME",
         "PYTHONPATH",
@@ -754,14 +754,19 @@ def _verify_locked_prime_runtime(target: Path, lock: PrimeArtifactLock) -> None:
         raise PromotionError("rebuilt Prime runtime is invalid") from None
 
 
-def _run_prime_binding_command(command: tuple[str, ...], cwd: Path) -> None:
+def _run_prime_binding_command(
+    command: tuple[str, ...], cwd: Path, npm_cache: Path
+) -> None:
     environment = {
         key: value
         for key in ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "PATH", "TMPDIR")
         if (value := os.environ.get(key)) is not None
     }
-    node = _resolve_operational_node()
-    environment["PATH"] = f"{node.parent}:{environment.get('PATH', '')}"
+    if command[0] == "npm":
+        environment = _closed_npm_subprocess_environment(cwd.parent, npm_cache)
+    else:
+        node = _resolve_operational_node()
+        environment["PATH"] = f"{node.parent}:{environment.get('PATH', '')}"
     try:
         completed = subprocess.run(
             command,
@@ -779,9 +784,13 @@ def _run_prime_binding_command(command: tuple[str, ...], cwd: Path) -> None:
 
 
 def _run_prime_operational_prepare_command(
-    command: tuple[str, ...], cwd: Path
+    command: tuple[str, ...], cwd: Path, npm_cache: Path
 ) -> None:
-    environment = _closed_prime_subprocess_environment(cwd.parent)
+    environment = (
+        _closed_npm_subprocess_environment(cwd.parent, npm_cache)
+        if command[0] == "npm"
+        else _closed_prime_subprocess_environment(cwd.parent)
+    )
     try:
         completed = subprocess.run(
             command,
@@ -802,6 +811,7 @@ def _prepare_external_prime_checkout(
     prime_source: Path,
     target: Path,
     source_commit: str,
+    npm_cache: Path,
 ) -> None:
     _run_prime_binding_command(
         (
@@ -814,13 +824,15 @@ def _prepare_external_prime_checkout(
             str(target),
         ),
         target.parent.parent,
+        npm_cache,
     )
     _run_prime_binding_command(
         ("git", "checkout", "--detach", source_commit),
         target,
+        npm_cache,
     )
     for command in PRIME_PREPARE_COMMANDS:
-        _run_prime_binding_command(command, target)
+        _run_prime_binding_command(command, target, npm_cache)
     _ignore_generated_prime_checkout_paths(target)
 
 
@@ -897,6 +909,7 @@ def _prepare_external_operational_prime_checkout(
     target: Path,
     source_commit: str,
     resource_root: Path,
+    npm_cache: Path,
 ) -> None:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -930,7 +943,7 @@ def _prepare_external_operational_prime_checkout(
     except (OSError, subprocess.SubprocessError):
         raise PromotionError("external Prime checkout could not be created") from None
     for command in PRIME_PREPARE_COMMANDS:
-        _run_prime_operational_prepare_command(command, target)
+        _run_prime_operational_prepare_command(command, target, npm_cache)
     _ignore_generated_prime_checkout_paths(target)
     _materialize_operational_dependency_tree(target)
     try:
@@ -946,6 +959,7 @@ def _bind_external_prime_source(
     source_root: Path,
     *,
     operational_workspace: Path | None = None,
+    npm_cache: Path,
 ) -> None:
     prime_source = _external_prime_source_root(source_root)
     if prime_source is None:
@@ -959,7 +973,9 @@ def _bind_external_prime_source(
         )
         artifact_lock_path = resource_root / "prime-artifact-lock.json"
         lock = load_prime_artifact_lock(artifact_lock_path)
-        _prepare_external_prime_checkout(prime_source, target, lock.source_commit)
+        _prepare_external_prime_checkout(
+            prime_source, target, lock.source_commit, npm_cache
+        )
         verify_prime_checkout(target, lock_path=artifact_lock_path)
         _verify_locked_prime_runtime(target, lock)
         resolve_prime_ecosystem_module(
@@ -975,6 +991,7 @@ def _bind_external_prime_source(
                 (operational_workspace or copy_root.parent) / OPERATIONAL_PRIME_SOURCE,
                 lock.source_commit,
                 resource_root,
+                npm_cache,
             )
     except (OSError, RuntimeError, PrimeSetupError):
         raise PromotionError("external Prime source binding could not be created") from None
@@ -1192,9 +1209,27 @@ def _run_quick(copy_root: Path, runner: Runner) -> int:
 def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
     initial_commands = (
         ("uv", "sync", "--frozen"),
-        ("npm", "ci", "--prefix", "packages/typescript/asterion-runtime"),
+        (
+            "npm",
+            "ci",
+            "--offline",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+            "--prefix",
+            "packages/typescript/asterion-runtime",
+        ),
         ("npm", "run", "build", "--prefix", "packages/typescript/asterion-runtime"),
-        ("npm", "ci", "--prefix", "packages/typescript/prime-gateway"),
+        (
+            "npm",
+            "ci",
+            "--offline",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+            "--prefix",
+            "packages/typescript/prime-gateway",
+        ),
         ("npm", "run", "build", "--prefix", "packages/typescript/prime-gateway"),
         (
             "uv",
@@ -1302,11 +1337,28 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
 
 
 def run_promotion(
-    *, source_root: Path, quick: bool = False, runner: Runner = _default_runner
+    *,
+    source_root: Path,
+    npm_cache: Path,
+    quick: bool = False,
+    runner: Runner = _default_runner,
 ) -> int:
     source = source_root.resolve()
     if not source.is_dir():
         raise PromotionError("standalone source root is unavailable")
+    cache = _resolve_promotion_npm_cache(str(npm_cache))
+
+    def promotion_runner(
+        command: tuple[str, ...], cwd: Path
+    ) -> subprocess.CompletedProcess[str]:
+        if command[0] == "npm" and runner is _default_runner:
+            return _default_runner(
+                command,
+                cwd,
+                environment=_closed_npm_subprocess_environment(cwd.parent, cache),
+            )
+        return runner(command, cwd)
+
     with tempfile.TemporaryDirectory(prefix="asterion-promotion-") as temporary:
         raw_workspace = Path(temporary)
         workspace = raw_workspace.resolve()
@@ -1316,12 +1368,13 @@ def run_promotion(
             copy_root,
             source,
             operational_workspace=raw_workspace,
+            npm_cache=cache,
         )
         _audit_copy(copy_root)
         command_count = (
-            _run_quick(copy_root, runner)
+            _run_quick(copy_root, promotion_runner)
             if quick
-            else _run_full(copy_root, workspace / "wheel-venv", runner)
+            else _run_full(copy_root, workspace / "wheel-venv", promotion_runner)
         )
     return command_count
 
@@ -1329,10 +1382,13 @@ def run_promotion(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--quick", action="store_true")
+    parser.add_argument("--npm-cache", required=True)
     arguments = parser.parse_args(argv)
     try:
         command_count = run_promotion(
-            source_root=Path(__file__).resolve().parents[1], quick=arguments.quick
+            source_root=Path(__file__).resolve().parents[1],
+            npm_cache=_resolve_promotion_npm_cache(arguments.npm_cache),
+            quick=arguments.quick,
         )
     except PromotionError as error:
         print(f"promotion check failed: {error}", file=sys.stderr)
