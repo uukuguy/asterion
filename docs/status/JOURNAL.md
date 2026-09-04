@@ -1619,3 +1619,4 @@
 - 11:35 Asserted zero launch calls for every rejected P4–P7 foreign identity [793ba82]
 - 11:40 Marked completed P4–P7 worker plan steps; retained unverified full-suite gate [de9d488]
 - 11:50 Confirmed promotion subprocess sanitization prevents offline npm workaround [no commit]
+- 12:10 Designed declared offline npm-cache ingress without weakening promotion isolation [0807a59]
