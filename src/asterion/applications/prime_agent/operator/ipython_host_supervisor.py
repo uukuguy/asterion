@@ -273,6 +273,9 @@ class IpythonHostSupervisor:
             or type(cancelled) is not bool
         ):
             _invalid()
+        if cancelled:
+            self._cancelled = True
+            _invalid()
         return _Cell(
             self._issuer,
             _ATTESTATION_VERSION,

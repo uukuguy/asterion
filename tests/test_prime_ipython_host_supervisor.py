@@ -121,17 +121,16 @@ class TestIpythonHostSupervisor(unittest.TestCase):
         supervisor.record_initial_snapshot(
             supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
         )
-        cancelled = supervisor._attest_brokered_cell(
-            identity=_identity(),
-            cell=_CELL,
-            bounded_model_digest="sha256:" + "b" * 64,
-            request_count=1,
-            input_bytes=1,
-            output_bytes=1,
-            cancelled=True,
-        )
         with self.assertRaises(IpythonHostSupervisorError):
-            supervisor.record_brokered_cell(cancelled)
+            supervisor._attest_brokered_cell(
+                identity=_identity(),
+                cell=_CELL,
+                bounded_model_digest="sha256:" + "b" * 64,
+                request_count=1,
+                input_bytes=1,
+                output_bytes=1,
+                cancelled=True,
+            )
         with self.assertRaises(IpythonHostSupervisorError):
             supervisor.record_brokered_cell(
                 supervisor._attest_brokered_cell(
@@ -143,6 +142,45 @@ class TestIpythonHostSupervisor(unittest.TestCase):
                     output_bytes=1,
                 )
             )
+
+    def test_discarded_cancelled_cell_blocks_replacement_and_completion(self) -> None:
+        supervisor = IpythonHostSupervisor(_identity())
+        supervisor.record_initial_snapshot(
+            supervisor._attest_initial_snapshot(_INITIAL, is_regular_file=True)
+        )
+        replacement = supervisor._attest_brokered_cell(
+            identity=_identity(),
+            cell=_CELL,
+            bounded_model_digest="sha256:" + "b" * 64,
+            request_count=1,
+            input_bytes=1,
+            output_bytes=1,
+        )
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor._attest_brokered_cell(
+                identity=_identity(),
+                cell=_CELL,
+                bounded_model_digest="sha256:" + "b" * 64,
+                request_count=1,
+                input_bytes=1,
+                output_bytes=1,
+                cancelled=True,
+            )
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor._attest_brokered_cell(
+                identity=_identity(),
+                cell=_CELL,
+                bounded_model_digest="sha256:" + "b" * 64,
+                request_count=1,
+                input_bytes=1,
+                output_bytes=1,
+            )
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.record_brokered_cell(replacement)
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor._attest_post_snapshot(_FINAL, is_regular_file=True)
+        with self.assertRaises(IpythonHostSupervisorError):
+            supervisor.complete(object())
 
     def test_cell_digest_is_distinct_from_final_source_digest(self) -> None:
         completion = _complete(IpythonHostSupervisor(_identity()))
