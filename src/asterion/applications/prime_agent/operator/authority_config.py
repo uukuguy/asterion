@@ -1,14 +1,15 @@
-"""Authority-only loader for the fixed external Prime P1 configuration."""
+"""Authority-only loader for a service-manager supplied Prime P1 config FD."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
+import fcntl
 import os
 import re
 import stat
 from types import MappingProxyType
-from collections.abc import Mapping
+import unicodedata
 
 
 _KEYS = frozenset(
@@ -47,62 +48,69 @@ class PrimeP1OperatorConfig:
         return "PrimeP1OperatorConfig(redacted)"
 
 
-def load_operator_config(path: Path, *, authority_uid: int, application_uid: int) -> PrimeP1OperatorConfig:
-    """Load one explicit, no-follow external file; never consult ambient state."""
+def load_operator_config(config_fd: int) -> PrimeP1OperatorConfig:
+    """Consume an already-open, close-on-exec authority configuration FD.
+
+    This is the production admission boundary.  It intentionally accepts no
+    path, identity, command-line, environment, or parser configuration input.
+    """
+    fd: int | None = config_fd if type(config_fd) is int else None
     try:
-        target = Path(path)
-        if not target.is_absolute() or target.name == ".env" or authority_uid < 0 or application_uid < 0:
+        if fd is None:
             raise ValueError
-        fd = _open_secure_file(target, application_uid)
-        try:
-            before = os.fstat(fd)
-            _validate_file(before, authority_uid)
-            data = _read_bounded(fd)
-            after = os.fstat(fd)
-            if (before.st_dev, before.st_ino, before.st_mode, before.st_size) != (after.st_dev, after.st_ino, after.st_mode, after.st_size):
-                raise ValueError
-        finally:
-            os.close(fd)
-        return PrimeP1OperatorConfig(MappingProxyType(_parse(data)))
+        _validate_close_on_exec(fd)
+        before = os.fstat(fd)
+        _validate_file(before, os.geteuid())
+        os.lseek(fd, 0, os.SEEK_SET)
+        data = _read_bounded(fd)
+        after = os.fstat(fd)
+        if _stable_identity(before) != _stable_identity(after):
+            raise ValueError
+        return PrimeP1OperatorConfig(MappingProxyType(_parse_verified_bytes(data)))
     except (OSError, TypeError, UnicodeError, ValueError):
         raise PrimeP1OperatorConfigError() from None
-
-
-def _open_secure_file(path: Path, application_uid: int) -> int:
-    """Walk absolute components through descriptors, never following a link."""
-    directory_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    try:
-        _validate_directory_stat(os.fstat(directory_fd), application_uid)
-        parts = path.parts[1:]
-        if not parts:
-            raise ValueError
-        for component in parts[:-1]:
-            next_fd = os.open(
-                component,
-                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                dir_fd=directory_fd,
-            )
-            os.close(directory_fd)
-            directory_fd = next_fd
-            _validate_directory_stat(os.fstat(directory_fd), application_uid)
-        return os.open(
-            parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory_fd
-        )
     finally:
-        os.close(directory_fd)
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
-def _validate_directory_stat(info: os.stat_result, application_uid: int) -> None:
-    if not stat.S_ISDIR(info.st_mode):
-        raise ValueError
-    # Group/world writable ancestors could be writable by the application.
-    if info.st_mode & 0o022 or (info.st_uid == application_uid and info.st_mode & 0o200):
+def _validate_close_on_exec(fd: int) -> None:
+    if not fcntl.fcntl(fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC:
         raise ValueError
 
 
 def _validate_file(info: os.stat_result, authority_uid: int) -> None:
-    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != authority_uid or stat.S_IMODE(info.st_mode) != 0o600:
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_nlink != 1
+        or info.st_uid != authority_uid
+        or stat.S_IMODE(info.st_mode) != 0o600
+    ):
         raise ValueError
+
+
+def _stable_identity(info: os.stat_result) -> tuple[int, ...]:
+    """Fields that must not change while the authority reads this FD.
+
+    Access time is excluded because a successful read may legitimately update
+    it.  All ownership, link, object, size, and mutation/change timestamps are
+    retained.
+    """
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_uid,
+        info.st_gid,
+        info.st_rdev,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
 
 
 def _read_bounded(fd: int) -> bytes:
@@ -112,18 +120,26 @@ def _read_bounded(fd: int) -> bytes:
     return data
 
 
-def _parse(data: bytes) -> dict[str, str]:
+def _parse_verified_bytes(data: bytes) -> dict[str, str]:
+    """Parse verified bytes only; this helper is not a resource admission API."""
     text = data.decode("utf-8")
     values: dict[str, str] = {}
-    for line in text.splitlines():
-        if not line or "=" not in line or line.startswith(("#", "export ")):
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    for line in lines:
+        if not line:
+            raise ValueError
+        if line.count("=") < 1:
             raise ValueError
         key, value = line.split("=", 1)
-        if key not in _KEYS or key in values or not value or "${" in value or "$" in value:
-            raise ValueError
-        if "\x00" in value or any(ord(char) < 32 or ord(char) == 127 for char in value):
+        if key not in _KEYS or key in values or not value or _unsafe_text(key) or _unsafe_text(value):
             raise ValueError
         values[key] = value
     if set(values) != _KEYS or _RECEIPT_KEY.fullmatch(values["ASTERION_PRIME_P1_RECEIPT_HMAC_KEY"]) is None:
         raise ValueError
     return values
+
+
+def _unsafe_text(value: str) -> bool:
+    return any(unicodedata.category(char) in {"Cc", "Cf", "Zl", "Zp"} for char in value)

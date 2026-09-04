@@ -1,4 +1,4 @@
-"""Adversarial tests for the authority-only operator configuration loader."""
+"""Adversarial tests for the descriptor-only Prime P1 authority config."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.authority_config import (
     PrimeP1OperatorConfigError,
@@ -27,48 +28,126 @@ VALUES = {
 
 
 class TestPrimeP1OperatorConfig(unittest.TestCase):
-    def _write(self, root: Path, text: str | None = None, name: str = "operator.env") -> Path:
-        path = root / name
-        path.write_text(text or "".join(f"{key}={value}\n" for key, value in VALUES.items()), encoding="utf-8")
-        path.chmod(0o600)
-        return path
+    def _text(self, values: dict[str, str] = VALUES) -> bytes:
+        return "".join(f"{key}={value}\n" for key, value in values.items()).encode()
 
-    def test_loads_only_an_explicit_secure_external_file(self) -> None:
+    def _open_config(self, root: Path, *, text: bytes | None = None) -> int:
+        path = root / "operator.env"
+        path.write_bytes(text or self._text())
+        path.chmod(0o600)
+        return os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+
+    def test_consumes_only_an_open_descriptor_and_derives_authority_uid(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
-            root = Path(temp)
-            root.chmod(0o700)
-            config = load_operator_config(self._write(root), authority_uid=os.getuid(), application_uid=65534)
+            fd = self._open_config(Path(temp))
+            config = load_operator_config(fd)
         self.assertEqual(config.model_id, "deepseek-chat")
+        with self.assertRaises(OSError):
+            os.fstat(fd)
         self.assertNotIn("SENTINEL_SECRET", repr(config))
 
-    def test_rejects_dotenv_symlinks_duplicates_interpolation_and_ambient_values(self) -> None:
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
-            root = Path(temp)
-            root.chmod(0o700)
-            target = self._write(root)
-            link = root / "link.env"
-            link.symlink_to(target)
-            cases = {
-                ".env": self._write(root, name=".env"),
-                "symlink": link,
-                "duplicate": self._write(root, text="".join(f"{key}={value}\n" for key, value in VALUES.items()) + "DEEPSEEK_API_KEY=other\n"),
-                "interpolation": self._write(root, text="".join(f"{key}={value}\n" for key, value in {**VALUES, "ASTERION_PRIME_P1_MODEL_ID": "${HOME}"}.items())),
-            }
-            os.environ["DEEPSEEK_API_KEY"] = "AMBIENT_SENTINEL"
-            for label, path in cases.items():
-                with self.subTest(label=label), self.assertRaisesRegex(PrimeP1OperatorConfigError, "unavailable"):
-                    load_operator_config(path, authority_uid=os.getuid(), application_uid=65534)
+    def test_rejects_path_and_caller_selected_identity_arguments(self) -> None:
+        with self.assertRaises((TypeError, PrimeP1OperatorConfigError)):
+            load_operator_config(Path("/not/an/admission/path"))  # type: ignore[arg-type]
+        with self.assertRaises(TypeError):
+            load_operator_config(0, authority_uid=os.getuid())  # type: ignore[call-arg]
 
-    def test_rejects_non_owner_only_file_and_reports_no_path_or_secret(self) -> None:
+    def test_rejects_insecure_file_contracts(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
             root = Path(temp)
-            root.chmod(0o700)
-            path = self._write(root)
-            path.chmod(0o640)
-            with self.assertRaises(PrimeP1OperatorConfigError) as caught:
-                load_operator_config(path, authority_uid=os.getuid(), application_uid=65534)
-        self.assertEqual(str(caught.exception), "prime P1 operator configuration is unavailable")
-        self.assertNotIn(str(path), repr(caught.exception))
+            cases: dict[str, tuple[int, bool]] = {
+                "not-owner-only": (0o640, False),
+                "not-regular": (0o600, True),
+                "hard-linked": (0o600, False),
+            }
+            for label, (mode, directory) in cases.items():
+                with self.subTest(label=label):
+                    if directory:
+                        path = root / label
+                        path.mkdir(mode=mode)
+                        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+                    else:
+                        fd = self._open_config(root)
+                        os.fchmod(fd, mode)
+                        if label == "hard-linked":
+                            os.link(root / "operator.env", root / "operator-link.env")
+                    with self.assertRaisesRegex(PrimeP1OperatorConfigError, "unavailable"):
+                        load_operator_config(fd)
+
+    def test_rejects_a_descriptor_not_owned_by_the_live_authority_identity(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            fd = self._open_config(Path(temp))
+            import asterion.applications.prime_agent.operator.authority_config as module
+
+            actual_fstat = os.fstat
+
+            def other_owner(target_fd: int) -> os.stat_result:
+                result = actual_fstat(target_fd)
+                return os.stat_result(
+                    (
+                        result.st_mode,
+                        result.st_ino,
+                        result.st_dev,
+                        result.st_nlink,
+                        result.st_uid + 1,
+                        result.st_gid,
+                        result.st_size,
+                        result.st_atime,
+                        result.st_mtime,
+                        result.st_ctime,
+                    )
+                )
+
+            with patch.object(module.os, "fstat", side_effect=other_owner):
+                with self.assertRaises(PrimeP1OperatorConfigError):
+                    load_operator_config(fd)
+
+    def test_rejects_changed_descriptor_identity_after_read(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            fd = self._open_config(Path(temp))
+            import asterion.applications.prime_agent.operator.authority_config as module
+
+            real_fstat = os.fstat
+            calls = 0
+
+            def changed_fstat(target_fd: int) -> os.stat_result:
+                nonlocal calls
+                calls += 1
+                result = real_fstat(target_fd)
+                if calls == 2:
+                    return os.stat_result(tuple(result[:8]) + (result.st_mtime + 1, result.st_ctime))
+                return result
+
+            with patch.object(module.os, "fstat", side_effect=changed_fstat):
+                with self.assertRaises(PrimeP1OperatorConfigError):
+                    load_operator_config(fd)
+
+    def test_rejects_closed_schema_and_unicode_controls_without_interpolation(self) -> None:
+        cases = {
+            "duplicate": self._text() + b"DEEPSEEK_API_KEY=other\n",
+            "missing": self._text({key: value for key, value in VALUES.items() if key != "DEEPSEEK_API_KEY"}),
+            "extra": self._text() + b"EXTRA=value\n",
+            "empty": self._text({**VALUES, "DEEPSEEK_API_KEY": ""}),
+            "blank-entry": self._text() + b"\n",
+            "non-utf8": self._text() + b"\xff",
+            "nul": self._text({**VALUES, "DEEPSEEK_API_KEY": "bad\x00value"}),
+            "c1": self._text({**VALUES, "DEEPSEEK_API_KEY": "bad\u0085value"}),
+            "format": self._text({**VALUES, "DEEPSEEK_API_KEY": "bad\u200evalue"}),
+            "line-separator": self._text({**VALUES, "DEEPSEEK_API_KEY": "bad\u2028value"}),
+        }
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            root = Path(temp)
+            for label, text in cases.items():
+                with self.subTest(label=label):
+                    fd = self._open_config(root, text=text)
+                    with self.assertRaises(PrimeP1OperatorConfigError):
+                        load_operator_config(fd)
+
+    def test_interpolation_is_literal_and_environment_is_never_merged(self) -> None:
+        values = {**VALUES, "DEEPSEEK_API_KEY": "${UNSET_SENTINEL}"}
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp, patch.dict(os.environ, {"UNSET_SENTINEL": "leaked"}):
+            config = load_operator_config(self._open_config(Path(temp), text=self._text(values)))
+        self.assertNotIn("leaked", repr(config))
 
 
 if __name__ == "__main__":
