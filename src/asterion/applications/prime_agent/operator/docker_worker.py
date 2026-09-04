@@ -388,6 +388,7 @@ class DockerRestrictedWorkerService:
                 raise asyncio.CancelledError
             return DockerWorkerWorkspaceSnapshot(source)
         except (asyncio.TimeoutError, asyncio.CancelledError):
+            state.cancellation_latched = True
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         except RestrictedWorkerError:
             raise

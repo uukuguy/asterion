@@ -6,6 +6,7 @@ import asyncio
 import unittest
 from collections.abc import Mapping
 from dataclasses import FrozenInstanceError
+from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.docker_worker import (
     DockerEngineTransport,
@@ -112,7 +113,9 @@ class _Transport(DockerEngineTransport):
         self.channel = _Channel(self)
         self.daemon_id = "d" * 64
         self.snapshot = b"def answer(): return 42\n"
-        self.snapshot_error: Exception | None = None
+        self.snapshot_error: BaseException | None = None
+        self.snapshot_unpause_started: asyncio.Event | None = None
+        self.allow_snapshot_unpause: asyncio.Event | None = None
 
     async def create(self, specification: object, *, control: object) -> str:  # type: ignore[override]
         self.calls.append("create")
@@ -168,6 +171,14 @@ class _Transport(DockerEngineTransport):
         self.assert_container_id(container_id)
         if self.snapshot_error is not None:
             raise self.snapshot_error
+        if self.snapshot_unpause_started is not None:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.snapshot_unpause_started.set()
+                assert self.allow_snapshot_unpause is not None
+                await self.allow_snapshot_unpause.wait()
+                raise
         return self.snapshot
 
     def _cancel(self, operation: str) -> None:
@@ -338,6 +349,44 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid"):
             await self.service._snapshot_solution(lease)
         self.assertNotIn("snapshot_solution", self.transport.calls)
+
+    async def test_snapshot_deadline_during_unpause_latches_cancellation(self) -> None:
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+        self.addAsyncCleanup(context.__aexit__, None, None, None)
+        self.transport.snapshot_unpause_started = asyncio.Event()
+        self.transport.allow_snapshot_unpause = asyncio.Event()
+
+        with patch(
+            "asterion.applications.prime_agent.operator.docker_worker._LIFECYCLE_SECONDS",
+            0.01,
+        ):
+            snapshot = asyncio.create_task(self.service._snapshot_solution(lease))
+            await self.transport.snapshot_unpause_started.wait()
+            self.transport.allow_snapshot_unpause.set()
+            with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid"):
+                await snapshot
+
+        state = self.service._leases[lease.worker_id]
+        self.assertTrue(state.cancellation_latched)
+        with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid"):
+            await self.service._snapshot_solution(lease)
+        self.assertEqual(self.transport.calls.count("snapshot_solution"), 1)
+
+    async def test_transport_snapshot_cancellation_latches_state(self) -> None:
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+        self.addAsyncCleanup(context.__aexit__, None, None, None)
+        self.transport.snapshot_error = asyncio.CancelledError()
+
+        with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid"):
+            await self.service._snapshot_solution(lease)
+
+        state = self.service._leases[lease.worker_id]
+        self.assertTrue(state.cancellation_latched)
+        with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid"):
+            await self.service._snapshot_solution(lease)
+        self.assertEqual(self.transport.calls.count("snapshot_solution"), 1)
 
     async def test_revalidates_engine_safety_after_start_before_admission(self) -> None:
         context = self.service.open(_request())
