@@ -1,51 +1,44 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-04 13:25. **Session remains active — not a final handoff.**
+> Updated: 2026-09-05 04:20. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- P1–P7 retain provider-free acceptance implementations; real Docker/model/
-  network/benchmark/ARC evidence remains External-limited.
-- P4–P7 now also have sealed restricted-worker facades. P4 has canonical
-  diagnostic completion and cancellation-safe cleanup; P5/P6/P7 have strict,
-  scenario-specific canonical completions that reject forged traces.
-- P7 adds a source-lock-preflighted, inert injected-engine factory. It permits
-  only the fixed one-game ARC adapter at exactly 300 seconds and 4096 bytes.
-- Cross-scenario isolation passed: every P4–P7 foreign role/workload pair is
-  rejected before launch. P4 and P7 independent reviews passed.
+- The seven Prime product contracts and provider-free scaffolding exist, but
+  none is a real LLM-driven end-to-end PASS yet.
+- P1 Task 1 closed the exact `prime-agent@1.0.0` / IPython-only package and
+  inert runtime path. Task 2 closed the private, fixed-limit bounded model
+  session host factory and receipt lifecycle.
+- P1 Task 3 was redesigned at `4f32aea`: the model container is untrusted;
+  only an application-host supervisor can emit completion/evidence.
 
 ## Current decision
 
-- Prime is an IPython-only action surface with recursive `rlm(...)` and a
-  versioned Continual Harness—not generic Native/DCI parity.
-- Provider-free tests validate causal ordering and rejection boundaries only;
-  they never promote an external runtime claim.
+- Do not trust container stdout, stderr, exit code, claimed frames, or a
+  container-executed oracle. They can only cause rejection.
+- The host binds a genuine bounded-model receipt and sent-cell digest to
+  Docker-attested pre/post snapshots, confirmed cleanup, and a host-owned
+  data-only AST oracle for the fixed `answer() == 42` fixture.
+- The existing launcher/attach completion design is ruled out: same-container
+  children can forge parent stdout via `/proc`, and importing model-owned
+  Python cannot establish correctness.
 
-## Verification evidence
+## In-flight work
 
-- Focused P4–P7 worker, acceptance, trace, live-reducer, gate, and integration
-  suites passed; scoped Ruff, Pyright, and `git diff --check` passed.
-- A new whole-repository `make test` attempt was stopped after a non-Prime
-  hard-link loop exceeded 14 minutes. A new `make promotion-check` attempt was
-  stopped after its proxy-backed `npm ci` stalled. Both are **Not rerun**, not
-  PASS or FAIL.
-- Earlier clean repository evidence remains historical only: promotion passed
-  before the new worker facade commits; it does not verify this head.
-
-## Immediate next action
-
-1. Diagnose/bound the unrelated full-suite hard-link loop before claiming a new
-   repository-wide test PASS.
-2. Retry promotion only after npm's local proxy path is responsive; retain its
-   result as Not rerun until an exit code and output are captured.
-3. Keep real Prime worker/model/ARC runs External-limited absent a separately
-   scoped operator authorization.
+1. A bounded worker is implementing and testing the pure P1 host supervisor
+   and AST oracle only; it must not modify Docker/CLI/model integration.
+2. After independent review, extend the Docker transport for daemon-ID/name,
+   inspect projection, bounded workspace archive, pause, and cleanup proof.
+3. Only then integrate the actual Prime SDK broker and `verify --level basic`.
+   A native-Docker qualification and real bounded broker call remain separate
+   operator-authorized execution steps.
 
 ## Recovery commands
 
 ```bash
 git status --short
 git log --oneline -16
-uv run python -m unittest -v tests.test_prime_restricted_scenario_worker tests.test_prime_restricted_scenario_worker_integration tests.test_prime_diagnostic_session_recovery_worker tests.test_prime_bounded_autonomy_worker tests.test_prime_continual_improvement_worker tests.test_prime_arc_agi_3_worker tests.test_prime_application_provider tests.test_prime_worker_gate
-make promotion-check
+uv run python -m unittest -v tests.test_prime_p1_host_supervisor
+uv run ruff check src/asterion/applications/prime_agent/operator tests/test_prime_p1_host_supervisor.py
+uv run pyright src/asterion/applications/prime_agent/operator tests/test_prime_p1_host_supervisor.py
 ```
