@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-05 04:20. **Session remains active — not a final handoff.**
+> Updated: 2026-09-05 05:05. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -8,9 +8,12 @@
   none is a real LLM-driven end-to-end PASS yet.
 - P1 Task 1 closed the exact `prime-agent@1.0.0` / IPython-only package and
   inert runtime path. Task 2 closed the private, fixed-limit bounded model
-  session host factory and receipt lifecycle.
+  session host factory and receipt lifecycle. Task 3's host-supervisor slice
+  has an independently reviewed AST oracle and terminal evidence reducer.
 - P1 Task 3 was redesigned at `4f32aea`: the model container is untrusted;
   only an application-host supervisor can emit completion/evidence.
+- Final supervisor hardening at `1864d97` also latches cancellation at the
+  broker observation point, before a discardable receipt exists.
 
 ## Current decision
 
@@ -25,11 +28,10 @@
 
 ## In-flight work
 
-1. A bounded worker is implementing and testing the pure P1 host supervisor
-   and AST oracle only; it must not modify Docker/CLI/model integration.
-2. After independent review, extend the Docker transport for daemon-ID/name,
+1. Extend Docker transport for daemon-ID/name,
    inspect projection, bounded workspace archive, pause, and cleanup proof.
-3. Only then integrate the actual Prime SDK broker and `verify --level basic`.
+2. Bind those daemon facts into the host supervisor, then integrate the actual
+   Prime SDK broker and `verify --level basic`.
    A native-Docker qualification and real bounded broker call remain separate
    operator-authorized execution steps.
 
@@ -38,7 +40,7 @@
 ```bash
 git status --short
 git log --oneline -16
-uv run python -m unittest -v tests.test_prime_p1_host_supervisor
-uv run ruff check src/asterion/applications/prime_agent/operator tests/test_prime_p1_host_supervisor.py
-uv run pyright src/asterion/applications/prime_agent/operator tests/test_prime_p1_host_supervisor.py
+uv run python -m unittest -v tests.test_prime_ipython_host_supervisor
+uv run ruff check src/asterion/applications/prime_agent/operator/ipython_host_supervisor.py tests/test_prime_ipython_host_supervisor.py
+pyright src/asterion/applications/prime_agent/operator/ipython_host_supervisor.py tests/test_prime_ipython_host_supervisor.py
 ```

@@ -42,6 +42,108 @@ pyright src/asterion/applications/prime_agent/operator/ipython_host_supervisor.p
 0 errors, 0 warnings, 0 informations
 ```
 
+## Final P1 supervisor security fix (2026-09-05)
+
+The initial host snapshot now requires the fixed starter digest. A trusted,
+stage-valid cancelled broker-cell attestation permanently latches cancellation
+before its body-free rejection, so a subsequent normal cell cannot recover the
+supervisor. Completion rejects deletion as well as assignment for every
+attribute. Expected-identity fields are exact primitive strings before any
+equality or digest-regex operations, turning hostile field values into the
+redacted supervisor error.
+
+### TDD evidence
+
+The focused RED run exposed all intended gaps: a wrong starter was accepted,
+the private completion digest could be deleted, and hostile `assembly_id`
+equality leaked `RuntimeError`. The cancellation recovery test was added before
+the latch implementation.
+
+### Fresh verification
+
+```text
+uv run python -m unittest -v tests.test_prime_ipython_host_supervisor
+Ran 19 tests ... OK
+
+uv run ruff check src/asterion/applications/prime_agent/operator/ipython_host_supervisor.py tests/test_prime_ipython_host_supervisor.py
+All checks passed!
+
+pyright src/asterion/applications/prime_agent/operator/ipython_host_supervisor.py tests/test_prime_ipython_host_supervisor.py
+0 errors, 0 warnings, 0 informations
+```
+
+## Review-fix follow-up 2 (2026-09-05)
+
+The supervisor now issues application-host-only attestations only for the next
+expected stage.  Each carries the fixed attestation format, stage, and monotonic
+sequence: initial snapshot (1), brokered cell (2), post snapshot (3), broker
+revocation (4), cleanup-and-absence (5), and final oracle (6).  A later-stage
+fact therefore cannot be pre-created and recorded once the state advances.
+Cancellation is terminal and checked by every producer, recorder, and
+`complete()`, including after final-oracle attestation.
+
+`IpythonHostExpectedIdentity` now admits the exact canonical P1 assembly,
+package, and implementation refs (with versions); fixed workload, oracle,
+starter, and package-source digests; and only a validated resolved image digest.
+Evidence includes all identity facts and every attestation version/stage/sequence.
+Revocation and cleanup/absence require separate private attestations rather than
+a cell reuse or asserted booleans.  Completion mints once, makes all later
+transitions fail closed, and has no assignable `_digest` state.
+
+This remains a pure Python application-host boundary, explicitly not a
+cryptographic or OS-isolation claim.  No Docker, broker, CLI, provider, or
+framework code was changed.
+
+### TDD evidence
+
+The focused suite was run after adding the regression tests and before the
+implementation update.  It was RED with 19 expected errors, led by the missing
+`workload_digest` identity field and missing stage-specific attestation APIs.
+
+### Fresh verification
+
+```text
+uv run python -m unittest -v tests.test_prime_ipython_host_supervisor
+Ran 16 tests ... OK
+
+uv run ruff check src/asterion/applications/prime_agent/operator/ipython_host_supervisor.py tests/test_prime_ipython_host_supervisor.py
+All checks passed!
+
+pyright src/asterion/applications/prime_agent/operator/ipython_host_supervisor.py tests/test_prime_ipython_host_supervisor.py
+0 errors, 0 warnings, 0 informations
+```
+
+### Remaining concern
+
+The private issuer/stage objects are a same-process convention.  Future Docker
+and broker integration must invoke their creation only after observing the real
+daemon/broker operation; this pure slice intentionally makes no transport or
+OS-isolation assertion.
+
+## Cancelled broker-attestation latch (2026-09-05)
+
+A stage-valid broker observation with `cancelled=True` now latches host
+cancellation and raises the redacted supervisor error immediately. It never
+returns a discardable cell token. The regression creates a valid prospective
+replacement, discards the cancelled observation, and verifies that neither a
+new cell nor that replacement can be recorded or advanced toward PASS.
+
+### TDD evidence
+
+The new focused regression was RED before the change because the cancelled
+attestation was returned. After the latch, it passes with the supervisor suite.
+
+```text
+uv run python -m unittest -v tests.test_prime_ipython_host_supervisor
+Ran 20 tests ... OK
+
+uv run ruff check src/asterion/applications/prime_agent/operator/ipython_host_supervisor.py tests/test_prime_ipython_host_supervisor.py
+All checks passed!
+
+pyright src/asterion/applications/prime_agent/operator/ipython_host_supervisor.py tests/test_prime_ipython_host_supervisor.py
+0 errors, 0 warnings, 0 informations
+```
+
 ## Remaining integration concern
 
 This is deliberately a pure reduction slice. The later Docker/host integration
