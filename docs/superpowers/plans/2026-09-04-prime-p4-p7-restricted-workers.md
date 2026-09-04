@@ -25,7 +25,7 @@
 
 **Interfaces:** `RestrictedScenarioAdapter` is frozen and contains `scenario_id`, `role_id`, `workload_digest`, `entrypoint`, `seccomp`, `max_runtime_seconds`, `max_output_bytes`, `parse_completion`. `RestrictedScenarioWorker(image_digest, engine, adapter)` exposes `open`, `attest`, `execution_receipt`, and `cleanup_receipt` compatible with `RestrictedWorkerService`.
 
-- [ ] **Step 1: Write the failing test.**
+- [x] **Step 1: Write the failing test.**
 
 ```python
 async def test_worker_uses_only_adapter_literals():
@@ -37,9 +37,9 @@ async def test_worker_uses_only_adapter_literals():
     self.assertTrue(cleanup.destroyed)
 ```
 
-- [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_restricted_scenario_worker`; expect missing module failure.
+- [x] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_restricted_scenario_worker`; expect missing module failure.
 
-- [ ] **Step 3: Write minimal implementation.**
+- [x] **Step 3: Write minimal implementation.**
 
 ```python
 def request_for(self, request: RestrictedWorkerRequest) -> RestrictedWorkerRequest:
@@ -53,9 +53,9 @@ def request_for(self, request: RestrictedWorkerRequest) -> RestrictedWorkerReque
 
 Use P3’s cancellation-safe removal approach. Require lease and inspection equality to request plus adapter literals; bound bytes before parser invocation; hash only validated bytes; tombstone only after removal.
 
-- [ ] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_restricted_scenario_worker tests.test_prime_worker_gate && uv run ruff check src/asterion/applications/prime_agent/operator/restricted_scenario_worker.py tests/test_prime_restricted_scenario_worker.py && uv run pyright src/asterion/applications/prime_agent/operator/restricted_scenario_worker.py tests/test_prime_restricted_scenario_worker.py && git diff --check`; expect PASS including forged lease/inspection, oversized output, cancellation, failed removal, duplicate cleanup, and sentinel redaction.
+- [x] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_restricted_scenario_worker tests.test_prime_worker_gate && uv run ruff check src/asterion/applications/prime_agent/operator/restricted_scenario_worker.py tests/test_prime_restricted_scenario_worker.py && uv run pyright src/asterion/applications/prime_agent/operator/restricted_scenario_worker.py tests/test_prime_restricted_scenario_worker.py && git diff --check`; expect PASS including forged lease/inspection, oversized output, cancellation, failed removal, duplicate cleanup, and sentinel redaction.
 
-- [ ] **Step 5: Commit.** Commit exact files with message `feat(prime): add sealed scenario worker lifecycle`.
+- [x] **Step 5: Commit.** Commit exact files with message `feat(prime): add sealed scenario worker lifecycle`.
 
 ### Task 2: P4 continuity adapter and result binding
 
@@ -65,7 +65,7 @@ Use P3’s cancellation-safe removal approach. Require lease and inspection equa
 
 **Interfaces:** `P4_DIAGNOSTIC_SESSION_RECOVERY_ADAPTER` and `DiagnosticSessionRecoveryWorker(image_digest, engine)`. Literal endpoint `/usr/local/bin/prime-diagnostic-session-recovery.mjs`; literal seccomp `prime-diagnostic-session-recovery`; P4 role/workload; 300 seconds and 4096 bytes.
 
-- [ ] **Step 1: Write the failing test.**
+- [x] **Step 1: Write the failing test.**
 
 ```python
 async def test_p4_worker_accepts_only_canonical_continuity_completion():
@@ -75,9 +75,9 @@ async def test_p4_worker_accepts_only_canonical_continuity_completion():
     self.assertEqual(receipt.workload_digest, P4_DIAGNOSTIC_RECOVERY_WORKLOAD_DIGEST)
 ```
 
-- [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_diagnostic_session_recovery_worker`; expect missing adapter failure.
+- [x] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_diagnostic_session_recovery_worker`; expect missing adapter failure.
 
-- [ ] **Step 3: Write minimal implementation.**
+- [x] **Step 3: Write minimal implementation.**
 
 ```python
 P4_DIAGNOSTIC_SESSION_RECOVERY_ADAPTER = RestrictedScenarioAdapter(
@@ -91,9 +91,9 @@ P4_DIAGNOSTIC_SESSION_RECOVERY_ADAPTER = RestrictedScenarioAdapter(
 
 The existing live reducer already requires `worker_boundary.result_digest == trace.diagnostic_result_sha256`; do not modify it.
 
-- [ ] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_diagnostic_session_recovery_worker tests.test_prime_diagnostic_session_recovery_completion tests.test_prime_diagnostic_session_recovery_acceptance tests.test_prime_diagnostic_session_recovery_live_validation tests.test_prime_worker_gate && git diff --check`; expect PASS.
+- [x] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_diagnostic_session_recovery_worker tests.test_prime_diagnostic_session_recovery_completion tests.test_prime_diagnostic_session_recovery_acceptance tests.test_prime_diagnostic_session_recovery_live_validation tests.test_prime_worker_gate && git diff --check`; expect PASS.
 
-- [ ] **Step 5: Commit.** Commit exact P4 worker and test files with `feat(prime): add P4 restricted continuity worker`.
+- [x] **Step 5: Commit.** Commit exact P4 worker and test files with `feat(prime): add P4 restricted continuity worker`.
 
 ### Task 3: P5 and P6 adapters and result binding
 
@@ -105,7 +105,7 @@ The existing live reducer already requires `worker_boundary.result_digest == tra
 
 **Interfaces:** P5 adapter literals are exact P5 role/workload, `/usr/local/bin/prime-bounded-autonomy.mjs`, `prime-bounded-autonomy`, 300 seconds, 4096 bytes. P6 literals are exact P6 role/workload, `/usr/local/bin/prime-continual-improvement.mjs`, `prime-continual-improvement`, 600 seconds, 4096 bytes.
 
-- [ ] **Step 1: Write failing tests.**
+- [x] **Step 1: Write failing tests.**
 
 ```python
 async def test_p5_worker_rejects_a_p6_completion():
@@ -116,13 +116,13 @@ async def test_p5_worker_rejects_a_p6_completion():
             await worker.execution_receipt(lease)
 ```
 
-- [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_bounded_autonomy_worker tests.test_prime_continual_improvement_worker`; expect missing worker modules.
+- [x] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_bounded_autonomy_worker tests.test_prime_continual_improvement_worker`; expect missing worker modules.
 
-- [ ] **Step 3: Write minimal implementation.** Create literal adapters using `validate_bounded_autonomy_trace` and `validate_continual_improvement_trace`; do not accept caller supplied adapter fields. The existing live reducers already bind worker result digests to trace terminal digests and remain unchanged.
+- [x] **Step 3: Write minimal implementation.** Create literal adapters using `validate_bounded_autonomy_trace` and `validate_continual_improvement_trace`; do not accept caller supplied adapter fields. The existing live reducers already bind worker result digests to trace terminal digests and remain unchanged.
 
-- [ ] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_bounded_autonomy_worker tests.test_prime_bounded_autonomy_receipt tests.test_prime_bounded_autonomy_acceptance tests.test_prime_bounded_autonomy_live_validation tests.test_prime_continual_improvement_worker tests.test_prime_continual_improvement_receipt tests.test_prime_continual_improvement_acceptance tests.test_prime_continual_improvement_live_validation tests.test_prime_worker_gate && git diff --check`; expect PASS including failed gate, unchanged workspace, invalid rollback, and foreign completion rejection.
+- [x] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_bounded_autonomy_worker tests.test_prime_bounded_autonomy_receipt tests.test_prime_bounded_autonomy_acceptance tests.test_prime_bounded_autonomy_live_validation tests.test_prime_continual_improvement_worker tests.test_prime_continual_improvement_receipt tests.test_prime_continual_improvement_acceptance tests.test_prime_continual_improvement_live_validation tests.test_prime_worker_gate && git diff --check`; expect PASS including failed gate, unchanged workspace, invalid rollback, and foreign completion rejection.
 
-- [ ] **Step 5: Commit.** Commit exact P5/P6 worker and test files with `feat(prime): add P5 and P6 restricted workers`.
+- [x] **Step 5: Commit.** Commit exact P5/P6 worker and test files with `feat(prime): add P5 and P6 restricted workers`.
 
 ### Task 4: P7 ARC-AGI-3 subset adapter and factory reachability
 
@@ -134,7 +134,7 @@ async def test_p5_worker_rejects_a_p6_completion():
 
 **Interfaces:** `P7_ARC_AGI_3_ADAPTER` and `ArcAgi3Worker(image_digest, engine)` use exact P7 role/workload, `/usr/local/bin/prime-arc-agi-3.mjs`, `prime-arc-agi-3`, 300 seconds, 4096 bytes. Preflight exposes a factory closure only; it never launches.
 
-- [ ] **Step 1: Write the failing test.**
+- [x] **Step 1: Write the failing test.**
 
 ```python
 async def test_p7_worker_rejects_multiple_games():
@@ -145,13 +145,13 @@ async def test_p7_worker_rejects_multiple_games():
             await worker.execution_receipt(lease)
 ```
 
-- [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_arc_agi_3_worker tests.test_prime_application_provider tests.test_prime_arc_agi_3_live_validation`; expect missing worker/factory failures.
+- [x] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_arc_agi_3_worker tests.test_prime_application_provider tests.test_prime_arc_agi_3_live_validation`; expect missing worker/factory failures.
 
-- [ ] **Step 3: Write minimal implementation.** Use the common envelope and `validate_arc_agi_3_trace`, and expose only a preflighted injected-engine factory. The existing reducer already requires worker result digest equal `trace.score_sha256`. Do not add model config, CLI command, benchmark selection, or full-suite adapter.
+- [x] **Step 3: Write minimal implementation.** Use the common envelope and `validate_arc_agi_3_trace`, and expose only a preflighted injected-engine factory. The existing reducer already requires worker result digest equal `trace.score_sha256`. Do not add model config, CLI command, benchmark selection, or full-suite adapter.
 
-- [ ] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_arc_agi_3_worker tests.test_prime_arc_agi_3_workload tests.test_prime_arc_agi_3_receipt tests.test_prime_arc_agi_3_broker tests.test_prime_arc_agi_3_acceptance tests.test_prime_arc_agi_3_live_validation tests.test_prime_application_provider tests.test_prime_worker_gate && git diff --check`; expect PASS and no full-suite evidence path.
+- [x] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_arc_agi_3_worker tests.test_prime_arc_agi_3_workload tests.test_prime_arc_agi_3_receipt tests.test_prime_arc_agi_3_broker tests.test_prime_arc_agi_3_acceptance tests.test_prime_arc_agi_3_live_validation tests.test_prime_application_provider tests.test_prime_worker_gate && git diff --check`; expect PASS and no full-suite evidence path.
 
-- [ ] **Step 5: Commit.** Commit exact P7 worker, provider, and test files with `feat(prime): add P7 restricted ARC worker`.
+- [x] **Step 5: Commit.** Commit exact P7 worker, provider, and test files with `feat(prime): add P7 restricted ARC worker`.
 
 ### Task 5: Cross-scenario closure and state
 
@@ -162,7 +162,7 @@ async def test_p7_worker_rejects_multiple_games():
 
 **Interfaces:** All P4–P7 adapters must reject every foreign role/workload and provider-free fakes must not issue bounded-sandboxed evidence.
 
-- [ ] **Step 1: Write the failing test.**
+- [x] **Step 1: Write the failing test.**
 
 ```python
 async def test_each_adapter_rejects_every_foreign_role_and_workload():
@@ -174,13 +174,13 @@ async def test_each_adapter_rejects_every_foreign_role_and_workload():
                     worker.open(replace(request, role_id=foreign.role_id, workload_digest=foreign.workload_digest))
 ```
 
-- [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_restricted_scenario_worker_integration`; expect failure until every adapter exists.
+- [x] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_restricted_scenario_worker_integration`; expect failure until every adapter exists.
 
 - [ ] **Step 3: Write minimal integration fixture and status update.** Fakes return canonical per-scenario bytes and record zero external operations. State that injected-worker integration is implemented while real sandbox evidence remains External-limited.
 
 - [ ] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_restricted_scenario_worker tests.test_prime_restricted_scenario_worker_integration tests.test_prime_diagnostic_session_recovery_worker tests.test_prime_bounded_autonomy_worker tests.test_prime_continual_improvement_worker tests.test_prime_arc_agi_3_worker tests.test_prime_worker_gate && make check && git diff --check`; expect PASS. Then run `make promotion-check` after clean verification and record only its actual output.
 
-- [ ] **Step 5: Commit.** Commit exact closure test and state files with `test(prime): close P4-P7 worker integration`.
+- [x] **Step 5: Commit.** Commit exact closure test and state files with `test(prime): close P4-P7 worker integration`.
 
 ## Plan self-review
 
