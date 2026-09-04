@@ -1605,3 +1605,4 @@
 - 08:12 Aligned stale gateway reopen test with sparse-cursor contract, unblocking promotion [07e870c]
 - 08:50 Verified full Prime promotion closure after source-lock and sparse-cursor repairs [78a0ec9]
 - 09:05 Designed sealed shared lifecycle envelope for executable P4–P7 workers [f1acd9a]
+- 09:20 Planned test-first P4–P7 sealed worker implementation and integration closure [7f8f799]
