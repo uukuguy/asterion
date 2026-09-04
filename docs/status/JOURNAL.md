@@ -1622,3 +1622,17 @@
 - 12:10 Designed declared offline npm-cache ingress without weakening promotion isolation [0807a59]
 - 12:35 Added fail-closed declared npm-cache validation and sealed npm environment [7db1678]
 - 02:13 Added declared-cache validation and sealed offline npm environment for hermetic promotion [7db1678]
+
+## 2026-09-05
+
+- 02:21 Threaded sealed cache through promotion npm preparation and verified offline cache-miss failure [93c2d5d]
+- 02:30 Sealed promotion npm uses pre-resolved Node; ambient resolver excluded during preparation [a44f530]
+- 02:37 Required validated explicit Node 22 input to eliminate ambient promotion resolution [5e34646]
+- 11:55 Sealed installed-wheel smoke Node to block ambient resolution [343e591]
+- 03:22 Added Prime P1 package/runtime closure for exact IPython-only composition [71e2860]
+- 03:34 Added bounded Prime model-session host factory and terminal receipts [db15387]
+- 03:42 Sealed fixed P1 model-session admission and lease identity against forged revocation [da7b484]
+- 03:54 Closed P1 IPython model frames to reject direct deterministic completion [4347b07]
+- 04:02 Isolated final P1 oracle to reject shell-spoofed model cells [35eb808]
+- 04:07 Isolated P1 model cells so forged terminal output cannot affect supervisor [1dca1c5]
+- 04:15 Reframed P1 Task 3 around host-only trusted completion [4f32aea]
