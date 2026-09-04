@@ -134,12 +134,13 @@ class AuthoritySession:
             receipt_hmac_key,
             None,
             None,
-            "await-execute",
+            "await-ready",
         )
 
     def ready_packet(self) -> bytes:
-        if self._state != "await-execute":
+        if self._state != "await-ready":
             _unavailable()
+        self._state = "await-execute"
         return encode_frame(
             self._session_key,
             self._session_id,
@@ -152,6 +153,13 @@ class AuthoritySession:
         )
 
     def accept_supervisor_packet(self, packet: bytes) -> AuthorityFrame:
+        try:
+            return self._accept_supervisor_packet(packet)
+        except PrimeP1AuthorityProtocolError:
+            self._state = "failed"
+            raise
+
+    def _accept_supervisor_packet(self, packet: bytes) -> AuthorityFrame:
         frame = decode_frame(packet, self._session_key)
         if frame.session_id != self._session_id:
             _unavailable()
@@ -237,6 +245,13 @@ class SupervisorSession:
         )
 
     def accept_authority_packet(self, packet: bytes) -> TerminalReceipt | None:
+        try:
+            return self._accept_authority_packet(packet)
+        except PrimeP1AuthorityProtocolError:
+            self._state = "failed"
+            raise
+
+    def _accept_authority_packet(self, packet: bytes) -> TerminalReceipt | None:
         frame = decode_frame(packet, self._session_key)
         if frame.session_id != self._session_id:
             _unavailable()
@@ -730,10 +745,9 @@ def _json(value: object) -> bytes:
 
 
 def _ensure_native_json_tree(value: object) -> None:
-    stack = [(value, 1)]
-    ancestors: set[int] = set()
+    stack = [(value, 1, frozenset())]
     while stack:
-        item, depth = stack.pop()
+        item, depth, ancestors = stack.pop()
         if item is None or type(item) in {bool, int, float, str}:
             continue
         if depth > _MAX_JSON_DEPTH:
@@ -742,14 +756,12 @@ def _ensure_native_json_tree(value: object) -> None:
             identifier = id(item)
             if identifier in ancestors or not all(type(key) is str for key in item):
                 raise ValueError
-            ancestors.add(identifier)
-            stack.extend((child, depth + 1) for child in item.values())
+            stack.extend((child, depth + 1, ancestors | {identifier}) for child in item.values())
         elif type(item) is list:
             identifier = id(item)
             if identifier in ancestors:
                 raise ValueError
-            ancestors.add(identifier)
-            stack.extend((child, depth + 1) for child in item)
+            stack.extend((child, depth + 1, ancestors | {identifier}) for child in item)
         else:
             raise ValueError
 

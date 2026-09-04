@@ -131,6 +131,18 @@ def _resign(receipt: dict[str, object]) -> None:
 
 
 class TestPrimeP1AuthorityProtocol(unittest.TestCase):
+    def test_authority_requires_one_ready_before_execute_and_poison_latches(self) -> None:
+        authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
+        execute = encode_frame(KEY, SESSION, 0, "execute", {"run_id": "run-1", "request_contract_sha256": CONTRACT, "application_request_sha256": APPLICATION})
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            authority.accept_supervisor_packet(execute)
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            authority.ready_packet()
+
+    def test_shared_native_json_tree_is_not_a_cycle(self) -> None:
+        shared = {"value": [1]}
+        packet = encode_frame(KEY, SESSION, 1, "terminal", {"left": shared, "right": shared})
+        self.assertEqual(decode_frame(packet, KEY).kind, "terminal")
     def test_supervisor_keeps_receipt_hmac_key_out_of_its_api(self) -> None:
         with self.assertRaises(TypeError):
             SupervisorSession(SESSION, KEY, CONTRACT, receipt_hmac_key=RECEIPT_KEY)  # type: ignore[call-arg]
@@ -219,6 +231,7 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
             request_contract_sha256=CONTRACT,
             resource_set_sha256=RESOURCE_SET,
         )
+        session.ready_packet()
         frame = session.accept_supervisor_packet(packet)
         self.assertEqual(frame.kind, "execute")
         self.assertEqual(frame.payload["run_id"], "run-1")
@@ -236,6 +249,7 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
             },
         )
         session = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
+        session.ready_packet()
         session.accept_supervisor_packet(packet)
         with self.assertRaisesRegex(PrimeP1AuthorityProtocolError, "unavailable"):
             session.accept_supervisor_packet(packet)
@@ -270,6 +284,7 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
         with self.assertRaises(PrimeP1AuthorityProtocolError):
             rejected_session.accept_supervisor_packet(cancel)
         session = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
+        session.ready_packet()
         execute = encode_frame(
             KEY,
             SESSION,
