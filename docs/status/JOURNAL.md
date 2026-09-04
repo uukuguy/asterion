@@ -1611,3 +1611,4 @@
 - 09:42 Sealed P4 completion bytes and cancellation-safe worker cleanup [5476d5a]
 - 10:05 Closed P4 review gaps for rejected-lease cleanup and canonical fixture bytes [7c56f93]
 - 10:18 Added canonical P5/P6 completions and sealed restricted-worker adapters [610886e]
+- 10:35 Added source-locked P7 ARC-AGI-3 worker factory and sealed completion protocol [daf5f2e]
