@@ -62,22 +62,20 @@ Use P3’s cancellation-safe removal approach. Require lease and inspection equa
 **Files:**
 - Create: `src/asterion/applications/prime_agent/operator/diagnostic_session_recovery_worker.py`
 - Create: `tests/test_prime_diagnostic_session_recovery_worker.py`
-- Modify: `src/asterion/applications/prime_agent/diagnostic_session_recovery_live_validation.py`
-- Modify: `tests/test_prime_diagnostic_session_recovery_live_validation.py`
 
 **Interfaces:** `P4_DIAGNOSTIC_SESSION_RECOVERY_ADAPTER` and `DiagnosticSessionRecoveryWorker(image_digest, engine)`. Literal endpoint `/usr/local/bin/prime-diagnostic-session-recovery.mjs`; literal seccomp `prime-diagnostic-session-recovery`; P4 role/workload; 300 seconds and 4096 bytes.
 
 - [ ] **Step 1: Write the failing test.**
 
 ```python
-def test_p4_reducer_requires_worker_result_equal_trace_completion():
-    observation, authorization = valid_p4_live_input()
-    bad = replace(authorization, worker_boundary=replace(authorization.worker_boundary, result_digest=DIGEST_B))
-    with self.assertRaises(DiagnosticSessionRecoveryLiveValidationError):
-        validate_diagnostic_session_recovery_live_result(observation, bad)
+async def test_p4_worker_accepts_only_canonical_continuity_completion():
+    worker, _, request = fixture(P4_DIAGNOSTIC_SESSION_RECOVERY_ADAPTER)
+    async with worker.open(request) as lease:
+        receipt = await worker.execution_receipt(lease)
+    self.assertEqual(receipt.workload_digest, P4_DIAGNOSTIC_RECOVERY_WORKLOAD_DIGEST)
 ```
 
-- [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_diagnostic_session_recovery_worker tests.test_prime_diagnostic_session_recovery_live_validation`; expect adapter/digest assertion failure.
+- [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_diagnostic_session_recovery_worker`; expect missing adapter failure.
 
 - [ ] **Step 3: Write minimal implementation.**
 
@@ -91,11 +89,11 @@ P4_DIAGNOSTIC_SESSION_RECOVERY_ADAPTER = RestrictedScenarioAdapter(
 )
 ```
 
-Require `worker_boundary.result_digest == trace.completion_sha256` in the reducer.
+The existing live reducer already requires `worker_boundary.result_digest == trace.diagnostic_result_sha256`; do not modify it.
 
 - [ ] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_diagnostic_session_recovery_worker tests.test_prime_diagnostic_session_recovery_completion tests.test_prime_diagnostic_session_recovery_acceptance tests.test_prime_diagnostic_session_recovery_live_validation tests.test_prime_worker_gate && git diff --check`; expect PASS.
 
-- [ ] **Step 5: Commit.** Commit exact P4 worker, reducer, and test files with `feat(prime): add P4 restricted continuity worker`.
+- [ ] **Step 5: Commit.** Commit exact P4 worker and test files with `feat(prime): add P4 restricted continuity worker`.
 
 ### Task 3: P5 and P6 adapters and result binding
 
@@ -104,8 +102,6 @@ Require `worker_boundary.result_digest == trace.completion_sha256` in the reduce
 - Create: `src/asterion/applications/prime_agent/operator/continual_improvement_worker.py`
 - Create: `tests/test_prime_bounded_autonomy_worker.py`
 - Create: `tests/test_prime_continual_improvement_worker.py`
-- Modify: `src/asterion/applications/prime_agent/bounded_autonomy_live_validation.py`
-- Modify: `src/asterion/applications/prime_agent/continual_improvement_live_validation.py`
 
 **Interfaces:** P5 adapter literals are exact P5 role/workload, `/usr/local/bin/prime-bounded-autonomy.mjs`, `prime-bounded-autonomy`, 300 seconds, 4096 bytes. P6 literals are exact P6 role/workload, `/usr/local/bin/prime-continual-improvement.mjs`, `prime-continual-improvement`, 600 seconds, 4096 bytes.
 
@@ -120,23 +116,21 @@ async def test_p5_worker_rejects_a_p6_completion():
             await worker.execution_receipt(lease)
 ```
 
-- [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_bounded_autonomy_worker tests.test_prime_continual_improvement_worker tests.test_prime_bounded_autonomy_live_validation tests.test_prime_continual_improvement_live_validation`; expect missing modules and result-digest rejection failures.
+- [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_bounded_autonomy_worker tests.test_prime_continual_improvement_worker`; expect missing worker modules.
 
-- [ ] **Step 3: Write minimal implementation.** Create literal adapters using `validate_bounded_autonomy_trace` and `validate_continual_improvement_trace`. Require each worker result digest equal its validated trace terminal digest; do not accept caller supplied adapter fields.
+- [ ] **Step 3: Write minimal implementation.** Create literal adapters using `validate_bounded_autonomy_trace` and `validate_continual_improvement_trace`; do not accept caller supplied adapter fields. The existing live reducers already bind worker result digests to trace terminal digests and remain unchanged.
 
 - [ ] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_bounded_autonomy_worker tests.test_prime_bounded_autonomy_receipt tests.test_prime_bounded_autonomy_acceptance tests.test_prime_bounded_autonomy_live_validation tests.test_prime_continual_improvement_worker tests.test_prime_continual_improvement_receipt tests.test_prime_continual_improvement_acceptance tests.test_prime_continual_improvement_live_validation tests.test_prime_worker_gate && git diff --check`; expect PASS including failed gate, unchanged workspace, invalid rollback, and foreign completion rejection.
 
-- [ ] **Step 5: Commit.** Commit exact P5/P6 worker, reducer, and test files with `feat(prime): add P5 and P6 restricted workers`.
+- [ ] **Step 5: Commit.** Commit exact P5/P6 worker and test files with `feat(prime): add P5 and P6 restricted workers`.
 
 ### Task 4: P7 ARC-AGI-3 subset adapter and factory reachability
 
 **Files:**
 - Create: `src/asterion/applications/prime_agent/operator/arc_agi_3_worker.py`
 - Create: `tests/test_prime_arc_agi_3_worker.py`
-- Modify: `src/asterion/applications/prime_agent/arc_agi_3_live_validation.py`
 - Modify: `src/asterion/applications/prime_agent/provider.py`
 - Modify: `tests/test_prime_application_provider.py`
-- Modify: `tests/test_prime_arc_agi_3_live_validation.py`
 
 **Interfaces:** `P7_ARC_AGI_3_ADAPTER` and `ArcAgi3Worker(image_digest, engine)` use exact P7 role/workload, `/usr/local/bin/prime-arc-agi-3.mjs`, `prime-arc-agi-3`, 300 seconds, 4096 bytes. Preflight exposes a factory closure only; it never launches.
 
@@ -153,11 +147,11 @@ async def test_p7_worker_rejects_multiple_games():
 
 - [ ] **Step 2: Run RED.** Run `uv run python -m unittest -v tests.test_prime_arc_agi_3_worker tests.test_prime_application_provider tests.test_prime_arc_agi_3_live_validation`; expect missing worker/factory failures.
 
-- [ ] **Step 3: Write minimal implementation.** Use the common envelope and `validate_arc_agi_3_trace`, require worker result digest equal `trace.score_sha256`, and expose only a preflighted injected-engine factory. Do not add model config, CLI command, benchmark selection, or full-suite adapter.
+- [ ] **Step 3: Write minimal implementation.** Use the common envelope and `validate_arc_agi_3_trace`, and expose only a preflighted injected-engine factory. The existing reducer already requires worker result digest equal `trace.score_sha256`. Do not add model config, CLI command, benchmark selection, or full-suite adapter.
 
 - [ ] **Step 4: Verify GREEN.** Run `uv run python -m unittest -v tests.test_prime_arc_agi_3_worker tests.test_prime_arc_agi_3_workload tests.test_prime_arc_agi_3_receipt tests.test_prime_arc_agi_3_broker tests.test_prime_arc_agi_3_acceptance tests.test_prime_arc_agi_3_live_validation tests.test_prime_application_provider tests.test_prime_worker_gate && git diff --check`; expect PASS and no full-suite evidence path.
 
-- [ ] **Step 5: Commit.** Commit exact P7 worker, reducer, provider, and test files with `feat(prime): add P7 restricted ARC worker`.
+- [ ] **Step 5: Commit.** Commit exact P7 worker, provider, and test files with `feat(prime): add P7 restricted ARC worker`.
 
 ### Task 5: Cross-scenario closure and state
 
