@@ -15,9 +15,6 @@ import subprocess
 import sys
 from typing import NoReturn
 
-from IPython.core.interactiveshell import InteractiveShell  # type: ignore[reportMissingImports]
-
-
 WORKLOAD_DIGEST = "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"
 PRIME_SDK_SESSION_PIN = "prime-agent@0.7.1"
 _FRAME_LIMIT = 65536
@@ -31,6 +28,12 @@ _FINAL_ORACLE_PROGRAM = (
     "runpy.run_path(sys.argv[2], run_name='__main__')",
 )
 _FINAL_ORACLE_TIMEOUT_SECONDS = 5
+_MODEL_CELL_PROGRAM = (
+    "import sys; from IPython.core.interactiveshell import InteractiveShell; "
+    "result = InteractiveShell.instance().run_cell(sys.stdin.read(), store_history=False); "
+    "sys.exit(result.error_in_exec is not None or result.error_before_exec is not None)"
+)
+_MODEL_CELL_TIMEOUT_SECONDS = 5
 _WRITABLE_KERNEL_MOUNTS = {"/dev", "/dev/mqueue", "/dev/pts", "/proc", "/sys"}
 _CREDENTIAL_SENTINELS = (Path("/run/secrets"), Path("/root/.aws"), Path("/home/node/.aws"), Path("/home/node/.config/gcloud"), Path("/workspace/.env"))
 
@@ -122,40 +125,7 @@ def read_model_response() -> str:
     return value["cell"]
 
 
-def _run_oracle(shell: InteractiveShell) -> bool:
-    sys.modules.pop("solution", None)
-    try:
-        shell.run_line_magic("run", str(_ORACLE))
-    except (AssertionError, Exception, SystemExit):
-        return False
-    return True
-
-
-def initial_oracle_failure(shell: InteractiveShell) -> None:
-    try:
-        _WORKSPACE_SOLUTION.write_bytes(_STARTER.read_bytes())
-    except OSError:
-        invalid_worker()
-    sys.path.insert(0, "/workspace")
-    if _run_oracle(shell):
-        invalid_worker()
-
-
-def execute_model_ipython_cell(shell: InteractiveShell, cell: str) -> None:
-    before = hashlib.sha256(_WORKSPACE_SOLUTION.read_bytes()).digest()
-    result = shell.run_cell(cell, store_history=False)
-    if result.error_in_exec is not None or result.error_before_exec is not None:
-        invalid_worker()
-    try:
-        after = hashlib.sha256(_WORKSPACE_SOLUTION.read_bytes()).digest()
-    except OSError:
-        invalid_worker()
-    if before == after:
-        invalid_worker()
-
-
-def final_oracle_success(shell: InteractiveShell) -> None:
-    del shell
+def _run_oracle() -> bool:
     try:
         completed = subprocess.run(
             (*_FINAL_ORACLE_PROGRAM, str(_WORKSPACE_SOLUTION.parent), str(_ORACLE)),
@@ -167,8 +137,45 @@ def final_oracle_success(shell: InteractiveShell) -> None:
             timeout=_FINAL_ORACLE_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+def initial_oracle_failure() -> None:
+    try:
+        _WORKSPACE_SOLUTION.write_bytes(_STARTER.read_bytes())
+    except OSError:
+        invalid_worker()
+    if _run_oracle():
+        invalid_worker()
+
+
+def execute_model_ipython_cell(cell: str) -> None:
+    before = hashlib.sha256(_WORKSPACE_SOLUTION.read_bytes()).digest()
+    try:
+        completed = subprocess.run(
+            (sys.executable, "-I", "-B", "-c", _MODEL_CELL_PROGRAM),
+            cwd=_WORKSPACE_SOLUTION.parent,
+            input=cell.encode("utf-8"),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=_MODEL_CELL_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError):
         invalid_worker()
     if completed.returncode != 0:
+        invalid_worker()
+    try:
+        after = hashlib.sha256(_WORKSPACE_SOLUTION.read_bytes()).digest()
+    except OSError:
+        invalid_worker()
+    if before == after:
+        invalid_worker()
+
+
+def final_oracle_success() -> None:
+    if not _run_oracle():
         invalid_worker()
 
 
@@ -183,12 +190,11 @@ def main() -> None:
     sys.stdout.buffer.write(_SELF_CHECK + b"\n")
     sys.stdout.buffer.flush()
     read_control()
-    shell = InteractiveShell.instance()
-    initial_oracle_failure(shell)
+    initial_oracle_failure()
     emit_model_request()
     cell = read_model_response()
-    execute_model_ipython_cell(shell, cell)
-    final_oracle_success(shell)
+    execute_model_ipython_cell(cell)
+    final_oracle_success()
     emit_completion()
 
 

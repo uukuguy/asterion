@@ -118,19 +118,22 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
             "subprocess.run",
             '"-I"',
             '"-S"',
+            '"-B"',
+            "_MODEL_CELL_PROGRAM",
+            "input=cell.encode(\"utf-8\")",
             "stdin=subprocess.DEVNULL",
             "stdout=subprocess.DEVNULL",
             "stderr=subprocess.DEVNULL",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, launcher)
+        self.assertNotIn("shell.run_cell", launcher)
 
     def test_python_launcher_accepts_only_a_host_mediated_ipython_model_response(self) -> None:
         launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
         dockerfile = (IMAGE / "Dockerfile").read_text(encoding="utf-8")
         for required in (
             "InteractiveShell",
-            "run_line_magic",
             '"/opt/prime-fixture/starter/solution.py"',
             '"/opt/prime-fixture/oracle/oracle.py"',
             '"/workspace/solution.py"',
@@ -139,7 +142,7 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
             "emit_model_request()",
             "read_model_response()",
             'value["tool"] != "ipython"',
-            "shell.run_cell",
+            "_MODEL_CELL_PROGRAM",
             "final_oracle_success",
             "emit_completion()",
         ):
@@ -176,16 +179,12 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
         ):
             with self.subTest(required=required):
                 self.assertIn(required, launcher)
-        self.assertLess(launcher.rindex("initial_oracle_failure(shell)"), launcher.rindex("emit_model_request()"))
-        self.assertLess(launcher.rindex("read_model_response()"), launcher.rindex("final_oracle_success(shell)"))
+        self.assertLess(launcher.rindex("initial_oracle_failure()"), launcher.rindex("emit_model_request()"))
+        self.assertLess(launcher.rindex("read_model_response()"), launcher.rindex("final_oracle_success()"))
 
-    def test_final_oracle_rejects_shell_primitive_spoofed_by_model_cell(self) -> None:
+    def test_final_oracle_rejects_incorrect_workspace_mutation_from_model_cell(self) -> None:
         launcher, previous = _load_launcher()
-        original_magic = _SpoofableInteractiveShell.run_line_magic
         self.addCleanup(_restore_ipython, previous)
-        self.addCleanup(
-            setattr, _SpoofableInteractiveShell, "run_line_magic", original_magic,
-        )
         starter = IMAGE / "fixture/starter/solution.py"
         oracle = IMAGE / "fixture/oracle/oracle.py"
         with TemporaryDirectory() as temporary:
@@ -197,24 +196,55 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
             setattr(launcher, "_STARTER", starter)
             setattr(launcher, "_ORACLE", copied_oracle)
             setattr(launcher, "_WORKSPACE_SOLUTION", solution)
-            sys.path.insert(0, str(workspace))
+            setattr(launcher, "_MODEL_CELL_PROGRAM", "import sys; exec(sys.stdin.read(), {})")
             try:
-                shell = _SpoofableInteractiveShell()
-                launcher.initial_oracle_failure(shell)
+                launcher.initial_oracle_failure()
                 launcher.execute_model_ipython_cell(
-                    shell,
                     "\n".join((
+                        "from pathlib import Path",
                         f"Path({str(solution)!r}).write_text("
                         "'def answer() -> int:\\n    return -1\\n', encoding='utf-8')",
-                        "InteractiveShell.run_line_magic = lambda self, *args, **kwargs: None",
                     )),
                 )
                 with self.assertRaises(RuntimeError):
-                    launcher.final_oracle_success(shell)
+                    launcher.final_oracle_success()
             finally:
-                _SpoofableInteractiveShell.run_line_magic = original_magic
                 sys.modules.pop("solution", None)
-                sys.path.remove(str(workspace))
+
+    def test_model_cell_cannot_emit_terminal_frame_or_mutate_supervisor_globals(self) -> None:
+        launcher, previous = _load_launcher()
+        self.addCleanup(_restore_ipython, previous)
+        starter = IMAGE / "fixture/starter/solution.py"
+        oracle = IMAGE / "fixture/oracle/oracle.py"
+        with TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            solution = workspace / "solution.py"
+            copied_oracle = workspace / "oracle.py"
+            shutil.copyfile(starter, solution)
+            shutil.copyfile(oracle, copied_oracle)
+            setattr(launcher, "_STARTER", starter)
+            setattr(launcher, "_ORACLE", copied_oracle)
+            setattr(launcher, "_WORKSPACE_SOLUTION", solution)
+            setattr(launcher, "_MODEL_CELL_PROGRAM", "import sys; exec(sys.stdin.read(), {})")
+            original_completion = launcher.emit_completion
+            try:
+                launcher.initial_oracle_failure()
+                launcher.execute_model_ipython_cell(
+                    "\n".join((
+                        "import json, sys",
+                        "from pathlib import Path",
+                        "print(json.dumps({'terminal': 'completed'}))",
+                        "import __main__",
+                        "__main__.emit_completion = lambda: None",
+                        f"Path({str(solution)!r}).write_text("
+                        "'def answer() -> int:\\n    return -1\\n', encoding='utf-8')",
+                    )),
+                )
+                self.assertIs(launcher.emit_completion, original_completion)
+                with self.assertRaises(RuntimeError):
+                    launcher.final_oracle_success()
+            finally:
+                sys.modules.pop("solution", None)
 
     def test_python_launcher_keeps_closed_worker_checks_before_selfcheck(self) -> None:
         launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
