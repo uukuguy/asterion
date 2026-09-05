@@ -64,9 +64,9 @@ class _Identity:
 class AdmittedPrimeP1SeccompResource:
     """Opaque retained profile descriptor, never execution authority."""
 
-    _fd: int
+    _fds: tuple[int, ...]
     _path: str
-    _identity: _Identity
+    _identities: tuple[_Identity, ...]
     _policy: SeccompPolicyLock
     _sha256: str
     _lock: threading.Lock
@@ -77,16 +77,12 @@ class AdmittedPrimeP1SeccompResource:
         return self._sha256
 
     def close(self) -> None:
-        fd: int | None = None
+        fds: tuple[int, ...] = ()
         with self._lock:
             if not self._closed[0]:
                 self._closed[0] = True
-                fd = self._fd
-        if fd is not None:
-            try:
-                os.close(fd)
-            except BaseException:
-                pass
+                fds = self._fds
+        _close_all(fds)
 
     def __repr__(self) -> str:
         return "AdmittedPrimeP1SeccompResource(redacted)"
@@ -106,7 +102,7 @@ class AdmittedPrimeP1SeccompResource:
 
 def admit_static_seccomp_resource(config: object) -> AdmittedPrimeP1SeccompResource:
     """Open and validate only the configured profile against a promoted lock."""
-    fd: int | None = None
+    fds: tuple[int, ...] = ()
     result: AdmittedPrimeP1SeccompResource | None = None
     try:
         _require_linux_posix()
@@ -121,23 +117,24 @@ def admit_static_seccomp_resource(config: object) -> AdmittedPrimeP1SeccompResou
         )
         # This resolution intentionally happens before any profile filesystem I/O.
         policy = resolve_promoted_seccomp_policy(platform)
+        if values["ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST"] != policy.image_config_digest:
+            raise ValueError
         path = values["ASTERION_PRIME_P1_SECCOMP_PROFILE"]
         expected = values["ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256"]
-        fd = _open_profile(path)
-        identity = _identity(fd)
-        data, actual = _read_profile(fd, identity)
+        fds = _open_profile(path)
+        identities = _chain_identities(fds)
+        data, actual = _read_profile(fds[-1], identities[-1])
         if not hmac.compare_digest(actual, expected):
             raise ValueError
         _validate_profile(data, policy)
         result = AdmittedPrimeP1SeccompResource(
-            fd, path, identity, policy, actual, threading.Lock(), [False]
+            fds, path, identities, policy, actual, threading.Lock(), [False]
         )
-        fd = None
+        fds = ()
     except BaseException:
         pass
     finally:
-        if fd is not None:
-            _close_quietly(fd)
+        _close_all(fds)
     if result is None:
         raise PrimeP1AuthorityResourceError() from None
     return result
@@ -145,28 +142,27 @@ def admit_static_seccomp_resource(config: object) -> AdmittedPrimeP1SeccompResou
 
 def revalidate_static_seccomp_resource(resource: object) -> None:
     """Rewalk and recheck a retained static profile at its next safe use."""
-    fd: int | None = None
+    fds: tuple[int, ...] = ()
     failed = False
     try:
         if type(resource) is not AdmittedPrimeP1SeccompResource:
             raise ValueError
         _require_linux_posix()
         with resource._lock:
-            if resource._closed[0] or _identity(resource._fd) != resource._identity:
+            if resource._closed[0] or _chain_identities(resource._fds) != resource._identities:
                 raise ValueError
-        fd = _open_profile(resource._path)
-        identity = _identity(fd)
-        if identity != resource._identity:
-            raise ValueError
-        data, digest = _read_profile(fd, identity)
-        if not hmac.compare_digest(digest, resource._sha256):
-            raise ValueError
-        _validate_profile(data, resource._policy)
+            fds = _open_profile(resource._path)
+            identities = _chain_identities(fds)
+            if identities != resource._identities:
+                raise ValueError
+            data, digest = _read_profile(fds[-1], identities[-1])
+            if not hmac.compare_digest(digest, resource._sha256):
+                raise ValueError
+            _validate_profile(data, resource._policy)
     except BaseException:
         failed = True
     finally:
-        if fd is not None:
-            _close_quietly(fd)
+        _close_all(fds)
     if failed:
         raise PrimeP1AuthorityResourceError() from None
 
@@ -176,29 +172,31 @@ def _require_linux_posix() -> None:
         raise ValueError
 
 
-def _open_profile(path: object) -> int:
+def _open_profile(path: object) -> tuple[int, ...]:
     if type(path) is not str or not path.startswith("/") or "\x00" in path:
         raise ValueError
     components = path.split("/")[1:]
     if not components or any(not part or part in {".", ".."} for part in components):
         raise ValueError
-    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    fds = [os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)]
     try:
-        _validate_directory(directory)
+        _validate_directory(fds[-1])
         for part in components[:-1]:
             child = os.open(
                 part,
                 os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                dir_fd=directory,
+                dir_fd=fds[-1],
             )
-            _close_quietly(directory)
-            directory = child
-            _validate_directory(directory)
-        return os.open(
-            components[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory
-        )
-    finally:
-        _close_quietly(directory)
+            fds.append(child)
+            _validate_directory(child)
+        fds.append(os.open(
+            components[-1], os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
+            dir_fd=fds[-1],
+        ))
+        return tuple(fds)
+    except BaseException:
+        _close_all(tuple(fds))
+        raise
 
 
 def _validate_directory(fd: int) -> None:
@@ -209,6 +207,25 @@ def _validate_directory(fd: int) -> None:
         or info.st_mode & 0o022
     ):
         raise ValueError
+
+
+def _chain_identities(fds: tuple[int, ...]) -> tuple[_Identity, ...]:
+    if not fds:
+        raise ValueError
+    return tuple(
+        _directory_identity(fd) if index + 1 < len(fds) else _identity(fd)
+        for index, fd in enumerate(fds)
+    )
+
+
+def _directory_identity(fd: int) -> _Identity:
+    _require_cloexec(fd)
+    _validate_directory(fd)
+    info = os.fstat(fd)
+    return _Identity(
+        info.st_dev, info.st_ino, info.st_mode, info.st_nlink, info.st_uid,
+        info.st_gid, info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+    )
 
 
 def _identity(fd: int) -> _Identity:
@@ -356,3 +373,8 @@ def _close_quietly(fd: int) -> None:
         os.close(fd)
     except BaseException:
         pass
+
+
+def _close_all(fds: tuple[int, ...]) -> None:
+    for fd in reversed(fds):
+        _close_quietly(fd)

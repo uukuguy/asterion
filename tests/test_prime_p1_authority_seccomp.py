@@ -53,13 +53,20 @@ def _policy() -> SeccompPolicyLock:
 
 
 class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
-    def _config(self, root: Path, profile: Path) -> object:
+    def _config(
+        self,
+        root: Path,
+        profile: Path,
+        *,
+        image_config_digest: str = "sha256:" + "a" * 64,
+        profile_bytes: bytes = _PROFILE,
+    ) -> object:
         values = {
             "ASTERION_PRIME_P1_DOCKER_EXECUTABLE": "/usr/bin/docker",
             "ASTERION_PRIME_P1_DOCKER_SOCKET": "/var/run/docker.sock",
             "ASTERION_PRIME_P1_SECCOMP_PROFILE": str(profile),
-            "ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256": hashlib.sha256(_PROFILE).hexdigest(),
-            "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST": "sha256:" + "a" * 64,
+            "ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256": hashlib.sha256(profile_bytes).hexdigest(),
+            "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST": image_config_digest,
             "ASTERION_PRIME_P1_IMAGE_PLATFORM_OS": "linux",
             "ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE": "amd64",
             "ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT": "none",
@@ -96,6 +103,34 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                 admit_static_seccomp_resource(config)
         self.assertIsNone(raised.exception.__context__)
         self.assertNotIn("SECCOMP_SECRET_SENTINEL", str(raised.exception))
+
+    def test_rejects_config_image_digest_before_profile_filesystem_access(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile, image_config_digest="sha256:" + "d" * 64)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(
+                    catalog_module,
+                    "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG",
+                    PromotedSeccompPolicyCatalog((_policy(),)),
+                ),
+                patch.object(module.os, "open", side_effect=AssertionError("filesystem")) as opened,
+                self.assertRaises(PrimeP1AuthorityResourceError) as raised,
+            ):
+                admit_static_seccomp_resource(config)
+        opened.assert_not_called()
+        self.assertIsNone(raised.exception.__context__)
 
     def test_admits_exact_canonical_profile_and_revalidates(self) -> None:
         from asterion.applications.prime_agent.operator.authority_seccomp import (
@@ -164,7 +199,7 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                     with self.subTest(payload=payload[:16]):
                         profile.write_bytes(payload)
                         profile.chmod(0o600)
-                        config = self._config(root, profile)
+                        config = self._config(root, profile, profile_bytes=payload)
                         with self.assertRaises(PrimeP1AuthorityResourceError) as raised:
                             admit_static_seccomp_resource(config)
                         self.assertIsNone(raised.exception.__context__)
@@ -199,6 +234,31 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                 resource.close()
                 with self.assertRaises(PrimeP1AuthorityResourceError):
                     revalidate_static_seccomp_resource(resource)
+
+    def test_fifo_is_rejected_without_blocking(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.fifo"
+            os.mkfifo(profile, 0o600)
+            config = self._config(root, profile, profile_bytes=b"fifo")
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(
+                    catalog_module,
+                    "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG",
+                    PromotedSeccompPolicyCatalog((_policy(),)),
+                ),
+                self.assertRaises(PrimeP1AuthorityResourceError) as raised,
+            ):
+                admit_static_seccomp_resource(config)
+        self.assertIsNone(raised.exception.__context__)
 
 
 if __name__ == "__main__":
