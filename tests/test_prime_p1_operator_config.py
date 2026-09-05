@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import copy
 import pickle
+import platform
 from pathlib import Path
 import tempfile
 import unittest
@@ -198,6 +199,16 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
                 for key, value in VALUES.items()
                 if key != "ASTERION_PRIME_P1_IMAGE_PLATFORM_OS"
             },
+            "missing-architecture": {
+                key: value
+                for key, value in VALUES.items()
+                if key != "ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE"
+            },
+            "missing-variant": {
+                key: value
+                for key, value in VALUES.items()
+                if key != "ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT"
+            },
             "extra": {**VALUES, "EXTRA_PLATFORM": "linux"},
             "malformed-os": {
                 **VALUES,
@@ -223,6 +234,47 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
                     fd = self._open_config(root, text=self._text(values))
                     with self.assertRaises(PrimeP1OperatorConfigError):
                         load_operator_config(fd)
+
+    def test_accepts_v8_platform_variant_without_public_platform_getter(self) -> None:
+        values = {
+            **VALUES,
+            "ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT": "v8",
+        }
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            config = load_operator_config(
+                self._open_config(Path(temp), text=self._text(values))
+            )
+        self.assertEqual(config.model_id, "deepseek-chat")
+        self.assertEqual(
+            [name for name in dir(config) if not name.startswith("_")], ["model_id"]
+        )
+
+    def test_load_does_not_probe_host_platform_environment_or_cwd(self) -> None:
+        def forbidden(*_: object, **__: object) -> object:
+            raise AssertionError("host probing is forbidden")
+
+        class ForbiddenEnvironment(dict[str, str]):
+            def __getattribute__(self, _: str) -> object:
+                raise AssertionError("environment access is forbidden")
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            root = Path(temp)
+            fd = self._open_config(root)
+            previous_cwd = Path.cwd()
+            os.chdir(root)
+            try:
+                import asterion.applications.prime_agent.operator.authority_config as module
+
+                with (
+                    patch.object(platform, "machine", side_effect=forbidden),
+                    patch.object(module.os, "uname", side_effect=forbidden),
+                    patch.object(module.os, "getcwd", side_effect=forbidden),
+                    patch.object(module.os, "environ", ForbiddenEnvironment()),
+                ):
+                    config = load_operator_config(fd)
+            finally:
+                os.chdir(previous_cwd)
+        self.assertEqual(config.model_id, "deepseek-chat")
 
     def test_interpolation_is_literal_and_environment_is_never_merged(self) -> None:
         values = {**VALUES, "DEEPSEEK_API_KEY": "${UNSET_SENTINEL}"}

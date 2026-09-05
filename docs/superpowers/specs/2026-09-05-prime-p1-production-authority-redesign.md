@@ -152,7 +152,19 @@ ASTERION_PRIME_P1_EVIDENCE_ROOT
 ASTERION_PRIME_P1_RECEIPT_KEY_ID
 ASTERION_PRIME_P1_RECEIPT_HMAC_KEY
 DEEPSEEK_API_KEY
+ASTERION_PRIME_P1_IMAGE_PLATFORM_OS
+ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE
+ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT
 ```
+
+The target is explicit operator configuration, never host discovery: OS and
+architecture use the canonical lowercase OCI grammar, while variant is `none`
+for no variant or `v[0-9]+`. P1 v1 accepts only `linux` OS but does not infer or
+hard-code its architecture. These three exact strings are receipt-HMAC-bound;
+this parser validates them but does not expose a platform descriptor. The raw
+literal `none` is normalized to `None` only by the forthcoming
+`authority_resources` descriptor construction, which privately resolves that
+descriptor against the code-owned promoted catalog.
 
 The file must be a single-link regular file owned by the authority uid, exact
 mode `0600`, 1..65536 bytes, below a no-symlink directory chain not writable by
