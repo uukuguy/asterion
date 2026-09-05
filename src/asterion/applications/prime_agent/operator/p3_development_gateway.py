@@ -20,17 +20,17 @@ class PrimeP3DevelopmentGateway(PrimeP2DevelopmentGateway):
         try:
             super().__init__(**kwargs)
             self._protocol = "asterion.prime-p3-development-gateway/v1"
+            self._nested_command_kinds = _KINDS
             if kwargs.get("entrypoint") is None:
                 self._entrypoint = (self._entrypoint[0], str(Path(__file__).resolve().parents[5] / "packages/typescript/prime-gateway/dist/src/p3-development-main.js"))
         except BaseException:
             raise PrimeP3DevelopmentGatewayError() from None
 
     async def request_nested(self, kind: str, payload: Mapping[str, object]) -> Mapping[str, object]:
-        if kind not in _KINDS or type(payload) is not dict:
-            raise PrimeP3DevelopmentGatewayError()
-        # Nested command pumping is implemented by the P3 bridge; callers may
-        # only reach it through an active P3 root prompt.
-        raise PrimeP3DevelopmentGatewayError()
+        try:
+            return await super().request_nested(kind, payload)
+        except BaseException:
+            raise PrimeP3DevelopmentGatewayError() from None
 
 
 __all__ = ("PrimeP3DevelopmentGateway", "PrimeP3DevelopmentGatewayError")
