@@ -93,6 +93,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
     ) -> None:
         invalid = (
             [(b"x", [], socket_module.MSG_TRUNC, None)],
+            [(b"x", [], int(socket_module.MSG_CTRUNC), None)],
             [(b"x", [(1, 2, b"fd")], 0, None)],
             [(b"", [], 0, None)],
             [(None, [], 0, None)],
@@ -130,6 +131,16 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                 AdmittedAuthorityDescriptors(exhausted, 11, 12, lambda _: None)
             )
         self.assertEqual(exhausted.calls, 9)
+        success_responses: list[object] = [OSError(errno.EINTR, "SENTINEL")] * 8
+        success_responses.append((b"x", [], 0, None))
+        succeeded = _PacketSocket(success_responses)
+        self.assertEqual(
+            _receive_authority_packet(
+                AdmittedAuthorityDescriptors(succeeded, 11, 12, lambda _: None)
+            ),
+            b"x",
+        )
+        self.assertEqual(succeeded.calls, 9)
 
     def test_private_packet_receive_redacts_close_failure(self) -> None:
         connection = _PacketSocket([(b"x", [], 0, None)])

@@ -186,7 +186,7 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
             or type(ancillary) is not list
             or ancillary
             or type(flags) is not int
-            or flags & socket.MSG_TRUNC
+            or flags & (socket.MSG_TRUNC | socket.MSG_CTRUNC)
         ):
             raise ValueError
         result = packet
