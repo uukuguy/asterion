@@ -346,6 +346,32 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         with self.assertRaises(OSError):
             os.fstat(config_read)
 
+    def test_pre_ready_cleanup_normalizes_base_exception_and_attempts_every_owner(
+        self,
+    ) -> None:
+        class CloseBomb(BaseException):
+            pass
+
+        class CloseBombSocket:
+            def __init__(self) -> None:
+                self.close_attempts = 0
+
+            def close(self) -> None:
+                self.close_attempts += 1
+                raise CloseBomb("CLOSE_BOMB_SENTINEL")
+
+        connection = CloseBombSocket()
+        closed_fds: list[int] = []
+        bundle = AdmittedAuthorityDescriptors(connection, 101, 102, closed_fds.append)
+
+        with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+            _run_ready_execute_exchange(bundle, cast(Any, object()))
+
+        self.assertIsNone(raised.exception.__context__)
+        self.assertNotIn("CLOSE_BOMB_SENTINEL", "".join(traceback.format_exception(raised.exception)))
+        self.assertEqual(connection.close_attempts, 1)
+        self.assertEqual(closed_fds, [101, 102])
+
     def test_rejected_descriptor_subclass_uses_base_cleanup_without_override(
         self,
     ) -> None:

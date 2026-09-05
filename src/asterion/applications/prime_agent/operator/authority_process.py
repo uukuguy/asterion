@@ -91,13 +91,13 @@ class AdmittedAuthorityDescriptors:
         if connection is not None:
             try:
                 _close_socket(connection)
-            except Exception:
+            except BaseException:
                 pass
         for fd in fds:
             if fd is not None:
                 try:
                     self._close_fd(fd)
-                except Exception:
+                except BaseException:
                     pass
 
     def _take(self, attribute: str) -> object:
@@ -315,13 +315,13 @@ def _run_ready_execute_exchange(
         if config_fd is not None:
             try:
                 descriptors._close_fd(config_fd)
-            except Exception:
+            except BaseException:
                 pass
         descriptor_mro = type.__getattribute__(type(descriptors), "__mro__")
         if any(base is AdmittedAuthorityDescriptors for base in descriptor_mro):
             try:
                 AdmittedAuthorityDescriptors.close(descriptors)
-            except Exception:
+            except BaseException:
                 pass
     _unavailable()
 
