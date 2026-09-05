@@ -449,6 +449,29 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                 module._close_all(fds)
             self.assertEqual(closed, list(reversed(fds)))
 
+    def test_tuple_allocation_failure_closes_each_opened_fd_once(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            path = Path(temporary) / "profile"
+            path.write_bytes(b"x")
+            path.chmod(0o600)
+            closed: list[int] = []
+            close_quietly = module._close_quietly
+
+            def tracked_close(fd: int) -> None:
+                closed.append(fd)
+                close_quietly(fd)
+
+            with (
+                patch.object(module, "_tuple", side_effect=MemoryError),
+                patch.object(module, "_close_quietly", side_effect=tracked_close),
+                self.assertRaises(MemoryError),
+            ):
+                module._open_profile(str(path))
+            self.assertEqual(len(closed), len(set(closed)))
+            self.assertGreater(len(closed), 1)
+
     def test_post_open_validation_failure_closes_full_chain_without_transfer(self) -> None:
         from asterion.applications.prime_agent.operator.authority_seccomp import (
             PrimeP1AuthorityResourceError,

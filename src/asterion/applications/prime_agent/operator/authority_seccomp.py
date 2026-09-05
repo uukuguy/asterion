@@ -40,6 +40,7 @@ _OPS: Final = frozenset(
         "SCMP_CMP_MASKED_EQ",
     }
 )
+_tuple = tuple
 
 
 class PrimeP1AuthorityResourceError(ValueError):
@@ -222,9 +223,8 @@ def _open_profile(path: object) -> tuple[int, ...]:
             _close_quietly(leaf)
             raise
         try:
-            result = tuple(fds)
+            result = _tuple(fds)
         except MemoryError:
-            _close_all(fds)
             raise
         fds = []
         return result
