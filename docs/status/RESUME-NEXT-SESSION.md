@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-06 06:15. **Session remains active — not a final handoff.**
+> Updated: 2026-09-06 06:30. **Session remains active — not a final handoff.**
 
 ## Direction
 
@@ -30,6 +30,8 @@ P1-A与P1-B开发链路均已真实完成。P1-B使用一个Prime SDK session、
 2. 当前阻点在credentialed backend边界：一次HTTP成功响应未产生首轮唯一`ipython`调用；按轮固定tool choice后，后续尝试在可分类HTTP响应前失败。先做一次窄的backend transport/response compatibility决策，不做盲重试。
 3. 保持严格tool/text响应校验、五次调用和内部成本/期限上限；不要通过接受任意文本来伪造工具证明。
 4. 获得一次真实CLI安全trace并确认零残留后，P1开发CLI才可标记Verified；随后继续P2 admitted execution与installed route。
+
+最新进展：`6bd2a764`增加无正文的私有DNS/connect/TLS/timeout/HTTP/response分类与严格P1-B失败帧；`a1861acc`按Sol复审隔离公开异常上下文和本地child故障。两个focused测试文件15项与Ruff通过。随后一次current-source首回调真实诊断成功返回唯一`ipython`调用；一次完整标准CLI仍安全失败，且guest中Prime Node进程与P1-B容器计数均为0。下一步只隔离后续四个callback或worker阶段，不重复首回调、不迁移Responses API、不接受文本伪造tool call。
 
 ## Actual environment
 

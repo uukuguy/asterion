@@ -1913,3 +1913,7 @@
 - 05:58 Covered the provider-free composed Prime verification route [e04580db]
 - 06:07 Fixed P1-B tool choice by its five protocol stages [c1c7b080]
 - 06:15 Recorded implemented CLI wiring and external backend limitation.
+- 06:18 Documented P1 CLI backend limitation to prevent a false verified claim [1601b418]
+- 06:24 Added private fixed P1 provider failure categories and strict child frames [6bd2a764]
+- 06:28 Removed private exception context and separated local child faults [a1861acc]
+- 06:30 Verified one real named-tool callback; complete CLI still failed safely with zero residue.
