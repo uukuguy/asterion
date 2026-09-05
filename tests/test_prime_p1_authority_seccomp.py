@@ -161,7 +161,13 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                 self.assertEqual(resource.sha256, hashlib.sha256(_PROFILE).hexdigest())
                 self.assertEqual(repr(resource), "AdmittedPrimeP1SeccompResource(redacted)")
                 revalidate_static_seccomp_resource(resource)
+                owned_fds = resource._fds
                 resource.close()
+                resource.close()
+                for fd in owned_fds:
+                    with self.subTest(fd=fd):
+                        with self.assertRaises(OSError):
+                            os.fstat(fd)
 
     def test_rejects_noncanonical_or_non_promoted_profile_atoms(self) -> None:
         from asterion.applications.prime_agent.operator.authority_seccomp import (
@@ -293,6 +299,94 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
             ):
                 admit_static_seccomp_resource(config)
         self.assertIsNone(raised.exception.__context__)
+
+    def test_reader_retries_eintr_with_bound_and_resets_after_a_chunk(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            path = Path(temporary) / "profile"
+            path.write_bytes(b"x")
+            path.chmod(0o600)
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+            identity = module._identity(fd)
+            actual_read = os.read
+            attempts = 0
+
+            def interrupted_then_data(target_fd: int, count: int) -> bytes:
+                nonlocal attempts
+                attempts += 1
+                if attempts <= 8:
+                    raise InterruptedError
+                return actual_read(target_fd, count)
+
+            with patch.object(module.os, "read", side_effect=interrupted_then_data):
+                data, digest = module._read_profile(fd, identity)
+            self.assertEqual(data, b"x")
+            self.assertEqual(digest, hashlib.sha256(b"x").hexdigest())
+            os.close(fd)
+
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+            identity = module._identity(fd)
+            calls = 0
+
+            def reset_after_chunk(_: int, __: int) -> bytes:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise InterruptedError
+                if calls == 2:
+                    return b"x"
+                if calls <= 10:
+                    raise InterruptedError
+                return b""
+
+            with patch.object(module.os, "read", side_effect=reset_after_chunk):
+                data, _ = module._read_profile(fd, identity)
+            self.assertEqual(data, b"x")
+            os.close(fd)
+
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+            identity = module._identity(fd)
+            with patch.object(module.os, "read", side_effect=InterruptedError):
+                with self.assertRaises(ValueError):
+                    module._read_profile(fd, identity)
+            os.close(fd)
+
+    def test_lexically_oversized_paths_are_rejected_before_open(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+
+        for path in ("/" + ("a/" * 65) + "profile", "/" + "a" * 4097):
+            with self.subTest(path_length=len(path)):
+                with patch.object(module.os, "open") as opened:
+                    with self.assertRaises(ValueError):
+                        module._open_profile(path)
+                opened.assert_not_called()
+
+    def test_missing_root_cloexec_closes_opened_root_once(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            path = Path(temporary) / "profile"
+            path.write_bytes(b"x")
+            path.chmod(0o600)
+            closed: list[int] = []
+            actual_close = os.close
+
+            def track_close(fd: int) -> None:
+                closed.append(fd)
+                actual_close(fd)
+
+            fds = module._open_profile(str(path))
+            with patch.object(module.fcntl, "fcntl", return_value=0):
+                with patch.object(module.os, "close", side_effect=track_close):
+                    with self.assertRaises(ValueError):
+                        module._chain_identities(fds)
+                    module._close_all(fds)
+            self.assertEqual(closed, list(reversed(fds)))
+            for fd in fds:
+                with self.subTest(fd=fd):
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
 
 
 if __name__ == "__main__":
