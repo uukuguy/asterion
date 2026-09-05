@@ -99,6 +99,25 @@ def _resources() -> AdmittedProductionAuthorityResources:
     )
 
 
+def _expected_aggregate_digest(contributions: tuple[bytes, ...]) -> str:
+    """Independently encode the fixed resource-set aggregate protocol."""
+    digest = hashlib.sha256(b"asterion.prime-p1.resource-set/v1\0")
+    for contribution in contributions:
+        digest.update(len(contribution).to_bytes(8, "big", signed=False))
+        digest.update(contribution)
+    return digest.hexdigest()
+
+
+def _changed_identity_field(identity: object, field: str) -> object:
+    """Return an exact identity type with one encoded integer field changed."""
+    values = {
+        name: getattr(identity, name)
+        for name in type(identity).__dataclass_fields__
+    }
+    values[field] += 1
+    return type(identity)(**values)
+
+
 def _real_resources(directory: str) -> AdmittedProductionAuthorityResources:
     """Build exact admitted child objects whose contributions validate locally."""
     import asterion.applications.prime_agent.operator.authority_application_resources as application_module
@@ -188,53 +207,103 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
             finally:
                 resource.close()
 
-            for name in ("_artifacts", "_application_resources", "_static_resources", "_evidence_resource", "_docker_executable", "_docker_socket"):
+            for name in (
+                "_artifacts",
+                "_application_resources",
+                "_static_resources",
+                "_evidence_resource",
+                "_docker_executable",
+                "_docker_socket",
+            ):
                 resource = _real_resources(directory)
                 try:
                     child = getattr(resource, name)
                     child.close()
-                    with patch.object(AdmittedPrimeP1DockerSocket, "revalidate_path"), self.assertRaises(PrimeP1AuthorityResourceError):
+                    with patch.object(
+                        AdmittedPrimeP1DockerSocket, "revalidate_path"
+                    ), self.assertRaises(PrimeP1AuthorityResourceError):
                         resource._resource_set_sha256()
                 finally:
                     resource.close()
 
-    def test_real_child_contributions_bind_retained_identity_values(self) -> None:
+    def test_digest_matches_independent_ordered_child_contribution_encoding(self) -> None:
         with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
             resource = _real_resources(directory)
             try:
                 with patch.object(AdmittedPrimeP1DockerSocket, "revalidate_path"):
-                    children_and_mutations = (
-                        (resource._artifacts, "_identity", b"d" * 32),
-                        (resource._application_resources, "_identity", b"e" * 32),
-                        (
+                    contributions = tuple(
+                        child._resource_set_contribution()
+                        for child in (
+                            resource._artifacts,
+                            resource._application_resources,
                             resource._static_resources,
-                            "_identity",
-                            type(resource._static_resources._identity)("f" * 64),
-                        ),
-                        (
                             resource._evidence_resource,
-                            "_identity",
-                            type(resource._evidence_resource._identity)(9, 8, 7, 6, 5),
-                        ),
-                        (resource._docker_executable, "_digest", b"g" * 32),
-                        (
+                            resource._docker_executable,
                             resource._docker_socket,
-                            "_socket",
-                            type(resource._docker_socket._socket)(9, 8, 7, 6, 5),
-                        ),
-                        (resource._docker_socket, "_expected_api_version", "1.42"),
-                        (resource._docker_socket, "_expected_version", "26.1.5"),
+                        )
                     )
-                    for child, attribute, changed in children_and_mutations:
-                        original = getattr(child, attribute)
-                        baseline = child._resource_set_contribution()
-                        setattr(child, attribute, changed)
-                        if attribute == "_identity" and child is resource._evidence_resource:
-                            with self.assertRaises(ValueError):
-                                child._resource_set_contribution()
-                        else:
-                            self.assertNotEqual(baseline, child._resource_set_contribution())
-                        setattr(child, attribute, original)
+                    expected = _expected_aggregate_digest(contributions)
+                    self.assertEqual(expected, resource._resource_set_sha256())
+                    swapped = list(contributions)
+                    swapped[0], swapped[1] = swapped[1], swapped[0]
+                    self.assertNotEqual(expected, _expected_aggregate_digest(tuple(swapped)))
+            finally:
+                resource.close()
+
+    def test_docker_executable_identity_mutation_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
+            resource = _real_resources(directory)
+            docker = resource._docker_executable
+            try:
+                with patch.object(AdmittedPrimeP1DockerSocket, "revalidate_path"):
+                    baseline = resource._resource_set_sha256()
+                    original = docker._identity
+                    docker._identity = _changed_identity_field(original, "mtime_ns")
+                    try:
+                        with self.assertRaises(ValueError):
+                            docker._resource_set_contribution()
+                        with self.assertRaises(PrimeP1AuthorityResourceError):
+                            resource._resource_set_sha256()
+                    finally:
+                        docker._identity = original
+                    self.assertEqual(baseline, resource._resource_set_sha256())
+            finally:
+                resource.close()
+
+    def test_docker_socket_identity_parent_and_projection_mutations_are_bound(self) -> None:
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
+            resource = _real_resources(directory)
+            docker_socket = resource._docker_socket
+            try:
+                with patch.object(AdmittedPrimeP1DockerSocket, "revalidate_path"):
+                    baseline = resource._resource_set_sha256()
+                    original_socket = docker_socket._socket
+                    docker_socket._socket = _changed_identity_field(original_socket, "inode")
+                    try:
+                        self.assertNotEqual(baseline, resource._resource_set_sha256())
+                    finally:
+                        docker_socket._socket = original_socket
+
+                    self.assertEqual(len(docker_socket._identities), 1)
+                    original_chain = docker_socket._identities
+                    docker_socket._identities = (
+                        _changed_identity_field(original_chain[0], "inode"),
+                    )
+                    try:
+                        with self.assertRaises(ValueError):
+                            docker_socket._resource_set_contribution()
+                        with self.assertRaises(PrimeP1AuthorityResourceError):
+                            resource._resource_set_sha256()
+                    finally:
+                        docker_socket._identities = original_chain
+
+                    original_version = docker_socket._expected_version
+                    docker_socket._expected_version = "26.1.5"
+                    try:
+                        self.assertNotEqual(baseline, resource._resource_set_sha256())
+                    finally:
+                        docker_socket._expected_version = original_version
+                    self.assertEqual(baseline, resource._resource_set_sha256())
             finally:
                 resource.close()
 
@@ -252,13 +321,21 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
                     resource._docker_socket,
                 )
                 originals = tuple(type(child)._resource_set_contribution for child in children)
+                labels = (
+                    "artifact",
+                    "application",
+                    "static",
+                    "evidence",
+                    "docker executable",
+                    "docker socket",
+                )
                 patches = [
                     patch.object(
                         type(child),
                         "_resource_set_contribution",
                         autospec=True,
                         side_effect=lambda child, original=original: (
-                            events.append(type(child).__name__), original(child)
+                            events.append(labels[len(events)]), original(child)
                         )[1],
                     )
                     for child, original in zip(children, originals, strict=True)
@@ -281,8 +358,20 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
                         )
                     )
                     resource._resource_set_sha256()
-                self.assertEqual(events[-2:], ["docker-final", "socket-revalidate"])
-                self.assertEqual(len(events), 9)
+                self.assertEqual(
+                    events,
+                    [
+                        "artifact",
+                        "application",
+                        "static",
+                        "evidence",
+                        "docker executable",
+                        "docker socket",
+                        "socket-revalidate",
+                        "docker-final",
+                        "socket-revalidate",
+                    ],
+                )
             finally:
                 resource.close()
 
