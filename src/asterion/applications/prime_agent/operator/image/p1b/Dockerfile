@@ -6,7 +6,7 @@ RUN python -m pip install --no-cache-dir --require-hashes -r /opt/prime-requirem
 COPY image/launcher.py /usr/local/bin/launcher.py
 COPY image/closed_worker.py /usr/local/bin/closed_worker.py
 COPY image/p1b_launcher.py /usr/local/bin/prime-p1b-persistent-worker.py
-COPY image/fixture/p1b-workload.json /opt/prime-fixture/p1b-workload.json
+COPY image/fixture /opt/prime-fixture
 RUN chmod 0555 /usr/local/bin/launcher.py /usr/local/bin/closed_worker.py /usr/local/bin/prime-p1b-persistent-worker.py \
     && test ! -e /root/.aws && test ! -L /root/.aws \
     && chmod 0711 /root

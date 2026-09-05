@@ -29,6 +29,8 @@ _FIXTURE_DIRECTORY = "p1b-state"
 _FIXTURE_NAME = "continuity.txt"
 _FIXTURE_BYTES = b"p1b continuity fixture\n"
 _SELF_CHECK = b'{"credentials_absent":true,"effective_capabilities":0,"effective_user_id":65534,"no_new_privileges":1,"nonloopback_network_absent":true,"root_read_only":true,"seccomp_mode":2,"workspace_only_writable":true}'
+_STARTER = Path("/opt/prime-fixture/starter/solution.py")
+_SOLUTION = Path("/workspace/solution.py")
 
 
 class _BoundedDiscard(io.TextIOBase):
@@ -136,6 +138,11 @@ def _event(identity: Mapping[str, str], sequence: int, kind: str, **values: obje
 def _prepare_workspace(workspace: Path) -> Path:
     if not workspace.is_absolute() or not workspace.is_dir():
         raise ValueError("invalid workspace")
+    if _SOLUTION != workspace / "solution.py":
+        raise ValueError("unexpected workspace")
+    _SOLUTION.write_bytes(_STARTER.read_bytes())
+    if _SOLUTION.read_bytes() != _STARTER.read_bytes():
+        raise ValueError("starter rejected")
     state = workspace / _FIXTURE_DIRECTORY
     if state.exists():
         raise ValueError("workspace state already exists")

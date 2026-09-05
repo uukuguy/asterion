@@ -108,18 +108,26 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
         self._specification(container_id)  # type: ignore[attr-defined]
         await self._call(self._prefix + ("container", "pause", container_id), control)  # type: ignore[attr-defined]
         try:
-            archive = await self._call(self._prefix + ("container", "cp", container_id + ":/workspace/p1b-state/continuity.txt", "-"), control)  # type: ignore[attr-defined]
-            with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as tar:
-                members = tar.getmembers()
-                if len(members) != 1 or not members[0].isreg() or members[0].size > _FRAME_CAP: raise ValueError
-                source = tar.extractfile(members[0])
-                if source is None: raise ValueError
-                return source.read(_FRAME_CAP + 1)
+            continuity = await self._call(self._prefix + ("container", "cp", container_id + ":/workspace/p1b-state/continuity.txt", "-"), control)  # type: ignore[attr-defined]
+            if self._archive_file(continuity.stdout, "continuity.txt") != _FIXTURE: raise ValueError
+            solution = await self._call(self._prefix + ("container", "cp", container_id + ":/workspace/solution.py", "-"), control)  # type: ignore[attr-defined]
+            return self._archive_file(solution.stdout, "solution.py")
         except (tarfile.TarError, ValueError, OSError):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         finally:
             cleanup = _LifecycleCallControl(monotonic() + 30, None)
             await self._call(self._prefix + ("container", "unpause", container_id), cleanup)  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _archive_file(raw: bytes, name: str) -> bytes:
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tar:
+            members = tar.getmembers()
+            if len(members) != 1 or members[0].name != name or not members[0].isreg() or members[0].size > _FRAME_CAP: raise ValueError
+            source = tar.extractfile(members[0])
+            if source is None: raise ValueError
+            data = source.read(_FRAME_CAP + 1)
+            if len(data) != members[0].size or len(data) > _FRAME_CAP: raise ValueError
+            return data
 
 
 @dataclass(frozen=True, repr=False)
@@ -255,7 +263,8 @@ class P1BDockerPersistentWorkerService:
     async def snapshot(self) -> bytes:
         if self._container is None or self._state != "snapshot": raise RestrictedWorkerError("restricted worker value is invalid")
         value = await self._transport.snapshot(self._container, control=_LifecycleCallControl(monotonic() + 30, None))
-        if value != _FIXTURE: raise RestrictedWorkerError("restricted worker value is invalid")
+        if type(value) is not bytes or not value or len(value) > _FRAME_CAP:
+            raise RestrictedWorkerError("restricted worker value is invalid")
         self._state = "cleanup"; return value
 
     async def cleanup(self) -> None:
