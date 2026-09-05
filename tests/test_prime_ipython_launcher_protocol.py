@@ -14,6 +14,7 @@ from types import ModuleType, SimpleNamespace
 import unittest
 
 from asterion.applications.prime_agent.operator.ipython_workload import (
+    PRIME_IPYTHON_CODING_EXPECTED_RESULT_SHA256,
     PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
 )
 
@@ -70,6 +71,16 @@ def _restore_ipython(previous: dict[str, ModuleType | None]) -> None:
 
 
 class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
+    def test_workload_identity_is_distinct_from_existing_launcher_result_identity(self) -> None:
+        launcher = (IMAGE / "launcher.py").read_text(encoding="utf-8")
+
+        self.assertNotEqual(
+            PRIME_IPYTHON_CODING_WORKLOAD_DIGEST.removeprefix("sha256:"),
+            PRIME_IPYTHON_CODING_EXPECTED_RESULT_SHA256,
+        )
+        self.assertIn(PRIME_IPYTHON_CODING_EXPECTED_RESULT_SHA256, launcher)
+        self.assertNotIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
+
     def test_fixture_starts_failing_then_can_pass_without_oracle_mutation(self) -> None:
         starter = IMAGE / "fixture/starter/solution.py"
         oracle = IMAGE / "fixture/oracle/oracle.py"
@@ -103,7 +114,8 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
         expected = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True)
         self.assertIn(expected, launcher)
         self.assertIn("_FRAME_LIMIT", launcher)
-        self.assertIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
+        self.assertIn(PRIME_IPYTHON_CODING_EXPECTED_RESULT_SHA256, launcher)
+        self.assertNotIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
         self.assertIn("hashlib.sha256", launcher)
         self.assertIn('"result_digest"', launcher)
         self.assertNotIn('{"terminal":"completed"}', launcher)
