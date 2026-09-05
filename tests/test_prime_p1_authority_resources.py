@@ -15,6 +15,7 @@ from asterion.applications.prime_agent.operator.authority_config import (
     load_operator_config,
 )
 from asterion.applications.prime_agent.operator.authority_resources import (
+    AdmittedProductionAuthorityResources,
     AdmittedStaticAuthorityResources,
     PrimeP1AuthorityResourceError,
     admit_production_authority_resources,
@@ -22,6 +23,7 @@ from asterion.applications.prime_agent.operator.authority_resources import (
     admit_static_image_resource,
 )
 from asterion.applications.prime_agent.operator.authority_evidence import (
+    AdmittedPrimeP1EvidenceRoot,
     PrimeP1EvidenceResourceError,
 )
 from asterion.applications.prime_agent.operator.image_input_lock import (
@@ -70,6 +72,18 @@ class _CountingResource:
     def close(self) -> None:
         self.close_calls += 1
         self._events.append(self._name)
+
+
+class _StaticResourceSubclass(AdmittedStaticAuthorityResources):
+    pass
+
+
+class _EvidenceResourceSubclass(AdmittedPrimeP1EvidenceRoot):
+    pass
+
+
+class _ProductionResourcesSubclass(AdmittedProductionAuthorityResources):
+    pass
 
 
 def _artifacts(*, config_sha256: str = "a" * 64) -> tuple[ImageArtifact, ...]:
@@ -133,43 +147,210 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
     def test_production_resources_require_static_and_evidence(self) -> None:
         config = self._config()
         events: list[str] = []
-        static = _CountingResource(events, "static")
-        evidence = _CountingResource(events, "evidence")
         import asterion.applications.prime_agent.operator.authority_resources as module
+        import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
+
+        static = AdmittedStaticAuthorityResources(
+            object(),
+            _CountingResource([], "nested"),
+            _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+        )
+        evidence_fd = os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC)
+        evidence = AdmittedPrimeP1EvidenceRoot(
+            evidence_fd, _token=evidence_module._EVIDENCE_TOKEN
+        )
+        original_static_close = AdmittedStaticAuthorityResources.close
+        original_evidence_close = AdmittedPrimeP1EvidenceRoot.close
+
+        def close_static(resource: AdmittedStaticAuthorityResources) -> None:
+            events.append("static")
+            original_static_close(resource)
+
+        def close_evidence(resource: AdmittedPrimeP1EvidenceRoot) -> None:
+            events.append("evidence")
+            original_evidence_close(resource)
 
         with (
             patch.object(
                 module, "admit_static_authority_resources", return_value=static
             ) as admit_static,
             patch.object(module, "admit_evidence_root", return_value=evidence) as admit_evidence,
+            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static),
+            patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence),
         ):
             resources = admit_production_authority_resources(config)
-        admit_static.assert_called_once_with(config)
-        admit_evidence.assert_called_once_with(config)
-        self.assertEqual(repr(resources), "AdmittedProductionAuthorityResources(redacted)")
-        with self.assertRaises(TypeError):
-            resources.__reduce__()
-        threads = [threading.Thread(target=resources.close) for _ in range(2)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
+            admit_static.assert_called_once_with(config)
+            admit_evidence.assert_called_once_with(config)
+            self.assertEqual(repr(resources), "AdmittedProductionAuthorityResources(redacted)")
+            with self.assertRaises(TypeError):
+                resources.__reduce__()
+            threads = [threading.Thread(target=resources.close) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
         self.assertEqual(events, ["evidence", "static"])
 
     def test_evidence_failure_closes_static_once_in_reverse_acquisition_order(self) -> None:
         config = self._config()
-        events: list[str] = []
-        static = _CountingResource(events, "static")
         import asterion.applications.prime_agent.operator.authority_resources as module
+
+        static = AdmittedStaticAuthorityResources(
+            object(),
+            _CountingResource([], "nested"),
+            _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+        )
+        original_close = AdmittedStaticAuthorityResources.close
+
+        def close(resource: AdmittedStaticAuthorityResources) -> None:
+            original_close(resource)
 
         with (
             patch.object(module, "admit_static_authority_resources", return_value=static),
             patch.object(module, "admit_evidence_root", side_effect=PrimeP1EvidenceResourceError),
+            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close) as close_static,
             self.assertRaises(PrimeP1AuthorityResourceError),
         ):
             admit_production_authority_resources(config)
-        self.assertEqual(static.close_calls, 1)
-        self.assertEqual(events, ["static"])
+        close_static.assert_called_once_with(static)
+
+    def test_factory_rejects_lookalike_or_subclass_children_without_ownership_transfer(
+        self,
+    ) -> None:
+        config = self._config()
+        import asterion.applications.prime_agent.operator.authority_resources as module
+
+        for child, factory_name in (
+            (_CountingResource([], "static-lookalike"), "admit_static_authority_resources"),
+            (
+                _StaticResourceSubclass(
+                    object(),
+                    _CountingResource([], "nested"),
+                    _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+                ),
+                "admit_static_authority_resources",
+            ),
+            (_CountingResource([], "evidence-lookalike"), "admit_evidence_root"),
+        ):
+            with self.subTest(factory_name=factory_name, child_type=type(child)):
+                exact_static = AdmittedStaticAuthorityResources(
+                    object(),
+                    _CountingResource([], "nested"),
+                    _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+                )
+                try:
+                    patches = {
+                        "admit_static_authority_resources": exact_static,
+                        "admit_evidence_root": _CountingResource([], "evidence"),
+                    }
+                    patches[factory_name] = child
+                    with (
+                        patch.object(
+                            module,
+                            "admit_static_authority_resources",
+                            return_value=patches["admit_static_authority_resources"],
+                        ),
+                        patch.object(
+                            module,
+                            "admit_evidence_root",
+                            return_value=patches["admit_evidence_root"],
+                        ),
+                        self.assertRaises(PrimeP1AuthorityResourceError) as raised,
+                    ):
+                        admit_production_authority_resources(config)
+                    self.assertIsNone(raised.exception.__context__)
+                    if isinstance(child, _CountingResource):
+                        self.assertEqual(child.close_calls, 0)
+                    else:
+                        self.assertFalse(child._closed)
+                finally:
+                    exact_static.close()
+                    if isinstance(child, _StaticResourceSubclass):
+                        child.close()
+
+    def test_constructor_rejects_wrong_token_children_and_aggregate_subclass_without_transfer(
+        self,
+    ) -> None:
+        import asterion.applications.prime_agent.operator.authority_resources as module
+        import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
+
+        static = AdmittedStaticAuthorityResources(
+            object(),
+            _CountingResource([], "nested"),
+            _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+        )
+        evidence_fd = os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC)
+        evidence = AdmittedPrimeP1EvidenceRoot(
+            evidence_fd, _token=evidence_module._EVIDENCE_TOKEN
+        )
+        static_subclass = _StaticResourceSubclass(
+            object(),
+            _CountingResource([], "nested-subclass"),
+            _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+        )
+        evidence_subclass_fd = os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC)
+        evidence_subclass = _EvidenceResourceSubclass(
+            evidence_subclass_fd, _token=evidence_module._EVIDENCE_TOKEN
+        )
+        try:
+            cases = (
+                (AdmittedProductionAuthorityResources, static, evidence, object()),
+                (AdmittedProductionAuthorityResources, object(), evidence, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static, object(), module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static_subclass, evidence, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static, evidence_subclass, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (_ProductionResourcesSubclass, static, evidence, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+            )
+            for constructor, static_child, evidence_child, token in cases:
+                with self.subTest(constructor=constructor, static_type=type(static_child), evidence_type=type(evidence_child)):
+                    with self.assertRaises(PrimeP1AuthorityResourceError):
+                        constructor(static_child, evidence_child, _token=token)
+                    self.assertFalse(static._closed)
+                    self.assertEqual(evidence._fd, evidence_fd)
+                    self.assertFalse(static_subclass._closed)
+                    self.assertEqual(evidence_subclass._fd, evidence_subclass_fd)
+        finally:
+            evidence_subclass.close()
+            static_subclass.close()
+            evidence.close()
+            static.close()
+
+    def test_constructor_failure_closes_acquired_exact_children_in_reverse_order(self) -> None:
+        config = self._config()
+        events: list[str] = []
+        import asterion.applications.prime_agent.operator.authority_resources as module
+        import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
+
+        static = AdmittedStaticAuthorityResources(
+            object(),
+            _CountingResource([], "nested"),
+            _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+        )
+        evidence_fd = os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC)
+        evidence = AdmittedPrimeP1EvidenceRoot(
+            evidence_fd, _token=evidence_module._EVIDENCE_TOKEN
+        )
+        original_static_close = AdmittedStaticAuthorityResources.close
+        original_evidence_close = AdmittedPrimeP1EvidenceRoot.close
+
+        def close_static(resource: AdmittedStaticAuthorityResources) -> None:
+            events.append("static")
+            original_static_close(resource)
+
+        def close_evidence(resource: AdmittedPrimeP1EvidenceRoot) -> None:
+            events.append("evidence")
+            original_evidence_close(resource)
+
+        with (
+            patch.object(module, "admit_static_authority_resources", return_value=static),
+            patch.object(module, "admit_evidence_root", return_value=evidence),
+            patch.object(module, "AdmittedProductionAuthorityResources", side_effect=MemoryError),
+            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static),
+            patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence),
+            self.assertRaises(PrimeP1AuthorityResourceError),
+        ):
+            admit_production_authority_resources(config)
+        self.assertEqual(events, ["evidence", "static"])
 
     def test_normalizes_none_only_at_resource_admission(self) -> None:
         config = self._config()

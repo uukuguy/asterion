@@ -106,7 +106,12 @@ class AdmittedProductionAuthorityResources:
         *,
         _token: object | None = None,
     ) -> None:
-        if _token is not _PRODUCTION_AUTHORITY_RESOURCES_TOKEN:
+        if (
+            type(self) is not AdmittedProductionAuthorityResources
+            or _token is not _PRODUCTION_AUTHORITY_RESOURCES_TOKEN
+            or type(static_resources) is not AdmittedStaticAuthorityResources
+            or type(evidence_resource) is not AdmittedPrimeP1EvidenceRoot
+        ):
             raise PrimeP1AuthorityResourceError() from None
         self._static_resources: AdmittedStaticAuthorityResources | None = static_resources
         self._evidence_resource: AdmittedPrimeP1EvidenceRoot | None = evidence_resource
@@ -210,8 +215,14 @@ def admit_production_authority_resources(
     evidence: AdmittedPrimeP1EvidenceRoot | None = None
     result: AdmittedProductionAuthorityResources | None = None
     try:
-        static = admit_static_authority_resources(config)
-        evidence = admit_evidence_root(config)
+        static_candidate = admit_static_authority_resources(config)
+        if type(static_candidate) is not AdmittedStaticAuthorityResources:
+            raise ValueError
+        static = static_candidate
+        evidence_candidate = admit_evidence_root(config)
+        if type(evidence_candidate) is not AdmittedPrimeP1EvidenceRoot:
+            raise ValueError
+        evidence = evidence_candidate
         result = AdmittedProductionAuthorityResources(
             static, evidence, _token=_PRODUCTION_AUTHORITY_RESOURCES_TOKEN
         )
