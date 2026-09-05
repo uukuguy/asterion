@@ -260,6 +260,117 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             module._static_authority_resource_identity(image, changed_profile).digest,
         )
 
+    def test_identity_matches_independent_literal_domain_and_raw_hashes(self) -> None:
+        image = _image_lock()
+        policy = SeccompPolicyLock(
+            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
+            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
+            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
+            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
+        )
+        seccomp = AdmittedPrimeP1SeccompResource(
+            (), "", (), policy, "c" * 64, threading.Lock(), [False], [False]
+        )
+        expected = hashlib.sha256(
+            b"asterion.prime-p1.static-authority-resources/v1\0"
+            + bytes.fromhex(
+                "8a0f9cbfb18058e98e4d65cf935b7fcd200809b2482bf0b18c4f9fad10eb9395"
+            )
+            + bytes.fromhex(
+                "50f7d82fdc8c1df9ca05b9c048a61439f7e9470c8d971b6d869955cfe85177f3"
+            )
+            + bytes.fromhex("c" * 64)
+        ).hexdigest()
+        import asterion.applications.prime_agent.operator.authority_resources as module
+
+        self.assertEqual(expected, "871375e1568eeefc6d524d5c524fb910a34d05fb26c994e810041411a76c0cb4")
+        self.assertEqual(
+            module._static_authority_resource_identity(image, seccomp).digest, expected
+        )
+
+    def test_identity_changes_when_each_bound_input_hash_changes(self) -> None:
+        image = _image_lock()
+        policy = SeccompPolicyLock(
+            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
+            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
+            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
+            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
+        )
+        import asterion.applications.prime_agent.operator.authority_resources as module
+
+        def resource(profile_hash: str, lock: SeccompPolicyLock = policy) -> AdmittedPrimeP1SeccompResource:
+            return AdmittedPrimeP1SeccompResource(
+                (), "", (), lock, profile_hash, threading.Lock(), [False], [False]
+            )
+
+        baseline = module._static_authority_resource_identity(image, resource("c" * 64)).digest
+        changed_image = replace(image, source_commit="0" * 39 + "1")
+        changed_policy = replace(policy, build_input_sha256="7" * 64)
+        self.assertNotEqual(
+            baseline,
+            module._static_authority_resource_identity(changed_image, resource("c" * 64)).digest,
+        )
+        self.assertNotEqual(
+            baseline,
+            module._static_authority_resource_identity(image, resource("c" * 64, changed_policy)).digest,
+        )
+        self.assertNotEqual(
+            baseline,
+            module._static_authority_resource_identity(image, resource("d" * 64)).digest,
+        )
+
+    def test_resource_set_close_calls_owned_child_once(self) -> None:
+        config = self._config()
+        image = _image_lock()
+        policy = SeccompPolicyLock(
+            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
+            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
+            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
+            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
+        )
+        seccomp = AdmittedPrimeP1SeccompResource(
+            (), "", (), policy, "c" * 64, threading.Lock(), [False], [False]
+        )
+        import asterion.applications.prime_agent.operator.authority_resources as module
+
+        with (
+            patch.object(module, "admit_static_image_resource", return_value=image),
+            patch.object(module, "admit_static_seccomp_resource", return_value=seccomp),
+            patch.object(AdmittedPrimeP1SeccompResource, "close", autospec=True) as close,
+        ):
+            resources = admit_static_authority_resources(config)
+            resources.close()
+            resources.close()
+        close.assert_called_once_with(seccomp)
+
+    def test_constructor_failure_after_seccomp_transfer_closes_child_once(self) -> None:
+        config = self._config()
+        image = _image_lock()
+        policy = SeccompPolicyLock(
+            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
+            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
+            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
+            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
+        )
+        seccomp = AdmittedPrimeP1SeccompResource(
+            (), "", (), policy, "c" * 64, threading.Lock(), [False], [False]
+        )
+        import asterion.applications.prime_agent.operator.authority_resources as module
+
+        with (
+            patch.object(module, "admit_static_image_resource", return_value=image),
+            patch.object(module, "admit_static_seccomp_resource", return_value=seccomp),
+            patch.object(module, "AdmittedStaticAuthorityResources", side_effect=MemoryError),
+            patch.object(AdmittedPrimeP1SeccompResource, "close", autospec=True) as close,
+            self.assertRaises(PrimeP1AuthorityResourceError),
+        ):
+            admit_static_authority_resources(config)
+        close.assert_called_once_with(seccomp)
+
     def test_resource_set_rejects_direct_construction_without_private_token(self) -> None:
         policy = SeccompPolicyLock(
             "asterion.prime-p1-seccomp-policy-lock/v1",
