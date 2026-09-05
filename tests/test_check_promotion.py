@@ -10,6 +10,7 @@ from unittest import mock
 
 from tools.check_promotion import (
     PromotionError,
+    _closed_prime_subprocess_environment,
     _closed_npm_subprocess_environment,
     _default_runner,
     _load_operational_package_receipt,
@@ -272,6 +273,22 @@ class PromotionCheckTests(unittest.TestCase):
                     self.assertNotEqual(environment.get(key), hostile_environment[key])
                 else:
                     self.assertNotIn(key, environment)
+
+    def test_closed_environment_uses_short_workspace_tmpdir_and_private_home(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            workspace = Path(temporary_directory) / "workspace"
+            workspace.mkdir()
+            environment = _closed_prime_subprocess_environment(
+                workspace, node_executable=Path("/node22/bin/node")
+            )
+
+        self.assertEqual(environment["TMPDIR"], str(workspace / "t"))
+        self.assertEqual(
+            environment["HOME"],
+            str(workspace / ".asterion-operational-env/home"),
+        )
+        self.assertIn(".asterion-operational-env/npm-cache", environment["NPM_CONFIG_CACHE"])
+
 
     def test_closed_npm_environment_uses_explicit_node_without_ambient_resolution(
         self,
@@ -631,6 +648,12 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertTrue(observed_roots)
         self.assertEqual(len(set(observed_roots)), 1)
         self.assertNotEqual(observed_roots[0], source)
+        self.assertFalse(observed_roots[0].exists())
+        if os.name == "posix":
+            self.assertEqual(
+                observed_roots[0].parent.parent, Path("/tmp").resolve()
+            )
+            self.assertTrue(observed_roots[0].parent.name.startswith("ap-"))
 
     def test_symlinks_are_rejected_before_copy_or_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

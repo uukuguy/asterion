@@ -571,7 +571,7 @@ def _closed_prime_subprocess_environment(
     if workspace is not None:
         private_root = workspace / ".asterion-operational-env"
         home = private_root / "home"
-        temporary = private_root / "tmp"
+        temporary = workspace / "t"
         npm_cache = private_root / "npm-cache"
         npm_global_config = private_root / "npm-globalconfig"
         npm_user_config = private_root / "npm-userconfig"
@@ -1454,7 +1454,10 @@ def run_promotion(
             )
         return runner(command, cwd)
 
-    with tempfile.TemporaryDirectory(prefix="asterion-promotion-") as temporary:
+    temporary_options: dict[str, str] = {"prefix": "ap-"}
+    if os.name == "posix":
+        temporary_options["dir"] = "/tmp"
+    with tempfile.TemporaryDirectory(**temporary_options) as temporary:
         raw_workspace = Path(temporary)
         workspace = raw_workspace.resolve()
         copy_root = workspace / "project"
