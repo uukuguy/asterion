@@ -126,7 +126,9 @@ export interface PrimeP3DevelopmentSdkSession {
   unregister(): void;
   readonly control: { state: "open" | "cancelled" | "closed" };
   observations(): PrimeP3DevelopmentResult["observations"];
-  markDeleted(id: string): void;
+  readonly childSessions: ReadonlyMap<string, PrimeSdkSession>;
+  readonly childRoles: ReadonlyMap<string, Exclude<PrimeP3DevelopmentRole, "root">>;
+  readonly childSelectors: Readonly<Record<"implementation" | "review", string>>;
 }
 
 /** Internal construction seam shared by the bounded P1 development slices. */
@@ -145,8 +147,12 @@ export async function openPrimeP3DevelopmentSdkSession(
   const primeSourceRoot = await canonicalPrimeSourceRoot(options.primeSourceRoot);
   const modules = await loadPrimeSdk(primeSourceRoot);
   const identity = randomUUID();
-  const provider = `asterion-p3-development-${identity}`;
-  const modelId = `p3-development-${identity}`;
+  const providers = Object.freeze({
+    root: `asterion-p3-root-${identity}`,
+    implementation: `asterion-p3-implementation-${identity}`,
+    review: `asterion-p3-review-${identity}`,
+  });
+  const modelIds = Object.freeze({ root: `root-${identity}`, implementation: `implementation-${identity}`, review: `review-${identity}` });
   const control: { state: "open" | "cancelled" | "closed" } = { state: "open" };
   let shared = sharedRegistries.get(primeSourceRoot);
   if (!shared) {
@@ -154,26 +160,30 @@ export async function openPrimeP3DevelopmentSdkSession(
     shared = { auth, registry: modules.ModelRegistry.inMemory(auth) };
     sharedRegistries.set(primeSourceRoot, shared);
   }
-  shared.auth.setRuntimeApiKey(provider, "in-memory-development-provider");
   const registry = shared.registry;
-  let modelCalls = 0;
+  const modelCalls: Record<PrimeP3DevelopmentRole, number> = { root: 0, implementation: 0, review: 0 };
   let toolCalls = 0;
-  const childRoles = new Map<string, PrimeP3DevelopmentRole>();
-  const retained = new Set<string>();
+  const childRoles = new Map<string, Exclude<PrimeP3DevelopmentRole, "root">>();
+  const childSessions = new Map<string, PrimeSdkSession>();
   const deleted = new Set<string>();
-  registry.registerProvider(provider, {
-    api: `asterion-p3-development-${identity}`, baseUrl: "http://127.0.0.1:0", apiKey: "in-memory-development-provider",
+  const register = (role: PrimeP3DevelopmentRole) => {
+    const provider = providers[role], modelId = modelIds[role];
+    shared.auth.setRuntimeApiKey(provider, "in-memory-development-provider");
+    registry.registerProvider(provider, {
+    api: `asterion-p3-${role}-${identity}`, baseUrl: "http://127.0.0.1:0", apiKey: "in-memory-development-provider",
     streamSimple: (model: unknown, context: unknown, streamOptions: unknown) => {
       assertCallbackAllowed(control);
-      if (modelCalls >= limits.model) throw new Error("Prime P3 development model callback limit exceeded");
-      modelCalls += 1;
-      const stream = options.model("root", model, context, streamOptions);
+      if (modelCalls[role] >= ({ root: 2, implementation: 2, review: 4 } as const)[role]) throw new Error("Prime P3 role callback limit exceeded");
+      modelCalls[role] += 1;
+      const stream = options.model(role, model, context, streamOptions);
       assertAssistantEventStream(stream);
       return stream;
     },
     models: [{ id: modelId, name: modelId, reasoning: false, input: ["text"], contextWindow: 16_384, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
   });
-  const model = registry.find(provider, modelId);
+  };
+  register("root"); register("implementation"); register("review");
+  const model = registry.find(providers.root, modelIds.root);
   if (!model) throw new Error("Prime P3 development model registration failed");
   const agentDir = join(options.workspace, ".asterion-prime-p3-development");
   const settingsManager = modules.SettingsManager.inMemory(settings);
@@ -201,56 +211,24 @@ export async function openPrimeP3DevelopmentSdkSession(
         const name = child.sessionName;
         if (typeof id !== "string" || depth !== 1 || (name !== "implementation" && name !== "review"))
           throw new Error("invalid P3 RLM child runtime");
-        if (childRoles.has(id) || childRoles.size >= 2) throw new Error("invalid P3 RLM child publication");
-        const role = name as PrimeP3DevelopmentRole;
+        if (childRoles.has(id) || [...childRoles.values()].includes(name as Exclude<PrimeP3DevelopmentRole, "root">) || childRoles.size >= 2) throw new Error("invalid P3 RLM child publication");
+        const role = name as Exclude<PrimeP3DevelopmentRole, "root">;
         childRoles.set(id, role);
-        const childProvider = `${provider}-${role}`;
-        const childTool = {
-          name: "ipython", description: "Caller-owned IPython execution bridge.", label: "ipython",
-          parameters: modules.Type.Object({ code: modules.Type.String() }),
-          execute: async (toolCallId: string, input: { code: string }, signal: AbortSignal) => {
-            assertCallbackAllowed(control);
-            if (toolCalls >= limits.tool) throw new Error("Prime P3 development ipython callback limit exceeded");
-            toolCalls += 1;
-            return options.ipython(role, toolCallId, Object.freeze({ code: input.code }), signal);
-          },
-        };
-        const childModelId = `${role}-p3-development-${identity}`;
-        shared.auth.setRuntimeApiKey(childProvider, "in-memory-development-provider");
-        registry.registerProvider(childProvider, {
-          api: `asterion-p3-development-${identity}`, baseUrl: "http://127.0.0.1:0", apiKey: "in-memory-development-provider",
-          streamSimple: (model: unknown, context: unknown, streamOptions: unknown) => {
-            assertCallbackAllowed(control);
-            if (modelCalls >= limits.model) throw new Error("Prime P3 development model callback limit exceeded");
-            modelCalls += 1;
-            const id = (model as { id?: unknown }).id;
-            const callbackRole: PrimeP3DevelopmentRole = typeof id === "string" && id.startsWith("implementation-")
-              ? "implementation"
-              : typeof id === "string" && id.startsWith("review-") ? "review" : role;
-            const stream = options.model(callbackRole, model, context, streamOptions);
-            assertAssistantEventStream(stream);
-            return stream;
-          },
-          models: [{ id: childModelId, name: childModelId, reasoning: false, input: ["text"], contextWindow: 16_384, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
-        });
-        const childModel = registry.find(childProvider, childModelId);
-        if (!childModel) throw new Error("Prime P3 development child model registration failed");
         const childCreated = await modules.createAgentSession({
-          cwd: options.workspace, agentDir: child.sessionDir, authStorage: shared.auth, modelRegistry: registry,
-          model: childModel, sessionManager: modules.SessionManager.inMemory(options.workspace), settingsManager, resourceLoader,
-          tools: ["ipython"], allowedToolNames: ["ipython"], initialActiveToolNames: ["ipython"], customTools: [childTool],
-          includeGoals: false, includeCompactSkill: false, prewarmIpythonKernel: false, serializedRefine: true, telemetryDisabled: true,
-          rlmDepth: 1, rlmMaxDepth: 1, rlmSessionDir: child.sessionDir, rlmParentNodeId: child.rlmParentNodeId,
+          cwd: options.workspace, agentDir: child.sessionDir as string, authStorage: shared.auth, modelRegistry: registry,
+          model: child.model, sessionManager: modules.SessionManager.inMemory(child.sessionDir as string), settingsManager, resourceLoader,
+          initialActiveToolNames: child.activeToolNames, allowedToolNames: child.allowedToolNames, customTools: child.customTools,
+          includeGoals: child.includeGoals, includeCompactSkill: child.includeCompactSkill, thinkingLevel: child.thinkingLevel,
+          serviceTier: child.serviceTier, scopedModels: child.scopedModels, prewarmIpythonKernel: false, serializedRefine: true, telemetryDisabled: true,
+          rlmDepth: child.rlmDepth, rlmMaxDepth: child.rlmMaxDepth, rlmSessionDir: child.sessionDir, rlmParentNodeId: child.rlmParentNodeId,
         });
         const childSession = childCreated.session;
+        childSessions.set(id, childSession);
         (child.onSessionPublished as ((session: PrimeSdkSession) => void) | undefined)?.(childSession);
         return { session: childSession };
       },
-      completeRlmSubagentRuntime: (id: string) => {
-        if (childRoles.get(id) === "review") retained.add(id);
-        return childRoles.get(id) === "review";
-      },
-      deleteRlmSubagentRuntime: async (id: string, child?: PrimeSdkSession) => { deleted.add(id); await child?.disposeAsync(); },
+      completeRlmSubagentRuntime: () => true,
+      deleteRlmSubagentRuntime: async (id: string, child?: PrimeSdkSession) => { await child?.disposeAsync(); deleted.add(id); childSessions.delete(id); },
       disposeRlmSubagentRuntimes: async () => {},
     },
     includeGoals: false, includeCompactSkill: false, prewarmIpythonKernel: false, serializedRefine: true, telemetryDisabled: true,
@@ -261,18 +239,19 @@ export async function openPrimeP3DevelopmentSdkSession(
     control,
     unregister: () => {
       unsubscribe();
-      registry.unregisterProvider(provider);
+      for (const provider of Object.values(providers)) registry.unregisterProvider(provider);
     },
     observations: () =>
       Object.freeze({
         child_count: childRoles.size,
         max_depth: childRoles.size ? 1 : 0,
-        model_callback_count: modelCalls,
+        model_callback_count: modelCalls.root + modelCalls.implementation + modelCalls.review,
         remaining_child_count: childRoles.size - deleted.size,
-        retained_follow_up_count: retained.size,
+        retained_follow_up_count: 0,
         tool_call_count: toolCalls,
       }),
-    markDeleted: (id: string) => { deleted.add(id); },
+    childSessions, childRoles,
+    childSelectors: Object.freeze({ implementation: `${providers.implementation}/${modelIds.implementation}`, review: `${providers.review}/${modelIds.review}` }),
   });
 }
 
@@ -283,21 +262,27 @@ export class PrimeP3DevelopmentSession {
   readonly #unregister: () => void;
   readonly #control: { state: "open" | "cancelled" | "closed" };
   readonly #observations: () => PrimeP3DevelopmentResult["observations"];
-  readonly #markDeleted: (id: string) => void;
-  readonly #deletedChildIds = new Set<string>();
+  readonly #childSessions: ReadonlyMap<string, PrimeSdkSession>;
+  readonly #childRoles: ReadonlyMap<string, Exclude<PrimeP3DevelopmentRole, "root">>;
+  readonly #childSelectors: Readonly<Record<"implementation" | "review", string>>;
+  #followedUpReview: string | undefined;
 
   private constructor(
     session: PrimeSdkSession,
     unregister: () => void,
     control: { state: "open" | "cancelled" | "closed" },
     observations: () => PrimeP3DevelopmentResult["observations"],
-    markDeleted: (id: string) => void,
+    childSessions: ReadonlyMap<string, PrimeSdkSession>,
+    childRoles: ReadonlyMap<string, Exclude<PrimeP3DevelopmentRole, "root">>,
+    childSelectors: Readonly<Record<"implementation" | "review", string>>,
   ) {
     this.#session = session;
     this.#unregister = unregister;
     this.#control = control;
     this.#observations = observations;
-    this.#markDeleted = markDeleted;
+    this.#childSessions = childSessions;
+    this.#childRoles = childRoles;
+    this.#childSelectors = childSelectors;
   }
 
   static async open(
@@ -312,7 +297,9 @@ export class PrimeP3DevelopmentSession {
       sdk.unregister,
       sdk.control,
       sdk.observations,
-      sdk.markDeleted,
+      sdk.childSessions,
+      sdk.childRoles,
+      sdk.childSelectors,
     );
   }
 
@@ -333,7 +320,8 @@ export class PrimeP3DevelopmentSession {
 
   async spawn(role: "implementation" | "review", prompt: string): Promise<{ rlm_child_id: string }> {
     this.assertDispatchable();
-    return this.#session.runRlmChild(prompt, { name: role });
+    if ([...this.#childRoles.values()].includes(role)) throw new Error("P3 child role already exists");
+    return this.#session.runRlmChild(prompt, { name: role, model: this.#childSelectors[role] });
   }
 
   async wait(childId: string): Promise<void> {
@@ -357,10 +345,13 @@ export class PrimeP3DevelopmentSession {
 
   async followUp(childId: string, prompt: string): Promise<void> {
     this.assertDispatchable();
+    if (this.#childRoles.get(childId) !== "review" || this.#followedUpReview !== undefined)
+      throw new Error("P3 follow-up requires the retained review child");
     const child = this.#session.getRlmChildSession(childId);
-    if (!child) throw new Error("P3 retained RLM child is unavailable");
+    if (!child || child !== this.#childSessions.get(childId)) throw new Error("P3 retained RLM child is unavailable");
     await child.prompt(prompt);
     await child.waitForIdle();
+    this.#followedUpReview = childId;
   }
 
   async list(): Promise<{ subagents: readonly unknown[] }> {
@@ -371,8 +362,7 @@ export class PrimeP3DevelopmentSession {
   async delete(childId: string): Promise<unknown> {
     this.assertDispatchable();
     const result = await this.#session.deleteRlmSubagent(childId);
-    this.#markDeleted(childId);
-    this.#deletedChildIds.add(childId);
+    if (!(result && typeof result === "object")) throw new Error("P3 child deletion failed");
     return result;
   }
 
@@ -427,10 +417,7 @@ export class PrimeP3DevelopmentSession {
         const observations = this.#observations();
         return Object.freeze({
           ...observations,
-          remaining_child_count:
-            observations.child_count === 2 && observations.retained_follow_up_count === 1
-              ? 0
-              : observations.remaining_child_count,
+          retained_follow_up_count: this.#followedUpReview === undefined ? 0 : 1,
         });
       })(),
     });
