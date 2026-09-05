@@ -397,21 +397,27 @@ class DockerCliEngineTransport(DockerEngineTransport):
         """Release the one-create seccomp descriptor without touching caller state."""
         fd, self._seccomp_profile_fd = self._seccomp_profile_fd, None
         if fd is not None:
-            try:
-                os.close(fd)
-            except OSError:
-                pass
+            self._close_fd(fd)
+
+    @staticmethod
+    def _close_fd(fd: int) -> None:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
 
     async def create(self, specification: _DockerWorkerSpecification, *, control: _LifecycleCallControl) -> str:
         self._valid_specification(specification)
         if specification.container_id in self._specifications:
             raise RestrictedWorkerError("restricted worker value is invalid")
+        # Transfer ownership before the first await: concurrent close() may
+        # release only an unclaimed descriptor, never this create's FD number.
+        fd, self._seccomp_profile_fd = self._seccomp_profile_fd, None
+        if type(fd) is not int:
+            raise RestrictedWorkerError("restricted worker value is invalid")
         # Keep the requested name only long enough to compensate an uncertain
         # create; successful creation is immediately re-keyed by daemon ID.
         self._specifications[specification.container_id] = specification
-        fd = self._seccomp_profile_fd
-        if type(fd) is not int:
-            raise RestrictedWorkerError("restricted worker value is invalid")
         argv = self._prefix + (
             "create", "--name", specification.container_id, "--pull=never", "--platform",
             "/".join(part for part in (self._platform.os, self._platform.architecture, self._platform.variant) if part is not None), "--network", "none",
@@ -426,7 +432,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
             await self._preflight(control)
             result = await self._call(argv, control, pass_fds=(fd,))
         finally:
-            self.close()
+            self._close_fd(fd)
         daemon_id = self._parse_daemon_id(result.stdout)
         if daemon_id in self._specifications:
             raise RestrictedWorkerError("restricted worker value is invalid")

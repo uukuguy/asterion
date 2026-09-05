@@ -60,6 +60,27 @@ class _Runner:
         return self.results.pop(0)
 
 
+class _BlockingPreflightRunner(_Runner):
+    def __init__(self, results: list[_Result]) -> None:
+        super().__init__(results)
+        self.preflight_started = asyncio.Event()
+        self.allow_preflight = asyncio.Event()
+
+    async def run(
+        self, *, argv: tuple[str, ...], env: dict[str, str], timeout: float,
+        max_output_bytes: int, pass_fds: tuple[int, ...],
+    ) -> _Result:
+        if not self.calls:
+            self.calls.append((argv, env, timeout, max_output_bytes, pass_fds))
+            self.preflight_started.set()
+            await self.allow_preflight.wait()
+            return self.results.pop(0)
+        return await super().run(
+            argv=argv, env=env, timeout=timeout, max_output_bytes=max_output_bytes,
+            pass_fds=pass_fds,
+        )
+
+
 class _Pipe:
     def __init__(self, data: bytes = b"", *, blocks: bool = False, failure: Exception | None = None) -> None:
         self.data = data
@@ -282,6 +303,37 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
             await transport.create(_spec(), control=self._control())
 
         owned_fd = runner.calls[-1][4][0]
+        with self.assertRaises(OSError):
+            os.fstat(owned_fd)
+
+    async def test_create_retains_transferred_descriptor_when_close_runs_during_preflight(self) -> None:
+        daemon_id = "a" * 64
+        runner = _BlockingPreflightRunner([
+            _Result(stdout=b"{}"), _Result(stdout=b"{}"),
+            _Result(stdout=(daemon_id + "\n").encode()),
+        ])
+        transport = self._construct(
+            docker_executable="/usr/local/bin/docker", socket_path=_SOCKET,
+            seccomp_profile_fd=self.seccomp_fd, platform=_PLATFORM, runner=runner,
+        )
+        owned_fd = transport._seccomp_profile_fd
+        self.assertIsInstance(owned_fd, int)
+        with mock.patch(
+            "asterion.applications.prime_agent.operator.docker_cli.os.close",
+            wraps=os.close,
+        ) as close:
+            creating = asyncio.create_task(transport.create(_spec(), control=self._control()))
+            await runner.preflight_started.wait()
+            transport.close()
+            with tempfile.TemporaryFile(dir=".") as replacement:
+                self.assertNotEqual(replacement.fileno(), owned_fd)
+                runner.allow_preflight.set()
+                self.assertEqual(await creating, daemon_id)
+
+        self.assertEqual(runner.calls[-1][4], (owned_fd,))
+        self.assertEqual(
+            [call.args for call in close.call_args_list].count((owned_fd,)), 1,
+        )
         with self.assertRaises(OSError):
             os.fstat(owned_fd)
 
