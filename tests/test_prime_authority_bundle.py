@@ -11,6 +11,8 @@ import copy
 from pathlib import Path
 import unittest
 from unittest import mock
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 from asterion.applications.prime_agent.operator.image_input_lock import (
@@ -275,10 +277,77 @@ class TestPrimeAuthorityBundle(unittest.TestCase):
             self.assertFalse(os.get_inheritable(bundle._inventory_fd))
             self.assertEqual(bundle._runtime_identity(), expected)
             bundle._revalidate_for_spawn()
+            mutated_root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            mutated_inventory_fd = os.open(inventory, os.O_RDONLY)
+            mutated = admit_authority_bundle(mutated_root_fd, mutated_inventory_fd, release.target, expected)
+            mutated_interpreter_fd = mutated._interpreter_fd
+            (root / "bin" / "bootstrap").chmod(0o755)
+            (root / "bin" / "bootstrap").write_bytes(b"y")
+            (root / "bin" / "bootstrap").chmod(0o555)
+            with self.assertRaises(AuthorityBundleError):
+                mutated._consume_spawn_descriptors()
+            for fd in (mutated_root_fd, mutated_inventory_fd, mutated_interpreter_fd):
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+            (root / "bin" / "bootstrap").chmod(0o755)
+            (root / "bin" / "bootstrap").write_bytes(b"x")
+            (root / "bin" / "bootstrap").chmod(0o555)
+            failed_root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            failed_inventory_fd = os.open(inventory, os.O_RDONLY)
+            failed = admit_authority_bundle(failed_root_fd, failed_inventory_fd, release.target, expected)
+            failed_interpreter_fd = failed._interpreter_fd
+            import asterion.applications.prime_agent.operator.authority_bundle_files as files_module
+            with mock.patch.object(files_module, "verify_authority_bundle_bootstrap", side_effect=AuthorityBundleError()):
+                with self.assertRaises(AuthorityBundleError):
+                    failed._consume_spawn_descriptors()
+            for fd in (failed_root_fd, failed_inventory_fd, failed_interpreter_fd):
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+            barrier = threading.Barrier(2)
+
+            def consume() -> object:
+                barrier.wait()
+                try:
+                    return bundle._consume_spawn_descriptors()
+                except AuthorityBundleError:
+                    return None
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = tuple(executor.map(lambda _: consume(), range(2)))
+            owners = tuple(result for result in results if result is not None)
+            self.assertEqual(len(owners), 1)
+            descriptors = owners[0]
+            with self.assertRaises(TypeError):
+                copy.copy(descriptors)
+            with self.assertRaises(TypeError):
+                pickle.dumps(descriptors)
+            self.assertEqual(descriptors.runtime_identity, expected)
+            self.assertEqual(descriptors.profile, release.launch_profile)
+            for fd in (descriptors.root_fd, descriptors.inventory_fd, descriptors.interpreter_fd, descriptors.bootstrap_fd):
+                self.assertFalse(os.get_inheritable(fd))
+                os.fstat(fd)
             bundle.close()
-            bundle.close()
+            for fd in (descriptors.root_fd, descriptors.inventory_fd, descriptors.interpreter_fd, descriptors.bootstrap_fd):
+                os.fstat(fd)
+            transferred = (descriptors.root_fd, descriptors.inventory_fd, descriptors.interpreter_fd, descriptors.bootstrap_fd)
+            close_barrier = threading.Barrier(2)
+
+            def close_owner() -> None:
+                close_barrier.wait()
+                descriptors.close()
+
+            import asterion.applications.prime_agent.operator.authority_bundle as bundle_module
+            with mock.patch.object(bundle_module.os, "close", wraps=os.close) as close:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    tuple(executor.map(lambda _: close_owner(), range(2)))
+            self.assertEqual(tuple(call.args[0] for call in close.call_args_list).count(transferred[0]), 1)
+            self.assertEqual(tuple(call.args[0] for call in close.call_args_list).count(transferred[1]), 1)
+            self.assertEqual(tuple(call.args[0] for call in close.call_args_list).count(transferred[2]), 1)
+            self.assertEqual(tuple(call.args[0] for call in close.call_args_list).count(transferred[3]), 1)
             for fd in (root_fd, inventory_fd):
                 with self.assertRaises(OSError):
                     os.fstat(fd)
+            with self.assertRaises(AuthorityBundleError):
+                bundle._consume_spawn_descriptors()
             with self.assertRaises(AuthorityBundleError):
                 bundle._revalidate_for_spawn()

@@ -119,6 +119,58 @@ class AuthorityBundleRelease:
 
 
 _BUNDLE_TOKEN = object()
+_SPAWN_TOKEN = object()
+
+
+class _AuthoritySpawnDescriptors:
+    __slots__ = ("_closed", "_lock", "bootstrap_fd", "interpreter_fd", "inventory_fd", "profile", "root_fd", "runtime_identity")
+
+    def __init__(self, root_fd: int, inventory_fd: int, interpreter_fd: int, bootstrap_fd: int, identity: AuthorityRuntimeIdentityV2, profile: AuthorityLaunchProfile, *, _token: object | None = None) -> None:
+        if type(self) is not _AuthoritySpawnDescriptors or _token is not _SPAWN_TOKEN:
+            raise AuthorityBundleError()
+        self._closed = False
+        self._lock = threading.Lock()
+        self.root_fd = root_fd
+        self.inventory_fd = inventory_fd
+        self.interpreter_fd = interpreter_fd
+        self.bootstrap_fd = bootstrap_fd
+        self.runtime_identity, self.profile = identity, profile
+
+    def __repr__(self) -> str:
+        return "AuthoritySpawnDescriptors(redacted)"
+
+    def __reduce__(self) -> NoReturn:
+        raise TypeError("prime authority bundle is unavailable")
+
+    def __reduce_ex__(self, _: SupportsIndex) -> NoReturn:
+        raise TypeError("prime authority bundle is unavailable")
+
+    def __copy__(self) -> object:
+        raise TypeError("prime authority bundle is unavailable")
+
+    def __deepcopy__(self, _: object) -> object:
+        raise TypeError("prime authority bundle is unavailable")
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            fds = (
+                self.bootstrap_fd,
+                self.interpreter_fd,
+                self.inventory_fd,
+                self.root_fd,
+            )
+            self.root_fd = -1
+            self.inventory_fd = -1
+            self.interpreter_fd = -1
+            self.bootstrap_fd = -1
+        for fd in fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 class AdmittedAuthorityBundle:
@@ -248,6 +300,47 @@ class AdmittedAuthorityBundle:
                 finally:
                     os.close(verified.interpreter_fd)
         except BaseException:
+            self.close()
+            raise AuthorityBundleError() from None
+
+    def _consume_spawn_descriptors(self) -> _AuthoritySpawnDescriptors:
+        bootstrap_fd: int | None = None
+        try:
+            with self._lock:
+                if self._closed:
+                    raise ValueError
+                release, identity = self._release, self._identity
+            self._revalidate_for_spawn()
+            from .authority_bundle_files import verify_authority_bundle_bootstrap
+
+            bootstrap_fd = verify_authority_bundle_bootstrap(
+                self._root_fd,
+                release.files,
+                release.launch_profile.bootstrap_path,
+                _devino(self._inventory_identity),
+            )
+            with self._lock:
+                if self._closed:
+                    raise ValueError
+                result = _AuthoritySpawnDescriptors(
+                    self._root_fd,
+                    self._inventory_fd,
+                    self._interpreter_fd,
+                    bootstrap_fd,
+                    identity,
+                    release.launch_profile,
+                    _token=_SPAWN_TOKEN,
+                )
+                self._closed = True
+                self._root_fd = self._inventory_fd = self._interpreter_fd = -1
+                bootstrap_fd = None
+                return result
+        except BaseException:
+            if bootstrap_fd is not None:
+                try:
+                    os.close(bootstrap_fd)
+                except OSError:
+                    pass
             self.close()
             raise AuthorityBundleError() from None
 

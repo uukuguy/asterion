@@ -129,6 +129,37 @@ def verify_external_runtime_files(files: tuple[AuthorityExternalRuntimeFile, ...
         raise AuthorityBundleError() from None
 
 
+def verify_authority_bundle_bootstrap(root_fd: int, files: tuple[AuthorityBundleFile, ...], path: str, inventory_identity: tuple[int, int]) -> int:
+    """Open the sole verified bootstrap through the already-admitted root."""
+    descriptors: list[int] = []
+    fd: int | None = None
+    try:
+        _required_open_flags()
+        records = _bundle_records(files, "bin/python3")
+        record = next(item for item in records if item.role == "bootstrap" and item.path == path)
+        if sum(item.role == "bootstrap" for item in records) != 1:
+            raise ValueError
+        current = root_fd
+        for component in path.split("/")[:-1]:
+            child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW | _CLOEXEC, dir_fd=current)
+            descriptors.append(child)
+            _directory_identity(child)
+            current = child
+        fd = os.open(path.rsplit("/", 1)[1], os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _NONBLOCK, dir_fd=current)
+        identity = _regular_identity(fd, record)
+        if identity[:2] == inventory_identity or _digest_fd(fd, identity) != record.sha256:
+            raise ValueError
+        result, fd = fd, None
+        return result
+    except Exception:
+        raise AuthorityBundleError() from None
+    finally:
+        if fd is not None:
+            _close(fd)
+        for descriptor in reversed(descriptors):
+            _close(descriptor)
+
+
 def _bundle_records(files: object, interpreter_path: object) -> tuple[AuthorityBundleFile, ...]:
     if type(files) is not tuple or type(interpreter_path) is not str or not _relative_path(interpreter_path):
         raise ValueError
