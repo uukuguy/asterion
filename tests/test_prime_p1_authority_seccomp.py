@@ -510,7 +510,31 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
             ):
                 resource = admit_static_seccomp_resource(config)
                 entered, release = threading.Event(), threading.Event()
+                closer_attempted, closer_completed = threading.Event(), threading.Event()
                 validate = module._validate_profile
+
+                class InstrumentedLock:
+                    def __init__(self) -> None:
+                        self._lock = threading.Lock()
+                        self._acquires = 0
+
+                    def __enter__(self) -> "InstrumentedLock":
+                        self.acquire()
+                        return self
+
+                    def __exit__(self, *_: object) -> None:
+                        self.release()
+
+                    def acquire(self) -> None:
+                        self._acquires += 1
+                        if self._acquires == 2:
+                            closer_attempted.set()
+                        self._lock.acquire()
+
+                    def release(self) -> None:
+                        self._lock.release()
+
+                object.__setattr__(resource, "_lock", InstrumentedLock())
 
                 def parked(data: bytes, policy: object) -> None:
                     entered.set()
@@ -521,14 +545,19 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                     worker = threading.Thread(target=revalidate_static_seccomp_resource, args=(resource,))
                     worker.start()
                     self.assertTrue(entered.wait(1))
-                    closer = threading.Thread(target=resource.close)
+                    closer = threading.Thread(target=lambda: (resource.close(), closer_completed.set()))
                     closer.start()
-                    self.assertTrue(worker.is_alive())
-                    release.set()
-                    worker.join(1)
-                    closer.join(1)
+                    try:
+                        self.assertTrue(closer_attempted.wait(1))
+                        self.assertFalse(closer_completed.is_set())
+                        release.set()
+                        worker.join(1)
+                        closer.join(1)
+                    finally:
+                        release.set()
                 self.assertFalse(worker.is_alive())
                 self.assertFalse(closer.is_alive())
+                self.assertTrue(closer_completed.is_set())
                 for fd in resource._fds:
                     with self.assertRaises(OSError):
                         os.fstat(fd)
