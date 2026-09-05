@@ -30,6 +30,9 @@ from asterion.applications.prime_agent.operator.authority_process import (
     _send_authority_packet,
 )
 from asterion.applications.prime_agent.operator.authority_protocol import (
+    AuthorityFrame,
+    AuthoritySession,
+    PrimeP1AuthorityProtocolError,
     decode_frame,
     encode_frame,
 )
@@ -454,6 +457,17 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                 self.close_calls += 1
 
         resources = RetainedProductionResources()
+        accepted: list[AuthorityFrame] = []
+        validator_packets: list[bytes] = []
+        real_accept = AuthoritySession.accept_supervisor_packet
+
+        def accept_with_evidence(
+            session: AuthoritySession, packet: bytes
+        ) -> AuthorityFrame:
+            validator_packets.append(packet)
+            frame = real_accept(session, packet)
+            accepted.append(frame)
+            return frame
 
         with (
             patch.object(
@@ -464,6 +478,11 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             patch.object(
                 module, "_receive_authority_packet", side_effect=ForbiddenAccess
             ) as descriptor_receive,
+            patch.object(
+                module.AuthoritySession,
+                "accept_supervisor_packet",
+                accept_with_evidence,
+            ),
             patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True),
             self.assertRaises(PrimeP1AuthorityBootstrapError),
         ):
@@ -473,6 +492,19 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         self.assertEqual(resources.close_calls, 1)
         self.assertEqual(len(connection.calls), 1)
         self.assertEqual(connection.recv_calls, 1)
+        self.assertEqual(validator_packets, [execute])
+        self.assertEqual(len(accepted), 1)
+        self.assertEqual(accepted[0].session_id, session_id)
+        self.assertEqual(accepted[0].sequence, 0)
+        self.assertEqual(accepted[0].kind, "execute")
+        self.assertEqual(
+            dict(accepted[0].payload),
+            {
+                "run_id": "run-1",
+                "request_contract_sha256": prime_p1_request_contract_sha256(),
+                "application_request_sha256": application,
+            },
+        )
         packet = b"".join(cast(list[bytes], connection.calls[0][0]))
         frame = decode_frame(packet, b"k" * 32)
         self.assertEqual(frame.kind, "ready")
@@ -513,8 +545,26 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             def close(self) -> None:
                 self.close_calls += 1
 
+        import asterion.applications.prime_agent.operator.authority_protocol as protocol
+
+        validator_packets: list[bytes] = []
+        validator_errors: list[BaseException] = []
+        real_accept = protocol.AuthoritySession.accept_supervisor_packet
+
+        def accept_with_evidence(
+            session: AuthoritySession, packet: bytes
+        ) -> AuthorityFrame:
+            validator_packets.append(packet)
+            try:
+                return real_accept(session, packet)
+            except BaseException as error:
+                validator_errors.append(error)
+                raise
+
         for label, packet in packets.items():
             with self.subTest(packet=label):
+                expected_validator_calls = len(validator_packets)
+                expected_validator_errors = len(validator_errors)
                 key_read, key_write = os.pipe()
                 os.write(key_write, key)
                 os.close(key_write)
@@ -529,6 +579,11 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                         "admit_production_authority_resources",
                         return_value=resources,
                     ),
+                    patch.object(
+                        module.AuthoritySession,
+                        "accept_supervisor_packet",
+                        accept_with_evidence,
+                    ),
                     patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True),
                     self.assertRaises(PrimeP1AuthorityBootstrapError) as raised,
                 ):
@@ -538,6 +593,16 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                 self.assertNotIn("MALFORMED_PACKET_SENTINEL", rendered)
                 self.assertEqual(len(connection.calls), 1)
                 self.assertEqual(connection.recv_calls, 1)
+                self.assertEqual(
+                    len(validator_packets), expected_validator_calls + 1
+                )
+                self.assertEqual(validator_packets[-1], packet)
+                self.assertEqual(
+                    len(validator_errors), expected_validator_errors + 1
+                )
+                self.assertIsInstance(
+                    validator_errors[-1], PrimeP1AuthorityProtocolError
+                )
                 self.assertTrue(connection.closed)
                 self.assertEqual(resources.close_calls, 1)
 
