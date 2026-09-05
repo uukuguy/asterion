@@ -563,6 +563,58 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                         revalidate_static_seccomp_resource(resource)
                 opened.assert_not_called()
 
+    def test_revalidation_ancestor_mutation_closes_transient_chain_only(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+            revalidate_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                original = resource._fds
+                rewalk: list[tuple[int, ...]] = []
+                open_profile = module._open_profile
+                validate = module._validate_profile
+                actual_close = os.close
+                closed: list[int] = []
+
+                def capture(path: object) -> tuple[int, ...]:
+                    fds = open_profile(path)
+                    rewalk.append(fds)
+                    return fds
+
+                def mutate(data: bytes, policy: object) -> None:
+                    validate(data, policy)  # type: ignore[arg-type]
+                    root.chmod(0o777)
+
+                with (
+                    patch.object(module, "_open_profile", side_effect=capture),
+                    patch.object(module, "_validate_profile", side_effect=mutate),
+                    patch.object(module.os, "close", side_effect=lambda fd: (closed.append(fd), actual_close(fd))[1]),
+                    self.assertRaises(PrimeP1AuthorityResourceError),
+                ):
+                    revalidate_static_seccomp_resource(resource)
+                self.assertEqual(len(rewalk), 1)
+                self.assertEqual(closed, list(reversed(rewalk[0])))
+                for fd in original:
+                    os.fstat(fd)
+                resource.close()
+                for fd in original:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+
 
 if __name__ == "__main__":
     unittest.main()
