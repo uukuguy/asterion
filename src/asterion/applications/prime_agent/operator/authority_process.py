@@ -168,7 +168,11 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
             _unavailable()
         connection = descriptors.consume_socket()
         capability = getattr(socket, "MSG_CMSG_CLOEXEC", None)
-        if type(capability) is not int or capability == 0:
+        if (
+            isinstance(capability, bool)
+            or not isinstance(capability, int)
+            or not int(capability)
+        ):
             raise ValueError
         interruptions = 0
         while True:
@@ -177,7 +181,7 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
                     connection,
                     8192,
                     socket.CMSG_SPACE(struct.calcsize("i")),
-                    capability,
+                    int(capability),
                 )
                 break
             except OSError as error:

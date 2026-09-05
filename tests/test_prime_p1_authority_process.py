@@ -8,6 +8,7 @@ import sys
 import threading
 import traceback
 import unittest
+import enum
 import errno
 import fcntl
 from array import array
@@ -195,6 +196,21 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                 b"x",
             )
         self.assertEqual(connection.flags, [64])
+
+        class _Flags(enum.IntFlag):
+            CLOEXEC = 128
+
+        connection = _PacketSocket([(b"x", [], 0, None)])
+        with patch.object(
+            socket_module, "MSG_CMSG_CLOEXEC", _Flags.CLOEXEC, create=True
+        ):
+            self.assertEqual(
+                _receive_authority_packet(
+                    AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
+                ),
+                b"x",
+            )
+        self.assertEqual(connection.flags, [128])
 
     def test_private_packet_receive_rejects_real_scm_rights_without_obtaining_fd(
         self,
