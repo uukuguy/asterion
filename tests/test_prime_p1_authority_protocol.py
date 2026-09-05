@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import unittest
 from collections.abc import Mapping
+from dataclasses import replace
 import hmac
 from asterion.applications.prime_agent.operator.authority_receipt import (
     _AuthorityTerminalBinding,
+    _IssuedAuthorityReceipt,
     _UnavailableReceiptMaterial,
     _issue_unavailable_receipt,
     _new_authority_receipt_issuer,
@@ -114,6 +116,24 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
 
         with self.assertRaises(PrimeP1AuthorityProtocolError):
             second_authority.terminal_packet(issued)
+
+    def test_terminal_rejects_constructed_or_replaced_issued_receipts(self) -> None:
+        first_authority, first_supervisor = self._live_pair()
+        second_authority, _ = self._live_pair()
+        first_binding = first_authority.reserve_terminal_binding()
+        second_binding = second_authority.reserve_terminal_binding()
+        issued = _issue_unavailable_receipt(
+            _new_authority_receipt_issuer("2" * 64), first_binding, _material()
+        )
+        first_supervisor.accept_authority_packet(first_authority.terminal_packet(issued))
+
+        for forged in (
+            _IssuedAuthorityReceipt(second_binding, issued._payload),
+            replace(issued, _binding=second_binding),
+        ):
+            with self.subTest(forged=repr(forged)):
+                with self.assertRaises(PrimeP1AuthorityProtocolError):
+                    second_authority.terminal_packet(forged)
 
     def test_terminal_rejects_raw_receipt_mapping_binding_mismatch_and_wrong_state(self) -> None:
         authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)

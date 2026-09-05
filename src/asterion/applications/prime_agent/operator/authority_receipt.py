@@ -67,7 +67,7 @@ class _UnavailableReceiptMaterial:
         return "UnavailableReceiptMaterial(redacted)"
 
 
-@dataclass(frozen=True, slots=True, repr=False)
+@dataclass(frozen=True, slots=True, repr=False, eq=False, weakref_slot=True)
 class _IssuedAuthorityReceipt:
     """A signed immutable unavailable terminal, not a signing capability."""
 
@@ -89,6 +89,10 @@ class _IssuedAuthorityReceipt:
 
 
 _ISSUER_KEYS: WeakKeyDictionary[_AuthorityReceiptIssuer, bytes] = WeakKeyDictionary()
+_ISSUED_RECEIPTS: WeakKeyDictionary[
+    _IssuedAuthorityReceipt, _AuthorityTerminalBinding
+] = WeakKeyDictionary()
+_ISSUED_RECEIPTS_LOCK = threading.Lock()
 
 
 def _new_authority_receipt_issuer(receipt_key_hex: str) -> _AuthorityReceiptIssuer:
@@ -126,7 +130,10 @@ def _issue_unavailable_receipt(
                 key, _RECEIPT_DOMAIN + _json(signed), "sha256"
             ).hexdigest(),
         }
-        return _IssuedAuthorityReceipt(binding, _freeze(payload))
+        receipt = _IssuedAuthorityReceipt(binding, _freeze(payload))
+        with _ISSUED_RECEIPTS_LOCK:
+            _ISSUED_RECEIPTS[receipt] = binding
+        return receipt
     except (TypeError, ValueError, UnicodeError):
         pass
     _unavailable()
@@ -142,10 +149,16 @@ def _consume_issued_unavailable_receipt(
     ):
         _unavailable()
     with receipt._consumption_lock:
-        if receipt._binding is not binding or receipt._consumed:
-            _unavailable()
-        object.__setattr__(receipt, "_consumed", True)
-        return receipt._payload
+        with _ISSUED_RECEIPTS_LOCK:
+            if (
+                _ISSUED_RECEIPTS.get(receipt) is not binding
+                or receipt._binding is not binding
+                or receipt._consumed
+            ):
+                _unavailable()
+            del _ISSUED_RECEIPTS[receipt]
+            object.__setattr__(receipt, "_consumed", True)
+            return receipt._payload
 
 
 def _unavailable_payload(
