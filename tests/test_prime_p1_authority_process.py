@@ -44,9 +44,11 @@ class _PacketSocket(_Socket):
         self.responses = iter(responses)
         self.calls = 0
         self.close_calls = 0
+        self.flags: list[int] = []
 
-    def recvmsg(self, _size: int, _ancillary_size: int) -> object:
+    def recvmsg(self, _size: int, _ancillary_size: int, flags: int) -> object:
         self.calls += 1
+        self.flags.append(flags)
         value = next(self.responses)
         if isinstance(value, BaseException):
             raise value
@@ -64,10 +66,10 @@ class _RecordingUnixSocket:
         self.flags: int | None = None
 
     def recvmsg(
-        self, size: int, ancillary_size: int
+        self, size: int, ancillary_size: int, flags: int
     ) -> tuple[bytes, list[tuple[int, int, bytes]], int, object]:
         packet, ancillary, flags, address = self.connection.recvmsg(
-            size, ancillary_size
+            size, ancillary_size, flags
         )
         self.ancillary = ancillary
         self.flags = flags
@@ -146,6 +148,9 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         self.assertEqual(_receive_authority_packet(bundle), b'{"canonical":true}')
         self.assertTrue(connection.closed)
         self.assertEqual(connection.close_calls, 1)
+        self.assertEqual(
+            connection.flags, [int(getattr(socket_module, "MSG_CMSG_CLOEXEC", 0))]
+        )
         bundle.close()
         self.assertTrue(connection.closed)
         self.assertEqual(connection.close_calls, 1)

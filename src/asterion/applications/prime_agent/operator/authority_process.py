@@ -171,7 +171,10 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
         while True:
             try:
                 received = _recvmsg(
-                    connection, 8192, socket.CMSG_SPACE(struct.calcsize("i"))
+                    connection,
+                    8192,
+                    socket.CMSG_SPACE(struct.calcsize("i")),
+                    int(getattr(socket, "MSG_CMSG_CLOEXEC", 0)),
                 )
                 break
             except OSError as error:
@@ -383,8 +386,8 @@ def _getsockopt(connection: object, level: int, option: int, *args: int) -> obje
     return cast(Any, connection).getsockopt(level, option, *args)
 
 
-def _recvmsg(connection: object, size: int, ancillary_size: int) -> object:
-    return cast(Any, connection).recvmsg(size, ancillary_size)
+def _recvmsg(connection: object, size: int, ancillary_size: int, flags: int) -> object:
+    return cast(Any, connection).recvmsg(size, ancillary_size, flags)
 
 
 def _close_received_rights(ancillary: object) -> None:
