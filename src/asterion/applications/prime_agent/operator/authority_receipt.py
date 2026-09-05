@@ -107,20 +107,23 @@ def _issue_unavailable_receipt(
         key = _ISSUER_KEYS.pop(issuer)
     except KeyError:
         _unavailable()
-    if type(binding) is not _AuthorityTerminalBinding or type(material) is not _UnavailableReceiptMaterial:
+    try:
+        if type(binding) is not _AuthorityTerminalBinding or type(material) is not _UnavailableReceiptMaterial:
+            _unavailable()
+        if not _valid_binding(binding) or not _valid_material(material):
+            _unavailable()
+        unsigned = _unavailable_payload(binding, material)
+        digest = hashlib.sha256(_RECEIPT_DOMAIN + _json(unsigned)).hexdigest()
+        signed = {**unsigned, "evidence_id": "prime-p1-" + digest, "receipt_sha256": digest}
+        payload = {
+            **signed,
+            "receipt_hmac_sha256": hmac.new(
+                key, _RECEIPT_DOMAIN + _json(signed), "sha256"
+            ).hexdigest(),
+        }
+        return _IssuedAuthorityReceipt(binding, _freeze(payload))
+    except (TypeError, ValueError, UnicodeError):
         _unavailable()
-    if not _valid_binding(binding) or not _valid_material(material):
-        _unavailable()
-    unsigned = _unavailable_payload(binding, material)
-    digest = hashlib.sha256(_RECEIPT_DOMAIN + _json(unsigned)).hexdigest()
-    signed = {**unsigned, "evidence_id": "prime-p1-" + digest, "receipt_sha256": digest}
-    payload = {
-        **signed,
-        "receipt_hmac_sha256": hmac.new(
-            key, _RECEIPT_DOMAIN + _json(signed), "sha256"
-        ).hexdigest(),
-    }
-    return _IssuedAuthorityReceipt(binding, _freeze(payload))
 
 
 def _unavailable_payload(
@@ -194,6 +197,7 @@ def _valid_material(value: _UnavailableReceiptMaterial) -> bool:
     return (
         type(value.authority_version) is str and bool(value.authority_version)
         and type(value.receipt_key_id) is str and bool(value.receipt_key_id)
+        and type(value.image_config_digest) is str
         and _IMAGE_DIGEST.fullmatch(value.image_config_digest) is not None
         and all(_sha256(item) for item in (
             value.authority_executable_sha256, value.operator_config_binding_hmac_sha256,
@@ -226,4 +230,4 @@ def _json(value: Mapping[str, object]) -> bytes:
 
 
 def _unavailable() -> NoReturn:
-    raise ValueError("prime P1 authority receipt is unavailable")
+    raise ValueError("prime P1 authority receipt is unavailable") from None

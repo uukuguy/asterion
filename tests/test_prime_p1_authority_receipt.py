@@ -22,7 +22,58 @@ from asterion.applications.prime_agent.operator.authority_receipt import (
 )
 
 
+def _binding() -> _AuthorityTerminalBinding:
+    return _AuthorityTerminalBinding(
+        session_id="a" * 64,
+        run_id="run-1",
+        request_contract_sha256="b" * 64,
+        application_request_sha256="c" * 64,
+        production_resource_set_sha256="d" * 64,
+    )
+
+
+def _material(**overrides: object) -> _UnavailableReceiptMaterial:
+    values: dict[str, object] = {
+        "authority_version": "1.0.0",
+        "authority_executable_sha256": "1" * 64,
+        "operator_config_binding_hmac_sha256": "2" * 64,
+        "receipt_key_id": "p1-2026",
+        "assembly_sha256": "3" * 64,
+        "package_manifest_sha256": "4" * 64,
+        "source_sha256": "5" * 64,
+        "build_input_sha256": "6" * 64,
+        "image_config_digest": "sha256:" + "7" * 64,
+        "workload_sha256": "8" * 64,
+        "starter_sha256": "9" * 64,
+        "oracle_sha256": "a" * 64,
+        "seccomp_sha256": "b" * 64,
+    }
+    values.update(overrides)
+    return _UnavailableReceiptMaterial(**cast(Any, values))
+
+
 class TestPrimeP1AuthorityReceiptCustody(unittest.TestCase):
+    def test_malformed_material_is_public_safe_after_custody_consumption(self) -> None:
+        for malformed in (
+            _material(image_config_digest=object()),
+            _material(authority_version="\ud800"),
+            _material(receipt_key_id="\ud800"),
+        ):
+            with self.subTest(malformed=repr(malformed)):
+                sentinel = "a" * 64
+                issuer = _new_authority_receipt_issuer(sentinel)
+                with self.assertRaises(ValueError) as raised:
+                    _issue_unavailable_receipt(issuer, _binding(), malformed)
+                self.assertIs(type(raised.exception), ValueError)
+                self.assertEqual(
+                    str(raised.exception), "prime P1 authority receipt is unavailable"
+                )
+                rendered = "".join(traceback.format_exception(raised.exception))
+                self.assertNotIn(sentinel, rendered)
+                self.assertNotIn("CONFIG_SECRET_SENTINEL", rendered)
+                with self.assertRaises(ValueError):
+                    _issue_unavailable_receipt(issuer, _binding(), _material())
+
     def test_issuer_creates_one_redacted_unavailable_receipt(self) -> None:
         sentinel = "e" * 64
         issuer = _new_authority_receipt_issuer(sentinel)
