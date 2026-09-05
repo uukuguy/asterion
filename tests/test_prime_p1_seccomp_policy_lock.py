@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import hashlib
 import inspect
 import json
@@ -22,6 +22,7 @@ from asterion.applications.prime_agent.operator.seccomp_policy_lock import (
     SeccompArgumentConstraint,
     SeccompPolicyLock,
     SeccompRuleAtom,
+    canonical_maximum_seccomp_profile_bytes,
     canonical_seccomp_policy_lock_bytes,
     parse_canonical_seccomp_policy_lock,
     resolve_promoted_seccomp_policy,
@@ -51,11 +52,35 @@ def _lock(**changes: object) -> SeccompPolicyLock:
         "allowed_rule_atoms": (_READ, _WRITE),
         "maximum_profile_sha256": "0" * 64,
     }
+    has_supplied_maximum = "maximum_profile_sha256" in changes
     values.update(changes)
+    provisional = SeccompPolicyLock(**values)  # type: ignore[arg-type]
+    if not has_supplied_maximum:
+        try:
+            values["maximum_profile_sha256"] = hashlib.sha256(
+                canonical_maximum_seccomp_profile_bytes(provisional)
+            ).hexdigest()
+        except PrimeP1SeccompPolicyLockError:
+            return provisional
     return SeccompPolicyLock(**values)  # type: ignore[arg-type]
 
 
 class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
+    def test_maximum_profile_is_canonical_and_intrinsic(self) -> None:
+        lock = _lock()
+        profile = canonical_maximum_seccomp_profile_bytes(lock)
+        self.assertEqual(
+            profile,
+            b'{"architectures":["SCMP_ARCH_X86_64"],"defaultAction":"SCMP_ACT_ERRNO",'
+            b'"syscalls":[{"action":"SCMP_ACT_ALLOW","args":[{"index":0,"op":"SCMP_CMP_EQ","value":0}],"names":["read"]},'
+            b'{"action":"SCMP_ACT_ALLOW","args":[{"index":0,"op":"SCMP_CMP_MASKED_EQ","value":1,"valueTwo":3}],"names":["write"]}]}'
+        )
+        self.assertEqual(lock.maximum_profile_sha256, hashlib.sha256(profile).hexdigest())
+        with self.assertRaises(PrimeP1SeccompPolicyLockError):
+            canonical_seccomp_policy_lock_bytes(
+                replace(lock, maximum_profile_sha256="0" * 64)
+            )
+
     def test_canonical_round_trip_and_digest_are_deterministic(self) -> None:
         lock = _lock()
         first = canonical_seccomp_policy_lock_bytes(lock)
@@ -130,7 +155,8 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
             with self.subTest(lock=repr(lock)):
                 with self.assertRaises(PrimeP1SeccompPolicyLockError):
                     canonical_seccomp_policy_lock_bytes(lock)
-        payload = canonical_seccomp_policy_lock_bytes(_lock())
+        valid_lock = _lock()
+        payload = canonical_seccomp_policy_lock_bytes(valid_lock)
         with self.assertRaises(PrimeP1SeccompPolicyLockError):
             parse_canonical_seccomp_policy_lock(payload + b" ")
         with self.assertRaises(PrimeP1SeccompPolicyLockError):
@@ -140,14 +166,14 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
         with self.assertRaises(PrimeP1SeccompPolicyLockError):
             parse_canonical_seccomp_policy_lock(
                 payload.replace(
-                    b'"maximum_profile_sha256":"' + b"0" * 64 + b'"',
+                    b'"maximum_profile_sha256":"' + valid_lock.maximum_profile_sha256.encode() + b'"',
                     b'"maximum_profile_sha256":NaN',
                 )
             )
         with self.assertRaises(PrimeP1SeccompPolicyLockError):
             parse_canonical_seccomp_policy_lock(
                 payload.replace(
-                    b'"maximum_profile_sha256":"' + b"0" * 64 + b'"',
+                    b'"maximum_profile_sha256":"' + valid_lock.maximum_profile_sha256.encode() + b'"',
                     b'"maximum_profile_sha256":Infinity',
                 )
             )

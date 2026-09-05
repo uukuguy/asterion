@@ -139,6 +139,25 @@ def canonical_seccomp_policy_lock_bytes(lock: object) -> bytes:
         raise PrimeP1SeccompPolicyLockError() from None
 
 
+def canonical_maximum_seccomp_profile_bytes(lock: object) -> bytes:
+    """Render the exact maximum Docker seccomp profile bound by a lock."""
+    try:
+        checked = _validated_lock_structure(lock)
+        return json.dumps(
+            {
+                "architectures": [checked.libseccomp_architecture],
+                "defaultAction": "SCMP_ACT_ERRNO",
+                "syscalls": [_maximum_rule(atom) for atom in checked.allowed_rule_atoms],
+            },
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError, PrimeP1SeccompPolicyLockError):
+        raise PrimeP1SeccompPolicyLockError() from None
+
+
 def seccomp_policy_lock_sha256(lock: object) -> str:
     """Return the SHA-256 of a canonical strict policy lock."""
     return hashlib.sha256(canonical_seccomp_policy_lock_bytes(lock)).hexdigest()
@@ -246,6 +265,15 @@ def _rule_atom_mapping(atom: SeccompRuleAtom) -> dict[str, object]:
 
 
 def _validated_lock(value: object) -> SeccompPolicyLock:
+    checked = _validated_lock_structure(value)
+    if checked.maximum_profile_sha256 != hashlib.sha256(
+        canonical_maximum_seccomp_profile_bytes(checked)
+    ).hexdigest():
+        raise PrimeP1SeccompPolicyLockError()
+    return checked
+
+
+def _validated_lock_structure(value: object) -> SeccompPolicyLock:
     if type(value) is not SeccompPolicyLock:
         raise PrimeP1SeccompPolicyLockError()
     platform = _platform(value.platform)
@@ -273,6 +301,25 @@ def _validated_lock(value: object) -> SeccompPolicyLock:
     if platform is not value.platform:
         raise PrimeP1SeccompPolicyLockError()
     return value
+
+
+def _maximum_rule(atom: SeccompRuleAtom) -> dict[str, object]:
+    return {
+        "action": "SCMP_ACT_ALLOW",
+        "args": [_maximum_constraint(item) for item in atom.arguments],
+        "names": [atom.syscall],
+    }
+
+
+def _maximum_constraint(value: SeccompArgumentConstraint) -> dict[str, object]:
+    result: dict[str, object] = {
+        "index": value.index,
+        "op": value.op,
+        "value": value.value,
+    }
+    if value.value_two is not None:
+        result["valueTwo"] = value.value_two
+    return result
 
 
 def _platform(value: object) -> ImagePlatformDescriptor:

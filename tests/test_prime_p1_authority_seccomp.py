@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,7 @@ from asterion.applications.prime_agent.operator.seccomp_policy_lock import (
     SeccompArgumentConstraint,
     SeccompPolicyLock,
     SeccompRuleAtom,
+    canonical_maximum_seccomp_profile_bytes,
 )
 
 
@@ -32,7 +34,7 @@ _PROFILE = (
 
 
 def _policy() -> SeccompPolicyLock:
-    return SeccompPolicyLock(
+    policy = SeccompPolicyLock(
         schema_version="asterion.prime-p1-seccomp-policy-lock/v1",
         platform=ImagePlatformDescriptor("linux", "amd64", None),
         libseccomp_architecture="SCMP_ARCH_X86_64",
@@ -54,6 +56,12 @@ def _policy() -> SeccompPolicyLock:
             ),
         ),
         maximum_profile_sha256="0" * 64,
+    )
+    return replace(
+        policy,
+        maximum_profile_sha256=hashlib.sha256(
+            canonical_maximum_seccomp_profile_bytes(policy)
+        ).hexdigest(),
     )
 
 
