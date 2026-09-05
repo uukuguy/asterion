@@ -15,7 +15,9 @@ import json
 from typing import Literal
 from uuid import uuid4
 
-from .docker_cli import DockerCliEngineTransport
+from .p1_development_snapshot import (
+    P1DevelopmentSnapshotTransport as DockerCliEngineTransport,
+)
 from .docker_worker import DockerRestrictedWorkerService, DockerWorkerModelRequest, DockerWorkerModelResponse, DockerWorkerWorkspaceSnapshot
 from .image_input_lock import ImagePlatformDescriptor
 from .ipython_host_orchestrator import _IpythonBrokeredCell, _IpythonHostOperations, _LIVE_RUN_SEAL, _issue_ipython_host_live_run
@@ -63,7 +65,11 @@ async def run_prime_p1_development(
     platform: ImagePlatformDescriptor, image_digest: str,
     operator_config: Mapping[str, object], signal: CancellationSignal | None = None,
 ) -> PrimeP1DevelopmentEvidence:
-    """Run the sole unpromoted local P1 preset with selected operator resources."""
+    """Run the root development preset after the operator confirms daemon locality.
+
+    The caller must already have verified that the daemon and this host share
+    the same Linux guest; a socket path is not a locality check.
+    """
     transport: DockerCliEngineTransport | None = None
     try:
         if not isinstance(operator_config, Mapping):
@@ -71,6 +77,7 @@ async def run_prime_p1_development(
         transport = DockerCliEngineTransport(
             docker_executable=docker_executable, socket_path=socket_path,
             seccomp_profile_fd=seccomp_profile_fd, platform=platform,
+            operator_confirmed_same_guest=True,
         )
         service = DockerRestrictedWorkerService(image_digest=image_digest, transport=transport)
         provider = create_prime_p1_development_provider(operator_config)
