@@ -36,6 +36,56 @@ class TestPrimeP1AuthorityApplicationResources(unittest.TestCase):
         admitted.close()
         admitted.close()
 
+    def test_admitted_resource_set_retains_exact_private_receipt_projection(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_application_resources as module
+
+        expected = {
+            item["path"]: item["sha256"]
+            for item in json.loads(module._descriptor_path().read_bytes())["resources"]
+        }
+        admitted = admit_prime_p1_application_resources()
+        projection = admitted._receipt_projection()
+
+        self.assertEqual(
+            projection.assembly_sha256,
+            expected["applications/prime_agent/assemblies/prime-ipython-coding.json"],
+        )
+        self.assertEqual(
+            projection.package_manifest_sha256,
+            expected["capabilities/prime_agent/payload/capability-package.json"],
+        )
+        self.assertEqual(
+            projection.workload_sha256,
+            expected["applications/prime_agent/operator/image/fixture/workload.json"],
+        )
+        self.assertEqual(
+            projection.starter_sha256,
+            expected["applications/prime_agent/operator/image/fixture/starter/solution.py"],
+        )
+        self.assertEqual(
+            projection.oracle_sha256,
+            expected["applications/prime_agent/operator/image/fixture/oracle/oracle.py"],
+        )
+
+    def test_closed_resource_set_withholds_private_receipt_projection(self) -> None:
+        admitted = admit_prime_p1_application_resources()
+        admitted.close()
+
+        with self.assertRaises(ValueError):
+            admitted._receipt_projection()
+
+    def test_forged_private_receipt_projection_is_rejected(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_application_resources as module
+
+        admitted = admit_prime_p1_application_resources()
+        forged = object.__new__(module._ApplicationReceiptProjection)
+        for field in module._RECEIPT_RESOURCE_PATHS:
+            object.__setattr__(forged, field, "0" * 64)
+        admitted._projection = forged
+
+        with self.assertRaises(ValueError):
+            admitted._receipt_projection()
+
     def test_verifier_failure_is_redacted(self) -> None:
         import asterion.applications.prime_agent.operator.authority_application_resources as module
 
@@ -70,6 +120,7 @@ class TestPrimeP1AuthorityApplicationResources(unittest.TestCase):
             ("schema", lambda value: value.pop("protocol")),
             ("identity", lambda value: value["identity"].__setitem__("runtime_id", 1)),
             ("digest", lambda value: value["resources"][0].__setitem__("sha256", "0" * 64)),
+            ("starter-digest", lambda value: value["resources"][3].__setitem__("sha256", "0" * 64)),
         )
         for name, mutate in mutations:
             with self.subTest(mutation=name):
