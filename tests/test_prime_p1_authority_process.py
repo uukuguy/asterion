@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import unittest
+import os
 import socket as socket_module
 import threading
+import unittest
+import errno
 from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.authority_process import (
@@ -13,6 +15,7 @@ from asterion.applications.prime_agent.operator.authority_process import (
     PrimeP1AuthorityBootstrapError,
     admit_authority_launch,
     admit_retained_authority_descriptors,
+    _consume_session_key,
 )
 
 
@@ -52,6 +55,80 @@ class _InstrumentedLock:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_private_session_key_reader_consumes_exact_key_and_closes_fd_once(
+        self,
+    ) -> None:
+        read_fd, write_fd = os.pipe()
+        os.write(write_fd, b"k" * 32)
+        os.close(write_fd)
+        descriptors = AdmittedAuthorityDescriptorsForTest(read_fd)
+        key = _consume_session_key(descriptors.bundle)
+        self.assertEqual(key, b"k" * 32)
+        with self.assertRaises(OSError):
+            os.fstat(read_fd)
+        descriptors.bundle.close()
+
+    def test_private_session_key_reader_rejects_short_extra_or_reader_error_without_leaks(
+        self,
+    ) -> None:
+        for reads in ((b"k" * 31, b""), (b"k" * 32, b"x"), (OSError("SENTINEL_KEY"),)):
+            with self.subTest(reads=reads):
+                closed: list[int] = []
+                descriptors = AdmittedAuthorityDescriptorsForTest(
+                    11, close_fd=closed.append
+                )
+                values = iter(reads)
+
+                def reader(_fd: int, _size: int) -> bytes:
+                    value = next(values)
+                    if isinstance(value, BaseException):
+                        raise value
+                    return value
+
+                with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+                    _consume_session_key(
+                        descriptors.bundle, reader=reader, close_fd=closed.append
+                    )
+                self.assertEqual(
+                    str(raised.exception), "prime P1 authority bootstrap is unavailable"
+                )
+                self.assertNotIn("SENTINEL_KEY", repr(raised.exception))
+                self.assertEqual(closed, [11])
+                descriptors.bundle.close()
+                self.assertEqual(closed, [11])
+
+    def test_private_session_key_reader_retries_bounded_eintr_and_redacts_close_error(
+        self,
+    ) -> None:
+        closed: list[int] = []
+        descriptors = AdmittedAuthorityDescriptorsForTest(11, close_fd=closed.append)
+        values = iter((OSError(errno.EINTR, "SENTINEL_KEY"), b"k" * 32, b""))
+
+        def interrupted_reader(_fd: int, _size: int) -> bytes:
+            value = next(values)
+            if isinstance(value, OSError):
+                raise value
+            return value
+
+        self.assertEqual(
+            _consume_session_key(
+                descriptors.bundle,
+                reader=interrupted_reader,
+                close_fd=closed.append,
+            ),
+            b"k" * 32,
+        )
+        self.assertEqual(closed, [11])
+
+        descriptors = AdmittedAuthorityDescriptorsForTest(12, close_fd=lambda _: None)
+        with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+            _consume_session_key(
+                descriptors.bundle,
+                reader=lambda *_: b"k" * 32,
+                close_fd=lambda _: (_ for _ in ()).throw(OSError("SENTINEL_KEY")),
+            )
+        self.assertNotIn("SENTINEL_KEY", repr(raised.exception))
+
     def test_instrumented_consume_vs_consume_has_one_owner(self) -> None:
         closed: list[int] = []
         bundle = AdmittedAuthorityDescriptors(
@@ -336,6 +413,19 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                         platform_name="linux",
                         close_fd=lambda _: None,
                     )
+
+
+class AdmittedAuthorityDescriptorsForTest:
+    """Build the opaque bundle only through test-local trusted inputs."""
+
+    def __init__(self, session_key_fd: int, *, close_fd: object = os.close) -> None:
+        self.bundle = AdmittedAuthorityDescriptors(
+            _Socket(peer=(300, 400)),
+            session_key_fd,
+            12,
+            close_fd,  # type: ignore[arg-type]
+        )
+        self.bundle.consume_config_fd()
 
 
 if __name__ == "__main__":

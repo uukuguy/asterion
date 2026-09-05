@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 import fcntl
+import errno
 import os
 import socket
 import struct
@@ -103,6 +104,44 @@ class AdmittedAuthorityDescriptors:
                 _unavailable()
             setattr(self, attribute, None)
             return value
+
+
+def _consume_session_key(
+    descriptors: AdmittedAuthorityDescriptors,
+    *,
+    reader: Callable[[int, int], bytes] = os.read,
+    close_fd: Callable[[int], object] = os.close,
+) -> bytes:
+    """Consume and close the private 32-byte authority session key descriptor."""
+    fd: int | None = None
+    try:
+        if not isinstance(descriptors, AdmittedAuthorityDescriptors):
+            _unavailable()
+        fd = descriptors.consume_session_key_fd()
+        data = bytearray()
+        interruptions = 0
+        while len(data) < 32:
+            try:
+                chunk = reader(fd, 32 - len(data))
+            except OSError as error:
+                if error.errno == errno.EINTR and interruptions < 8:
+                    interruptions += 1
+                    continue
+                raise
+            if type(chunk) is not bytes or not chunk or len(chunk) > 32 - len(data):
+                raise ValueError
+            data.extend(chunk)
+        if reader(fd, 1):
+            raise ValueError
+        return bytes(data)
+    except (OSError, OverflowError, TypeError, ValueError):
+        _unavailable()
+    finally:
+        if fd is not None:
+            try:
+                close_fd(fd)
+            except (OSError, OverflowError, TypeError):
+                _unavailable()
 
 
 def admit_authority_launch(
