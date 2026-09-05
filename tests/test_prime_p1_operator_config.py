@@ -26,6 +26,9 @@ VALUES = {
     "ASTERION_PRIME_P1_RECEIPT_KEY_ID": "p1-2026",
     "ASTERION_PRIME_P1_RECEIPT_HMAC_KEY": "b" * 64,
     "DEEPSEEK_API_KEY": "SENTINEL_SECRET",
+    "ASTERION_PRIME_P1_IMAGE_PLATFORM_OS": "linux",
+    "ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE": "amd64",
+    "ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT": "none",
 }
 
 
@@ -54,7 +57,11 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
         self.assertEqual(config.model_id, "deepseek-chat")
         with self.assertRaises(TypeError):
             vars(config)
-        for operation in (lambda: pickle.dumps(config), lambda: copy.copy(config), lambda: copy.deepcopy(config)):
+        for operation in (
+            lambda: pickle.dumps(config),
+            lambda: copy.copy(config),
+            lambda: copy.deepcopy(config),
+        ):
             with self.subTest(operation=operation):
                 with self.assertRaises(TypeError) as raised:
                     operation()
@@ -176,6 +183,44 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
             for label, text in cases.items():
                 with self.subTest(label=label):
                     fd = self._open_config(root, text=text)
+                    with self.assertRaises(PrimeP1OperatorConfigError):
+                        load_operator_config(fd)
+
+    def test_rejects_legacy_or_malformed_image_platform_triples(self) -> None:
+        cases = {
+            "legacy-nine-key": {
+                key: value
+                for key, value in VALUES.items()
+                if "IMAGE_PLATFORM" not in key
+            },
+            "missing-os": {
+                key: value
+                for key, value in VALUES.items()
+                if key != "ASTERION_PRIME_P1_IMAGE_PLATFORM_OS"
+            },
+            "extra": {**VALUES, "EXTRA_PLATFORM": "linux"},
+            "malformed-os": {
+                **VALUES,
+                "ASTERION_PRIME_P1_IMAGE_PLATFORM_OS": "Linux",
+            },
+            "malformed-architecture": {
+                **VALUES,
+                "ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE": "amd_64",
+            },
+            "malformed-variant": {
+                **VALUES,
+                "ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT": "arm64",
+            },
+            "non-linux": {
+                **VALUES,
+                "ASTERION_PRIME_P1_IMAGE_PLATFORM_OS": "darwin",
+            },
+        }
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            root = Path(temp)
+            for label, values in cases.items():
+                with self.subTest(label=label):
+                    fd = self._open_config(root, text=self._text(values))
                     with self.assertRaises(PrimeP1OperatorConfigError):
                         load_operator_config(fd)
 

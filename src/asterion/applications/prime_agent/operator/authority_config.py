@@ -26,9 +26,14 @@ _KEYS = frozenset(
         "ASTERION_PRIME_P1_RECEIPT_KEY_ID",
         "ASTERION_PRIME_P1_RECEIPT_HMAC_KEY",
         "DEEPSEEK_API_KEY",
+        "ASTERION_PRIME_P1_IMAGE_PLATFORM_OS",
+        "ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE",
+        "ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT",
     }
 )
 _RECEIPT_KEY = re.compile(r"[0-9a-f]{64}\Z")
+_OCI_COMPONENT = re.compile(r"[a-z0-9]+\Z")
+_OCI_VARIANT = re.compile(r"v[0-9]+\Z")
 _MAX_BYTES = 65536
 
 
@@ -170,6 +175,20 @@ def _parse_verified_bytes(data: bytes) -> dict[str, str]:
     if (
         set(values) != _KEYS
         or _RECEIPT_KEY.fullmatch(values["ASTERION_PRIME_P1_RECEIPT_HMAC_KEY"]) is None
+        or values["ASTERION_PRIME_P1_IMAGE_PLATFORM_OS"] != "linux"
+        or _OCI_COMPONENT.fullmatch(values["ASTERION_PRIME_P1_IMAGE_PLATFORM_OS"])
+        is None
+        or _OCI_COMPONENT.fullmatch(
+            values["ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE"]
+        )
+        is None
+        or (
+            values["ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT"] != "none"
+            and _OCI_VARIANT.fullmatch(
+                values["ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT"]
+            )
+            is None
+        )
     ):
         raise ValueError
     return values
