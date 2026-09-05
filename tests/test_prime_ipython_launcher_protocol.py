@@ -78,8 +78,8 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
             PRIME_IPYTHON_CODING_WORKLOAD_DIGEST.removeprefix("sha256:"),
             PRIME_IPYTHON_CODING_EXPECTED_RESULT_SHA256,
         )
-        self.assertIn(PRIME_IPYTHON_CODING_EXPECTED_RESULT_SHA256, launcher)
-        self.assertNotIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
+        self.assertNotIn(PRIME_IPYTHON_CODING_EXPECTED_RESULT_SHA256, launcher)
+        self.assertIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
 
     def test_fixture_starts_failing_then_can_pass_without_oracle_mutation(self) -> None:
         starter = IMAGE / "fixture/starter/solution.py"
@@ -90,6 +90,10 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
         self.assertIn("return 0", starter.read_text(encoding="utf-8"))
         self.assertIn("answer() == 42", oracle.read_text(encoding="utf-8"))
         self.assertIn("initial_oracle_must_fail", lock)
+        self.assertEqual(
+            lock["workload_sha256"],
+            PRIME_IPYTHON_CODING_WORKLOAD_DIGEST.removeprefix("sha256:"),
+        )
         immutable_oracle = oracle.read_bytes()
         with TemporaryDirectory() as temporary:
             workspace = Path(temporary)
@@ -114,8 +118,8 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
         expected = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True)
         self.assertIn(expected, launcher)
         self.assertIn("_FRAME_LIMIT", launcher)
-        self.assertIn(PRIME_IPYTHON_CODING_EXPECTED_RESULT_SHA256, launcher)
-        self.assertNotIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
+        self.assertNotIn(PRIME_IPYTHON_CODING_EXPECTED_RESULT_SHA256, launcher)
+        self.assertIn(PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, launcher)
         self.assertIn("hashlib.sha256", launcher)
         self.assertIn('"result_digest"', launcher)
         self.assertNotIn('{"terminal":"completed"}', launcher)

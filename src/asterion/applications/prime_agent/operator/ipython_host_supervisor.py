@@ -13,6 +13,8 @@ import json
 import re
 from typing import cast
 
+from .ipython_workload import PRIME_IPYTHON_CODING_WORKLOAD_DIGEST
+
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9-]*$")
 _MAX_SOURCE_BYTES = 16 * 1024
@@ -22,7 +24,7 @@ _ATTESTATION_VERSION = "prime-ipython-host-attestation/v1"
 _ASSEMBLY_ID = "prime.ipython-coding@1.0.0"
 _PACKAGE_ID = "prime-agent@1.0.0"
 _IMPLEMENTATION_ID = "prime.ipython-coding@1.0.0"
-_WORKLOAD_DIGEST = "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"
+_WORKLOAD_DIGEST = PRIME_IPYTHON_CODING_WORKLOAD_DIGEST
 _ORACLE_DIGEST = "sha256:85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b31639fa3c4eb"
 _STARTER_DIGEST = "sha256:4f8e0bca0f70582bad96caa292823ac29577633bebd9f76257617dc92ab6832f"
 _SOURCE_DIGEST = "sha256:486a083f857430c7d6a452ebf881d1b8c46063c128b51162ffdebef0c1f71c7a"

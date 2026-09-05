@@ -15,7 +15,7 @@ import subprocess
 import sys
 from typing import NoReturn
 
-WORKLOAD_DIGEST = "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"
+WORKLOAD_DIGEST = "sha256:21e33f624940b7715de04f30a68223e04b52061823ad5947daba3b294c9e1cd6"
 PRIME_SDK_SESSION_PIN = "prime-agent@0.7.1"
 _FRAME_LIMIT = 65536
 _SELF_CHECK = b'{"credentials_absent":true,"effective_capabilities":0,"effective_user_id":65534,"no_new_privileges":1,"nonloopback_network_absent":true,"root_read_only":true,"seccomp_mode":2,"workspace_only_writable":true}'

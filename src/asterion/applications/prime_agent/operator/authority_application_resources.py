@@ -23,6 +23,7 @@ _EXPECTED_PATHS: Final = (
     "applications/prime_agent/operator/image/fixture/fixture-lock.json",
     "applications/prime_agent/operator/image/fixture/oracle/oracle.py",
     "applications/prime_agent/operator/image/fixture/starter/solution.py",
+    "applications/prime_agent/operator/image/fixture/workload.json",
     "applications/prime_agent/operator/image/launcher.py",
     "capabilities/prime_agent/payload/capabilities/ipython-coding.json",
     "capabilities/prime_agent/payload/capability-package.json",

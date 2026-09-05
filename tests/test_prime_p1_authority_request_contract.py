@@ -22,17 +22,24 @@ _GOLDEN = (
     b'{"controls":{"deadline_milliseconds":60000,"max_cost_microunits":10000,'
     b'"max_input_bytes":4096,"max_input_tokens":1024,"max_output_bytes":4096,'
     b'"max_output_tokens":1024,"max_requests":1},"format":'
-    b'"asterion.prime-p1-request-contract/v1","identity":{"application_id":'
+    b'"asterion.prime-p1-request-contract/v2","identity":{"application_id":'
     b'"prime.ipython-coding","application_version":"1.0.0","assembly_ref":'
     b'"prime.ipython-coding@1.0.0","implementation_ref":'
     b'"prime.ipython-coding@1.0.0","package_ref":"prime-agent@1.0.0",'
     b'"prime_sdk_ref":"prime-agent@0.7.1","provider_id":"prime-agent",'
     b'"runtime_id":"prime.agent"},"model_tools":["ipython"],"oracle_sha256":'
     b'"85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b31639fa3c4eb",'
-    b'"workload_sha256":"f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"}'
+    b'"workload_sha256":"21e33f624940b7715de04f30a68223e04b52061823ad5947daba3b294c9e1cd6"}'
 )
-_DIGEST = "b574630f0d31c7ea92f93812389a8efe79ac4b953da04797a2d598329f99aa34"
-_ALLOWED_IMPORT_MODULES = frozenset({"__future__", "hashlib", "json"})
+_DIGEST = "7bbe643efb2efdc764a06f8d4a20aa92b4de60bb15285bf32a2a5b3937424b97"
+_ALLOWED_IMPORT_MODULES = frozenset(
+    {
+        "__future__",
+        "hashlib",
+        "json",
+        ".ipython_workload",
+    }
+)
 
 
 def _has_only_allowed_imports(source: str) -> bool:
@@ -45,9 +52,9 @@ def _has_only_allowed_imports(source: str) -> bool:
         if isinstance(node, ast.Import):
             modules.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            if node.level != 0 or node.module is None:
+            if node.module is None:
                 return False
-            modules.add(node.module)
+            modules.add("." * node.level + node.module)
     return modules <= _ALLOWED_IMPORT_MODULES
 
 
@@ -61,7 +68,7 @@ class TestPrimeP1AuthorityRequestContract(unittest.TestCase):
         self.assertEqual(
             decoded,
             {
-                "format": "asterion.prime-p1-request-contract/v1",
+                "format": "asterion.prime-p1-request-contract/v2",
                 "controls": {
                     "deadline_milliseconds": 60_000,
                     "max_cost_microunits": 10_000,
@@ -82,7 +89,7 @@ class TestPrimeP1AuthorityRequestContract(unittest.TestCase):
                     "runtime_id": "prime.agent",
                 },
                 "model_tools": ["ipython"],
-                "workload_sha256": "f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022",
+                "workload_sha256": "21e33f624940b7715de04f30a68223e04b52061823ad5947daba3b294c9e1cd6",
                 "oracle_sha256": "85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b31639fa3c4eb",
             },
         )

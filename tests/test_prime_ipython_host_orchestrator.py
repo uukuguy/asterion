@@ -20,13 +20,16 @@ from asterion.applications.prime_agent.operator.model_broker import (
 )
 from asterion.runtime.host import CancellationSignal
 from asterion.services.restricted_worker import RestrictedWorkerLease
+from asterion.applications.prime_agent.operator.ipython_workload import (
+    PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
+)
 
 
 _INITIAL = b"def answer() -> int:\n    return 0\n"
 _FINAL = b"def answer() -> int:\n    return 42\n"
 _CELL = "def answer() -> int:\n    return 42\n"
 _CHALLENGE = "sha256:" + "a" * 64
-_WORKLOAD = "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"
+_WORKLOAD = PRIME_IPYTHON_CODING_WORKLOAD_DIGEST
 
 
 class _HostCallbackSentinel(BaseException):

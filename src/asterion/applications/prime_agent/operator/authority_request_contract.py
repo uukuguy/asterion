@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 
+from .ipython_workload import PRIME_IPYTHON_CODING_WORKLOAD_DIGEST
+
 
 def canonical_prime_p1_request_contract_bytes() -> bytes:
     """Return the closed P1 request contract without consulting host state."""
     value = {
-        "format": "asterion.prime-p1-request-contract/v1",
+        "format": "asterion.prime-p1-request-contract/v2",
         "controls": {
             "deadline_milliseconds": 60_000,
             "max_cost_microunits": 10_000,
@@ -30,7 +32,7 @@ def canonical_prime_p1_request_contract_bytes() -> bytes:
             "runtime_id": "prime.agent",
         },
         "model_tools": ["ipython"],
-        "workload_sha256": "f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022",
+        "workload_sha256": PRIME_IPYTHON_CODING_WORKLOAD_DIGEST.removeprefix("sha256:"),
         "oracle_sha256": "85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b31639fa3c4eb",
     }
     return json.dumps(

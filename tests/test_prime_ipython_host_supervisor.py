@@ -14,6 +14,9 @@ from asterion.applications.prime_agent.operator.ipython_host_supervisor import (
     IpythonHostTrace,
     inspect_answer_source,
 )
+from asterion.applications.prime_agent.operator.ipython_workload import (
+    PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
+)
 
 
 _INITIAL = b"def answer() -> int:\n    return 0\n"
@@ -27,7 +30,7 @@ def _identity(**changes: object) -> IpythonHostExpectedIdentity:
         "package_id": "prime-agent@1.0.0",
         "implementation_id": "prime.ipython-coding@1.0.0",
         "image_digest": "sha256:" + "a" * 64,
-        "workload_digest": "sha256:f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022",
+        "workload_digest": PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
         "oracle_digest": "sha256:85ee4060b19a5ee375e4c6258f45b1df722f53efd8310f56603b31639fa3c4eb",
         "starter_digest": "sha256:4f8e0bca0f70582bad96caa292823ac29577633bebd9f76257617dc92ab6832f",
         "source_digest": "sha256:486a083f857430c7d6a452ebf881d1b8c46063c128b51162ffdebef0c1f71c7a",
