@@ -114,6 +114,8 @@ def _consume_session_key(
 ) -> bytes:
     """Consume and close the private 32-byte authority session key descriptor."""
     fd: int | None = None
+    result: bytes | None = None
+    failed = False
     try:
         if not isinstance(descriptors, AdmittedAuthorityDescriptors):
             _unavailable()
@@ -142,15 +144,18 @@ def _consume_session_key(
                 raise
         if type(extra) is not bytes or extra != b"":
             raise ValueError
-        return bytes(data)
+        result = bytes(data)
     except (OSError, OverflowError, TypeError, ValueError):
-        _unavailable()
+        failed = True
     finally:
         if fd is not None:
             try:
                 close_fd(fd)
             except (OSError, OverflowError, TypeError):
-                _unavailable()
+                failed = True
+    if failed or result is None:
+        _unavailable()
+    return result
 
 
 def admit_authority_launch(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import socket as socket_module
 import threading
+import traceback
 import unittest
 import errno
 from unittest.mock import patch
@@ -55,6 +56,83 @@ class _InstrumentedLock:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_private_session_key_reader_handles_eof_eintr_matrix_and_bounds_retries(
+        self,
+    ) -> None:
+        for reads, expected in (
+            ((b"k" * 32, OSError(errno.EINTR, "SENTINEL"), b""), b"k" * 32),
+            ((b"k" * 32, OSError(errno.EINTR, "SENTINEL"), b"x"), None),
+            ((None,), None),
+            (("",), None),
+            ((0,), None),
+        ):
+            with self.subTest(reads=reads):
+                descriptors = AdmittedAuthorityDescriptorsForTest(
+                    11, close_fd=lambda _: None
+                )
+                values = iter(reads)
+
+                def reader(_fd: int, _size: int) -> bytes:
+                    value = next(values)
+                    if isinstance(value, OSError):
+                        raise value
+                    return value  # type: ignore[return-value]
+
+                if expected is None:
+                    with self.assertRaises(PrimeP1AuthorityBootstrapError):
+                        _consume_session_key(
+                            descriptors.bundle, reader=reader, close_fd=lambda _: None
+                        )
+                else:
+                    self.assertEqual(
+                        _consume_session_key(
+                            descriptors.bundle, reader=reader, close_fd=lambda _: None
+                        ),
+                        expected,
+                    )
+
+        attempts = 0
+        descriptors = AdmittedAuthorityDescriptorsForTest(11, close_fd=lambda _: None)
+
+        def always_interrupted(_fd: int, _size: int) -> bytes:
+            nonlocal attempts
+            attempts += 1
+            raise OSError(errno.EINTR, "SENTINEL")
+
+        with self.assertRaises(PrimeP1AuthorityBootstrapError):
+            _consume_session_key(
+                descriptors.bundle, reader=always_interrupted, close_fd=lambda _: None
+            )
+        self.assertEqual(
+            attempts, 9
+        )  # Eight retries, then the ninth EINTR fails closed.
+
+    def test_private_session_key_reader_discards_reader_and_closer_exception_context(
+        self,
+    ) -> None:
+        for reader, closer in (
+            (
+                lambda *_: (_ for _ in ()).throw(OSError("READER_SENTINEL")),
+                lambda _: None,
+            ),
+            (
+                lambda *_: b"k" * 32,
+                lambda _: (_ for _ in ()).throw(OSError("CLOSE_SENTINEL")),
+            ),
+        ):
+            with self.subTest(reader=reader, closer=closer):
+                descriptors = AdmittedAuthorityDescriptorsForTest(
+                    11, close_fd=lambda _: None
+                )
+                with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+                    _consume_session_key(
+                        descriptors.bundle, reader=reader, close_fd=closer
+                    )
+                self.assertIsNone(raised.exception.__context__)
+                rendered = "".join(traceback.format_exception(raised.exception))
+                self.assertNotIn("READER_SENTINEL", rendered)
+                self.assertNotIn("CLOSE_SENTINEL", rendered)
+
     def test_private_session_key_reader_consumes_exact_key_and_closes_fd_once(
         self,
     ) -> None:
