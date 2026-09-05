@@ -30,6 +30,17 @@ _DIGEST = PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
 _FIXTURE = b"p1b continuity fixture\n"
 
 
+async def _reap_process(process: DockerCliAttachProcess) -> None:
+    if process.returncode is None: process.kill()
+    task = asyncio.create_task(process.wait()); cancelled = False
+    async with asyncio.timeout(30):
+        while not task.done():
+            try: await asyncio.shield(task)
+            except asyncio.CancelledError: cancelled = True
+    task.result()
+    if cancelled: raise asyncio.CancelledError
+
+
 @dataclass(frozen=True)
 class _P1BSpec:
     container_id: str
@@ -120,8 +131,7 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
         self._specification(container_id)  # type: ignore[attr-defined]
         process = await self._attach_runner.open(argv=self._prefix + ("container", "start", "--attach", "--interactive", container_id), env={}, pass_fds=())  # type: ignore[attr-defined]
         if process.stdin is None or process.stdout is None:
-            if process.returncode is None: process.kill()
-            await process.wait()
+            await _reap_process(process)
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._started_processes[container_id] = process  # type: ignore[attr-defined]
 
@@ -224,8 +234,7 @@ class _P1BChannel:
         if self._state == "closed": return
         self._state = "closed"
         if self._process.stdin is not None: self._process.stdin.close()
-        if self._process.returncode is None: self._process.kill()
-        await asyncio.wait_for(self._process.wait(), max(0.001, control.deadline - monotonic()))
+        await _reap_process(self._process)
 
     async def _read(self, control: _LifecycleCallControl) -> bytes:
         if self._process.stdout is None: raise RestrictedWorkerError("restricted worker value is invalid")
