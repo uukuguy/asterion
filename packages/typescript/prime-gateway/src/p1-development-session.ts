@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { inspect } from "node:util";
@@ -87,16 +88,17 @@ export class PrimeP1DevelopmentSession {
     if (!isAbsolute(options.primeSourceRoot) || !isAbsolute(options.workspace)) {
       throw new Error("primeSourceRoot and workspace must be absolute paths");
     }
-    const modules = await loadPrimeSdk(options.primeSourceRoot);
+    const primeSourceRoot = await canonicalPrimeSourceRoot(options.primeSourceRoot);
+    const modules = await loadPrimeSdk(primeSourceRoot);
     const identity = randomUUID();
     const provider = `asterion-p1-development-${identity}`;
     const modelId = `p1-development-${identity}`;
     const control: { state: "open" | "cancelled" | "closed" } = { state: "open" };
-    let shared = sharedRegistries.get(options.primeSourceRoot);
+    let shared = sharedRegistries.get(primeSourceRoot);
     if (!shared) {
       const auth = modules.AuthStorage.inMemory();
       shared = { auth, registry: modules.ModelRegistry.inMemory(auth) };
-      sharedRegistries.set(options.primeSourceRoot, shared);
+      sharedRegistries.set(primeSourceRoot, shared);
     }
     // Prime requires a configured model. This fixed marker is in-memory only and
     // is never supplied to a network provider because streamSimple is injected.
@@ -127,6 +129,7 @@ export class PrimeP1DevelopmentSession {
     const settingsManager = modules.SettingsManager.inMemory({
       retry: { enabled: false, provider: { maxRetries: 0 } },
       autoRefine: { enabled: false },
+      compaction: { enabled: false },
     });
     // DefaultResourceLoader is empty until reload(); never reload it here, since
     // reload discovers workspace and ancestor resources.
@@ -240,6 +243,11 @@ async function loadPrimeSdk(root: string): Promise<PrimeSdkModules> {
     SettingsManager: settings.SettingsManager,
     Type: typebox.Type,
   } as PrimeSdkModules;
+}
+
+async function canonicalPrimeSourceRoot(root: string): Promise<string> {
+  try { return await realpath(root); }
+  catch { throw new Error("Prime SDK source root is unavailable"); }
 }
 
 function assertAssistantEventStream(value: unknown): asserts value is { [Symbol.asyncIterator](): AsyncIterator<unknown>; result(): Promise<unknown> } {

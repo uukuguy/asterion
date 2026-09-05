@@ -62,12 +62,12 @@ test("runs one real SDK prompt tool loop through injected callbacks without leak
   });
   try {
     const result = await session.prompt("SENTINEL_PROMPT");
-    assert.equal(seen.model, 1);
+    assert.equal(seen.model, 2);
     assert.equal(seen.tool, 1);
     assert.deepEqual(result, {
       lifecycle: "completed",
-      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 },
-      assistant: { completed: false, stop_reason: "toolUse" },
+      usage: { input_tokens: 6, output_tokens: 4, total_tokens: 10 },
+      assistant: { completed: true, stop_reason: "stop" },
     });
     assert.doesNotMatch(JSON.stringify(result), /SENTINEL_(PROMPT|MODEL_COMPLETION|TOOL_INPUT|TOOL_OUTPUT)/);
     assert.doesNotMatch(inspect(session), /SENTINEL_/);
