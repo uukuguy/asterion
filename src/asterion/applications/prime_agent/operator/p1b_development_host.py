@@ -76,12 +76,16 @@ async def run_prime_p1b_development(
     node_bin: str,
     entrypoint: str,
     prime_source_root: str,
+    run_id: str | None = None,
 ) -> PrimeP1BDevelopmentTrace:
     """Run the one fixed P1-B development flow and emit only its safe trace."""
     if not isinstance(operator_config, Mapping):
         raise PrimeP1BDevelopmentHostError()
     suffix = uuid4().hex
-    run_id = "prime-p1b-development-" + suffix
+    if run_id is None:
+        run_id = "prime-p1b-development-" + suffix
+    elif type(run_id) is not str or not run_id:
+        raise PrimeP1BDevelopmentHostError()
     session_id = "prime-p1b-development-session-" + suffix
     service: P1BDockerPersistentWorkerService | None = None
     gateway: PrimeP1BDevelopmentGateway | None = None

@@ -1,0 +1,146 @@
+"""Focused contract checks for the local-root P1 CLI host."""
+
+from __future__ import annotations
+
+import asyncio
+import unittest
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from asterion.services.registry import HostServiceFactoryContext
+from asterion.runtimes.prime_agent_host import PrimeSmallVerificationRequest
+
+
+def _context(**changes: object) -> HostServiceFactoryContext:
+    values: dict[str, object] = {
+        "provider_id": "prime-agent",
+        "application_id": "prime.ipython-coding",
+        "application_version": "1.0.0",
+        "capability_id": "prime.ipython-production",
+        "options": {},
+    }
+    values.update(changes)
+    return HostServiceFactoryContext(**values)  # type: ignore[arg-type]
+
+
+class _Signal:
+    cancelled = False
+
+
+class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_context_opens_without_starting_the_verification_flow(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        ready = subject._P1CliResources(  # type: ignore[attr-defined]
+            image_digest="sha256:" + "a" * 64,
+            transport=object(),
+            operator_config={"DEEPSEEK_API_KEY": "SENTINEL"},
+            node_bin="/operator/node",
+            entrypoint="/operator/bridge.js",
+            prime_source_root="/operator/prime",
+        )
+        binding = subject.create_prime_p1_cli_factory(repo_root=Path("/unavailable"))
+        with (
+            patch.object(subject, "_preflight", return_value=ready) as preflight,
+            patch.object(subject, "run_prime_p1b_development", new_callable=AsyncMock) as run,
+        ):
+            async with binding.factory(_context()) as service:
+                self.assertIsInstance(service, subject.PrimeSmallVerificationService)
+            preflight.assert_called_once()
+            run.assert_not_awaited()
+
+    async def test_verify_consumes_service_and_preserves_caller_run_id(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+        from asterion.applications.prime_agent.operator.p1b_development_host import PrimeP1BDevelopmentTrace
+
+        ready = subject._P1CliResources(  # type: ignore[attr-defined]
+            image_digest="sha256:" + "a" * 64, transport=object(), operator_config={},
+            node_bin="/operator/node", entrypoint="/operator/bridge.js", prime_source_root="/operator/prime",
+        )
+        binding = subject.create_prime_p1_cli_factory(repo_root=Path("/unavailable"))
+        trace = PrimeP1BDevelopmentTrace(trace_sha256="sha256:" + "b" * 64)
+        with (
+            patch.object(subject, "_preflight", return_value=ready),
+            patch.object(subject, "run_prime_p1b_development", new=AsyncMock(return_value=trace)) as run,
+        ):
+            async with binding.factory(_context()) as service:
+                result = await service.verify(PrimeSmallVerificationRequest("caller-run-1"))
+                self.assertEqual((result.run_id, result.scope, result.promotion, result.trace_sha256), ("caller-run-1", "p1-b-development", "unpromoted", trace.trace_sha256))
+                with self.assertRaises(subject.PrimeP1CliHostError):
+                    await service.verify(PrimeSmallVerificationRequest("caller-run-2"))
+        run.assert_awaited_once_with(
+            image_digest=ready.image_digest, transport=ready.transport, operator_config=ready.operator_config,
+            node_bin=ready.node_bin, entrypoint=ready.entrypoint, prime_source_root=ready.prime_source_root,
+            run_id="caller-run-1",
+        )
+
+    async def test_context_exit_and_bad_request_fail_closed_without_secret(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        ready = subject._P1CliResources(  # type: ignore[attr-defined]
+            image_digest="sha256:" + "a" * 64, transport=object(), operator_config={"key": "SENTINEL"},
+            node_bin="/operator/node", entrypoint="/operator/bridge.js", prime_source_root="/operator/prime",
+        )
+        binding = subject.create_prime_p1_cli_factory(repo_root=Path("/unavailable"))
+        with patch.object(subject, "_preflight", return_value=ready):
+            async with binding.factory(_context()) as service:
+                with self.assertRaises(subject.PrimeP1CliHostError) as caught:
+                    await service.verify(object())
+            with self.assertRaises(subject.PrimeP1CliHostError):
+                await service.verify(PrimeSmallVerificationRequest("caller-run-1"))
+        self.assertNotIn("SENTINEL", str(caught.exception))
+
+    async def test_cancellation_waits_for_p1b_cleanup_before_propagating(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        ready = subject._P1CliResources(  # type: ignore[attr-defined]
+            image_digest="sha256:" + "a" * 64, transport=object(), operator_config={},
+            node_bin="/operator/node", entrypoint="/operator/bridge.js", prime_source_root="/operator/prime",
+        )
+        completed = asyncio.Event()
+
+        async def pending(**_: object) -> object:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                completed.set()
+            raise AssertionError("unreachable")
+
+        binding = subject.create_prime_p1_cli_factory(repo_root=Path("/unavailable"))
+        with (
+            patch.object(subject, "_preflight", return_value=ready),
+            patch.object(subject, "run_prime_p1b_development", side_effect=pending),
+        ):
+            async with binding.factory(_context()) as service:
+                task = asyncio.create_task(service.verify(PrimeSmallVerificationRequest("caller-run-1"), signal=_Signal()))
+                await asyncio.sleep(0)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+        self.assertTrue(completed.is_set())
+
+    async def test_failed_p1b_task_is_reaped_before_safe_failure(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        ready = subject._P1CliResources(  # type: ignore[attr-defined]
+            image_digest="sha256:" + "a" * 64, transport=object(), operator_config={},
+            node_bin="/operator/node", entrypoint="/operator/bridge.js", prime_source_root="/operator/prime",
+        )
+        completed = asyncio.Event()
+
+        async def fails_after_cleanup(**_: object) -> object:
+            try:
+                raise RuntimeError("SENTINEL")
+            finally:
+                completed.set()
+
+        binding = subject.create_prime_p1_cli_factory(repo_root=Path("/unavailable"))
+        with (
+            patch.object(subject, "_preflight", return_value=ready),
+            patch.object(subject, "run_prime_p1b_development", side_effect=fails_after_cleanup),
+        ):
+            async with binding.factory(_context()) as service:
+                with self.assertRaises(subject.PrimeP1CliHostError) as caught:
+                    await service.verify(PrimeSmallVerificationRequest("caller-run-1"))
+        self.assertTrue(completed.is_set())
+        self.assertNotIn("SENTINEL", str(caught.exception))
