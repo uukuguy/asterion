@@ -17,8 +17,12 @@ from asterion.applications.prime_agent.operator.authority_config import (
 from asterion.applications.prime_agent.operator.authority_resources import (
     AdmittedStaticAuthorityResources,
     PrimeP1AuthorityResourceError,
+    admit_production_authority_resources,
     admit_static_authority_resources,
     admit_static_image_resource,
+)
+from asterion.applications.prime_agent.operator.authority_evidence import (
+    PrimeP1EvidenceResourceError,
 )
 from asterion.applications.prime_agent.operator.image_input_lock import (
     ImageArtifact,
@@ -55,6 +59,17 @@ _SINGLE_READ_PROFILE = (
     b'{"architectures":["SCMP_ARCH_X86_64"],"defaultAction":"SCMP_ACT_ERRNO",'
     b'"syscalls":[{"action":"SCMP_ACT_ALLOW","args":[],"names":["read"]}]}'
 )
+
+
+class _CountingResource:
+    def __init__(self, events: list[str], name: str) -> None:
+        self.close_calls = 0
+        self._events = events
+        self._name = name
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self._events.append(self._name)
 
 
 def _artifacts(*, config_sha256: str = "a" * 64) -> tuple[ImageArtifact, ...]:
@@ -114,6 +129,47 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         self.assertIsNone(raised.exception.__context__)
         self.assertNotIn("RESOURCE_SECRET_SENTINEL", str(raised.exception))
         self.assertNotIn("RESOURCE_SECRET_SENTINEL", repr(raised.exception))
+
+    def test_production_resources_require_static_and_evidence(self) -> None:
+        config = self._config()
+        events: list[str] = []
+        static = _CountingResource(events, "static")
+        evidence = _CountingResource(events, "evidence")
+        import asterion.applications.prime_agent.operator.authority_resources as module
+
+        with (
+            patch.object(
+                module, "admit_static_authority_resources", return_value=static
+            ) as admit_static,
+            patch.object(module, "admit_evidence_root", return_value=evidence) as admit_evidence,
+        ):
+            resources = admit_production_authority_resources(config)
+        admit_static.assert_called_once_with(config)
+        admit_evidence.assert_called_once_with(config)
+        self.assertEqual(repr(resources), "AdmittedProductionAuthorityResources(redacted)")
+        with self.assertRaises(TypeError):
+            resources.__reduce__()
+        threads = [threading.Thread(target=resources.close) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(events, ["evidence", "static"])
+
+    def test_evidence_failure_closes_static_once_in_reverse_acquisition_order(self) -> None:
+        config = self._config()
+        events: list[str] = []
+        static = _CountingResource(events, "static")
+        import asterion.applications.prime_agent.operator.authority_resources as module
+
+        with (
+            patch.object(module, "admit_static_authority_resources", return_value=static),
+            patch.object(module, "admit_evidence_root", side_effect=PrimeP1EvidenceResourceError),
+            self.assertRaises(PrimeP1AuthorityResourceError),
+        ):
+            admit_production_authority_resources(config)
+        self.assertEqual(static.close_calls, 1)
+        self.assertEqual(events, ["static"])
 
     def test_normalizes_none_only_at_resource_admission(self) -> None:
         config = self._config()

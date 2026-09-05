@@ -19,10 +19,15 @@ from .authority_seccomp import (
     AdmittedPrimeP1SeccompResource,
     admit_static_seccomp_resource,
 )
+from .authority_evidence import (
+    AdmittedPrimeP1EvidenceRoot,
+    admit_evidence_root,
+)
 from .seccomp_policy_lock import seccomp_policy_lock_sha256
 
 
 _STATIC_AUTHORITY_RESOURCES_TOKEN = object()
+_PRODUCTION_AUTHORITY_RESOURCES_TOKEN = object()
 _IDENTITY_DOMAIN = b"asterion.prime-p1.static-authority-resources/v1\0"
 
 
@@ -89,6 +94,54 @@ class AdmittedStaticAuthorityResources:
                 pass
 
 
+class AdmittedProductionAuthorityResources:
+    """Opaque owner of all admitted production resources."""
+
+    __slots__ = ("_evidence_resource", "_lock", "_static_resources")
+
+    def __init__(
+        self,
+        static_resources: AdmittedStaticAuthorityResources,
+        evidence_resource: AdmittedPrimeP1EvidenceRoot,
+        *,
+        _token: object | None = None,
+    ) -> None:
+        if _token is not _PRODUCTION_AUTHORITY_RESOURCES_TOKEN:
+            raise PrimeP1AuthorityResourceError() from None
+        self._static_resources: AdmittedStaticAuthorityResources | None = static_resources
+        self._evidence_resource: AdmittedPrimeP1EvidenceRoot | None = evidence_resource
+        self._lock = threading.Lock()
+
+    def __repr__(self) -> str:
+        return "AdmittedProductionAuthorityResources(redacted)"
+
+    def __reduce__(self) -> object:
+        raise TypeError("prime P1 authority resource is unavailable")
+
+    def __reduce_ex__(self, _: SupportsIndex) -> object:
+        raise TypeError("prime P1 authority resource is unavailable")
+
+    def __copy__(self) -> object:
+        raise TypeError("prime P1 authority resource is unavailable")
+
+    def __deepcopy__(self, _: object) -> object:
+        raise TypeError("prime P1 authority resource is unavailable")
+
+    def close(self) -> None:
+        """Release owned children once, in reverse acquisition order."""
+        with self._lock:
+            evidence = self._evidence_resource
+            static = self._static_resources
+            self._evidence_resource = None
+            self._static_resources = None
+        for resource in (evidence, static):
+            if resource is not None:
+                try:
+                    resource.close()
+                except BaseException:
+                    pass
+
+
 def _static_authority_resource_identity(
     image: ImageInputLock,
     seccomp: AdmittedPrimeP1SeccompResource,
@@ -144,6 +197,35 @@ def admit_static_authority_resources(config: object) -> AdmittedStaticAuthorityR
                 seccomp.close()
             except BaseException:
                 pass
+    if result is None:
+        raise PrimeP1AuthorityResourceError() from None
+    return result
+
+
+def admit_production_authority_resources(
+    config: object,
+) -> AdmittedProductionAuthorityResources:
+    """Admit and retain static and evidence resources as one opaque owner."""
+    static: AdmittedStaticAuthorityResources | None = None
+    evidence: AdmittedPrimeP1EvidenceRoot | None = None
+    result: AdmittedProductionAuthorityResources | None = None
+    try:
+        static = admit_static_authority_resources(config)
+        evidence = admit_evidence_root(config)
+        result = AdmittedProductionAuthorityResources(
+            static, evidence, _token=_PRODUCTION_AUTHORITY_RESOURCES_TOKEN
+        )
+        static = None
+        evidence = None
+    except BaseException:
+        pass
+    finally:
+        for resource in (evidence, static):
+            if resource is not None:
+                try:
+                    resource.close()
+                except BaseException:
+                    pass
     if result is None:
         raise PrimeP1AuthorityResourceError() from None
     return result
