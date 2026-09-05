@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from contextlib import AsyncExitStack
 from pathlib import Path
 import socket
 from tempfile import TemporaryDirectory
-from typing import cast
 import unittest
 from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.production_host import (
-    PrimeP1ProductionHostCapability,
     PrimeP1ProductionHostError,
     create_prime_p1_production_factory,
 )
@@ -54,9 +51,7 @@ class TestPrimeP1ProductionHost(unittest.IsolatedAsyncioTestCase):
         )
         binding = create_prime_p1_production_factory(repo_root=Path("/unavailable"))
         for changes in cases:
-            with self.subTest(changes=changes), patch(
-                "asterion.applications.prime_agent.operator.production_host.dotenv_values"
-            ) as dotenv:
+            with self.subTest(changes=changes), patch("dotenv.dotenv_values") as dotenv:
                 with self.assertRaises(PrimeP1ProductionHostError):
                     async with binding.factory(_context(**changes)):
                         pass
@@ -75,7 +70,7 @@ class TestPrimeP1ProductionHost(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(sentinel, str(raised.exception))
         self.assertNotIn(sentinel, repr(binding))
 
-    async def test_static_preflight_mints_one_redacted_one_shot_authority_without_io(self) -> None:
+    async def test_legacy_host_is_unavailable_without_docker_or_model_work(self) -> None:
         sentinel = "SENTINEL-PRIVATE-MODEL-KEY"
         with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -107,35 +102,27 @@ class TestPrimeP1ProductionHost(unittest.IsolatedAsyncioTestCase):
                     encoding="utf-8",
                 )
                 binding = create_prime_p1_production_factory(repo_root=root)
-                with patch("asyncio.create_subprocess_exec") as subprocess_call, patch(
+                with patch(
+                    "dotenv.dotenv_values"
+                ) as dotenv, patch(
+                    "asterion.applications.prime_agent.operator.production_host.DockerRestrictedWorkerService"
+                ) as worker, patch(
+                    "asterion.applications.prime_agent.operator.production_host._PrimeBoundedModelSessionService"
+                ) as models, patch("asyncio.create_subprocess_exec") as subprocess_call, patch(
                     "urllib.request.urlopen"
                 ) as network_call:
-                    async with AsyncExitStack() as stack:
-                        capability = cast(
-                            PrimeP1ProductionHostCapability,
-                            await stack.enter_async_context(binding.factory(_context())),
-                        )
-                        authority = capability.authorize("run-1")
-                        with self.assertRaises(PrimeP1ProductionHostError):
-                            capability.authorize("run-2")
-                        import asterion.applications.prime_agent.operator.ipython_host_issuer as issuer
-
-                        with self.assertRaisesRegex(Exception, "unavailable"):
-                            await issuer._issue_production_ipython_host_live_run(  # noqa: SLF001
-                                capability=authority
-                            )
-                        with self.assertRaisesRegex(Exception, "unavailable"):
-                            await issuer._issue_production_ipython_host_live_run(  # noqa: SLF001
-                                capability=authority
-                            )
+                    with self.assertRaises(PrimeP1ProductionHostError) as raised:
+                        async with binding.factory(_context()):
+                            pass
+                dotenv.assert_not_called()
+                worker.assert_not_called()
+                models.assert_not_called()
                 subprocess_call.assert_not_called()
                 network_call.assert_not_called()
             finally:
                 listener.close()
-        self.assertNotIn(sentinel, repr(capability))
-        self.assertNotIn(sentinel, repr(authority))
-        self.assertFalse(hasattr(authority, "provider"))
-        self.assertFalse(hasattr(authority, "docker"))
+        self.assertNotIn(sentinel, str(raised.exception))
+        self.assertNotIn(sentinel, repr(binding))
 
     async def test_symlinked_or_non_socket_production_resources_fail_closed(self) -> None:
         with TemporaryDirectory() as directory:

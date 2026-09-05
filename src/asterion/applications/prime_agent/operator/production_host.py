@@ -1,10 +1,4 @@
-"""Production-only host authority for the fixed Prime P1 application.
-
-The factory performs static, side-effect-free readiness checks.  It constructs
-only the concrete Docker CLI transport and concrete model provider service; it
-does not contact either backend.  The resulting capability may authorize one
-run and cannot itself turn provider-free traces into successful evidence.
-"""
+"""Quarantined legacy production-host authority for the fixed Prime P1 app."""
 
 from __future__ import annotations
 
@@ -19,19 +13,11 @@ import re
 import stat
 from typing import NoReturn, cast
 
-from dotenv import dotenv_values
-
-from asterion.applications.prime_agent.operator.docker_cli import (
-    DockerCliEngineTransport,
-    _ProductionAttachRunner,
-    _ProductionRunner,
-)
 from asterion.applications.prime_agent.operator.docker_worker import (
     DockerRestrictedWorkerService,
 )
 from asterion.applications.prime_agent.operator.model_session_host import (
     _PrimeBoundedModelSessionService,
-    _private_config_from_values,
 )
 from asterion.services.registry import (
     HostServiceFactoryBinding,
@@ -202,49 +188,9 @@ def _validate_context(context: object) -> None:
 
 
 def _build_capability(env_path: Path) -> PrimeP1ProductionHostCapability:
-    try:
-        env_identity = _regular_resource(
-            env_path, executable=False, digest_limit=_SECCOMP_CAP
-        )
-        values = dotenv_values(env_path)
-        paths = tuple(_absolute_path(values.get(key)) for key in _PATH_KEYS)
-        docker_identity = _regular_resource(
-            paths[0], executable=True, digest_limit=_EXECUTABLE_CAP
-        )
-        socket_identity = _socket_resource(paths[1])
-        seccomp_identity = _seccomp_resource(paths[2])
-        image_digest = values.get(_IMAGE_KEY)
-        if type(image_digest) is not str or _DIGEST.fullmatch(image_digest) is None:
-            raise ValueError
-        model_config = _private_config_from_values(values)
-        transport = DockerCliEngineTransport(
-            docker_executable=str(paths[0]),
-            socket_path=str(paths[1]),
-            seccomp_profile=str(paths[2]),
-        )
-        if (
-            type(transport._runner) is not _ProductionRunner  # noqa: SLF001
-            or type(transport._attach_runner) is not _ProductionAttachRunner  # noqa: SLF001
-        ):
-            raise ValueError
-        components = _ProductionComponents(
-            worker=DockerRestrictedWorkerService(
-                image_digest=image_digest, transport=transport
-            ),
-            models=_PrimeBoundedModelSessionService(model_config),
-            resources=(
-                env_identity,
-                docker_identity,
-                socket_identity,
-                seccomp_identity,
-            ),
-            image_digest=image_digest,
-        )
-        return PrimeP1ProductionHostCapability(
-            components, _seal=_CAPABILITY_SEAL
-        )
-    except BaseException:
-        _unavailable()
+    """Reject the obsolete path-based host before touching private resources."""
+    del env_path
+    _unavailable()
 
 
 def _absolute_path(value: object) -> Path:
