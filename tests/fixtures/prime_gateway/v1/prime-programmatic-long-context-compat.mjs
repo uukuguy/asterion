@@ -72,7 +72,7 @@ async function run(sourceRoot, workspace) {
     "records = json.loads(Path('corpus.json').read_text(encoding='utf-8'))",
     "selected = [record for record in records if record['include']]",
     "aggregate = {'count': len(selected), 'sum': sum(record['value'] for record in selected)}",
-    "Path('aggregate.json').write_text(json.dumps(aggregate, sort_keys=True), encoding='utf-8')",
+    "Path('aggregate.json').write_text(json.dumps(aggregate, sort_keys=True, separators=(',', ':')), encoding='utf-8')",
     "assert aggregate == {'count': 2, 'sum': 12}",
   ].join("\n");
   try {
