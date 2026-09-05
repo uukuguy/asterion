@@ -12,6 +12,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
+try:  # Docker copies this sibling module beside the executable entrypoint.
+    from .closed_worker import require_closed_worker
+except ImportError:  # pragma: no cover - exercised by the image entrypoint.
+    from closed_worker import require_closed_worker
+
 if TYPE_CHECKING:
     from IPython.core.interactiveshell import InteractiveShell
 
@@ -196,6 +201,8 @@ def run_development_worker(*, workspace: Path, stdin: TextIO, stdout: TextIO) ->
     output_sequence = 1
     original_cwd = Path.cwd()
     try:
+        # No protocol witness may be emitted before the P1-A-equivalent gate.
+        require_closed_worker()
         workspace = workspace.resolve()
         state = _prepare_workspace(workspace)
         os.chdir(workspace)

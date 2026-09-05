@@ -8,6 +8,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.image import p1b_launcher
 
@@ -72,17 +73,34 @@ assert P1BPath("continuity.txt").read_bytes() == b"p1b continuity fixture\\n"
 """
 
 
+class TestPrimeP1BLauncherClosedWorkerGate(unittest.TestCase):
+    def test_checks_the_closed_worker_before_reading_the_first_protocol_frame(self) -> None:
+        workspace = Path("/workspace")
+        with patch.object(p1b_launcher, "require_closed_worker") as self_check, patch.object(
+            p1b_launcher, "_prepare_workspace", return_value=workspace / "p1b-state"
+        ), patch.object(p1b_launcher, "_read_frame", side_effect=ValueError("stop")):
+            self.assertEqual(
+                p1b_launcher.run_development_worker(
+                    workspace=workspace, stdin=io.StringIO(), stdout=io.StringIO()
+                ),
+                1,
+            )
+        self.assertEqual(self_check.call_count, 1)
+
+
 @unittest.skipUnless(importlib.util.find_spec("IPython"), "requires the image's IPython dependency")
 class TestPrimeP1BLauncher(unittest.TestCase):
     def _run(
         self, workspace: Path, frames: io.StringIO
     ) -> tuple[int, list[dict[str, object]]]:
         output = io.StringIO()
-        status = p1b_launcher.run_development_worker(
-            workspace=workspace,
-            stdin=frames,
-            stdout=output,
-        )
+        with patch.object(p1b_launcher, "require_closed_worker") as self_check:
+            status = p1b_launcher.run_development_worker(
+                workspace=workspace,
+                stdin=frames,
+                stdout=output,
+            )
+        self.assertEqual(self_check.call_count, 1)
         return status, [json.loads(line) for line in output.getvalue().splitlines()]
 
     def test_two_cells_preserve_one_kernel_state(self) -> None:
