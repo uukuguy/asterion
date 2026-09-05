@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-06 07:05. **Session remains active — not a final handoff.**
+> Updated: 2026-09-06. **Session remains active — not a final handoff.**
 
 ## Direction
 
@@ -26,10 +26,12 @@ P1-A与P1-B开发链路均已真实完成。P1-B使用一个Prime SDK session、
 
 ## Next concrete action
 
-1. P1开发闭环已完成：精确selector标准CLI完成五次provider callback、两次Docker IPython cell、compact、oracle与cleanup，安全trace为`sha256:a8be640bdcee9c93ea3e382729db561e4c29e071d3ff776335daac4ff572c703`；不要重复运行或把`unpromoted`升格为发布证明。
-2. 立即转入P2 `prime.programmatic-long-context/v1`：复用P1的runtime/host/service spine，补 admitted restricted-worker/model execution、固定oracle和installed application route。
-3. P2保持长上下文/RLM语义在Prime TypeScript Gateway；Python只负责准入、预算、受控执行和证据投影，不新增第二套composer/session runner。
-4. 研发验证只覆盖正常真实流程和身份、上限、取消清理、公开脱敏边界；不运行promotion或极端矩阵。
+1. P1与P2开发闭环均已完成；不要重复运行或把`unpromoted`升格为发布证明。
+2. 立即转入P3 `prime.recursive-workflow/v1`，复用现有runtime/host/service spine并补真实Prime递归子智能体执行、宿主oracle和installed route。
+3. P3的Prime session/RLM child语义留在TypeScript Gateway；Python只负责准入、预算、受控执行和证据投影。
+4. 研发验证只覆盖正常真实流程和身份、深度/上限、取消清理、公开脱敏边界；不运行promotion或极端矩阵。
+
+P2精确命令`prime.programmatic-long-context@1.0.0`已退出0：一个Prime SDK session、两次model callback、一次Docker IPython cell、固定八记录corpus oracle和cleanup均完成。安全结果为`p2-development/unpromoted`与trace `4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`。最终guest中P2 Node进程与容器均为0；Sol最终复审APPROVE。
 
 最新进展：`6bd2a764`/`a1861acc`增加并收紧私有provider失败分类；`23c7faee`/`e45cacd0`增加经Sol复审的operator私有阶段观察器。一次观察运行完成5/5 callback与2/2 cell，无失败；随后精确命令`--application prime.ipython-coding@1.0.0`退出0并返回安全trace。先前省略版本的命令只在selector处失败，并未进入host。最终guest中Prime Node进程与P1-B容器均为0。
 
@@ -44,6 +46,6 @@ P1-A与P1-B开发链路均已真实完成。P1-B使用一个Prime SDK session、
 
 ## Agents and preservation
 
-P1开发实现与Sol复审均已结束；没有正在运行的model调用或容器。下一任务是P2 admitted execution与installed route。
+P1/P2开发实现与Sol复审均已结束；没有正在运行的model调用或容器。下一任务是P3 recursive workflow。
 
 保留既有`.superpowers/sdd/task-1-report.md`、JOURNAL/RESUME未提交修改、未跟踪旧计划和tmp目录。不要整体暂存、重置、删除或push。完整ARC/global harness activation/发布不在本轮范围。

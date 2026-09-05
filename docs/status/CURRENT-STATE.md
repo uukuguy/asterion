@@ -10,9 +10,9 @@
   capability-package framework
 - Project route: managed
 - Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
-- Active work package: P1 development reproduction and exact-selector CLI are
-  closed; P2 admitted execution and installed route are next, followed by
-  P3–P7. Existing provider-free acceptance implementations are retained. Native
+- Active work package: P1 and P2 development reproductions and exact-selector
+  CLI routes are closed; P3 recursive workflow is next, followed by P4–P7.
+  Existing provider-free acceptance implementations are retained. Native
   parity and broad framework restructuring are not prerequisites for Prime
   closure.
 - Git recovery closure: one clean local `main` branch and one primary worktree
@@ -111,11 +111,12 @@
   `sha256:a8be640bdcee9c93ea3e382729db561e4c29e071d3ff776335daac4ff572c703`.
   Post-run inspection found zero Prime Node processes and zero P1-B containers.
   Production authority promotion remains separate release work.
-- P2 `prime.programmatic-long-context/v1` has a fixed IPython-only corpus
-  workload, sealed completion protocol, exact worker/broker acceptance chain,
-  and worker-bound bounded-evidence reducer. Real local Prime/IPython compatibility is verified without model work;
-  fake-chain tests remain provider-free, and real restricted-worker evidence remains
-  External-limited.
+- P2 `prime.programmatic-long-context/v1` is CLI verified in development. Its
+  installed route completed one Prime SDK session, two model callbacks, one
+  Docker-backed IPython cell, the fixed corpus oracle and cleanup. It returned
+  only `p2-development/unpromoted` trace
+  `4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`;
+  post-run inspection found zero P2 containers and zero P2 Node processes.
 - P3 `prime.recursive-workflow/v1` has a fixed depth-one two-child IPython
   review workload, causal aggregation trace, sealed worker/launcher facades,
   provider-free acceptance, and a live authorization reducer. Real local Prime daemon/sidecar child messaging, aggregation and cleanup
@@ -204,7 +205,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Resume the active Prime seven-scenario worklist. Native Phase 3.2 remains a
+4. Resume P3 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
    parallel runtime track; do not substitute it or broad framework refactoring
    for Prime end-to-end closure.
 5. Keep credentials, private configuration, and execution authority external.

@@ -23,7 +23,7 @@ or merge contracts.
 | Package | Current evidence | Remaining closure | Dependencies / status |
 |---|---|---|---|
 | P1 `prime.ipython-coding/v1` | P1-A and P1-B real Prime SDK/provider/Docker/IPython/oracle/cleanup runs pass; the exact installed CLI route also completed five callbacks, two cells and cleanup | Production authority promotion remains a separate release task | **Development closure / CLI verified**. Standard exact-selector command exited 0 with an unpromoted safe trace and zero residue |
-| P2 `prime.programmatic-long-context/v1` | Workload, worker, launcher, receipt and reducer tests pass; real local Prime/IPython corpus compatibility PASS after canonical JSON fixture correction | Admitted restricted-worker/model execution, fixed oracle, installed public route | Depends on P1 shared execution boundary; existing P2 launcher retained |
+| P2 `prime.programmatic-long-context/v1` | One real installed CLI run completed two model callbacks, one Docker-backed IPython cell, fixed corpus oracle and cleanup | Production authority promotion and long-context scale remain separate release tasks | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P3 `prime.recursive-workflow/v1` | Provider-free tests pass; real local Prime two-child message/aggregate/delete compatibility PASS | Real admitted restricted-worker/model execution, exact depth/usage/cancellation and public route | Depends on P1/P2 spine; compatibility evidence does not satisfy bounded-sandboxed gate |
 | P4 `prime.long-session-continuity/v1` | Diagnostic workload, completion, recovery adapter, worker and reducer tests pass | Actual detach/attach/compaction/recovery launcher/host, same oracle after recovery, no blind effect replay | Depends on P1/P3; real launcher/host absent |
 | P5 `prime.bounded-autonomy/v1` | Fixed repair workload, two-gate/digest fencing, worker and reducer tests pass | Actual finite Prime worker/gate loop with result and quality-gate proof | Depends on P1/P4; real launcher/host absent |
@@ -32,7 +32,7 @@ or merge contracts.
 
 All seven complete only after their named real scenario succeeds. Public
 metadata, fixed fixtures, fake workers and compatibility probes are distinct
-evidence layers, not alternate ways to close a scenario. P2–P7 currently lack
+evidence layers, not alternate ways to close a scenario. P3–P7 currently lack
 installed application assembly routes; seven source-level test suites do not
 mean seven publicly runnable scenarios.
 
@@ -102,6 +102,20 @@ authority identity and all approved security constraints. No same-uid fake,
 Python source digest, image digest or empty catalog can stand in for a promoted
 authority executable.
 
+## P2 closure record
+
+P2 now reuses the P1 runtime/host/service spine through the exact installed
+application `prime.programmatic-long-context@1.0.0`. One real Prime SDK session
+made exactly two model callbacks and one `ipython` tool call. The restricted
+Docker worker read the fixed eight-record corpus, while the host independently
+verified the canonical aggregate bytes and emitted only a digest-bound trace.
+The standard CLI exited 0 with scope `p2-development`, promotion `unpromoted`,
+and trace `4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`.
+Post-run inspection found zero P2 containers and zero P2 Node processes. Sol's
+final material review approved the contract, cleanup, observations and public
+error isolation. This proves the fixed development reproduction, not production
+promotion or arbitrary long-context scale.
+
 ## Current development execution evidence
 
 The development path now constructs real Linux/arm64 P1-A and P1-B images,
@@ -122,6 +136,13 @@ asterion run \
   --application prime.ipython-coding@1.0.0 \
   --runtime prime.agent \
   --run-id prime-cli-verified-20260906 \
+  --input fixed-small-verification
+
+asterion run \
+  --provider prime-agent \
+  --application prime.programmatic-long-context@1.0.0 \
+  --runtime prime.agent \
+  --run-id prime-p2-cli-verified3-20260906 \
   --input fixed-small-verification
 ```
 
