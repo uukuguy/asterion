@@ -75,8 +75,11 @@ def _image_lock() -> ImageInputLock:
     return lock
 
 
-def _artifacts_without_one_oci_config() -> tuple[ImageArtifact, ...]:
-    return tuple(item for item in _artifacts() if item.kind != "oci-config")
+def _artifacts_with_two_oci_configs() -> tuple[ImageArtifact, ...]:
+    artifacts = _artifacts()
+    return artifacts[:5] + (
+        ImageArtifact("oci-config", "oci/config/secondary.json", 0, "8" * 64),
+    ) + artifacts[5:]
 
 
 class TestPrimeP1AuthorityResources(unittest.TestCase):
@@ -126,18 +129,27 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             with self.assertRaises(PrimeP1AuthorityResourceError):
                 admit_static_image_resource(config)
 
-    def test_rejects_image_lock_without_exactly_one_oci_config_artifact(self) -> None:
+    def test_rejects_image_lock_with_two_oci_config_artifacts(self) -> None:
         config = self._config()
-        malformed = replace(
-            _image_lock(), artifacts=_artifacts_without_one_oci_config()
-        )
+        multiple = replace(_image_lock(), artifacts=_artifacts_with_two_oci_configs())
+        validate_image_input_lock(multiple)
         import asterion.applications.prime_agent.operator.authority_resources as module
 
         with patch.object(
-            module, "resolve_promoted_image_input_lock", return_value=malformed
+            module, "resolve_promoted_image_input_lock", return_value=multiple
         ):
             with self.assertRaises(PrimeP1AuthorityResourceError):
                 admit_static_image_resource(config)
+
+    def test_admits_image_lock_with_matching_oci_config_digest(self) -> None:
+        config = self._config()
+        resource = _image_lock()
+        import asterion.applications.prime_agent.operator.authority_resources as module
+
+        with patch.object(
+            module, "resolve_promoted_image_input_lock", return_value=resource
+        ):
+            self.assertIs(admit_static_image_resource(config), resource)
 
 
 if __name__ == "__main__":
