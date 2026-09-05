@@ -43,13 +43,31 @@ class _TamperingInput(io.StringIO):
         return super().readline(size)
 
 
+class _InitialWorkspaceWitness(io.StringIO):
+    def __init__(self, frames: str, workspace: Path) -> None:
+        super().__init__(frames)
+        self._workspace = workspace
+        self._read = False
+
+    def readline(self, size: int = -1) -> str:
+        if not self._read:
+            self._read = True
+            if self._workspace.joinpath("p1b-state").exists() or self._workspace.joinpath(
+                "p1b-state", "continuity.txt"
+            ).exists():
+                raise AssertionError("worker prepared cell-owned state before cell1")
+        return super().readline(size)
+
+
 _BASELINE_CELL = """\
 from pathlib import Path as P1BPath
 p1b_value = 41
 def p1b_answer():
     return 42
 import os
+P1BPath("p1b-state").mkdir()
 os.chdir(P1BPath.cwd() / "p1b-state")
+P1BPath("continuity.txt").write_bytes(b"p1b continuity fixture\\n")
 assert P1BPath("continuity.txt").read_bytes() == b"p1b continuity fixture\\n"
 """
 
@@ -69,12 +87,14 @@ class TestPrimeP1BLauncher(unittest.TestCase):
 
     def test_two_cells_preserve_one_kernel_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
             status, messages = self._run(
-                Path(temporary),
-                io.StringIO(
+                workspace,
+                _InitialWorkspaceWitness(
                     _frame(1, "cell.execute", cell=_BASELINE_CELL)
                     + _frame(2, "cell.execute", cell="assert p1b_answer() == 42")
-                    + _frame(3, "finish")
+                    + _frame(3, "finish"),
+                    workspace,
                 ),
             )
 

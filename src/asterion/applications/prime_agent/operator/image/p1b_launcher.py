@@ -129,11 +129,10 @@ def _event(identity: Mapping[str, str], sequence: int, kind: str, **values: obje
 def _prepare_workspace(workspace: Path) -> Path:
     if not workspace.is_absolute() or not workspace.is_dir():
         raise ValueError("invalid workspace")
-    state = (workspace / _FIXTURE_DIRECTORY).resolve()
-    state.mkdir(mode=0o700, exist_ok=True)
-    fixture = state / _FIXTURE_NAME
-    fixture.write_bytes(_FIXTURE_BYTES)
-    return state
+    state = workspace / _FIXTURE_DIRECTORY
+    if state.exists():
+        raise ValueError("workspace state already exists")
+    return state.resolve()
 
 
 def _execute(shell: InteractiveShell, cell: str) -> None:
