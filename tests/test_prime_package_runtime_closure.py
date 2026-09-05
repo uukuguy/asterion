@@ -5,6 +5,8 @@ from __future__ import annotations
 import unittest
 import asyncio
 from dataclasses import replace
+import json
+from pathlib import Path
 
 from asterion.applications.prime_agent.provider import create_provider
 from asterion.applications.provider import (
@@ -14,11 +16,37 @@ from asterion.applications.provider import (
     resolve_installed_provider,
 )
 from asterion.capabilities.catalog import CapabilityRef
-from asterion.capabilities.prime_agent.provider import create_prime_agent_package
+from asterion.capabilities.execution import CapabilityInvocation
+from asterion.capabilities.prime_agent.provider import (
+    PrimeIpythonCodingImplementation,
+    create_prime_agent_package,
+)
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest
 from asterion.runtimes.prime_agent import PrimeAgentRuntimeClient, PrimeAgentRuntimeError
+from asterion.runtimes.prime_agent_host import (
+    PrimeSmallVerificationRequest,
+    PrimeSmallVerificationResult,
+)
+
+
+class _VerificationService:
+    def __init__(self, result: object) -> None:
+        self.result = result
+        self.requests: list[PrimeSmallVerificationRequest] = []
+
+    async def verify(
+        self,
+        request: PrimeSmallVerificationRequest,
+        *,
+        signal: object = None,
+    ) -> object:
+        del signal
+        self.requests.append(request)
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
 
 
 class TestPrimePackageRuntimeClosure(unittest.TestCase):
@@ -114,14 +142,20 @@ class TestPrimePackageRuntimeClosure(unittest.TestCase):
 
     def test_runtime_rejects_a_non_ipython_tool_before_emitting_frames(self) -> None:
         async def collect() -> tuple[object, ...]:
-            runtime = PrimeAgentRuntimeClient()
+            runtime = PrimeAgentRuntimeClient(
+                _VerificationService(
+                    PrimeSmallVerificationResult(
+                        run_id="unused", trace_sha256="sha256:" + "a" * 64
+                    )
+                )
+            )
             return tuple(
                 [
                     event
                     async for event in runtime.run(
                         RunRequest(
                             run_id="prime-tool-rejection",
-                            input_text="unused",
+                            input_text="fixed-small-verification",
                             requested_capabilities=("prime.tool.shell",),
                         )
                     )
@@ -131,18 +165,21 @@ class TestPrimePackageRuntimeClosure(unittest.TestCase):
         with self.assertRaisesRegex(PrimeAgentRuntimeError, "not declared"):
             asyncio.run(collect())
 
-    def test_runtime_collects_exact_unavailable_frames_for_ipython_tool(self) -> None:
+    def test_runtime_projects_one_fixed_small_verification(self) -> None:
         run_id = "prime-runtime-unavailable"
+        service = _VerificationService(
+            PrimeSmallVerificationResult(run_id=run_id, trace_sha256="sha256:" + "a" * 64)
+        )
 
         async def collect() -> tuple[RunEvent, ...]:
-            runtime = PrimeAgentRuntimeClient()
+            runtime = PrimeAgentRuntimeClient(service)
             return tuple(
                 [
                     event
                     async for event in runtime.run(
                         RunRequest(
                             run_id=run_id,
-                            input_text="unused",
+                            input_text="fixed-small-verification",
                             requested_capabilities=("prime.tool.ipython",),
                         )
                     )
@@ -162,14 +199,103 @@ class TestPrimePackageRuntimeClosure(unittest.TestCase):
                 RunEvent(
                     run_id=run_id,
                     sequence=2,
-                    type="run.failed",
+                    type="artifact.created",
                     payload={
-                        "code": "runtime-unavailable",
-                        "message": "Prime worker is unavailable",
+                        "artifact": {
+                            "artifact_id": "prime.p1-b-development.trace",
+                            "kind": "p1-b-development",
+                            "media_type": "application/vnd.asterion.prime.p1-development-trace+json",
+                            "sha256": "a" * 64,
+                        },
                     },
+                ),
+                RunEvent(
+                    run_id=run_id,
+                    sequence=3,
+                    type="run.completed",
+                    payload={"status": "completed"},
                 ),
             ),
         )
-        self.assertEqual(tuple(event.sequence for event in events), (1, 2))
-        self.assertEqual(tuple(event.run_id for event in events), (run_id, run_id))
-        self.assertEqual(events[-1].payload["code"], "runtime-unavailable")
+        self.assertEqual(service.requests, [PrimeSmallVerificationRequest(run_id)])
+
+    def test_factory_rejects_missing_or_extra_prime_host_before_execution(self) -> None:
+        binding = default_runtime_factory_registry().select("prime.agent")
+        base = dict(
+            provider_id="prime-agent",
+            application_id="prime.ipython-coding",
+            application_version="1.0.0",
+            runtime_id="prime.agent",
+            assembly_path=Path("/assembly.json"),
+            options={},
+        )
+        service = _VerificationService(
+            PrimeSmallVerificationResult(run_id="unused", trace_sha256="sha256:" + "a" * 64)
+        )
+        from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
+
+        for services in ({}, {"prime.ipython-production": service, "extra": object()}):
+            with self.subTest(services=tuple(services)), self.assertRaises(RuntimeFactoryError):
+                binding.factory(RuntimeFactoryContext(**base, host_services=services))
+
+    def test_capability_projects_only_safe_trace_fields_and_rejects_noncompletion(self) -> None:
+        run_id = "prime-capability-run"
+        manifest = json.loads(
+            (Path(__file__).parents[1] / "src/asterion/capabilities/prime_agent/payload/capabilities/ipython-coding.json").read_text()
+        )
+
+        async def execute(result: object):
+            runtime = PrimeAgentRuntimeClient(_VerificationService(result))
+            return await PrimeIpythonCodingImplementation().execute(
+                CapabilityInvocation(
+                    capability_ref=CapabilityRef("prime.ipython-coding", "1.0.0"),
+                    manifest=manifest,
+                    run_id=run_id,
+                    input_text="fixed-small-verification",
+                    upstream_artifacts=(),
+                    runtime=runtime,
+                    host_services={},
+                )
+            )
+
+        result = asyncio.run(
+            execute(PrimeSmallVerificationResult(run_id=run_id, trace_sha256="sha256:" + "b" * 64))
+        )
+        self.assertEqual(
+            result.artifacts,
+            ({"artifact_id": "prime.p1-b-development.trace", "media_type": "application/vnd.asterion.prime.p1-development-trace+json", "value": {"scope": "p1-b-development", "promotion": "unpromoted", "trace_sha256": "b" * 64}},),
+        )
+        for bad in ("invalid", PrimeSmallVerificationResult(run_id="other", trace_sha256="sha256:" + "b" * 64)):
+            with self.subTest(bad=type(bad).__name__), self.assertRaisesRegex(Exception, "Prime"):
+                asyncio.run(execute(bad))
+
+    def test_host_failure_is_redacted_and_cancellation_is_rethrown(self) -> None:
+        run_id = "prime-failure-run"
+
+        async def collect(service: _VerificationService) -> tuple[RunEvent, ...]:
+            return tuple(
+                [
+                    event
+                    async for event in PrimeAgentRuntimeClient(service).run(
+                        RunRequest(
+                            run_id=run_id,
+                            input_text="fixed-small-verification",
+                            requested_capabilities=("prime.tool.ipython",),
+                        )
+                    )
+                ]
+            )
+
+        sentinel = "SENTINEL-PRIME-HOST-SECRET"
+        for failure, cancelled in (
+            (RuntimeError(sentinel), False),
+            (asyncio.CancelledError(), True),
+        ):
+            with self.subTest(failure=type(failure).__name__):
+                if cancelled:
+                    with self.assertRaises(asyncio.CancelledError):
+                        asyncio.run(collect(_VerificationService(failure)))
+                else:
+                    events = asyncio.run(collect(_VerificationService(failure)))
+                    self.assertEqual(events[-1].type, "run.failed")
+                    self.assertNotIn(sentinel, repr(events))

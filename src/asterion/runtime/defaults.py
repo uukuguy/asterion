@@ -25,6 +25,7 @@ from asterion.runtimes.prime_agent import (
     PRIME_RUNTIME_ID,
     PrimeAgentRuntimeClient,
 )
+from asterion.runtimes.prime_agent_host import PrimeSmallVerificationService
 
 
 PI_CAPABILITIES = ("filesystem.read", "pi.tool.grep")
@@ -92,10 +93,13 @@ def _create_prime_agent_runtime(context: RuntimeFactoryContext) -> PrimeAgentRun
     if (
         context.runtime_id != PRIME_RUNTIME_ID
         or context.options
-        or context.host_services
+        or set(context.host_services) != {"prime.ipython-production"}
     ):
         raise RuntimeFactoryError("Prime runtime configuration is invalid")
-    return PrimeAgentRuntimeClient()
+    service = context.host_services["prime.ipython-production"]
+    if not isinstance(service, PrimeSmallVerificationService):
+        raise RuntimeFactoryError("Prime runtime configuration is invalid")
+    return PrimeAgentRuntimeClient(service)
 
 
 def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
