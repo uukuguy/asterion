@@ -36,6 +36,7 @@ _ACQUIRE_DEADLINE_SECONDS = 60
 _CREATE_DEADLINE_SECONDS = 120
 _PROVISIONAL_SETTLE_SECONDS = 30
 _PROVISIONAL_SETTLE_INTERVAL_SECONDS = 0.5
+_PROVISIONAL_FINAL_GRACE_SECONDS = 5
 
 
 async def _reap_process(process: DockerCliAttachProcess, *, deadline: float | None = None) -> None:
@@ -147,8 +148,14 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
             remaining = deadline - monotonic()
             if remaining > 0:
                 await asyncio.sleep(min(_PROVISIONAL_SETTLE_INTERVAL_SECONDS, remaining))
-        if not await remove_then_inspect(_LifecycleCallControl(monotonic() + 30, None)):
-            raise RestrictedWorkerError("restricted worker value is invalid")
+        final_deadline = monotonic() + _PROVISIONAL_FINAL_GRACE_SECONDS
+        while True:
+            if await remove_then_inspect(_LifecycleCallControl(final_deadline, None)):
+                return
+            remaining = final_deadline - monotonic()
+            if remaining <= 0:
+                raise RestrictedWorkerError("restricted worker value is invalid")
+            await asyncio.sleep(min(_PROVISIONAL_SETTLE_INTERVAL_SECONDS, remaining))
 
     async def inspect(self, container_id: str, *, control: _LifecycleCallControl) -> None:  # type: ignore[override]
         self._specification(container_id)  # type: ignore[attr-defined]

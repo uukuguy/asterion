@@ -11,6 +11,8 @@ from asterion.applications.prime_agent.operator.p1b_development_docker import (
     P1BDevelopmentSnapshotTransport, P1BDockerCompletion,
     P1BDockerPersistentWorkerService, P1BDockerCliTransport, _reap_process,
 )
+from asterion.applications.prime_agent.operator import p1b_development_docker as p1b_docker
+from asterion.applications.prime_agent.operator import docker_cli
 from asterion.applications.prime_agent.operator.docker_cli import DockerCliResult
 from asterion.applications.prime_agent.operator.docker_worker import _LifecycleCallControl
 from asterion.applications.prime_agent.operator import p1_development_snapshot as snapshots
@@ -217,24 +219,30 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runner.argv[1][-5:], ("container", "inspect", "--format", "{{.Id}}", "prime-p1b-provisional"))
 
     async def test_uncertain_create_compensation_waits_for_late_create_then_removes_it(self) -> None:
+        class Clock:
+            now = 0.0
+            def __call__(self) -> float: return self.now
+
         class Runner:
             def __init__(self) -> None:
                 self.argv: list[tuple[str, ...]] = []
                 self.remove_count = 0
-                self.present = False
+                self.inspect_count = 0
 
             async def run(self, *, argv: tuple[str, ...], **_: object) -> DockerCliResult:
                 self.argv.append(argv)
                 if "rm" in argv:
                     self.remove_count += 1
-                    if self.remove_count == 3:
-                        self.present = True
-                    if self.present:
-                        self.present = False
+                    if self.remove_count == 6:
                         return DockerCliResult(0, b"prime-p1b-provisional\n", b"")
                     return DockerCliResult(1, b"", b"Error: No such object: prime-p1b-provisional\n")
+                self.inspect_count += 1
+                if self.inspect_count == 5:
+                    return DockerCliResult(0, b"d" * 64 + b"\n", b"")
                 return DockerCliResult(1, b"", b"Error: No such object: prime-p1b-provisional\n")
 
+        clock = Clock()
+        async def advance(delay: float) -> None: clock.now += delay
         runner = Runner()
         subject = object.__new__(P1BDockerCliTransport)
         subject._prefix = ("/operator/docker", "--host", "unix:///operator/docker.sock")
@@ -245,7 +253,15 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "asterion.applications.prime_agent.operator.p1b_development_docker._PROVISIONAL_SETTLE_SECONDS",
             0.004,
+        ), patch(
+            "asterion.applications.prime_agent.operator.p1b_development_docker._PROVISIONAL_FINAL_GRACE_SECONDS",
+            0.005,
+        ), patch.object(p1b_docker, "monotonic", clock), patch.object(
+            docker_cli, "monotonic", clock,
+        ), patch.object(
+            p1b_docker.asyncio, "sleep", advance,
         ):
             await subject._compensate_provisional("prime-p1b-provisional")
-        self.assertGreaterEqual(runner.remove_count, 3)
+        self.assertEqual(runner.remove_count, 6)
+        self.assertEqual(runner.inspect_count, 6)
         self.assertEqual(runner.argv[-1][-5:], ("container", "inspect", "--format", "{{.Id}}", "prime-p1b-provisional"))
