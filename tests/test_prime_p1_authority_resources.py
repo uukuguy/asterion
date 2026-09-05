@@ -26,6 +26,9 @@ from asterion.applications.prime_agent.operator.authority_resources import (
 from asterion.applications.prime_agent.operator.authority_artifact_lock import (
     AdmittedPrimeP1AuthorityArtifacts,
 )
+from asterion.applications.prime_agent.operator.authority_application_resources import (
+    AdmittedPrimeP1ApplicationResources,
+)
 from asterion.applications.prime_agent.operator.authority_evidence import (
     AdmittedPrimeP1EvidenceRoot,
     PrimeP1EvidenceResourceError,
@@ -95,6 +98,12 @@ def _artifact_lock() -> AdmittedPrimeP1AuthorityArtifacts:
     import asterion.applications.prime_agent.operator.authority_artifact_lock as module
 
     return AdmittedPrimeP1AuthorityArtifacts(_token=module._TOKEN)
+
+
+def _application_resources() -> AdmittedPrimeP1ApplicationResources:
+    import asterion.applications.prime_agent.operator.authority_application_resources as module
+
+    return AdmittedPrimeP1ApplicationResources(_token=module._TOKEN)
 
 
 class _StaticResourceSubclass(AdmittedStaticAuthorityResources):
@@ -255,6 +264,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         socket = _socket()
         resource = AdmittedProductionAuthorityResources(
             _artifact_lock(),
+            _application_resources(),
             static,
             evidence,
             docker,
@@ -290,6 +300,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         )
         resource = AdmittedProductionAuthorityResources(
             _artifact_lock(),
+            _application_resources(),
             static,
             evidence,
             _docker(),
@@ -726,6 +737,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                     with self.assertRaises(PrimeP1AuthorityResourceError):
                         constructor(
                             _artifact_lock(),
+                            _application_resources(),
                             static_child,
                             evidence_child,
                             docker_child,

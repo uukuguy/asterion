@@ -107,6 +107,7 @@ class AdmittedProductionAuthorityResources:
     """Opaque owner of all admitted production resources."""
 
     __slots__ = (
+        "_application_resources",
         "_artifacts",
         "_docker_executable",
         "_docker_socket",
@@ -118,6 +119,7 @@ class AdmittedProductionAuthorityResources:
     def __init__(
         self,
         artifacts: object,
+        application_resources: object,
         static_resources: AdmittedStaticAuthorityResources,
         evidence_resource: AdmittedPrimeP1EvidenceRoot,
         docker_executable: AdmittedPrimeP1DockerExecutable,
@@ -126,11 +128,13 @@ class AdmittedProductionAuthorityResources:
         _token: object | None = None,
     ) -> None:
         from .authority_artifact_lock import AdmittedPrimeP1AuthorityArtifacts
+        from .authority_application_resources import AdmittedPrimeP1ApplicationResources
 
         if (
             type(self) is not AdmittedProductionAuthorityResources
             or _token is not _PRODUCTION_AUTHORITY_RESOURCES_TOKEN
             or type(artifacts) is not AdmittedPrimeP1AuthorityArtifacts
+            or type(application_resources) is not AdmittedPrimeP1ApplicationResources
             or type(static_resources) is not AdmittedStaticAuthorityResources
             or type(evidence_resource) is not AdmittedPrimeP1EvidenceRoot
             or type(docker_executable) is not AdmittedPrimeP1DockerExecutable
@@ -138,6 +142,7 @@ class AdmittedProductionAuthorityResources:
         ):
             raise PrimeP1AuthorityResourceError() from None
         self._artifacts: AdmittedPrimeP1AuthorityArtifacts | None = artifacts
+        self._application_resources: AdmittedPrimeP1ApplicationResources | None = application_resources
         self._static_resources: AdmittedStaticAuthorityResources | None = static_resources
         self._evidence_resource: AdmittedPrimeP1EvidenceRoot | None = evidence_resource
         self._docker_executable: AdmittedPrimeP1DockerExecutable | None = docker_executable
@@ -166,13 +171,15 @@ class AdmittedProductionAuthorityResources:
             docker = self._docker_executable
             evidence = self._evidence_resource
             static = self._static_resources
+            application = self._application_resources
             artifacts = self._artifacts
             self._docker_socket = None
             self._docker_executable = None
             self._evidence_resource = None
             self._static_resources = None
+            self._application_resources = None
             self._artifacts = None
-        for resource in (socket, docker, evidence, static, artifacts):
+        for resource in (socket, docker, evidence, static, application, artifacts):
             if resource is not None:
                 try:
                     resource.close()
@@ -263,8 +270,10 @@ def admit_production_authority_resources(
 ) -> AdmittedProductionAuthorityResources:
     """Admit and retain static, evidence, and Docker resources as one owner."""
     from .authority_artifact_lock import AdmittedPrimeP1AuthorityArtifacts
+    from .authority_application_resources import AdmittedPrimeP1ApplicationResources
 
     artifacts: AdmittedPrimeP1AuthorityArtifacts | None = None
+    application: AdmittedPrimeP1ApplicationResources | None = None
     static: AdmittedStaticAuthorityResources | None = None
     evidence: AdmittedPrimeP1EvidenceRoot | None = None
     docker: AdmittedPrimeP1DockerExecutable | None = None
@@ -275,6 +284,10 @@ def admit_production_authority_resources(
         if type(artifacts_candidate) is not AdmittedPrimeP1AuthorityArtifacts:
             raise ValueError
         artifacts = artifacts_candidate
+        application_candidate = admit_prime_p1_application_resources()
+        if type(application_candidate) is not AdmittedPrimeP1ApplicationResources:
+            raise ValueError
+        application = application_candidate
         static_candidate = admit_static_authority_resources(config)
         if type(static_candidate) is not AdmittedStaticAuthorityResources:
             raise ValueError
@@ -293,6 +306,7 @@ def admit_production_authority_resources(
         socket = socket_candidate
         result = AdmittedProductionAuthorityResources(
             artifacts,
+            application,
             static,
             evidence,
             docker,
@@ -300,6 +314,7 @@ def admit_production_authority_resources(
             _token=_PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
         )
         artifacts = None
+        application = None
         static = None
         evidence = None
         docker = None
@@ -307,7 +322,7 @@ def admit_production_authority_resources(
     except BaseException:
         pass
     finally:
-        for resource in (socket, docker, evidence, static, artifacts):
+        for resource in (socket, docker, evidence, static, application, artifacts):
             if resource is not None:
                 try:
                     resource.close()
@@ -321,6 +336,13 @@ def admit_production_authority_resources(
 def admit_authority_artifact_lock() -> object:
     """Cross the artifact admission boundary without creating an import cycle."""
     from .authority_artifact_lock import admit_authority_artifact_lock as admit
+
+    return admit()
+
+
+def admit_prime_p1_application_resources() -> object:
+    """Cross the fixed application-resource boundary without import cycles."""
+    from .authority_application_resources import admit_prime_p1_application_resources as admit
 
     return admit()
 

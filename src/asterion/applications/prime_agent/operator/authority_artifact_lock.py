@@ -21,6 +21,7 @@ _PROTOCOL: Final = "asterion.prime-p1-authority-artifact-lock/v1"
 _DESCRIPTOR_PATH: Final = ("resources", "authority-artifact-lock.json")
 _EXPECTED_ARTIFACT_PATHS: Final = (
     "authority_artifact_lock.py",
+    "authority_application_resources.py",
     "authority_config.py",
     "authority_docker_executable.py",
     "authority_docker_socket.py",
