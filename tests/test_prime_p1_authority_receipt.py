@@ -14,9 +14,79 @@ from asterion.applications.prime_agent.operator.authority_config import (
     PrimeP1OperatorConfigError,
     load_operator_config,
 )
+from asterion.applications.prime_agent.operator.authority_receipt import (
+    _AuthorityTerminalBinding,
+    _UnavailableReceiptMaterial,
+    _issue_unavailable_receipt,
+    _new_authority_receipt_issuer,
+)
 
 
 class TestPrimeP1AuthorityReceiptCustody(unittest.TestCase):
+    def test_issuer_creates_one_redacted_unavailable_receipt(self) -> None:
+        sentinel = "e" * 64
+        issuer = _new_authority_receipt_issuer(sentinel)
+        binding = _AuthorityTerminalBinding(
+            session_id="a" * 64,
+            run_id="run-1",
+            request_contract_sha256="b" * 64,
+            application_request_sha256="c" * 64,
+            production_resource_set_sha256="d" * 64,
+        )
+        material = _UnavailableReceiptMaterial(
+            authority_version="1.0.0",
+            authority_executable_sha256="1" * 64,
+            operator_config_binding_hmac_sha256="2" * 64,
+            receipt_key_id="p1-2026",
+            assembly_sha256="3" * 64,
+            package_manifest_sha256="4" * 64,
+            source_sha256="5" * 64,
+            build_input_sha256="6" * 64,
+            image_config_digest="sha256:" + "7" * 64,
+            workload_sha256="8" * 64,
+            starter_sha256="9" * 64,
+            oracle_sha256="a" * 64,
+            seccomp_sha256="b" * 64,
+        )
+
+        issued = _issue_unavailable_receipt(issuer, binding, material)
+
+        payload = issued._payload
+        self.assertEqual((payload["status"], payload["reason_code"]), ("UNAVAILABLE", "unavailable"))
+        self.assertEqual(payload["model_accounting"]["request_count"], 0)  # type: ignore[index]
+        self.assertEqual(payload["worker_evidence"]["worker_count"], 0)  # type: ignore[index]
+        self.assertEqual(payload["worker_evidence"]["model_tool_calls"], 0)  # type: ignore[index]
+        self.assertEqual(payload["worker_evidence"]["ipython_tool_calls"], 0)  # type: ignore[index]
+        self.assertFalse(payload["worker_evidence"]["final_oracle_passed"])  # type: ignore[index]
+        self.assertFalse(payload["worker_evidence"]["mutation_after_model_response"])  # type: ignore[index]
+        for rendered in (repr(issuer), repr(issued)):
+            self.assertNotIn(sentinel, rendered)
+            self.assertNotIn("CONFIG_SECRET_SENTINEL", rendered)
+        with self.assertRaises(ValueError) as raised:
+            _issue_unavailable_receipt(issuer, binding, material)
+        self.assertEqual(str(raised.exception), "prime P1 authority receipt is unavailable")
+
+    def test_issuer_rejects_altered_binding_without_secret_disclosure(self) -> None:
+        sentinel = "f" * 64
+        issuer = _new_authority_receipt_issuer(sentinel)
+        material = _UnavailableReceiptMaterial(
+            authority_version="1.0.0", authority_executable_sha256="1" * 64,
+            operator_config_binding_hmac_sha256="2" * 64, receipt_key_id="p1-2026",
+            assembly_sha256="3" * 64, package_manifest_sha256="4" * 64,
+            source_sha256="5" * 64, build_input_sha256="6" * 64,
+            image_config_digest="sha256:" + "7" * 64, workload_sha256="8" * 64,
+            starter_sha256="9" * 64, oracle_sha256="a" * 64, seccomp_sha256="b" * 64,
+        )
+        with self.assertRaises(ValueError) as raised:
+            _issue_unavailable_receipt(
+                issuer,
+                _AuthorityTerminalBinding("not-a-session", "run-1", "b" * 64, "c" * 64, "d" * 64),
+                material,
+            )
+        rendered = "".join(traceback.format_exception(raised.exception))
+        self.assertNotIn(sentinel, rendered)
+        self.assertNotIn("CONFIG_SECRET_SENTINEL", rendered)
+
     def test_config_moves_receipt_key_into_opaque_issuer_without_public_capability(
         self,
     ) -> None:
