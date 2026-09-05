@@ -3,13 +3,27 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
+import threading
+from dataclasses import dataclass
+from typing import SupportsIndex
 
 from .authority_config import PrimeP1OperatorConfig
 from .image_input_lock import (
     ImageInputLock,
     ImagePlatformDescriptor,
+    image_input_lock_sha256,
     resolve_promoted_image_input_lock,
 )
+from .authority_seccomp import (
+    AdmittedPrimeP1SeccompResource,
+    admit_static_seccomp_resource,
+)
+from .seccomp_policy_lock import seccomp_policy_lock_sha256
+
+
+_STATIC_AUTHORITY_RESOURCES_TOKEN = object()
+_IDENTITY_DOMAIN = b"asterion.prime-p1.static-authority-resources/v1\0"
 
 
 class PrimeP1AuthorityResourceError(ValueError):
@@ -17,6 +31,122 @@ class PrimeP1AuthorityResourceError(ValueError):
 
     def __init__(self, *_: object) -> None:
         super().__init__("prime P1 authority resource is unavailable")
+
+
+@dataclass(frozen=True, repr=False, slots=True)
+class _StaticAuthorityResourceIdentity:
+    """Private, deterministic binding of the three admitted static inputs."""
+
+    digest: str
+
+
+class AdmittedStaticAuthorityResources:
+    """Opaque owner of static admission resources until the next authority slice."""
+
+    __slots__ = ("_identity", "_lock", "_closed", "_seccomp_resource")
+
+    def __init__(
+        self,
+        identity: _StaticAuthorityResourceIdentity,
+        seccomp_resource: AdmittedPrimeP1SeccompResource,
+        *,
+        _token: object | None = None,
+    ) -> None:
+        if _token is not _STATIC_AUTHORITY_RESOURCES_TOKEN:
+            raise PrimeP1AuthorityResourceError() from None
+        self._identity = identity
+        self._seccomp_resource: AdmittedPrimeP1SeccompResource | None = seccomp_resource
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def __repr__(self) -> str:
+        return "AdmittedStaticAuthorityResources(redacted)"
+
+    def __reduce__(self) -> object:
+        raise TypeError("prime P1 authority resource is unavailable")
+
+    def __reduce_ex__(self, _: SupportsIndex) -> object:
+        raise TypeError("prime P1 authority resource is unavailable")
+
+    def __copy__(self) -> object:
+        raise TypeError("prime P1 authority resource is unavailable")
+
+    def __deepcopy__(self, _: object) -> object:
+        raise TypeError("prime P1 authority resource is unavailable")
+
+    def close(self) -> None:
+        """Release the retained seccomp resource exactly once."""
+        with self._lock:
+            resource = self._seccomp_resource
+            if self._closed:
+                return
+            self._closed = True
+            self._seccomp_resource = None
+        if resource is not None:
+            try:
+                resource.close()
+            except BaseException:
+                pass
+
+
+def _static_authority_resource_identity(
+    image: ImageInputLock,
+    seccomp: AdmittedPrimeP1SeccompResource,
+) -> _StaticAuthorityResourceIdentity:
+    """Hash exact admitted lock identities and the observed profile digest."""
+    image_hash = image_input_lock_sha256(image)
+    policy_hash = seccomp_policy_lock_sha256(seccomp._policy)
+    profile_hash = seccomp.sha256
+    if (
+        type(profile_hash) is not str
+        or len(profile_hash) != 64
+        or any(character not in "0123456789abcdef" for character in profile_hash)
+    ):
+        raise ValueError
+    digest = hashlib.sha256(
+        _IDENTITY_DOMAIN
+        + bytes.fromhex(image_hash)
+        + bytes.fromhex(policy_hash)
+        + bytes.fromhex(profile_hash)
+    ).hexdigest()
+    return _StaticAuthorityResourceIdentity(digest)
+
+
+def admit_static_authority_resources(config: object) -> AdmittedStaticAuthorityResources:
+    """Admit the exact image/profile pair as one private, retained resource set."""
+    seccomp: AdmittedPrimeP1SeccompResource | None = None
+    result: AdmittedStaticAuthorityResources | None = None
+    try:
+        if type(config) is not PrimeP1OperatorConfig:
+            raise ValueError
+        image = admit_static_image_resource(config)
+        seccomp = admit_static_seccomp_resource(config)
+        if (
+            type(image) is not ImageInputLock
+            or type(seccomp) is not AdmittedPrimeP1SeccompResource
+            or image.platform != seccomp._policy.platform
+            or not hmac.compare_digest(
+                config._values["ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST"],
+                seccomp._policy.image_config_digest,
+            )
+        ):
+            raise ValueError
+        identity = _static_authority_resource_identity(image, seccomp)
+        result = AdmittedStaticAuthorityResources(
+            identity, seccomp, _token=_STATIC_AUTHORITY_RESOURCES_TOKEN
+        )
+        seccomp = None
+    except BaseException:
+        pass
+    finally:
+        if seccomp is not None:
+            try:
+                seccomp.close()
+            except BaseException:
+                pass
+    if result is None:
+        raise PrimeP1AuthorityResourceError() from None
+    return result
 
 
 def admit_static_image_resource(config: object) -> ImageInputLock:

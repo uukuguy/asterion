@@ -387,7 +387,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             pass
 
         with (
-            patch.object(module, "admit_static_image_resource", return_value=object()) as admit,
+            patch.object(module, "admit_static_authority_resources", return_value=object()) as admit,
             patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
             patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
             self.assertRaises(PrimeP1AuthorityBootstrapError),
@@ -397,7 +397,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         self.assertEqual(connection.calls, [])
         self.assertTrue(connection.closed)
 
-    def test_pre_ready_seccomp_admission_precedes_transport_and_closes_resource(
+    def test_pre_ready_aggregate_admission_precedes_transport_and_closes_resource(
         self,
     ) -> None:
         import asterion.applications.prime_agent.operator.authority_process as module
@@ -405,9 +405,9 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         events: list[str] = []
         closed_fds: list[int] = []
 
-        class RetainedSeccompResource:
+        class RetainedStaticResources:
             def close(self) -> None:
-                events.append("seccomp-close")
+                events.append("resources-close")
 
         class ForbiddenAccess(BaseException):
             pass
@@ -420,25 +420,19 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             ),
             patch.object(
                 module,
-                "admit_static_image_resource",
-                side_effect=lambda _: events.append("image") or object(),
-            ),
-            patch.object(
-                module,
-                "admit_static_seccomp_resource",
-                side_effect=lambda _: events.append("seccomp") or RetainedSeccompResource(),
-                create=True,
+                "admit_static_authority_resources",
+                side_effect=lambda _: events.append("resources") or RetainedStaticResources(),
             ),
             patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
             patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
             self.assertRaises(PrimeP1AuthorityBootstrapError),
         ):
             _run_ready_execute_exchange(bundle, "a" * 64)
-        self.assertEqual(events, ["config", "image", "seccomp", "seccomp-close"])
+        self.assertEqual(events, ["config", "resources", "resources-close"])
         self.assertEqual(closed_fds, [101])
         self.assertTrue(connection.closed)
 
-    def test_failed_seccomp_admission_never_consumes_key_or_socket(self) -> None:
+    def test_failed_static_resource_admission_never_consumes_key_or_socket(self) -> None:
         import asterion.applications.prime_agent.operator.authority_process as module
 
         class ForbiddenAccess(BaseException):
@@ -448,12 +442,10 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         bundle = AdmittedAuthorityDescriptors(connection, 101, 102, lambda _: None)
         with (
             patch.object(module, "load_operator_config", return_value=object()),
-            patch.object(module, "admit_static_image_resource", return_value=object()),
             patch.object(
                 module,
-                "admit_static_seccomp_resource",
-                side_effect=ValueError("SECCOMP_SENTINEL"),
-                create=True,
+                "admit_static_authority_resources",
+                side_effect=ValueError("RESOURCE_SENTINEL"),
             ),
             patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
             patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
@@ -461,7 +453,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         ):
             _run_ready_execute_exchange(bundle, "a" * 64)
         self.assertIsNone(raised.exception.__context__)
-        self.assertNotIn("SECCOMP_SENTINEL", "".join(traceback.format_exception(raised.exception)))
+        self.assertNotIn("RESOURCE_SENTINEL", "".join(traceback.format_exception(raised.exception)))
         self.assertTrue(connection.closed)
 
     def test_spoofed_descriptor_class_never_receives_cleanup_access(self) -> None:

@@ -14,8 +14,7 @@ import threading
 from typing import Any, NoReturn, cast
 
 from .authority_config import load_operator_config
-from .authority_resources import admit_static_image_resource
-from .authority_seccomp import admit_static_seccomp_resource
+from .authority_resources import admit_static_authority_resources
 
 
 class PrimeP1AuthorityBootstrapError(ValueError):
@@ -275,7 +274,7 @@ def _run_ready_execute_exchange(
     authority ready or execute exchange.
     """
     config_fd: int | None = None
-    seccomp_resource = None
+    static_resources = None
     try:
         if (
             type(descriptors) is not AdmittedAuthorityDescriptors
@@ -286,14 +285,13 @@ def _run_ready_execute_exchange(
         loader_owned_config_fd = config_fd
         config_fd = None
         config = load_operator_config(loader_owned_config_fd)
-        admit_static_image_resource(config)
-        seccomp_resource = admit_static_seccomp_resource(config)
+        static_resources = admit_static_authority_resources(config)
     except Exception:
         pass
     finally:
-        if seccomp_resource is not None:
+        if static_resources is not None:
             try:
-                seccomp_resource.close()
+                static_resources.close()
             except BaseException:
                 pass
         if config_fd is not None:
