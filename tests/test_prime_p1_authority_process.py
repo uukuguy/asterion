@@ -381,16 +381,45 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         )
         import asterion.applications.prime_agent.operator.authority_process as module
 
+        class ForbiddenAccess(BaseException):
+            pass
+
         with (
             patch.object(module, "admit_static_image_resource", return_value=object()) as admit,
-            patch.object(bundle, "consume_session_key_fd", side_effect=AssertionError),
-            patch.object(bundle, "consume_socket", side_effect=AssertionError),
+            patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
+            patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
             self.assertRaises(PrimeP1AuthorityBootstrapError),
         ):
             _run_ready_execute_exchange(bundle, "a" * 64)
         admit.assert_called_once()
         self.assertEqual(connection.calls, [])
         self.assertTrue(connection.closed)
+
+    def test_spoofed_descriptor_class_never_receives_cleanup_access(self) -> None:
+        class ForbiddenAccess(BaseException):
+            pass
+
+        class SpoofedDescriptor:
+            class_queries = 0
+
+            @property
+            def __class__(  # type: ignore[reportIncompatibleMethodOverride]
+                self,
+            ) -> type[AdmittedAuthorityDescriptors]:
+                SpoofedDescriptor.class_queries += 1
+                return AdmittedAuthorityDescriptors
+
+            def __getattribute__(self, _: str) -> object:
+                raise ForbiddenAccess("SPOOFED_DESCRIPTOR_ACCESS")
+
+        with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+            cast(Any, _run_ready_execute_exchange)(SpoofedDescriptor(), "a" * 64)
+        self.assertIsNone(raised.exception.__context__)
+        self.assertEqual(SpoofedDescriptor.class_queries, 0)
+        self.assertNotIn(
+            "SPOOFED_DESCRIPTOR_ACCESS",
+            "".join(traceback.format_exception(raised.exception)),
+        )
 
     def test_pre_ready_resource_gate_rejects_legacy_digest_arguments(self) -> None:
         with self.assertRaises(TypeError):

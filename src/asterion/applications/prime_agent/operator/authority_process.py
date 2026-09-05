@@ -293,7 +293,8 @@ def _run_ready_execute_exchange(
                 descriptors._close_fd(config_fd)
             except Exception:
                 pass
-        if isinstance(descriptors, AdmittedAuthorityDescriptors):
+        descriptor_mro = type.__getattribute__(type(descriptors), "__mro__")
+        if AdmittedAuthorityDescriptors in descriptor_mro:
             try:
                 AdmittedAuthorityDescriptors.close(descriptors)
             except Exception:
