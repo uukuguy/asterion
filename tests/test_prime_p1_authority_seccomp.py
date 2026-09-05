@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -488,6 +489,49 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
             with self.subTest(fd=fd):
                 with self.assertRaises(OSError):
                     os.fstat(fd)
+
+    def test_revalidate_wins_over_concurrent_close_and_then_closes(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            admit_static_seccomp_resource,
+            revalidate_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                entered, release = threading.Event(), threading.Event()
+                validate = module._validate_profile
+
+                def parked(data: bytes, policy: object) -> None:
+                    entered.set()
+                    release.wait(2)
+                    validate(data, policy)  # type: ignore[arg-type]
+
+                with patch.object(module, "_validate_profile", side_effect=parked):
+                    worker = threading.Thread(target=revalidate_static_seccomp_resource, args=(resource,))
+                    worker.start()
+                    self.assertTrue(entered.wait(1))
+                    closer = threading.Thread(target=resource.close)
+                    closer.start()
+                    self.assertTrue(worker.is_alive())
+                    release.set()
+                    worker.join(1)
+                    closer.join(1)
+                self.assertFalse(worker.is_alive())
+                self.assertFalse(closer.is_alive())
+                for fd in resource._fds:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
 
 
 if __name__ == "__main__":
