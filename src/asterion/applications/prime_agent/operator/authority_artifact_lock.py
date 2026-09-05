@@ -11,7 +11,7 @@ from importlib import metadata
 from pathlib import Path
 import stat
 import threading
-from typing import Final, SupportsIndex
+from typing import Final, NoReturn, SupportsIndex
 
 from .authority_resources import PrimeP1AuthorityResourceError
 
@@ -25,6 +25,7 @@ _EXPECTED_ARTIFACT_PATHS: Final = (
     "authority_config.py",
     "authority_docker_executable.py",
     "authority_docker_socket.py",
+    "authority_executable_lock.py",
     "authority_evidence.py",
     "authority_process.py",
     "authority_protocol.py",
@@ -78,10 +79,10 @@ class AdmittedPrimeP1AuthorityArtifacts:
     def __repr__(self) -> str:
         return "AdmittedPrimeP1AuthorityArtifacts(redacted)"
 
-    def __reduce__(self) -> object:
+    def __reduce__(self) -> NoReturn:
         raise TypeError("prime P1 authority resource is unavailable")
 
-    def __reduce_ex__(self, _: SupportsIndex) -> object:
+    def __reduce_ex__(self, _: SupportsIndex) -> NoReturn:
         raise TypeError("prime P1 authority resource is unavailable")
 
     def __copy__(self) -> object:
