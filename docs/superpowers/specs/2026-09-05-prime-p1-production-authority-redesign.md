@@ -158,6 +158,14 @@ ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE
 ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT
 ```
 
+`ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256` is a bare, exact 64-character
+lowercase hexadecimal SHA-256: it has no `sha256:` prefix, default,
+first-read enrollment, or path hashing. It independently roots the expected
+external profile bytes; future resource admission must compare those observed
+bytes. The seccomp profile path and digest are both bound by the private config
+HMAC and are never exposed. The observed digest must equal the resource-set and
+receipt `seccomp_sha256`.
+
 The target is explicit operator configuration, never host discovery: OS and
 architecture use the canonical lowercase OCI grammar, while variant is `none`
 for no variant or `v[0-9]+`. P1 v1 accepts only `linux` OS but does not infer or

@@ -245,6 +245,7 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
             "duplicate": self._text() + f"{digest_key}={'d' * 64}\n".encode(),
             "short": self._text({**VALUES, digest_key: "c" * 63}),
             "long": self._text({**VALUES, digest_key: "c" * 65}),
+            "prefixed": self._text({**VALUES, digest_key: "sha256:" + "c" * 64}),
             "uppercase": self._text({**VALUES, digest_key: "C" * 64}),
             "nonhex": self._text({**VALUES, digest_key: "g" * 64}),
             "control": self._text({**VALUES, digest_key: "c" * 63 + "\u0085"}),
