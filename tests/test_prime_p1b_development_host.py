@@ -48,12 +48,16 @@ class _Service:
 
 
 class _Provider:
+    fail_at: int | None = None
+
     def __init__(self) -> None:
         self.calls: list[bytes] = []
         self.closed = False
 
     async def __call__(self, body: bytes) -> bytes:
         self.calls.append(body)
+        if self.fail_at == len(self.calls) - 1:
+            raise ValueError("SENTINEL_CALLBACK_FAILURE")
         return json.dumps(
             {"content": [], "role": "assistant", "stopReason": "stop"},
             separators=(",", ":"),
@@ -123,6 +127,7 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
         _Service.instances.clear()
         _Gateway.instances.clear()
         provider = _Provider()
+        observation = subject._P1BObservation()  # noqa: SLF001
         with (
             patch.object(subject, "P1BDockerPersistentWorkerService", _Service),
             patch.object(subject, "PrimeP1BDevelopmentGateway", _Gateway),
@@ -139,6 +144,7 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
                 node_bin="/operator/node",
                 entrypoint="/operator/bridge.js",
                 prime_source_root="/operator/prime",
+                _observation=observation,
             )
 
         self.assertEqual(
@@ -164,8 +170,43 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
             ["open", "prompt", "compact", "prompt", "close"],
         )
         self.assertNotIn("secret", repr(trace))
+        snapshot = observation.snapshot()
+        self.assertFalse(snapshot.observation_invalid)
+        self.assertIsNone(snapshot.first_work_failure)
+        self.assertEqual(snapshot.cleanup_failures, ())
+        self.assertEqual(len(snapshot.events), 44)
+        self.assertEqual(
+            [(event.stage, event.lane, event.state, event.index) for event in snapshot.events],
+            [
+                ("worker.acquire", "work", "started", None), ("worker.acquire", "work", "succeeded", None),
+                ("worker.snapshot0", "work", "started", None), ("worker.snapshot0", "work", "succeeded", None),
+                ("oracle", "work", "started", 0), ("oracle", "work", "succeeded", 0),
+                ("gateway.open", "work", "started", None), ("gateway.open", "work", "succeeded", None),
+                ("gateway.prompt0", "work", "started", None),
+                ("provider.callback", "work", "started", 0), ("provider.callback", "work", "succeeded", 0),
+                ("worker.cell", "work", "started", 0), ("worker.cell", "work", "succeeded", 0),
+                ("provider.callback", "work", "started", 1), ("provider.callback", "work", "succeeded", 1),
+                ("gateway.prompt0", "work", "succeeded", None),
+                ("gateway.compact", "work", "started", None),
+                ("provider.callback", "work", "started", 2), ("provider.callback", "work", "succeeded", 2),
+                ("gateway.compact", "work", "succeeded", None),
+                ("gateway.prompt1", "work", "started", None),
+                ("provider.callback", "work", "started", 3), ("provider.callback", "work", "succeeded", 3),
+                ("worker.cell", "work", "started", 1), ("worker.cell", "work", "succeeded", 1),
+                ("provider.callback", "work", "started", 4), ("provider.callback", "work", "succeeded", 4),
+                ("gateway.prompt1", "work", "succeeded", None),
+                ("gateway.close", "work", "started", None), ("gateway.close", "work", "succeeded", None),
+                ("provider.usage", "work", "started", None), ("provider.usage", "work", "succeeded", None),
+                ("worker.finish", "work", "started", None), ("worker.finish", "work", "succeeded", None),
+                ("worker.snapshot1", "work", "started", None), ("worker.snapshot1", "work", "succeeded", None),
+                ("oracle", "work", "started", 1), ("oracle", "work", "succeeded", 1),
+                ("trace", "work", "started", None), ("trace", "work", "succeeded", None),
+                ("provider.close", "work", "started", None), ("provider.close", "work", "succeeded", None),
+                ("worker.cleanup", "cleanup", "started", None), ("worker.cleanup", "cleanup", "succeeded", None),
+            ],
+        )
 
-    async def test_bad_compaction_witness_fails_closed_and_cleans_up_redacted(
+    async def test_callback_failure_preserves_first_work_failure_over_cleanup_failure(
         self,
     ) -> None:
         from asterion.applications.prime_agent.operator import (
@@ -174,7 +215,9 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
 
         _Service.instances.clear()
         _Gateway.instances.clear()
-        _Gateway.bad_witness = True
+        _Provider.fail_at = 2
+        _Service.cleanup_failure = True
+        observation = subject._P1BObservation()  # noqa: SLF001
         try:
             with (
                 patch.object(subject, "P1BDockerPersistentWorkerService", _Service),
@@ -195,12 +238,24 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
                         node_bin="/operator/node",
                         entrypoint="/operator/bridge.js",
                         prime_source_root="/operator/prime",
+                        _observation=observation,
                     )
         finally:
-            _Gateway.bad_witness = False
+            _Provider.fail_at = None
+            _Service.cleanup_failure = False
         self.assertIn("cleanup", _Service.instances[0].calls)
         self.assertIn("close", _Gateway.instances[0].calls)
         self.assertNotIn("SENTINEL", str(caught.exception))
+        snapshot = observation.snapshot()
+        self.assertEqual(
+            (snapshot.first_work_failure.stage, snapshot.first_work_failure.index),
+            ("provider.callback", 2),
+        )
+        self.assertEqual(
+            [(event.stage, event.lane) for event in snapshot.cleanup_failures],
+            [("worker.cleanup", "cleanup")],
+        )
+        self.assertNotIn("SENTINEL", repr(snapshot))
 
     async def test_cleanup_failure_does_not_return_a_trace(self) -> None:
         from asterion.applications.prime_agent.operator import (

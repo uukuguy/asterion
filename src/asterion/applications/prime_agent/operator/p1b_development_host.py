@@ -15,7 +15,11 @@ from .ipython_host_supervisor import inspect_answer_source
 from .p1_development_sdk_provider import _canonical_json
 from .p1b_development_docker import P1BDockerPersistentWorkerService, P1BDockerTransport
 from .p1b_development_gateway import PrimeP1BDevelopmentGateway, _safe_witness
-from .p1b_development_sdk_provider import create_prime_p1b_development_sdk_provider
+from .p1b_development_observation import _P1BObservation
+from .p1b_development_sdk_provider import (
+    PrimeP1BDevelopmentSdkProvider,
+    create_prime_p1b_development_sdk_provider,
+)
 from .p1b_workload import PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
 
 
@@ -77,6 +81,7 @@ async def run_prime_p1b_development(
     entrypoint: str,
     prime_source_root: str,
     run_id: str | None = None,
+    _observation: _P1BObservation | None = None,
 ) -> PrimeP1BDevelopmentTrace:
     """Run the one fixed P1-B development flow and emit only its safe trace."""
     if not isinstance(operator_config, Mapping):
@@ -94,6 +99,7 @@ async def run_prime_p1b_development(
     gateway_closed = False
     provider_closed = False
     cleanup_complete = False
+    active_work: tuple[str, int | None] | None = None
     try:
         provider = create_prime_p1b_development_sdk_provider(operator_config)
         service = P1BDockerPersistentWorkerService(
@@ -102,32 +108,56 @@ async def run_prime_p1b_development(
             run_id=run_id,
             session_id=session_id,
         )
+        active_work = ("worker.acquire", None)
+        _record(_observation, "worker.acquire")
         await service.acquire()
+        _record(_observation, "worker.acquire", state="succeeded")
+        active_work = ("worker.snapshot0", None)
+        _record(_observation, "worker.snapshot0")
         initial = await service.initial_snapshot()
+        _record(_observation, "worker.snapshot0", state="succeeded")
+        active_work = ("oracle", 0)
+        _record(_observation, "oracle", index=0)
         if "sha256:" + sha256(
             initial
         ).hexdigest() != "sha256:" + _STARTER_SHA256 or inspect_answer_source(initial):
             raise ValueError
+        _record(_observation, "oracle", index=0, state="succeeded")
+        active_work = None
         model_calls = 0
         tool_calls = 0
         tool_ids: set[str] = set()
 
         async def model_hook(payload: object) -> dict[str, object]:
-            nonlocal model_calls
+            nonlocal active_work, model_calls
             if (
                 model_calls >= _MODEL_COUNT
                 or type(payload) is not dict
                 or not callable(provider)
             ):
                 raise ValueError
-            body = _canonical_json(payload).encode("utf-8")
-            reply = await provider(body)
-            value = _strict_json_object(reply)
+            index = model_calls
+            previous_work = active_work
+            active_work = ("provider.callback", index)
+            _record(_observation, "provider.callback", index=index)
+            try:
+                body = _canonical_json(payload).encode("utf-8")
+                reply = await provider(body)
+                value = _strict_json_object(reply)
+            except BaseException:
+                _record(
+                    _observation, "provider.callback", index=index,
+                    state=_provider_failure_state(provider),
+                )
+                active_work = previous_work
+                raise
             model_calls += 1
+            _record(_observation, "provider.callback", index=index, state="succeeded")
+            active_work = previous_work
             return value
 
         async def tool_hook(payload: object) -> dict[str, object]:
-            nonlocal tool_calls
+            nonlocal active_work, tool_calls
             if (
                 tool_calls >= _TOOL_COUNT
                 or type(payload) is not dict
@@ -139,8 +169,17 @@ async def run_prime_p1b_development(
                 or not payload["code"]
             ):
                 raise ValueError
+            index = tool_calls
+            previous_work = active_work
+            active_work = ("worker.cell", index)
             tool_ids.add(payload["tool_call_id"])
-            observed = await service.execute_cell(payload["code"])
+            _record(_observation, "worker.cell", index=index)
+            try:
+                observed = await service.execute_cell(payload["code"])
+            except BaseException:
+                _record(_observation, "worker.cell", index=index, state="failed")
+                active_work = previous_work
+                raise
             tool_calls += 1
             if (
                 type(observed) is not dict
@@ -148,7 +187,11 @@ async def run_prime_p1b_development(
                 or observed.get("kernel_generation") != 1
                 or observed.get("probe_count") != tool_calls * 6
             ):
+                _record(_observation, "worker.cell", index=index, state="failed")
+                active_work = previous_work
                 raise ValueError
+            _record(_observation, "worker.cell", index=index, state="succeeded")
+            active_work = previous_work
             return {
                 "content": [{"text": "IPython cell completed", "type": "text"}],
                 "details": {},
@@ -163,6 +206,8 @@ async def run_prime_p1b_development(
                 tool_hook=tool_hook,
                 deadline_seconds=180,
             )
+            active_work = ("gateway.open", None)
+            _record(_observation, "gateway.open")
             await gateway.open(
                 run_id=run_id,
                 session_id=session_id,
@@ -171,22 +216,49 @@ async def run_prime_p1b_development(
                 workspace=workspace,
             )
             gateway_open = True
-            if (await gateway.prompt(_PROMPT_ONE)).get("lifecycle") != "completed":
+            _record(_observation, "gateway.open", state="succeeded")
+            active_work = ("gateway.prompt0", None)
+            _record(_observation, "gateway.prompt0")
+            prompt_zero = await gateway.prompt(_PROMPT_ONE)
+            if prompt_zero.get("lifecycle") != "completed":
                 raise ValueError
+            _record(_observation, "gateway.prompt0", state="succeeded")
+            active_work = ("gateway.compact", None)
+            _record(_observation, "gateway.compact")
             compact = _safe_witness(await gateway.compact())
-            if (await gateway.prompt(_PROMPT_TWO)).get("lifecycle") != "completed":
+            _record(_observation, "gateway.compact", state="succeeded")
+            active_work = ("gateway.prompt1", None)
+            _record(_observation, "gateway.prompt1")
+            prompt_one = await gateway.prompt(_PROMPT_TWO)
+            if prompt_one.get("lifecycle") != "completed":
                 raise ValueError
+            _record(_observation, "gateway.prompt1", state="succeeded")
+            active_work = ("gateway.close", None)
+            _record(_observation, "gateway.close")
             await gateway.close()
             gateway_closed = True
+            _record(_observation, "gateway.close", state="succeeded")
+            active_work = None
         if (
             model_calls != _MODEL_COUNT
             or tool_calls != _TOOL_COUNT
             or len(tool_ids) != _TOOL_COUNT
         ):
             raise ValueError
+        active_work = ("provider.usage", None)
+        _record(_observation, "provider.usage")
         _terminal_provider_usage(provider)
+        _record(_observation, "provider.usage", state="succeeded")
+        active_work = ("worker.finish", None)
+        _record(_observation, "worker.finish")
         completion = await service.finish()
+        _record(_observation, "worker.finish", state="succeeded")
+        active_work = ("worker.snapshot1", None)
+        _record(_observation, "worker.snapshot1")
         post = await service.snapshot()
+        _record(_observation, "worker.snapshot1", state="succeeded")
+        active_work = ("oracle", 1)
+        _record(_observation, "oracle", index=1)
         if (
             not inspect_answer_source(post)
             or completion.kernel_generation != 1
@@ -194,6 +266,9 @@ async def run_prime_p1b_development(
             or completion.probe_count != _PROBE_COUNT
         ):
             raise ValueError
+        _record(_observation, "oracle", index=1, state="succeeded")
+        active_work = ("trace", None)
+        _record(_observation, "trace")
         trace_sha256 = _trace_digest(
             run_id=run_id,
             session_id=session_id,
@@ -201,14 +276,23 @@ async def run_prime_p1b_development(
             initial=initial,
             post=post,
         )
+        _record(_observation, "trace", state="succeeded")
+        active_work = ("provider.close", None)
+        _record(_observation, "provider.close")
         await _close_provider(provider)
         provider_closed = True
+        _record(_observation, "provider.close", state="succeeded")
+        active_work = None
+        _record(_observation, "worker.cleanup", lane="cleanup")
         await service.cleanup()
         cleanup_complete = True
+        _record(_observation, "worker.cleanup", lane="cleanup", state="succeeded")
         return PrimeP1BDevelopmentTrace(trace_sha256=trace_sha256)
     except asyncio.CancelledError:
         raise
     except BaseException:
+        if active_work is not None:
+            _record(_observation, active_work[0], index=active_work[1], state="failed")
         raise PrimeP1BDevelopmentHostError() from None
     finally:
         if not cleanup_complete:
@@ -219,18 +303,52 @@ async def run_prime_p1b_development(
                 provider=provider,
                 provider_closed=provider_closed,
                 service=service,
+                observation=_observation,
             )
 
 
-async def _stop_gateway(gateway: PrimeP1BDevelopmentGateway) -> None:
+def _record(
+    observation: _P1BObservation | None,
+    stage: str,
+    *,
+    lane: str = "work",
+    state: str = "started",
+    index: int | None = None,
+) -> None:
+    if observation is not None:
+        observation.record(stage, lane=lane, state=state, index=index)
+
+
+def _provider_failure_state(provider: object) -> str:
+    if type(provider) is not PrimeP1BDevelopmentSdkProvider:
+        return "failed"
+    failure = getattr(provider, "_failure", None)
+    kind = getattr(failure, "kind", None)
+    if kind in {
+        "dns", "connect", "tls", "timeout", "http-4xx", "http-5xx", "response",
+    }:
+        return "failed-" + kind
+    return "failed"
+
+
+async def _stop_gateway(
+    gateway: PrimeP1BDevelopmentGateway,
+    observation: _P1BObservation | None,
+) -> None:
+    failed = False
+    _record(observation, "gateway.close", lane="cleanup")
     try:
         await gateway.cancel()
     except BaseException:
-        pass
+        failed = True
     try:
         await gateway.close()
     except BaseException:
-        pass
+        failed = True
+    _record(
+        observation, "gateway.close", lane="cleanup",
+        state="failed" if failed else "succeeded",
+    )
 
 
 async def _close_provider(provider: object | None) -> None:
@@ -252,20 +370,27 @@ async def _shielded_best_effort_cleanup(
     provider: object | None,
     provider_closed: bool,
     service: P1BDockerPersistentWorkerService | None,
+    observation: _P1BObservation | None,
 ) -> None:
     async def cleanup() -> None:
         if gateway is not None and gateway_open and not gateway_closed:
-            await _stop_gateway(gateway)
+            await _stop_gateway(gateway, observation)
         if provider is not None and not provider_closed:
+            _record(observation, "provider.close", lane="cleanup")
             try:
                 await _close_provider(provider)
             except BaseException:
-                pass
+                _record(observation, "provider.close", lane="cleanup", state="failed")
+            else:
+                _record(observation, "provider.close", lane="cleanup", state="succeeded")
         if service is not None:
+            _record(observation, "worker.cleanup", lane="cleanup")
             try:
                 await service.cleanup()
             except BaseException:
-                pass
+                _record(observation, "worker.cleanup", lane="cleanup", state="failed")
+            else:
+                _record(observation, "worker.cleanup", lane="cleanup", state="succeeded")
 
     task = asyncio.create_task(cleanup())
     cancelled = False
