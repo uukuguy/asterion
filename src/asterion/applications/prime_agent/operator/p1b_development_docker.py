@@ -316,17 +316,16 @@ class P1BDockerPersistentWorkerService:
         self._state = "cleanup"; return value
 
     async def cleanup(self) -> None:
-        container, self._container = self._container, None
+        container = self._container
         if container is None: return
-        control = _LifecycleCallControl(monotonic() + 30, None)
         channel = self._channel
         async def destroy() -> bool:
             close_error = False
             if channel is not None:
-                try: await channel.close(control=control)
+                try: await channel.close(control=_LifecycleCallControl(monotonic() + 30, None))
                 except BaseException: close_error = True
-            await self._transport.force_remove(container, control=control)
-            await self._transport.assert_absent(container, control=control)
+            await self._transport.force_remove(container, control=_LifecycleCallControl(monotonic() + 30, None))
+            await self._transport.assert_absent(container, control=_LifecycleCallControl(monotonic() + 30, None))
             return close_error
         task = asyncio.create_task(destroy())
         cancelled = False
@@ -335,6 +334,10 @@ class P1BDockerPersistentWorkerService:
                 try: await asyncio.shield(task)
                 except asyncio.CancelledError: cancelled = True
             if task.result(): raise RestrictedWorkerError("restricted worker value is invalid")
-        finally:
-            self._channel = None; self._state = "closed"
+        except BaseException:
+            # Retain identity and channel for an explicit retry if removal or
+            # absence verification was not completed.
+            raise
+        else:
+            self._container = None; self._channel = None; self._state = "closed"
         if cancelled: raise asyncio.CancelledError

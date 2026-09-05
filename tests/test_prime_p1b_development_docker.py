@@ -24,7 +24,7 @@ class _Channel:
 
 
 class _Transport:
-    def __init__(self) -> None: self.calls: list[str] = []; self.channel_value = _Channel(); self.inspect_error = False
+    def __init__(self) -> None: self.calls: list[str] = []; self.channel_value = _Channel(); self.inspect_error = False; self.remove_error = False
     async def create(self, **_: object) -> str: self.calls.append("create"); return "d" * 64
     async def inspect(self, *_: object, **__: object) -> None:
         self.calls.append("inspect")
@@ -33,7 +33,9 @@ class _Transport:
     async def channel(self, *_: object, **__: object) -> _Channel: self.calls.append("attach"); return self.channel_value
     async def snapshot(self, *_: object, **__: object) -> bytes: self.calls.append("snapshot"); return b"p1b continuity fixture\n"
     async def initial_snapshot(self, *_: object, **__: object) -> bytes: self.calls.append("initial_snapshot"); return b"def answer() -> int:\n    return 0\n"
-    async def force_remove(self, *_: object, **__: object) -> None: self.calls.append("remove")
+    async def force_remove(self, *_: object, **__: object) -> None:
+        self.calls.append("remove")
+        if self.remove_error: raise ValueError
     async def assert_absent(self, *_: object, **__: object) -> None: self.calls.append("absent")
 
 
@@ -56,6 +58,13 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             await service.acquire()
         self.assertEqual(transport.calls, ["create", "inspect", "remove", "absent"])
+
+    async def test_cleanup_failure_retains_owner_for_retry(self) -> None:
+        transport = _Transport(); service = P1BDockerPersistentWorkerService(image_digest="sha256:" + "a" * 64, transport=transport, run_id="run", session_id="session")
+        await service.acquire(); transport.remove_error = True
+        with self.assertRaises(ValueError): await service.cleanup()
+        transport.remove_error = False; await service.cleanup()
+        self.assertEqual(transport.calls[-3:], ["remove", "remove", "absent"])
 
     async def test_uncertain_create_compensation_removes_provisional_name_then_asserts_absence(self) -> None:
         class Runner:
