@@ -27,11 +27,13 @@ _ENTRYPOINT = "/usr/local/bin/prime-p1b-persistent-worker.py"
 _PROTOCOL = "prime-p1-b-development-worker/v1"
 _FRAME_CAP = 64 * 1024
 _DIGEST = PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
+_FIXTURE = b"p1b continuity fixture\n"
 
 
 @dataclass(frozen=True)
 class _P1BSpec:
     container_id: str
+    image_digest: str
     role_id: str
     run_id: str
     challenge_digest: str
@@ -72,13 +74,23 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
         finally:
             self._close_fd(fd)  # type: ignore[attr-defined]
         daemon = self._parse_daemon_id(result.stdout)  # type: ignore[attr-defined]
-        self._specifications[daemon] = _P1BSpec(daemon, "prime.ipython-coding-p1b-development", run_id, "sha256:" + "0" * 64, _DIGEST)  # type: ignore[attr-defined]
+        self._specifications[daemon] = _P1BSpec(daemon, image_digest, "prime.ipython-coding-p1b-development", run_id, "sha256:" + "0" * 64, _DIGEST)  # type: ignore[attr-defined]
         return daemon
 
     async def inspect(self, container_id: str, *, control: _LifecycleCallControl) -> None:  # type: ignore[override]
         self._specification(container_id)  # type: ignore[attr-defined]
-        result = await self._call(self._prefix + ("container", "inspect", "--format", "{{.Id}}", container_id), control)  # type: ignore[attr-defined]
-        if result.stdout != (container_id + "\n").encode() or result.stderr:
+        spec = self._specification(container_id)  # type: ignore[attr-defined]
+        projection = '{{json .Id}} {{json .Image}} {{json .Config.Entrypoint}} {{json .HostConfig.NetworkMode}} {{json .HostConfig.ReadonlyRootfs}} {{json .Config.User}} {{json .HostConfig.Privileged}} {{json .HostConfig.CapDrop}} {{json .HostConfig.SecurityOpt}} {{json .HostConfig.Tmpfs}}'
+        result = await self._call(self._prefix + ("container", "inspect", "--format", projection, container_id), control)  # type: ignore[attr-defined]
+        try:
+            parts = result.stdout.rstrip(b"\n").split(b" ", 9)
+            values = [json.loads(part) for part in parts]
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
+        if (len(values) != 10 or values[0] != container_id or values[1] != spec.image_digest or values[2] != [_ENTRYPOINT]
+                or values[3] != "none" or values[4] is not True or values[5] != "65534:65534" or values[6] is not False
+                or values[7] != ["ALL"] or "no-new-privileges:true" not in values[8] or type(values[9]) is not dict
+                or values[9].get("/workspace") != "rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700" or result.stderr):
             raise RestrictedWorkerError("restricted worker value is invalid")
 
     async def start(self, container_id: str, *, control: _LifecycleCallControl) -> None:  # type: ignore[override]
@@ -150,7 +162,7 @@ class _P1BChannel:
             raise RestrictedWorkerError("restricted worker value is invalid")
         if sequence == 1 and event["baseline_recorded"] is not True:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        if sequence == 2 and (type(event["preserved"]) is not dict or not all(value is True for value in event["preserved"].values())):
+        if sequence == 2 and (type(event["preserved"]) is not dict or set(event["preserved"]) != {"cwd", "file_bytes", "function_behavior", "function_identity", "namespace_value", "path_alias"} or not all(value is True for value in event["preserved"].values())):
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._state = "cell-2" if sequence == 1 else "finish"
         return {key: event[key] for key in sorted(event) if key != "preserved"}
@@ -213,11 +225,12 @@ class P1BDockerPersistentWorkerService:
         if not (type(image_digest) is str and image_digest.startswith("sha256:") and len(image_digest) == 71 and all(c in "0123456789abcdef" for c in image_digest[7:]) and type(run_id) is str and run_id and type(session_id) is str and session_id):
             raise RestrictedWorkerError("restricted worker value is invalid")
         self._image, self._transport, self._run, self._session = image_digest, transport, run_id, session_id
-        self._container: str | None = None; self._channel: _P1BChannel | None = None
+        self._container: str | None = None; self._channel: _P1BChannel | None = None; self._state = "new"
 
     def __repr__(self) -> str: return "P1BDockerPersistentWorkerService(redacted)"
 
     async def acquire(self) -> None:
+        if self._state != "new": raise RestrictedWorkerError("restricted worker value is invalid")
         control = _LifecycleCallControl(monotonic() + 30, None)
         try:
             container = await self._transport.create(image_digest=self._image, run_id=self._run, session_id=self._session, control=control)
@@ -225,27 +238,36 @@ class P1BDockerPersistentWorkerService:
             channel = await self._transport.channel(container, run_id=self._run, session_id=self._session, control=control)
             check = await channel.self_check(control=control)
             if not (check.nonloopback_network_absent and check.root_read_only and check.workspace_only_writable and check.credentials_absent and check.effective_capabilities == 0 and check.no_new_privileges == 1 and check.seccomp_mode == 2 and check.effective_user_id == 65534): raise ValueError
-            self._container, self._channel = container, channel
+            self._container, self._channel, self._state = container, channel, "cell-1"
         except BaseException:
             await self.cleanup(); raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     async def execute_cell(self, cell: str) -> dict[str, object]:
-        if self._channel is None: raise RestrictedWorkerError("restricted worker value is invalid")
-        return await self._channel.execute_cell(cell, control=_LifecycleCallControl(monotonic() + 30, None))
+        if self._channel is None or self._state not in {"cell-1", "cell-2"}: raise RestrictedWorkerError("restricted worker value is invalid")
+        result = await self._channel.execute_cell(cell, control=_LifecycleCallControl(monotonic() + 30, None))
+        self._state = "cell-2" if self._state == "cell-1" else "finish"
+        return result
 
     async def finish(self) -> P1BDockerCompletion:
-        if self._channel is None: raise RestrictedWorkerError("restricted worker value is invalid")
-        return await self._channel.finish(control=_LifecycleCallControl(monotonic() + 30, None))
+        if self._channel is None or self._state != "finish": raise RestrictedWorkerError("restricted worker value is invalid")
+        result = await self._channel.finish(control=_LifecycleCallControl(monotonic() + 30, None)); self._state = "snapshot"; return result
 
     async def snapshot(self) -> bytes:
-        if self._container is None: raise RestrictedWorkerError("restricted worker value is invalid")
-        return await self._transport.snapshot(self._container, control=_LifecycleCallControl(monotonic() + 30, None))
+        if self._container is None or self._state != "snapshot": raise RestrictedWorkerError("restricted worker value is invalid")
+        value = await self._transport.snapshot(self._container, control=_LifecycleCallControl(monotonic() + 30, None))
+        if value != _FIXTURE: raise RestrictedWorkerError("restricted worker value is invalid")
+        self._state = "cleanup"; return value
 
     async def cleanup(self) -> None:
         container, self._container = self._container, None
         if container is None: return
         control = _LifecycleCallControl(monotonic() + 30, None)
+        close_error = False
         try:
-            if self._channel is not None: await self._channel.close(control=control)
-            await self._transport.force_remove(container, control=control); await self._transport.assert_absent(container, control=control)
-        finally: self._channel = None
+            if self._channel is not None:
+                try: await self._channel.close(control=control)
+                except BaseException: close_error = True
+            await asyncio.shield(self._transport.force_remove(container, control=control))
+            await asyncio.shield(self._transport.assert_absent(container, control=control))
+            if close_error: raise RestrictedWorkerError("restricted worker value is invalid")
+        finally: self._channel = None; self._state = "closed"

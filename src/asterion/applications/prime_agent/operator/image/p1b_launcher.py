@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import os
+import select
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -27,6 +28,7 @@ _IDENTITY_KEYS = frozenset(("run_id", "session_id"))
 _FIXTURE_DIRECTORY = "p1b-state"
 _FIXTURE_NAME = "continuity.txt"
 _FIXTURE_BYTES = b"p1b continuity fixture\n"
+_SELF_CHECK = b'{"credentials_absent":true,"effective_capabilities":0,"effective_user_id":65534,"no_new_privileges":1,"nonloopback_network_absent":true,"root_read_only":true,"seccomp_mode":2,"workspace_only_writable":true}'
 
 
 class _BoundedDiscard(io.TextIOBase):
@@ -203,6 +205,8 @@ def run_development_worker(*, workspace: Path, stdin: TextIO, stdout: TextIO) ->
     try:
         # No protocol witness may be emitted before the P1-A-equivalent gate.
         require_closed_worker()
+        stdout.write(_SELF_CHECK.decode("ascii") + "\n")
+        stdout.flush()
         workspace = workspace.resolve()
         state = _prepare_workspace(workspace)
         os.chdir(workspace)
@@ -236,6 +240,7 @@ def run_development_worker(*, workspace: Path, stdin: TextIO, stdout: TextIO) ->
             raise ValueError("unexpected EOF")
         _require_request(finish, identity=identity, sequence=3, kind="finish")
         _emit(stdout, _event(identity, output_sequence, "completed", cell_count=2, completed=True, kernel_generation=1, probe_count=12))
+        select.select((stdin,), (), (), 30)
         return 0
     except Exception:
         if identity is not None:

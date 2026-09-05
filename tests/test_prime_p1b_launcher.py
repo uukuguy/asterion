@@ -117,12 +117,13 @@ class TestPrimeP1BLauncher(unittest.TestCase):
             )
 
         self.assertEqual(status, 0)
-        self.assertEqual(messages[0]["kind"], "baseline.recorded")
-        self.assertEqual(messages[0]["baseline_recorded"], True)
-        self.assertEqual(messages[0]["kernel_generation"], 1)
-        self.assertEqual(messages[1]["kind"], "continuity.verified")
+        self.assertEqual(messages[0], json.loads(p1b_launcher._SELF_CHECK))  # noqa: SLF001
+        self.assertEqual(messages[1]["kind"], "baseline.recorded")
+        self.assertEqual(messages[1]["baseline_recorded"], True)
+        self.assertEqual(messages[1]["kernel_generation"], 1)
+        self.assertEqual(messages[2]["kind"], "continuity.verified")
         self.assertEqual(
-            messages[1]["preserved"],
+            messages[2]["preserved"],
             {
                 "cwd": True,
                 "file_bytes": True,
@@ -132,7 +133,7 @@ class TestPrimeP1BLauncher(unittest.TestCase):
                 "path_alias": True,
             },
         )
-        self.assertEqual(messages[2]["kind"], "completed")
+        self.assertEqual(messages[3]["kind"], "completed")
 
     def test_tampering_after_first_cell_fails_before_second_cell_and_redacts_sentinel(self) -> None:
         sentinel = "P1B_PRIVATE_SENTINEL_DO_NOT_LEAK"
@@ -147,5 +148,5 @@ class TestPrimeP1BLauncher(unittest.TestCase):
 
         serialized = json.dumps(messages, separators=(",", ":"), sort_keys=True)
         self.assertEqual(status, 1)
-        self.assertEqual([message["kind"] for message in messages], ["baseline.recorded", "failed"])
+        self.assertEqual([message.get("kind") for message in messages], [None, "baseline.recorded", "failed"])
         self.assertNotIn(sentinel, serialized)
