@@ -21,6 +21,7 @@ from asterion.applications.prime_agent.restricted_worker import (
     PrimeRestrictedWorkerProfile,
 )
 from asterion.applications.prime_agent.preflight import prime_preflight
+from asterion.applications.prime_agent.product import create_prime_product
 from asterion.applications.prime_agent.source_lock import PrimeSourceLock
 
 
@@ -84,4 +85,5 @@ def create_provider() -> InstalledApplicationProvider:
                 runtime_ids=("prime.agent",),
             ),
         ),
+        product=create_prime_product(),
     )

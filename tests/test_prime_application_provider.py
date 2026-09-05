@@ -134,6 +134,28 @@ class TestPrimeApplicationProvider(unittest.TestCase):
             ],
         )
 
+    def test_provider_exposes_only_provider_free_p1_product_metadata(self) -> None:
+        provider = create_provider()
+
+        self.assertIsNotNone(provider.product)
+        description = provider.product.description  # type: ignore[union-attr]
+        self.assertEqual(description.product_id, "prime.ipython-coding")
+        self.assertEqual(description.version, "1.0.0")
+        self.assertEqual(
+            [(profile.level, profile.cost_class) for profile in description.profiles],
+            [
+                ("acceptance", "provider-free"),
+                ("basic", "bounded-provider-backed"),
+                ("preflight", "provider-free"),
+            ],
+        )
+        self.assertEqual(
+            [item.name for item in description.configuration],
+            ["PRIME_PRODUCT_AUTHORITY"],
+        )
+        self.assertNotIn("/", repr(description))
+        self.assertNotIn("PROMPT", repr(description))
+
     def test_installed_entry_point_discovers_and_loads_prime_provider(self) -> None:
         entries = tuple(metadata.entry_points(group="asterion.applications"))
 
