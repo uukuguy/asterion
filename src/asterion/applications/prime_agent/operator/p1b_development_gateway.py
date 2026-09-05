@@ -73,14 +73,18 @@ class PrimeP1BDevelopmentGateway(DevelopmentGatewayTransport):
         workspace: str,
     ) -> None:
         self._event_loop = asyncio.get_running_loop()
-        await asyncio.to_thread(
-            self.open_sync,
-            run_id=run_id,
-            session_id=session_id,
-            generation=generation,
-            prime_source_root=prime_source_root,
-            workspace=workspace,
-        )
+        try:
+            await asyncio.to_thread(
+                self.open_sync,
+                run_id=run_id,
+                session_id=session_id,
+                generation=generation,
+                prime_source_root=prime_source_root,
+                workspace=workspace,
+            )
+        except asyncio.CancelledError:
+            await self._abort_shielded()
+            raise
 
     def open_sync(
         self,
@@ -126,7 +130,7 @@ class PrimeP1BDevelopmentGateway(DevelopmentGatewayTransport):
         try:
             return await asyncio.to_thread(self.prompt_sync, prompt)
         except asyncio.CancelledError:
-            await asyncio.shield(asyncio.to_thread(self._abort_active))
+            await self._abort_shielded()
             raise
 
     def prompt_sync(self, prompt: str) -> Mapping[str, object]:
@@ -158,7 +162,7 @@ class PrimeP1BDevelopmentGateway(DevelopmentGatewayTransport):
         try:
             return await asyncio.to_thread(self.compact_sync)
         except asyncio.CancelledError:
-            await asyncio.shield(asyncio.to_thread(self._abort_active))
+            await self._abort_shielded()
             raise
 
     def compact_sync(self) -> Mapping[str, object]:
@@ -181,7 +185,7 @@ class PrimeP1BDevelopmentGateway(DevelopmentGatewayTransport):
     async def cancel(self) -> Mapping[str, object]:
         self._event_loop = asyncio.get_running_loop()
         if self._state != "prompt1":
-            await asyncio.shield(asyncio.to_thread(self._abort_active))
+            await self._abort_shielded()
             raise PrimeP1BDevelopmentGatewayError()
         return await asyncio.to_thread(self.cancel_sync)
 
@@ -247,6 +251,18 @@ class PrimeP1BDevelopmentGateway(DevelopmentGatewayTransport):
 
     def _abort_active(self) -> None:
         self._fail()
+
+    async def _abort_shielded(self) -> None:
+        cleanup = asyncio.create_task(asyncio.to_thread(self._abort_active))
+        interrupted = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                interrupted = True
+        cleanup.result()
+        if interrupted:
+            raise asyncio.CancelledError
 
 
 def _safe_prompt_result(value: object) -> dict[str, object]:

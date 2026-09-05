@@ -50,7 +50,7 @@ class PrimeP1BDevelopmentSdkProviderError(ValueError):
 class PrimeP1BDevelopmentSdkProvider:
     """Translate only the captured five-call P1-B SDK conversation."""
 
-    __slots__ = ("_calls", "_cancelled", "_child_pid", "_config", "_deadline", "_issued", "_provisional", "_terminal", "_uncertain")
+    __slots__ = ("_calls", "_cancelled", "_child_pid", "_closed", "_cleanup_task", "_config", "_deadline", "_issued", "_provisional", "_terminal", "_uncertain")
 
     def __init__(self, config: _PrivatePrimeModelConfig) -> None:
         if type(config) is not _PrivatePrimeModelConfig:
@@ -58,6 +58,8 @@ class PrimeP1BDevelopmentSdkProvider:
         self._calls = 0
         self._cancelled = False
         self._child_pid: int | None = None
+        self._closed = False
+        self._cleanup_task: asyncio.Task[None] | None = None
         self._config = config
         self._deadline: float | None = None
         self._issued: list[tuple[dict[str, object], dict[str, object]]] = []
@@ -69,7 +71,7 @@ class PrimeP1BDevelopmentSdkProvider:
         return "PrimeP1BDevelopmentSdkProvider(redacted)"
 
     async def __call__(self, body: bytes) -> bytes:
-        if self._cancelled or self._child_pid is not None or type(body) is not bytes or not body or len(body) > _INPUT_CAP or self._calls >= _MAX_REQUESTS:
+        if self._closed or self._cancelled or self._child_pid is not None or type(body) is not bytes or not body or len(body) > _INPUT_CAP or self._calls >= _MAX_REQUESTS:
             raise PrimeP1BDevelopmentSdkProviderError()
         try:
             request = _decode_request(body, self._calls, self._issued)
@@ -132,6 +134,16 @@ class PrimeP1BDevelopmentSdkProvider:
             raise PrimeP1BDevelopmentSdkProviderError()
         return self._terminal
 
+    async def close(self) -> None:
+        self._closed = True
+        self._cancelled = True
+        self._terminal = None
+        self._uncertain = True
+        await self._reap_shielded()
+
+    async def cancel(self) -> None:
+        await self.close()
+
     async def _receive_result(self, result_read: int) -> tuple[bytes, PrimeModelBrokerTokenUsage]:
         chunks: list[bytes] = []
         while True:
@@ -152,7 +164,10 @@ class PrimeP1BDevelopmentSdkProvider:
             await asyncio.sleep(_POLL_SECONDS)
 
     async def _reap_shielded(self) -> None:
-        task = asyncio.create_task(self._kill_and_reap())
+        task = self._cleanup_task
+        if task is None:
+            task = asyncio.create_task(self._kill_and_reap())
+            self._cleanup_task = task
         interrupted = False
         while not task.done():
             try:

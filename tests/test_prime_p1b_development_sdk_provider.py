@@ -58,6 +58,26 @@ def _text_reply(text: str) -> dict[str, object]:
 
 
 class TestPrimeP1BDevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
+    async def test_close_reaps_active_child_and_rejects_new_calls(self) -> None:
+        from asterion.applications.prime_agent.operator import p1b_development_sdk_provider as subject
+
+        provider = subject.create_prime_p1b_development_sdk_provider({"DEEPSEEK_API_KEY": "private-key", "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"})
+        with mock.patch.object(subject, "_post_chat_completion", side_effect=lambda *_: time.sleep(10)):
+            active = asyncio.create_task(provider(_request([{"content": "solve", "role": "user"}])))
+            for _ in range(100):
+                if provider._child_pid is not None:  # noqa: SLF001
+                    break
+                await asyncio.sleep(0.01)
+            pid = provider._child_pid  # noqa: SLF001
+            await provider.close()
+            with self.assertRaises(subject.PrimeP1BDevelopmentSdkProviderError):
+                await active
+        self.assertIsNone(provider._child_pid)  # noqa: SLF001
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(pid, os.WNOHANG)  # type: ignore[arg-type]
+        with self.assertRaises(subject.PrimeP1BDevelopmentSdkProviderError):
+            await provider(_request([{"content": "solve", "role": "user"}]))
+
     async def test_real_pinned_bridge_runs_prompt_compact_prompt_through_provider(
         self,
     ) -> None:

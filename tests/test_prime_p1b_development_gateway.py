@@ -29,8 +29,62 @@ _STALL_COMPACT_CHILD = _CHILD.replace(
     'else if(phase==="compact"){}',
 )
 
+_STALL_OPEN_CHILD = "setInterval(() => {}, 1000);"
+
+_CALLBACK_CHILD = _CHILD.replace(
+    'else if(f.kind==="prompt"||f.kind==="compact"){active=f.request_id;model()}',
+    'else if(f.kind==="prompt"){active=f.request_id;model()}',
+)
+
 
 class TestPrimeP1BDevelopmentGateway(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelling_open_reaps_launched_child(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            entry = Path(temporary) / "bridge.js"
+            entry.write_text(_STALL_OPEN_CHILD, encoding="utf-8")
+            gateway = PrimeP1BDevelopmentGateway(
+                node_bin="node", entrypoint=entry, deadline_seconds=10
+            )
+            opening = asyncio.create_task(
+                gateway.open(
+                    run_id="run-1", session_id="session-1", generation=1,
+                    prime_source_root=temporary, workspace=temporary,
+                )
+            )
+            await asyncio.sleep(0.05)
+            opening.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await opening
+            self.assertIsNone(gateway.child_pid)
+
+    async def test_cancelling_active_callback_cancels_and_settles_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            entry = Path(temporary) / "bridge.js"
+            entry.write_text(_CALLBACK_CHILD, encoding="utf-8")
+            settled = asyncio.Event()
+
+            async def model(_: object) -> object:
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    settled.set()
+                return {"role": "assistant"}
+
+            gateway = PrimeP1BDevelopmentGateway(
+                node_bin="node", entrypoint=entry, model_hook=model, tool_hook=lambda _: {}
+            )
+            await gateway.open(
+                run_id="run-1", session_id="session-1", generation=1,
+                prime_source_root=temporary, workspace=temporary,
+            )
+            prompt = asyncio.create_task(gateway.prompt("one"))
+            await asyncio.sleep(0.05)
+            prompt.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await prompt
+            self.assertTrue(settled.is_set())
+            self.assertIsNone(gateway.child_pid)
+
     def test_witness_rejects_non_observed_compaction_counts(self) -> None:
         with self.assertRaises(ValueError):
             _safe_witness(

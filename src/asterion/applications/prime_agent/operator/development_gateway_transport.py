@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping
+from concurrent.futures import Future
 import inspect
 import json
 import os
@@ -44,6 +45,8 @@ class DevelopmentGatewayTransport:
 
     __slots__ = (
         "_child",
+        "_callback_futures",
+        "_callback_lock",
         "_deadline",
         "_entrypoint",
         "_identity",
@@ -87,6 +90,8 @@ class DevelopmentGatewayTransport:
         self._deadline = float(deadline_seconds)
         self._model_hook, self._tool_hook = model_hook, tool_hook
         self._child: subprocess.Popen[bytes] | None = None
+        self._callback_futures: set[tuple[Future[object], threading.Event]] = set()
+        self._callback_lock = threading.Lock()
         self._socket: socket.socket | None = None
         self._identity: dict[str, object] | None = None
         self._input_sequence = self._output_sequence = 0
@@ -154,7 +159,7 @@ class DevelopmentGatewayTransport:
             while data := child.stderr.read(1024):
                 if len(self._stderr) < _STDERR_LIMIT:
                     self._stderr.extend(data[: _STDERR_LIMIT - len(self._stderr)])
-        except OSError:
+        except (OSError, ValueError):
             pass
 
     def _send(self, kind: str, request_id: str, payload: Mapping[str, object]) -> str:
@@ -221,9 +226,23 @@ class DevelopmentGatewayTransport:
             loop = self._event_loop
             if loop is None or loop.is_closed():
                 raise DevelopmentGatewayTransportError()
-            response = asyncio.run_coroutine_threadsafe(response, loop).result(
-                timeout=max(0.001, self._deadline)
-            )
+            settled = threading.Event()
+
+            async def tracked() -> object:
+                try:
+                    return await response
+                finally:
+                    settled.set()
+
+            future = asyncio.run_coroutine_threadsafe(tracked(), loop)
+            entry = (future, settled)
+            with self._callback_lock:
+                self._callback_futures.add(entry)
+            try:
+                response = future.result(timeout=max(0.001, self._deadline))
+            finally:
+                with self._callback_lock:
+                    self._callback_futures.discard(entry)
         self._send(response_kind, request_id, {key: response})
 
     def _receive(self, deadline: float) -> dict[str, object]:
@@ -313,7 +332,17 @@ class DevelopmentGatewayTransport:
                         pass
 
     def _fail_transport(self) -> None:
+        self._cancel_callback_futures()
         self._reap(graceful=False)
+
+    def _cancel_callback_futures(self) -> None:
+        with self._callback_lock:
+            callbacks = tuple(self._callback_futures)
+        for future, _ in callbacks:
+            future.cancel()
+        deadline = time.monotonic() + min(self._deadline, 1.0)
+        for _, settled in callbacks:
+            settled.wait(timeout=max(0.0, deadline - time.monotonic()))
 
 
 def _valid_id(value: object) -> bool:
