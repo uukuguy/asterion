@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-06 03:25. **Session remains active — not a final handoff.**
+> Updated: 2026-09-06 04:45. **Session remains active — not a final handoff.**
 
 ## Direction
 
@@ -11,7 +11,7 @@ Plan: docs/superpowers/plans/2026-09-05-prime-authority-bundle-and-linux-launch.
 
 ## Current implementation and evidence
 
-本地实现已推进至764c6f3b；未push。主要新增提交：
+本地实现已推进至6f496311及后续P1-B清理修复；未push。主要状态：
 - d103447 qualification IPC/bootstrap；真实Linux四个focused checks通过（normal/cancel/identity/handoff ownership）。不发production receipt。
 - 6408ab9等待cell completion并保持可snapshot；c4a7969可cancel/reap模型子进程；9a6c789接development host/broker/oracle。
 - 1a12fda Dockerfile对齐canonical context；f371e1a修真实CLI参数、interactive start握手、env/namespace/absence投影。
@@ -22,26 +22,26 @@ Plan: docs/superpowers/plans/2026-09-05-prime-authority-bundle-and-linux-launch.
 - 4f3c88be/c8ae1e8c新增Python继承FD gateway并修active prompt取消回收；0362c161区分worker外层一次exchange与SDK内部两次provider callback。
 - c309abd1/1082d9e8完成P1-A host接线、隔离SDK workspace并固定一次IPython验证prompt；764c6f3b兼容后端tool-call的空字符串content。
 
-P1-A现已完成一次真实有界链路：Prime SDK `session.prompt()`→两次真实provider callback→一次Docker IPython→post snapshot→host oracle→broker revoke→容器清理，输出`p1-a-development/unpromoted` trace。完整P1仍未PASS。Prime SDK会话属于host-side TypeScript Gateway，Python保留授权、预算、模型进程、Docker、snapshot与最终oracle；restricted worker仅保留IPython kernel/workspace。下一步是P1-B持久session/kernel、两次prompt和一次真实compaction，然后接public runtime。
+P1-A与P1-B开发链路均已真实完成。P1-B使用一个Prime SDK session、两次prompt、一次真实compact、五次provider callback、两次Docker IPython cell、同一kernel及十二项连续性probe；双snapshot、AST oracle、provider/Node/container cleanup均完成。安全结果为`p1-b-development/unpromoted`与`sha256:21ba3699ff291d98349bf2895b3453adacd1a48dd0b6f9fdfd6803321f403d46`。Prime SDK会话仍属于host-side TypeScript Gateway；Python保留授权、预算、模型进程、Docker、snapshot与最终oracle。
 
 ## Next concrete action
 
-1. 设计P1-B exact contract：同一Prime session、同一Docker IPython kernel、两次prompt之间保留namespace/import/function/cwd/file witness，并执行一次真实`session.compact()`；计数、预算和证据不得复用P1-A常量猜测。
-2. 在现有TypeScript Gateway扩展独立P1-B adapter/protocol版本；Python继续只做授权、provider/Docker broker、snapshot/oracle/cleanup，不复制session逻辑。
-3. 只验证正常持久链路、compaction witness、取消回收和脱敏边界；不跑promotion/发布矩阵。P1-B完成后接public runtime preset。
-4. 所有模型继续使用repo `.env`的operator wiring，禁止打印值或增加公开provider/model/budget旋钮。
+1. 将P1-A/P1-B闭环接入标准`CLI → provider → assembly → runtime → injected host service`路径；不让capability实现直接发现Docker、模型或配置。
+2. 为`prime.ipython-production`实现固定small-verification host service，并让`prime.agent` runtime消费该精确服务；用户命令不增加provider/model/cost/deadline旋钮。
+3. 保持`list`、`describe`、`acceptance`、`preflight` provider-free；开发CLI结果明确`unpromoted`且只输出安全身份、状态与trace digest。
+4. CLI可运行后继续P2 admitted restricted-worker/model execution与installed route，复用P1执行spine。
 
 ## Actual environment
 
 - Linux为OrbStack `ubuntu`，使用`orb -m ubuntu -u root`；Docker29.2.1与host同一guest，/usr/bin/docker，/var/run/docker.sock，GID988。Mac /tmp不是guest /tmp。
 - Python live命令使用`/private/tmp/asterion-p1-sdk-run-20260906.py`；guest Node22.23.2位于`/tmp/asterion-node22/bin/node`并按官方SHA256校验。这是live-source开发边界，不是sealed bundle运行。
-- 当前image `sha256:cdaa182cd3dfd3377aaf93757d8edfdd2c96025e2becf0be86f2fb9e6a053d5c`，linux/arm64，tag `asterion-p1-development:20260906`。input739aeadbb639c78cb9cb40e9e02881989efb9f8d8165e9de7526d250aef0dcfe。
+- P1-A image `sha256:cdaa182cd3dfd3377aaf93757d8edfdd2c96025e2becf0be86f2fb9e6a053d5c`；P1-B image `sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657`，均为linux/arm64且未promotion。
 - Context Mac `/private/tmp/asterion-p1-development-context-v3-20260906.tar`；build log同目录`asterion-p1-development-build-v3-20260906.log`。
 - 官方Moby docker-v29.2.1默认seccomp已保存guest `/tmp/asterion-p1-development-seccomp.json`；canonical hash7ce699efbba58df5691185a87189ecc0a47ff01c48ec8fc5708465954b672979。未promotion。
 - 原qualification bundle仍为guest `/tmp/asterion-authority-candidate-9hpk1mgz`与.release.json（CPython3.13.7/658files/5external libs）。不要混作development image/完整authority。
 
 ## Agents and preservation
 
-P1-A实现/复审agent均已结束；P1-B契约设计是下一任务。没有正在运行的model调用或完整测试流程。
+P1-B实现与Sol复审均已结束；没有正在运行的model调用或容器。下一任务是P1正式CLI preset接线。
 
 保留既有`.superpowers/sdd/task-1-report.md`、JOURNAL/RESUME未提交修改、未跟踪旧计划和tmp目录。不要整体暂存、重置、删除或push。完整ARC/global harness activation/发布不在本轮范围。

@@ -1884,3 +1884,20 @@
 - 03:22 Accepted backend empty tool-call content while preserving the single-ipython boundary [764c6f3b]
 - 03:04 Wired P1 host to SDK gateway for bounded two-turn callbacks [c309abd1]
 - 03:25 Completed one real P1-A SDK/provider/IPython/oracle/cleanup run; evidence remains unpromoted.
+- 03:29 Recorded P1-A live closure and advanced the recovery boundary to P1-B [18f3ae92]
+- 03:23 Added bounded P1-B SDK session compaction witness and topology coverage [e3818f14]
+- 03:23 Added P1-B persistent IPython worker with continuity probes [0d6d6465]
+- 03:23 Hardened P1-B compaction witness validation and nonblocking cancellation [84f17c37]
+- 03:25 Required cell1 to create P1-B continuity fixture for valid witness [7b4f7c82]
+- 03:31 Added sealed P1-B workload identity for fixed multi-turn development evidence [bbe98679]
+- 03:30 Added P1-B inherited-FD bridge for fixed prompt/compact lifecycle [32a880d0]
+- 03:33 Settled cancelled P1-B compact commands to preserve single terminal result [ed635b17]
+- 03:36 Added strict five-stage P1-B provider to bind SDK compaction and tool continuity [75fcd01e]
+- 03:37 Added P1-B Python gateway and shared transport for bounded lifecycle safety [06fa79b4]
+- 03:37 Validated captured P1-B model shape and stage context continuity [b93f0756]
+- 03:39 Required exact P1-B compaction witness counts to reject forged host evidence [2776d9a7]
+
+## 2026-09-06
+- 04:31 Settled late P1-B Docker creates before propagation [58cf15fc]
+- 04:45 Completed real P1-B SDK, compaction, persistent IPython, oracle, and cleanup evidence.
+- 04:46 Advanced P1 from internal closure to public fixed-preset CLI wiring.

@@ -22,7 +22,7 @@ or merge contracts.
 
 | Package | Current evidence | Remaining closure | Dependencies / status |
 |---|---|---|---|
-| P1 `prime.ipython-coding/v1` | P1-A development scope now completes a real Prime SDK session, two bounded provider callbacks, one Docker-backed IPython tool call, host oracle and cleanup | P1-B: persistent namespace/imports/functions/cwd/files across turns and compaction; then public runtime wiring and promoted authority resources | **Active**. P1-A is verified only as unpromoted local-root development evidence; production catalogs remain empty |
+| P1 `prime.ipython-coding/v1` | P1-A and P1-B development scopes now complete real Prime SDK/provider/Docker/IPython/oracle/cleanup runs, including two prompts, one compact and persistent kernel continuity | Public fixed-preset runtime/host wiring, then promoted authority resources | **Active**. Functional reproduction is verified as unpromoted local-root development evidence; the public CLI still exposes only provider-free fixture acceptance |
 | P2 `prime.programmatic-long-context/v1` | Workload, worker, launcher, receipt and reducer tests pass; real local Prime/IPython corpus compatibility PASS after canonical JSON fixture correction | Admitted restricted-worker/model execution, fixed oracle, installed public route | Depends on P1 shared execution boundary; existing P2 launcher retained |
 | P3 `prime.recursive-workflow/v1` | Provider-free tests pass; real local Prime two-child message/aggregate/delete compatibility PASS | Real admitted restricted-worker/model execution, exact depth/usage/cancellation and public route | Depends on P1/P2 spine; compatibility evidence does not satisfy bounded-sandboxed gate |
 | P4 `prime.long-session-continuity/v1` | Diagnostic workload, completion, recovery adapter, worker and reducer tests pass | Actual detach/attach/compaction/recovery launcher/host, same oracle after recovery, no blind effect replay | Depends on P1/P3; real launcher/host absent |
@@ -73,10 +73,13 @@ mean seven publicly runnable scenarios.
    worker retains only its IPython kernel and workspace. One bounded live run
    completed with scope `p1-a-development` and promotion `unpromoted`. Public
    preset wiring and production receipt/catalog publication remain separate.
-4. **P1-B semantic closure:** current production workload permits one model
-   request/IPython call, while the original P1 fixture requires multiple turns
-   and post-compaction witnesses. Preserve P1-A's exact contract; add a reviewed
-   exact semantic scenario rather than relabeling one-cell evidence as full P1.
+4. **P1-B semantic closure — development verified:** one real bounded run used
+   one Prime SDK session, two prompts, one manual compact, five provider
+   callbacks and two Docker-backed IPython cells in one kernel. Namespace,
+   import identity, function identity/behavior, cwd and file bytes passed all
+   twelve continuity probes. Initial/post snapshots, final AST oracle, provider
+   close, Node reap and exact container absence completed. The body-free result
+   is `p1-b-development/unpromoted`; public runtime wiring remains next.
 
 The P1-A/P1-B split records existing contract differences, not permission to
 weaken the seven-scenario goal. Production deployment must preserve separate
@@ -86,17 +89,16 @@ authority executable.
 
 ## Current development execution evidence
 
-The development path now constructs a real Linux/arm64 image, starts the
-restricted Docker worker, passes its self-check, initializes the coding task,
-and reads the initial tmpfs snapshot from the same-guest root host. Real model
-requests reached HTTP 200 but did not close the SDK path. The new structured
-adapter exposed one concrete compatibility defect: the backend returned the
-valid tool-call shape with empty-string content instead of null. After the
-narrow compatibility fix, one bounded run completed the real Prime-SDK→two-
-provider-turns→Docker-IPython→snapshot→host-oracle→broker-revoke→container-
-cleanup chain and emitted only an unpromoted development trace. This closes
-P1-A development behavior. Complete P1, P1-B persistence/compaction, public
-runtime routing and production receipt remain unverified.
+The development path now constructs real Linux/arm64 P1-A and P1-B images,
+starts restricted Docker workers, passes their self-checks, and reads live tmpfs
+snapshots through the explicitly local-root same-guest operation. P1-A closed
+the single-cell SDK/provider path. P1-B then closed the original multi-turn
+semantic gap with a real compact operation and one persistent IPython kernel.
+The successful P1-B trace digest is
+`sha256:21ba3699ff291d98349bf2895b3453adacd1a48dd0b6f9fdfd6803321f403d46`.
+Both results remain unpromoted development evidence. The installed CLI still
+validates only the provider-free fixture; the fixed public runtime/host preset
+is the active P1 task.
 
 The local proc snapshot is an operator development operation. A reduced-
 privilege authority cannot assume it has that root capability; later integration
