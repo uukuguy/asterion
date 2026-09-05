@@ -122,6 +122,7 @@ class AdmittedPrimeP1DockerSocket:
     async def _verify_daemon_projection(self, deadline: float) -> None:
         """Privately verify the admitted daemon's fixed /version projection."""
         client: socket.socket | None = None
+        failed = False
         try:
             if type(self) is not AdmittedPrimeP1DockerSocket or not _valid_deadline(deadline):
                 raise ValueError
@@ -141,13 +142,15 @@ class AdmittedPrimeP1DockerSocket:
         except asyncio.CancelledError:
             raise
         except BaseException:
-            raise PrimeP1DockerSocketError() from None
+            failed = True
         finally:
             if client is not None:
                 try:
                     client.close()
                 except BaseException:
                     pass
+        if failed:
+            raise PrimeP1DockerSocketError() from None
 
 
 def admit_docker_socket(config: object) -> AdmittedPrimeP1DockerSocket:
@@ -278,10 +281,11 @@ def _valid_deadline(value: object) -> bool:
 
 
 def _new_daemon_client() -> socket.socket:
-    flags = getattr(socket, "SOCK_CLOEXEC", None)
-    if type(flags) is not int:
+    cloexec = getattr(socket, "SOCK_CLOEXEC", None)
+    nonblock = getattr(socket, "SOCK_NONBLOCK", None)
+    if type(cloexec) is not int or type(nonblock) is not int or not cloexec or not nonblock:
         raise ValueError
-    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | flags)
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | cloexec | nonblock)
     try:
         client.setblocking(False)
         client.set_inheritable(False)
@@ -315,12 +319,13 @@ def _verify_daemon_projection(
         raise ValueError
     headers: dict[bytes, bytes] = {}
     for line in lines[1:]:
-        if not line or b":" not in line:
+        if not line or b":" not in line or any(byte in b"\x00\x0b\x0c" for byte in line):
             raise ValueError
         name, value = line.split(b":", 1)
+        if not _header_token(name) or not value or value[:1] in b" \t" or value[-1:] in b" \t":
+            raise ValueError
         name = name.lower()
-        value = value.strip()
-        if not name or name in headers:
+        if name in headers:
             raise ValueError
         headers[name] = value
     if headers.get(b"content-type") != b"application/json":
@@ -361,7 +366,23 @@ def _verify_daemon_projection(
 
 def _valid_status_line(line: bytes) -> bool:
     fields = line.split(b" ", 2)
-    return len(fields) == 3 and fields[0] == b"HTTP/1.1" and fields[1] == b"200"
+    return (
+        len(fields) == 3
+        and fields[0] == b"HTTP/1.1"
+        and fields[1] == b"200"
+        and bool(fields[2])
+        and all(32 <= byte <= 126 and byte != 127 for byte in fields[2])
+    )
+
+
+def _header_token(value: bytes) -> bool:
+    return bool(value) and all(
+        48 <= byte <= 57
+        or 65 <= byte <= 90
+        or 97 <= byte <= 122
+        or byte in b"!#$%&'*+-.^_`|~"
+        for byte in value
+    )
 
 
 def _decode_chunked_body(wire: bytes) -> bytes:

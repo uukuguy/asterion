@@ -25,6 +25,13 @@ from asterion.applications.prime_agent.operator.authority_config import (
 
 _SENTINEL = "DOCKER_SOCKET_SECRET_SENTINEL"
 _FSTAT = os.fstat
+_SOCKET = socket.socket
+
+
+def _configured_client() -> socket.socket:
+    client = _SOCKET(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.setblocking(False)
+    return client
 
 
 def _config(
@@ -263,7 +270,11 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         with (
             self._linux(module),
             patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
-            patch.object(module.socket, "SOCK_CLOEXEC", 0, create=True),
+            patch.object(
+                module,
+                "_new_daemon_client",
+                side_effect=lambda: _configured_client(),
+            ),
         ):
             for value in values:
                 with self.subTest(value=value), self.assertRaises(PrimeP1DockerSocketError):
@@ -369,8 +380,8 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
                 while b"\r\n\r\n" not in b"".join(observed):
                     observed.append(client.recv(4096))
                 for fragment in (
-                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
-                    b"Content-Length: 53\r\n\r\n{\"Version\":\"26.1.4\",",
+                    b"HTTP/1.1 200 OK\r\nContent-Type:application/json\r\n",
+                    b"Content-Length:53\r\n\r\n{\"Version\":\"26.1.4\",",
                     b"\"ApiVersion\":\"1.41\",\"extra\":true}",
                 ):
                     client.sendall(fragment)
@@ -380,7 +391,11 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         with (
             self._linux(module),
             patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
-            patch.object(module.socket, "SOCK_CLOEXEC", 0, create=True),
+            patch.object(
+                module,
+                "_new_daemon_client",
+                side_effect=lambda: _configured_client(),
+            ),
         ):
             resource = admit_docker_socket(_config(path=str(self.socket)))
             asyncio.run(resource._verify_daemon_projection(time.monotonic() + 2))
