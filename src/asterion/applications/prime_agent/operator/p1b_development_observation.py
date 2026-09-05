@@ -6,10 +6,11 @@ from dataclasses import dataclass
 
 
 _STAGES = frozenset({
-    "worker.acquire", "worker.snapshot0", "gateway.open", "gateway.prompt0",
-    "gateway.compact", "gateway.prompt1", "provider.callback", "worker.cell",
-    "provider.usage", "worker.finish", "worker.snapshot1", "oracle", "trace",
-    "gateway.close", "provider.close", "worker.cleanup",
+    "setup", "conversation.validate", "worker.acquire", "worker.snapshot0",
+    "gateway.open", "gateway.prompt0", "gateway.compact", "gateway.prompt1",
+    "provider.callback", "worker.cell", "provider.usage", "worker.finish",
+    "worker.snapshot1", "oracle", "trace", "gateway.close", "provider.close",
+    "worker.cleanup",
 })
 _LANES = frozenset({"work", "cleanup"})
 _STATES = frozenset({

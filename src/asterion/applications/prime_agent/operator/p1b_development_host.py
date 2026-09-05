@@ -84,8 +84,8 @@ async def run_prime_p1b_development(
     _observation: _P1BObservation | None = None,
 ) -> PrimeP1BDevelopmentTrace:
     """Run the one fixed P1-B development flow and emit only its safe trace."""
-    if not isinstance(operator_config, Mapping):
-        raise PrimeP1BDevelopmentHostError()
+    if type(_observation) not in (type(None), _P1BObservation) or not isinstance(operator_config, Mapping):
+        raise PrimeP1BDevelopmentHostError() from None
     suffix = uuid4().hex
     if run_id is None:
         run_id = "prime-p1b-development-" + suffix
@@ -100,7 +100,10 @@ async def run_prime_p1b_development(
     provider_closed = False
     cleanup_complete = False
     active_work: tuple[str, int | None] | None = None
+    failed = False
     try:
+        active_work = ("setup", None)
+        _record(_observation, "setup")
         provider = create_prime_p1b_development_sdk_provider(operator_config)
         service = P1BDockerPersistentWorkerService(
             image_digest=image_digest,
@@ -108,6 +111,7 @@ async def run_prime_p1b_development(
             run_id=run_id,
             session_id=session_id,
         )
+        _record(_observation, "setup", state="succeeded")
         active_work = ("worker.acquire", None)
         _record(_observation, "worker.acquire")
         await service.acquire()
@@ -144,6 +148,9 @@ async def run_prime_p1b_development(
                 body = _canonical_json(payload).encode("utf-8")
                 reply = await provider(body)
                 value = _strict_json_object(reply)
+            except asyncio.CancelledError:
+                active_work = previous_work
+                raise
             except BaseException:
                 _record(
                     _observation, "provider.callback", index=index,
@@ -176,6 +183,9 @@ async def run_prime_p1b_development(
             _record(_observation, "worker.cell", index=index)
             try:
                 observed = await service.execute_cell(payload["code"])
+            except asyncio.CancelledError:
+                active_work = previous_work
+                raise
             except BaseException:
                 _record(_observation, "worker.cell", index=index, state="failed")
                 active_work = previous_work
@@ -199,6 +209,8 @@ async def run_prime_p1b_development(
             }
 
         with TemporaryDirectory(prefix="asterion-prime-p1b-") as workspace:
+            active_work = ("setup", None)
+            _record(_observation, "setup")
             gateway = PrimeP1BDevelopmentGateway(
                 node_bin=node_bin,
                 entrypoint=entrypoint,
@@ -206,6 +218,7 @@ async def run_prime_p1b_development(
                 tool_hook=tool_hook,
                 deadline_seconds=180,
             )
+            _record(_observation, "setup", state="succeeded")
             active_work = ("gateway.open", None)
             _record(_observation, "gateway.open")
             await gateway.open(
@@ -239,12 +252,15 @@ async def run_prime_p1b_development(
             gateway_closed = True
             _record(_observation, "gateway.close", state="succeeded")
             active_work = None
+        active_work = ("conversation.validate", None)
+        _record(_observation, "conversation.validate")
         if (
             model_calls != _MODEL_COUNT
             or tool_calls != _TOOL_COUNT
             or len(tool_ids) != _TOOL_COUNT
         ):
             raise ValueError
+        _record(_observation, "conversation.validate", state="succeeded")
         active_work = ("provider.usage", None)
         _record(_observation, "provider.usage")
         _terminal_provider_usage(provider)
@@ -293,7 +309,7 @@ async def run_prime_p1b_development(
     except BaseException:
         if active_work is not None:
             _record(_observation, active_work[0], index=active_work[1], state="failed")
-        raise PrimeP1BDevelopmentHostError() from None
+        failed = True
     finally:
         if not cleanup_complete:
             await _shielded_best_effort_cleanup(
@@ -305,6 +321,9 @@ async def run_prime_p1b_development(
                 service=service,
                 observation=_observation,
             )
+    if failed:
+        raise PrimeP1BDevelopmentHostError() from None
+    raise PrimeP1BDevelopmentHostError()
 
 
 def _record(
@@ -315,8 +334,11 @@ def _record(
     state: str = "started",
     index: int | None = None,
 ) -> None:
-    if observation is not None:
-        observation.record(stage, lane=lane, state=state, index=index)
+    if type(observation) is _P1BObservation:
+        try:
+            observation.record(stage, lane=lane, state=state, index=index)
+        except BaseException:
+            pass
 
 
 def _provider_failure_state(provider: object) -> str:

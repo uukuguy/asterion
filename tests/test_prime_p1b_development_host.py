@@ -128,6 +128,17 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
         _Gateway.instances.clear()
         provider = _Provider()
         observation = subject._P1BObservation()  # noqa: SLF001
+        with self.assertRaises(subject.PrimeP1BDevelopmentHostError) as invalid:
+            await subject.run_prime_p1b_development(
+                image_digest="sha256:" + "a" * 64,
+                transport=object(),
+                operator_config={"DEEPSEEK_API_KEY": "secret"},
+                node_bin="/operator/node",
+                entrypoint="/operator/bridge.js",
+                prime_source_root="/operator/prime",
+                _observation=object(),  # type: ignore[arg-type]
+            )
+        self.assertIsNone(invalid.exception.__context__)
         with (
             patch.object(subject, "P1BDockerPersistentWorkerService", _Service),
             patch.object(subject, "PrimeP1BDevelopmentGateway", _Gateway),
@@ -174,13 +185,15 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(snapshot.observation_invalid)
         self.assertIsNone(snapshot.first_work_failure)
         self.assertEqual(snapshot.cleanup_failures, ())
-        self.assertEqual(len(snapshot.events), 44)
+        self.assertEqual(len(snapshot.events), 50)
         self.assertEqual(
             [(event.stage, event.lane, event.state, event.index) for event in snapshot.events],
             [
+                ("setup", "work", "started", None), ("setup", "work", "succeeded", None),
                 ("worker.acquire", "work", "started", None), ("worker.acquire", "work", "succeeded", None),
                 ("worker.snapshot0", "work", "started", None), ("worker.snapshot0", "work", "succeeded", None),
                 ("oracle", "work", "started", 0), ("oracle", "work", "succeeded", 0),
+                ("setup", "work", "started", None), ("setup", "work", "succeeded", None),
                 ("gateway.open", "work", "started", None), ("gateway.open", "work", "succeeded", None),
                 ("gateway.prompt0", "work", "started", None),
                 ("provider.callback", "work", "started", 0), ("provider.callback", "work", "succeeded", 0),
@@ -196,6 +209,7 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
                 ("provider.callback", "work", "started", 4), ("provider.callback", "work", "succeeded", 4),
                 ("gateway.prompt1", "work", "succeeded", None),
                 ("gateway.close", "work", "started", None), ("gateway.close", "work", "succeeded", None),
+                ("conversation.validate", "work", "started", None), ("conversation.validate", "work", "succeeded", None),
                 ("provider.usage", "work", "started", None), ("provider.usage", "work", "succeeded", None),
                 ("worker.finish", "work", "started", None), ("worker.finish", "work", "succeeded", None),
                 ("worker.snapshot1", "work", "started", None), ("worker.snapshot1", "work", "succeeded", None),
@@ -246,6 +260,7 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cleanup", _Service.instances[0].calls)
         self.assertIn("close", _Gateway.instances[0].calls)
         self.assertNotIn("SENTINEL", str(caught.exception))
+        self.assertIsNone(caught.exception.__context__)
         snapshot = observation.snapshot()
         self.assertEqual(
             (snapshot.first_work_failure.stage, snapshot.first_work_failure.index),
@@ -256,6 +271,44 @@ class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
             [("worker.cleanup", "cleanup")],
         )
         self.assertNotIn("SENTINEL", repr(snapshot))
+
+    async def test_bad_compaction_witness_fails_closed_and_cleans_up_redacted(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p1b_development_host as subject,
+        )
+
+        _Service.instances.clear()
+        _Gateway.instances.clear()
+        _Gateway.bad_witness = True
+        try:
+            with (
+                patch.object(subject, "P1BDockerPersistentWorkerService", _Service),
+                patch.object(subject, "PrimeP1BDevelopmentGateway", _Gateway),
+                patch.object(
+                    subject,
+                    "create_prime_p1b_development_sdk_provider",
+                    return_value=_Provider(),
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    subject.PrimeP1BDevelopmentHostError, "unavailable"
+                ) as caught:
+                    await subject.run_prime_p1b_development(
+                        image_digest="sha256:" + "a" * 64,
+                        transport=object(),
+                        operator_config={"DEEPSEEK_API_KEY": "SENTINEL"},
+                        node_bin="/operator/node",
+                        entrypoint="/operator/bridge.js",
+                        prime_source_root="/operator/prime",
+                    )
+        finally:
+            _Gateway.bad_witness = False
+        self.assertIn("cleanup", _Service.instances[0].calls)
+        self.assertIn("close", _Gateway.instances[0].calls)
+        self.assertNotIn("SENTINEL", str(caught.exception) + repr(caught.exception))
+        self.assertIsNone(caught.exception.__context__)
 
     async def test_cleanup_failure_does_not_return_a_trace(self) -> None:
         from asterion.applications.prime_agent.operator import (
