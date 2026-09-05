@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import hashlib
 import threading
+import asyncio
 from dataclasses import dataclass
 from typing import SupportsIndex
 
@@ -169,6 +170,24 @@ class AdmittedProductionAuthorityResources:
                     resource.close()
                 except BaseException:
                     pass
+
+    async def _verify_daemon_projection(self, deadline: float) -> None:
+        """Delegate the private daemon projection check to the exact socket child."""
+        failed = False
+        try:
+            if type(self) is not AdmittedProductionAuthorityResources:
+                raise ValueError
+            with self._lock:
+                socket = self._docker_socket
+            if type(socket) is not AdmittedPrimeP1DockerSocket:
+                raise ValueError
+            await socket._verify_daemon_projection(deadline)
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            failed = True
+        if failed:
+            raise PrimeP1AuthorityResourceError() from None
 
 
 def _static_authority_resource_identity(

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
+import json
+import math
 import os
+import socket
 import stat
 import sys
 import threading
@@ -11,6 +15,9 @@ from typing import SupportsIndex
 
 
 _ADMITTED_DOCKER_SOCKET_TOKEN = object()
+_DAEMON_RESPONSE_LIMIT = 16 * 1024
+_DAEMON_HEADER_LIMIT = 4 * 1024
+_VERSION_REQUEST = b"GET /version HTTP/1.1\r\nHost: docker\r\nConnection: close\r\n\r\n"
 
 
 class PrimeP1DockerSocketError(ValueError):
@@ -32,7 +39,10 @@ class _Identity:
 class AdmittedPrimeP1DockerSocket:
     """Opaque owner of the admitted socket's verified parent descriptor."""
 
-    __slots__ = ("_components", "_identities", "_lock", "_parent_fd", "_socket")
+    __slots__ = (
+        "_components", "_expected_api_version", "_expected_version", "_identities",
+        "_lock", "_parent_fd", "_probe_lock", "_socket",
+    )
 
     def __init__(
         self,
@@ -40,6 +50,8 @@ class AdmittedPrimeP1DockerSocket:
         components: tuple[str, ...],
         identities: tuple[_Identity, ...],
         socket_identity: _Identity,
+        expected_api_version: str = "",
+        expected_version: str = "",
         *,
         _token: object | None = None,
     ) -> None:
@@ -50,9 +62,12 @@ class AdmittedPrimeP1DockerSocket:
             raise PrimeP1DockerSocketError() from None
         self._parent_fd: int | None = parent_fd
         self._components = components
+        self._expected_api_version = expected_api_version
+        self._expected_version = expected_version
         self._identities = identities
         self._socket = socket_identity
         self._lock = threading.Lock()
+        self._probe_lock = asyncio.Lock()
 
     def __repr__(self) -> str:
         return "AdmittedPrimeP1DockerSocket(redacted)"
@@ -104,6 +119,36 @@ class AdmittedPrimeP1DockerSocket:
         if failed:
             raise PrimeP1DockerSocketError() from None
 
+    async def _verify_daemon_projection(self, deadline: float) -> None:
+        """Privately verify the admitted daemon's fixed /version projection."""
+        client: socket.socket | None = None
+        try:
+            if type(self) is not AdmittedPrimeP1DockerSocket or not _valid_deadline(deadline):
+                raise ValueError
+            async with asyncio.timeout_at(deadline):
+                async with self._probe_lock:
+                    self.revalidate_path()
+                    client = _new_daemon_client()
+                    loop = asyncio.get_running_loop()
+                    await loop.sock_connect(client, "/" + "/".join(self._components))
+                    self.revalidate_path()
+                    await loop.sock_sendall(client, _VERSION_REQUEST)
+                    response = await _read_daemon_response(loop, client)
+                    _verify_daemon_projection(
+                        response, self._expected_version, self._expected_api_version
+                    )
+                    self.revalidate_path()
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            raise PrimeP1DockerSocketError() from None
+        finally:
+            if client is not None:
+                try:
+                    client.close()
+                except BaseException:
+                    pass
+
 
 def admit_docker_socket(config: object) -> AdmittedPrimeP1DockerSocket:
     """Admit a configured socket as an opaque resource without connecting to it."""
@@ -132,6 +177,8 @@ def admit_docker_socket(config: object) -> AdmittedPrimeP1DockerSocket:
             components,
             identities,
             socket_identity,
+            values["ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION"],
+            values["ASTERION_PRIME_P1_DOCKER_SERVER_VERSION"],
             _token=_ADMITTED_DOCKER_SOCKET_TOKEN,
         )
         parent_fd = None
@@ -224,3 +271,131 @@ def _close_quietly(fd: int | None) -> None:
             os.close(fd)
         except (OSError, OverflowError):
             pass
+
+
+def _valid_deadline(value: object) -> bool:
+    return type(value) is float and math.isfinite(value)
+
+
+def _new_daemon_client() -> socket.socket:
+    flags = getattr(socket, "SOCK_CLOEXEC", None)
+    if type(flags) is not int:
+        raise ValueError
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | flags)
+    try:
+        client.setblocking(False)
+        client.set_inheritable(False)
+        return client
+    except BaseException:
+        client.close()
+        raise
+
+
+async def _read_daemon_response(
+    loop: asyncio.AbstractEventLoop, client: socket.socket
+) -> bytes:
+    response = bytearray()
+    while True:
+        chunk = await loop.sock_recv(client, 4096)
+        if not chunk:
+            return bytes(response)
+        response.extend(chunk)
+        if len(response) > _DAEMON_RESPONSE_LIMIT:
+            raise ValueError
+
+
+def _verify_daemon_projection(
+    response: bytes, expected_version: str, expected_api_version: str
+) -> None:
+    header_end = response.find(b"\r\n\r\n")
+    if header_end < 0 or header_end > _DAEMON_HEADER_LIMIT:
+        raise ValueError
+    lines = response[:header_end].split(b"\r\n")
+    if not lines or not _valid_status_line(lines[0]):
+        raise ValueError
+    headers: dict[bytes, bytes] = {}
+    for line in lines[1:]:
+        if not line or b":" not in line:
+            raise ValueError
+        name, value = line.split(b":", 1)
+        name = name.lower()
+        value = value.strip()
+        if not name or name in headers:
+            raise ValueError
+        headers[name] = value
+    if headers.get(b"content-type") != b"application/json":
+        raise ValueError
+    content_length = headers.get(b"content-length")
+    transfer_encoding = headers.get(b"transfer-encoding")
+    if (content_length is None) == (transfer_encoding is None):
+        raise ValueError
+    wire_body = response[header_end + 4 :]
+    if content_length is not None:
+        if not content_length.isdigit() or (len(content_length) > 1 and content_length[:1] == b"0"):
+            raise ValueError
+        length = int(content_length)
+        if length != len(wire_body):
+            raise ValueError
+        body = wire_body
+    else:
+        if transfer_encoding != b"chunked":
+            raise ValueError
+        body = _decode_chunked_body(wire_body)
+    try:
+        document = json.loads(
+            body.decode("utf-8"),
+            object_pairs_hook=_no_duplicate_object,
+            parse_constant=_reject_json_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise ValueError from None
+    if (
+        type(document) is not dict
+        or type(document.get("Version")) is not str
+        or type(document.get("ApiVersion")) is not str
+        or document["Version"] != expected_version
+        or document["ApiVersion"] != expected_api_version
+    ):
+        raise ValueError
+
+
+def _valid_status_line(line: bytes) -> bool:
+    fields = line.split(b" ", 2)
+    return len(fields) == 3 and fields[0] == b"HTTP/1.1" and fields[1] == b"200"
+
+
+def _decode_chunked_body(wire: bytes) -> bytes:
+    output = bytearray()
+    position = 0
+    while True:
+        line_end = wire.find(b"\r\n", position)
+        if line_end < 0:
+            raise ValueError
+        size_text = wire[position:line_end]
+        if not size_text or any(byte not in b"0123456789abcdefABCDEF" for byte in size_text):
+            raise ValueError
+        size = int(size_text, 16)
+        position = line_end + 2
+        if len(wire) < position + size + 2 or wire[position + size : position + size + 2] != b"\r\n":
+            raise ValueError
+        output.extend(wire[position : position + size])
+        if len(output) > _DAEMON_RESPONSE_LIMIT:
+            raise ValueError
+        position += size + 2
+        if size == 0:
+            if position != len(wire):
+                raise ValueError
+            return bytes(output)
+
+
+def _no_duplicate_object(pairs: list[tuple[object, object]]) -> dict[object, object]:
+    result: dict[object, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(_: str) -> None:
+    raise ValueError

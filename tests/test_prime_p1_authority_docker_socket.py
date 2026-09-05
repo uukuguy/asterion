@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from types import MappingProxyType, SimpleNamespace
 from unittest.mock import patch
@@ -36,6 +37,8 @@ def _config(
                 "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID": str(uid),
                 "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID": str(gid),
                 "ASTERION_PRIME_P1_DOCKER_SOCKET_MODE": mode,
+                "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION": "1.41",
+                "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION": "26.1.4",
             }
         ),
         object(),  # type: ignore[arg-type]
@@ -156,6 +159,11 @@ class TestPrimeP1AuthorityDockerSocket(unittest.TestCase):
                 "admit_authority_launch",
                 side_effect=AssertionError("authority-ready"),
             ) as ready,
+            patch.object(
+                AdmittedPrimeP1DockerSocket,
+                "_verify_daemon_projection",
+                side_effect=AssertionError("daemon-probe"),
+            ) as probe,
         ):
             resource = admit_docker_socket(_config(path=str(self.socket)))
             self.assertIsInstance(resource, AdmittedPrimeP1DockerSocket)
@@ -163,6 +171,7 @@ class TestPrimeP1AuthorityDockerSocket(unittest.TestCase):
         self.assertEqual(repr(resource), "AdmittedPrimeP1DockerSocket(redacted)")
         aggregate.assert_not_called()
         ready.assert_not_called()
+        probe.assert_not_called()
         resource.close()
 
     def test_forbidden_effect_guard_covers_process_and_authority_seams(self) -> None:
@@ -251,7 +260,11 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
             str(self.link_parent / "docker.sock"),
             str(self.writable_socket),
         )
-        with self._linux(module), patch.object(module.os, "fstat", side_effect=self._root_owned_stat):
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+            patch.object(module.socket, "SOCK_CLOEXEC", 0, create=True),
+        ):
             for value in values:
                 with self.subTest(value=value), self.assertRaises(PrimeP1DockerSocketError):
                     admit_docker_socket(_config(path=value))
@@ -339,6 +352,44 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         for operation in (copy.copy, copy.deepcopy, pickle.dumps):
             with self.subTest(operation=operation), self.assertRaises(TypeError):
                 operation(resource)
+        resource.close()
+
+    def test_private_projection_probe_uses_fixed_request_and_accepts_fragmented_content_length(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_docker_socket import (
+            admit_docker_socket,
+        )
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        self.listener.listen(1)
+        observed: list[bytes] = []
+
+        def serve() -> None:
+            client, _ = self.listener.accept()
+            with client:
+                while b"\r\n\r\n" not in b"".join(observed):
+                    observed.append(client.recv(4096))
+                for fragment in (
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n",
+                    b"Content-Length: 53\r\n\r\n{\"Version\":\"26.1.4\",",
+                    b"\"ApiVersion\":\"1.41\",\"extra\":true}",
+                ):
+                    client.sendall(fragment)
+
+        server = threading.Thread(target=serve)
+        server.start()
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+            patch.object(module.socket, "SOCK_CLOEXEC", 0, create=True),
+        ):
+            resource = admit_docker_socket(_config(path=str(self.socket)))
+            asyncio.run(resource._verify_daemon_projection(time.monotonic() + 2))
+        server.join(timeout=2)
+        self.assertFalse(server.is_alive())
+        self.assertEqual(
+            b"".join(observed),
+            b"GET /version HTTP/1.1\r\nHost: docker\r\nConnection: close\r\n\r\n",
+        )
         resource.close()
 
 

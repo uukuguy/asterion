@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import asyncio
 import hashlib
 import os
 from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from asterion.applications.prime_agent.operator.authority_config import (
     load_operator_config,
@@ -214,6 +215,36 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         docker.assert_called_once_with(config)
         socket.assert_called_once_with(config)
         resource.close()
+
+    def test_production_aggregate_privately_delegates_projection_to_exact_socket(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_resources as module
+        import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
+
+        static = AdmittedStaticAuthorityResources(
+            object(), _CountingResource([], "nested"),
+            _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+        )
+        evidence = AdmittedPrimeP1EvidenceRoot(
+            os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC),
+            _token=evidence_module._EVIDENCE_TOKEN,
+        )
+        docker = _docker()
+        socket = _socket()
+        resource = AdmittedProductionAuthorityResources(
+            static, evidence, docker, socket,
+            _token=module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+        )
+        with patch.object(
+            AdmittedPrimeP1DockerSocket,
+            "_verify_daemon_projection",
+            new_callable=AsyncMock,
+        ) as probe:
+            asyncio.run(resource._verify_daemon_projection(123.0))
+        probe.assert_awaited_once_with(123.0)
+        resource.close()
+        with self.assertRaises(PrimeP1AuthorityResourceError) as raised:
+            asyncio.run(resource._verify_daemon_projection(123.0))
+        self.assertIsNone(raised.exception.__context__)
 
     def test_production_resources_require_static_evidence_and_docker(self) -> None:
         config = self._config()
