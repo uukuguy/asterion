@@ -388,6 +388,66 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                     with self.assertRaises(OSError):
                         os.fstat(fd)
 
+    def test_missing_middle_or_leaf_cloexec_rejects_and_closes_reverse(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            path = Path(temporary) / "profile"
+            path.write_bytes(b"x")
+            path.chmod(0o600)
+            actual_fcntl = module.fcntl.fcntl
+            for failure_index in (2,):
+                fds = module._open_profile(str(path))
+                closed: list[int] = []
+                actual_close = os.close
+                calls = 0
+
+                def missing_cloexec(fd: int, operation: int) -> int:
+                    nonlocal calls
+                    calls += 1
+                    if calls == failure_index:
+                        return 0
+                    return actual_fcntl(fd, operation)
+
+                with (
+                    self.subTest(failure_index=failure_index),
+                    patch.object(module.fcntl, "fcntl", side_effect=missing_cloexec),
+                    patch.object(
+                        module.os,
+                        "close",
+                        side_effect=lambda fd: (closed.append(fd), actual_close(fd))[1],
+                    ),
+                ):
+                    with self.assertRaises(ValueError):
+                        module._chain_identities(fds)
+                    module._close_all(fds)
+                self.assertEqual(closed, list(reversed(fds)))
+
+            fds = module._open_profile(str(path))
+            closed = []
+            actual_close = os.close
+            calls = 0
+
+            def missing_leaf(fd: int, operation: int) -> int:
+                nonlocal calls
+                calls += 1
+                if calls == len(fds):
+                    return 0
+                return actual_fcntl(fd, operation)
+
+            with (
+                patch.object(module.fcntl, "fcntl", side_effect=missing_leaf),
+                patch.object(
+                    module.os,
+                    "close",
+                    side_effect=lambda fd: (closed.append(fd), actual_close(fd))[1],
+                ),
+            ):
+                with self.assertRaises(ValueError):
+                    module._chain_identities(fds)
+                module._close_all(fds)
+            self.assertEqual(closed, list(reversed(fds)))
+
     def test_post_open_validation_failure_closes_full_chain_without_transfer(self) -> None:
         from asterion.applications.prime_agent.operator.authority_seccomp import (
             PrimeP1AuthorityResourceError,
