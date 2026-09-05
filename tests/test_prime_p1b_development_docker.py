@@ -27,6 +27,7 @@ class _Transport:
     async def start(self, *_: object, **__: object) -> None: self.calls.append("start")
     async def channel(self, *_: object, **__: object) -> _Channel: self.calls.append("attach"); return self.channel_value
     async def snapshot(self, *_: object, **__: object) -> bytes: self.calls.append("snapshot"); return b"p1b continuity fixture\n"
+    async def initial_snapshot(self, *_: object, **__: object) -> bytes: self.calls.append("initial_snapshot"); return b"def answer() -> int:\n    return 0\n"
     async def force_remove(self, *_: object, **__: object) -> None: self.calls.append("remove")
     async def assert_absent(self, *_: object, **__: object) -> None: self.calls.append("absent")
 
@@ -36,9 +37,10 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         transport = _Transport()
         service = P1BDockerPersistentWorkerService(image_digest="sha256:" + "a" * 64, transport=transport, run_id="run", session_id="session")
         await service.acquire()
+        self.assertIn(b"return 0", await service.initial_snapshot())
         self.assertEqual((await service.execute_cell("one"))["cell_count"], 1)
         self.assertEqual((await service.execute_cell("two"))["probe_count"], 12)
         self.assertEqual(await service.finish(), P1BDockerCompletion(PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST, 1, 2, 12))
         self.assertEqual(await service.snapshot(), b"p1b continuity fixture\n")
         await service.cleanup()
-        self.assertEqual(transport.calls, ["create", "inspect", "start", "attach", "snapshot", "remove", "absent"])
+        self.assertEqual(transport.calls, ["create", "inspect", "start", "attach", "initial_snapshot", "snapshot", "remove", "absent"])

@@ -121,6 +121,15 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
             cleanup = _LifecycleCallControl(monotonic() + 30, None)
             await self._call(self._prefix + ("container", "unpause", container_id), cleanup)  # type: ignore[attr-defined]
 
+    async def initial_snapshot(self, container_id: str, *, control: _LifecycleCallControl) -> bytes:
+        self._specification(container_id)  # type: ignore[attr-defined]
+        await self._call(self._prefix + ("container", "pause", container_id), control)  # type: ignore[attr-defined]
+        try:
+            archive = await self._call(self._prefix + ("container", "cp", container_id + ":/workspace/solution.py", "-"), control)  # type: ignore[attr-defined]
+            return self._archive_file(archive.stdout, "solution.py")
+        finally:
+            await self._call(self._prefix + ("container", "unpause", container_id), _LifecycleCallControl(monotonic() + 30, None))  # type: ignore[attr-defined]
+
     @staticmethod
     def _archive_file(raw: bytes, name: str) -> bytes:
         with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tar:
@@ -226,6 +235,7 @@ class P1BDockerTransport(Protocol):
     async def start(self, container_id: str, *, control: _LifecycleCallControl) -> None: ...
     async def channel(self, container_id: str, *, run_id: str, session_id: str, control: _LifecycleCallControl) -> _P1BChannel: ...
     async def snapshot(self, container_id: str, *, control: _LifecycleCallControl) -> bytes: ...
+    async def initial_snapshot(self, container_id: str, *, control: _LifecycleCallControl) -> bytes: ...
     async def force_remove(self, container_id: str, *, control: _LifecycleCallControl) -> None: ...
     async def assert_absent(self, container_id: str, *, control: _LifecycleCallControl) -> None: ...
 
@@ -259,6 +269,14 @@ class P1BDockerPersistentWorkerService:
         self._state = "cell-2" if self._state == "cell-1" else "finish"
         return result
 
+    async def initial_snapshot(self) -> bytes:
+        if self._container is None or self._state != "cell-1":
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        value = await self._transport.initial_snapshot(self._container, control=_LifecycleCallControl(monotonic() + 30, None))
+        if type(value) is not bytes or not value or len(value) > _FRAME_CAP:
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        return value
+
     async def finish(self) -> P1BDockerCompletion:
         if self._channel is None or self._state != "finish": raise RestrictedWorkerError("restricted worker value is invalid")
         result = await self._channel.finish(control=_LifecycleCallControl(monotonic() + 30, None)); self._state = "snapshot"; return result
@@ -274,12 +292,22 @@ class P1BDockerPersistentWorkerService:
         container, self._container = self._container, None
         if container is None: return
         control = _LifecycleCallControl(monotonic() + 30, None)
-        close_error = False
-        try:
-            if self._channel is not None:
-                try: await self._channel.close(control=control)
+        channel = self._channel
+        async def destroy() -> bool:
+            close_error = False
+            if channel is not None:
+                try: await channel.close(control=control)
                 except BaseException: close_error = True
-            await asyncio.shield(self._transport.force_remove(container, control=control))
-            await asyncio.shield(self._transport.assert_absent(container, control=control))
-            if close_error: raise RestrictedWorkerError("restricted worker value is invalid")
-        finally: self._channel = None; self._state = "closed"
+            await self._transport.force_remove(container, control=control)
+            await self._transport.assert_absent(container, control=control)
+            return close_error
+        task = asyncio.create_task(destroy())
+        cancelled = False
+        try:
+            while not task.done():
+                try: await asyncio.shield(task)
+                except asyncio.CancelledError: cancelled = True
+            if task.result(): raise RestrictedWorkerError("restricted worker value is invalid")
+        finally:
+            self._channel = None; self._state = "closed"
+        if cancelled: raise asyncio.CancelledError
