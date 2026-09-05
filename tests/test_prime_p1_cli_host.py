@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from asterion.services.registry import HostServiceFactoryContext
@@ -28,6 +30,53 @@ class _Signal:
 
 
 class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
+    async def test_seccomp_memfd_is_sealed_like_docker_admission(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        with TemporaryDirectory() as directory:
+            profile = Path(directory) / "seccomp.json"
+            profile.write_bytes(b"{}")
+            seals = 1 | 2 | 4 | 8
+            with (
+                patch.object(subject.os, "memfd_create", return_value=73, create=True) as created,
+                patch.object(subject.os, "MFD_CLOEXEC", 16, create=True),
+                patch.object(subject.os, "MFD_ALLOW_SEALING", 32, create=True),
+                patch.object(subject.fcntl, "F_ADD_SEALS", 64, create=True),
+                patch.object(subject.fcntl, "F_GET_SEALS", 128, create=True),
+                patch.object(subject.fcntl, "F_SEAL_WRITE", 1, create=True),
+                patch.object(subject.fcntl, "F_SEAL_GROW", 2, create=True),
+                patch.object(subject.fcntl, "F_SEAL_SHRINK", 4, create=True),
+                patch.object(subject.fcntl, "F_SEAL_SEAL", 8, create=True),
+                patch.object(subject.fcntl, "F_GETFD", 256, create=True),
+                patch.object(subject.fcntl, "FD_CLOEXEC", 16, create=True),
+                patch.object(subject.os, "write", return_value=2),
+                patch.object(subject.os, "fstat", return_value=SimpleNamespace(st_size=2)),
+                patch.object(subject.os, "lseek", return_value=0),
+                patch.object(subject.fcntl, "fcntl", side_effect=(16, None, seals)) as mocked,
+            ):
+                descriptor = subject._sealed_seccomp(profile)
+        self.assertEqual(descriptor, 73)
+        created.assert_called_once_with("asterion-p1-development-seccomp", 48)
+        self.assertEqual(mocked.call_args_list, [
+            ((73, 256),),
+            ((73, 64, seals),),
+            ((73, 128),),
+        ])
+
+    async def test_service_context_close_releases_source_memfd_once(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        resources = subject._P1CliResources(  # type: ignore[attr-defined]
+            image_digest="sha256:" + "a" * 64, transport=object(), operator_config={},
+            node_bin="/operator/node", entrypoint="/operator/bridge.js", prime_source_root="/operator/prime",
+            seccomp_fd=73,
+        )
+        service = subject.PrimeSmallVerificationService(resources)
+        with patch.object(subject.os, "close") as close:
+            service._close()  # type: ignore[attr-defined]
+            service._close()  # type: ignore[attr-defined]
+        close.assert_called_once_with(73)
+
     async def test_exact_context_opens_without_starting_the_verification_flow(self) -> None:
         from asterion.applications.prime_agent.operator import p1_cli_host as subject
 

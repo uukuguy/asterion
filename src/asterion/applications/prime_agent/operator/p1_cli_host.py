@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+import fcntl
 import os
 from pathlib import Path
 import re
@@ -118,6 +119,8 @@ class PrimeSmallVerificationService:
             raise PrimeP1CliHostError() from None
 
     def _close(self) -> None:
+        if not self._active:
+            return
         self._active = False
         descriptor = self._resources.seccomp_fd
         if type(descriptor) is int and descriptor >= 0:
@@ -242,17 +245,61 @@ def _regular_directory(path: Path) -> Path:
 
 def _sealed_seccomp(path: Path) -> int:
     source = _regular_file(path).read_bytes()
-    if not source or len(source) > 64 * 1024 or not hasattr(os, "memfd_create"):
+    memfd_create = getattr(os, "memfd_create", None)
+    cloexec = getattr(os, "MFD_CLOEXEC", None)
+    allow_sealing = getattr(os, "MFD_ALLOW_SEALING", None)
+    constants = tuple(
+        getattr(fcntl, name, None)
+        for name in (
+            "F_ADD_SEALS", "F_GET_SEALS", "F_SEAL_WRITE", "F_SEAL_GROW",
+            "F_SEAL_SHRINK", "F_SEAL_SEAL", "F_GETFD", "FD_CLOEXEC",
+        )
+    )
+    if (
+        not source
+        or len(source) > 64 * 1024
+        or not callable(memfd_create)
+        or type(cloexec) is not int
+        or type(allow_sealing) is not int
+        or any(type(value) is not int for value in constants)
+    ):
         raise PrimeP1CliHostError()
-    descriptor = os.memfd_create("asterion-p1-development-seccomp", getattr(os, "MFD_CLOEXEC", 0))
+    add_seals, get_seals, seal_write, seal_grow, seal_shrink, seal_seal, get_fd, fd_cloexec = constants
+    seals = seal_write | seal_grow | seal_shrink | seal_seal
+    descriptor = -1
     try:
-        if os.write(descriptor, source) != len(source):
+        descriptor = memfd_create(
+            "asterion-p1-development-seccomp", cloexec | allow_sealing
+        )
+        if type(descriptor) is not int or descriptor < 0:
+            raise ValueError
+        offset = 0
+        while offset < len(source):
+            written = os.write(descriptor, source[offset:])
+            if type(written) is not int or written <= 0:
+                raise ValueError
+            offset += written
+        if os.fstat(descriptor).st_size != len(source):
             raise ValueError
         os.lseek(descriptor, 0, os.SEEK_SET)
-        return descriptor
+        if not fcntl.fcntl(descriptor, get_fd) & fd_cloexec:
+            raise ValueError
+        fcntl.fcntl(descriptor, add_seals, seals)
+        if fcntl.fcntl(descriptor, get_seals) != seals:
+            raise ValueError
+        if os.fstat(descriptor).st_size != len(source) or os.lseek(descriptor, 0, os.SEEK_CUR) != 0:
+            raise ValueError
+        result = descriptor
+        descriptor = -1
+        return result
     except BaseException:
-        os.close(descriptor)
         raise PrimeP1CliHostError() from None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 def _host_platform() -> ImagePlatformDescriptor:
