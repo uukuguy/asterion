@@ -89,8 +89,8 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         exact = {"Id": container_id, "Image": spec.image_digest, "User": "65534:65534", "Env": list(_ENVIRONMENT) + list(_CLEARED_BASE_IMAGE_ENVIRONMENT), "Entrypoint": [_ENTRYPOINT], "Labels": {}, "OpenStdin": True, "NetworkMode": "none", "PortBindings": {}, "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700"}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "", "IpcMode": "private", "UTSMode": "", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}, "Mounts": [], "Running": False}
         if (set(values) != set(exact) | {"SecurityOpt"} or any(values[key] != value for key, value in exact.items())
-                or type(values["SecurityOpt"]) is not list or len(values["SecurityOpt"]) != 2
-                or values["SecurityOpt"][0] != "no-new-privileges:true" or not values["SecurityOpt"][1].startswith("seccomp=") or result.stderr):
+                or values["SecurityOpt"] != ["no-new-privileges:true", "seccomp=" + self._seccomp_profile]  # type: ignore[attr-defined]
+                or result.stderr):
             raise RestrictedWorkerError("restricted worker value is invalid")
 
     async def start(self, container_id: str, *, control: _LifecycleCallControl) -> None:  # type: ignore[override]
