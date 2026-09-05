@@ -158,6 +158,51 @@ def _consume_session_key(
     return result
 
 
+def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> bytes:
+    """Receive one raw bounded authority packet and close its consumed socket."""
+    connection: object | None = None
+    result: bytes | None = None
+    failed = False
+    try:
+        if not isinstance(descriptors, AdmittedAuthorityDescriptors):
+            _unavailable()
+        connection = descriptors.consume_socket()
+        interruptions = 0
+        while True:
+            try:
+                received = _recvmsg(connection, 8192)
+                break
+            except OSError as error:
+                if error.errno == errno.EINTR and interruptions < 8:
+                    interruptions += 1
+                    continue
+                raise
+        if type(received) is not tuple or len(received) != 4:
+            raise ValueError
+        packet, ancillary, flags, _address = received
+        if (
+            type(packet) is not bytes
+            or not 1 <= len(packet) <= 8192
+            or type(ancillary) is not list
+            or ancillary
+            or type(flags) is not int
+            or flags & socket.MSG_TRUNC
+        ):
+            raise ValueError
+        result = packet
+    except (OSError, OverflowError, TypeError, ValueError):
+        failed = True
+    finally:
+        if connection is not None:
+            try:
+                _close_socket(connection)
+            except (OSError, OverflowError, TypeError):
+                failed = True
+    if failed or result is None:
+        _unavailable()
+    return result
+
+
 def admit_authority_launch(
     contract: AuthorityLaunchContract,
     *,
@@ -333,6 +378,10 @@ def _peer_credentials(connection: object, peercred_option: int) -> tuple[int, in
 
 def _getsockopt(connection: object, level: int, option: int, *args: int) -> object:
     return cast(Any, connection).getsockopt(level, option, *args)
+
+
+def _recvmsg(connection: object, size: int) -> object:
+    return cast(Any, connection).recvmsg(size)
 
 
 def _close_socket(connection: object) -> None:

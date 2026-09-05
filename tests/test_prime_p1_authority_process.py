@@ -17,6 +17,7 @@ from asterion.applications.prime_agent.operator.authority_process import (
     admit_authority_launch,
     admit_retained_authority_descriptors,
     _consume_session_key,
+    _receive_authority_packet,
 )
 
 
@@ -34,6 +35,25 @@ class _Socket:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _PacketSocket(_Socket):
+    def __init__(self, responses: list[object]) -> None:
+        super().__init__(peer=(300, 400))
+        self.responses = iter(responses)
+        self.calls = 0
+        self.close_calls = 0
+
+    def recvmsg(self, _size: int) -> object:
+        self.calls += 1
+        value = next(self.responses)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    def close(self) -> None:
+        self.close_calls += 1
+        super().close()
 
 
 class _InstrumentedLock:
@@ -56,6 +76,73 @@ class _InstrumentedLock:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_private_packet_receive_returns_one_raw_packet_and_closes_consumed_socket(
+        self,
+    ) -> None:
+        connection = _PacketSocket([(b'{"canonical":true}', [], 0, None)])
+        bundle = AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
+        self.assertEqual(_receive_authority_packet(bundle), b'{"canonical":true}')
+        self.assertTrue(connection.closed)
+        self.assertEqual(connection.close_calls, 1)
+        bundle.close()
+        self.assertTrue(connection.closed)
+        self.assertEqual(connection.close_calls, 1)
+
+    def test_private_packet_receive_rejects_transport_shapes_and_bounds_eintr(
+        self,
+    ) -> None:
+        invalid = (
+            [(b"x", [], socket_module.MSG_TRUNC, None)],
+            [(b"x", [(1, 2, b"fd")], 0, None)],
+            [(b"", [], 0, None)],
+            [(None, [], 0, None)],
+            [(b"x" * 8193, [], 0, None)],
+            [OSError("RECV_SENTINEL")],
+        )
+        for responses in invalid:
+            with self.subTest(responses=responses):
+                connection = _PacketSocket(list(responses))
+                bundle = AdmittedAuthorityDescriptors(
+                    connection, 11, 12, lambda _: None
+                )
+                with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+                    _receive_authority_packet(bundle)
+                self.assertIsNone(raised.exception.__context__)
+                self.assertNotIn(
+                    "RECV_SENTINEL",
+                    "".join(traceback.format_exception(raised.exception)),
+                )
+                self.assertTrue(connection.closed)
+
+        connection = _PacketSocket(
+            [OSError(errno.EINTR, "SENTINEL"), (b"x", [], 0, None)]
+        )
+        self.assertEqual(
+            _receive_authority_packet(
+                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
+            ),
+            b"x",
+        )
+        self.assertEqual(connection.calls, 2)
+        exhausted = _PacketSocket([OSError(errno.EINTR, "SENTINEL")] * 9)
+        with self.assertRaises(PrimeP1AuthorityBootstrapError):
+            _receive_authority_packet(
+                AdmittedAuthorityDescriptors(exhausted, 11, 12, lambda _: None)
+            )
+        self.assertEqual(exhausted.calls, 9)
+
+    def test_private_packet_receive_redacts_close_failure(self) -> None:
+        connection = _PacketSocket([(b"x", [], 0, None)])
+        connection.close = lambda: (_ for _ in ()).throw(OSError("CLOSE_SENTINEL"))  # type: ignore[method-assign]
+        with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+            _receive_authority_packet(
+                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
+            )
+        self.assertIsNone(raised.exception.__context__)
+        self.assertNotIn(
+            "CLOSE_SENTINEL", "".join(traceback.format_exception(raised.exception))
+        )
+
     def test_private_session_key_reader_handles_eof_eintr_matrix_and_bounds_retries(
         self,
     ) -> None:
