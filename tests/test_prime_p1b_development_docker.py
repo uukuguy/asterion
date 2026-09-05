@@ -58,7 +58,57 @@ class _Transport:
     async def assert_absent(self, *_: object, **__: object) -> None: self.calls.append("absent")
 
 
+def _p1b_projected_inspect(
+    container_id: str, image_digest: str, environment: list[str], *, port_bindings: object = {},
+) -> bytes:
+    return json.dumps([{
+        "Id": container_id, "Image": image_digest, "User": "65534:65534", "Env": environment,
+        "Entrypoint": ["/usr/local/bin/prime-p1b-persistent-worker.py"], "Labels": {},
+        "OpenStdin": True, "NetworkMode": "none", "PortBindings": port_bindings,
+        "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"],
+        "SecurityOpt": ["no-new-privileges:true", "seccomp=profile"], "Binds": None,
+        "VolumesFrom": None,
+        "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700"},
+        "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912,
+        "NanoCpus": 1000000000, "PidMode": "", "IpcMode": "private", "UTSMode": "",
+        "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}, "Mounts": [], "Running": False,
+    }], separators=(",", ":")).encode()
+
+
 class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
+    async def test_p1b_inspect_accepts_reordered_environment_and_rejects_invalid_keys(self) -> None:
+        container_id = "d" * 64
+        image_digest = "sha256:" + "a" * 64
+        subject = object.__new__(P1BDockerCliTransport)
+        subject._prefix = ("/operator/docker",)
+        subject._seccomp_profile = "profile"
+        subject._specifications = {
+            container_id: p1b_docker._P1BSpec(
+                container_id, image_digest, "role", "run", "challenge", "workload",
+            ),
+        }
+        valid = list(reversed([
+            *docker_cli._ENVIRONMENT, *docker_cli._CLEARED_BASE_IMAGE_ENVIRONMENT,
+        ]))
+        cases = (
+            (valid, None, False),
+            (valid + [valid[0]], {}, True),
+            (valid + ["UNEXPECTED=value"], {}, True),
+        )
+        for environment, port_bindings, rejected in cases:
+            with self.subTest(environment=environment, port_bindings=port_bindings):
+                async def call(*_: object, **__: object) -> DockerCliResult:
+                    return DockerCliResult(stdout=_p1b_projected_inspect(
+                        container_id, image_digest, environment, port_bindings=port_bindings,
+                    ))
+                subject._call = call
+                if rejected:
+                    from asterion.services.restricted_worker import RestrictedWorkerError
+                    with self.assertRaises(RestrictedWorkerError):
+                        await subject.inspect(container_id, control=_LifecycleCallControl(monotonic() + 30, None))
+                else:
+                    await subject.inspect(container_id, control=_LifecycleCallControl(monotonic() + 30, None))
+
     def test_local_root_snapshot_transport_requires_explicit_same_guest_confirmation(self) -> None:
         with patch.object(P1BDockerCliTransport, "__init__", return_value=None) as base:
             for platform, euid, confirmed in (
