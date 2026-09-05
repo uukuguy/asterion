@@ -16,6 +16,7 @@ _COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _REF_COMPONENT = re.compile(r"[A-Za-z0-9._-]+")
 _LOCK_FIELDS: Final = frozenset({"commit", "tree_sha256", "package_lock_sha256"})
+_SOURCE_LOCK_DIGEST_DOMAIN: Final = b"asterion.prime-source-lock/v1\0"
 _EXCLUDED_SOURCE_NAMES: Final = frozenset({".git", "node_modules", "package-lock.json"})
 _GENERATED_SOURCE_DIRECTORY_NAMES: Final = frozenset(
     {"__pycache__", "dist", "dist-chrome", "dist-firefox"}
@@ -33,6 +34,36 @@ class PrimeSourceLock:
     commit: str
     tree_sha256: str
     package_lock_sha256: str
+
+
+def canonical_prime_source_lock_bytes(lock: object) -> bytes:
+    """Return the canonical identity bytes for an exact Prime source lock."""
+
+    try:
+        _validate_lock(lock)
+        if type(lock) is not PrimeSourceLock:
+            raise PrimeSourceLockError("Prime source lock is invalid")
+        return json.dumps(
+            {
+                "commit": lock.commit,
+                "package_lock_sha256": lock.package_lock_sha256,
+                "tree_sha256": lock.tree_sha256,
+            },
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except PrimeSourceLockError:
+        raise PrimeSourceLockError("Prime source lock is invalid") from None
+    except (TypeError, UnicodeError, ValueError):
+        raise PrimeSourceLockError("Prime source lock is invalid") from None
+
+
+def prime_source_lock_sha256(lock: object) -> str:
+    """Return the domain-separated SHA-256 identity of a Prime source lock."""
+
+    return sha256(_SOURCE_LOCK_DIGEST_DOMAIN + canonical_prime_source_lock_bytes(lock)).hexdigest()
 
 
 def verify_prime_source_lock(root: Path, lock: PrimeSourceLock) -> PrimeSourceLock:

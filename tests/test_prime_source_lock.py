@@ -12,6 +12,8 @@ import unittest
 from asterion.applications.prime_agent.source_lock import (
     PrimeSourceLock,
     PrimeSourceLockError,
+    canonical_prime_source_lock_bytes,
+    prime_source_lock_sha256,
     verify_prime_source_lock,
 )
 
@@ -46,6 +48,24 @@ def _lock(root: Path) -> PrimeSourceLock:
 
 
 class TestPrimeSourceLock(unittest.TestCase):
+    def test_canonical_identity_is_deterministic_and_field_sensitive(self) -> None:
+        lock = PrimeSourceLock(_COMMIT, "b" * 64, "c" * 64)
+        expected = b'{"commit":"' + _COMMIT.encode() + b'","package_lock_sha256":"' + (
+            b"c" * 64
+        ) + b'","tree_sha256":"' + (b"b" * 64) + b'"}'
+
+        self.assertEqual(canonical_prime_source_lock_bytes(lock), expected)
+        digest = prime_source_lock_sha256(lock)
+        self.assertEqual(len(digest), 64)
+        self.assertEqual(digest, prime_source_lock_sha256(lock))
+        self.assertNotEqual(
+            digest,
+            prime_source_lock_sha256(PrimeSourceLock(_COMMIT, "d" * 64, "c" * 64)),
+        )
+
+        with self.assertRaises(PrimeSourceLockError):
+            canonical_prime_source_lock_bytes(object())
+
     def test_verifies_exact_canonical_source_and_package_lock(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             source_root = (Path(temporary_directory) / "prime-agent").resolve()
