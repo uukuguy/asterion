@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import copy
+import pickle
 from pathlib import Path
 import tempfile
 import unittest
@@ -45,6 +47,18 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
         with self.assertRaises(OSError):
             os.fstat(fd)
         self.assertNotIn("SENTINEL_SECRET", repr(config))
+
+    def test_config_has_no_ordinary_reflection_or_serialization_export(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            config = load_operator_config(self._open_config(Path(temp)))
+        self.assertEqual(config.model_id, "deepseek-chat")
+        with self.assertRaises(TypeError):
+            vars(config)
+        for operation in (lambda: pickle.dumps(config), lambda: copy.copy(config), lambda: copy.deepcopy(config)):
+            with self.subTest(operation=operation):
+                with self.assertRaises(TypeError) as raised:
+                    operation()
+                self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
 
     def test_rejects_path_and_caller_selected_identity_arguments(self) -> None:
         with self.assertRaises((TypeError, PrimeP1OperatorConfigError)):

@@ -9,6 +9,7 @@ import os
 import re
 import stat
 from types import MappingProxyType
+from typing import Any, SupportsIndex
 import unicodedata
 
 from .authority_receipt import _AuthorityReceiptIssuer, _new_authority_receipt_issuer
@@ -38,7 +39,7 @@ class PrimeP1OperatorConfigError(ValueError):
         super().__init__("prime P1 operator configuration is unavailable")
 
 
-@dataclass(frozen=True, repr=False)
+@dataclass(frozen=True, repr=False, slots=True)
 class PrimeP1OperatorConfig:
     _values: Mapping[str, str]
     _receipt_issuer: _AuthorityReceiptIssuer
@@ -49,6 +50,18 @@ class PrimeP1OperatorConfig:
 
     def __repr__(self) -> str:
         return "PrimeP1OperatorConfig(redacted)"
+
+    def __reduce__(self) -> str | tuple[Any, ...]:
+        raise TypeError("prime P1 operator configuration is unavailable")
+
+    def __reduce_ex__(self, _: SupportsIndex) -> str | tuple[Any, ...]:
+        raise TypeError("prime P1 operator configuration is unavailable")
+
+    def __copy__(self) -> object:
+        raise TypeError("prime P1 operator configuration is unavailable")
+
+    def __deepcopy__(self, _: object) -> object:
+        raise TypeError("prime P1 operator configuration is unavailable")
 
 
 def load_operator_config(config_fd: int) -> PrimeP1OperatorConfig:
