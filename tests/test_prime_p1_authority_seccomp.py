@@ -48,6 +48,10 @@ def _policy() -> SeccompPolicyLock:
             SeccompRuleAtom(
                 "write", (SeccompArgumentConstraint(0, "SCMP_CMP_EQ", 0, None),)
             ),
+            SeccompRuleAtom(
+                "write",
+                (SeccompArgumentConstraint(0, "SCMP_CMP_MASKED_EQ", 1, 3),),
+            ),
         ),
         maximum_profile_sha256="0" * 64,
     )
@@ -471,6 +475,60 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                 module._open_profile(str(path))
             self.assertEqual(len(closed), len(set(closed)))
             self.assertGreater(len(closed), 1)
+
+    def test_semantic_profile_matrix_uses_matching_config_digest(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        policy = _policy()
+        def payload(syscalls: object, **extra: object) -> bytes:
+            value: dict[str, object] = {
+                "architectures": ["SCMP_ARCH_X86_64"],
+                "defaultAction": "SCMP_ACT_ERRNO",
+                "syscalls": syscalls,
+            }
+            value.update(extra)
+            return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+
+        valid = (
+            payload([]),
+            _PROFILE,
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_MASKED_EQ", "value": 1, "valueTwo": 3}], "names": ["write"]}]),
+        )
+        invalid = (
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": ["write"]}]),
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": ["read", "write"]}]),
+            payload([{"action": "SCMP_ACT_ALLOW", "names": ["read"]}]),
+            payload([], architectures=["SCMP_ARCH_AARCH64"]),
+            payload([], defaultAction="SCMP_ACT_ALLOW"),
+            payload([], extra=True),
+            b'{"architectures":["SCMP_ARCH_X86_64"],"defaultAction":"SCMP_ACT_ERRNO","syscalls":NaN}',
+            _PROFILE + b" ",
+        )
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((policy,))),
+            ):
+                for item in valid:
+                    with self.subTest(valid=item[:24]):
+                        profile.write_bytes(item)
+                        profile.chmod(0o600)
+                        resource = admit_static_seccomp_resource(self._config(root, profile, profile_bytes=item))
+                        resource.close()
+                for item in invalid:
+                    with self.subTest(invalid=item[:24]):
+                        profile.write_bytes(item)
+                        profile.chmod(0o600)
+                        with self.assertRaises(PrimeP1AuthorityResourceError) as raised:
+                            admit_static_seccomp_resource(self._config(root, profile, profile_bytes=item))
+                        self.assertIsNone(raised.exception.__context__)
 
     def test_post_open_validation_failure_closes_full_chain_without_transfer(self) -> None:
         from asterion.applications.prime_agent.operator.authority_seccomp import (
