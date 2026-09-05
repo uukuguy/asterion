@@ -62,9 +62,9 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         for reads, expected in (
             ((b"k" * 32, OSError(errno.EINTR, "SENTINEL"), b""), b"k" * 32),
             ((b"k" * 32, OSError(errno.EINTR, "SENTINEL"), b"x"), None),
-            ((None,), None),
-            (("",), None),
-            ((0,), None),
+            ((b"k" * 32, None), None),
+            ((b"k" * 32, ""), None),
+            ((b"k" * 32, 0), None),
         ):
             with self.subTest(reads=reads):
                 descriptors = AdmittedAuthorityDescriptorsForTest(
@@ -107,6 +107,27 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             attempts, 9
         )  # Eight retries, then the ninth EINTR fails closed.
 
+        values = iter(
+            [OSError(errno.EINTR, "SENTINEL")] * 4
+            + [b"k" * 32]
+            + [OSError(errno.EINTR, "SENTINEL")] * 4
+            + [b""]
+        )
+        descriptors = AdmittedAuthorityDescriptorsForTest(11, close_fd=lambda _: None)
+
+        def bounded_reader(_fd: int, _size: int) -> bytes:
+            value = next(values)
+            if isinstance(value, OSError):
+                raise value
+            return value
+
+        self.assertEqual(
+            _consume_session_key(
+                descriptors.bundle, reader=bounded_reader, close_fd=lambda _: None
+            ),
+            b"k" * 32,
+        )
+
     def test_private_session_key_reader_discards_reader_and_closer_exception_context(
         self,
     ) -> None:
@@ -116,7 +137,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                 lambda _: None,
             ),
             (
-                lambda *_: b"k" * 32,
+                (lambda values=iter((b"k" * 32, b"")): lambda *_: next(values))(),
                 lambda _: (_ for _ in ()).throw(OSError("CLOSE_SENTINEL")),
             ),
         ):
