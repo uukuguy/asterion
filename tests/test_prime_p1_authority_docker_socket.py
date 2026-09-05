@@ -90,34 +90,47 @@ class TestPrimeP1AuthorityDockerSocket(unittest.TestCase):
     @contextmanager
     def _forbidden_effects(self):
         """Prove socket admission does not cross into effectful APIs."""
+        import asterion.applications.prime_agent.operator.authority_process as process
+        import asterion.applications.prime_agent.operator.authority_resources as resources
+
+        targets = {
+            "socket.socket.connect": (socket.socket, "connect"),
+            "socket.socket.connect_ex": (socket.socket, "connect_ex"),
+            "socket.create_connection": (socket, "create_connection"),
+            "asyncio.open_unix_connection": (asyncio, "open_unix_connection"),
+            "asyncio.BaseEventLoop.create_unix_connection": (
+                asyncio.BaseEventLoop,
+                "create_unix_connection",
+            ),
+            "asyncio.create_subprocess_exec": (asyncio, "create_subprocess_exec"),
+            "asyncio.create_subprocess_shell": (asyncio, "create_subprocess_shell"),
+            "subprocess.run": (subprocess, "run"),
+            "subprocess.Popen": (subprocess, "Popen"),
+            "authority_resources.admit_static_authority_resources": (
+                resources,
+                "admit_static_authority_resources",
+            ),
+            "authority_process._run_ready_execute_exchange": (
+                process,
+                "_run_ready_execute_exchange",
+            ),
+        }
+        for name in (
+            "spawnv", "spawnve", "spawnvp", "spawnvpe",
+            "execv", "execve", "execvp", "execvpe",
+            "posix_spawn", "posix_spawnp", "system",
+        ):
+            if hasattr(os, name):
+                targets[f"os.{name}"] = (os, name)
         with ExitStack() as stack:
-            guards = []
-            for target, name in (
-                (socket.socket, "connect"),
-                (socket.socket, "connect_ex"),
-                (socket, "create_connection"),
-                (asyncio, "open_unix_connection"),
-                (asyncio.BaseEventLoop, "create_unix_connection"),
-                (asyncio, "create_subprocess_exec"),
-                (asyncio, "create_subprocess_shell"),
-                (subprocess, "run"),
-                (subprocess, "Popen"),
-                *(
-                    (os, name)
-                    for name in (
-                        "spawnv", "spawnve", "spawnvp", "spawnvpe",
-                        "execv", "execve", "execvp", "execvpe",
-                    )
-                    if hasattr(os, name)
-                ),
-            ):
-                guards.append(
-                    stack.enter_context(
-                        patch.object(target, name, side_effect=AssertionError(name))
-                    )
+            guards = {
+                label: stack.enter_context(
+                    patch.object(target, name, side_effect=AssertionError(label))
                 )
+                for label, (target, name) in targets.items()
+            }
             yield guards
-            for guard in guards:
+            for guard in guards.values():
                 guard.assert_not_called()
 
     def test_admits_exact_socket_without_connecting_or_spawning(self) -> None:
@@ -151,6 +164,19 @@ class TestPrimeP1AuthorityDockerSocket(unittest.TestCase):
         aggregate.assert_not_called()
         ready.assert_not_called()
         resource.close()
+
+    def test_forbidden_effect_guard_covers_process_and_authority_seams(self) -> None:
+        required = {
+            "authority_resources.admit_static_authority_resources",
+            "authority_process._run_ready_execute_exchange",
+        }
+        required.update(
+            f"os.{name}"
+            for name in ("posix_spawn", "posix_spawnp", "system")
+            if hasattr(os, name)
+        )
+        with self._forbidden_effects() as guards:
+            self.assertTrue(required.issubset(guards))
 
     def test_import_is_platform_neutral_without_linux_flags_or_config_dependency(self) -> None:
         script = """
