@@ -71,6 +71,30 @@ class TestPrimeAuthorityBundleFiles(unittest.TestCase):
         self.assertTrue(stat.S_ISREG(os.fstat(result.interpreter_fd).st_mode))
         self.assertEqual(result.root_identity[:2], (os.fstat(root_fd).st_dev, os.fstat(root_fd).st_ino))
 
+    def test_opens_root_level_bootstrap_by_root_descriptor(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_bundle_files import (
+            verify_authority_bundle_bootstrap,
+        )
+
+        if os.geteuid() != 0:
+            self.skipTest("actual root-owned filesystem qualification requires Linux root")
+        directory, root, files = self._root_owned_bundle()
+        self.addCleanup(directory.cleanup)
+        bootstrap = b"root bootstrap\n"
+        (root / "bin" / "bootstrap").unlink()
+        (root / "bootstrap.py").write_bytes(bootstrap)
+        os.chmod(root / "bootstrap.py", 0o444)
+        files = (
+            _file("bin/python3", "interpreter", _elf()),
+            _file("bootstrap.py", "bootstrap", bootstrap, 0o444),
+        )
+        root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+        self.addCleanup(os.close, root_fd)
+        bootstrap_fd = verify_authority_bundle_bootstrap(root_fd, files, "bootstrap.py", (-1, -1))
+        self.addCleanup(os.close, bootstrap_fd)
+        os.lseek(bootstrap_fd, 0, os.SEEK_SET)
+        self.assertEqual(os.read(bootstrap_fd, len(bootstrap)), bootstrap)
+
     def test_rejects_extra_tree_entries_and_preserves_borrowed_root_fd(self) -> None:
         from asterion.applications.prime_agent.operator.authority_bundle_files import (
             verify_authority_bundle_files,

@@ -145,7 +145,7 @@ def verify_authority_bundle_bootstrap(root_fd: int, files: tuple[AuthorityBundle
             descriptors.append(child)
             _directory_identity(child)
             current = child
-        fd = os.open(path.rsplit("/", 1)[1], os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _NONBLOCK, dir_fd=current)
+        fd = os.open(path.rpartition("/")[2], os.O_RDONLY | _NOFOLLOW | _CLOEXEC | _NONBLOCK, dir_fd=current)
         identity = _regular_identity(fd, record)
         if identity[:2] == inventory_identity or _digest_fd(fd, identity) != record.sha256:
             raise ValueError
