@@ -12,6 +12,7 @@ import enum
 import errno
 import fcntl
 from array import array
+from typing import cast
 from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.authority_process import (
@@ -23,7 +24,12 @@ from asterion.applications.prime_agent.operator.authority_process import (
     _consume_session_key,
     _receive_authority_packet,
     _receive_authority_packet_from_connection,
+    _run_ready_execute_exchange,
     _send_authority_packet,
+)
+from asterion.applications.prime_agent.operator.authority_protocol import (
+    SupervisorSession,
+    encode_frame,
 )
 
 
@@ -77,6 +83,25 @@ class _SendingSocket:
         return result
 
 
+class _ExchangeSocket(_SendingSocket):
+    def __init__(self, received: object) -> None:
+        super().__init__([])
+        self.received = received
+        self.closed = False
+
+    def sendmsg(self, buffers: object, ancillary: object, flags: int) -> object:
+        self.calls.append((buffers, ancillary, flags))
+        return sum(len(buffer) for buffer in cast(list[bytes], buffers))
+
+    def recvmsg(self, _size: int, _ancillary_size: int, _flags: int) -> object:
+        if isinstance(self.received, BaseException):
+            raise self.received
+        return self.received
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class _RecordingUnixSocket:
     def __init__(self, connection: socket_module.socket) -> None:
         self.connection = connection
@@ -127,6 +152,117 @@ def _send_packet(connection: object, packet: bytes) -> None:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_private_ready_execute_exchange_returns_only_execute_and_closes_unused_descriptors(
+        self,
+    ) -> None:
+        session_id = "a" * 64
+        contract = "b" * 64
+        resource = "c" * 64
+        application = "d" * 64
+        key = b"k" * 32
+        key_read, key_write = os.pipe()
+        config_read, config_write = os.pipe()
+        self.addCleanup(lambda: os.close(config_write))
+        os.write(key_write, key)
+        os.close(key_write)
+        execute = encode_frame(
+            key,
+            session_id,
+            0,
+            "execute",
+            {
+                "run_id": "verified-run",
+                "request_contract_sha256": contract,
+                "application_request_sha256": application,
+            },
+        )
+        connection = _ExchangeSocket((execute, [], 0, None))
+        bundle = AdmittedAuthorityDescriptors(
+            connection, key_read, config_read, os.close
+        )
+        with (
+            patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True),
+            patch.object(socket_module, "MSG_NOSIGNAL", 64, create=True),
+        ):
+            request = _run_ready_execute_exchange(
+                bundle, session_id, contract, resource
+            )
+        self.assertEqual(request.run_id, "verified-run")
+        self.assertEqual(request.application_request_sha256, application)
+        self.assertEqual(len(connection.calls), 1)
+        ready = cast(list[bytes], connection.calls[0][0])[0]
+        self.assertIsInstance(ready, bytes)
+        self.assertIsNone(
+            SupervisorSession(session_id, key, contract).accept_authority_packet(ready)
+        )
+        self.assertTrue(connection.closed)
+        with self.assertRaises(OSError):
+            os.fstat(key_read)
+        with self.assertRaises(OSError):
+            os.fstat(config_read)
+
+    def test_private_ready_execute_exchange_rejects_bad_or_out_of_order_packets_and_closes_all_fds(
+        self,
+    ) -> None:
+        session_id = "a" * 64
+        contract = "b" * 64
+        resource = "c" * 64
+        application = "d" * 64
+        key = b"k" * 32
+        execute_payload = {
+            "run_id": "verified-run",
+            "request_contract_sha256": contract,
+            "application_request_sha256": application,
+        }
+        execute = encode_frame(key, session_id, 0, "execute", execute_payload)
+        final_hmac = execute[-3:-2]
+        tampered = execute[:-3] + (b"0" if final_hmac != b"0" else b"1") + execute[-2:]
+        invalid_packets = (
+            tampered,
+            encode_frame(
+                key,
+                session_id,
+                0,
+                "ready",
+                {
+                    "request_contract_sha256": contract,
+                    "resource_set_sha256": resource,
+                },
+            ),
+            encode_frame(key, session_id, 1, "execute", execute_payload),
+            encode_frame(key, session_id, 0, "cancel", {}),
+            b"",
+            OSError("TRANSPORT_SENTINEL"),
+        )
+        for packet in invalid_packets:
+            with self.subTest(packet=type(packet).__name__):
+                key_read, key_write = os.pipe()
+                config_read, config_write = os.pipe()
+                self.addCleanup(lambda fd=config_write: os.close(fd))
+                os.write(key_write, key)
+                os.close(key_write)
+                connection = _ExchangeSocket((packet, [], 0, None))
+                bundle = AdmittedAuthorityDescriptors(
+                    connection, key_read, config_read, os.close
+                )
+                with (
+                    patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True),
+                    patch.object(socket_module, "MSG_NOSIGNAL", 64, create=True),
+                    self.assertRaises(PrimeP1AuthorityBootstrapError) as raised,
+                ):
+                    _run_ready_execute_exchange(bundle, session_id, contract, resource)
+                self.assertIsNone(raised.exception.__context__)
+                self.assertNotIn(key.decode(), repr(raised.exception))
+                self.assertNotIn(
+                    "TRANSPORT_SENTINEL",
+                    "".join(traceback.format_exception(raised.exception)),
+                )
+                self.assertTrue(connection.closed)
+                with self.assertRaises(OSError):
+                    os.fstat(key_read)
+                with self.assertRaises(OSError):
+                    os.fstat(config_read)
+
     def test_connection_level_packet_receive_never_closes_caller_connection(
         self,
     ) -> None:

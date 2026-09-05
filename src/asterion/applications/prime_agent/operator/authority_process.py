@@ -13,6 +13,10 @@ import sys
 import threading
 from typing import Any, NoReturn, cast
 
+from asterion.applications.prime_agent.operator.authority_protocol import (
+    AuthoritySession,
+)
+
 
 class PrimeP1AuthorityBootstrapError(ValueError):
     """Single public-safe authority bootstrap failure category."""
@@ -43,6 +47,17 @@ class AuthorityBootstrap:
 
     def __repr__(self) -> str:
         return "AuthorityBootstrap(redacted)"
+
+
+@dataclass(frozen=True, repr=False)
+class AuthorityExecuteRequest:
+    """Validated execute metadata; this is neither a receipt nor a PASS grant."""
+
+    run_id: str
+    application_request_sha256: str
+
+    def __repr__(self) -> str:
+        return "AuthorityExecuteRequest(redacted)"
 
 
 class AdmittedAuthorityDescriptors:
@@ -258,6 +273,60 @@ def _send_authority_packet(connection: object, packet: bytes) -> None:
         failed = True
     if failed:
         _unavailable()
+
+
+def _run_ready_execute_exchange(
+    descriptors: AdmittedAuthorityDescriptors,
+    session_id: str,
+    request_contract_sha256: str,
+    resource_set_sha256: str,
+) -> AuthorityExecuteRequest:
+    """Perform only the authority ready-to-execute handshake, then relinquish FDs."""
+    connection: object | None = None
+    config_fd: int | None = None
+    session_key: bytes | None = None
+    result: AuthorityExecuteRequest | None = None
+    failed = False
+    try:
+        if not isinstance(descriptors, AdmittedAuthorityDescriptors):
+            raise ValueError
+        config_fd = descriptors.consume_config_fd()
+        session_key = _consume_session_key(descriptors)
+        connection = descriptors.consume_socket()
+        session = AuthoritySession(
+            session_id,
+            session_key,
+            request_contract_sha256,
+            resource_set_sha256,
+        )
+        _send_authority_packet(connection, session.ready_packet())
+        frame = session.accept_supervisor_packet(
+            _receive_authority_packet_from_connection(connection)
+        )
+        run_id = frame.payload.get("run_id")
+        application_request_sha256 = frame.payload.get("application_request_sha256")
+        if type(run_id) is not str or type(application_request_sha256) is not str:
+            raise ValueError
+        result = AuthorityExecuteRequest(run_id, application_request_sha256)
+    except (OSError, OverflowError, TypeError, ValueError):
+        failed = True
+    finally:
+        session_key = b""
+        if connection is not None:
+            try:
+                _close_socket(connection)
+            except (OSError, OverflowError, TypeError):
+                failed = True
+        if config_fd is not None:
+            try:
+                descriptors._close_fd(config_fd)
+            except (OSError, OverflowError, TypeError):
+                failed = True
+        if isinstance(descriptors, AdmittedAuthorityDescriptors):
+            descriptors.close()
+    if failed or result is None:
+        _unavailable()
+    return result
 
 
 def admit_authority_launch(
