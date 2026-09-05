@@ -20,6 +20,7 @@ _KEYS = frozenset(
         "ASTERION_PRIME_P1_DOCKER_EXECUTABLE",
         "ASTERION_PRIME_P1_DOCKER_SOCKET",
         "ASTERION_PRIME_P1_SECCOMP_PROFILE",
+        "ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256",
         "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST",
         "ASTERION_PRIME_P1_MODEL_ID",
         "ASTERION_PRIME_P1_EVIDENCE_ROOT",
@@ -175,6 +176,10 @@ def _parse_verified_bytes(data: bytes) -> dict[str, str]:
     if (
         set(values) != _KEYS
         or _RECEIPT_KEY.fullmatch(values["ASTERION_PRIME_P1_RECEIPT_HMAC_KEY"]) is None
+        or _RECEIPT_KEY.fullmatch(
+            values["ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256"]
+        )
+        is None
         or values["ASTERION_PRIME_P1_IMAGE_PLATFORM_OS"] != "linux"
         or _OCI_COMPONENT.fullmatch(values["ASTERION_PRIME_P1_IMAGE_PLATFORM_OS"])
         is None
