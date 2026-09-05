@@ -396,14 +396,34 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         class ForbiddenAccess(BaseException):
             pass
 
+        class RetainedProductionResources:
+            close_calls = 0
+
+            def close(self) -> None:
+                self.close_calls += 1
+
+        resources = RetainedProductionResources()
+
         with (
-            patch.object(module, "admit_static_authority_resources", return_value=object()) as admit,
+            patch.object(
+                module,
+                "admit_production_authority_resources",
+                return_value=resources,
+            ) as admit,
+            patch.object(
+                module,
+                "admit_static_authority_resources",
+                side_effect=AssertionError("static admission must not run"),
+                create=True,
+            ) as static_admit,
             patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
             patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
             self.assertRaises(PrimeP1AuthorityBootstrapError),
         ):
             _run_ready_execute_exchange(bundle, "a" * 64)
         admit.assert_called_once()
+        static_admit.assert_not_called()
+        self.assertEqual(resources.close_calls, 1)
         self.assertEqual(connection.calls, [])
         self.assertTrue(connection.closed)
 
@@ -415,9 +435,10 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         events: list[str] = []
         closed_fds: list[int] = []
 
-        class RetainedStaticResources:
+        class RetainedProductionResources:
             def close(self) -> None:
                 events.append("resources-close")
+                raise RuntimeError("RESOURCE_CLOSE_SENTINEL")
 
         class ForbiddenAccess(BaseException):
             pass
@@ -430,19 +451,28 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             ),
             patch.object(
                 module,
-                "admit_static_authority_resources",
-                side_effect=lambda _: events.append("resources") or RetainedStaticResources(),
+                "admit_production_authority_resources",
+                side_effect=lambda _: (
+                    events.append("resources") or RetainedProductionResources()
+                ),
             ),
+            patch.object(
+                module,
+                "admit_static_authority_resources",
+                side_effect=AssertionError("static admission must not run"),
+                create=True,
+            ) as static_admit,
             patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
             patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
             self.assertRaises(PrimeP1AuthorityBootstrapError),
         ):
             _run_ready_execute_exchange(bundle, "a" * 64)
         self.assertEqual(events, ["config", "resources", "resources-close"])
+        static_admit.assert_not_called()
         self.assertEqual(closed_fds, [101])
         self.assertTrue(connection.closed)
 
-    def test_failed_static_resource_admission_never_consumes_key_or_socket(self) -> None:
+    def test_failed_production_resource_admission_never_consumes_key_or_socket(self) -> None:
         import asterion.applications.prime_agent.operator.authority_process as module
 
         class ForbiddenAccess(BaseException):
@@ -454,9 +484,15 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             patch.object(module, "load_operator_config", return_value=object()),
             patch.object(
                 module,
-                "admit_static_authority_resources",
+                "admit_production_authority_resources",
                 side_effect=ValueError("RESOURCE_SENTINEL"),
             ),
+            patch.object(
+                module,
+                "admit_static_authority_resources",
+                side_effect=AssertionError("static admission must not run"),
+                create=True,
+            ) as static_admit,
             patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
             patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
             self.assertRaises(PrimeP1AuthorityBootstrapError) as raised,
@@ -464,6 +500,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             _run_ready_execute_exchange(bundle, "a" * 64)
         self.assertIsNone(raised.exception.__context__)
         self.assertNotIn("RESOURCE_SENTINEL", "".join(traceback.format_exception(raised.exception)))
+        static_admit.assert_not_called()
         self.assertTrue(connection.closed)
 
     def test_spoofed_descriptor_class_never_receives_cleanup_access(self) -> None:

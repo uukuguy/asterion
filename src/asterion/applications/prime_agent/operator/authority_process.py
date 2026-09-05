@@ -14,7 +14,7 @@ import threading
 from typing import Any, NoReturn, cast
 
 from .authority_config import load_operator_config
-from .authority_resources import admit_static_authority_resources
+from .authority_resources import admit_production_authority_resources
 
 
 class PrimeP1AuthorityBootstrapError(ValueError):
@@ -267,14 +267,14 @@ def _run_ready_execute_exchange(
     descriptors: AdmittedAuthorityDescriptors,
     session_id: str,
 ) -> NoReturn:
-    """Run static resource admission, then stop unavailable before any handshake.
+    """Run production resource admission, then stop unavailable before any handshake.
 
     A later authority slice must provide opaque complete ready bindings before
-    constructing a protocol session.  Static admission alone never permits an
-    authority ready or execute exchange.
+    constructing a protocol session. Production resource admission alone never
+    permits an authority ready or execute exchange.
     """
     config_fd: int | None = None
-    static_resources = None
+    production_resources = None
     try:
         if (
             type(descriptors) is not AdmittedAuthorityDescriptors
@@ -285,13 +285,13 @@ def _run_ready_execute_exchange(
         loader_owned_config_fd = config_fd
         config_fd = None
         config = load_operator_config(loader_owned_config_fd)
-        static_resources = admit_static_authority_resources(config)
+        production_resources = admit_production_authority_resources(config)
     except Exception:
         pass
     finally:
-        if static_resources is not None:
+        if production_resources is not None:
             try:
-                static_resources.close()
+                production_resources.close()
             except BaseException:
                 pass
         if config_fd is not None:
