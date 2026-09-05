@@ -1,15 +1,176 @@
+"""Focused boundary checks for the role-multiplexed P3 SDK provider."""
+
 from __future__ import annotations
+
+import asyncio
+import json
 import unittest
+from unittest import mock
 
 
-class TestPrimeP3DevelopmentSdkProvider(unittest.TestCase):
-    def test_role_partition_is_exact(self) -> None:
-        from asterion.applications.prime_agent.operator.p3_development_sdk_provider import (
-            PrimeP3DevelopmentSdkProvider,
+def _body(text: str) -> bytes:
+    return json.dumps(
+        {
+            "context": {
+                "messages": [{"content": text, "role": "user"}],
+                "tools": [
+                    {
+                        "description": "bound IPython",
+                        "name": "ipython",
+                        "parameters": {
+                            "properties": {"code": {"type": "string"}},
+                            "required": ["code"],
+                            "type": "object",
+                        },
+                    }
+                ],
+            },
+            "model": {
+                "api": "asterion-p3-development",
+                "id": "p3-development",
+                "provider": "asterion-p3-development",
+            },
+            "options": {},
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+
+
+def _response(text: str) -> bytes:
+    return json.dumps(
+        {
+            "api": "asterion-p3-development",
+            "content": [{"text": text, "type": "text"}],
+            "model": "p3-development",
+            "provider": "asterion-p3-development",
+            "role": "assistant",
+            "stopReason": "stop",
+            "timestamp": 1,
+            "usage": {
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "cost": {
+                    "cacheRead": 0,
+                    "cacheWrite": 0,
+                    "input": 0,
+                    "output": 0,
+                    "total": 0,
+                },
+                "input": 1,
+                "output": 1,
+                "totalTokens": 2,
+            },
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+
+
+def _follow(previous: bytes, response: bytes, text: str) -> bytes:
+    value = json.loads(previous)
+    value["context"]["messages"].extend(
+        [json.loads(response), {"content": text, "role": "user"}]
+    )
+    return json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode()
+
+
+class TestPrimeP3DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
+    async def test_roles_keep_independent_histories_and_return_child_response(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p3_development_sdk_provider as subject,
         )
 
-        provider = PrimeP3DevelopmentSdkProvider()
-        for role, count in (("root", 4), ("implementation", 2), ("review", 4)):
-            for _ in range(count):
-                provider.admit(role, b"{}")
+        provider = subject.create_prime_p3_development_sdk_provider(
+            {
+                "DEEPSEEK_API_KEY": "private-key",
+                "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash",
+            }
+        )
+        result, usage = (
+            _response("private assistant answer"),
+            subject.PrimeModelBrokerTokenUsage(1, 1, 1),
+        )
+        with mock.patch.object(
+            type(provider), "_run_child", return_value=(result, usage)
+        ) as child:
+            self.assertEqual(
+                await provider.callback("root", _body("root-only")), result
+            )
+            self.assertEqual(
+                await provider.callback("implementation", _body("implementation-only")),
+                result,
+            )
+        self.assertEqual(provider.histories["root"], (_body("root-only"),))
+        self.assertEqual(
+            provider.histories["implementation"], (_body("implementation-only"),)
+        )
+        self.assertEqual(provider.histories["review"], ())
+        self.assertEqual(child.call_count, 2)
+
+    async def test_exact_role_caps_share_one_budget_and_terminal_usage_needs_ten_calls(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p3_development_sdk_provider as subject,
+        )
+
+        provider = subject.create_prime_p3_development_sdk_provider(
+            {
+                "DEEPSEEK_API_KEY": "private-key",
+                "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash",
+            }
+        )
+        result, usage = _response("answer"), subject.PrimeModelBrokerTokenUsage(1, 1, 1)
+        with mock.patch.object(
+            type(provider), "_run_child", return_value=(result, usage)
+        ):
+            for role, count in (("root", 4), ("implementation", 2), ("review", 4)):
+                body = _body(f"{role}-0")
+                for index in range(count):
+                    await provider.callback(role, body)
+                    body = _follow(body, result, f"{role}-{index + 1}")
+            with self.assertRaises(subject.PrimeP3DevelopmentSdkProviderError):
+                await provider.callback("review", _body("too-many"))
         self.assertTrue(provider.terminal())
+        self.assertEqual(
+            provider.terminal_usage(), subject.PrimeModelBrokerTokenUsage(10, 10, 10)
+        )
+
+    async def test_cancellation_reaps_active_child_and_hides_usage(self) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p3_development_sdk_provider as subject,
+        )
+
+        provider = subject.create_prime_p3_development_sdk_provider(
+            {
+                "DEEPSEEK_API_KEY": "private-key",
+                "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash",
+            }
+        )
+        reaped = asyncio.Event()
+
+        async def blocked(*_: object) -> tuple[bytes, object]:
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        async def reap() -> None:
+            reaped.set()
+
+        with (
+            mock.patch.object(type(provider), "_run_child", side_effect=blocked),
+            mock.patch.object(type(provider), "_reap_shielded", side_effect=reap),
+        ):
+            task = asyncio.create_task(provider.callback("root", _body("cancel")))
+            await asyncio.sleep(0)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertTrue(reaped.is_set())
+        with self.assertRaises(subject.PrimeP3DevelopmentSdkProviderError):
+            provider.terminal_usage()
