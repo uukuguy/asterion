@@ -48,7 +48,7 @@ _ENVIRONMENT = ("HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHOND
 _ENVIRONMENT_BY_KEY = dict(item.split("=", 1) for item in _ENVIRONMENT)
 _CLEARED_BASE_IMAGE_ENVIRONMENT = ("LANG", "GPG_KEY", "PYTHON_VERSION", "PYTHON_SHA256")
 _ENTRYPOINT = "/usr/local/bin/prime-ipython-coding.py"
-_TMPFS = "/workspace:rw,nodev,noexec,nosuid,size=67108864"
+_TMPFS = "/workspace:rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700"
 _OUTPUT_CAP = 65536
 _SECCOMP_PROFILE_CAP = 65536
 # Inspect encodes SecurityOpt as a JSON string.  A canonical profile may be
@@ -472,7 +472,13 @@ class DockerCliEngineTransport(DockerEngineTransport):
             await _DockerCliLauncherChannel(process).close(control=control)
             raise asyncio.CancelledError
         self._started_processes[container_id] = process
-        return RestrictedWorkerLease(container_id, specification.role_id, specification.run_id, specification.challenge_digest, specification.workload_digest)
+        return RestrictedWorkerLease(
+            specification.container_id,
+            specification.role_id,
+            specification.run_id,
+            specification.challenge_digest,
+            specification.workload_digest,
+        )
 
     async def open_launcher_channel(self, container_id: str, *, control: _LifecycleCallControl) -> DockerLauncherChannel:
         self._specification(container_id)

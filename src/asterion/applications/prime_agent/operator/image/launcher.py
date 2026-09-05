@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import select
+import stat
 import subprocess
 import sys
 from typing import NoReturn
@@ -37,6 +39,12 @@ _MODEL_CELL_PROGRAM = (
 _MODEL_CELL_TIMEOUT_SECONDS = 5
 _POST_COMPLETION_WAIT_SECONDS = 30
 _WRITABLE_KERNEL_MOUNTS = {"/dev", "/dev/mqueue", "/dev/pts", "/proc", "/sys"}
+_SHARED_MEMORY_MOUNT = "/dev/shm"
+_MASKED_PROC_PATHS = (
+    "/proc/interrupts",
+    "/proc/keys",
+    "/proc/timer_list",
+)
 _CREDENTIAL_SENTINELS = (Path("/run/secrets"), Path("/root/.aws"), Path("/home/node/.aws"), Path("/home/node/.config/gcloud"), Path("/workspace/.env"))
 
 
@@ -69,9 +77,37 @@ def _workspace_only_writable(mounts: tuple[tuple[str, str, str, set[str]], ...])
             root_read_only = "ro" in options
         if mount_point == "/workspace":
             workspace_writable = device == "tmpfs" and kind == "tmpfs" and {"rw", "nodev", "noexec", "nosuid"}.issubset(options)
-        if "rw" in options and mount_point != "/workspace" and mount_point not in _WRITABLE_KERNEL_MOUNTS:
+        if "rw" in options and mount_point != "/workspace" and not _allowed_writable_mount(mount_point, kind, options):
             return False
     return root_read_only and workspace_writable
+
+
+def _allowed_writable_mount(
+    mount_point: str, kind: str, options: set[str]
+) -> bool:
+    if mount_point in _WRITABLE_KERNEL_MOUNTS:
+        return True
+    if mount_point == _SHARED_MEMORY_MOUNT:
+        return kind == "tmpfs" and {"rw", "nodev", "noexec", "nosuid"}.issubset(options)
+    if mount_point not in _MASKED_PROC_PATHS:
+        return False
+    try:
+        details = os.stat(mount_point, follow_symlinks=False)
+    except OSError:
+        return False
+    return stat.S_ISCHR(details.st_mode) and details.st_rdev == os.makedev(1, 3)
+
+
+def _credentials_absent() -> bool:
+    for path in _CREDENTIAL_SENTINELS:
+        try:
+            path.stat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        return False
+    return True
 
 
 def require_closed_worker() -> None:
@@ -81,7 +117,7 @@ def require_closed_worker() -> None:
     except (OSError, UnicodeError):
         invalid_worker()
     expected = ("Uid:\t65534\t65534\t65534\t65534", "NoNewPrivs:\t1", "CapEff:\t0000000000000000", "Seccomp:\t2")
-    if not all(value in status for value in expected) or not _workspace_only_writable(_parse_mounts()) or any(path.exists() for path in _CREDENTIAL_SENTINELS) or any(":" in line and not line.lstrip().startswith("lo:") for line in devices.splitlines()):
+    if not all(value in status for value in expected) or not _workspace_only_writable(_parse_mounts()) or not _credentials_absent() or any(":" in line and not line.lstrip().startswith("lo:") for line in devices.splitlines()):
         invalid_worker()
 
 

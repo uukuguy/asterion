@@ -184,7 +184,7 @@ def _inspect(*, container_id: str = _CONTAINER, extra: object = None) -> bytes:
         "Image": _IMAGE,
         "RepoDigests": [],
         "Config": {"User": "65534:65534", "Env": ["GPG_KEY", "PYTHON_VERSION", "PYTHON_SHA256", "HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1", "LANG"], "Entrypoint": ["/usr/local/bin/prime-ipython-coding.py"], "Labels": {}, "OpenStdin": True},
-        "HostConfig": {"NetworkMode": "none", "PortBindings": {}, "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true", f"seccomp={_SECCOMP_TEXT}"], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864"}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "", "IpcMode": "private", "UTSMode": "", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}},
+        "HostConfig": {"NetworkMode": "none", "PortBindings": {}, "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true", f"seccomp={_SECCOMP_TEXT}"], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700"}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "", "IpcMode": "private", "UTSMode": "", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}},
         "Mounts": [],
         "State": {"Running": False},
     }
@@ -212,7 +212,7 @@ def _projected_inspect(*, container_id: str = _CONTAINER, extra: object = None) 
         "SecurityOpt": ["no-new-privileges:true", f"seccomp={_SECCOMP_TEXT}"],
         "Binds": None,
         "VolumesFrom": None,
-        "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864"},
+        "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700"},
         "PidsLimit": 256,
         "Memory": 536870912,
         "MemorySwap": 536870912,
@@ -279,7 +279,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runner.calls[1][0][-3:], ("info", "--format", "{{json .}}"))
         owned_fd = runner.calls[2][4][0]
         self.assertNotEqual(owned_fd, self.seccomp_fd)
-        self.assertEqual(runner.calls[2][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "create", "--name", _CONTAINER, "--pull=never", "--platform", "linux/amd64", "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", f"seccomp=/proc/self/fd/{owned_fd}", "--tmpfs", "/workspace:rw,nodev,noexec,nosuid,size=67108864", "--env", "HOME=/workspace", "--env", "PATH=/usr/local/bin:/usr/bin:/bin", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "LANG", "--env", "GPG_KEY", "--env", "PYTHON_VERSION", "--env", "PYTHON_SHA256", "--interactive", "--ipc", "private", "--pids-limit", "256", "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no", "--entrypoint", "/usr/local/bin/prime-ipython-coding.py", _IMAGE))
+        self.assertEqual(runner.calls[2][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "create", "--name", _CONTAINER, "--pull=never", "--platform", "linux/amd64", "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", f"seccomp=/proc/self/fd/{owned_fd}", "--tmpfs", "/workspace:rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700", "--env", "HOME=/workspace", "--env", "PATH=/usr/local/bin:/usr/bin:/bin", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "LANG", "--env", "GPG_KEY", "--env", "PYTHON_VERSION", "--env", "PYTHON_SHA256", "--interactive", "--ipc", "private", "--pids-limit", "256", "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no", "--entrypoint", "/usr/local/bin/prime-ipython-coding.py", _IMAGE))
         self.assertTrue(all(env == {} for _, env, _, _, _ in runner.calls))
         self.assertEqual([pass_fds for _, _, _, _, pass_fds in runner.calls], [(), (), (owned_fd,)])
         with self.assertRaises(OSError):
@@ -602,25 +602,26 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(_SECCOMP_TEXT, repr(inspection))
 
     async def test_lifecycle_operations_are_closed_and_parse_only_narrow_evidence(self) -> None:
+        daemon_id = "1" + "a" * 63
         selfcheck = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
         attach = _AttachRunner(_AttachProcess(selfcheck))
-        transport, runner = self._transport([_Result(stdout=_projected_inspect()), _Result(returncode=1, stdout=b"\n", stderr=("Error response from daemon: No such container: " + _CONTAINER + "\n").encode())], attach)
-        transport._specifications[_CONTAINER] = _spec()
-        inspection = await transport.inspect(_CONTAINER, control=self._control())
-        lease = await transport.start(_CONTAINER, control=self._control())
-        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        transport, runner = self._transport([_Result(stdout=_projected_inspect(container_id=daemon_id)), _Result(returncode=1, stdout=b"\n", stderr=("Error response from daemon: No such container: " + daemon_id + "\n").encode())], attach)
+        transport._specifications[daemon_id] = _spec()
+        inspection = await transport.inspect(daemon_id, control=self._control())
+        lease = await transport.start(daemon_id, control=self._control())
+        channel = await transport.open_launcher_channel(daemon_id, control=self._control())
         check = await channel.self_check(control=self._control())
         await channel.release(control=self._control())
         await channel.close(control=self._control())
-        await transport.assert_absent(_CONTAINER, control=self._control())
+        await transport.assert_absent(daemon_id, control=self._control())
         self.assertEqual(inspection["network_mode"], "none")
-        self.assertEqual(lease.worker_id, _CONTAINER)
+        self.assertEqual(lease.worker_id, _spec().container_id)
         self.assertEqual(check.effective_user_id, 65534)
-        self.assertEqual(attach.calls[0][0][-4:], ("start", "--attach", "--interactive", _CONTAINER))
+        self.assertEqual(attach.calls[0][0][-4:], ("start", "--attach", "--interactive", daemon_id))
         self.assertEqual(attach.calls[0][2], ())
         self.assertEqual(attach.process.stdin.writes, [_CONTROL])
         self.assertTrue(attach.process.waited)
-        self.assertEqual(runner.calls[1][0][-4:], ("inspect", "--format", "{{.Id}}", _CONTAINER))
+        self.assertEqual(runner.calls[1][0][-4:], ("inspect", "--format", "{{.Id}}", daemon_id))
 
     async def test_attach_rejects_noncanonical_extra_eof_or_oversize_frames(self) -> None:
         canonical = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode()
