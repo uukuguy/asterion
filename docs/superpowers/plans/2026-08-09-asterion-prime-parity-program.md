@@ -1,5 +1,13 @@
 # Asterion Prime Functional Parity Program Implementation Plan
 
+> Current priority (2026-09-05 user clarification): Prime and Native are parallel
+> runtimes. Close the existing seven Prime end-to-end capability scenarios first,
+> using `docs/status/PRIME-TYPICAL-APPLICATIONS.md` as the active worklist and the
+> 2026-09-02 capability-program design as their semantic contract. Native parity
+> is not a prerequisite for that closure. Historical phase gates and evidence
+> below remain intact; their “full project objective” wording does not override
+> the current framework goal or the seven-scenario priority.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver Asterion-supported Prime functional parity first through a Prime-managed control provider and then through an interchangeable Asterion-native kernel, beginning with a verifiable long-running closure and ending only when both named parity gates pass against pinned Prime commit `a18809e00ea30638584d87b3afea7285a9d7296c`.

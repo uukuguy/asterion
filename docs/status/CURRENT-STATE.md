@@ -3,16 +3,17 @@
 ## Project Snapshot
 
 - Project: Asterion
-- Active branch: local `main` at the verified integration head; `origin/main`
-  remains unchanged
-- Theme-level focus: Prime RLM-harness capability program: persistent IPython,
-  recursive RLM, Continual Harness, and staged end-to-end evidence through ARC
+- Active branch: local `main`; implementation verification is scoped to its
+  named boundaries, and `origin/main` remains unchanged
+- Theme-level focus: close the existing seven Prime end-to-end capability
+  scenarios; Prime and Native remain parallel runtimes within the unified
+  capability-package framework
 - Project route: managed
-- Canonical worklist:
-  `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: all seven approved Prime capability products now have
-  provider-free acceptance implementations. Their real restricted-worker,
-  model, Docker, benchmark, and ARC executions remain External-limited.
+- Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
+- Active work package: Prime P1 execution spine and semantic closure, followed
+  by P2–P7. Existing provider-free acceptance implementations are retained;
+  real restricted-worker/model evidence is still incomplete. Native parity and
+  broad framework restructuring are not prerequisites for Prime closure.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -108,13 +109,13 @@
   has been authorized or run for that contract.
 - P2 `prime.programmatic-long-context/v1` has a fixed IPython-only corpus
   workload, sealed completion protocol, exact worker/broker acceptance chain,
-  and worker-bound bounded-evidence reducer. Its compatibility and fake-chain
-  tests are provider-free only; real restricted-worker evidence remains
+  and worker-bound bounded-evidence reducer. Real local Prime/IPython compatibility is verified without model work;
+  fake-chain tests remain provider-free, and real restricted-worker evidence remains
   External-limited.
 - P3 `prime.recursive-workflow/v1` has a fixed depth-one two-child IPython
   review workload, causal aggregation trace, sealed worker/launcher facades,
-  provider-free acceptance, and a live authorization reducer. Its local chain
-  is provider-free only; real recursive-worker evidence remains
+  provider-free acceptance, and a live authorization reducer. Real local Prime daemon/sidecar child messaging, aggregation and cleanup
+  compatibility is verified without model work; real recursive-worker evidence remains
   External-limited.
 - P4 `prime.long-session-continuity/v1` has a fixed IPython diagnostic
   workload, canonical redacted completion parser, replay-free recovery adapter,
@@ -141,8 +142,8 @@
   reviewed difference records.
 - Prime source locking now hashes the declared source inputs while excluding
   only declared generated build products. The pinned `a18809e...` checkout
-  reproduces cleanly, and `make promotion-check` passed its 28 provider-free
-  commands with zero provider operations and no full dataset.
+  reproduces cleanly, and the historical H-036/H-038 closure passed promotion. Those
+  historical results do not verify the current uncommitted changes.
 - Obtain separately authorized real restricted-worker evidence for the seven
   Prime products; do not infer it from local fake-chain tests or Smoke Core.
 - Run final provider-free repository verification and keep any real ARC-AGI-3
@@ -199,7 +200,8 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Resume Phase 3.2 by injecting and reviewing an operator-owned small-
-   verification host; otherwise retain the provider-free receipt unchanged.
+4. Resume the active Prime seven-scenario worklist. Native Phase 3.2 remains a
+   parallel runtime track; do not substitute it or broad framework refactoring
+   for Prime end-to-end closure.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

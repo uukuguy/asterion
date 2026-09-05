@@ -10,6 +10,7 @@
 | D-2026-08-27-04 | 🟢 active | Quiesce host-owned ecosystem projections before cleanup |
 | D-2026-09-02-05 | 🟢 active | Keep Prime Smoke Core and Smoke Full evidence as distinct closed claims |
 | D-2026-09-02-06 | 🟢 active | Make Prime a full RLM-harness capability program, not a Smoke Full roadmap |
+| D-2026-09-05-01 | 🟢 active | Prime and Native remain parallel runtimes; close Prime's seven end-to-end scenarios first |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -97,3 +98,23 @@
   trusted-local runs cannot satisfy capability acceptance.
 - Evidence: user-approved review on 2026-09-02;
   `docs/superpowers/specs/2026-09-02-asterion-prime-capability-program-design.md`.
+
+## D-2026-09-05-01 — Close Prime's seven scenarios before broad framework adjustment
+
+- Status: 🟢 active
+- Decision: Prime and Native are parallel runtimes. Preserve the unified
+  capability-package framework objective, but first close the existing seven
+  Prime end-to-end reproductions. Native parity is not a dependency.
+- Rationale: The seven-scenario program already contains substantial workload,
+  worker, receipt and compatibility implementation; integrate and verify that
+  work before redirecting effort to broad framework refactoring.
+- Consequence: `PRIME-TYPICAL-APPLICATIONS.md` is the canonical active worklist,
+  beginning with P1's real execution spine and full semantic proof. The earlier
+  assessment's framework-first implementation ordering is superseded; its
+  technical findings remain valid backlog candidates or blocking fixes.
+- Ownership: Astra handles the hardest contract decisions; Terra implements
+  explicit tasks; Luna performs mechanical checks; Sol independently reviews
+  material security/contract changes.
+- Evidence: explicit user correction and model-routing instruction on
+  2026-09-05. This does not promote fake/compatibility evidence or authorize
+  ARC full-suite reproduction, global activation or publication.
