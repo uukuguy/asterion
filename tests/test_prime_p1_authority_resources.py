@@ -34,6 +34,10 @@ from asterion.applications.prime_agent.operator.authority_evidence import (
     AdmittedPrimeP1EvidenceRoot,
     PrimeP1EvidenceResourceError,
 )
+from asterion.applications.prime_agent.operator.authority_executable_lock import (
+    AdmittedPrimeP1AuthorityExecutable,
+    AuthorityExecutableLock,
+)
 from asterion.applications.prime_agent.operator.authority_docker_executable import (
     AdmittedPrimeP1DockerExecutable,
     _ExecutableIdentity,
@@ -151,6 +155,17 @@ def _socket() -> AdmittedPrimeP1DockerSocket:
     )
 
 
+def _authority_executable() -> AdmittedPrimeP1AuthorityExecutable:
+    import asterion.applications.prime_agent.operator.authority_executable_lock as module
+
+    return AdmittedPrimeP1AuthorityExecutable(
+        AuthorityExecutableLock(
+            ImagePlatformDescriptor("linux", "amd64", None), "elf", 1, "d" * 64
+        ),
+        _token=module._TOKEN,
+    )
+
+
 def _artifacts(*, config_sha256: str = "a" * 64) -> tuple[ImageArtifact, ...]:
     """Return a complete, canonically ordered static image artifact set."""
 
@@ -253,6 +268,11 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             patch.object(
                 module, "admit_docker_socket", return_value=socket_resource
             ) as socket,
+            patch.object(
+                module,
+                "admit_promoted_authority_executable",
+                return_value=_authority_executable(),
+            ),
         ):
             resource = admit_production_authority_resources(config)
         docker.assert_called_once_with(config)
@@ -283,6 +303,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             evidence,
             docker,
             socket,
+            _authority_executable(),
             _token=module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
         )
         with patch.object(
@@ -319,6 +340,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             evidence,
             _docker(),
             _socket(),
+            _authority_executable(),
             _token=module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
         )
         with (
@@ -356,12 +378,14 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         )
         docker = _docker()
         socket = _socket()
+        authority_executable = _authority_executable()
         original_static_close = AdmittedStaticAuthorityResources.close
         original_artifacts_close = AdmittedPrimeP1AuthorityArtifacts.close
         original_application_close = AdmittedPrimeP1ApplicationResources.close
         original_evidence_close = AdmittedPrimeP1EvidenceRoot.close
         original_docker_close = AdmittedPrimeP1DockerExecutable.close
         original_socket_close = AdmittedPrimeP1DockerSocket.close
+        original_authority_executable_close = AdmittedPrimeP1AuthorityExecutable.close
 
         def close_static(resource: AdmittedStaticAuthorityResources) -> None:
             events.append("static")
@@ -387,6 +411,12 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             events.append("socket")
             original_socket_close(resource)
 
+        def close_authority_executable(
+            resource: AdmittedPrimeP1AuthorityExecutable,
+        ) -> None:
+            events.append("authority executable")
+            original_authority_executable_close(resource)
+
         def admit_artifacts() -> AdmittedPrimeP1AuthorityArtifacts:
             events.append("artifacts")
             return artifacts
@@ -411,6 +441,10 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             events.append("socket")
             return socket
 
+        def admit_authority_executable(_: object) -> AdmittedPrimeP1AuthorityExecutable:
+            events.append("authority executable")
+            return authority_executable
+
         with (
             patch.object(
                 module, "admit_authority_artifact_lock", side_effect=admit_artifacts
@@ -432,6 +466,11 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             patch.object(
                 module, "admit_docker_socket", side_effect=admit_socket
             ) as admit_socket_mock,
+            patch.object(
+                module,
+                "admit_promoted_authority_executable",
+                side_effect=admit_authority_executable,
+            ) as admit_authority_executable_mock,
             patch.object(
                 AdmittedPrimeP1AuthorityArtifacts,
                 "close",
@@ -468,6 +507,12 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 autospec=True,
                 side_effect=close_socket,
             ),
+            patch.object(
+                AdmittedPrimeP1AuthorityExecutable,
+                "close",
+                autospec=True,
+                side_effect=close_authority_executable,
+            ),
         ):
             resources = admit_production_authority_resources(config)
             admit_artifacts_mock.assert_called_once_with()
@@ -476,6 +521,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             admit_evidence_mock.assert_called_once_with(config)
             admit_docker_mock.assert_called_once_with(config)
             admit_socket_mock.assert_called_once_with(config)
+            admit_authority_executable_mock.assert_called_once_with(config)
             self.assertEqual(
                 repr(resources), "AdmittedProductionAuthorityResources(redacted)"
             )
@@ -495,6 +541,8 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 "evidence",
                 "docker",
                 "socket",
+                "authority executable",
+                "authority executable",
                 "socket",
                 "docker",
                 "evidence",
@@ -851,10 +899,12 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         )
         docker = _docker()
         socket = _socket()
+        authority_executable = _authority_executable()
         original_static_close = AdmittedStaticAuthorityResources.close
         original_evidence_close = AdmittedPrimeP1EvidenceRoot.close
         original_docker_close = AdmittedPrimeP1DockerExecutable.close
         original_socket_close = AdmittedPrimeP1DockerSocket.close
+        original_authority_executable_close = AdmittedPrimeP1AuthorityExecutable.close
 
         def close_static(resource: AdmittedStaticAuthorityResources) -> None:
             events.append("static")
@@ -872,6 +922,12 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             events.append("socket")
             original_socket_close(resource)
 
+        def close_authority_executable(
+            resource: AdmittedPrimeP1AuthorityExecutable,
+        ) -> None:
+            events.append("authority executable")
+            original_authority_executable_close(resource)
+
         with (
             patch.object(
                 module, "admit_static_authority_resources", return_value=static
@@ -879,6 +935,11 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             patch.object(module, "admit_evidence_root", return_value=evidence),
             patch.object(module, "admit_docker_executable", return_value=docker),
             patch.object(module, "admit_docker_socket", return_value=socket),
+            patch.object(
+                module,
+                "admit_promoted_authority_executable",
+                return_value=authority_executable,
+            ),
             patch.object(
                 module, "AdmittedProductionAuthorityResources", side_effect=MemoryError
             ),
@@ -906,10 +967,19 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 autospec=True,
                 side_effect=close_socket,
             ),
+            patch.object(
+                AdmittedPrimeP1AuthorityExecutable,
+                "close",
+                autospec=True,
+                side_effect=close_authority_executable,
+            ),
             self.assertRaises(PrimeP1AuthorityResourceError),
         ):
             admit_production_authority_resources(config)
-        self.assertEqual(events, ["socket", "docker", "evidence", "static"])
+        self.assertEqual(
+            events,
+            ["authority executable", "socket", "docker", "evidence", "static"],
+        )
 
     def test_socket_failure_closes_docker_evidence_then_static_once(self) -> None:
         config = self._config()

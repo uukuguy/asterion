@@ -29,6 +29,13 @@ from asterion.applications.prime_agent.operator.authority_docker_socket import (
 from asterion.applications.prime_agent.operator.authority_evidence import (
     AdmittedPrimeP1EvidenceRoot,
 )
+from asterion.applications.prime_agent.operator.authority_executable_lock import (
+    AdmittedPrimeP1AuthorityExecutable,
+    AuthorityExecutableLock,
+)
+from asterion.applications.prime_agent.operator.image_input_lock import (
+    ImagePlatformDescriptor,
+)
 from asterion.applications.prime_agent.operator.authority_resources import (
     AdmittedProductionAuthorityResources,
     AdmittedStaticAuthorityResources,
@@ -90,11 +97,23 @@ def _socket() -> AdmittedPrimeP1DockerSocket:
     )
 
 
+def _authority_executable() -> AdmittedPrimeP1AuthorityExecutable:
+    import asterion.applications.prime_agent.operator.authority_executable_lock as module
+
+    return AdmittedPrimeP1AuthorityExecutable(
+        AuthorityExecutableLock(
+            ImagePlatformDescriptor("linux", "amd64", None), "elf", 1, "d" * 64
+        ),
+        _token=module._TOKEN,
+    )
+
+
 def _resources() -> AdmittedProductionAuthorityResources:
     import asterion.applications.prime_agent.operator.authority_resources as module
 
     return AdmittedProductionAuthorityResources(
         _artifacts(), _application(), _static(), _evidence(), _docker(), _socket(),
+        _authority_executable(),
         _token=module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
     )
 
@@ -125,6 +144,7 @@ def _real_resources(directory: str) -> AdmittedProductionAuthorityResources:
     import asterion.applications.prime_agent.operator.authority_docker_executable as docker_module
     import asterion.applications.prime_agent.operator.authority_docker_socket as socket_module
     import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
+    import asterion.applications.prime_agent.operator.authority_executable_lock as executable_module
     import asterion.applications.prime_agent.operator.authority_resources as resources_module
     from asterion.applications.prime_agent.operator.authority_seccomp import (
         AdmittedPrimeP1SeccompResource,
@@ -169,6 +189,12 @@ def _real_resources(directory: str) -> AdmittedProductionAuthorityResources:
             "26.1.4",
             _token=socket_module._ADMITTED_DOCKER_SOCKET_TOKEN,
         ),
+        AdmittedPrimeP1AuthorityExecutable(
+            AuthorityExecutableLock(
+                ImagePlatformDescriptor("linux", "amd64", None), "elf", 1, "d" * 64
+            ),
+            _token=executable_module._TOKEN,
+        ),
         _token=resources_module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
     )
 
@@ -200,6 +226,7 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
                         resource._evidence_resource,
                         resource._docker_executable,
                         resource._docker_socket,
+                        resource._authority_executable,
                     ):
                         self.assertIsNotNone(child)
                         contribution = child._resource_set_contribution()
@@ -214,6 +241,7 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
                 "_evidence_resource",
                 "_docker_executable",
                 "_docker_socket",
+                "_authority_executable",
             ):
                 resource = _real_resources(directory)
                 try:
@@ -240,6 +268,7 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
                             resource._evidence_resource,
                             resource._docker_executable,
                             resource._docker_socket,
+                            resource._authority_executable,
                         )
                     )
                     expected = _expected_aggregate_digest(contributions)
@@ -266,6 +295,23 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
                             resource._resource_set_sha256()
                     finally:
                         docker._identity = original
+                    self.assertEqual(baseline, resource._resource_set_sha256())
+            finally:
+                resource.close()
+
+    def test_authority_executable_identity_mutation_is_bound(self) -> None:
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
+            resource = _real_resources(directory)
+            executable = resource._authority_executable
+            try:
+                with patch.object(AdmittedPrimeP1DockerSocket, "revalidate_path"):
+                    baseline = resource._resource_set_sha256()
+                    original = executable._identity
+                    executable._identity = b"e" * 32
+                    try:
+                        self.assertNotEqual(baseline, resource._resource_set_sha256())
+                    finally:
+                        executable._identity = original
                     self.assertEqual(baseline, resource._resource_set_sha256())
             finally:
                 resource.close()
@@ -319,6 +365,7 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
                     resource._evidence_resource,
                     resource._docker_executable,
                     resource._docker_socket,
+                    resource._authority_executable,
                 )
                 originals = tuple(type(child)._resource_set_contribution for child in children)
                 labels = (
@@ -328,17 +375,18 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
                     "evidence",
                     "docker executable",
                     "docker socket",
+                    "authority executable",
                 )
                 patches = [
                     patch.object(
                         type(child),
                         "_resource_set_contribution",
                         autospec=True,
-                        side_effect=lambda child, original=original: (
-                            events.append(labels[len(events)]), original(child)
+                        side_effect=lambda child, original=original, label=label: (
+                            events.append(label), original(child)
                         )[1],
                     )
-                    for child, original in zip(children, originals, strict=True)
+                    for child, original, label in zip(children, originals, labels, strict=True)
                 ]
                 with ExitStack() as stack:
                     for contribution_patch in patches:
@@ -368,6 +416,7 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
                         "docker executable",
                         "docker socket",
                         "socket-revalidate",
+                        "authority executable",
                         "docker-final",
                         "socket-revalidate",
                     ],

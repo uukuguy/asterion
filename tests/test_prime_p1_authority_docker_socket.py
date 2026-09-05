@@ -54,12 +54,17 @@ def _config(
 
 class TestPrimeP1AuthorityDockerSocket(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(dir=Path.cwd())
+        # AF_UNIX pathname limits are much shorter than promotion worktree paths.
+        # The test fixture still uses real filesystem ancestry, while the focused
+        # admission assertions retain their explicit unsafe-subtree coverage.
+        self.temporary = tempfile.TemporaryDirectory(dir=Path.home())
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.safe = self.root / "safe"
         self.safe.mkdir(mode=0o755)
         self.socket = self.safe / "docker.sock"
         self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(self.listener.close)
         self.listener.bind(str(self.socket))
         self.socket.chmod(0o600)
         self.final_link = self.safe / "socket-link"
@@ -70,13 +75,12 @@ class TestPrimeP1AuthorityDockerSocket(unittest.TestCase):
         self.writable.mkdir(mode=0o755)
         self.writable_socket = self.writable / "docker.sock"
         self.writable_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(self.writable_listener.close)
         self.writable_listener.bind(str(self.writable_socket))
         self.writable_socket.chmod(0o600)
 
     def tearDown(self) -> None:
-        self.listener.close()
-        self.writable_listener.close()
-        self.temporary.cleanup()
+        pass
 
     @staticmethod
     def _root_owned_stat(fd: int) -> os.stat_result:
@@ -567,6 +571,25 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         finally:
             client.close()
 
+    def test_new_daemon_client_accepts_stdlib_socketkind_atomic_flags(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        cloexec = getattr(socket, "SOCK_CLOEXEC", None)
+        nonblock = getattr(socket, "SOCK_NONBLOCK", None)
+        if (
+            not isinstance(cloexec, int)
+            or not isinstance(nonblock, int)
+            or type(cloexec) is int
+            or type(nonblock) is int
+        ):
+            self.skipTest("stdlib socket flags are unavailable or plain integers")
+        client = module._new_daemon_client()
+        try:
+            self.assertFalse(client.getblocking())
+            self.assertFalse(client.get_inheritable())
+        finally:
+            client.close()
+
     def test_new_daemon_client_constructs_with_atomic_cloexec_and_nonblock_flags(self) -> None:
         import asterion.applications.prime_agent.operator.authority_docker_socket as module
 
@@ -787,14 +810,16 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         for replacement_call in (1, 2, 3):
             with self.subTest(replacement_call=replacement_call):
                 # A distinct fixture is needed because replacing a Unix path is irreversible.
-                with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+                with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
                     safe = Path(directory) / "safe"
                     safe.mkdir(mode=0o755)
                     path = safe / "docker.sock"
                     listener = _SOCKET(socket.AF_UNIX, socket.SOCK_STREAM)
+                    self.addCleanup(listener.close)
                     listener.bind(str(path))
                     path.chmod(0o600)
                     listener.listen(1)
+                    listener.settimeout(0.2)
                     accepted = threading.Event()
 
                     def serve() -> None:
@@ -848,6 +873,7 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
                     resource.close()
                     listener.close()
                     server.join(1)
+                    self.assertFalse(server.is_alive())
 
     def test_projection_probe_after_close_concurrent_and_close_during_are_safe(
         self,

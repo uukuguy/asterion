@@ -44,3 +44,28 @@ class TestPrimeP1AuthorityExecutableLock(unittest.TestCase):
                 with patch.object(module, "PRIME_P1_PROMOTED_AUTHORITY_EXECUTABLE_CATALOG", (lock,)):
                     with self.assertRaises(PrimeP1AuthorityResourceError):
                         module.resolve_promoted_authority_executable_lock(target)
+
+    def test_admitted_identity_contributes_only_selected_digest_until_closed(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_executable_lock as module
+
+        admitted = module.AdmittedPrimeP1AuthorityExecutable(
+            module.AuthorityExecutableLock(
+                module.ImagePlatformDescriptor("linux", "arm64", None),
+                "elf",
+                1,
+                "a" * 64,
+            ),
+            _token=module._TOKEN,
+        )
+        self.assertEqual(
+            admitted._resource_set_contribution(),
+            b"authority-executable\0"
+            + (6).to_bytes(4, "big")
+            + b"sha256"
+            + (32).to_bytes(8, "big")
+            + bytes.fromhex("a" * 64),
+        )
+        admitted.close()
+        admitted.close()
+        with self.assertRaises(ValueError):
+            admitted._resource_set_contribution()

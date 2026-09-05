@@ -7,7 +7,7 @@ import hashlib
 import threading
 import asyncio
 from dataclasses import dataclass
-from typing import SupportsIndex
+from typing import NoReturn, SupportsIndex, cast
 
 from .authority_config import PrimeP1OperatorConfig
 from .image_input_lock import (
@@ -77,10 +77,10 @@ class AdmittedStaticAuthorityResources:
     def __repr__(self) -> str:
         return "AdmittedStaticAuthorityResources(redacted)"
 
-    def __reduce__(self) -> object:
+    def __reduce__(self) -> NoReturn:
         raise TypeError("prime P1 authority resource is unavailable")
 
-    def __reduce_ex__(self, _: SupportsIndex) -> object:
+    def __reduce_ex__(self, _: SupportsIndex) -> NoReturn:
         raise TypeError("prime P1 authority resource is unavailable")
 
     def __copy__(self) -> object:
@@ -131,6 +131,7 @@ class AdmittedProductionAuthorityResources:
         "_artifacts",
         "_docker_executable",
         "_docker_socket",
+        "_authority_executable",
         "_evidence_resource",
         "_lock",
         "_static_resources",
@@ -144,11 +145,13 @@ class AdmittedProductionAuthorityResources:
         evidence_resource: AdmittedPrimeP1EvidenceRoot,
         docker_executable: AdmittedPrimeP1DockerExecutable,
         docker_socket: AdmittedPrimeP1DockerSocket,
+        authority_executable: object | None = None,
         *,
         _token: object | None = None,
     ) -> None:
         from .authority_artifact_lock import AdmittedPrimeP1AuthorityArtifacts
         from .authority_application_resources import AdmittedPrimeP1ApplicationResources
+        from .authority_executable_lock import AdmittedPrimeP1AuthorityExecutable
 
         if (
             type(self) is not AdmittedProductionAuthorityResources
@@ -159,6 +162,7 @@ class AdmittedProductionAuthorityResources:
             or type(evidence_resource) is not AdmittedPrimeP1EvidenceRoot
             or type(docker_executable) is not AdmittedPrimeP1DockerExecutable
             or type(docker_socket) is not AdmittedPrimeP1DockerSocket
+            or type(authority_executable) is not AdmittedPrimeP1AuthorityExecutable
         ):
             raise PrimeP1AuthorityResourceError() from None
         self._artifacts: AdmittedPrimeP1AuthorityArtifacts | None = artifacts
@@ -167,15 +171,16 @@ class AdmittedProductionAuthorityResources:
         self._evidence_resource: AdmittedPrimeP1EvidenceRoot | None = evidence_resource
         self._docker_executable: AdmittedPrimeP1DockerExecutable | None = docker_executable
         self._docker_socket: AdmittedPrimeP1DockerSocket | None = docker_socket
+        self._authority_executable: AdmittedPrimeP1AuthorityExecutable | None = authority_executable
         self._lock = threading.Lock()
 
     def __repr__(self) -> str:
         return "AdmittedProductionAuthorityResources(redacted)"
 
-    def __reduce__(self) -> object:
+    def __reduce__(self) -> NoReturn:
         raise TypeError("prime P1 authority resource is unavailable")
 
-    def __reduce_ex__(self, _: SupportsIndex) -> object:
+    def __reduce_ex__(self, _: SupportsIndex) -> NoReturn:
         raise TypeError("prime P1 authority resource is unavailable")
 
     def __copy__(self) -> object:
@@ -188,18 +193,28 @@ class AdmittedProductionAuthorityResources:
         """Release owned children once, in reverse acquisition order."""
         with self._lock:
             socket = self._docker_socket
+            authority_executable = self._authority_executable
             docker = self._docker_executable
             evidence = self._evidence_resource
             static = self._static_resources
             application = self._application_resources
             artifacts = self._artifacts
             self._docker_socket = None
+            self._authority_executable = None
             self._docker_executable = None
             self._evidence_resource = None
             self._static_resources = None
             self._application_resources = None
             self._artifacts = None
-        for resource in (socket, docker, evidence, static, application, artifacts):
+        for resource in (
+            authority_executable,
+            socket,
+            docker,
+            evidence,
+            static,
+            application,
+            artifacts,
+        ):
             if resource is not None:
                 try:
                     resource.close()
@@ -228,6 +243,7 @@ class AdmittedProductionAuthorityResources:
         """Return the complete opaque identity of exactly this live resource set."""
         from .authority_artifact_lock import AdmittedPrimeP1AuthorityArtifacts
         from .authority_application_resources import AdmittedPrimeP1ApplicationResources
+        from .authority_executable_lock import AdmittedPrimeP1AuthorityExecutable
 
         failed = False
         result = ""
@@ -239,6 +255,7 @@ class AdmittedProductionAuthorityResources:
                 evidence = self._evidence_resource
                 docker = self._docker_executable
                 socket = self._docker_socket
+                authority_executable = self._authority_executable
             children = (
                 (b"authority-artifacts", artifacts, AdmittedPrimeP1AuthorityArtifacts),
                 (b"application-resources", application, AdmittedPrimeP1ApplicationResources),
@@ -246,17 +263,30 @@ class AdmittedProductionAuthorityResources:
                 (b"evidence-root", evidence, AdmittedPrimeP1EvidenceRoot),
                 (b"docker-executable", docker, AdmittedPrimeP1DockerExecutable),
                 (b"docker-socket", socket, AdmittedPrimeP1DockerSocket),
+                (b"authority-executable", authority_executable, AdmittedPrimeP1AuthorityExecutable),
             )
             if any(type(child) is not expected for _, child, expected in children):
                 raise ValueError
+            admitted_children = cast(
+                tuple[
+                    tuple[bytes, AdmittedPrimeP1AuthorityArtifacts, type[AdmittedPrimeP1AuthorityArtifacts]],
+                    tuple[bytes, AdmittedPrimeP1ApplicationResources, type[AdmittedPrimeP1ApplicationResources]],
+                    tuple[bytes, AdmittedStaticAuthorityResources, type[AdmittedStaticAuthorityResources]],
+                    tuple[bytes, AdmittedPrimeP1EvidenceRoot, type[AdmittedPrimeP1EvidenceRoot]],
+                    tuple[bytes, AdmittedPrimeP1DockerExecutable, type[AdmittedPrimeP1DockerExecutable]],
+                    tuple[bytes, AdmittedPrimeP1DockerSocket, type[AdmittedPrimeP1DockerSocket]],
+                    tuple[bytes, AdmittedPrimeP1AuthorityExecutable, type[AdmittedPrimeP1AuthorityExecutable]],
+                ],
+                children,
+            )
             contributions: list[bytes] = []
-            for kind, child, _ in children:
+            for kind, child, _ in admitted_children:
                 contribution = child._resource_set_contribution()
                 if type(contribution) is not bytes or not contribution.startswith(kind + b"\0"):
                     raise ValueError
                 contributions.append(contribution)
-            docker.revalidate_for_spawn()
-            socket.revalidate_path()
+            admitted_children[4][1].revalidate_for_spawn()
+            admitted_children[5][1].revalidate_path()
             digest = hashlib.sha256(_RESOURCE_SET_DOMAIN)
             for contribution in contributions:
                 digest.update(_length_delimited(contribution))
@@ -356,6 +386,7 @@ def admit_production_authority_resources(
     evidence: AdmittedPrimeP1EvidenceRoot | None = None
     docker: AdmittedPrimeP1DockerExecutable | None = None
     socket: AdmittedPrimeP1DockerSocket | None = None
+    authority_executable: object | None = None
     result: AdmittedProductionAuthorityResources | None = None
     try:
         artifacts_candidate = admit_authority_artifact_lock()
@@ -382,6 +413,12 @@ def admit_production_authority_resources(
         if type(socket_candidate) is not AdmittedPrimeP1DockerSocket:
             raise ValueError
         socket = socket_candidate
+        authority_executable_candidate = admit_promoted_authority_executable(config)
+        from .authority_executable_lock import AdmittedPrimeP1AuthorityExecutable
+
+        if type(authority_executable_candidate) is not AdmittedPrimeP1AuthorityExecutable:
+            raise ValueError
+        authority_executable = authority_executable_candidate
         result = AdmittedProductionAuthorityResources(
             artifacts,
             application,
@@ -389,6 +426,7 @@ def admit_production_authority_resources(
             evidence,
             docker,
             socket,
+            authority_executable,
             _token=_PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
         )
         artifacts = None
@@ -397,10 +435,19 @@ def admit_production_authority_resources(
         evidence = None
         docker = None
         socket = None
+        authority_executable = None
     except BaseException:
         pass
     finally:
-        for resource in (socket, docker, evidence, static, application, artifacts):
+        for resource in (
+            authority_executable,
+            socket,
+            docker,
+            evidence,
+            static,
+            application,
+            artifacts,
+        ):
             if resource is not None:
                 try:
                     resource.close()
@@ -423,6 +470,25 @@ def admit_prime_p1_application_resources() -> object:
     from .authority_application_resources import admit_prime_p1_application_resources as admit
 
     return admit()
+
+
+def admit_promoted_authority_executable(config: object) -> object:
+    """Admit the promoted authority executable for the selected image target."""
+    try:
+        if type(config) is not PrimeP1OperatorConfig:
+            raise ValueError
+        values = config._values
+        variant = values["ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT"]
+        target = ImagePlatformDescriptor(
+            values["ASTERION_PRIME_P1_IMAGE_PLATFORM_OS"],
+            values["ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE"],
+            None if variant == "none" else variant,
+        )
+        from .authority_executable_lock import admit_promoted_authority_executable as admit
+
+        return admit(target)
+    except BaseException:
+        raise PrimeP1AuthorityResourceError() from None
 
 
 def admit_static_image_resource(config: object) -> ImageInputLock:

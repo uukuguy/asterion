@@ -328,7 +328,12 @@ def _valid_deadline(value: object) -> bool:
 def _new_daemon_client() -> socket.socket:
     cloexec = getattr(socket, "SOCK_CLOEXEC", None)
     nonblock = getattr(socket, "SOCK_NONBLOCK", None)
-    if type(cloexec) is not int or type(nonblock) is not int or not cloexec or not nonblock:
+    if (
+        not isinstance(cloexec, int)
+        or not isinstance(nonblock, int)
+        or not cloexec
+        or not nonblock
+    ):
         raise ValueError
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | cloexec | nonblock)
     try:
