@@ -10,6 +10,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.authority_config import (
@@ -980,6 +981,103 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                 ):
                     resource._consume_sealed_memfd()
                 sealed.assert_not_called()
+
+    def test_sealed_memfd_post_allocation_failures_close_the_transient_fd(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+
+        add, get, write, grow, shrink, seal = 101, 102, 4, 8, 16, 32
+        expected_seals = write | grow | shrink | seal
+        cases = {
+            "write": (OSError("write"), None, None),
+            "size": (None, OSError("size"), None),
+            "seek": (None, None, 1),
+            "add-seals": (None, None, None),
+            "get-seals": (None, None, None),
+            "final-cloexec": (None, None, None),
+        }
+        for name, (write_effect, fstat_effect, seek_result) in cases.items():
+            with self.subTest(name=name):
+                closed: list[int] = []
+                getfd_calls = 0
+
+                def fcntl_call(fd: int, command: int, value: object = None) -> int:
+                    nonlocal getfd_calls
+                    self.assertEqual(fd, 73)
+                    if command == module.fcntl.F_GETFD:
+                        getfd_calls += 1
+                        return 0 if name == "final-cloexec" and getfd_calls == 2 else module.fcntl.FD_CLOEXEC
+                    if command == add:
+                        if name == "add-seals":
+                            raise OSError("add")
+                        self.assertEqual(value, expected_seals)
+                        return 0
+                    if command == get:
+                        return 0 if name == "get-seals" else expected_seals
+                    self.fail(f"unexpected fcntl command: {command}")
+
+                with (
+                    patch.object(module.sys, "platform", "linux"),
+                    patch.object(module.os, "memfd_create", return_value=73, create=True),
+                    patch.object(module.os, "MFD_CLOEXEC", 64, create=True),
+                    patch.object(module.os, "MFD_ALLOW_SEALING", 128, create=True),
+                    patch.object(module.fcntl, "F_ADD_SEALS", add, create=True),
+                    patch.object(module.fcntl, "F_GET_SEALS", get, create=True),
+                    patch.object(module.fcntl, "F_SEAL_WRITE", write, create=True),
+                    patch.object(module.fcntl, "F_SEAL_GROW", grow, create=True),
+                    patch.object(module.fcntl, "F_SEAL_SHRINK", shrink, create=True),
+                    patch.object(module.fcntl, "F_SEAL_SEAL", seal, create=True),
+                    patch.object(module.fcntl, "fcntl", side_effect=fcntl_call),
+                    patch.object(module.os, "write", side_effect=write_effect or (lambda _, data: len(data))),
+                    patch.object(module.os, "fstat", side_effect=fstat_effect or (lambda _: SimpleNamespace(st_size=len(_PROFILE)))),
+                    patch.object(module.os, "lseek", return_value=0 if seek_result is None else seek_result),
+                    patch.object(module.os, "close", side_effect=closed.append),
+                ):
+                    with self.assertRaises((OSError, ValueError)):
+                        module._make_sealed_memfd(_PROFILE)
+                self.assertEqual(closed, [73])
+
+    def test_failed_consume_is_terminal_without_revalidation_or_memfd_effects(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+            revalidate_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                with (
+                    patch.object(module, "_make_sealed_memfd", side_effect=OSError("sealed")),
+                    self.assertRaises(PrimeP1AuthorityResourceError) as first,
+                ):
+                    resource._consume_sealed_memfd()
+                self.assertIsNone(first.exception.__context__)
+                with (
+                    patch.object(module, "_open_profile", side_effect=AssertionError("profile")) as opened,
+                    patch.object(module, "_make_sealed_memfd", side_effect=AssertionError("memfd")) as sealed,
+                    self.assertRaises(PrimeP1AuthorityResourceError) as second,
+                ):
+                    resource._consume_sealed_memfd()
+                self.assertIsNone(second.exception.__context__)
+                opened.assert_not_called()
+                sealed.assert_not_called()
+                with (
+                    patch.object(module, "_open_profile", side_effect=AssertionError("profile")) as opened,
+                    self.assertRaises(PrimeP1AuthorityResourceError) as revalidated,
+                ):
+                    revalidate_static_seccomp_resource(resource)
+                self.assertIsNone(revalidated.exception.__context__)
+                opened.assert_not_called()
 
 
 if __name__ == "__main__":
