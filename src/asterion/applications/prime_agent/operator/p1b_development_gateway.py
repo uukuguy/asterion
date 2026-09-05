@@ -1,23 +1,37 @@
-"""Private, bounded Python transport for the P1 development Node bridge."""
+"""Private fixed-flow Python gateway for the P1-B Node development bridge."""
 
 from __future__ import annotations
 import asyncio
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 from .development_gateway_transport import DevelopmentGatewayTransport, Hook, _absolute
 
-_PROTOCOL: Final = "asterion.prime-p1-development-gateway/v1"
+_PROTOCOL: Final = "asterion.prime-p1-b-development-gateway/v1"
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_WITNESS = frozenset(
+    (
+        "compact_called",
+        "succeeded",
+        "start_count",
+        "end_count",
+        "message_count_before",
+        "message_count_after",
+        "tokens_before",
+        "first_kept_entry_id_sha256",
+    )
+)
 
 
-class PrimeP1DevelopmentGatewayError(ValueError):
+class PrimeP1BDevelopmentGatewayError(ValueError):
     def __init__(self, *_: object) -> None:
-        super().__init__("prime P1 development gateway is unavailable")
+        super().__init__("prime P1-B development gateway is unavailable")
 
 
-class PrimeP1DevelopmentGateway(DevelopmentGatewayTransport):
-    """One private inherited-FD bridge session with synchronous and async APIs."""
+class PrimeP1BDevelopmentGateway(DevelopmentGatewayTransport):
+    """A one-shot ``open → prompt1 → compact → prompt2 → close`` bridge."""
 
     __slots__ = ("_state",)
 
@@ -34,7 +48,7 @@ class PrimeP1DevelopmentGateway(DevelopmentGatewayTransport):
             super().__init__(
                 protocol=_PROTOCOL,
                 default_entrypoint=Path(__file__).resolve().parents[5]
-                / "packages/typescript/prime-gateway/dist/src/p1-development-main.js",
+                / "packages/typescript/prime-gateway/dist/src/p1b-development-main.js",
                 model_hook=model_hook,
                 tool_hook=tool_hook,
                 node_bin=node_bin,
@@ -42,11 +56,11 @@ class PrimeP1DevelopmentGateway(DevelopmentGatewayTransport):
                 deadline_seconds=deadline_seconds,
             )
         except ValueError:
-            raise PrimeP1DevelopmentGatewayError() from None
+            raise PrimeP1BDevelopmentGatewayError() from None
         self._state = "new"
 
     def __repr__(self) -> str:
-        return "PrimeP1DevelopmentGateway(redacted)"
+        return "PrimeP1BDevelopmentGateway(redacted)"
 
     async def open(
         self,
@@ -101,64 +115,92 @@ class PrimeP1DevelopmentGateway(DevelopmentGatewayTransport):
                 )
                 if frame["payload"] != {}:
                     raise ValueError()
-                self._state = "open"
+                self._state = "prompt1"
             except BaseException:
                 self._fail()
-                raise PrimeP1DevelopmentGatewayError() from None
+                raise PrimeP1BDevelopmentGatewayError() from None
 
     async def prompt(self, prompt: str) -> Mapping[str, object]:
         self._event_loop = asyncio.get_running_loop()
         try:
             return await asyncio.to_thread(self.prompt_sync, prompt)
         except asyncio.CancelledError:
-            await asyncio.shield(asyncio.to_thread(self._abort_active_prompt))
+            await asyncio.shield(asyncio.to_thread(self._abort_active))
             raise
 
     def prompt_sync(self, prompt: str) -> Mapping[str, object]:
         with self._lock:
             try:
-                if self._state != "open" or type(prompt) is not str or not prompt:
+                if (
+                    self._state not in {"prompt1", "prompt2"}
+                    or type(prompt) is not str
+                    or not prompt
+                ):
                     raise ValueError()
-                self._state = "prompt"
+                phase = self._state
+                self._state = "active"
                 frame = self._receive_until(
                     self._send(
                         "prompt", self._next_request_id("prompt"), {"prompt": prompt}
                     ),
                     {"command.result"},
                 )
-                result = frame["payload"].get("result")
-                if type(result) is not dict:
-                    raise ValueError()
-                self._state = "open"
+                result = _safe_prompt_result(frame["payload"].get("result"))
+                self._state = "compact" if phase == "prompt1" else "close_ready"
                 return result
             except BaseException:
                 self._fail()
-                raise PrimeP1DevelopmentGatewayError() from None
+                raise PrimeP1BDevelopmentGatewayError() from None
+
+    async def compact(self) -> Mapping[str, object]:
+        self._event_loop = asyncio.get_running_loop()
+        try:
+            return await asyncio.to_thread(self.compact_sync)
+        except asyncio.CancelledError:
+            await asyncio.shield(asyncio.to_thread(self._abort_active))
+            raise
+
+    def compact_sync(self) -> Mapping[str, object]:
+        with self._lock:
+            try:
+                if self._state != "compact":
+                    raise ValueError()
+                self._state = "active"
+                frame = self._receive_until(
+                    self._send("compact", self._next_request_id("compact"), {}),
+                    {"command.result"},
+                )
+                result = _safe_witness(frame["payload"].get("result"))
+                self._state = "prompt2"
+                return result
+            except BaseException:
+                self._fail()
+                raise PrimeP1BDevelopmentGatewayError() from None
 
     async def cancel(self) -> Mapping[str, object]:
         self._event_loop = asyncio.get_running_loop()
-        if self._state == "prompt":
-            await asyncio.shield(asyncio.to_thread(self._abort_active_prompt))
-            raise PrimeP1DevelopmentGatewayError()
+        if self._state != "prompt1":
+            await asyncio.shield(asyncio.to_thread(self._abort_active))
+            raise PrimeP1BDevelopmentGatewayError()
         return await asyncio.to_thread(self.cancel_sync)
 
     def cancel_sync(self) -> Mapping[str, object]:
         with self._lock:
             try:
-                if self._state != "open":
+                if self._state != "prompt1":
                     raise ValueError()
                 frame = self._receive_until(
                     self._send("cancel", self._next_request_id("cancel"), {}),
                     {"command.result"},
                 )
                 result = frame["payload"].get("result")
-                if type(result) is not dict or result.get("lifecycle") != "cancelled":
+                if result != {"lifecycle": "cancelled"}:
                     raise ValueError()
                 self._state = "cancelled"
-                return result
+                return {"lifecycle": "cancelled"}
             except BaseException:
                 self._fail()
-                raise PrimeP1DevelopmentGatewayError() from None
+                raise PrimeP1BDevelopmentGatewayError() from None
 
     async def close(self) -> None:
         self._event_loop = asyncio.get_running_loop()
@@ -166,10 +208,10 @@ class PrimeP1DevelopmentGateway(DevelopmentGatewayTransport):
 
     def close_sync(self) -> None:
         with self._lock:
-            if self._state in {"closed", "failed"}:
+            if self._state == "closed":
                 return
             try:
-                if self._state not in {"open", "cancelled"}:
+                if self._state not in {"close_ready", "cancelled"}:
                     raise ValueError()
                 frame = self._receive_until(
                     self._send("close", self._next_request_id("close"), {}),
@@ -181,13 +223,16 @@ class PrimeP1DevelopmentGateway(DevelopmentGatewayTransport):
                 self._reap(graceful=True)
             except BaseException:
                 self._fail()
-                raise PrimeP1DevelopmentGatewayError() from None
+                raise PrimeP1BDevelopmentGatewayError() from None
 
     async def aopen(self, **kwargs: object) -> None:
         await self.open(**kwargs)
 
     async def aprompt(self, prompt: str) -> Mapping[str, object]:
         return await self.prompt(prompt)
+
+    async def acompact(self) -> Mapping[str, object]:
+        return await self.compact()
 
     async def acancel(self) -> Mapping[str, object]:
         return await self.cancel()
@@ -199,8 +244,44 @@ class PrimeP1DevelopmentGateway(DevelopmentGatewayTransport):
         self._state = "failed"
         self._fail_transport()
 
-    def _abort_active_prompt(self) -> None:
+    def _abort_active(self) -> None:
         self._fail()
 
 
-__all__ = ("PrimeP1DevelopmentGateway", "PrimeP1DevelopmentGatewayError")
+def _safe_prompt_result(value: object) -> dict[str, object]:
+    if type(value) is not dict or value.get("lifecycle") not in {
+        "completed",
+        "cancelled",
+    }:
+        raise ValueError()
+    lifecycle = value["lifecycle"]
+    # The child result is intentionally projected: no provider/model or payload data crosses this boundary.
+    return {"lifecycle": lifecycle}
+
+
+def _safe_witness(value: object) -> dict[str, object]:
+    if (
+        type(value) is not dict
+        or set(value) != _WITNESS
+        or value["compact_called"] is not True
+        or value["succeeded"] is not True
+    ):
+        raise ValueError()
+    if any(
+        type(value[key]) is not int or value[key] < 0
+        for key in (
+            "start_count",
+            "end_count",
+            "message_count_before",
+            "message_count_after",
+            "tokens_before",
+        )
+    ):
+        raise ValueError()
+    digest = value["first_kept_entry_id_sha256"]
+    if type(digest) is not str or not _DIGEST.fullmatch(digest):
+        raise ValueError()
+    return {key: value[key] for key in sorted(_WITNESS)}
+
+
+__all__ = ("PrimeP1BDevelopmentGateway", "PrimeP1BDevelopmentGatewayError")
