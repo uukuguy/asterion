@@ -183,7 +183,7 @@ async def _trace_issued_live_run(live_run: IpythonHostLiveRun) -> IpythonHostTra
 
         revocation = await operations.revoke_broker(lease)
         broker_revoked = True
-        _record_broker_revocation(supervisor, lease, revocation)
+        _record_broker_revocation(supervisor, identity, lease, revocation)
         _check_cancel(signal, supervisor)
     except asyncio.CancelledError:
         if supervisor is not None:
@@ -257,7 +257,8 @@ def _record_brokered_cell(
         or usage.run_id != lease.run_id
         or usage.worker_id != lease.worker_id
         or usage.challenge_digest != lease.challenge_digest
-        or usage.request_count != 1
+        or type(usage.request_count) is not int
+        or usage.request_count != identity.expected_provider_request_count
         or usage.input_bytes <= 0
         or usage.output_bytes <= 0
     ):
@@ -284,7 +285,10 @@ def _record_post(supervisor: IpythonHostSupervisor, snapshot: object) -> None:
 
 
 def _record_broker_revocation(
-    supervisor: IpythonHostSupervisor, lease: RestrictedWorkerLease, receipt: object
+    supervisor: IpythonHostSupervisor,
+    identity: IpythonHostExpectedIdentity,
+    lease: RestrictedWorkerLease,
+    receipt: object,
 ) -> None:
     if (
         type(receipt) is not PrimeModelBrokerReceipt
@@ -293,7 +297,8 @@ def _record_broker_revocation(
         or receipt.run_id != lease.run_id
         or receipt.worker_id != lease.worker_id
         or receipt.challenge_digest != lease.challenge_digest
-        or receipt.request_count != 1
+        or type(receipt.request_count) is not int
+        or receipt.request_count != identity.expected_provider_request_count
         or receipt.input_bytes <= 0
         or receipt.output_bytes <= 0
     ):

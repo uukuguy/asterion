@@ -51,6 +51,7 @@ class IpythonHostExpectedIdentity:
     oracle_digest: str
     starter_digest: str
     source_digest: str
+    expected_provider_request_count: int = 1
 
     def __repr__(self) -> str:
         return "IpythonHostExpectedIdentity(redacted)"
@@ -268,7 +269,7 @@ class IpythonHostSupervisor:
             or len(cell) > _MAX_SOURCE_BYTES
             or not _valid_digest(bounded_model_digest)
             or type(request_count) is not int
-            or request_count != 1
+            or request_count != self._expected.expected_provider_request_count
             or type(input_bytes) is not int
             or input_bytes <= 0
             or type(output_bytes) is not int
@@ -301,7 +302,8 @@ class IpythonHostSupervisor:
         self._require_stage(3)
         if (
             type(session_id) is not str or not session_id
-            or type(request_count) is not int or request_count != 1
+            or type(request_count) is not int
+            or request_count != self._expected.expected_provider_request_count
             or type(input_bytes) is not int or input_bytes <= 0
             or type(output_bytes) is not int or output_bytes <= 0
         ):
@@ -333,7 +335,9 @@ class IpythonHostSupervisor:
 
     def record_brokered_cell(self, receipt: object) -> None:
         self._require_stage(1)
-        if self._cell is not None or not _valid_cell(receipt, self._issuer, "cell", 2):
+        if self._cell is not None or not _valid_cell(
+            receipt, self._issuer, "cell", 2, self._expected
+        ):
             _invalid()
         attestation = cast(_Cell, receipt)
         if attestation.identity != self._expected:
@@ -359,7 +363,9 @@ class IpythonHostSupervisor:
 
     def record_broker_revoked(self, receipt: object) -> None:
         self._require_stage(3)
-        if not _valid_revocation(receipt, self._issuer, 4):
+        if not _valid_revocation(
+            receipt, self._issuer, 4, self._expected.expected_provider_request_count
+        ):
             _invalid()
         self._revocation = cast(_Revocation, receipt)
         self._sequence = 4
@@ -401,6 +407,7 @@ class IpythonHostSupervisor:
                 self._expected.oracle_digest,
                 self._expected.starter_digest,
                 self._expected.source_digest,
+                self._expected.expected_provider_request_count,
             ),
             "model": (
                 cell.model_digest,
@@ -462,19 +469,26 @@ def _valid_snapshot(value: object, issuer: object, stage: str, sequence: int) ->
     )
 
 
-def _valid_cell(value: object, issuer: object, stage: str, sequence: int) -> bool:
+def _valid_cell(
+    value: object,
+    issuer: object,
+    stage: str,
+    sequence: int,
+    expected_identity: IpythonHostExpectedIdentity,
+) -> bool:
     if type(value) is not _Cell or value.issuer is not issuer:
         return False
     tools = value.tools
     return (
         _valid_identity(value.identity)
+        and value.identity == expected_identity
         and value.version == _ATTESTATION_VERSION
         and value.stage == stage
         and value.sequence == sequence
         and _valid_digest(value.digest)
         and _valid_digest(value.model_digest)
         and type(value.request_count) is int
-        and value.request_count == 1
+        and value.request_count == expected_identity.expected_provider_request_count
         and type(value.input_bytes) is int
         and value.input_bytes > 0
         and type(value.output_bytes) is int
@@ -518,15 +532,20 @@ def _valid_identity(value: object) -> bool:
         and value.oracle_digest == _ORACLE_DIGEST
         and value.starter_digest == _STARTER_DIGEST
         and value.source_digest == _SOURCE_DIGEST
+        and type(value.expected_provider_request_count) is int
+        and value.expected_provider_request_count in {1, 2}
     )
 
 
-def _valid_revocation(value: object, issuer: object, sequence: int) -> bool:
+def _valid_revocation(
+    value: object, issuer: object, sequence: int, expected_provider_request_count: int
+) -> bool:
     return (
         type(value) is _Revocation and value.issuer is issuer
         and value.version == _ATTESTATION_VERSION and value.stage == "revocation"
         and value.sequence == sequence and type(value.session_id) is str and bool(value.session_id)
-        and type(value.request_count) is int and value.request_count == 1
+        and type(value.request_count) is int
+        and value.request_count == expected_provider_request_count
         and type(value.input_bytes) is int and value.input_bytes > 0
         and type(value.output_bytes) is int and value.output_bytes > 0
     )
