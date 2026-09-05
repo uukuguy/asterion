@@ -294,7 +294,7 @@ def _run_ready_execute_exchange(
             except Exception:
                 pass
         descriptor_mro = type.__getattribute__(type(descriptors), "__mro__")
-        if AdmittedAuthorityDescriptors in descriptor_mro:
+        if any(base is AdmittedAuthorityDescriptors for base in descriptor_mro):
             try:
                 AdmittedAuthorityDescriptors.close(descriptors)
             except Exception:

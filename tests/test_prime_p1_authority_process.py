@@ -421,6 +421,22 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             "".join(traceback.format_exception(raised.exception)),
         )
 
+    def test_descriptor_cleanup_ancestry_never_uses_hostile_equality(self) -> None:
+        class EqualityTrap(type):
+            def __eq__(self, _: object) -> bool:
+                raise BaseException("MRO_EQUALITY_SENTINEL")
+
+        class TrappedDescriptor(metaclass=EqualityTrap):
+            pass
+
+        with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+            cast(Any, _run_ready_execute_exchange)(TrappedDescriptor(), "a" * 64)
+        self.assertIsNone(raised.exception.__context__)
+        self.assertNotIn(
+            "MRO_EQUALITY_SENTINEL",
+            "".join(traceback.format_exception(raised.exception)),
+        )
+
     def test_pre_ready_resource_gate_rejects_legacy_digest_arguments(self) -> None:
         with self.assertRaises(TypeError):
             cast(Any, _run_ready_execute_exchange)(
