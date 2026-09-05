@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import unittest
 from time import monotonic
+import asyncio
 
 from asterion.applications.prime_agent.operator.docker_worker import DockerWorkerLauncherSelfCheck
 from asterion.applications.prime_agent.operator.p1b_development_docker import (
-    P1BDockerCompletion, P1BDockerPersistentWorkerService, P1BDockerCliTransport,
+    P1BDockerCompletion, P1BDockerPersistentWorkerService, P1BDockerCliTransport, _reap_process,
 )
 from asterion.applications.prime_agent.operator.docker_cli import DockerCliResult
 from asterion.applications.prime_agent.operator.docker_worker import _LifecycleCallControl
@@ -40,6 +41,23 @@ class _Transport:
 
 
 class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
+    async def test_reap_completes_wait_before_propagating_cancellation(self) -> None:
+        released = asyncio.Event()
+        class Process:
+            returncode = None
+            killed = False
+            def kill(self) -> None: self.killed = True
+            async def wait(self) -> int:
+                await released.wait(); return 0
+        process = Process()
+        task = asyncio.create_task(_reap_process(process))
+        await asyncio.sleep(0)
+        task.cancel(); await asyncio.sleep(0)
+        self.assertTrue(process.killed)
+        self.assertFalse(task.done())
+        released.set()
+        with self.assertRaises(asyncio.CancelledError): await task
+
     async def test_two_cells_finish_snapshot_and_cleanup_are_ordered(self) -> None:
         transport = _Transport()
         service = P1BDockerPersistentWorkerService(image_digest="sha256:" + "a" * 64, transport=transport, run_id="run", session_id="session")
