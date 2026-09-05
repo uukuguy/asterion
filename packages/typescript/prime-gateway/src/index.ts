@@ -201,6 +201,13 @@ export {
 export {
   PrimeP1DevelopmentSession,
 } from "./p1-development-session.js";
+export {
+  inheritedP1DevelopmentSocket,
+  P1_DEVELOPMENT_GATEWAY_PROTOCOL,
+  P1_DEVELOPMENT_MAX_FRAME_BYTES,
+  P1DevelopmentBridge,
+  P1DevelopmentFrameDecoder,
+} from "./p1-development-bridge.js";
 export type {
   PrimeP1DevelopmentResult,
   PrimeP1DevelopmentSessionOptions,
