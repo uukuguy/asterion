@@ -51,7 +51,8 @@ _ENDPOINT = "https://api.deepseek.com/v1/chat/completions"
 _P1_PROVIDER_PROMPT = (
     "Return only one Python IPython cell. The cell must rewrite "
     "/workspace/solution.py so its complete contents define answer() with no "
-    "arguments and return the integer 42. Do not use any other tool."
+    "arguments and return the integer 42. Do not use Markdown fences or any "
+    "other tool."
 )
 _PROVIDER_RESPONSE_CAP = 64 * 1024
 
@@ -67,6 +68,18 @@ class _PrivatePrimeModelConfig:
 
     def __repr__(self) -> str:
         return "_PrivatePrimeModelConfig(redacted)"
+
+
+def _bare_provider_cell(content: str) -> str:
+    if "```" not in content:
+        return content
+    stripped = content.strip()
+    for prefix in ("```python\n", "```\n"):
+        if stripped.startswith(prefix) and stripped.endswith("\n```"):
+            cell = stripped[len(prefix):-4]
+            if "```" not in cell:
+                return cell
+    raise ValueError
 
 
 class _PrimeP1Provider:
@@ -252,6 +265,7 @@ def _invoke_provider_sync(
             ],
             "model": config.model_id,
             "stream": False,
+            "thinking": {"type": "disabled"},
         },
         separators=(",", ":"),
         sort_keys=True,
@@ -290,15 +304,15 @@ def _invoke_provider_sync(
         if (
             type(content) is not str
             or not content
-            or "```" in content
             or type(input_tokens) is not int
             or not 0 < input_tokens <= _P1_MAX_INPUT_TOKENS
             or type(output_tokens) is not int
             or not 0 < output_tokens <= _P1_MAX_OUTPUT_TOKENS
         ):
             raise ValueError
+        content = _bare_provider_cell(content)
         cell = content.encode("utf-8", "strict")
-        if len(cell) > _P1_MAX_OUTPUT_BYTES:
+        if not cell or len(cell) > _P1_MAX_OUTPUT_BYTES:
             raise ValueError
         return cell, PrimeModelBrokerTokenUsage(
             input_tokens, output_tokens, _P1_MAX_COST_MICROUNITS

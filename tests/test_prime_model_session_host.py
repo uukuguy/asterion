@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import AsyncExitStack
 from dataclasses import replace
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, cast
@@ -166,3 +167,58 @@ class TestPrimeModelSessionHost(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(type(provider).__name__, "_PrimeP1Provider")
                     self.assertFalse(hasattr(provider, "transport"))
                 opened.assert_not_called()
+
+    async def test_provider_request_disables_thinking_for_fixed_p1_cell_budget(self) -> None:
+        from asterion.applications.prime_agent.operator import model_session_host as subject
+
+        response = mock.MagicMock()
+        response.status = 200
+        response.read.return_value = json.dumps(
+            {
+                "choices": [{"message": {"content": "```python\nanswer = 42\n```"}}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+            }
+        ).encode()
+        opened = mock.MagicMock()
+        opened.return_value.__enter__.return_value = response
+        config = subject._PrivatePrimeModelConfig(  # type: ignore[attr-defined]
+            api_key="private-key", model_id="deepseek-v4-flash"
+        )
+
+        with mock.patch.object(subject, "_open_provider_request", opened):
+            cell, _ = subject._invoke_provider_sync(config, b"request")  # type: ignore[attr-defined]
+
+        self.assertEqual(cell, b"answer = 42")
+        request = opened.call_args.args[0]
+        self.assertEqual(json.loads(request.data), {  # type: ignore[arg-type]
+            "max_tokens": 1024,
+            "messages": [{
+                "content": mock.ANY,
+                "role": "user",
+            }],
+            "model": "deepseek-v4-flash",
+            "stream": False,
+            "thinking": {"type": "disabled"},
+        })
+
+    async def test_provider_request_rejects_multiple_markdown_cells(self) -> None:
+        from asterion.applications.prime_agent.operator import model_session_host as subject
+
+        response = mock.MagicMock()
+        response.status = 200
+        response.read.return_value = json.dumps(
+            {
+                "choices": [{"message": {"content": "```python\nanswer = 42\n```\n```python\npass\n```"}}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+            }
+        ).encode()
+        opened = mock.MagicMock()
+        opened.return_value.__enter__.return_value = response
+        config = subject._PrivatePrimeModelConfig(  # type: ignore[attr-defined]
+            api_key="private-key", model_id="deepseek-v4-flash"
+        )
+
+        with mock.patch.object(subject, "_open_provider_request", opened), self.assertRaises(
+            PrimeModelSessionHostError
+        ):
+            subject._invoke_provider_sync(config, b"request")  # type: ignore[attr-defined]
