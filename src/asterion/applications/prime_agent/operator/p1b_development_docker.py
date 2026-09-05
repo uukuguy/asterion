@@ -32,6 +32,7 @@ _PROTOCOL = "prime-p1-b-development-worker/v1"
 _FRAME_CAP = 64 * 1024
 _DIGEST = PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
 _FIXTURE = b"p1b continuity fixture\n"
+_ACQUIRE_DEADLINE_SECONDS = 60
 
 
 async def _reap_process(process: DockerCliAttachProcess, *, deadline: float | None = None) -> None:
@@ -324,7 +325,7 @@ class P1BDockerPersistentWorkerService:
 
     async def acquire(self) -> None:
         if self._state != "new": raise RestrictedWorkerError("restricted worker value is invalid")
-        control = _LifecycleCallControl(monotonic() + 30, None)
+        control = _LifecycleCallControl(monotonic() + _ACQUIRE_DEADLINE_SECONDS, None)
         try:
             container = await self._transport.create(image_digest=self._image, run_id=self._run, session_id=self._session, control=control)
             # Register as soon as Docker returns its daemon identity: every
