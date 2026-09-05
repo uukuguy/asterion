@@ -30,6 +30,10 @@ from asterion.applications.prime_agent.operator.authority_docker_executable impo
     AdmittedPrimeP1DockerExecutable,
     _ExecutableIdentity,
 )
+from asterion.applications.prime_agent.operator.authority_docker_socket import (
+    AdmittedPrimeP1DockerSocket,
+    _Identity,
+)
 from asterion.applications.prime_agent.operator.image_input_lock import (
     ImageArtifact,
     ImageInputLock,
@@ -95,6 +99,10 @@ class _DockerExecutableSubclass(AdmittedPrimeP1DockerExecutable):
     pass
 
 
+class _DockerSocketSubclass(AdmittedPrimeP1DockerSocket):
+    pass
+
+
 class _ProductionResourcesSubclass(AdmittedProductionAuthorityResources):
     pass
 
@@ -107,6 +115,19 @@ def _docker() -> AdmittedPrimeP1DockerExecutable:
         _ExecutableIdentity(0, 0, 0, 0, 0, 0, 0),
         b"docker",
         _token=module._ADMITTED_DOCKER_EXECUTABLE_TOKEN,
+    )
+
+
+def _socket() -> AdmittedPrimeP1DockerSocket:
+    import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+    identity = _Identity(0, 0, 0, 0, 0)
+    return AdmittedPrimeP1DockerSocket(
+        os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC),
+        ("docker.sock",),
+        (identity,),
+        identity,
+        _token=module._ADMITTED_DOCKER_SOCKET_TOKEN,
     )
 
 
@@ -182,13 +203,16 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             _token=evidence_module._EVIDENCE_TOKEN,
         )
         docker_resource = _docker()
+        socket_resource = _socket()
         with (
             patch.object(module, "admit_static_authority_resources", return_value=static),
             patch.object(module, "admit_evidence_root", return_value=evidence),
             patch.object(module, "admit_docker_executable", return_value=docker_resource) as docker,
+            patch.object(module, "admit_docker_socket", return_value=socket_resource) as socket,
         ):
             resource = admit_production_authority_resources(config)
         docker.assert_called_once_with(config)
+        socket.assert_called_once_with(config)
         resource.close()
 
     def test_production_resources_require_static_evidence_and_docker(self) -> None:
@@ -207,9 +231,11 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             evidence_fd, _token=evidence_module._EVIDENCE_TOKEN
         )
         docker = _docker()
+        socket = _socket()
         original_static_close = AdmittedStaticAuthorityResources.close
         original_evidence_close = AdmittedPrimeP1EvidenceRoot.close
         original_docker_close = AdmittedPrimeP1DockerExecutable.close
+        original_socket_close = AdmittedPrimeP1DockerSocket.close
 
         def close_static(resource: AdmittedStaticAuthorityResources) -> None:
             events.append("static")
@@ -223,20 +249,27 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             events.append("docker")
             original_docker_close(resource)
 
+        def close_socket(resource: AdmittedPrimeP1DockerSocket) -> None:
+            events.append("socket")
+            original_socket_close(resource)
+
         with (
             patch.object(
                 module, "admit_static_authority_resources", return_value=static
             ) as admit_static,
             patch.object(module, "admit_evidence_root", return_value=evidence) as admit_evidence,
             patch.object(module, "admit_docker_executable", return_value=docker) as admit_docker,
+            patch.object(module, "admit_docker_socket", return_value=socket) as admit_socket,
             patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static),
             patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence),
             patch.object(AdmittedPrimeP1DockerExecutable, "close", autospec=True, side_effect=close_docker),
+            patch.object(AdmittedPrimeP1DockerSocket, "close", autospec=True, side_effect=close_socket),
         ):
             resources = admit_production_authority_resources(config)
             admit_static.assert_called_once_with(config)
             admit_evidence.assert_called_once_with(config)
             admit_docker.assert_called_once_with(config)
+            admit_socket.assert_called_once_with(config)
             self.assertEqual(repr(resources), "AdmittedProductionAuthorityResources(redacted)")
             with self.assertRaises(TypeError):
                 resources.__reduce__()
@@ -245,7 +278,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 thread.start()
             for thread in threads:
                 thread.join()
-        self.assertEqual(events, ["docker", "evidence", "static"])
+        self.assertEqual(events, ["socket", "docker", "evidence", "static"])
 
     def test_evidence_failure_closes_static_once_in_reverse_acquisition_order(self) -> None:
         config = self._config()
@@ -265,12 +298,14 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             patch.object(module, "admit_static_authority_resources", return_value=static),
             patch.object(module, "admit_evidence_root", side_effect=PrimeP1EvidenceResourceError),
             patch.object(module, "admit_docker_executable") as docker,
+            patch.object(module, "admit_docker_socket") as socket,
             patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close) as close_static,
             self.assertRaises(PrimeP1AuthorityResourceError),
         ):
             admit_production_authority_resources(config)
         close_static.assert_called_once_with(static)
         docker.assert_not_called()
+        socket.assert_not_called()
 
     def test_docker_failure_closes_evidence_then_static_once(self) -> None:
         config = self._config()
@@ -301,6 +336,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             patch.object(module, "admit_static_authority_resources", return_value=static),
             patch.object(module, "admit_evidence_root", return_value=evidence),
             patch.object(module, "admit_docker_executable", side_effect=ValueError),
+            patch.object(module, "admit_docker_socket") as socket,
             patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static) as static_close,
             patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence) as evidence_close,
             self.assertRaises(PrimeP1AuthorityResourceError) as raised,
@@ -310,6 +346,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         static_close.assert_called_once_with(static)
         evidence_close.assert_called_once_with(evidence)
         self.assertEqual(events, ["evidence", "static"])
+        socket.assert_not_called()
 
     def test_factory_rejects_lookalike_or_subclass_children_without_ownership_transfer(
         self,
@@ -331,6 +368,8 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             (_CountingResource([], "evidence-lookalike"), "admit_evidence_root"),
             (_CountingResource([], "docker-lookalike"), "admit_docker_executable"),
             (_DockerExecutableSubclass.__new__(_DockerExecutableSubclass), "admit_docker_executable"),
+            (_CountingResource([], "socket-lookalike"), "admit_docker_socket"),
+            (_DockerSocketSubclass.__new__(_DockerSocketSubclass), "admit_docker_socket"),
         ):
             with self.subTest(factory_name=factory_name, child_type=type(child)):
                 exact_static = AdmittedStaticAuthorityResources(
@@ -346,6 +385,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                             _token=evidence_module._EVIDENCE_TOKEN,
                         ),
                         "admit_docker_executable": _docker(),
+                        "admit_docker_socket": _socket(),
                     }
                     patches[factory_name] = child
                     with (
@@ -363,6 +403,11 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                             module,
                             "admit_docker_executable",
                             return_value=patches["admit_docker_executable"],
+                        ),
+                        patch.object(
+                            module,
+                            "admit_docker_socket",
+                            return_value=patches["admit_docker_socket"],
                         ),
                         self.assertRaises(PrimeP1AuthorityResourceError) as raised,
                     ):
@@ -405,33 +450,39 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             evidence_subclass_fd, _token=evidence_module._EVIDENCE_TOKEN
         )
         docker = _docker()
+        socket = _socket()
         docker_subclass = _DockerExecutableSubclass.__new__(_DockerExecutableSubclass)
+        socket_subclass = _DockerSocketSubclass.__new__(_DockerSocketSubclass)
         try:
             cases = (
-                (AdmittedProductionAuthorityResources, static, evidence, docker, object()),
-                (AdmittedProductionAuthorityResources, object(), evidence, docker, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, object(), docker, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, evidence, object(), module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static_subclass, evidence, docker, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, evidence_subclass, docker, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, evidence, docker_subclass, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (_ProductionResourcesSubclass, static, evidence, docker, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static, evidence, docker, socket, object()),
+                (AdmittedProductionAuthorityResources, object(), evidence, docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static, object(), docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static, evidence, object(), socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static, evidence, docker, object(), module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static_subclass, evidence, docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static, evidence_subclass, docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static, evidence, docker_subclass, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (AdmittedProductionAuthorityResources, static, evidence, docker, socket_subclass, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (_ProductionResourcesSubclass, static, evidence, docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
             )
-            for constructor, static_child, evidence_child, docker_child, token in cases:
-                with self.subTest(constructor=constructor, static_type=type(static_child), evidence_type=type(evidence_child), docker_type=type(docker_child)):
+            for constructor, static_child, evidence_child, docker_child, socket_child, token in cases:
+                with self.subTest(constructor=constructor, static_type=type(static_child), evidence_type=type(evidence_child), docker_type=type(docker_child), socket_type=type(socket_child)):
                     with self.assertRaises(PrimeP1AuthorityResourceError):
-                        constructor(static_child, evidence_child, docker_child, _token=token)
+                        constructor(static_child, evidence_child, docker_child, socket_child, _token=token)
                     self.assertFalse(static._closed)
                     self.assertEqual(evidence._fd, evidence_fd)
                     self.assertFalse(static_subclass._closed)
                     self.assertEqual(evidence_subclass._fd, evidence_subclass_fd)
                     self.assertIsNotNone(docker._fd)
+                    self.assertIsNotNone(socket._parent_fd)
         finally:
             evidence_subclass.close()
             static_subclass.close()
             evidence.close()
             static.close()
             docker.close()
+            socket.close()
 
     def test_constructor_failure_closes_acquired_exact_children_in_reverse_order(self) -> None:
         config = self._config()
@@ -447,6 +498,58 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         evidence_fd = os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC)
         evidence = AdmittedPrimeP1EvidenceRoot(
             evidence_fd, _token=evidence_module._EVIDENCE_TOKEN
+        )
+        docker = _docker()
+        socket = _socket()
+        original_static_close = AdmittedStaticAuthorityResources.close
+        original_evidence_close = AdmittedPrimeP1EvidenceRoot.close
+        original_docker_close = AdmittedPrimeP1DockerExecutable.close
+        original_socket_close = AdmittedPrimeP1DockerSocket.close
+
+        def close_static(resource: AdmittedStaticAuthorityResources) -> None:
+            events.append("static")
+            original_static_close(resource)
+
+        def close_evidence(resource: AdmittedPrimeP1EvidenceRoot) -> None:
+            events.append("evidence")
+            original_evidence_close(resource)
+
+        def close_docker(resource: AdmittedPrimeP1DockerExecutable) -> None:
+            events.append("docker")
+            original_docker_close(resource)
+
+        def close_socket(resource: AdmittedPrimeP1DockerSocket) -> None:
+            events.append("socket")
+            original_socket_close(resource)
+
+        with (
+            patch.object(module, "admit_static_authority_resources", return_value=static),
+            patch.object(module, "admit_evidence_root", return_value=evidence),
+            patch.object(module, "admit_docker_executable", return_value=docker),
+            patch.object(module, "admit_docker_socket", return_value=socket),
+            patch.object(module, "AdmittedProductionAuthorityResources", side_effect=MemoryError),
+            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static),
+            patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence),
+            patch.object(AdmittedPrimeP1DockerExecutable, "close", autospec=True, side_effect=close_docker),
+            patch.object(AdmittedPrimeP1DockerSocket, "close", autospec=True, side_effect=close_socket),
+            self.assertRaises(PrimeP1AuthorityResourceError),
+        ):
+            admit_production_authority_resources(config)
+        self.assertEqual(events, ["socket", "docker", "evidence", "static"])
+
+    def test_socket_failure_closes_docker_evidence_then_static_once(self) -> None:
+        config = self._config()
+        events: list[str] = []
+        import asterion.applications.prime_agent.operator.authority_resources as module
+        import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
+
+        static = AdmittedStaticAuthorityResources(
+            object(), _CountingResource([], "nested"),
+            _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+        )
+        evidence = AdmittedPrimeP1EvidenceRoot(
+            os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC),
+            _token=evidence_module._EVIDENCE_TOKEN,
         )
         docker = _docker()
         original_static_close = AdmittedStaticAuthorityResources.close
@@ -469,13 +572,18 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             patch.object(module, "admit_static_authority_resources", return_value=static),
             patch.object(module, "admit_evidence_root", return_value=evidence),
             patch.object(module, "admit_docker_executable", return_value=docker),
-            patch.object(module, "AdmittedProductionAuthorityResources", side_effect=MemoryError),
-            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static),
-            patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence),
-            patch.object(AdmittedPrimeP1DockerExecutable, "close", autospec=True, side_effect=close_docker),
-            self.assertRaises(PrimeP1AuthorityResourceError),
+            patch.object(module, "admit_docker_socket", side_effect=ValueError) as socket,
+            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static) as static_close,
+            patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence) as evidence_close,
+            patch.object(AdmittedPrimeP1DockerExecutable, "close", autospec=True, side_effect=close_docker) as docker_close,
+            self.assertRaises(PrimeP1AuthorityResourceError) as raised,
         ):
             admit_production_authority_resources(config)
+        self.assertIsNone(raised.exception.__context__)
+        socket.assert_called_once_with(config)
+        docker_close.assert_called_once_with(docker)
+        evidence_close.assert_called_once_with(evidence)
+        static_close.assert_called_once_with(static)
         self.assertEqual(events, ["docker", "evidence", "static"])
 
     def test_normalizes_none_only_at_resource_admission(self) -> None:
