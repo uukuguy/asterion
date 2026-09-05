@@ -206,7 +206,6 @@ export {
   P1_DEVELOPMENT_GATEWAY_PROTOCOL,
   P1_DEVELOPMENT_MAX_FRAME_BYTES,
   P1DevelopmentBridge,
-  P1DevelopmentFrameDecoder,
 } from "./p1-development-bridge.js";
 export type {
   PrimeP1DevelopmentResult,

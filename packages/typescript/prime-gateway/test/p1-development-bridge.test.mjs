@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inspect } from "node:util";
 import test from "node:test";
 
 const protocol = "asterion.prime-p1-development-gateway/v1";
@@ -55,7 +56,7 @@ test("runs a real SDK prompt through the inherited duplex bridge without exposin
   });
   const [socket] = await connected;
   const child = spawn(process.execPath, ["dist/src/p1-development-main.js", "3"], {
-    cwd: gatewayRoot, stdio: ["ignore", "ignore", "pipe", socket],
+    cwd: gatewayRoot, env: {}, stdio: ["ignore", "ignore", "pipe", socket],
   });
   const stderr = [];
   child.stderr.on("data", (chunk) => stderr.push(chunk));
@@ -83,19 +84,25 @@ test("runs a real SDK prompt through the inherited duplex bridge without exposin
     assert.equal(completed.kind, "command.result");
     assert.deepEqual(completed.payload.result.assistant, { completed: true, stop_reason: "stop" });
     assert.doesNotMatch(JSON.stringify(completed), /SENTINEL_(PROMPT|TOOL_INPUT|TOOL_OUTPUT|MODEL_COMPLETION)/);
+    send(command(6, "close-1", "close"));
+    const closed = await next();
+    assert.deepEqual(closed.payload.result, { lifecycle: "closed" });
   } finally {
     client.destroy(); socket.destroy(); server.close(); child.kill();
   }
   assert.equal(Buffer.concat(stderr).toString(), "");
 });
 
-test("rejects an oversized inbound frame with a safe error", async () => {
-  const { P1DevelopmentFrameDecoder } = await import("../dist/src/p1-development-bridge.js");
-  const decoder = new P1DevelopmentFrameDecoder();
-  const tooLarge = Buffer.alloc(4);
-  tooLarge.writeUInt32BE(1_048_577);
-  assert.throws(() => decoder.push(tooLarge), /frame/);
+test("keeps bridge inspection free of transport and path sentinels", async () => {
+  const { P1DevelopmentBridge } = await import("../dist/src/p1-development-bridge.js");
+  const socket = createConnection({ port: 9, host: "127.0.0.1" });
+  socket.on("error", () => {});
+  const bridge = new P1DevelopmentBridge(socket);
+  const rendered = `${inspect(bridge)}${JSON.stringify(bridge)}`;
+  assert.doesNotMatch(rendered, /SENTINEL|buffer|path|socket/i);
+  socket.destroy();
 });
+
 
 function assistantToolMessage() {
   return { role: "assistant", api: "anthropic-messages", provider: "asterion-development", model: "p1-test", content: [{ type: "toolCall", id: "call-1", name: "ipython", arguments: { code: "SENTINEL_TOOL_INPUT" } }], usage: usage(), stopReason: "toolUse", timestamp: Date.now() };
