@@ -1917,3 +1917,8 @@
 - 06:24 Added private fixed P1 provider failure categories and strict child frames [6bd2a764]
 - 06:28 Removed private exception context and separated local child faults [a1861acc]
 - 06:30 Verified one real named-tool callback; complete CLI still failed safely with zero residue.
+- 06:32 Recorded first-callback success to keep P1 CLI status honest [c285594c]
+- 06:44 Added private P1-B stage observation for one non-blind full diagnosis [23c7faee]
+- 06:50 Hardened observation isolation and restored compaction boundary coverage [e45cacd0]
+- 07:02 Completed five observed callbacks and two cells without work or cleanup failures.
+- 07:04 Verified exact-selector P1 CLI with safe trace and zero Node/container residue.

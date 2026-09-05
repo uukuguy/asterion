@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-06 06:30. **Session remains active — not a final handoff.**
+> Updated: 2026-09-06 07:05. **Session remains active — not a final handoff.**
 
 ## Direction
 
@@ -26,12 +26,12 @@ P1-A与P1-B开发链路均已真实完成。P1-B使用一个Prime SDK session、
 
 ## Next concrete action
 
-1. P1标准`CLI → provider → assembly → runtime → injected host service`已实现；不要重复重做接线。
-2. 当前阻点在credentialed backend边界：一次HTTP成功响应未产生首轮唯一`ipython`调用；按轮固定tool choice后，后续尝试在可分类HTTP响应前失败。先做一次窄的backend transport/response compatibility决策，不做盲重试。
-3. 保持严格tool/text响应校验、五次调用和内部成本/期限上限；不要通过接受任意文本来伪造工具证明。
-4. 获得一次真实CLI安全trace并确认零残留后，P1开发CLI才可标记Verified；随后继续P2 admitted execution与installed route。
+1. P1开发闭环已完成：精确selector标准CLI完成五次provider callback、两次Docker IPython cell、compact、oracle与cleanup，安全trace为`sha256:a8be640bdcee9c93ea3e382729db561e4c29e071d3ff776335daac4ff572c703`；不要重复运行或把`unpromoted`升格为发布证明。
+2. 立即转入P2 `prime.programmatic-long-context/v1`：复用P1的runtime/host/service spine，补 admitted restricted-worker/model execution、固定oracle和installed application route。
+3. P2保持长上下文/RLM语义在Prime TypeScript Gateway；Python只负责准入、预算、受控执行和证据投影，不新增第二套composer/session runner。
+4. 研发验证只覆盖正常真实流程和身份、上限、取消清理、公开脱敏边界；不运行promotion或极端矩阵。
 
-最新进展：`6bd2a764`增加无正文的私有DNS/connect/TLS/timeout/HTTP/response分类与严格P1-B失败帧；`a1861acc`按Sol复审隔离公开异常上下文和本地child故障。两个focused测试文件15项与Ruff通过。随后一次current-source首回调真实诊断成功返回唯一`ipython`调用；一次完整标准CLI仍安全失败，且guest中Prime Node进程与P1-B容器计数均为0。下一步只隔离后续四个callback或worker阶段，不重复首回调、不迁移Responses API、不接受文本伪造tool call。
+最新进展：`6bd2a764`/`a1861acc`增加并收紧私有provider失败分类；`23c7faee`/`e45cacd0`增加经Sol复审的operator私有阶段观察器。一次观察运行完成5/5 callback与2/2 cell，无失败；随后精确命令`--application prime.ipython-coding@1.0.0`退出0并返回安全trace。先前省略版本的命令只在selector处失败，并未进入host。最终guest中Prime Node进程与P1-B容器均为0。
 
 ## Actual environment
 
@@ -44,6 +44,6 @@ P1-A与P1-B开发链路均已真实完成。P1-B使用一个Prime SDK session、
 
 ## Agents and preservation
 
-P1-B实现与Sol复审均已结束；没有正在运行的model调用或容器。下一任务是P1正式CLI preset接线。
+P1开发实现与Sol复审均已结束；没有正在运行的model调用或容器。下一任务是P2 admitted execution与installed route。
 
 保留既有`.superpowers/sdd/task-1-report.md`、JOURNAL/RESUME未提交修改、未跟踪旧计划和tmp目录。不要整体暂存、重置、删除或push。完整ARC/global harness activation/发布不在本轮范围。

@@ -10,10 +10,11 @@
   capability-package framework
 - Project route: managed
 - Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
-- Active work package: Prime P1 execution spine and semantic closure, followed
-  by P2–P7. Existing provider-free acceptance implementations are retained;
-  real restricted-worker/model evidence is still incomplete. Native parity and
-  broad framework restructuring are not prerequisites for Prime closure.
+- Active work package: P1 development reproduction and exact-selector CLI are
+  closed; P2 admitted execution and installed route are next, followed by
+  P3–P7. Existing provider-free acceptance implementations are retained. Native
+  parity and broad framework restructuring are not prerequisites for Prime
+  closure.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -103,10 +104,13 @@
   depth policy, two-child work, causal messaging, active reconnect,
   application/oracle, healthy observations, budget, cleanup, and public
   privacy. This evidence is not Smoke Full or parity promotion evidence.
-- P1's restricted-worker contract admits one code-owned, digest-selected
-  IPython fixture only. Its worker must return a canonical workload-bound
-  result before a P1 receipt can be issued; no Docker/model/network execution
-  has been authorized or run for that contract.
+- P1's development reproduction is CLI verified. The exact installed route
+  completed one Prime SDK session, five provider callbacks, two Docker-backed
+  IPython cells, manual compact, oracle and cleanup, then returned the safe
+  `p1-b-development/unpromoted` trace
+  `sha256:a8be640bdcee9c93ea3e382729db561e4c29e071d3ff776335daac4ff572c703`.
+  Post-run inspection found zero Prime Node processes and zero P1-B containers.
+  Production authority promotion remains separate release work.
 - P2 `prime.programmatic-long-context/v1` has a fixed IPython-only corpus
   workload, sealed completion protocol, exact worker/broker acceptance chain,
   and worker-bound bounded-evidence reducer. Real local Prime/IPython compatibility is verified without model work;
