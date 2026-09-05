@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 import socket as socket_module
+import sys
 import threading
 import traceback
 import unittest
 import errno
+import fcntl
 from array import array
 from unittest.mock import patch
 
@@ -99,13 +101,36 @@ class _InstrumentedLock:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_private_packet_receive_requires_cmsg_cloexec_without_zero_fallback(
+        self,
+    ) -> None:
+        connection = _PacketSocket([(b"x", [], 0, None)])
+        with patch.object(socket_module, "MSG_CMSG_CLOEXEC", None, create=True):
+            with self.assertRaises(PrimeP1AuthorityBootstrapError):
+                _receive_authority_packet(
+                    AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
+                )
+        self.assertTrue(connection.closed)
+        self.assertEqual(connection.flags, [])
+
+        connection = _PacketSocket([(b"x", [], 0, None)])
+        with patch.object(socket_module, "MSG_CMSG_CLOEXEC", 64, create=True):
+            self.assertEqual(
+                _receive_authority_packet(
+                    AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
+                ),
+                b"x",
+            )
+        self.assertEqual(connection.flags, [64])
+
     def test_private_packet_receive_rejects_real_scm_rights_without_obtaining_fd(
         self,
     ) -> None:
-        if not all(
-            hasattr(socket_module, name) for name in ("SCM_RIGHTS", "MSG_CTRUNC")
+        if sys.platform != "linux" or not all(
+            hasattr(socket_module, name)
+            for name in ("SCM_RIGHTS", "MSG_CTRUNC", "MSG_CMSG_CLOEXEC")
         ):
-            self.skipTest("SCM_RIGHTS or MSG_CTRUNC is unavailable")
+            self.skipTest("Linux SCM_RIGHTS MSG_CMSG_CLOEXEC is unavailable")
         sender, receiver = socket_module.socketpair(
             socket_module.AF_UNIX, socket_module.SOCK_STREAM
         )
@@ -124,7 +149,20 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                 )
             ],
         )
-        with self.assertRaises(PrimeP1AuthorityBootstrapError):
+        received_flags: list[int] = []
+        native_close = os.close
+
+        def inspect_then_close(fd: int) -> None:
+            received_flags.append(fcntl.fcntl(fd, fcntl.F_GETFD))
+            native_close(fd)
+
+        with (
+            patch(
+                "asterion.applications.prime_agent.operator.authority_process.os.close",
+                side_effect=inspect_then_close,
+            ),
+            self.assertRaises(PrimeP1AuthorityBootstrapError),
+        ):
             _receive_authority_packet(
                 AdmittedAuthorityDescriptors(wrapped, 11, 12, lambda _: None)
             )
@@ -137,6 +175,8 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             received_fd.frombytes(wrapped.ancillary[0][2])
             with self.assertRaises(OSError):
                 os.fstat(received_fd[0])
+        self.assertEqual(len(received_flags), 1)
+        self.assertTrue(received_flags[0] & fcntl.FD_CLOEXEC)
         with self.assertRaises(OSError):
             os.fstat(receiver.fileno())
 
@@ -145,12 +185,12 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
     ) -> None:
         connection = _PacketSocket([(b'{"canonical":true}', [], 0, None)])
         bundle = AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
-        self.assertEqual(_receive_authority_packet(bundle), b'{"canonical":true}')
+        self.assertEqual(
+            _receive_authority_packet(bundle, cmsg_cloexec=1), b'{"canonical":true}'
+        )
         self.assertTrue(connection.closed)
         self.assertEqual(connection.close_calls, 1)
-        self.assertEqual(
-            connection.flags, [int(getattr(socket_module, "MSG_CMSG_CLOEXEC", 0))]
-        )
+        self.assertEqual(connection.flags, [1])
         bundle.close()
         self.assertTrue(connection.closed)
         self.assertEqual(connection.close_calls, 1)
@@ -174,7 +214,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                     connection, 11, 12, lambda _: None
                 )
                 with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
-                    _receive_authority_packet(bundle)
+                    _receive_authority_packet(bundle, cmsg_cloexec=1)
                 self.assertIsNone(raised.exception.__context__)
                 self.assertNotIn(
                     "RECV_SENTINEL",
@@ -187,7 +227,8 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         )
         self.assertEqual(
             _receive_authority_packet(
-                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
+                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None),
+                cmsg_cloexec=1,
             ),
             b"x",
         )
@@ -195,7 +236,8 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         exhausted = _PacketSocket([OSError(errno.EINTR, "SENTINEL")] * 9)
         with self.assertRaises(PrimeP1AuthorityBootstrapError):
             _receive_authority_packet(
-                AdmittedAuthorityDescriptors(exhausted, 11, 12, lambda _: None)
+                AdmittedAuthorityDescriptors(exhausted, 11, 12, lambda _: None),
+                cmsg_cloexec=1,
             )
         self.assertEqual(exhausted.calls, 9)
         success_responses: list[object] = [OSError(errno.EINTR, "SENTINEL")] * 8
@@ -203,7 +245,8 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         succeeded = _PacketSocket(success_responses)
         self.assertEqual(
             _receive_authority_packet(
-                AdmittedAuthorityDescriptors(succeeded, 11, 12, lambda _: None)
+                AdmittedAuthorityDescriptors(succeeded, 11, 12, lambda _: None),
+                cmsg_cloexec=1,
             ),
             b"x",
         )
@@ -214,7 +257,8 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         connection.close = lambda: (_ for _ in ()).throw(OSError("CLOSE_SENTINEL"))  # type: ignore[method-assign]
         with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
             _receive_authority_packet(
-                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
+                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None),
+                cmsg_cloexec=1,
             )
         self.assertIsNone(raised.exception.__context__)
         self.assertNotIn(

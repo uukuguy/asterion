@@ -158,7 +158,9 @@ def _consume_session_key(
     return result
 
 
-def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> bytes:
+def _receive_authority_packet(
+    descriptors: AdmittedAuthorityDescriptors, *, cmsg_cloexec: int | None = None
+) -> bytes:
     """Receive one raw bounded authority packet and close its consumed socket."""
     connection: object | None = None
     result: bytes | None = None
@@ -167,6 +169,13 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
         if not isinstance(descriptors, AdmittedAuthorityDescriptors):
             _unavailable()
         connection = descriptors.consume_socket()
+        capability = (
+            getattr(socket, "MSG_CMSG_CLOEXEC", None)
+            if cmsg_cloexec is None
+            else cmsg_cloexec
+        )
+        if type(capability) is not int or capability == 0:
+            raise ValueError
         interruptions = 0
         while True:
             try:
@@ -174,7 +183,7 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
                     connection,
                     8192,
                     socket.CMSG_SPACE(struct.calcsize("i")),
-                    int(getattr(socket, "MSG_CMSG_CLOEXEC", 0)),
+                    capability,
                 )
                 break
             except OSError as error:
