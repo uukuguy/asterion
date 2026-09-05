@@ -45,3 +45,18 @@ class TestPrimeP3DevelopmentWorkload(unittest.TestCase):
 
         self.assertEqual(subject.P3_EXPECTED_SOURCE_DIGEST, "sha256:" + sha256(subject.P3_EXPECTED_SOURCE_BYTES).hexdigest())
         self.assertEqual(subject.P3_DEVELOPMENT_WORKLOAD_DIGEST, "sha256:" + sha256(subject.P3_DEVELOPMENT_WORKLOAD_BYTES).hexdigest())
+
+    def test_workload_binds_expected_patch_test_and_artifact_schema_identities(self) -> None:
+        from hashlib import sha256
+        import json
+        from asterion.applications.prime_agent.operator import p3_development_workload as subject
+
+        manifest = json.loads(subject.P3_DEVELOPMENT_WORKLOAD_BYTES)
+        self.assertEqual(manifest["expected_source_sha256"], sha256(subject.P3_EXPECTED_SOURCE_BYTES).hexdigest())
+        self.assertEqual(manifest["expected_test_sha256"], sha256(subject.P3_EXPECTED_TEST_BYTES).hexdigest())
+        self.assertEqual(manifest["implementation_artifact_sha256"], sha256(subject.P3_IMPLEMENTATION_BYTES).hexdigest())
+        self.assertEqual(manifest["review_artifact_sha256"], sha256(subject.P3_REVIEW_BYTES).hexdigest())
+        self.assertEqual(manifest["follow_up_artifact_sha256"], sha256(subject.P3_FOLLOW_UP_BYTES).hexdigest())
+        self.assertNotEqual(manifest["expected_source_sha256"], sha256(b"def in_range(value: int, low: int, high: int) -> bool:\n    return low < value < high\n").hexdigest())
+        self.assertNotEqual(manifest["expected_test_sha256"], sha256(subject.P3_INITIAL_TEST_BYTES).hexdigest())
+        self.assertNotEqual(manifest["review_artifact_sha256"], sha256(b'{"format":"changed"}\n').hexdigest())
