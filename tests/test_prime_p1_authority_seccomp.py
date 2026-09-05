@@ -388,6 +388,47 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                     with self.assertRaises(OSError):
                         os.fstat(fd)
 
+    def test_post_open_validation_failure_closes_full_chain_without_transfer(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            closed: list[int] = []
+            actual_close = os.close
+
+            def track_close(fd: int) -> None:
+                closed.append(fd)
+                actual_close(fd)
+
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(
+                    catalog_module,
+                    "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG",
+                    PromotedSeccompPolicyCatalog((_policy(),)),
+                ),
+                patch.object(module, "_validate_profile", side_effect=RuntimeError("private")),
+                patch.object(module.os, "close", side_effect=track_close),
+                self.assertRaises(PrimeP1AuthorityResourceError) as raised,
+            ):
+                admit_static_seccomp_resource(config)
+        self.assertIsNone(raised.exception.__context__)
+        self.assertGreater(len(closed), 1)
+        self.assertEqual(len(closed), len(set(closed)))
+        for fd in closed:
+            with self.subTest(fd=fd):
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+
 
 if __name__ == "__main__":
     unittest.main()
