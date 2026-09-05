@@ -114,7 +114,7 @@ export class P1BDevelopmentBridge {
   #n = 0;
   #ids = new Set<string>();
   #terminal = false;
-  #activePrompt: string | undefined;
+  #activeCommand: string | undefined;
   #socket: Socket;
   constructor(socket: Socket) {
     this.#socket = socket;
@@ -167,10 +167,13 @@ export class P1BDevelopmentBridge {
     this.#ids.add(f.request_id);
     if (f.kind === "open") this.#p = "opening";
     if (f.kind === "prompt") this.#p = this.#p === "open" ? "prompt1" : "prompt2";
-    if (f.kind === "prompt") this.#activePrompt = f.request_id;
+    if (f.kind === "prompt" || f.kind === "compact")
+      this.#activeCommand = f.request_id;
     if (f.kind === "cancel") this.#p = "cancelling";
     if (f.kind === "close") this.#p = "closing";
-    void this.command(f).catch(() => this.fail(f.request_id));
+    void this.command(f).catch(() => {
+      if (this.#p !== "cancelled") void this.fail(f.request_id);
+    });
   }
   async command(f: F) {
     if (f.kind === "open") {
@@ -186,7 +189,7 @@ export class P1BDevelopmentBridge {
         ipython: (id, input) => this.#tool(id, input.code),
       });
       this.#p = "open";
-      this.#activePrompt = undefined;
+      this.#activeCommand = undefined;
       this.emit("ready", f.request_id, {});
       return;
     }
@@ -195,7 +198,7 @@ export class P1BDevelopmentBridge {
       const r = await this.session().prompt(text(f.payload, "prompt"));
       if (this.#p === phase) {
         this.#p = phase === "prompt1" ? "compact" : "close_ready";
-        this.#settleActivePrompt(r);
+        this.#settleActiveCommand(r);
       }
       return;
     }
@@ -204,16 +207,16 @@ export class P1BDevelopmentBridge {
       const r = await this.session().compact();
       if (this.#p === "compact") {
         this.#p = "prompt2";
-        this.emit("command.result", f.request_id, { result: r });
+        this.#settleActiveCommand(r);
       }
       return;
     }
     if (f.kind === "cancel") {
       if (!only(f.payload, [])) throw Error("invalid cancel payload");
       this.settle(Error("cancelled"));
-      await this.session().cancel();
-      this.#settleActivePrompt({ lifecycle: "cancelled" });
+      this.#settleActiveCommand({ lifecycle: "cancelled" });
       this.#p = "cancelled";
+      await this.session().cancel();
       this.emit("command.result", f.request_id, {
         result: { lifecycle: "cancelled" },
       });
@@ -291,9 +294,9 @@ export class P1BDevelopmentBridge {
     this.#m.clear();
     this.#t.clear();
   }
-  #settleActivePrompt(result: unknown) {
-    const requestId = this.#activePrompt;
-    this.#activePrompt = undefined;
+  #settleActiveCommand(result: unknown) {
+    const requestId = this.#activeCommand;
+    this.#activeCommand = undefined;
     if (requestId) this.emit("command.result", requestId, { result });
   }
   callback(k: "model" | "tool") {

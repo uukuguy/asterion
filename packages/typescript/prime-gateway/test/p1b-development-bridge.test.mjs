@@ -114,3 +114,53 @@ test("runs the real SDK P1B open-prompt-compact-prompt-close bridge flow", async
   }
   assert.equal(Buffer.concat(stderr).toString(), "");
 });
+
+test("settles the active compact command once when cancelled", async () => {
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const connected = once(server, "connection");
+  const client = await new Promise((resolve) => {
+    const socket = createConnection({ port: server.address().port, host: "127.0.0.1" });
+    socket.once("connect", () => resolve(socket));
+  });
+  const [socket] = await connected;
+  const child = spawn(process.execPath, ["dist/src/p1b-development-main.js", "3"], {
+    cwd: gatewayRoot, env: {}, stdio: ["ignore", "ignore", "pipe", socket],
+  });
+  const receive = reader(client);
+  const next = () => Promise.race([receive(), new Promise((_, reject) => {
+    const timer = setTimeout(() => reject(new Error("bridge response timed out")), 5_000);
+    timer.unref();
+  })]);
+  const send = (value) => client.write(frame(value));
+  const workspace = await mkdtemp(join(tmpdir(), "asterion-p1b-cancel-"));
+  try {
+    send(command(1, "open-1", "open", { prime_source_root: primeSourceRoot, workspace }));
+    assert.equal((await next()).kind, "ready");
+    send(command(2, "prompt-1", "prompt", { prompt: "SENTINEL_PROMPT_1" }));
+    const model1 = await next();
+    send(command(3, model1.request_id, "model.response", { message: assistant("call-1") }));
+    const tool1 = await next();
+    send(command(4, tool1.request_id, "tool.response", { result: { content: [], details: {}, isError: false } }));
+    const model2 = await next();
+    send(command(5, model2.request_id, "model.response", { message: assistant() }));
+    assert.equal((await next()).request_id, "prompt-1");
+    send(command(6, "compact-1", "compact"));
+    const model3 = await next();
+    assert.equal(model3.kind, "model.request");
+    send(command(7, "cancel-1", "cancel"));
+    const settled = [await next(), await next()]
+      .map((event) => [event.request_id, event.payload.result])
+      .sort(([a], [b]) => a.localeCompare(b));
+    assert.deepEqual(settled, [
+      ["cancel-1", { lifecycle: "cancelled" }],
+      ["compact-1", { lifecycle: "cancelled" }],
+    ]);
+    send(command(8, "close-1", "close"));
+    assert.deepEqual((await next()).payload.result, { lifecycle: "closed" });
+    assert.equal((await once(child, "exit"))[0], 0);
+  } finally {
+    client.destroy(); socket.destroy(); server.close(); child.kill();
+  }
+});
