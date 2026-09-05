@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 import importlib.util
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, call, patch
 
 from asterion.applications.prime_agent.operator.docker_cli import DockerCliResult
 from asterion.applications.prime_agent.operator.p3_development_docker import (
@@ -29,6 +29,9 @@ class TestPrimeP3DevelopmentDocker(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_uses_exact_roles_and_root_only_socket_mount(self) -> None:
         transport = self._transport()
+        transport._call = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[DockerCliResult(stdout=(character * 64 + "\n").encode()) for character in ("a", "b", "c")]
+        )
 
         workers = await transport.create_workers(
             image_digest="sha256:" + "a" * 64,
@@ -84,6 +87,36 @@ class TestPrimeP3DevelopmentDocker(unittest.IsolatedAsyncioTestCase):
 
         commands = [call.args[0] for call in transport._call_raw.await_args_list]  # type: ignore[attr-defined]
         self.assertEqual([command[-1] for command in commands], ["c" * 64, "b" * 64, "a" * 64])
+
+    async def test_create_rejects_duplicate_daemon_identity(self) -> None:
+        transport = self._transport()
+        transport._call = AsyncMock(  # type: ignore[method-assign]
+            return_value=DockerCliResult(stdout=b"a" * 64 + b"\n")
+        )
+
+        with self.assertRaisesRegex(ValueError, "prime P3 development docker worker is unavailable"):
+            await transport.create_workers(
+                image_digest="sha256:" + "a" * 64,
+                run_id="run",
+                workspace="/host/workspace",
+                rlm_socket_directory="/host/rlm",
+                control=object(),  # type: ignore[arg-type]
+            )
+
+
+class TestP3DevelopmentDockerDescriptors(unittest.TestCase):
+    def test_seccomp_duplicate_is_closed_when_inheritable_marking_fails(self) -> None:
+        transport = object.__new__(PrimeP3DevelopmentDockerTransport)
+        transport._seccomp_profile_fd = 10  # type: ignore[attr-defined]
+        transport._close_fd = Mock()  # type: ignore[method-assign]
+
+        with patch("asterion.applications.prime_agent.operator.p3_development_docker.os.dup", return_value=20), patch(
+            "asterion.applications.prime_agent.operator.p3_development_docker.os.set_inheritable",
+            side_effect=OSError("denied"),
+        ), self.assertRaisesRegex(ValueError, "prime P3 development docker worker is unavailable"):
+            transport._claim_seccomp_fds(3)  # type: ignore[attr-defined]
+
+        self.assertEqual(transport._close_fd.call_args_list, [call(20), call(10)])  # type: ignore[attr-defined]
 
 
 class TestP3RootRlmSchema(unittest.TestCase):

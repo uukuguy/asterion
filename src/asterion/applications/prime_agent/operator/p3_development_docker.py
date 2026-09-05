@@ -57,7 +57,9 @@ class PrimeP3DevelopmentDockerTransport(DockerCliEngineTransport):
             for role, name, fd in zip(_ROLES, names, fds, strict=True):
                 result = await self._call(self._create_argv(role=role, name=name, image_digest=image_digest, workspace=workspace, rlm_socket_directory=rlm_socket_directory, fd=fd), control, pass_fds=(fd,))  # type: ignore[attr-defined]
                 containers.append(P3DevelopmentContainer(role, self._parse_daemon_id(result.stdout)))  # type: ignore[attr-defined]
-            return tuple(containers)
+            workers = tuple(containers)
+            self._exact_workers(workers)
+            return workers
         except asyncio.CancelledError:
             await self._cleanup_uncertain(tuple(containers), names)
             raise
@@ -131,13 +133,17 @@ class PrimeP3DevelopmentDockerTransport(DockerCliEngineTransport):
         if type(fd) is not int:
             raise PrimeP3DevelopmentDockerError()
         duplicates: list[int] = []
+        pending: int | None = None
         try:
             for _ in range(count):
-                duplicate = os.dup(fd)
-                os.set_inheritable(duplicate, False)
-                duplicates.append(duplicate)
+                pending = os.dup(fd)
+                os.set_inheritable(pending, False)
+                duplicates.append(pending)
+                pending = None
             return tuple(duplicates)
         except OSError:
+            if pending is not None:
+                self._close_fd(pending)  # type: ignore[attr-defined]
             for duplicate in duplicates:
                 self._close_fd(duplicate)  # type: ignore[attr-defined]
             raise PrimeP3DevelopmentDockerError() from None
@@ -146,7 +152,11 @@ class PrimeP3DevelopmentDockerTransport(DockerCliEngineTransport):
 
     @staticmethod
     def _exact_workers(containers: tuple[P3DevelopmentContainer, ...]) -> None:
-        if type(containers) is not tuple or tuple(container.role for container in containers) != _ROLES:
+        if (
+            type(containers) is not tuple
+            or tuple(container.role for container in containers) != _ROLES
+            or len({container.container_id for container in containers}) != len(_ROLES)
+        ):
             raise PrimeP3DevelopmentDockerError()
 
     async def _cleanup_uncertain(self, containers: tuple[P3DevelopmentContainer, ...], names: tuple[str, ...]) -> None:
