@@ -168,16 +168,20 @@ def _image_lock() -> ImageInputLock:
 
 def _artifacts_with_two_oci_configs() -> tuple[ImageArtifact, ...]:
     artifacts = _artifacts()
-    return artifacts[:5] + (
-        ImageArtifact("oci-config", "oci/config/secondary.json", 0, "8" * 64),
-    ) + artifacts[5:]
+    return (
+        artifacts[:5]
+        + (ImageArtifact("oci-config", "oci/config/secondary.json", 0, "8" * 64),)
+        + artifacts[5:]
+    )
 
 
 class TestPrimeP1AuthorityResources(unittest.TestCase):
     def _config(self) -> object:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
             path = Path(temp) / "operator.env"
-            path.write_text("".join(f"{key}={value}\n" for key, value in _VALUES.items()))
+            path.write_text(
+                "".join(f"{key}={value}\n" for key, value in _VALUES.items())
+            )
             path.chmod(0o600)
             fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
             return load_operator_config(fd)
@@ -196,7 +200,8 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
 
         static = AdmittedStaticAuthorityResources(
-            object(), _CountingResource([], "nested"),
+            object(),
+            _CountingResource([], "nested"),
             _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
         )
         evidence = AdmittedPrimeP1EvidenceRoot(
@@ -206,22 +211,31 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         docker_resource = _docker()
         socket_resource = _socket()
         with (
-            patch.object(module, "admit_static_authority_resources", return_value=static),
+            patch.object(
+                module, "admit_static_authority_resources", return_value=static
+            ),
             patch.object(module, "admit_evidence_root", return_value=evidence),
-            patch.object(module, "admit_docker_executable", return_value=docker_resource) as docker,
-            patch.object(module, "admit_docker_socket", return_value=socket_resource) as socket,
+            patch.object(
+                module, "admit_docker_executable", return_value=docker_resource
+            ) as docker,
+            patch.object(
+                module, "admit_docker_socket", return_value=socket_resource
+            ) as socket,
         ):
             resource = admit_production_authority_resources(config)
         docker.assert_called_once_with(config)
         socket.assert_called_once_with(config)
         resource.close()
 
-    def test_production_aggregate_privately_delegates_projection_to_exact_socket(self) -> None:
+    def test_production_aggregate_privately_delegates_projection_to_exact_socket(
+        self,
+    ) -> None:
         import asterion.applications.prime_agent.operator.authority_resources as module
         import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
 
         static = AdmittedStaticAuthorityResources(
-            object(), _CountingResource([], "nested"),
+            object(),
+            _CountingResource([], "nested"),
             _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
         )
         evidence = AdmittedPrimeP1EvidenceRoot(
@@ -231,7 +245,10 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         docker = _docker()
         socket = _socket()
         resource = AdmittedProductionAuthorityResources(
-            static, evidence, docker, socket,
+            static,
+            evidence,
+            docker,
+            socket,
             _token=module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
         )
         with patch.object(
@@ -245,6 +262,44 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         with self.assertRaises(PrimeP1AuthorityResourceError) as raised:
             asyncio.run(resource._verify_daemon_projection(123.0))
         self.assertIsNone(raised.exception.__context__)
+
+    def test_production_projection_rejects_closed_or_child_failure_redacted(
+        self,
+    ) -> None:
+        import asterion.applications.prime_agent.operator.authority_resources as module
+        import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
+
+        static = AdmittedStaticAuthorityResources(
+            object(),
+            _CountingResource([], "nested"),
+            _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+        )
+        evidence = AdmittedPrimeP1EvidenceRoot(
+            os.open("/dev/null", os.O_RDONLY | os.O_CLOEXEC),
+            _token=evidence_module._EVIDENCE_TOKEN,
+        )
+        resource = AdmittedProductionAuthorityResources(
+            static,
+            evidence,
+            _docker(),
+            _socket(),
+            _token=module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+        )
+        with (
+            patch.object(
+                AdmittedPrimeP1DockerSocket,
+                "_verify_daemon_projection",
+                side_effect=OSError("AGGREGATE_SECRET_SENTINEL"),
+            ),
+            self.assertRaises(PrimeP1AuthorityResourceError) as raised,
+        ):
+            asyncio.run(resource._verify_daemon_projection(123.0))
+        self.assertNotIn("AGGREGATE_SECRET_SENTINEL", str(raised.exception))
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertIsNone(raised.exception.__context__)
+        resource.close()
+        with self.assertRaises(PrimeP1AuthorityResourceError):
+            asyncio.run(resource._verify_daemon_projection(123.0))
 
     def test_production_resources_require_static_evidence_and_docker(self) -> None:
         config = self._config()
@@ -288,20 +343,48 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             patch.object(
                 module, "admit_static_authority_resources", return_value=static
             ) as admit_static,
-            patch.object(module, "admit_evidence_root", return_value=evidence) as admit_evidence,
-            patch.object(module, "admit_docker_executable", return_value=docker) as admit_docker,
-            patch.object(module, "admit_docker_socket", return_value=socket) as admit_socket,
-            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static),
-            patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence),
-            patch.object(AdmittedPrimeP1DockerExecutable, "close", autospec=True, side_effect=close_docker),
-            patch.object(AdmittedPrimeP1DockerSocket, "close", autospec=True, side_effect=close_socket),
+            patch.object(
+                module, "admit_evidence_root", return_value=evidence
+            ) as admit_evidence,
+            patch.object(
+                module, "admit_docker_executable", return_value=docker
+            ) as admit_docker,
+            patch.object(
+                module, "admit_docker_socket", return_value=socket
+            ) as admit_socket,
+            patch.object(
+                AdmittedStaticAuthorityResources,
+                "close",
+                autospec=True,
+                side_effect=close_static,
+            ),
+            patch.object(
+                AdmittedPrimeP1EvidenceRoot,
+                "close",
+                autospec=True,
+                side_effect=close_evidence,
+            ),
+            patch.object(
+                AdmittedPrimeP1DockerExecutable,
+                "close",
+                autospec=True,
+                side_effect=close_docker,
+            ),
+            patch.object(
+                AdmittedPrimeP1DockerSocket,
+                "close",
+                autospec=True,
+                side_effect=close_socket,
+            ),
         ):
             resources = admit_production_authority_resources(config)
             admit_static.assert_called_once_with(config)
             admit_evidence.assert_called_once_with(config)
             admit_docker.assert_called_once_with(config)
             admit_socket.assert_called_once_with(config)
-            self.assertEqual(repr(resources), "AdmittedProductionAuthorityResources(redacted)")
+            self.assertEqual(
+                repr(resources), "AdmittedProductionAuthorityResources(redacted)"
+            )
             with self.assertRaises(TypeError):
                 resources.__reduce__()
             threads = [threading.Thread(target=resources.close) for _ in range(2)]
@@ -311,7 +394,9 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 thread.join()
         self.assertEqual(events, ["socket", "docker", "evidence", "static"])
 
-    def test_evidence_failure_closes_static_once_in_reverse_acquisition_order(self) -> None:
+    def test_evidence_failure_closes_static_once_in_reverse_acquisition_order(
+        self,
+    ) -> None:
         config = self._config()
         import asterion.applications.prime_agent.operator.authority_resources as module
 
@@ -326,11 +411,20 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             original_close(resource)
 
         with (
-            patch.object(module, "admit_static_authority_resources", return_value=static),
-            patch.object(module, "admit_evidence_root", side_effect=PrimeP1EvidenceResourceError),
+            patch.object(
+                module, "admit_static_authority_resources", return_value=static
+            ),
+            patch.object(
+                module, "admit_evidence_root", side_effect=PrimeP1EvidenceResourceError
+            ),
             patch.object(module, "admit_docker_executable") as docker,
             patch.object(module, "admit_docker_socket") as socket,
-            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close) as close_static,
+            patch.object(
+                AdmittedStaticAuthorityResources,
+                "close",
+                autospec=True,
+                side_effect=close,
+            ) as close_static,
             self.assertRaises(PrimeP1AuthorityResourceError),
         ):
             admit_production_authority_resources(config)
@@ -345,7 +439,8 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
 
         static = AdmittedStaticAuthorityResources(
-            object(), _CountingResource([], "nested"),
+            object(),
+            _CountingResource([], "nested"),
             _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
         )
         evidence = AdmittedPrimeP1EvidenceRoot(
@@ -364,12 +459,24 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             original_evidence_close(resource)
 
         with (
-            patch.object(module, "admit_static_authority_resources", return_value=static),
+            patch.object(
+                module, "admit_static_authority_resources", return_value=static
+            ),
             patch.object(module, "admit_evidence_root", return_value=evidence),
             patch.object(module, "admit_docker_executable", side_effect=ValueError),
             patch.object(module, "admit_docker_socket") as socket,
-            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static) as static_close,
-            patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence) as evidence_close,
+            patch.object(
+                AdmittedStaticAuthorityResources,
+                "close",
+                autospec=True,
+                side_effect=close_static,
+            ) as static_close,
+            patch.object(
+                AdmittedPrimeP1EvidenceRoot,
+                "close",
+                autospec=True,
+                side_effect=close_evidence,
+            ) as evidence_close,
             self.assertRaises(PrimeP1AuthorityResourceError) as raised,
         ):
             admit_production_authority_resources(config)
@@ -387,7 +494,10 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
 
         for child, factory_name in (
-            (_CountingResource([], "static-lookalike"), "admit_static_authority_resources"),
+            (
+                _CountingResource([], "static-lookalike"),
+                "admit_static_authority_resources",
+            ),
             (
                 _StaticResourceSubclass(
                     object(),
@@ -398,9 +508,15 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             ),
             (_CountingResource([], "evidence-lookalike"), "admit_evidence_root"),
             (_CountingResource([], "docker-lookalike"), "admit_docker_executable"),
-            (_DockerExecutableSubclass.__new__(_DockerExecutableSubclass), "admit_docker_executable"),
+            (
+                _DockerExecutableSubclass.__new__(_DockerExecutableSubclass),
+                "admit_docker_executable",
+            ),
             (_CountingResource([], "socket-lookalike"), "admit_docker_socket"),
-            (_DockerSocketSubclass.__new__(_DockerSocketSubclass), "admit_docker_socket"),
+            (
+                _DockerSocketSubclass.__new__(_DockerSocketSubclass),
+                "admit_docker_socket",
+            ),
         ):
             with self.subTest(factory_name=factory_name, child_type=type(child)):
                 exact_static = AdmittedStaticAuthorityResources(
@@ -486,21 +602,110 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         socket_subclass = _DockerSocketSubclass.__new__(_DockerSocketSubclass)
         try:
             cases = (
-                (AdmittedProductionAuthorityResources, static, evidence, docker, socket, object()),
-                (AdmittedProductionAuthorityResources, object(), evidence, docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, object(), docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, evidence, object(), socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, evidence, docker, object(), module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static_subclass, evidence, docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, evidence_subclass, docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, evidence, docker_subclass, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (AdmittedProductionAuthorityResources, static, evidence, docker, socket_subclass, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
-                (_ProductionResourcesSubclass, static, evidence, docker, socket, module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN),
+                (
+                    AdmittedProductionAuthorityResources,
+                    static,
+                    evidence,
+                    docker,
+                    socket,
+                    object(),
+                ),
+                (
+                    AdmittedProductionAuthorityResources,
+                    object(),
+                    evidence,
+                    docker,
+                    socket,
+                    module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+                ),
+                (
+                    AdmittedProductionAuthorityResources,
+                    static,
+                    object(),
+                    docker,
+                    socket,
+                    module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+                ),
+                (
+                    AdmittedProductionAuthorityResources,
+                    static,
+                    evidence,
+                    object(),
+                    socket,
+                    module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+                ),
+                (
+                    AdmittedProductionAuthorityResources,
+                    static,
+                    evidence,
+                    docker,
+                    object(),
+                    module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+                ),
+                (
+                    AdmittedProductionAuthorityResources,
+                    static_subclass,
+                    evidence,
+                    docker,
+                    socket,
+                    module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+                ),
+                (
+                    AdmittedProductionAuthorityResources,
+                    static,
+                    evidence_subclass,
+                    docker,
+                    socket,
+                    module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+                ),
+                (
+                    AdmittedProductionAuthorityResources,
+                    static,
+                    evidence,
+                    docker_subclass,
+                    socket,
+                    module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+                ),
+                (
+                    AdmittedProductionAuthorityResources,
+                    static,
+                    evidence,
+                    docker,
+                    socket_subclass,
+                    module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+                ),
+                (
+                    _ProductionResourcesSubclass,
+                    static,
+                    evidence,
+                    docker,
+                    socket,
+                    module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+                ),
             )
-            for constructor, static_child, evidence_child, docker_child, socket_child, token in cases:
-                with self.subTest(constructor=constructor, static_type=type(static_child), evidence_type=type(evidence_child), docker_type=type(docker_child), socket_type=type(socket_child)):
+            for (
+                constructor,
+                static_child,
+                evidence_child,
+                docker_child,
+                socket_child,
+                token,
+            ) in cases:
+                with self.subTest(
+                    constructor=constructor,
+                    static_type=type(static_child),
+                    evidence_type=type(evidence_child),
+                    docker_type=type(docker_child),
+                    socket_type=type(socket_child),
+                ):
                     with self.assertRaises(PrimeP1AuthorityResourceError):
-                        constructor(static_child, evidence_child, docker_child, socket_child, _token=token)
+                        constructor(
+                            static_child,
+                            evidence_child,
+                            docker_child,
+                            socket_child,
+                            _token=token,
+                        )
                     self.assertFalse(static._closed)
                     self.assertEqual(evidence._fd, evidence_fd)
                     self.assertFalse(static_subclass._closed)
@@ -515,7 +720,9 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             docker.close()
             socket.close()
 
-    def test_constructor_failure_closes_acquired_exact_children_in_reverse_order(self) -> None:
+    def test_constructor_failure_closes_acquired_exact_children_in_reverse_order(
+        self,
+    ) -> None:
         config = self._config()
         events: list[str] = []
         import asterion.applications.prime_agent.operator.authority_resources as module
@@ -554,15 +761,39 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             original_socket_close(resource)
 
         with (
-            patch.object(module, "admit_static_authority_resources", return_value=static),
+            patch.object(
+                module, "admit_static_authority_resources", return_value=static
+            ),
             patch.object(module, "admit_evidence_root", return_value=evidence),
             patch.object(module, "admit_docker_executable", return_value=docker),
             patch.object(module, "admit_docker_socket", return_value=socket),
-            patch.object(module, "AdmittedProductionAuthorityResources", side_effect=MemoryError),
-            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static),
-            patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence),
-            patch.object(AdmittedPrimeP1DockerExecutable, "close", autospec=True, side_effect=close_docker),
-            patch.object(AdmittedPrimeP1DockerSocket, "close", autospec=True, side_effect=close_socket),
+            patch.object(
+                module, "AdmittedProductionAuthorityResources", side_effect=MemoryError
+            ),
+            patch.object(
+                AdmittedStaticAuthorityResources,
+                "close",
+                autospec=True,
+                side_effect=close_static,
+            ),
+            patch.object(
+                AdmittedPrimeP1EvidenceRoot,
+                "close",
+                autospec=True,
+                side_effect=close_evidence,
+            ),
+            patch.object(
+                AdmittedPrimeP1DockerExecutable,
+                "close",
+                autospec=True,
+                side_effect=close_docker,
+            ),
+            patch.object(
+                AdmittedPrimeP1DockerSocket,
+                "close",
+                autospec=True,
+                side_effect=close_socket,
+            ),
             self.assertRaises(PrimeP1AuthorityResourceError),
         ):
             admit_production_authority_resources(config)
@@ -575,7 +806,8 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
 
         static = AdmittedStaticAuthorityResources(
-            object(), _CountingResource([], "nested"),
+            object(),
+            _CountingResource([], "nested"),
             _token=module._STATIC_AUTHORITY_RESOURCES_TOKEN,
         )
         evidence = AdmittedPrimeP1EvidenceRoot(
@@ -600,13 +832,32 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             original_docker_close(resource)
 
         with (
-            patch.object(module, "admit_static_authority_resources", return_value=static),
+            patch.object(
+                module, "admit_static_authority_resources", return_value=static
+            ),
             patch.object(module, "admit_evidence_root", return_value=evidence),
             patch.object(module, "admit_docker_executable", return_value=docker),
-            patch.object(module, "admit_docker_socket", side_effect=ValueError) as socket,
-            patch.object(AdmittedStaticAuthorityResources, "close", autospec=True, side_effect=close_static) as static_close,
-            patch.object(AdmittedPrimeP1EvidenceRoot, "close", autospec=True, side_effect=close_evidence) as evidence_close,
-            patch.object(AdmittedPrimeP1DockerExecutable, "close", autospec=True, side_effect=close_docker) as docker_close,
+            patch.object(
+                module, "admit_docker_socket", side_effect=ValueError
+            ) as socket,
+            patch.object(
+                AdmittedStaticAuthorityResources,
+                "close",
+                autospec=True,
+                side_effect=close_static,
+            ) as static_close,
+            patch.object(
+                AdmittedPrimeP1EvidenceRoot,
+                "close",
+                autospec=True,
+                side_effect=close_evidence,
+            ) as evidence_close,
+            patch.object(
+                AdmittedPrimeP1DockerExecutable,
+                "close",
+                autospec=True,
+                side_effect=close_docker,
+            ) as docker_close,
             self.assertRaises(PrimeP1AuthorityResourceError) as raised,
         ):
             admit_production_authority_resources(config)
@@ -628,7 +879,9 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         ) as resolver:
             with self.assertRaises(PrimeP1AuthorityResourceError):
                 admit_static_image_resource(config)
-        resolver.assert_called_once_with(ImagePlatformDescriptor("linux", "amd64", None))
+        resolver.assert_called_once_with(
+            ImagePlatformDescriptor("linux", "amd64", None)
+        )
 
     def test_rejects_non_authority_config_before_resolving(self) -> None:
         import asterion.applications.prime_agent.operator.authority_resources as module
@@ -643,7 +896,9 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         wrong = replace(_image_lock(), artifacts=_artifacts(config_sha256="9" * 64))
         import asterion.applications.prime_agent.operator.authority_resources as module
 
-        with patch.object(module, "resolve_promoted_image_input_lock", return_value=wrong):
+        with patch.object(
+            module, "resolve_promoted_image_input_lock", return_value=wrong
+        ):
             with self.assertRaises(PrimeP1AuthorityResourceError):
                 admit_static_image_resource(config)
 
@@ -689,8 +944,13 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             ImagePlatformDescriptor("linux", "arm64", None),
             "SCMP_ARCH_AARCH64",
             "sha256:" + "a" * 64,
-            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
-            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            "1" * 64,
+            "2" * 64,
+            "3" * 64,
+            "4" * 64,
+            "5" * 64,
+            "SCMP_ACT_ERRNO",
+            (SeccompRuleAtom("read", ()),),
             hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
         )
 
@@ -711,10 +971,17 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         config = self._config()
         image = _image_lock()
         policy = SeccompPolicyLock(
-            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
-            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
-            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
-            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            "asterion.prime-p1-seccomp-policy-lock/v1",
+            image.platform,
+            "SCMP_ARCH_X86_64",
+            "sha256:" + "a" * 64,
+            "1" * 64,
+            "2" * 64,
+            "3" * 64,
+            "4" * 64,
+            "5" * 64,
+            "SCMP_ACT_ERRNO",
+            (SeccompRuleAtom("read", ()),),
             hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
         )
 
@@ -736,10 +1003,17 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
     def test_identity_is_deterministic_and_domain_binds_each_exact_digest(self) -> None:
         image = _image_lock()
         policy = SeccompPolicyLock(
-            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
-            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
-            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
-            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            "asterion.prime-p1-seccomp-policy-lock/v1",
+            image.platform,
+            "SCMP_ARCH_X86_64",
+            "sha256:" + "a" * 64,
+            "1" * 64,
+            "2" * 64,
+            "3" * 64,
+            "4" * 64,
+            "5" * 64,
+            "SCMP_ACT_ERRNO",
+            (SeccompRuleAtom("read", ()),),
             hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
         )
         import asterion.applications.prime_agent.operator.authority_resources as module
@@ -765,10 +1039,17 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
     def test_identity_matches_independent_literal_domain_and_raw_hashes(self) -> None:
         image = _image_lock()
         policy = SeccompPolicyLock(
-            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
-            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
-            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
-            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            "asterion.prime-p1-seccomp-policy-lock/v1",
+            image.platform,
+            "SCMP_ARCH_X86_64",
+            "sha256:" + "a" * 64,
+            "1" * 64,
+            "2" * 64,
+            "3" * 64,
+            "4" * 64,
+            "5" * 64,
+            "SCMP_ACT_ERRNO",
+            (SeccompRuleAtom("read", ()),),
             hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
         )
         seccomp = AdmittedPrimeP1SeccompResource(
@@ -786,7 +1067,9 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         ).hexdigest()
         import asterion.applications.prime_agent.operator.authority_resources as module
 
-        self.assertEqual(expected, "871375e1568eeefc6d524d5c524fb910a34d05fb26c994e810041411a76c0cb4")
+        self.assertEqual(
+            expected, "871375e1568eeefc6d524d5c524fb910a34d05fb26c994e810041411a76c0cb4"
+        )
         self.assertEqual(
             module._static_authority_resource_identity(image, seccomp).digest, expected
         )
@@ -794,43 +1077,67 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
     def test_identity_changes_when_each_bound_input_hash_changes(self) -> None:
         image = _image_lock()
         policy = SeccompPolicyLock(
-            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
-            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
-            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
-            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            "asterion.prime-p1-seccomp-policy-lock/v1",
+            image.platform,
+            "SCMP_ARCH_X86_64",
+            "sha256:" + "a" * 64,
+            "1" * 64,
+            "2" * 64,
+            "3" * 64,
+            "4" * 64,
+            "5" * 64,
+            "SCMP_ACT_ERRNO",
+            (SeccompRuleAtom("read", ()),),
             hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
         )
         import asterion.applications.prime_agent.operator.authority_resources as module
 
-        def resource(profile_hash: str, lock: SeccompPolicyLock = policy) -> AdmittedPrimeP1SeccompResource:
+        def resource(
+            profile_hash: str, lock: SeccompPolicyLock = policy
+        ) -> AdmittedPrimeP1SeccompResource:
             return AdmittedPrimeP1SeccompResource(
                 (), "", (), lock, profile_hash, threading.Lock(), [False], [False]
             )
 
-        baseline = module._static_authority_resource_identity(image, resource("c" * 64)).digest
+        baseline = module._static_authority_resource_identity(
+            image, resource("c" * 64)
+        ).digest
         changed_image = replace(image, source_commit="0" * 39 + "1")
         changed_policy = replace(policy, build_input_sha256="7" * 64)
         self.assertNotEqual(
             baseline,
-            module._static_authority_resource_identity(changed_image, resource("c" * 64)).digest,
+            module._static_authority_resource_identity(
+                changed_image, resource("c" * 64)
+            ).digest,
         )
         self.assertNotEqual(
             baseline,
-            module._static_authority_resource_identity(image, resource("c" * 64, changed_policy)).digest,
+            module._static_authority_resource_identity(
+                image, resource("c" * 64, changed_policy)
+            ).digest,
         )
         self.assertNotEqual(
             baseline,
-            module._static_authority_resource_identity(image, resource("d" * 64)).digest,
+            module._static_authority_resource_identity(
+                image, resource("d" * 64)
+            ).digest,
         )
 
     def test_resource_set_close_calls_owned_child_once(self) -> None:
         config = self._config()
         image = _image_lock()
         policy = SeccompPolicyLock(
-            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
-            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
-            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
-            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            "asterion.prime-p1-seccomp-policy-lock/v1",
+            image.platform,
+            "SCMP_ARCH_X86_64",
+            "sha256:" + "a" * 64,
+            "1" * 64,
+            "2" * 64,
+            "3" * 64,
+            "4" * 64,
+            "5" * 64,
+            "SCMP_ACT_ERRNO",
+            (SeccompRuleAtom("read", ()),),
             hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
         )
         seccomp = AdmittedPrimeP1SeccompResource(
@@ -841,7 +1148,9 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         with (
             patch.object(module, "admit_static_image_resource", return_value=image),
             patch.object(module, "admit_static_seccomp_resource", return_value=seccomp),
-            patch.object(AdmittedPrimeP1SeccompResource, "close", autospec=True) as close,
+            patch.object(
+                AdmittedPrimeP1SeccompResource, "close", autospec=True
+            ) as close,
         ):
             resources = admit_static_authority_resources(config)
             resources.close()
@@ -852,10 +1161,17 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         config = self._config()
         image = _image_lock()
         policy = SeccompPolicyLock(
-            "asterion.prime-p1-seccomp-policy-lock/v1", image.platform,
-            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
-            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
-            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            "asterion.prime-p1-seccomp-policy-lock/v1",
+            image.platform,
+            "SCMP_ARCH_X86_64",
+            "sha256:" + "a" * 64,
+            "1" * 64,
+            "2" * 64,
+            "3" * 64,
+            "4" * 64,
+            "5" * 64,
+            "SCMP_ACT_ERRNO",
+            (SeccompRuleAtom("read", ()),),
             hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
         )
         seccomp = AdmittedPrimeP1SeccompResource(
@@ -866,20 +1182,32 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         with (
             patch.object(module, "admit_static_image_resource", return_value=image),
             patch.object(module, "admit_static_seccomp_resource", return_value=seccomp),
-            patch.object(module, "AdmittedStaticAuthorityResources", side_effect=MemoryError),
-            patch.object(AdmittedPrimeP1SeccompResource, "close", autospec=True) as close,
+            patch.object(
+                module, "AdmittedStaticAuthorityResources", side_effect=MemoryError
+            ),
+            patch.object(
+                AdmittedPrimeP1SeccompResource, "close", autospec=True
+            ) as close,
             self.assertRaises(PrimeP1AuthorityResourceError),
         ):
             admit_static_authority_resources(config)
         close.assert_called_once_with(seccomp)
 
-    def test_resource_set_rejects_direct_construction_without_private_token(self) -> None:
+    def test_resource_set_rejects_direct_construction_without_private_token(
+        self,
+    ) -> None:
         policy = SeccompPolicyLock(
             "asterion.prime-p1-seccomp-policy-lock/v1",
             ImagePlatformDescriptor("linux", "amd64", None),
-            "SCMP_ARCH_X86_64", "sha256:" + "a" * 64,
-            "1" * 64, "2" * 64, "3" * 64, "4" * 64, "5" * 64,
-            "SCMP_ACT_ERRNO", (SeccompRuleAtom("read", ()),),
+            "SCMP_ARCH_X86_64",
+            "sha256:" + "a" * 64,
+            "1" * 64,
+            "2" * 64,
+            "3" * 64,
+            "4" * 64,
+            "5" * 64,
+            "SCMP_ACT_ERRNO",
+            (SeccompRuleAtom("read", ()),),
             hashlib.sha256(_SINGLE_READ_PROFILE).hexdigest(),
         )
         seccomp = AdmittedPrimeP1SeccompResource(

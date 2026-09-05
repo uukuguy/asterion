@@ -126,9 +126,17 @@ class TestPrimeP1AuthorityDockerSocket(unittest.TestCase):
             ),
         }
         for name in (
-            "spawnv", "spawnve", "spawnvp", "spawnvpe",
-            "execv", "execve", "execvp", "execvpe",
-            "posix_spawn", "posix_spawnp", "system",
+            "spawnv",
+            "spawnve",
+            "spawnvp",
+            "spawnvpe",
+            "execv",
+            "execve",
+            "execvp",
+            "execvpe",
+            "posix_spawn",
+            "posix_spawnp",
+            "system",
         ):
             if hasattr(os, name):
                 targets[f"os.{name}"] = (os, name)
@@ -194,7 +202,9 @@ class TestPrimeP1AuthorityDockerSocket(unittest.TestCase):
         with self._forbidden_effects() as guards:
             self.assertTrue(required.issubset(guards))
 
-    def test_import_is_platform_neutral_without_linux_flags_or_config_dependency(self) -> None:
+    def test_import_is_platform_neutral_without_linux_flags_or_config_dependency(
+        self,
+    ) -> None:
         script = """
 import importlib.abc
 import os
@@ -241,7 +251,9 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
 
         with (
             patch.object(module.sys, "platform", "darwin"),
-            patch.object(module.os, "open", side_effect=AssertionError("open")) as open_,
+            patch.object(
+                module.os, "open", side_effect=AssertionError("open")
+            ) as open_,
             self.assertRaises(PrimeP1DockerSocketError),
         ):
             admit_docker_socket(_config(path=str(self.socket)))
@@ -277,7 +289,10 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
             ),
         ):
             for value in values:
-                with self.subTest(value=value), self.assertRaises(PrimeP1DockerSocketError):
+                with (
+                    self.subTest(value=value),
+                    self.assertRaises(PrimeP1DockerSocketError),
+                ):
                     admit_docker_socket(_config(path=value))
 
     def test_rejects_regular_socket_metadata_mismatch_and_final_link(self) -> None:
@@ -296,7 +311,12 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
             ("mode", {"path": str(self.socket), "mode": "0660"}),
             ("final-link", {"path": str(self.final_link)}),
         ):
-            with self.subTest(name=name), self._linux(module), patch.object(module.os, "fstat", side_effect=self._root_owned_stat), self.assertRaises(PrimeP1DockerSocketError):
+            with (
+                self.subTest(name=name),
+                self._linux(module),
+                patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+                self.assertRaises(PrimeP1DockerSocketError),
+            ):
                 admit_docker_socket(_config(**kwargs))
 
     def test_revalidation_rejects_closed_or_replaced_resource(self) -> None:
@@ -306,7 +326,10 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         )
         import asterion.applications.prime_agent.operator.authority_docker_socket as module
 
-        with self._linux(module), patch.object(module.os, "fstat", side_effect=self._root_owned_stat):
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+        ):
             resource = admit_docker_socket(_config(path=str(self.socket)))
             resource.close()
             with self.assertRaises(PrimeP1DockerSocketError):
@@ -329,7 +352,10 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         )
         import asterion.applications.prime_agent.operator.authority_docker_socket as module
 
-        with self._linux(module), patch.object(module.os, "fstat", side_effect=self._root_owned_stat):
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+        ):
             resource = admit_docker_socket(_config(path=str(self.socket)))
         with patch.object(module.os, "close", wraps=os.close) as close:
             threads = [threading.Thread(target=resource.close) for _ in range(2)]
@@ -358,14 +384,19 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
 
         with self.assertRaises(PrimeP1DockerSocketError):
             AdmittedPrimeP1DockerSocket(-1, (), (), object())  # type: ignore[arg-type]
-        with self._linux(module), patch.object(module.os, "fstat", side_effect=self._root_owned_stat):
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+        ):
             resource = admit_docker_socket(_config(path=str(self.socket)))
         for operation in (copy.copy, copy.deepcopy, pickle.dumps):
             with self.subTest(operation=operation), self.assertRaises(TypeError):
                 operation(resource)
         resource.close()
 
-    def test_private_projection_probe_uses_fixed_request_and_accepts_fragmented_content_length(self) -> None:
+    def test_private_projection_probe_uses_fixed_request_and_accepts_fragmented_content_length(
+        self,
+    ) -> None:
         from asterion.applications.prime_agent.operator.authority_docker_socket import (
             admit_docker_socket,
         )
@@ -381,8 +412,8 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
                     observed.append(client.recv(4096))
                 for fragment in (
                     b"HTTP/1.1 200 OK\r\nContent-Type:application/json\r\n",
-                    b"Content-Length:53\r\n\r\n{\"Version\":\"26.1.4\",",
-                    b"\"ApiVersion\":\"1.41\",\"extra\":true}",
+                    b'Content-Length:53\r\n\r\n{"Version":"26.1.4",',
+                    b'"ApiVersion":"1.41","extra":true}',
                 ):
                     client.sendall(fragment)
 
@@ -413,17 +444,29 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         def content(body: bytes, extra: bytes = b"") -> bytes:
             return (
                 b"HTTP/1.1 200 OK\r\nContent-Type:application/json\r\nContent-Length:"
-                + str(len(body)).encode() + b"\r\n\r\n" + body + extra
+                + str(len(body)).encode()
+                + b"\r\n\r\n"
+                + body
+                + extra
             )
 
         valid = b'{"Version":"26.1.4","ApiVersion":"1.41"}'
         invalid = (
             content(valid, b"x"),
-            content(valid).replace(b"Content-Length:", b"Content-Length:0\r\nContent-Length:"),
-            content(valid).replace(b"Content-Length:", b"Transfer-Encoding:chunked\r\nContent-Length:"),
+            content(valid).replace(
+                b"Content-Length:", b"Content-Length:0\r\nContent-Length:"
+            ),
+            content(valid).replace(
+                b"Content-Length:", b"Transfer-Encoding:chunked\r\nContent-Length:"
+            ),
             content(b'{"Version":"26.1.4","Version":"x","ApiVersion":"1.41"}'),
             content(b'{"Version":NaN,"ApiVersion":"1.41"}'),
-            content(b'{"Version":"26.1.4","ApiVersion":"1.41","x":' + b'{"x":' * 65 + b"0" + b"}" * 66),
+            content(
+                b'{"Version":"26.1.4","ApiVersion":"1.41","x":'
+                + b'{"x":' * 65
+                + b"0"
+                + b"}" * 66
+            ),
             content(b'\xef\xbb\xbf{"Version":"26.1.4","ApiVersion":"1.41"}'),
             content(b'{"Version":"26.1.4","ApiVersion":"1.41"}x'),
             b"HTTP/1.1 200 OK\r\nContent-Type:application/json\r\nTransfer-Encoding:chunked\r\n\r\n2;x\r\n{}\r\n0\r\n\r\n",
@@ -431,6 +474,220 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         for response in invalid:
             with self.subTest(response=response[:40]), self.assertRaises(ValueError):
                 module._verify_daemon_projection(response, "26.1.4", "1.41")
+
+    def test_private_projection_probe_accepts_fragmented_chunked_response(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_docker_socket import (
+            admit_docker_socket,
+        )
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        self.listener.listen(1)
+        body = b'{"Version":"26.1.4","ApiVersion":"1.41"}'
+        request = []
+
+        def serve() -> None:
+            client, _ = self.listener.accept()
+            with client:
+                request.append(client.recv(4096))
+                for fragment in (
+                    b"HTTP/1.1 200 OK\r\nContent-Type:application/json\r\nTransfer-Encoding:chunked\r\n\r\n",
+                    b"10\r\n" + body[:16] + b"\r\n",
+                    f"{len(body[16:]):x}".encode()
+                    + b"\r\n"
+                    + body[16:]
+                    + b"\r\n0\r\n\r\n",
+                ):
+                    client.sendall(fragment)
+
+        server = threading.Thread(target=serve)
+        server.start()
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+            patch.object(module, "_new_daemon_client", side_effect=_configured_client),
+        ):
+            resource = admit_docker_socket(_config(path=str(self.socket)))
+            asyncio.run(resource._verify_daemon_projection(time.monotonic() + 2))
+        server.join(2)
+        self.assertFalse(server.is_alive())
+        self.assertEqual(b"".join(request), module._VERSION_REQUEST)
+        resource.close()
+
+    def test_projection_probe_revalidates_on_each_replacement_timing(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_docker_socket import (
+            PrimeP1DockerSocketError,
+            admit_docker_socket,
+        )
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        for replacement_call in (1, 2, 3):
+            with self.subTest(replacement_call=replacement_call):
+                # A distinct fixture is needed because replacing a Unix path is irreversible.
+                with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+                    safe = Path(directory) / "safe"
+                    safe.mkdir(mode=0o755)
+                    path = safe / "docker.sock"
+                    listener = _SOCKET(socket.AF_UNIX, socket.SOCK_STREAM)
+                    listener.bind(str(path))
+                    path.chmod(0o600)
+                    listener.listen(1)
+                    accepted = threading.Event()
+
+                    def serve() -> None:
+                        try:
+                            client, _ = listener.accept()
+                            accepted.set()
+                            with client:
+                                client.recv(4096)
+                                client.sendall(
+                                    b'HTTP/1.1 200 OK\r\nContent-Type:application/json\r\nContent-Length:38\r\n\r\n{"Version":"26.1.4","ApiVersion":"1.41"}'
+                                )
+                        except OSError:
+                            pass
+
+                    server = threading.Thread(target=serve)
+                    server.start()
+                    with (
+                        self._linux(module),
+                        patch.object(
+                            module.os, "fstat", side_effect=self._root_owned_stat
+                        ),
+                        patch.object(
+                            module, "_new_daemon_client", side_effect=_configured_client
+                        ),
+                    ):
+                        resource = admit_docker_socket(_config(path=str(path)))
+                        original = type(resource).revalidate_path
+                        calls = 0
+
+                        def revalidate(instance: object) -> None:
+                            nonlocal calls
+                            calls += 1
+                            if calls == replacement_call:
+                                path.unlink()
+                                replacement = _SOCKET(
+                                    socket.AF_UNIX, socket.SOCK_STREAM
+                                )
+                                replacement.bind(str(path))
+                                replacement.close()
+                            original(instance)  # type: ignore[arg-type]
+
+                        with (
+                            patch.object(
+                                type(resource), "revalidate_path", new=revalidate
+                            ),
+                            self.assertRaises(PrimeP1DockerSocketError),
+                        ):
+                            asyncio.run(
+                                resource._verify_daemon_projection(time.monotonic() + 1)
+                            )
+                    resource.close()
+                    listener.close()
+                    server.join(1)
+
+    def test_projection_probe_after_close_concurrent_and_close_during_are_safe(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator.authority_docker_socket import (
+            PrimeP1DockerSocketError,
+            admit_docker_socket,
+        )
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        self.listener.listen(2)
+        first_connected = threading.Event()
+        release_first = threading.Event()
+        closed_by_peer = threading.Event()
+
+        def serve() -> None:
+            client, _ = self.listener.accept()
+            first_connected.set()
+            with client:
+                client.recv(4096)
+                release_first.wait(2)
+                client.sendall(
+                    b'HTTP/1.1 200 OK\r\nContent-Type:application/json\r\nContent-Length:38\r\n\r\n{"Version":"26.1.4","ApiVersion":"1.41"}'
+                )
+                while client.recv(4096):
+                    pass
+            closed_by_peer.set()
+
+        server = threading.Thread(target=serve)
+        server.start()
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+            patch.object(module, "_new_daemon_client", side_effect=_configured_client),
+        ):
+            resource = admit_docker_socket(_config(path=str(self.socket)))
+
+            async def run() -> None:
+                first = asyncio.create_task(
+                    resource._verify_daemon_projection(time.monotonic() + 2)
+                )
+                await asyncio.to_thread(first_connected.wait, 1)
+                second = asyncio.create_task(
+                    resource._verify_daemon_projection(time.monotonic() + 2)
+                )
+                resource.close()
+                release_first.set()
+                for task in (first, second):
+                    with self.assertRaises(PrimeP1DockerSocketError):
+                        await task
+
+            asyncio.run(run())
+        self.assertTrue(closed_by_peer.wait(1))
+        server.join(1)
+
+    def test_projection_probe_stall_deadline_and_cancellation_close_client(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator.authority_docker_socket import (
+            PrimeP1DockerSocketError,
+            admit_docker_socket,
+        )
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        self.listener.listen(2)
+        peer_closed = threading.Event()
+        connections = 0
+
+        def serve() -> None:
+            nonlocal connections
+            while connections < 2:
+                client, _ = self.listener.accept()
+                connections += 1
+                with client:
+                    client.recv(4096)
+                    while client.recv(4096):
+                        pass
+                if connections == 2:
+                    peer_closed.set()
+
+        server = threading.Thread(target=serve)
+        server.start()
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+            patch.object(module, "_new_daemon_client", side_effect=_configured_client),
+        ):
+            resource = admit_docker_socket(_config(path=str(self.socket)))
+
+            async def run() -> None:
+                with self.assertRaises(PrimeP1DockerSocketError):
+                    await resource._verify_daemon_projection(time.monotonic() + 0.05)
+                task = asyncio.create_task(
+                    resource._verify_daemon_projection(time.monotonic() + 2)
+                )
+                await asyncio.sleep(0.02)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+            asyncio.run(run())
+        self.assertTrue(peer_closed.wait(1))
+        resource.close()
+        server.join(1)
 
 
 if __name__ == "__main__":
