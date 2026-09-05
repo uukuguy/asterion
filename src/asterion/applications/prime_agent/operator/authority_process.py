@@ -14,6 +14,8 @@ import threading
 from typing import Any, NoReturn, cast
 
 from .authority_config import load_operator_config
+from .authority_protocol import AuthoritySession
+from .authority_request_contract import prime_p1_request_contract_sha256
 from .authority_resources import admit_production_authority_resources
 
 
@@ -267,14 +269,15 @@ def _run_ready_execute_exchange(
     descriptors: AdmittedAuthorityDescriptors,
     session_id: str,
 ) -> NoReturn:
-    """Run production resource admission, then stop unavailable before any handshake.
+    """Emit one authenticated ready packet, then stop unavailable.
 
-    A later authority slice must provide opaque complete ready bindings before
-    constructing a protocol session. Production resource admission alone never
-    permits an authority ready or execute exchange.
+    This deliberately does not receive an execute packet or perform any
+    authority work beyond complete local resource admission and the ready
+    transport binding.
     """
     config_fd: int | None = None
-    production_resources = None
+    connection: object | None = None
+    production_resources: object | None = None
     try:
         if (
             type(descriptors) is not AdmittedAuthorityDescriptors
@@ -286,9 +289,24 @@ def _run_ready_execute_exchange(
         config_fd = None
         config = load_operator_config(loader_owned_config_fd)
         production_resources = admit_production_authority_resources(config)
-    except Exception:
+        resource_set_sha256 = production_resources._resource_set_sha256()
+        session_key = _consume_session_key(descriptors)
+        connection = descriptors.consume_socket()
+        session = AuthoritySession(
+            session_id,
+            session_key,
+            prime_p1_request_contract_sha256(),
+            resource_set_sha256,
+        )
+        _send_authority_packet(connection, session.ready_packet())
+    except BaseException:
         pass
     finally:
+        if connection is not None:
+            try:
+                _close_socket(connection)
+            except BaseException:
+                pass
         if production_resources is not None:
             try:
                 production_resources.close()

@@ -29,6 +29,10 @@ from asterion.applications.prime_agent.operator.authority_process import (
     _run_ready_execute_exchange,
     _send_authority_packet,
 )
+from asterion.applications.prime_agent.operator.authority_protocol import decode_frame
+from asterion.applications.prime_agent.operator.authority_request_contract import (
+    prime_p1_request_contract_sha256,
+)
 class _Socket:
     family = 1
     type = 5
@@ -381,7 +385,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         self.assertNotIn("SOCKET_CLOSE_SENTINEL", rendered)
         self.assertNotIn("FD_CLOSE_SENTINEL", rendered)
 
-    def test_pre_ready_resource_gate_stays_unavailable_after_future_resolution(
+    def test_ready_transport_sends_one_authenticated_frame_without_receive(
         self,
     ) -> None:
         key_read, key_write = os.pipe()
@@ -399,6 +403,9 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         class RetainedProductionResources:
             close_calls = 0
 
+            def _resource_set_sha256(self) -> str:
+                return "c" * 64
+
             def close(self) -> None:
                 self.close_calls += 1
 
@@ -411,23 +418,26 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                 return_value=resources,
             ) as admit,
             patch.object(
-                module,
-                "admit_static_authority_resources",
-                side_effect=AssertionError("static admission must not run"),
-                create=True,
-            ) as static_admit,
-            patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
-            patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
+                module, "_receive_authority_packet", side_effect=ForbiddenAccess
+            ) as receive,
             self.assertRaises(PrimeP1AuthorityBootstrapError),
         ):
             _run_ready_execute_exchange(bundle, "a" * 64)
         admit.assert_called_once()
-        static_admit.assert_not_called()
+        receive.assert_not_called()
         self.assertEqual(resources.close_calls, 1)
-        self.assertEqual(connection.calls, [])
+        self.assertEqual(len(connection.calls), 1)
+        packet = b"".join(cast(list[bytes], connection.calls[0][0]))
+        frame = decode_frame(packet, b"k" * 32)
+        self.assertEqual(frame.kind, "ready")
+        self.assertEqual(
+            frame.payload["request_contract_sha256"],
+            prime_p1_request_contract_sha256(),
+        )
+        self.assertEqual(frame.payload["resource_set_sha256"], "c" * 64)
         self.assertTrue(connection.closed)
 
-    def test_pre_ready_aggregate_admission_precedes_transport_and_closes_resource(
+    def test_ready_transport_derives_resource_set_before_consuming_key_or_socket(
         self,
     ) -> None:
         import asterion.applications.prime_agent.operator.authority_process as module
@@ -436,6 +446,10 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         closed_fds: list[int] = []
 
         class RetainedProductionResources:
+            def _resource_set_sha256(self) -> str:
+                events.append("resource-digest")
+                return "c" * 64
+
             def close(self) -> None:
                 events.append("resources-close")
                 raise RuntimeError("RESOURCE_CLOSE_SENTINEL")
@@ -443,7 +457,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         class ForbiddenAccess(BaseException):
             pass
 
-        connection = _ExchangeSocket(AssertionError("transport must not run"))
+        connection = _ExchangeSocket(AssertionError("transport must not receive"))
         bundle = AdmittedAuthorityDescriptors(connection, 101, 102, closed_fds.append)
         with (
             patch.object(
@@ -456,19 +470,16 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                     events.append("resources") or RetainedProductionResources()
                 ),
             ),
-            patch.object(
-                module,
-                "admit_static_authority_resources",
-                side_effect=AssertionError("static admission must not run"),
-                create=True,
-            ) as static_admit,
-            patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
-            patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
+            patch.object(module, "_consume_session_key", side_effect=lambda _: events.append("key") or b"k" * 32),
+            patch.object(bundle, "consume_socket", side_effect=lambda: events.append("socket") or connection),
+            patch.object(module, "_receive_authority_packet", side_effect=ForbiddenAccess),
             self.assertRaises(PrimeP1AuthorityBootstrapError),
         ):
             _run_ready_execute_exchange(bundle, "a" * 64)
-        self.assertEqual(events, ["config", "resources", "resources-close"])
-        static_admit.assert_not_called()
+        self.assertEqual(
+            events,
+            ["config", "resources", "resource-digest", "key", "socket", "resources-close"],
+        )
         self.assertEqual(closed_fds, [101])
         self.assertTrue(connection.closed)
 
