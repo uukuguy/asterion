@@ -16,7 +16,7 @@ from typing import Protocol
 
 from .docker_cli import (
     DockerCliAttachProcess, DockerCliAttachRunner, DockerCliEngineTransport,
-    DockerCliRunner, _CLEARED_BASE_IMAGE_ENVIRONMENT, _ENVIRONMENT, _TMPFS,
+    DockerCliRunner, _CLEARED_BASE_IMAGE_ENVIRONMENT, _ENVIRONMENT, _TMPFS, _INSPECT_PROJECTION,
 )
 from .docker_worker import DockerWorkerLauncherSelfCheck, _LifecycleCallControl
 from .image_input_lock import ImagePlatformDescriptor
@@ -80,23 +80,26 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
     async def inspect(self, container_id: str, *, control: _LifecycleCallControl) -> None:  # type: ignore[override]
         self._specification(container_id)  # type: ignore[attr-defined]
         spec = self._specification(container_id)  # type: ignore[attr-defined]
-        projection = '{{json .Id}} {{json .Image}} {{json .Config.Entrypoint}} {{json .HostConfig.NetworkMode}} {{json .HostConfig.ReadonlyRootfs}} {{json .Config.User}} {{json .HostConfig.Privileged}} {{json .HostConfig.CapDrop}} {{json .HostConfig.SecurityOpt}} {{json .HostConfig.Tmpfs}}'
-        result = await self._call(self._prefix + ("container", "inspect", "--format", projection, container_id), control)  # type: ignore[attr-defined]
+        result = await self._call(self._prefix + ("container", "inspect", "--format", _INSPECT_PROJECTION, container_id), control)  # type: ignore[attr-defined]
         try:
-            parts = result.stdout.rstrip(b"\n").split(b" ", 9)
-            values = [json.loads(part) for part in parts]
+            parsed = json.loads(result.stdout)
+            if type(parsed) is not list or len(parsed) != 1 or type(parsed[0]) is not dict: raise ValueError
+            values = parsed[0]
         except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
-        if (len(values) != 10 or values[0] != container_id or values[1] != spec.image_digest or values[2] != [_ENTRYPOINT]
-                or values[3] != "none" or values[4] is not True or values[5] != "65534:65534" or values[6] is not False
-                or values[7] != ["ALL"] or "no-new-privileges:true" not in values[8] or type(values[9]) is not dict
-                or values[9].get("/workspace") != "rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700" or result.stderr):
+        exact = {"Id": container_id, "Image": spec.image_digest, "User": "65534:65534", "Env": list(_ENVIRONMENT) + list(_CLEARED_BASE_IMAGE_ENVIRONMENT), "Entrypoint": [_ENTRYPOINT], "Labels": {}, "OpenStdin": True, "NetworkMode": "none", "PortBindings": {}, "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700"}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "", "IpcMode": "private", "UTSMode": "", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}, "Mounts": [], "Running": False}
+        if (set(values) != set(exact) | {"SecurityOpt"} or any(values[key] != value for key, value in exact.items())
+                or type(values["SecurityOpt"]) is not list or len(values["SecurityOpt"]) != 2
+                or values["SecurityOpt"][0] != "no-new-privileges:true" or not values["SecurityOpt"][1].startswith("seccomp=") or result.stderr):
             raise RestrictedWorkerError("restricted worker value is invalid")
 
     async def start(self, container_id: str, *, control: _LifecycleCallControl) -> None:  # type: ignore[override]
         self._specification(container_id)  # type: ignore[attr-defined]
         process = await self._attach_runner.open(argv=self._prefix + ("container", "start", "--attach", "--interactive", container_id), env={}, pass_fds=())  # type: ignore[attr-defined]
-        if process.stdin is None or process.stdout is None: raise RestrictedWorkerError("restricted worker value is invalid")
+        if process.stdin is None or process.stdout is None:
+            if process.returncode is None: process.kill()
+            await process.wait()
+            raise RestrictedWorkerError("restricted worker value is invalid")
         self._started_processes[container_id] = process  # type: ignore[attr-defined]
 
     async def channel(self, container_id: str, *, run_id: str, session_id: str, control: _LifecycleCallControl) -> _P1BChannel:
