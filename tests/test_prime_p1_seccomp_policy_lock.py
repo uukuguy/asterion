@@ -101,6 +101,10 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
             canonical_seccomp_policy_lock_bytes(
                 replace(lock, maximum_profile_sha256="0" * 64)
             )
+        with self.assertRaises(PrimeP1SeccompPolicyLockError):
+            canonical_maximum_seccomp_profile_bytes(
+                replace(lock, maximum_profile_sha256="0" * 64)
+            )
 
     def test_canonical_round_trip_and_digest_are_deterministic(self) -> None:
         lock = _lock()

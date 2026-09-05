@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -23,13 +22,18 @@ from asterion.applications.prime_agent.operator.seccomp_policy_lock import (
     SeccompArgumentConstraint,
     SeccompPolicyLock,
     SeccompRuleAtom,
-    canonical_maximum_seccomp_profile_bytes,
 )
 
 
 _PROFILE = (
     b'{"architectures":["SCMP_ARCH_X86_64"],"defaultAction":"SCMP_ACT_ERRNO",'
     b'"syscalls":[{"action":"SCMP_ACT_ALLOW","args":[],"names":["read"]}]}'
+)
+_MAXIMUM_PROFILE = (
+    b'{"architectures":["SCMP_ARCH_X86_64"],"defaultAction":"SCMP_ACT_ERRNO",'
+    b'"syscalls":[{"action":"SCMP_ACT_ALLOW","args":[],"names":["read"]},'
+    b'{"action":"SCMP_ACT_ALLOW","args":[{"index":0,"op":"SCMP_CMP_EQ","value":0}],"names":["write"]},'
+    b'{"action":"SCMP_ACT_ALLOW","args":[{"index":0,"op":"SCMP_CMP_MASKED_EQ","value":1,"valueTwo":3}],"names":["write"]}]}'
 )
 
 
@@ -55,14 +59,9 @@ def _policy() -> SeccompPolicyLock:
                 (SeccompArgumentConstraint(0, "SCMP_CMP_MASKED_EQ", 1, 3),),
             ),
         ),
-        maximum_profile_sha256="0" * 64,
+        maximum_profile_sha256=hashlib.sha256(_MAXIMUM_PROFILE).hexdigest(),
     )
-    return replace(
-        policy,
-        maximum_profile_sha256=hashlib.sha256(
-            canonical_maximum_seccomp_profile_bytes(policy)
-        ).hexdigest(),
-    )
+    return policy
 
 
 class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
