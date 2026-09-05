@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   chmod,
+  chown,
   mkdir,
   mkdtemp,
   readFile,
   realpath,
   rm,
+  stat,
   readdir,
   writeFile,
 } from "node:fs/promises";
@@ -381,7 +383,13 @@ test("rejects special permission bits on projection roots, directories, and file
         : target === "resource"
           ? resourcePath
           : join(resourcePath, "payload.txt");
+      if (target === "resource" && typeof process.getuid === "function") {
+        await chown(targetPath, process.getuid(), process.getgid());
+      }
       await chmod(targetPath, mode);
+      if (target === "resource") {
+        assert.equal((await stat(targetPath)).mode & 0o7777, mode);
+      }
       assert.throws(() => validatePrimeEcosystemFrame(state.frame), PrimeEcosystemError);
     } finally {
       await state.cleanup();
