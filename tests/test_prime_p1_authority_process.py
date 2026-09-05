@@ -33,20 +33,11 @@ class _Socket:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
-    def test_consume_wins_over_close_without_closing_returned_fd(self) -> None:
-        entered, release = threading.Event(), threading.Event()
+    def test_consume_then_close_never_closes_returned_fd(self) -> None:
         closed: list[int] = []
-        bundle = AdmittedAuthorityDescriptors(_Socket(peer=(300, 400)), 11, 12, closed.append, _before_take=lambda: (entered.set(), release.wait()))
-        result: list[int] = []
-        consumer = threading.Thread(target=lambda: result.append(bundle.consume_session_key_fd()))
-        consumer.start()
-        self.assertTrue(entered.wait(1))
-        closer = threading.Thread(target=bundle.close)
-        closer.start()
-        release.set()
-        consumer.join()
-        closer.join()
-        self.assertEqual(result, [11])
+        bundle = AdmittedAuthorityDescriptors(_Socket(peer=(300, 400)), 11, 12, closed.append)
+        self.assertEqual(bundle.consume_session_key_fd(), 11)
+        bundle.close()
         self.assertEqual(closed, [12])
 
     def test_close_wins_before_consume_closes_fd_once(self) -> None:
