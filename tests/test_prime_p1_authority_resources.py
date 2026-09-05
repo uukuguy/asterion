@@ -387,23 +387,51 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             events.append("socket")
             original_socket_close(resource)
 
+        def admit_artifacts() -> AdmittedPrimeP1AuthorityArtifacts:
+            events.append("artifacts")
+            return artifacts
+
+        def admit_application() -> AdmittedPrimeP1ApplicationResources:
+            events.append("application")
+            return application
+
+        def admit_static(_: object) -> AdmittedStaticAuthorityResources:
+            events.append("static")
+            return static
+
+        def admit_evidence(_: object) -> AdmittedPrimeP1EvidenceRoot:
+            events.append("evidence")
+            return evidence
+
+        def admit_docker(_: object) -> AdmittedPrimeP1DockerExecutable:
+            events.append("docker")
+            return docker
+
+        def admit_socket(_: object) -> AdmittedPrimeP1DockerSocket:
+            events.append("socket")
+            return socket
+
         with (
-            patch.object(module, "admit_authority_artifact_lock", return_value=artifacts) as admit_artifacts,
             patch.object(
-                module, "admit_prime_p1_application_resources", return_value=application
-            ) as admit_application,
+                module, "admit_authority_artifact_lock", side_effect=admit_artifacts
+            ) as admit_artifacts_mock,
             patch.object(
-                module, "admit_static_authority_resources", return_value=static
-            ) as admit_static,
+                module,
+                "admit_prime_p1_application_resources",
+                side_effect=admit_application,
+            ) as admit_application_mock,
             patch.object(
-                module, "admit_evidence_root", return_value=evidence
-            ) as admit_evidence,
+                module, "admit_static_authority_resources", side_effect=admit_static
+            ) as admit_static_mock,
             patch.object(
-                module, "admit_docker_executable", return_value=docker
-            ) as admit_docker,
+                module, "admit_evidence_root", side_effect=admit_evidence
+            ) as admit_evidence_mock,
             patch.object(
-                module, "admit_docker_socket", return_value=socket
-            ) as admit_socket,
+                module, "admit_docker_executable", side_effect=admit_docker
+            ) as admit_docker_mock,
+            patch.object(
+                module, "admit_docker_socket", side_effect=admit_socket
+            ) as admit_socket_mock,
             patch.object(
                 AdmittedPrimeP1AuthorityArtifacts,
                 "close",
@@ -442,12 +470,12 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             ),
         ):
             resources = admit_production_authority_resources(config)
-            admit_artifacts.assert_called_once_with()
-            admit_application.assert_called_once_with()
-            admit_static.assert_called_once_with(config)
-            admit_evidence.assert_called_once_with(config)
-            admit_docker.assert_called_once_with(config)
-            admit_socket.assert_called_once_with(config)
+            admit_artifacts_mock.assert_called_once_with()
+            admit_application_mock.assert_called_once_with()
+            admit_static_mock.assert_called_once_with(config)
+            admit_evidence_mock.assert_called_once_with(config)
+            admit_docker_mock.assert_called_once_with(config)
+            admit_socket_mock.assert_called_once_with(config)
             self.assertEqual(
                 repr(resources), "AdmittedProductionAuthorityResources(redacted)"
             )
@@ -460,7 +488,20 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 thread.join()
         self.assertEqual(
             events,
-            ["socket", "docker", "evidence", "static", "application", "artifacts"],
+            [
+                "artifacts",
+                "application",
+                "static",
+                "evidence",
+                "docker",
+                "socket",
+                "socket",
+                "docker",
+                "evidence",
+                "static",
+                "application",
+                "artifacts",
+            ],
         )
 
     def test_evidence_failure_closes_static_once_in_reverse_acquisition_order(
