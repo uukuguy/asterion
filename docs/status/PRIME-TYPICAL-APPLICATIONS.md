@@ -1,6 +1,6 @@
 # Prime Seven-Scenario Closure Worklist
 
-> Updated: 2026-09-05. Canonical active worklist for the Prime capability program.
+> Updated: 2026-09-06. Canonical active worklist for the Prime capability program.
 
 ## Goal and authority
 
@@ -43,7 +43,7 @@ mean seven publicly runnable scenarios.
    cleanup are implemented. The 42-test focused group passed and Sol approved.
    Pure provider-free work; an empty production catalog continues to
    reject execution. Owner: Terra, with independent Sol review.
-2. **P1 execution/deployment contract — bundle admission verified, launch pending:** use the reviewed Linux
+2. **P1 execution/deployment contract — bundle launch and qualification IPC verified:** use the reviewed Linux
    execution substrate for the trusted supervisor, application child and
    authority; bind service-manager identity, exact ELF launch and credential
    custody. Astra owns the decision; Sol independently checks feasibility.
@@ -55,11 +55,23 @@ mean seven publicly runnable scenarios.
    `docs/superpowers/specs/2026-09-05-prime-authority-bundle-contract.md`; its
    inventory/profile and descriptor admission is implemented and Sol-approved.
    A real root-owned Linux CPython candidate (658 files, five external libraries)
-   passed admission/revalidation/cleanup. Actual authority IPC launch remains next.
-3. **P1-A real spine:** promoted resources, exact launch, authenticated terminal,
-   killable model transport, trusted oracle and cleanup connect to one public
-   preset. First prove the complete process path with a deterministic backend,
-   then its finite actual model execution. This is a spine/coding smoke gate.
+   passed admission/revalidation/cleanup. Development Linux child launch is now
+   implemented in `2e6022d`: real fd-exec, identity policy, fixed FD custody,
+   cancellation and reaping; 13 focused launch tests pass. This is not full
+   authority IPC or a P1 scenario PASS. The user's 2026-09-06 correction limits
+   development verification to normal flows and key boundary assertions;
+   exhaustive release matrices and repeated promotion are deferred. Next is the
+   real worker/model integration. The authority-owned ready/execute/terminal
+   qualification exchange is implemented: four focused Linux tests cover normal
+   completion, cancellation, identity mismatch and FD handoff ownership. It
+   issues no production receipt.
+3. **P1-A real spine:** first connect a private development hook using the
+   actual Docker worker, killable model transport, trusted oracle and cleanup.
+   Record the selected image and execution scope as unpromoted; production
+   receipt/catalog publication is not a development prerequisite. Qualification
+   IPC remains a separate fixed workload. Then bind the accepted execution path
+   to the public preset. The current image calls IPython but does not yet invoke
+   Prime SDK: a one-cell model smoke result alone cannot close P1.
 4. **P1-B semantic closure:** current production workload permits one model
    request/IPython call, while the original P1 fixture requires multiple turns
    and post-compaction witnesses. Preserve P1-A's exact contract; add a reviewed
@@ -70,6 +82,27 @@ weaken the seven-scenario goal. Production deployment must preserve separate
 authority identity and all approved security constraints. No same-uid fake,
 Python source digest, image digest or empty catalog can stand in for a promoted
 authority executable.
+
+## Current development execution evidence
+
+The development path now constructs a real Linux/arm64 image, starts the
+restricted Docker worker, passes its self-check, initializes the coding task,
+and reads the initial tmpfs snapshot from the same-guest root host. Real model
+requests reached HTTP 200. The last complete command still exited 1 because the
+provider returned a fenced cell; `850365c` fixes that format with two focused,
+provider-free passing checks. **The real command was not rerun after that fix.**
+No final coding oracle, complete P1, public runtime route or production receipt
+has been verified by these development attempts.
+
+The local proc snapshot is an operator development operation. A reduced-
+privilege authority cannot assume it has that root capability; later integration
+must inject a narrow manager-owned operation. The image still invokes IPython
+directly rather than the Prime SDK. Preserve those two remaining boundaries.
+
+Development verification follows the user's explicit scope: normal execution
+plus identity/isolation, limits, cancellation/cleanup and redaction assertions.
+Do not add release matrices or repeat promotion as a prerequisite to functional
+progress. Concrete real execution failures justify narrow fixes and checks.
 
 ## Work ownership and parallelism
 
