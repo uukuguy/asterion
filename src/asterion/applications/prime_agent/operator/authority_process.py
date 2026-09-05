@@ -212,6 +212,42 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
     return result
 
 
+def _send_authority_packet(
+    connection: object, packet: bytes, *, msg_nosignal: int | None = None
+) -> None:
+    """Send one raw authority packet without taking ownership of its socket."""
+    failed = False
+    try:
+        capability = (
+            getattr(socket, "MSG_NOSIGNAL", None)
+            if msg_nosignal is None
+            else msg_nosignal
+        )
+        if (
+            type(packet) is not bytes
+            or not 1 <= len(packet) <= 8192
+            or type(capability) is not int
+            or capability == 0
+        ):
+            raise ValueError
+        interruptions = 0
+        while True:
+            try:
+                sent = _sendmsg(connection, [packet], [], capability)
+                break
+            except OSError as error:
+                if error.errno == errno.EINTR and interruptions < 8:
+                    interruptions += 1
+                    continue
+                raise
+        if type(sent) is not int or sent != len(packet):
+            raise ValueError
+    except (OSError, OverflowError, TypeError, ValueError):
+        failed = True
+    if failed:
+        _unavailable()
+
+
 def admit_authority_launch(
     contract: AuthorityLaunchContract,
     *,
@@ -391,6 +427,12 @@ def _getsockopt(connection: object, level: int, option: int, *args: int) -> obje
 
 def _recvmsg(connection: object, size: int, ancillary_size: int, flags: int) -> object:
     return cast(Any, connection).recvmsg(size, ancillary_size, flags)
+
+
+def _sendmsg(
+    connection: object, buffers: list[bytes], ancillary: list[object], flags: int
+) -> object:
+    return cast(Any, connection).sendmsg(buffers, ancillary, flags)
 
 
 def _close_received_rights(ancillary: object) -> None:
