@@ -319,10 +319,17 @@ def _verify_daemon_projection(
         raise ValueError
     headers: dict[bytes, bytes] = {}
     for line in lines[1:]:
-        if not line or b":" not in line or any(byte in b"\x00\x0b\x0c" for byte in line):
+        if not line or b":" not in line:
             raise ValueError
         name, value = line.split(b":", 1)
-        if not _header_token(name) or not value or value[:1] in b" \t" or value[-1:] in b" \t":
+        if (
+            not _header_token(name)
+            or not value
+            or any(byte < 32 for byte in name)
+            or any(byte < 32 for byte in value)
+            or value[:1] in b" \t"
+            or value[-1:] in b" \t"
+        ):
             raise ValueError
         name = name.lower()
         if name in headers:

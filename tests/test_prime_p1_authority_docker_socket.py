@@ -475,6 +475,270 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
             with self.subTest(response=response[:40]), self.assertRaises(ValueError):
                 module._verify_daemon_projection(response, "26.1.4", "1.41")
 
+    def test_projection_parser_rejects_controls_and_explicit_contract_failures(
+        self,
+    ) -> None:
+        """Every HTTP boundary violation is rejected before JSON is trusted."""
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        body = b'{"Version":"26.1.4","ApiVersion":"1.41"}'
+
+        def response(headers: bytes, payload: bytes = body) -> bytes:
+            return (
+                b"HTTP/1.1 200 OK\r\n"
+                + headers.replace(b"@", str(len(payload)).encode())
+                + b"\r\n\r\n"
+                + payload
+            )
+
+        cases = {
+            "status": response(
+                b"Content-Type:application/json\r\nContent-Length:@"
+            ).replace(b"200 OK", b"201 OK"),
+            "bare-lf": response(
+                b"Content-Type:application/json\r\nContent-Length:@\r\nX-Test:ok\nbad"
+            ),
+            "bare-cr": response(
+                b"Content-Type:application/json\r\nContent-Length:@\r\nX-Test:ok\rbad"
+            ),
+            "control-name": response(
+                b"Content\x01-Type:application/json\r\nContent-Length:@"
+            ),
+            "control-value": response(
+                b"Content-Type:application/json\r\nContent-Length:@\r\nX-Test:ok\x1f"
+            ),
+            "wrong-content-type": response(
+                b"Content-Type:application/json; charset=utf-8\r\nContent-Length:@"
+            ),
+            "both-framings": response(
+                b"Content-Type:application/json\r\nContent-Length:@\r\n"
+                b"Transfer-Encoding:chunked"
+            ),
+            "truncated-chunk": response(
+                b"Content-Type:application/json\r\nTransfer-Encoding:chunked",
+                b"26\r\n" + body[:-1],
+            ),
+            "invalid-utf8": response(
+                b"Content-Type:application/json\r\nContent-Length:@", b"\xff\xff"
+            ),
+            "missing-version": response(
+                b"Content-Type:application/json\r\nContent-Length:@",
+                b'{"ApiVersion":"1.41"}',
+            ),
+            "wrong-version-type": response(
+                b"Content-Type:application/json\r\nContent-Length:@",
+                b'{"Version":26,"ApiVersion":"1.41"}',
+            ),
+            "mismatched-version": response(
+                b"Content-Type:application/json\r\nContent-Length:@",
+                b'{"Version":"26.1.3","ApiVersion":"1.41"}',
+            ),
+            "missing-api-version": response(
+                b"Content-Type:application/json\r\nContent-Length:@",
+                b'{"Version":"26.1.4"}',
+            ),
+            "wrong-api-version-type": response(
+                b"Content-Type:application/json\r\nContent-Length:@",
+                b'{"Version":"26.1.4","ApiVersion":141}',
+            ),
+            "mismatched-api-version": response(
+                b"Content-Type:application/json\r\nContent-Length:@",
+                b'{"Version":"26.1.4","ApiVersion":"1.40"}',
+            ),
+        }
+        for name, value in cases.items():
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                module._verify_daemon_projection(value, "26.1.4", "1.41")
+
+    def test_new_daemon_client_uses_atomic_flags_without_patching_constructor(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        if not all(
+            isinstance(getattr(socket, name, None), int)
+            for name in ("SOCK_CLOEXEC", "SOCK_NONBLOCK")
+        ):
+            self.skipTest("atomic Linux socket flags are unavailable")
+        client = module._new_daemon_client()
+        try:
+            self.assertEqual(client.family, socket.AF_UNIX)
+            self.assertEqual(client.type & socket.SOCK_STREAM, socket.SOCK_STREAM)
+            self.assertFalse(client.getblocking())
+            self.assertFalse(client.get_inheritable())
+        finally:
+            client.close()
+
+    def test_new_daemon_client_constructs_with_atomic_cloexec_and_nonblock_flags(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        calls: list[tuple[object, ...]] = []
+
+        class Client:
+            def setblocking(self, value: bool) -> None:
+                self.blocking = value
+
+            def set_inheritable(self, value: bool) -> None:
+                self.inheritable = value
+
+            def close(self) -> None:
+                self.closed = True
+
+        def construct(*args: object) -> Client:
+            calls.append(args)
+            return Client()
+
+        with (
+            patch.object(module.socket, "SOCK_CLOEXEC", 0x100, create=True),
+            patch.object(module.socket, "SOCK_NONBLOCK", 0x200, create=True),
+            patch.object(module.socket, "socket", side_effect=construct),
+        ):
+            client = module._new_daemon_client()
+        self.assertIsInstance(client, Client)
+        self.assertEqual(
+            calls,
+            [(socket.AF_UNIX, socket.SOCK_STREAM | 0x100 | 0x200)],
+        )
+
+    def test_queued_probe_deadline_and_cancel_do_not_create_clients_and_close_once(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator.authority_docker_socket import (
+            PrimeP1DockerSocketError,
+            admit_docker_socket,
+        )
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        self.listener.listen(1)
+        connected = threading.Event()
+        release = threading.Event()
+
+        def serve() -> None:
+            client, _ = self.listener.accept()
+            with client:
+                client.recv(4096)
+                connected.set()
+                release.wait(2)
+                client.sendall(
+                    b"HTTP/1.1 200 OK\r\nContent-Type:application/json\r\n"
+                    b"Content-Length:40\r\n\r\n"
+                    b'{"Version":"26.1.4","ApiVersion":"1.41"}'
+                )
+
+        class CloseSpy:
+            def __init__(self, client: socket.socket) -> None:
+                self.client = client
+                self.close_calls = 0
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(self.client, name)
+
+            def close(self) -> None:
+                self.close_calls += 1
+                self.client.close()
+
+        server = threading.Thread(target=serve)
+        server.start()
+        spies: list[CloseSpy] = []
+
+        def new_client() -> CloseSpy:
+            spy = CloseSpy(_configured_client())
+            spies.append(spy)
+            return spy
+
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+            patch.object(module, "_new_daemon_client", side_effect=new_client),
+        ):
+            resource = admit_docker_socket(_config(path=str(self.socket)))
+
+            async def run() -> None:
+                first = asyncio.create_task(
+                    resource._verify_daemon_projection(time.monotonic() + 2)
+                )
+                while not resource._probe_lock.locked():
+                    await asyncio.sleep(0)
+                await asyncio.to_thread(connected.wait, 1)
+                queued_deadline = asyncio.create_task(
+                    resource._verify_daemon_projection(time.monotonic() + 0.02)
+                )
+                await asyncio.sleep(0)
+                with self.assertRaises(PrimeP1DockerSocketError):
+                    await queued_deadline
+                queued_cancel = asyncio.create_task(
+                    resource._verify_daemon_projection(time.monotonic() + 2)
+                )
+                await asyncio.sleep(0)
+                queued_cancel.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await queued_cancel
+                self.assertEqual(len(spies), 1)
+                release.set()
+                await first
+
+            asyncio.run(run())
+        server.join(2)
+        self.assertFalse(server.is_alive())
+        self.assertEqual([spy.close_calls for spy in spies], [1])
+        resource.close()
+
+    def test_probe_recursively_redacts_socket_level_sentinels_and_exception_links(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator.authority_docker_socket import (
+            PrimeP1DockerSocketError,
+            admit_docker_socket,
+        )
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+        ):
+            resource = admit_docker_socket(_config(path=str(self.socket)))
+        failures = (
+            patch.object(
+                type(resource), "revalidate_path", side_effect=RuntimeError(_SENTINEL)
+            ),
+            patch.object(module, "_new_daemon_client", side_effect=RuntimeError(_SENTINEL)),
+        )
+        for failure in failures:
+            with self.subTest(failure=failure):
+                with failure, self.assertRaises(PrimeP1DockerSocketError) as raised:
+                    asyncio.run(resource._verify_daemon_projection(time.monotonic() + 1))
+                self.assertNotIn(_SENTINEL, str(raised.exception))
+                self.assertIsNone(raised.exception.__cause__)
+                self.assertIsNone(raised.exception.__context__)
+        resource.close()
+
+    def test_probe_rejects_a_fake_daemon_response_over_the_cap(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_docker_socket import (
+            PrimeP1DockerSocketError,
+            admit_docker_socket,
+        )
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        self.listener.listen(1)
+
+        def serve() -> None:
+            client, _ = self.listener.accept()
+            with client:
+                client.recv(4096)
+                client.sendall(b"x" * (module._DAEMON_RESPONSE_LIMIT + 1))
+
+        server = threading.Thread(target=serve)
+        server.start()
+        with (
+            self._linux(module),
+            patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
+            patch.object(module, "_new_daemon_client", side_effect=_configured_client),
+        ):
+            resource = admit_docker_socket(_config(path=str(self.socket)))
+            with self.assertRaises(PrimeP1DockerSocketError):
+                asyncio.run(resource._verify_daemon_projection(time.monotonic() + 2))
+        server.join(2)
+        self.assertFalse(server.is_alive())
+        resource.close()
+
     def test_private_projection_probe_accepts_fragmented_chunked_response(self) -> None:
         from asterion.applications.prime_agent.operator.authority_docker_socket import (
             admit_docker_socket,
