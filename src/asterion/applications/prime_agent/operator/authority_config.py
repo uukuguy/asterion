@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import fcntl
+import hmac
+import json
 import os
 import re
 import stat
@@ -47,6 +49,7 @@ _CANONICAL_API_VERSION = re.compile(
 _SAFE_ASCII_TOKEN = re.compile(r"[!-~]{1,64}\Z")
 _MAX_BYTES = 65536
 _MAX_UINT32 = 4294967294
+_CONFIG_BINDING_DOMAIN = b"asterion.prime-p1-operator-config/v1\0"
 
 
 class PrimeP1OperatorConfigError(ValueError):
@@ -60,6 +63,7 @@ class PrimeP1OperatorConfigError(ValueError):
 class PrimeP1OperatorConfig:
     _values: Mapping[str, str]
     _receipt_issuer: _AuthorityReceiptIssuer
+    _operator_config_binding_hmac_sha256: str = field(default="", repr=False)
 
     @property
     def model_id(self) -> str:
@@ -102,10 +106,23 @@ def load_operator_config(config_fd: int) -> PrimeP1OperatorConfig:
         if _stable_identity(before) != _stable_identity(after):
             raise ValueError
         values = _parse_verified_bytes(data)
-        issuer = _new_authority_receipt_issuer(
-            values.pop("ASTERION_PRIME_P1_RECEIPT_HMAC_KEY")
+        receipt_key = values.pop("ASTERION_PRIME_P1_RECEIPT_HMAC_KEY")
+        binding = hmac.new(
+            bytes.fromhex(receipt_key),
+            _CONFIG_BINDING_DOMAIN
+            + json.dumps(
+                values,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8"),
+            "sha256",
+        ).hexdigest()
+        issuer = _new_authority_receipt_issuer(receipt_key)
+        result = PrimeP1OperatorConfig(
+            MappingProxyType(values), issuer, binding
         )
-        result = PrimeP1OperatorConfig(MappingProxyType(values), issuer)
     except (OSError, OverflowError, TypeError, UnicodeError, ValueError):
         failed = True
     finally:

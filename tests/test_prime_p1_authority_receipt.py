@@ -11,6 +11,7 @@ import unittest
 from typing import Any, cast
 
 from asterion.applications.prime_agent.operator.authority_config import (
+    PrimeP1OperatorConfig,
     PrimeP1OperatorConfigError,
     load_operator_config,
 )
@@ -53,6 +54,61 @@ def _material(**overrides: object) -> _UnavailableReceiptMaterial:
 
 
 class TestPrimeP1AuthorityReceiptCustody(unittest.TestCase):
+    def test_admitted_config_has_deterministic_redacted_binding_digest(self) -> None:
+        receipt_key = "b" * 64
+        config_secret = "CONFIG_SECRET_SENTINEL"
+        values = {
+            "ASTERION_PRIME_P1_DOCKER_EXECUTABLE": "/usr/bin/docker",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET": "/var/run/docker.sock",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID": "0",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID": "0",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET_MODE": "0600",
+            "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION": "1.41",
+            "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION": "26.1.4",
+            "ASTERION_PRIME_P1_SECCOMP_PROFILE": "/etc/asterion/seccomp.json",
+            "ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256": "c" * 64,
+            "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST": "sha256:" + "a" * 64,
+            "ASTERION_PRIME_P1_IMAGE_PLATFORM_OS": "linux",
+            "ASTERION_PRIME_P1_IMAGE_PLATFORM_ARCHITECTURE": "amd64",
+            "ASTERION_PRIME_P1_IMAGE_PLATFORM_VARIANT": "none",
+            "ASTERION_PRIME_P1_MODEL_ID": "deepseek-chat",
+            "ASTERION_PRIME_P1_EVIDENCE_ROOT": "/var/lib/asterion/evidence",
+            "ASTERION_PRIME_P1_RECEIPT_KEY_ID": "p1-2026",
+            "ASTERION_PRIME_P1_RECEIPT_HMAC_KEY": receipt_key,
+            "DEEPSEEK_API_KEY": config_secret,
+        }
+
+        def load(
+            values_to_load: dict[str, str], path: Path
+        ) -> PrimeP1OperatorConfig:
+            path.write_text("".join(f"{key}={value}\n" for key, value in values_to_load.items()))
+            path.chmod(0o600)
+            return load_operator_config(
+                os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+            )
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            root = Path(temp)
+            first = load(values, root / "first.env")
+            second = load(values, root / "second.env")
+            altered = dict(values, ASTERION_PRIME_P1_MODEL_ID="deepseek-reasoner")
+            changed = load(altered, root / "changed.env")
+            invalid = dict(values)
+            del invalid["ASTERION_PRIME_P1_MODEL_ID"]
+            with self.assertRaises(PrimeP1OperatorConfigError) as raised:
+                load(invalid, root / "invalid.env")
+
+        first_binding = first._operator_config_binding_hmac_sha256
+        self.assertEqual(first_binding, second._operator_config_binding_hmac_sha256)
+        self.assertNotEqual(first_binding, changed._operator_config_binding_hmac_sha256)
+        self.assertRegex(first_binding, r"[0-9a-f]{64}\Z")
+        self.assertNotIn("ASTERION_PRIME_P1_RECEIPT_HMAC_KEY", first._values)
+        rendered = "".join(traceback.format_exception(raised.exception))
+        for value in (receipt_key, config_secret):
+            self.assertNotIn(value, repr(first))
+            self.assertNotIn(value, rendered)
+        self.assertIsNone(raised.exception.__context__)
+
     def test_malformed_material_is_public_safe_after_custody_consumption(self) -> None:
         for malformed in (
             _material(image_config_digest=object()),
