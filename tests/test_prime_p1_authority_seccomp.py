@@ -533,6 +533,36 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                     with self.assertRaises(OSError):
                         os.fstat(fd)
 
+    def test_close_wins_and_revalidation_never_rewalks(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+            revalidate_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                completed = threading.Event()
+                closer = threading.Thread(target=lambda: (resource.close(), completed.set()))
+                closer.start()
+                self.assertTrue(completed.wait(1))
+                closer.join(1)
+                with patch.object(module, "_open_profile", side_effect=AssertionError("rewalk")) as opened:
+                    with self.assertRaises(PrimeP1AuthorityResourceError):
+                        revalidate_static_seccomp_resource(resource)
+                opened.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
