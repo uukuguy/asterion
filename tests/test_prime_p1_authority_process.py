@@ -397,6 +397,73 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         self.assertEqual(connection.calls, [])
         self.assertTrue(connection.closed)
 
+    def test_pre_ready_seccomp_admission_precedes_transport_and_closes_resource(
+        self,
+    ) -> None:
+        import asterion.applications.prime_agent.operator.authority_process as module
+
+        events: list[str] = []
+        closed_fds: list[int] = []
+
+        class RetainedSeccompResource:
+            def close(self) -> None:
+                events.append("seccomp-close")
+
+        class ForbiddenAccess(BaseException):
+            pass
+
+        connection = _ExchangeSocket(AssertionError("transport must not run"))
+        bundle = AdmittedAuthorityDescriptors(connection, 101, 102, closed_fds.append)
+        with (
+            patch.object(
+                module, "load_operator_config", side_effect=lambda _: events.append("config") or object()
+            ),
+            patch.object(
+                module,
+                "admit_static_image_resource",
+                side_effect=lambda _: events.append("image") or object(),
+            ),
+            patch.object(
+                module,
+                "admit_static_seccomp_resource",
+                side_effect=lambda _: events.append("seccomp") or RetainedSeccompResource(),
+                create=True,
+            ),
+            patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
+            patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
+            self.assertRaises(PrimeP1AuthorityBootstrapError),
+        ):
+            _run_ready_execute_exchange(bundle, "a" * 64)
+        self.assertEqual(events, ["config", "image", "seccomp", "seccomp-close"])
+        self.assertEqual(closed_fds, [101])
+        self.assertTrue(connection.closed)
+
+    def test_failed_seccomp_admission_never_consumes_key_or_socket(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_process as module
+
+        class ForbiddenAccess(BaseException):
+            pass
+
+        connection = _ExchangeSocket(AssertionError("transport must not run"))
+        bundle = AdmittedAuthorityDescriptors(connection, 101, 102, lambda _: None)
+        with (
+            patch.object(module, "load_operator_config", return_value=object()),
+            patch.object(module, "admit_static_image_resource", return_value=object()),
+            patch.object(
+                module,
+                "admit_static_seccomp_resource",
+                side_effect=ValueError("SECCOMP_SENTINEL"),
+                create=True,
+            ),
+            patch.object(bundle, "consume_session_key_fd", side_effect=ForbiddenAccess),
+            patch.object(bundle, "consume_socket", side_effect=ForbiddenAccess),
+            self.assertRaises(PrimeP1AuthorityBootstrapError) as raised,
+        ):
+            _run_ready_execute_exchange(bundle, "a" * 64)
+        self.assertIsNone(raised.exception.__context__)
+        self.assertNotIn("SECCOMP_SENTINEL", "".join(traceback.format_exception(raised.exception)))
+        self.assertTrue(connection.closed)
+
     def test_spoofed_descriptor_class_never_receives_cleanup_access(self) -> None:
         class ForbiddenAccess(BaseException):
             pass
