@@ -22,7 +22,7 @@ P3_INITIAL_TEST_BYTES: Final = b"from solution import in_range\n\n\ndef test_int
 P3_EXPECTED_SOURCE_BYTES: Final = b"def in_range(value: int, low: int, high: int) -> bool:\n    return low <= value < high\n"
 P3_EXPECTED_TEST_BYTES: Final = b"from solution import in_range\n\n\ndef test_interior_value() -> None:\n    assert in_range(3, 1, 5) is True\n\n\ndef test_upper_bound_is_exclusive() -> None:\n    assert in_range(5, 1, 5) is False\n"
 P3_ORACLE_CASES: Final = ((5, 1, 5, False), (3, 1, 5, True))
-P3_ROLE_MODEL_CALLBACKS: Final = MappingProxyType({"root": 3, "implementation": 2, "review": 4})
+P3_ROLE_MODEL_CALLBACKS: Final = MappingProxyType({"root": 4, "implementation": 2, "review": 4})
 P3_ROLE_TOOL_CALLS: Final = MappingProxyType({"root": 1, "implementation": 1, "review": 2})
 P3_CHILD_COUNT: Final = 2
 P3_MAX_DEPTH: Final = 1
@@ -30,7 +30,7 @@ P3_MAX_DEPTH: Final = 1
 _IMPLEMENTATION_ARTIFACT = {"format": "asterion.prime-p3-implementation/v1", "patched": True, "role": "implementation"}
 _REVIEW_ARTIFACT = {"format": "asterion.prime-p3-review/v1", "missing_case": "upper-exclusive", "role": "review"}
 _FOLLOW_UP_ARTIFACT = {"format": "asterion.prime-p3-review-follow-up/v1", "oracle_cases": ((5, 1, 5, False), (3, 1, 5, True)), "role": "review", "verified": True}
-_AGGREGATE = {"child_count": 2, "implementation": "patched", "max_depth": 1, "model_callback_count": 9, "remaining_child_count": 0, "retained_follow_up_count": 1, "review": "verified", "tool_call_count": 4}
+_AGGREGATE = {"child_count": 2, "implementation": "patched", "max_depth": 1, "model_callback_count": 10, "remaining_child_count": 0, "retained_follow_up_count": 1, "review": "verified", "tool_call_count": 4}
 P3_IMPLEMENTATION_ARTIFACT: Final = MappingProxyType(_IMPLEMENTATION_ARTIFACT)
 P3_REVIEW_ARTIFACT: Final = MappingProxyType(_REVIEW_ARTIFACT)
 P3_FOLLOW_UP_ARTIFACT: Final = MappingProxyType(_FOLLOW_UP_ARTIFACT)
@@ -41,7 +41,7 @@ P3_FOLLOW_UP_BYTES: Final = _json(_FOLLOW_UP_ARTIFACT)
 P3_AGGREGATE_BYTES: Final = _json(_AGGREGATE)
 
 P3_DEVELOPMENT_SCHEMA_BYTES: Final = _json({"format": "asterion.prime-p3-development/v1", "roles": ["implementation", "review", "root"]})
-P3_DEVELOPMENT_WORKLOAD_BYTES: Final = _json({"aggregate_sha256": sha256(P3_AGGREGATE_BYTES).hexdigest(), "expected_source_sha256": sha256(P3_EXPECTED_SOURCE_BYTES).hexdigest(), "expected_test_sha256": sha256(P3_EXPECTED_TEST_BYTES).hexdigest(), "follow_up_artifact_sha256": sha256(P3_FOLLOW_UP_BYTES).hexdigest(), "format": "asterion.prime-p3-development-workload/v1", "implementation_artifact_sha256": sha256(P3_IMPLEMENTATION_BYTES).hexdigest(), "initial_source_sha256": sha256(P3_INITIAL_SOURCE_BYTES).hexdigest(), "initial_test_sha256": sha256(P3_INITIAL_TEST_BYTES).hexdigest(), "oracle_cases": [[5, 1, 5, False], [3, 1, 5, True]], "role_model_callbacks": {"implementation": 2, "review": 4, "root": 3}, "role_tool_calls": {"implementation": 1, "review": 2, "root": 1}, "review_artifact_sha256": sha256(P3_REVIEW_BYTES).hexdigest(), "schema_sha256": sha256(P3_DEVELOPMENT_SCHEMA_BYTES).hexdigest()})
+P3_DEVELOPMENT_WORKLOAD_BYTES: Final = _json({"aggregate_sha256": sha256(P3_AGGREGATE_BYTES).hexdigest(), "expected_source_sha256": sha256(P3_EXPECTED_SOURCE_BYTES).hexdigest(), "expected_test_sha256": sha256(P3_EXPECTED_TEST_BYTES).hexdigest(), "follow_up_artifact_sha256": sha256(P3_FOLLOW_UP_BYTES).hexdigest(), "format": "asterion.prime-p3-development-workload/v1", "implementation_artifact_sha256": sha256(P3_IMPLEMENTATION_BYTES).hexdigest(), "initial_source_sha256": sha256(P3_INITIAL_SOURCE_BYTES).hexdigest(), "initial_test_sha256": sha256(P3_INITIAL_TEST_BYTES).hexdigest(), "oracle_cases": [[5, 1, 5, False], [3, 1, 5, True]], "role_model_callbacks": {"implementation": 2, "review": 4, "root": 4}, "role_tool_calls": {"implementation": 1, "review": 2, "root": 1}, "review_artifact_sha256": sha256(P3_REVIEW_BYTES).hexdigest(), "schema_sha256": sha256(P3_DEVELOPMENT_SCHEMA_BYTES).hexdigest()})
 
 P3_DEVELOPMENT_WORKLOAD_DIGEST: Final = "sha256:" + sha256(P3_DEVELOPMENT_WORKLOAD_BYTES).hexdigest()
 P3_DEVELOPMENT_SCHEMA_DIGEST: Final = "sha256:" + sha256(P3_DEVELOPMENT_SCHEMA_BYTES).hexdigest()
