@@ -192,7 +192,12 @@ def _open_profile(path: object) -> tuple[int, ...]:
         or any(not part or part in {".", ".."} for part in components)
     ):
         raise ValueError
-    fds = [os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)]
+    root = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        fds = [root]
+    except MemoryError:
+        _close_quietly(root)
+        raise
     try:
         _validate_directory(fds[-1])
         for part in components[:-1]:
@@ -201,15 +206,30 @@ def _open_profile(path: object) -> tuple[int, ...]:
                 os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
                 dir_fd=fds[-1],
             )
-            fds.append(child)
+            try:
+                fds.append(child)
+            except MemoryError:
+                _close_quietly(child)
+                raise
             _validate_directory(child)
-        fds.append(os.open(
+        leaf = os.open(
             components[-1], os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW | os.O_CLOEXEC,
             dir_fd=fds[-1],
-        ))
-        return tuple(fds)
+        )
+        try:
+            fds.append(leaf)
+        except MemoryError:
+            _close_quietly(leaf)
+            raise
+        try:
+            result = tuple(fds)
+        except MemoryError:
+            _close_all(fds)
+            raise
+        fds = []
+        return result
     except BaseException:
-        _close_all(tuple(fds))
+        _close_all(fds)
         raise
 
 
@@ -389,6 +409,6 @@ def _close_quietly(fd: int) -> None:
         pass
 
 
-def _close_all(fds: tuple[int, ...]) -> None:
+def _close_all(fds: tuple[int, ...] | list[int]) -> None:
     for fd in reversed(fds):
         _close_quietly(fd)
