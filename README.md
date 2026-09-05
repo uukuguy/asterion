@@ -212,12 +212,15 @@ Before making this directory the root of a Git repository, run:
 
 ```bash
 make check
-make promotion-check
+ASTERION_PROMOTION_NPM_CACHE="$(npm config get cache)" make promotion-check
 ```
 
 `promotion-check` copies the standalone tree into a temporary directory and
-re-runs the provider-free repository gates there. It does not create a remote,
-publish a package, or run a provider.
+re-runs the provider-free repository gates there. Its npm dependencies require
+an absolute, pre-populated, operator-owned npm cache supplied through
+`ASTERION_PROMOTION_NPM_CACHE`; the cache is an external tool resource, not
+packaged evidence. A cache miss fails and does not access the network. It does
+not create a remote, publish a package, or run a provider.
 
 ## Mixed-repository integration parity
 

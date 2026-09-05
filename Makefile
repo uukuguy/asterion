@@ -5,7 +5,8 @@ DCI_ARGS ?=
 ASTERION_PRIME_SOURCE_ROOT ?= 3th-party/prime-agent
 ASTERION_PRIME_AUTHORITY ?=
 ASTERION_PRIME_MAX_COST_MICROS ?=
-ASTERION_PRIME_NODE ?= $(shell npm exec --offline --yes --package=node@22 -- which node 2>/dev/null)
+ASTERION_PRIME_NODE ?= $(shell npm exec --offline --yes --package=node@22 -- node -p 'process.execPath' 2>/dev/null)
+ASTERION_PROMOTION_NPM_CACHE ?=
 
 .DEFAULT_GOAL := help
 
@@ -72,7 +73,7 @@ docs-check:
 check: test-typescript test lint docs-check check-rust build
 
 promotion-check:
-	ASTERION_PRIME_SOURCE_ROOT="$(ASTERION_PRIME_SOURCE_ROOT)" $(UV_BIN) run python tools/check_promotion.py
+	ASTERION_PRIME_SOURCE_ROOT="$(ASTERION_PRIME_SOURCE_ROOT)" $(UV_BIN) run python tools/check_promotion.py --npm-cache "$(ASTERION_PROMOTION_NPM_CACHE)" --node-executable "$(ASTERION_PRIME_NODE)"
 
 first-run-check:
 	$(UV_BIN) run python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification

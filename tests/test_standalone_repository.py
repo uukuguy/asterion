@@ -274,6 +274,16 @@ class StandaloneRepositoryTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn(command, text)
 
+    def test_promotion_declares_an_operator_owned_offline_npm_cache(self) -> None:
+        makefile = self._makefile_text()
+        self.assertIn("ASTERION_PROMOTION_NPM_CACHE", makefile)
+        self.assertEqual(makefile.count("--npm-cache"), 1)
+
+        readme = (PROJECT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("operator-owned npm cache", readme)
+        self.assertIn("cache miss fails", readme)
+        self.assertIn("does not access the network", readme)
+
     def test_pi_setup_targets_render_exact_commands(self) -> None:
         self.assertEqual(
             dry_run("setup-pi"), ("bash", "scripts/setup_pi.sh")
@@ -399,6 +409,16 @@ class StandaloneRepositoryTests(unittest.TestCase):
         self.assertIn("python-version: '3.10'", text)
         self.assertIn("node-version: '22.19.0'", text)
         self.assertIn("toolchain: stable", text)
+        self.assertIn("actions/cache@v4", text)
+        self.assertIn("ASTERION_PROMOTION_NPM_CACHE", text)
+        self.assertIn("hashFiles(", text)
+        for lockfile in (
+            "packages/typescript/asterion-runtime/package-lock.json",
+            "packages/typescript/prime-gateway/package-lock.json",
+            "3th-party/prime-agent/package-lock.json",
+        ):
+            with self.subTest(lockfile=lockfile):
+                self.assertIn(lockfile, text)
         self.assertIn("make promotion-check", text)
         self.assertIn("make first-run-check", text)
         for forbidden in (
