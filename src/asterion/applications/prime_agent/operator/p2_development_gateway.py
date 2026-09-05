@@ -40,6 +40,7 @@ class PrimeP2DevelopmentGateway(DevelopmentGatewayTransport):
                 node_bin=node_bin,
                 entrypoint=entrypoint,
                 deadline_seconds=deadline_seconds,
+                nested_command_kinds=frozenset(),
             )
         except ValueError:
             raise PrimeP2DevelopmentGatewayError() from None
