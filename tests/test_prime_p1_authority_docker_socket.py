@@ -407,6 +407,31 @@ assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.
         )
         resource.close()
 
+    def test_projection_parser_rejects_strict_framing_and_json_failures(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_docker_socket as module
+
+        def content(body: bytes, extra: bytes = b"") -> bytes:
+            return (
+                b"HTTP/1.1 200 OK\r\nContent-Type:application/json\r\nContent-Length:"
+                + str(len(body)).encode() + b"\r\n\r\n" + body + extra
+            )
+
+        valid = b'{"Version":"26.1.4","ApiVersion":"1.41"}'
+        invalid = (
+            content(valid, b"x"),
+            content(valid).replace(b"Content-Length:", b"Content-Length:0\r\nContent-Length:"),
+            content(valid).replace(b"Content-Length:", b"Transfer-Encoding:chunked\r\nContent-Length:"),
+            content(b'{"Version":"26.1.4","Version":"x","ApiVersion":"1.41"}'),
+            content(b'{"Version":NaN,"ApiVersion":"1.41"}'),
+            content(b'{"Version":"26.1.4","ApiVersion":"1.41","x":' + b'{"x":' * 65 + b"0" + b"}" * 66),
+            content(b'\xef\xbb\xbf{"Version":"26.1.4","ApiVersion":"1.41"}'),
+            content(b'{"Version":"26.1.4","ApiVersion":"1.41"}x'),
+            b"HTTP/1.1 200 OK\r\nContent-Type:application/json\r\nTransfer-Encoding:chunked\r\n\r\n2;x\r\n{}\r\n0\r\n\r\n",
+        )
+        for response in invalid:
+            with self.subTest(response=response[:40]), self.assertRaises(ValueError):
+                module._verify_daemon_projection(response, "26.1.4", "1.41")
+
 
 if __name__ == "__main__":
     unittest.main()

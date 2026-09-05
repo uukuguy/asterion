@@ -356,12 +356,28 @@ def _verify_daemon_projection(
         raise ValueError from None
     if (
         type(document) is not dict
+        or not _json_within_limits(document)
         or type(document.get("Version")) is not str
         or type(document.get("ApiVersion")) is not str
         or document["Version"] != expected_version
         or document["ApiVersion"] != expected_api_version
     ):
         raise ValueError
+
+
+def _json_within_limits(value: object) -> bool:
+    pending: list[tuple[object, int]] = [(value, 1)]
+    nodes = 0
+    while pending:
+        item, depth = pending.pop()
+        nodes += 1
+        if nodes > 1024 or depth > 64:
+            return False
+        if type(item) is dict:
+            pending.extend((child, depth + 1) for child in item.values())
+        elif type(item) is list:
+            pending.extend((child, depth + 1) for child in item)
+    return True
 
 
 def _valid_status_line(line: bytes) -> bool:
