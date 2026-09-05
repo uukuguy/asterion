@@ -58,11 +58,32 @@ def _lock(**changes: object) -> SeccompPolicyLock:
     if not has_supplied_maximum:
         try:
             values["maximum_profile_sha256"] = hashlib.sha256(
-                canonical_maximum_seccomp_profile_bytes(provisional)
+                _independent_maximum_profile_bytes(provisional)
             ).hexdigest()
-        except PrimeP1SeccompPolicyLockError:
+        except (AttributeError, PrimeP1SeccompPolicyLockError):
             return provisional
     return SeccompPolicyLock(**values)  # type: ignore[arg-type]
+
+
+def _independent_maximum_profile_bytes(lock: SeccompPolicyLock) -> bytes:
+    return json.dumps(
+        {
+            "architectures": [lock.libseccomp_architecture],
+            "defaultAction": "SCMP_ACT_ERRNO",
+            "syscalls": [
+                {
+                    "action": "SCMP_ACT_ALLOW",
+                    "args": [
+                        {**{"index": item.index, "op": item.op, "value": item.value}, **({"valueTwo": item.value_two} if item.value_two is not None else {})}
+                        for item in atom.arguments
+                    ],
+                    "names": [atom.syscall],
+                }
+                for atom in lock.allowed_rule_atoms
+            ],
+        },
+        ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode()
 
 
 class TestPrimeP1SeccompPolicyLock(unittest.TestCase):

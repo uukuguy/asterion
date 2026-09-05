@@ -142,18 +142,7 @@ def canonical_seccomp_policy_lock_bytes(lock: object) -> bytes:
 def canonical_maximum_seccomp_profile_bytes(lock: object) -> bytes:
     """Render the exact maximum Docker seccomp profile bound by a lock."""
     try:
-        checked = _validated_lock_structure(lock)
-        return json.dumps(
-            {
-                "architectures": [checked.libseccomp_architecture],
-                "defaultAction": "SCMP_ACT_ERRNO",
-                "syscalls": [_maximum_rule(atom) for atom in checked.allowed_rule_atoms],
-            },
-            ensure_ascii=False,
-            allow_nan=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
+        return _render_maximum_profile(_validated_lock(lock))
     except (TypeError, ValueError, PrimeP1SeccompPolicyLockError):
         raise PrimeP1SeccompPolicyLockError() from None
 
@@ -267,10 +256,24 @@ def _rule_atom_mapping(atom: SeccompRuleAtom) -> dict[str, object]:
 def _validated_lock(value: object) -> SeccompPolicyLock:
     checked = _validated_lock_structure(value)
     if checked.maximum_profile_sha256 != hashlib.sha256(
-        canonical_maximum_seccomp_profile_bytes(checked)
+        _render_maximum_profile(checked)
     ).hexdigest():
         raise PrimeP1SeccompPolicyLockError()
     return checked
+
+
+def _render_maximum_profile(checked: SeccompPolicyLock) -> bytes:
+    return json.dumps(
+        {
+            "architectures": [checked.libseccomp_architecture],
+            "defaultAction": "SCMP_ACT_ERRNO",
+            "syscalls": [_maximum_rule(atom) for atom in checked.allowed_rule_atoms],
+        },
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
 def _validated_lock_structure(value: object) -> SeccompPolicyLock:
