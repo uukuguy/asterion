@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hmac
+
 from .authority_config import PrimeP1OperatorConfig
 from .image_input_lock import (
     ImageInputLock,
@@ -36,8 +38,16 @@ def admit_static_image_resource(config: object) -> ImageInputLock:
             None if variant == "none" else variant,
         )
         resource = resolve_promoted_image_input_lock(platform)
+        config_artifacts = tuple(
+            item for item in resource.artifacts if item.kind == "oci-config"
+        )
+        if len(config_artifacts) != 1:
+            raise ValueError
+        expected = values["ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST"]
+        if not hmac.compare_digest(expected, "sha256:" + config_artifacts[0].sha256):
+            raise ValueError
     except Exception:
-        pass
+        resource = None
     if resource is None:
         raise PrimeP1AuthorityResourceError() from None
     return resource
