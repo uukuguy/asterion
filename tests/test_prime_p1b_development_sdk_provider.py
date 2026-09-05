@@ -12,8 +12,15 @@ from unittest import mock
 
 _MODEL = {
     "api": "asterion-p1-development",
+    "baseUrl": "https://development.invalid/v1",
+    "contextWindow": 32_768,
+    "cost": {"cacheRead": 0, "cacheWrite": 0, "input": 0, "output": 0},
     "id": "p1-development",
+    "input": ["text"],
+    "maxTokens": 1_024,
+    "name": "P1 development",
     "provider": "asterion-development",
+    "reasoning": False,
 }
 _NORMAL_OPTIONS = {
     "apiKey": "in-memory-development-provider",

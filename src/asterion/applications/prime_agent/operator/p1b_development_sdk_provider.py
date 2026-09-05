@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 import json
+import math
 import os
+import re
 import signal
 import struct
 import time
@@ -35,6 +37,7 @@ _OUTPUT_LIMITS = (1024, 128, 768, 1024, 128)
 _REQUEST_COST_RESERVATION = 5_000
 _DEADLINE_SECONDS = 180.0
 _NORMAL_OPTION_KEYS = frozenset({"apiKey", "maxRetries", "maxRetryDelayMs", "model", "serviceTier", "sessionId", "signal", "toolExecution", "transport"})
+_MODEL_KEYS = frozenset({"api", "baseUrl", "contextWindow", "cost", "id", "input", "maxTokens", "name", "provider", "reasoning"})
 
 
 class PrimeP1BDevelopmentSdkProviderError(ValueError):
@@ -234,8 +237,7 @@ def _validate_request(value: dict[str, object], turn: int, issued: list[tuple[di
     if set(value) != {"model", "context", "options"} or type(value["model"]) is not dict or type(value["context"]) is not dict or type(value["options"]) is not dict:
         raise ValueError
     model, context, options = value["model"], value["context"], value["options"]
-    if set(model) != {"api", "provider", "id"} or any(type(model[key]) is not str or not model[key] for key in model):
-        raise ValueError
+    _validate_model(model)
     compact = turn == 2
     if set(context) != ({"messages", "systemPrompt"} if compact else {"messages", "systemPrompt", "tools"}) or type(context["systemPrompt"]) is not str or not context["systemPrompt"] or type(context["messages"]) is not list:
         raise ValueError
@@ -264,17 +266,35 @@ def _validate_request(value: dict[str, object], turn: int, issued: list[tuple[di
         _validate_tool_pair(answer, messages[-1])
     elif turn == 3:
         summary = issued[2][1]
-        if len(messages) != 3 or [item.get("role") if type(item) is dict else None for item in messages] != ["user", "assistant", "user"] or _canonical_json(messages[1]) != _canonical_json(summary) or not _text(messages[0].get("content")) or not _text(messages[2].get("content")):
+        initial_context = issued[0][0]["context"]
+        if _canonical_json(context["systemPrompt"]) != _canonical_json(initial_context["systemPrompt"]) or _canonical_json(context["tools"]) != _canonical_json(initial_context["tools"]) or len(messages) != 3 or [item.get("role") if type(item) is dict else None for item in messages] != ["user", "assistant", "user"] or _canonical_json(messages[1]) != _canonical_json(summary) or not _text(messages[0].get("content")) or not _text(messages[2].get("content")):
             raise ValueError
     else:
         previous, answer = issued[3]
-        if _canonical_json(messages[:-2]) != _canonical_json(previous["context"]["messages"]) or _canonical_json(messages[-2]) != _canonical_json(answer):
+        prior_context = previous["context"]
+        if _canonical_json(context["systemPrompt"]) != _canonical_json(prior_context["systemPrompt"]) or _canonical_json(context["tools"]) != _canonical_json(prior_context["tools"]) or _canonical_json(messages[:-2]) != _canonical_json(prior_context["messages"]) or _canonical_json(messages[-2]) != _canonical_json(answer):
             raise ValueError
         _validate_tool_pair(answer, messages[-1])
 
 
 def _validate_normal_options(options: dict[str, object], model: dict[str, object]) -> None:
-    if set(options) != _NORMAL_OPTION_KEYS or options.get("apiKey") != "in-memory-development-provider" or _canonical_json(options.get("model")) != _canonical_json(model) or options.get("maxRetries") != 0 or options.get("maxRetryDelayMs") != 60_000 or options.get("serviceTier") != "default" or options.get("signal") != {} or options.get("toolExecution") != "parallel" or options.get("transport") != "auto" or type(options.get("sessionId")) is not str or not options["sessionId"]:
+    if set(options) != _NORMAL_OPTION_KEYS or options.get("apiKey") != "in-memory-development-provider" or _canonical_json(options.get("model")) != _canonical_json(model) or options.get("maxRetries") != 0 or options.get("maxRetryDelayMs") != 60_000 or options.get("serviceTier") != "default" or options.get("signal") != {} or options.get("toolExecution") != "parallel" or options.get("transport") != "auto" or type(options.get("sessionId")) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", options["sessionId"]) is None:
+        raise ValueError
+
+
+def _validate_model(model: dict[str, object]) -> None:
+    if set(model) != _MODEL_KEYS:
+        raise ValueError
+    if any(type(model[key]) is not str or not model[key] for key in ("api", "baseUrl", "id", "name", "provider")):
+        raise ValueError
+    if any(type(model[key]) is not int or not 0 < model[key] <= 2_147_483_647 for key in ("contextWindow", "maxTokens")):
+        raise ValueError
+    if model["reasoning"] not in (True, False) or type(model["reasoning"]) is not bool or model["input"] != ["text"]:
+        raise ValueError
+    cost = model["cost"]
+    if type(cost) is not dict or set(cost) != {"input", "output", "cacheRead", "cacheWrite"}:
+        raise ValueError
+    if any(type(cost[key]) not in (int, float) or isinstance(cost[key], bool) or not math.isfinite(cost[key]) or cost[key] < 0 for key in cost):
         raise ValueError
 
 
