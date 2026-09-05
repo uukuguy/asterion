@@ -21,6 +21,7 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _IMAGE_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _ARCHITECTURE = re.compile(r"SCMP_ARCH_[A-Z0-9_]+\Z")
 _SYSCALL = re.compile(r"[a-z0-9_]+\Z")
+_UNSIGNED_64_BIT_MAX: Final = 2**64 - 1
 _COMPARISON_OPERATORS: Final = frozenset(
     {
         "SCMP_CMP_EQ",
@@ -332,7 +333,15 @@ def _validated_constraint(value: object) -> SeccompArgumentConstraint:
         or value.op not in _COMPARISON_OPERATORS
         or type(value.value) is not int
         or isinstance(value.value, bool)
-        or (value.value_two is not None and (type(value.value_two) is not int or isinstance(value.value_two, bool)))
+        or not 0 <= value.value <= _UNSIGNED_64_BIT_MAX
+        or (
+            value.value_two is not None
+            and (
+                type(value.value_two) is not int
+                or isinstance(value.value_two, bool)
+                or not 0 <= value.value_two <= _UNSIGNED_64_BIT_MAX
+            )
+        )
         or (value.op == "SCMP_CMP_MASKED_EQ") != (value.value_two is not None)
     ):
         raise PrimeP1SeccompPolicyLockError()

@@ -161,6 +161,43 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
                 _lock(platform=ImagePlatformDescriptor("linux", "amd64", "v8"))
             )
 
+    def test_constraint_values_are_bounded_unsigned_64_bit_integers(self) -> None:
+        maximum = 2**64 - 1
+        accepted = (
+            SeccompRuleAtom(
+                "read", (SeccompArgumentConstraint(0, "SCMP_CMP_EQ", 0, None),)
+            ),
+            SeccompRuleAtom(
+                "write",
+                (
+                    SeccompArgumentConstraint(
+                        0, "SCMP_CMP_MASKED_EQ", maximum, maximum
+                    ),
+                ),
+            ),
+        )
+        for atom in accepted:
+            with self.subTest(atom=repr(atom)):
+                canonical_seccomp_policy_lock_bytes(_lock(allowed_rule_atoms=(atom,)))
+        invalid = (
+            SeccompArgumentConstraint(0, "SCMP_CMP_EQ", -1, None),
+            SeccompArgumentConstraint(0, "SCMP_CMP_EQ", 2**64, None),
+            SeccompArgumentConstraint(0, "SCMP_CMP_EQ", 10**100, None),
+            SeccompArgumentConstraint(0, "SCMP_CMP_MASKED_EQ", 0, -1),
+            SeccompArgumentConstraint(0, "SCMP_CMP_MASKED_EQ", 0, 2**64),
+            SeccompArgumentConstraint(0, "SCMP_CMP_MASKED_EQ", 0, 10**100),
+        )
+        for constraint in invalid:
+            with self.subTest(constraint=repr(constraint)):
+                with self.assertRaises(PrimeP1SeccompPolicyLockError):
+                    canonical_seccomp_policy_lock_bytes(
+                        _lock(
+                            allowed_rule_atoms=(
+                                SeccompRuleAtom("read", (constraint,)),
+                            )
+                        )
+                    )
+
     def test_empty_catalog_and_platform_mismatch_fail_closed(self) -> None:
         with self.assertRaises(PrimeP1SeccompPolicyLockError):
             resolve_promoted_seccomp_policy(ImagePlatformDescriptor("linux", "amd64", None))
