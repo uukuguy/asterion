@@ -30,10 +30,17 @@ class _Channel:
 
 
 class _Transport:
-    def __init__(self) -> None: self.calls: list[str] = []; self.channel_value = _Channel(); self.inspect_error = False; self.remove_error = False
+    def __init__(self) -> None:
+        self.calls: list[str] = []; self.channel_value = _Channel(); self.inspect_error = False; self.remove_error = False
+        self.inspect_started: asyncio.Event | None = None; self.allow_inspect: asyncio.Event | None = None
+        self.remove_started: asyncio.Event | None = None; self.allow_remove: asyncio.Event | None = None
     async def create(self, **_: object) -> str: self.calls.append("create"); return "d" * 64
     async def inspect(self, *_: object, **__: object) -> None:
         self.calls.append("inspect")
+        if self.inspect_started is not None:
+            self.inspect_started.set()
+        if self.allow_inspect is not None:
+            await self.allow_inspect.wait()
         if self.inspect_error: raise ValueError
     async def start(self, *_: object, **__: object) -> None: self.calls.append("start")
     async def channel(self, *_: object, **__: object) -> _Channel: self.calls.append("attach"); return self.channel_value
@@ -41,6 +48,10 @@ class _Transport:
     async def initial_snapshot(self, *_: object, **__: object) -> bytes: self.calls.append("initial_snapshot"); return b"def answer() -> int:\n    return 0\n"
     async def force_remove(self, *_: object, **__: object) -> None:
         self.calls.append("remove")
+        if self.remove_started is not None:
+            self.remove_started.set()
+        if self.allow_remove is not None:
+            await self.allow_remove.wait()
         if self.remove_error: raise ValueError
     async def assert_absent(self, *_: object, **__: object) -> None: self.calls.append("absent")
 
@@ -168,6 +179,21 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         transport.remove_error = False; await service.cleanup()
         self.assertEqual(transport.calls[-3:], ["remove", "remove", "absent"])
 
+    async def test_acquire_cancellation_completes_cleanup_then_propagates_cancellation(self) -> None:
+        transport = _Transport()
+        transport.inspect_started = asyncio.Event(); transport.allow_inspect = asyncio.Event()
+        transport.remove_started = asyncio.Event(); transport.allow_remove = asyncio.Event()
+        service = P1BDockerPersistentWorkerService(image_digest="sha256:" + "a" * 64, transport=transport, run_id="run", session_id="session")
+        task = asyncio.create_task(service.acquire())
+        await transport.inspect_started.wait()
+        task.cancel()
+        await transport.remove_started.wait()
+        self.assertFalse(task.done())
+        transport.allow_remove.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual(transport.calls, ["create", "inspect", "remove", "absent"])
+
     async def test_uncertain_create_compensation_removes_provisional_name_then_asserts_absence(self) -> None:
         class Runner:
             def __init__(self) -> None: self.argv: list[tuple[str, ...]] = []
@@ -182,6 +208,9 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         with patch(
             "asterion.applications.prime_agent.operator.p1b_development_docker._PROVISIONAL_SETTLE_INTERVAL_SECONDS",
             0.001,
+        ), patch(
+            "asterion.applications.prime_agent.operator.p1b_development_docker._PROVISIONAL_SETTLE_SECONDS",
+            0.004,
         ):
             await subject._compensate_provisional("prime-p1b-provisional")
         self.assertEqual(runner.argv[0][-4:], ("container", "rm", "--force", "prime-p1b-provisional"))
@@ -192,14 +221,18 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
             def __init__(self) -> None:
                 self.argv: list[tuple[str, ...]] = []
                 self.remove_count = 0
+                self.present = False
 
             async def run(self, *, argv: tuple[str, ...], **_: object) -> DockerCliResult:
                 self.argv.append(argv)
                 if "rm" in argv:
                     self.remove_count += 1
-                    if self.remove_count == 1:
-                        return DockerCliResult(1, b"", b"Error: No such object: prime-p1b-provisional\n")
-                    return DockerCliResult(0, b"prime-p1b-provisional\n", b"")
+                    if self.remove_count == 3:
+                        self.present = True
+                    if self.present:
+                        self.present = False
+                        return DockerCliResult(0, b"prime-p1b-provisional\n", b"")
+                    return DockerCliResult(1, b"", b"Error: No such object: prime-p1b-provisional\n")
                 return DockerCliResult(1, b"", b"Error: No such object: prime-p1b-provisional\n")
 
         runner = Runner()
@@ -209,7 +242,10 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         with patch(
             "asterion.applications.prime_agent.operator.p1b_development_docker._PROVISIONAL_SETTLE_INTERVAL_SECONDS",
             0.001,
+        ), patch(
+            "asterion.applications.prime_agent.operator.p1b_development_docker._PROVISIONAL_SETTLE_SECONDS",
+            0.004,
         ):
             await subject._compensate_provisional("prime-p1b-provisional")
-        self.assertEqual(runner.remove_count, 2)
-        self.assertEqual(sum("inspect" in argv for argv in runner.argv), 2)
+        self.assertGreaterEqual(runner.remove_count, 3)
+        self.assertEqual(runner.argv[-1][-5:], ("container", "inspect", "--format", "{{.Id}}", "prime-p1b-provisional"))

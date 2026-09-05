@@ -120,13 +120,12 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
             self._close_fd(fd)  # type: ignore[attr-defined]
 
     async def _compensate_provisional(self, name: str) -> None:
-        """Remove a possibly late Docker create until absence is stable."""
+        """Remove a possibly late Docker create throughout a bounded settle window."""
         deadline = monotonic() + _PROVISIONAL_SETTLE_SECONDS
-        stable_absence = False
         missing = (b"", b"\n")
         absent_errors = {("Error: No such object: " + name + "\n").encode(), ("Error: No such container: " + name + "\n").encode(), ("Error response from daemon: No such container: " + name + "\n").encode(), ("No such container: " + name).encode()}
-        while True:
-            control = _LifecycleCallControl(deadline, None)
+
+        async def remove_then_inspect(control: _LifecycleCallControl) -> bool:
             removed = await self._call_raw(self._prefix + ("container", "rm", "--force", name), control)  # type: ignore[attr-defined]
             if removed.returncode == 0:
                 if removed.stdout not in ((name + "\n").encode(), b"") or removed.stderr:
@@ -135,19 +134,21 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
                 raise RestrictedWorkerError("restricted worker value is invalid")
             inspected = await self._call_raw(self._prefix + ("container", "inspect", "--format", "{{.Id}}", name), control)  # type: ignore[attr-defined]
             if inspected.returncode == 1 and inspected.stdout in missing and inspected.stderr in absent_errors:
-                if stable_absence:
-                    return
-                stable_absence = True
-            elif inspected.returncode == 0 and not inspected.stderr:
+                return True
+            if inspected.returncode == 0 and not inspected.stderr:
                 # The daemon committed after the remove attempt.  It is not
                 # absence, so the following pass must remove it.
                 self._parse_daemon_id(inspected.stdout)  # type: ignore[attr-defined]
-                stable_absence = False
-            else:
-                raise RestrictedWorkerError("restricted worker value is invalid")
-            if monotonic() + _PROVISIONAL_SETTLE_INTERVAL_SECONDS >= deadline:
-                raise RestrictedWorkerError("restricted worker value is invalid")
-            await asyncio.sleep(_PROVISIONAL_SETTLE_INTERVAL_SECONDS)
+                return False
+            raise RestrictedWorkerError("restricted worker value is invalid")
+
+        while monotonic() < deadline:
+            await remove_then_inspect(_LifecycleCallControl(deadline, None))
+            remaining = deadline - monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(_PROVISIONAL_SETTLE_INTERVAL_SECONDS, remaining))
+        if not await remove_then_inspect(_LifecycleCallControl(monotonic() + 30, None)):
+            raise RestrictedWorkerError("restricted worker value is invalid")
 
     async def inspect(self, container_id: str, *, control: _LifecycleCallControl) -> None:  # type: ignore[override]
         self._specification(container_id)  # type: ignore[attr-defined]
@@ -363,6 +364,13 @@ class P1BDockerPersistentWorkerService:
             check = await channel.self_check(control=control)
             if not (check.nonloopback_network_absent and check.root_read_only and check.workspace_only_writable and check.credentials_absent and check.effective_capabilities == 0 and check.no_new_privileges == 1 and check.seccomp_mode == 2 and check.effective_user_id == 65534): raise ValueError
             self._state = "cell-1"
+        except asyncio.CancelledError:
+            task = asyncio.create_task(self.cleanup())
+            while not task.done():
+                try: await asyncio.shield(task)
+                except asyncio.CancelledError: pass
+            task.result()
+            raise
         except BaseException:
             await self.cleanup(); raise RestrictedWorkerError("restricted worker value is invalid") from None
 
