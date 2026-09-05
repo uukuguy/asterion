@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
+import ssl
 import time
+import urllib.error
 import unittest
 from unittest import mock
 
@@ -83,6 +86,43 @@ class TestPrimeP1DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(subject._new_proxy_handler().proxies, {})  # noqa: SLF001
+
+    def test_private_post_classifies_transport_and_response_without_details(self) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p1_development_sdk_provider as subject,
+        )
+
+        sentinel = "SENTINEL_SECRET"
+        config = subject._private_config_from_values(  # noqa: SLF001
+            {"DEEPSEEK_API_KEY": sentinel, "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}
+        )
+        failures: tuple[tuple[str, BaseException], ...] = (
+            ("dns", urllib.error.URLError(socket.gaierror("dns"))),
+            ("connect", urllib.error.URLError(OSError("connect"))),
+            ("tls", urllib.error.URLError(ssl.SSLError("tls"))),
+            ("timeout", urllib.error.URLError(TimeoutError("timeout"))),
+            ("http-4xx", urllib.error.HTTPError("https://" + sentinel, 429, "status", {}, None)),
+            ("http-5xx", urllib.error.HTTPError("https://" + sentinel, 503, "status", {}, None)),
+        )
+        for expected, error in failures:
+            with self.subTest(expected=expected), mock.patch.object(
+                subject, "_new_opener", side_effect=error
+            ):
+                with self.assertRaises(subject._ProviderFailure) as raised:  # noqa: SLF001
+                    subject._post_chat_completion(config, {"x": 1}, 1)  # noqa: SLF001
+            self.assertEqual(raised.exception.kind, expected)  # noqa: SLF001
+            self.assertNotIn(sentinel, repr(raised.exception) + str(raised.exception))
+
+        for raw in (b"", b"x" * (subject._OUTPUT_CAP + 1), b"\xff", b"{"):
+            response = mock.MagicMock()
+            response.status = 200
+            response.read.return_value = raw
+            opener = mock.MagicMock()
+            opener.open.return_value.__enter__.return_value = response
+            with self.subTest(response=raw[:1]), mock.patch.object(subject, "_new_opener", return_value=opener):
+                with self.assertRaises(subject._ProviderFailure) as raised:  # noqa: SLF001
+                    subject._post_chat_completion(config, {"x": 1}, 1)  # noqa: SLF001
+            self.assertEqual(raised.exception.kind, "response")  # noqa: SLF001
 
     async def test_two_turn_tool_then_text_returns_prime_messages_and_usage(self) -> None:
         from asterion.applications.prime_agent.operator import (

@@ -9,6 +9,8 @@ import os
 import re
 import resource
 import signal
+import socket
+import ssl
 import struct
 import time
 import urllib.error
@@ -35,6 +37,17 @@ _DEADLINE_SECONDS = 60.0
 _REAP_GRACE_SECONDS = 2.0
 _POLL_SECONDS = 0.01
 _USAGE_SIZE = struct.calcsize("!QQQ")
+_FAILURE_CODES = {
+    "dns": b"D",
+    "connect": b"C",
+    "tls": b"T",
+    "timeout": b"O",
+    "http-4xx": b"4",
+    "http-5xx": b"5",
+    "response": b"R",
+}
+_FAILURE_KINDS = frozenset(_FAILURE_CODES)
+_FAILURE_CODE_KINDS = {code: kind for kind, code in _FAILURE_CODES.items()}
 
 
 class PrimeP1DevelopmentSdkProviderError(ValueError):
@@ -42,6 +55,21 @@ class PrimeP1DevelopmentSdkProviderError(ValueError):
 
     def __init__(self, *_: object) -> None:
         super().__init__("prime development SDK provider is unavailable")
+
+
+class _ProviderFailure(ValueError):
+    """Fixed, detail-free classification for private provider diagnostics."""
+
+    __slots__ = ("kind",)
+
+    def __init__(self, kind: str) -> None:
+        if type(kind) is not str or kind not in _FAILURE_KINDS:
+            raise ValueError
+        self.kind = kind
+        super().__init__("private provider failure")
+
+    def __repr__(self) -> str:
+        return "_ProviderFailure(redacted)"
 
 
 class PrimeP1DevelopmentSdkProvider:
@@ -414,23 +442,67 @@ def _deepseek_payload(request: object, model_id: str, turn: int, max_output: int
 
 
 def _post_chat_completion(config: _PrivatePrimeModelConfig, payload: object, timeout: float) -> object:
-    request = urllib.request.Request(
-        _ENDPOINT,
-        data=_canonical_json(payload).encode("utf-8"),
-        headers={"Authorization": "Bearer " + config.api_key, "Content-Type": "application/json"},
-        method="POST",
-    )
     try:
+        request = urllib.request.Request(
+            _ENDPOINT,
+            data=_canonical_json(payload).encode("utf-8"),
+            headers={"Authorization": "Bearer " + config.api_key, "Content-Type": "application/json"},
+            method="POST",
+        )
         opener = _new_opener()
         with opener.open(request, timeout=timeout) as response:
             if type(response.status) is not int or not 200 <= response.status < 300:
-                raise ValueError
+                raise _ProviderFailure("response")
             raw = response.read(_OUTPUT_CAP + 1)
         if type(raw) is not bytes or not raw or len(raw) > _OUTPUT_CAP:
-            raise ValueError
+            raise _ProviderFailure("response")
         return json.loads(raw.decode("utf-8", "strict"))
-    except (OSError, TypeError, ValueError, UnicodeError, json.JSONDecodeError, urllib.error.URLError):
-        raise ValueError from None
+    except _ProviderFailure:
+        raise
+    except urllib.error.HTTPError as error:
+        raise _failure_from_http_status(error.code) from None
+    except Exception as error:
+        raise _classify_provider_failure(error) from None
+
+
+def _failure_from_http_status(status: object) -> _ProviderFailure:
+    if type(status) is int and 400 <= status < 500:
+        return _ProviderFailure("http-4xx")
+    if type(status) is int and 500 <= status < 600:
+        return _ProviderFailure("http-5xx")
+    return _ProviderFailure("response")
+
+
+def _classify_provider_failure(error: BaseException) -> _ProviderFailure:
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        return _ProviderFailure("timeout")
+    if isinstance(error, ssl.SSLError):
+        return _ProviderFailure("tls")
+    if isinstance(error, socket.gaierror):
+        return _ProviderFailure("dns")
+    if isinstance(error, urllib.error.URLError):
+        reason = error.reason
+        if isinstance(reason, BaseException):
+            return _classify_provider_failure(reason)
+        return _ProviderFailure("connect")
+    if isinstance(error, OSError):
+        return _ProviderFailure("connect")
+    return _ProviderFailure("response")
+
+
+def _encode_provider_failure(error: _ProviderFailure) -> bytes:
+    if type(error) is not _ProviderFailure:
+        raise ValueError
+    return b"F" + _FAILURE_CODES[error.kind]
+
+
+def _decode_provider_failure(raw: bytes) -> _ProviderFailure:
+    if type(raw) is not bytes or len(raw) != 2 or raw[:1] != b"F":
+        raise ValueError
+    kind = _FAILURE_CODE_KINDS.get(raw[1:])
+    if kind is None:
+        raise ValueError
+    return _ProviderFailure(kind)
 
 
 def _assistant_response(request: object, raw: object, turn: int, max_output: int) -> tuple[bytes, PrimeModelBrokerTokenUsage]:

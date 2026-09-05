@@ -17,11 +17,14 @@ from .model_session_host import _PrivatePrimeModelConfig, _private_config_from_v
 from .p1_development_sdk_provider import (
     _POLL_SECONDS,
     _REAP_GRACE_SECONDS,
+    _ProviderFailure,
     _canonical_json,
     _close_quietly,
+    _decode_provider_failure,
     _close_unneeded_child_fds,
     _decode_result,
     _drain,
+    _encode_provider_failure,
     _post_chat_completion,
     _read_exact,
     _write_all,
@@ -50,7 +53,7 @@ class PrimeP1BDevelopmentSdkProviderError(ValueError):
 class PrimeP1BDevelopmentSdkProvider:
     """Translate only the captured five-call P1-B SDK conversation."""
 
-    __slots__ = ("_calls", "_cancelled", "_child_pid", "_closed", "_cleanup_task", "_config", "_deadline", "_issued", "_provisional", "_terminal", "_uncertain")
+    __slots__ = ("_calls", "_cancelled", "_child_pid", "_closed", "_cleanup_task", "_config", "_deadline", "_failure", "_issued", "_provisional", "_terminal", "_uncertain")
 
     def __init__(self, config: _PrivatePrimeModelConfig) -> None:
         if type(config) is not _PrivatePrimeModelConfig:
@@ -62,6 +65,7 @@ class PrimeP1BDevelopmentSdkProvider:
         self._cleanup_task: asyncio.Task[None] | None = None
         self._config = config
         self._deadline: float | None = None
+        self._failure: _ProviderFailure | None = None
         self._issued: list[tuple[dict[str, object], dict[str, object]]] = []
         self._provisional = PrimeModelBrokerTokenUsage(0, 0, 0)
         self._terminal: PrimeModelBrokerTokenUsage | None = None
@@ -85,6 +89,7 @@ class PrimeP1BDevelopmentSdkProvider:
         turn = self._calls
         self._calls += 1
         self._uncertain = True
+        self._failure = None
         request_read = request_write = result_read = result_write = None
         try:
             request_read, request_write = os.pipe()
@@ -119,7 +124,9 @@ class PrimeP1BDevelopmentSdkProvider:
             self._terminal = None
             await self._reap_shielded()
             raise
-        except BaseException:
+        except BaseException as error:
+            if type(error) is _ProviderFailure:
+                self._failure = error
             self._terminal = None
             await self._reap_shielded()
             raise PrimeP1BDevelopmentSdkProviderError() from None
@@ -155,10 +162,15 @@ class PrimeP1BDevelopmentSdkProvider:
                 raise ValueError from None
             if observed:
                 self._child_pid = None
-                if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
-                    raise ValueError
                 _drain(result_read, chunks)
-                return _decode_result(b"".join(chunks))
+                raw = b"".join(chunks)
+                if not os.WIFEXITED(status):
+                    raise ValueError
+                if os.WEXITSTATUS(status) == 1:
+                    raise _decode_provider_failure(raw)
+                if os.WEXITSTATUS(status) != 0:
+                    raise ValueError
+                return _decode_result(raw)
             if self._deadline is None or time.monotonic() >= self._deadline:
                 raise TimeoutError
             await asyncio.sleep(_POLL_SECONDS)
@@ -227,9 +239,15 @@ def _provider_child(config: _PrivatePrimeModelConfig, request: dict[str, object]
         response, usage = _assistant_response(request, raw, turn, max_output)
         _write_all(result_write, b"S" + struct.pack("!I", len(response)) + response + struct.pack("!QQQ", usage.input_tokens, usage.output_tokens, usage.cost_microunits))
         os._exit(0)
+    except _ProviderFailure as error:
+        try:
+            _write_all(result_write, _encode_provider_failure(error))
+        except BaseException:
+            pass
+        os._exit(1)
     except BaseException:
         try:
-            _write_all(result_write, b"F")
+            _write_all(result_write, _encode_provider_failure(_ProviderFailure("response")))
         except BaseException:
             pass
         os._exit(1)
