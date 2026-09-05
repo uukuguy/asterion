@@ -91,6 +91,7 @@ class PrimeP1BDevelopmentSdkProvider:
         self._uncertain = True
         self._failure = None
         request_read = request_write = result_read = result_write = None
+        failed = False
         try:
             request_read, request_write = os.pipe()
             result_read, result_write = os.pipe()
@@ -129,12 +130,15 @@ class PrimeP1BDevelopmentSdkProvider:
                 self._failure = error
             self._terminal = None
             await self._reap_shielded()
-            raise PrimeP1BDevelopmentSdkProviderError() from None
+            failed = True
         finally:
             _close_quietly(request_read)
             _close_quietly(request_write)
             _close_quietly(result_read)
             _close_quietly(result_write)
+        if failed:
+            raise PrimeP1BDevelopmentSdkProviderError() from None
+        raise PrimeP1BDevelopmentSdkProviderError()
 
     def terminal_usage(self) -> PrimeModelBrokerTokenUsage:
         if self._uncertain or self._terminal is None:
@@ -236,7 +240,10 @@ def _provider_child(config: _PrivatePrimeModelConfig, request: dict[str, object]
         _close_quietly(request_read)
         payload = _deepseek_payload(request, config.model_id, max_output, turn=turn)
         raw = _post_chat_completion(config, payload, timeout)
-        response, usage = _assistant_response(request, raw, turn, max_output)
+        try:
+            response, usage = _assistant_response(request, raw, turn, max_output)
+        except ValueError:
+            raise _ProviderFailure("response") from None
         _write_all(result_write, b"S" + struct.pack("!I", len(response)) + response + struct.pack("!QQQ", usage.input_tokens, usage.output_tokens, usage.cost_microunits))
         os._exit(0)
     except _ProviderFailure as error:
@@ -246,11 +253,7 @@ def _provider_child(config: _PrivatePrimeModelConfig, request: dict[str, object]
             pass
         os._exit(1)
     except BaseException:
-        try:
-            _write_all(result_write, _encode_provider_failure(_ProviderFailure("response")))
-        except BaseException:
-            pass
-        os._exit(1)
+        os._exit(2)
     finally:
         _close_quietly(request_read)
         _close_quietly(request_write)

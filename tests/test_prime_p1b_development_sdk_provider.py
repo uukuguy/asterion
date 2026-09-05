@@ -76,6 +76,7 @@ class TestPrimeP1BDevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(subject.PrimeP1BDevelopmentSdkProviderError) as raised:
                 await provider(_request([{"content": "solve", "role": "user"}]))
         self.assertEqual(provider._failure.kind, "http-4xx")  # noqa: SLF001
+        self.assertIsNone(raised.exception.__context__)
         projection = repr(provider) + repr(raised.exception) + str(raised.exception)
         self.assertNotIn(sentinel, projection)
         self.assertEqual(
@@ -89,6 +90,21 @@ class TestPrimeP1BDevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             subject._decode_provider_failure(b"F5").kind, "http-5xx"  # noqa: SLF001
         )
+
+    async def test_local_child_failure_has_no_provider_classification(self) -> None:
+        from asterion.applications.prime_agent.operator import p1b_development_sdk_provider as subject
+
+        provider = subject.create_prime_p1b_development_sdk_provider(
+            {
+                "DEEPSEEK_API_KEY": "private-key",
+                "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash",
+            }
+        )
+        with mock.patch.object(subject, "_deepseek_payload", side_effect=ValueError):
+            with self.assertRaises(subject.PrimeP1BDevelopmentSdkProviderError) as raised:
+                await provider(_request([{"content": "solve", "role": "user"}]))
+        self.assertIsNone(provider._failure)  # noqa: SLF001
+        self.assertIsNone(raised.exception.__context__)
 
     async def test_payload_uses_the_fixed_five_turn_tool_choice_policy(self) -> None:
         from asterion.applications.prime_agent.operator import p1b_development_sdk_provider as subject
