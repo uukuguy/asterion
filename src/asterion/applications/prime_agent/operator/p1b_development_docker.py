@@ -33,6 +33,9 @@ _FRAME_CAP = 64 * 1024
 _DIGEST = PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
 _FIXTURE = b"p1b continuity fixture\n"
 _ACQUIRE_DEADLINE_SECONDS = 60
+_CREATE_DEADLINE_SECONDS = 120
+_PROVISIONAL_SETTLE_SECONDS = 30
+_PROVISIONAL_SETTLE_INTERVAL_SECONDS = 0.5
 
 
 async def _reap_process(process: DockerCliAttachProcess, *, deadline: float | None = None) -> None:
@@ -93,7 +96,13 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
         )
         try:
             await self._preflight(control)  # type: ignore[attr-defined]
-            result = await self._call(argv, control, pass_fds=(fd,))  # type: ignore[attr-defined]
+            # A Docker create can outlive the CLI's original request deadline.
+            # Give this one daemon operation its own bounded budget, which is
+            # still below the host and worker execution limits.
+            create_control = _LifecycleCallControl(
+                monotonic() + _CREATE_DEADLINE_SECONDS, control.signal,
+            )
+            result = await self._call(argv, create_control, pass_fds=(fd,))  # type: ignore[attr-defined]
             daemon = self._parse_daemon_id(result.stdout)  # type: ignore[attr-defined]
             self._specifications[daemon] = _P1BSpec(daemon, image_digest, "prime.ipython-coding-p1b-development", run_id, "sha256:" + "0" * 64, _DIGEST)  # type: ignore[attr-defined]
             return daemon
@@ -111,17 +120,34 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
             self._close_fd(fd)  # type: ignore[attr-defined]
 
     async def _compensate_provisional(self, name: str) -> None:
-        control = _LifecycleCallControl(monotonic() + 30, None)
-        removed = await self._call_raw(self._prefix + ("container", "rm", "--force", name), control)  # type: ignore[attr-defined]
+        """Remove a possibly late Docker create until absence is stable."""
+        deadline = monotonic() + _PROVISIONAL_SETTLE_SECONDS
+        stable_absence = False
         missing = (b"", b"\n")
         absent_errors = {("Error: No such object: " + name + "\n").encode(), ("Error: No such container: " + name + "\n").encode(), ("Error response from daemon: No such container: " + name + "\n").encode(), ("No such container: " + name).encode()}
-        if removed.returncode == 0:
-            if removed.stdout not in ((name + "\n").encode(), b"") or removed.stderr: raise RestrictedWorkerError("restricted worker value is invalid")
-        elif removed.returncode != 1 or removed.stdout not in missing or removed.stderr not in absent_errors:
-            raise RestrictedWorkerError("restricted worker value is invalid")
-        inspected = await self._call_raw(self._prefix + ("container", "inspect", "--format", "{{.Id}}", name), control)  # type: ignore[attr-defined]
-        if inspected.returncode != 1 or inspected.stdout not in missing or inspected.stderr not in absent_errors:
-            raise RestrictedWorkerError("restricted worker value is invalid")
+        while True:
+            control = _LifecycleCallControl(deadline, None)
+            removed = await self._call_raw(self._prefix + ("container", "rm", "--force", name), control)  # type: ignore[attr-defined]
+            if removed.returncode == 0:
+                if removed.stdout not in ((name + "\n").encode(), b"") or removed.stderr:
+                    raise RestrictedWorkerError("restricted worker value is invalid")
+            elif removed.returncode != 1 or removed.stdout not in missing or removed.stderr not in absent_errors:
+                raise RestrictedWorkerError("restricted worker value is invalid")
+            inspected = await self._call_raw(self._prefix + ("container", "inspect", "--format", "{{.Id}}", name), control)  # type: ignore[attr-defined]
+            if inspected.returncode == 1 and inspected.stdout in missing and inspected.stderr in absent_errors:
+                if stable_absence:
+                    return
+                stable_absence = True
+            elif inspected.returncode == 0 and not inspected.stderr:
+                # The daemon committed after the remove attempt.  It is not
+                # absence, so the following pass must remove it.
+                self._parse_daemon_id(inspected.stdout)  # type: ignore[attr-defined]
+                stable_absence = False
+            else:
+                raise RestrictedWorkerError("restricted worker value is invalid")
+            if monotonic() + _PROVISIONAL_SETTLE_INTERVAL_SECONDS >= deadline:
+                raise RestrictedWorkerError("restricted worker value is invalid")
+            await asyncio.sleep(_PROVISIONAL_SETTLE_INTERVAL_SECONDS)
 
     async def inspect(self, container_id: str, *, control: _LifecycleCallControl) -> None:  # type: ignore[override]
         self._specification(container_id)  # type: ignore[attr-defined]

@@ -179,6 +179,37 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         subject = object.__new__(P1BDockerCliTransport)
         subject._prefix = ("/operator/docker", "--host", "unix:///operator/docker.sock")
         subject._runner = runner
-        await subject._compensate_provisional("prime-p1b-provisional")
+        with patch(
+            "asterion.applications.prime_agent.operator.p1b_development_docker._PROVISIONAL_SETTLE_INTERVAL_SECONDS",
+            0.001,
+        ):
+            await subject._compensate_provisional("prime-p1b-provisional")
         self.assertEqual(runner.argv[0][-4:], ("container", "rm", "--force", "prime-p1b-provisional"))
         self.assertEqual(runner.argv[1][-5:], ("container", "inspect", "--format", "{{.Id}}", "prime-p1b-provisional"))
+
+    async def test_uncertain_create_compensation_waits_for_late_create_then_removes_it(self) -> None:
+        class Runner:
+            def __init__(self) -> None:
+                self.argv: list[tuple[str, ...]] = []
+                self.remove_count = 0
+
+            async def run(self, *, argv: tuple[str, ...], **_: object) -> DockerCliResult:
+                self.argv.append(argv)
+                if "rm" in argv:
+                    self.remove_count += 1
+                    if self.remove_count == 1:
+                        return DockerCliResult(1, b"", b"Error: No such object: prime-p1b-provisional\n")
+                    return DockerCliResult(0, b"prime-p1b-provisional\n", b"")
+                return DockerCliResult(1, b"", b"Error: No such object: prime-p1b-provisional\n")
+
+        runner = Runner()
+        subject = object.__new__(P1BDockerCliTransport)
+        subject._prefix = ("/operator/docker", "--host", "unix:///operator/docker.sock")
+        subject._runner = runner
+        with patch(
+            "asterion.applications.prime_agent.operator.p1b_development_docker._PROVISIONAL_SETTLE_INTERVAL_SECONDS",
+            0.001,
+        ):
+            await subject._compensate_provisional("prime-p1b-provisional")
+        self.assertEqual(runner.remove_count, 2)
+        self.assertEqual(sum("inspect" in argv for argv in runner.argv), 2)
