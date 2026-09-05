@@ -45,6 +45,8 @@ from asterion.services.restricted_worker import (
 
 
 _ENVIRONMENT = ("HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1")
+_ENVIRONMENT_BY_KEY = dict(item.split("=", 1) for item in _ENVIRONMENT)
+_CLEARED_BASE_IMAGE_ENVIRONMENT = ("LANG", "GPG_KEY", "PYTHON_VERSION", "PYTHON_SHA256")
 _ENTRYPOINT = "/usr/local/bin/prime-ipython-coding.py"
 _TMPFS = "/workspace:rw,nodev,noexec,nosuid,size=67108864"
 _OUTPUT_CAP = 65536
@@ -63,6 +65,7 @@ _INSPECT_PROJECTION = (
     '[{"Id":{{json .Id}},"Image":{{json .Image}},'
     '"User":{{json .Config.User}},"Env":{{json .Config.Env}},'
     '"Entrypoint":{{json .Config.Entrypoint}},"Labels":{{json .Config.Labels}},'
+    '"OpenStdin":{{json .Config.OpenStdin}},'
     '"NetworkMode":{{json .HostConfig.NetworkMode}},"PortBindings":{{json .HostConfig.PortBindings}},'
     '"ReadonlyRootfs":{{json .HostConfig.ReadonlyRootfs}},"Privileged":{{json .HostConfig.Privileged}},'
     '"CapAdd":{{json .HostConfig.CapAdd}},"CapDrop":{{json .HostConfig.CapDrop}},'
@@ -392,6 +395,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
         self._runner = runner or _ProductionRunner()
         self._attach_runner = attach_runner or _ProductionAttachRunner()
         self._specifications: dict[str, _DockerWorkerSpecification] = {}
+        self._started_processes: dict[str, DockerCliAttachProcess] = {}
 
     def close(self) -> None:
         """Release the one-create seccomp descriptor without touching caller state."""
@@ -424,7 +428,9 @@ class DockerCliEngineTransport(DockerEngineTransport):
             "--read-only", "--user", "65534:65534", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges:true", "--security-opt", "seccomp=/proc/self/fd/" + str(fd),
             "--tmpfs", _TMPFS, "--env", _ENVIRONMENT[0], "--env", _ENVIRONMENT[1], "--env", _ENVIRONMENT[2],
-            "--pid", "private", "--ipc", "private", "--uts", "private", "--pids-limit", "256",
+            "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[0], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[1],
+            "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[2], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[3],
+            "--interactive", "--ipc", "private", "--pids-limit", "256",
             "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no",
             "--entrypoint", _ENTRYPOINT, specification.image_digest,
         )
@@ -451,17 +457,12 @@ class DockerCliEngineTransport(DockerEngineTransport):
 
     async def start(self, container_id: str, *, control: _LifecycleCallControl) -> RestrictedWorkerLease:
         specification = self._specification(container_id)
-        result = await self._call(self._prefix + ("container", "start", container_id), control)
-        if result.stdout not in (b"", (container_id + "\n").encode()) or result.stderr:
+        if container_id in self._started_processes:
             raise RestrictedWorkerError("restricted worker value is invalid")
-        return RestrictedWorkerLease(container_id, specification.role_id, specification.run_id, specification.challenge_digest, specification.workload_digest)
-
-    async def open_launcher_channel(self, container_id: str, *, control: _LifecycleCallControl) -> DockerLauncherChannel:
-        self._specification(container_id)
         if control.cancelled() or monotonic() >= control.deadline:
             raise asyncio.CancelledError
         process = await self._attach_runner.open(
-            argv=self._prefix + ("container", "attach", "--sig-proxy=false", container_id),
+            argv=self._prefix + ("container", "start", "--attach", "--interactive", container_id),
             env={}, pass_fds=(),
         )
         if process.stdin is None or process.stdout is None:
@@ -470,13 +471,32 @@ class DockerCliEngineTransport(DockerEngineTransport):
         if control.cancelled():
             await _DockerCliLauncherChannel(process).close(control=control)
             raise asyncio.CancelledError
+        self._started_processes[container_id] = process
+        return RestrictedWorkerLease(container_id, specification.role_id, specification.run_id, specification.challenge_digest, specification.workload_digest)
+
+    async def open_launcher_channel(self, container_id: str, *, control: _LifecycleCallControl) -> DockerLauncherChannel:
+        self._specification(container_id)
+        if control.cancelled() or monotonic() >= control.deadline:
+            raise asyncio.CancelledError
+        process = self._started_processes.pop(container_id, None)
+        if process is None:
+            raise RestrictedWorkerError("restricted worker value is invalid")
         return _DockerCliLauncherChannel(process)
 
     async def force_remove(self, container_id: str, *, control: _LifecycleCallControl) -> None:
         self._specification(container_id)
+        process = self._started_processes.pop(container_id, None)
+        close_error: BaseException | None = None
+        if process is not None:
+            try:
+                await _DockerCliLauncherChannel(process).close(control=control)
+            except BaseException as error:
+                close_error = error
         result = await self._call(self._prefix + ("container", "rm", "--force", container_id), control)
         if result.stdout not in (b"", (container_id + "\n").encode()) or result.stderr:
             raise RestrictedWorkerError("restricted worker value is invalid")
+        if close_error is not None:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
 
     async def assert_absent(self, container_id: str, *, control: _LifecycleCallControl) -> None:
         self._specification(container_id)
@@ -484,9 +504,10 @@ class DockerCliEngineTransport(DockerEngineTransport):
         absent_errors = {
             ("Error: No such object: " + container_id + "\n").encode(),
             ("Error: No such container: " + container_id + "\n").encode(),
+            ("Error response from daemon: No such container: " + container_id + "\n").encode(),
             ("No such container: " + container_id).encode(),
         }
-        if result.returncode != 1 or result.stdout or result.stderr not in absent_errors:
+        if result.returncode != 1 or result.stdout not in (b"", b"\n") or result.stderr not in absent_errors:
             raise RestrictedWorkerError("restricted worker value is invalid")
         del self._specifications[container_id]
 
@@ -670,7 +691,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
                 raise ValueError
             item = value[0]
             fields = {
-                "Id", "Image", "User", "Env", "Entrypoint", "Labels", "NetworkMode",
+                "Id", "Image", "User", "Env", "Entrypoint", "Labels", "OpenStdin", "NetworkMode",
                 "PortBindings", "ReadonlyRootfs", "Privileged", "CapAdd", "CapDrop",
                 "SecurityOpt", "Binds", "VolumesFrom", "Tmpfs", "PidsLimit", "Memory",
                 "MemorySwap", "NanoCpus", "PidMode", "IpcMode", "UTSMode", "RestartPolicy",
@@ -678,14 +699,46 @@ class DockerCliEngineTransport(DockerEngineTransport):
             }
             if set(item) != fields or item["Id"] != container_id or item["Image"] != specification.image_digest or item["Mounts"] != [] or type(item["Running"]) is not bool:
                 raise ValueError
-            if item["User"] != "65534:65534" or item["Env"] != list(_ENVIRONMENT) or item["Entrypoint"] != [_ENTRYPOINT] or type(item["Labels"]) is not dict or any("run" in key.lower() or "challenge" in key.lower() for key in item["Labels"]):
+            environment = item["Env"]
+            if (
+                item["User"] != "65534:65534"
+                or not self._valid_environment(environment)
+                or item["Entrypoint"] != [_ENTRYPOINT]
+                or item["OpenStdin"] is not True
+                or type(item["Labels"]) is not dict
+                or any("run" in key.lower() or "challenge" in key.lower() for key in item["Labels"])
+            ):
                 raise ValueError
-            expected = {"NetworkMode": "none", "PortBindings": None, "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true", "seccomp=" + self._seccomp_profile], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": _TMPFS.removeprefix("/workspace:")}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "private", "IpcMode": "private", "UTSMode": "private", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}}
+            if item["PortBindings"] is not None and (type(item["PortBindings"]) is not dict or item["PortBindings"] != {}):
+                raise ValueError
+            expected = {"NetworkMode": "none", "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true", "seccomp=" + self._seccomp_profile], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": _TMPFS.removeprefix("/workspace:")}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "", "IpcMode": "private", "UTSMode": "", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}}
             if any(item[name] != expected[name] for name in expected):
                 raise ValueError
         except (KeyError, TypeError, ValueError):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         return {"image_id": specification.image_digest, "repo_digests": (), "network_mode": "none", "ports": (), "readonly_rootfs": True, "privileged": False, "cap_add": (), "cap_drop": ("ALL",), "security_opt": ("no-new-privileges", "seccomp=prime-ipython-coding"), "user": "65534:65534", "devices": (), "mounts": (), "binds": (), "volumes": (), "tmpfs": {"/workspace": {"size_bytes": 67108864, "options": ("nodev", "noexec", "nosuid")}}, "env": _ENVIRONMENT, "pids_limit": 256, "memory": 536870912, "memory_swap": 536870912, "nano_cpus": 1000000000, "pid_namespace": "private", "ipc_namespace": "private", "uts_namespace": "private"}
+
+    @staticmethod
+    def _valid_environment(value: object) -> bool:
+        if type(value) is not list:
+            return False
+        environment: dict[str, str] = {}
+        cleared: set[str] = set()
+        for item in value:
+            if type(item) is not str:
+                return False
+            if "=" not in item:
+                if item not in _CLEARED_BASE_IMAGE_ENVIRONMENT or item in cleared:
+                    return False
+                cleared.add(item)
+                continue
+            if item.count("=") != 1:
+                return False
+            key, setting = item.split("=", 1)
+            if not key or key in environment or key in cleared:
+                return False
+            environment[key] = setting
+        return environment == _ENVIRONMENT_BY_KEY and cleared == set(_CLEARED_BASE_IMAGE_ENVIRONMENT)
 
     @staticmethod
     def _parse_self_check_line(raw: bytes) -> DockerWorkerLauncherSelfCheck:

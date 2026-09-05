@@ -21,7 +21,8 @@ from asterion.applications.prime_agent.operator.docker_cli import (
     _ProductionRunner,
 )
 from asterion.applications.prime_agent.operator.docker_worker import (
-    DockerWorkerCompletion, DockerWorkerModelRequest, DockerWorkerModelResponse,
+    DockerLauncherChannel, DockerWorkerCompletion, DockerWorkerModelRequest,
+    DockerWorkerModelResponse,
 )
 from asterion.applications.prime_agent.operator.ipython_workload import (
     PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
@@ -182,8 +183,8 @@ def _inspect(*, container_id: str = _CONTAINER, extra: object = None) -> bytes:
         "Id": container_id,
         "Image": _IMAGE,
         "RepoDigests": [],
-        "Config": {"User": "65534:65534", "Env": ["HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1"], "Entrypoint": ["/usr/local/bin/prime-ipython-coding.py"], "Labels": {}},
-        "HostConfig": {"NetworkMode": "none", "PortBindings": None, "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true", f"seccomp={_SECCOMP_TEXT}"], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864"}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "private", "IpcMode": "private", "UTSMode": "private", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}},
+        "Config": {"User": "65534:65534", "Env": ["GPG_KEY", "PYTHON_VERSION", "PYTHON_SHA256", "HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1", "LANG"], "Entrypoint": ["/usr/local/bin/prime-ipython-coding.py"], "Labels": {}, "OpenStdin": True},
+        "HostConfig": {"NetworkMode": "none", "PortBindings": {}, "ReadonlyRootfs": True, "Privileged": False, "CapAdd": None, "CapDrop": ["ALL"], "SecurityOpt": ["no-new-privileges:true", f"seccomp={_SECCOMP_TEXT}"], "Binds": None, "VolumesFrom": None, "Tmpfs": {"/workspace": "rw,nodev,noexec,nosuid,size=67108864"}, "PidsLimit": 256, "Memory": 536870912, "MemorySwap": 536870912, "NanoCpus": 1000000000, "PidMode": "", "IpcMode": "private", "UTSMode": "", "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0}},
         "Mounts": [],
         "State": {"Running": False},
     }
@@ -198,11 +199,12 @@ def _projected_inspect(*, container_id: str = _CONTAINER, extra: object = None) 
         "Id": container_id,
         "Image": _IMAGE,
         "User": "65534:65534",
-        "Env": ["HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1"],
+        "Env": ["GPG_KEY", "PYTHON_VERSION", "PYTHON_SHA256", "HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE=1", "LANG"],
         "Entrypoint": ["/usr/local/bin/prime-ipython-coding.py"],
+        "OpenStdin": True,
         "Labels": {},
         "NetworkMode": "none",
-        "PortBindings": None,
+        "PortBindings": {},
         "ReadonlyRootfs": True,
         "Privileged": False,
         "CapAdd": None,
@@ -215,9 +217,9 @@ def _projected_inspect(*, container_id: str = _CONTAINER, extra: object = None) 
         "Memory": 536870912,
         "MemorySwap": 536870912,
         "NanoCpus": 1000000000,
-        "PidMode": "private",
+        "PidMode": "",
         "IpcMode": "private",
-        "UTSMode": "private",
+        "UTSMode": "",
         "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
         "Mounts": [],
         "Running": False,
@@ -261,6 +263,12 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
     def _control(self, signal: _Signal | None = None) -> _LifecycleCallControl:
         return _LifecycleCallControl(asyncio.get_running_loop().time() + 10, signal)
 
+    async def _handoff_started_channel(
+        self, transport: DockerCliEngineTransport, attach: _AttachRunner
+    ) -> DockerLauncherChannel:
+        transport._started_processes[_CONTAINER] = attach.process  # noqa: SLF001
+        return await transport.open_launcher_channel(_CONTAINER, control=self._control())
+
     async def test_create_preflights_and_uses_only_the_fixed_argv_and_empty_environment(self) -> None:
         daemon_id = "a" * 64
         transport, runner = self._transport([_Result(stdout=b"{}"), _Result(stdout=b"{}"), _Result(stdout=(daemon_id + "\n").encode())])
@@ -271,7 +279,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runner.calls[1][0][-3:], ("info", "--format", "{{json .}}"))
         owned_fd = runner.calls[2][4][0]
         self.assertNotEqual(owned_fd, self.seccomp_fd)
-        self.assertEqual(runner.calls[2][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "create", "--name", _CONTAINER, "--pull=never", "--platform", "linux/amd64", "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", f"seccomp=/proc/self/fd/{owned_fd}", "--tmpfs", "/workspace:rw,nodev,noexec,nosuid,size=67108864", "--env", "HOME=/workspace", "--env", "PATH=/usr/local/bin:/usr/bin:/bin", "--env", "PYTHONDONTWRITEBYTECODE=1", "--pid", "private", "--ipc", "private", "--uts", "private", "--pids-limit", "256", "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no", "--entrypoint", "/usr/local/bin/prime-ipython-coding.py", _IMAGE))
+        self.assertEqual(runner.calls[2][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "create", "--name", _CONTAINER, "--pull=never", "--platform", "linux/amd64", "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", f"seccomp=/proc/self/fd/{owned_fd}", "--tmpfs", "/workspace:rw,nodev,noexec,nosuid,size=67108864", "--env", "HOME=/workspace", "--env", "PATH=/usr/local/bin:/usr/bin:/bin", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "LANG", "--env", "GPG_KEY", "--env", "PYTHON_VERSION", "--env", "PYTHON_SHA256", "--interactive", "--ipc", "private", "--pids-limit", "256", "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no", "--entrypoint", "/usr/local/bin/prime-ipython-coding.py", _IMAGE))
         self.assertTrue(all(env == {} for _, env, _, _, _ in runner.calls))
         self.assertEqual([pass_fds for _, _, _, _, pass_fds in runner.calls], [(), (), (owned_fd,)])
         with self.assertRaises(OSError):
@@ -596,7 +604,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
     async def test_lifecycle_operations_are_closed_and_parse_only_narrow_evidence(self) -> None:
         selfcheck = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode() + b"\n"
         attach = _AttachRunner(_AttachProcess(selfcheck))
-        transport, runner = self._transport([_Result(stdout=_projected_inspect()), _Result(), _Result(returncode=1, stderr=("No such container: " + _CONTAINER).encode())], attach)
+        transport, runner = self._transport([_Result(stdout=_projected_inspect()), _Result(returncode=1, stdout=b"\n", stderr=("Error response from daemon: No such container: " + _CONTAINER + "\n").encode())], attach)
         transport._specifications[_CONTAINER] = _spec()
         inspection = await transport.inspect(_CONTAINER, control=self._control())
         lease = await transport.start(_CONTAINER, control=self._control())
@@ -608,12 +616,11 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inspection["network_mode"], "none")
         self.assertEqual(lease.worker_id, _CONTAINER)
         self.assertEqual(check.effective_user_id, 65534)
-        self.assertEqual(runner.calls[1][0][-2:], ("start", _CONTAINER))
-        self.assertEqual(attach.calls[0][0][-3:], ("attach", "--sig-proxy=false", _CONTAINER))
+        self.assertEqual(attach.calls[0][0][-4:], ("start", "--attach", "--interactive", _CONTAINER))
         self.assertEqual(attach.calls[0][2], ())
         self.assertEqual(attach.process.stdin.writes, [_CONTROL])
         self.assertTrue(attach.process.waited)
-        self.assertEqual(runner.calls[2][0][-4:], ("inspect", "--format", "{{.Id}}", _CONTAINER))
+        self.assertEqual(runner.calls[1][0][-4:], ("inspect", "--format", "{{.Id}}", _CONTAINER))
 
     async def test_attach_rejects_noncanonical_extra_eof_or_oversize_frames(self) -> None:
         canonical = json.dumps({"credentials_absent": True, "effective_capabilities": 0, "effective_user_id": 65534, "no_new_privileges": 1, "nonloopback_network_absent": True, "root_read_only": True, "seccomp_mode": 2, "workspace_only_writable": True}, separators=(",", ":"), sort_keys=True).encode()
@@ -623,7 +630,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
                 attach = _AttachRunner(_AttachProcess(frame))
                 transport, _ = self._transport([], attach)
                 transport._specifications[_CONTAINER] = _spec()
-                channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+                channel = await self._handoff_started_channel(transport, attach)
                 with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
                     await channel.self_check(control=self._control())
                 await channel.close(control=self._control())
@@ -635,7 +642,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         attach = _AttachRunner(_AttachProcess(frame))
         transport, _ = self._transport([], attach)
         transport._specifications[_CONTAINER] = _spec()
-        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        channel = await self._handoff_started_channel(transport, attach)
         await channel.self_check(control=self._control())
         await channel.release(control=self._control())
         with self.assertRaises(RestrictedWorkerError):
@@ -649,7 +656,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         attach = _AttachRunner(_AttachProcess(selfcheck + request))
         transport, _ = self._transport([], attach)
         transport._specifications[_CONTAINER] = _spec()
-        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        channel = await self._handoff_started_channel(transport, attach)
 
         await channel.self_check(control=self._control())
         await channel.release(control=self._control())
@@ -664,7 +671,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         attach = _AttachRunner(_AttachProcess(selfcheck + request))
         transport, _ = self._transport([], attach)
         transport._specifications[_CONTAINER] = _spec()
-        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        channel = await self._handoff_started_channel(transport, attach)
 
         await channel.self_check(control=self._control())
         await channel.release(control=self._control())
@@ -744,7 +751,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         attach = _AttachRunner(process)
         transport, _ = self._transport([], attach)
         transport._specifications[_CONTAINER] = _spec()
-        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        channel = await self._handoff_started_channel(transport, attach)
 
         with self.assertRaises(asyncio.CancelledError):
             await channel.close(control=self._control(_Signal(True)))
@@ -758,7 +765,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         attach = _AttachRunner(process)
         transport, _ = self._transport([], attach)
         transport._specifications[_CONTAINER] = _spec()
-        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        channel = await self._handoff_started_channel(transport, attach)
         closing = asyncio.create_task(channel.close(control=self._control()))
         await process.wait_started.wait()
         closing.cancel()
@@ -776,7 +783,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         attach = _AttachRunner(process)
         transport, _ = self._transport([], attach)
         transport._specifications[_CONTAINER] = _spec()
-        channel = await transport.open_launcher_channel(_CONTAINER, control=self._control())
+        channel = await self._handoff_started_channel(transport, attach)
 
         with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
             await channel.close(control=self._control())
