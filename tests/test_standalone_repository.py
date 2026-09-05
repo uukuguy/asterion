@@ -415,10 +415,11 @@ class StandaloneRepositoryTests(unittest.TestCase):
         for lockfile in (
             "packages/typescript/asterion-runtime/package-lock.json",
             "packages/typescript/prime-gateway/package-lock.json",
-            "3th-party/prime-agent/package-lock.json",
+            "packages/typescript/prime-gateway/resources/prime-artifact-lock.json",
         ):
             with self.subTest(lockfile=lockfile):
                 self.assertIn(lockfile, text)
+        self.assertNotIn("3th-party/prime-agent/package-lock.json", text)
         self.assertIn("make promotion-check", text)
         self.assertIn("make first-run-check", text)
         for forbidden in (

@@ -23,7 +23,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/asterion-promotion-npm-cache
-          key: promotion-npm-${{ runner.os }}-${{ hashFiles('packages/typescript/asterion-runtime/package-lock.json', 'packages/typescript/prime-gateway/package-lock.json', '3th-party/prime-agent/package-lock.json') }}
+          key: promotion-npm-${{ runner.os }}-${{ hashFiles('packages/typescript/asterion-runtime/package-lock.json', 'packages/typescript/prime-gateway/package-lock.json', 'packages/typescript/prime-gateway/resources/prime-artifact-lock.json') }}
       - name: Require pre-populated promotion npm cache
         if: steps.promotion-npm-cache.outputs.cache-hit != 'true'
         run: exit 1

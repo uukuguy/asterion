@@ -54,3 +54,35 @@ model, benchmark, or network fallback was invoked by this task.
 
 The full populated-cache promotion gate remains not rerun to completion. CI
 requires a pre-populated cache entry for the exact lock-key before promotion.
+
+## Cache-key authority correction
+
+The CI cache key now hashes the tracked
+`packages/typescript/prime-gateway/resources/prime-artifact-lock.json`, which
+records both the external Prime `package-lock.json` digest and its source
+commit. It retains the tracked Asterion Runtime and Prime Gateway package lock
+files and no longer names the ignored
+`3th-party/prime-agent/package-lock.json` path. No cache fallback, network,
+provider, Docker, or model behavior changed.
+
+### TDD and verification evidence
+
+RED:
+
+```text
+uv run python -m unittest -v tests.test_standalone_repository.StandaloneRepositoryTests.test_ci_runs_only_the_full_provider_free_promotion_gate
+FAILED (failures=2)
+```
+
+The test failed because CI omitted the authority resource and still referenced
+the ignored external lockfile.
+
+GREEN:
+
+```text
+uv run python -m unittest -v tests.test_standalone_repository.StandaloneRepositoryTests.test_ci_runs_only_the_full_provider_free_promotion_gate
+Ran 1 test ... OK
+uv run ruff check tests/test_standalone_repository.py
+All checks passed!
+git diff --check
+```
