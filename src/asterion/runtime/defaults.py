@@ -22,6 +22,8 @@ from asterion.runtimes.claude_code import ClaudeCodeRuntimeClient
 from asterion.runtimes.pi import PiRuntimeClient, prepare_pi_evidence_root
 from asterion.runtimes.prime_agent import (
     PRIME_IPYTHON_CAPABILITY,
+    PRIME_P1_PROFILE,
+    PRIME_P2_PROFILE,
     PRIME_RUNTIME_ID,
     PrimeAgentRuntimeClient,
 )
@@ -92,17 +94,28 @@ def default_runtime_factory_registry() -> RuntimeFactoryRegistry:
 def _create_prime_agent_runtime(context: RuntimeFactoryContext) -> PrimeAgentRuntimeClient:
     if (
         context.provider_id != "prime-agent"
-        or context.application_id != "prime.ipython-coding"
         or context.application_version != "1.0.0"
         or context.runtime_id != PRIME_RUNTIME_ID
         or context.options
-        or set(context.host_services) != {"prime.ipython-production"}
     ):
         raise RuntimeFactoryError("Prime runtime configuration is invalid")
-    service = context.host_services["prime.ipython-production"]
+    routes = {
+        "prime.ipython-coding": ("prime.ipython-production", PRIME_P1_PROFILE),
+        "prime.programmatic-long-context": (
+            "prime.programmatic-long-context-development",
+            PRIME_P2_PROFILE,
+        ),
+    }
+    try:
+        host_key, profile = routes[context.application_id]
+    except KeyError:
+        raise RuntimeFactoryError("Prime runtime configuration is invalid") from None
+    if set(context.host_services) != {host_key}:
+        raise RuntimeFactoryError("Prime runtime configuration is invalid")
+    service = context.host_services[host_key]
     if not isinstance(service, PrimeSmallVerificationService):
         raise RuntimeFactoryError("Prime runtime configuration is invalid")
-    return PrimeAgentRuntimeClient(service)
+    return PrimeAgentRuntimeClient(service, profile=profile)
 
 
 def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:

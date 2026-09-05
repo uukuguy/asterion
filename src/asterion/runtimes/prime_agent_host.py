@@ -10,7 +10,7 @@ from asterion.runtime.host import CancellationSignal
 
 
 _PRESET = "fixed-small-verification"
-_SCOPE = "p1-b-development"
+_SCOPES = frozenset(("p1-b-development", "p2-development"))
 _PROMOTION = "unpromoted"
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
@@ -40,7 +40,7 @@ class PrimeSmallVerificationRequest:
 class PrimeSmallVerificationResult:
     run_id: str
     trace_sha256: str
-    scope: str = _SCOPE
+    scope: str = "p1-b-development"
     promotion: str = _PROMOTION
 
     def __post_init__(self) -> None:
@@ -49,7 +49,7 @@ class PrimeSmallVerificationResult:
             or not self.run_id
             or type(self.trace_sha256) is not str
             or _SHA256.fullmatch(self.trace_sha256) is None
-            or self.scope != _SCOPE
+            or self.scope not in _SCOPES
             or self.promotion != _PROMOTION
         ):
             raise PrimeSmallVerificationContractError("Prime verification result is invalid")

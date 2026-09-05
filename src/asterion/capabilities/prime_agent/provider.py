@@ -22,6 +22,7 @@ from asterion.runtime.host import parse_event_stream
 
 PACKAGE_REF = CapabilityPackageRef("prime-agent", "1.0.0")
 CAPABILITY_REF = CapabilityRef("prime.ipython-coding", "1.0.0")
+P2_CAPABILITY_REF = CapabilityRef("prime.programmatic-long-context", "1.0.0")
 
 
 _TRACE_ARTIFACT_ID = "prime.p1-b-development.trace"
@@ -33,13 +34,44 @@ class PrimeIpythonCodingImplementation:
     """Project only the public-safe trace from Prime's fixed verification."""
 
     async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
-        if invocation.runtime.manifest.runtime_id != "prime.agent" or (
-            invocation.runtime.manifest.capabilities != ("prime.tool.ipython",)
-        ):
-            raise CapabilityExecutionError("Prime runtime is unavailable")
-        if invocation.input_text != "fixed-small-verification":
-            raise CapabilityExecutionError("Prime capability input is invalid")
-        events = tuple([
+        return await _execute_fixed_verification(
+            invocation,
+            artifact_id=_TRACE_ARTIFACT_ID,
+            kind="p1-b-development",
+            media_type=_TRACE_MEDIA_TYPE,
+            scope="p1-b-development",
+        )
+
+
+class PrimeProgrammaticLongContextImplementation:
+    """Project only P2's public-safe development trace."""
+
+    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
+        return await _execute_fixed_verification(
+            invocation,
+            artifact_id="prime.p2-development.trace",
+            kind="p2-development",
+            media_type="application/vnd.asterion.prime.p2-development-trace+json",
+            scope="p2-development",
+        )
+
+
+async def _execute_fixed_verification(
+    invocation: CapabilityInvocation,
+    *,
+    artifact_id: str,
+    kind: str,
+    media_type: str,
+    scope: str,
+) -> CapabilityExecutionResult:
+    if invocation.runtime.manifest.runtime_id != "prime.agent" or (
+        invocation.runtime.manifest.capabilities != ("prime.tool.ipython",)
+    ):
+        raise CapabilityExecutionError("Prime runtime is unavailable")
+    if invocation.input_text != "fixed-small-verification":
+        raise CapabilityExecutionError("Prime capability input is invalid")
+    events = tuple(
+        [
             event
             async for event in invocation.runtime.run(
                 RunRequest(
@@ -49,56 +81,55 @@ class PrimeIpythonCodingImplementation:
                 ),
                 signal=invocation.signal,
             )
-        ])
-        try:
-            parsed = parse_event_stream(event.to_mapping() for event in events)
-        except Exception as error:
-            raise CapabilityExecutionError("Prime runtime result is invalid") from error
-        if any(event.run_id != invocation.run_id for event in parsed):
-            raise CapabilityExecutionError("Prime runtime result is invalid")
-        if (
-            len(parsed) == 2
-            and tuple(event.type for event in parsed)
-            == ("run.started", "run.completed")
-            and parsed[0].payload == {"capabilities": ["prime.tool.ipython"]}
-            and parsed[-1].payload == {"status": "cancelled"}
-        ):
-            raise asyncio.CancelledError
-        if (
-            len(parsed) != 3
-            or tuple(event.type for event in parsed)
-            != ("run.started", "artifact.created", "run.completed")
-            or parsed[0].payload != {"capabilities": ["prime.tool.ipython"]}
-        ):
-            raise CapabilityExecutionError("Prime runtime did not complete")
-        if parsed[-1].payload != {"status": "completed"}:
-            raise CapabilityExecutionError("Prime runtime did not complete")
-        artifact = parsed[1].payload.get("artifact")
-        if not isinstance(artifact, dict) or artifact != {
-            "artifact_id": _TRACE_ARTIFACT_ID,
-            "kind": "p1-b-development",
-            "media_type": _TRACE_MEDIA_TYPE,
-            "sha256": artifact.get("sha256"),
-        } or _TRACE_SHA256.fullmatch(str(artifact.get("sha256"))) is None:
-            raise CapabilityExecutionError("Prime runtime result is invalid")
-        return CapabilityExecutionResult(
-            events=(),
-            artifacts=(
-                {
-                    "artifact_id": _TRACE_ARTIFACT_ID,
-                    "media_type": _TRACE_MEDIA_TYPE,
-                    "value": {
-                        "scope": "p1-b-development",
-                        "promotion": "unpromoted",
-                        "trace_sha256": artifact["sha256"],
-                    },
+        ]
+    )
+    try:
+        parsed = parse_event_stream(event.to_mapping() for event in events)
+    except Exception as error:
+        raise CapabilityExecutionError("Prime runtime result is invalid") from error
+    if any(event.run_id != invocation.run_id for event in parsed):
+        raise CapabilityExecutionError("Prime runtime result is invalid")
+    if (
+        len(parsed) == 2
+        and tuple(event.type for event in parsed) == ("run.started", "run.completed")
+        and parsed[0].payload == {"capabilities": ["prime.tool.ipython"]}
+        and parsed[-1].payload == {"status": "cancelled"}
+    ):
+        raise asyncio.CancelledError
+    if (
+        len(parsed) != 3
+        or tuple(event.type for event in parsed)
+        != ("run.started", "artifact.created", "run.completed")
+        or parsed[0].payload != {"capabilities": ["prime.tool.ipython"]}
+        or parsed[-1].payload != {"status": "completed"}
+    ):
+        raise CapabilityExecutionError("Prime runtime did not complete")
+    artifact = parsed[1].payload.get("artifact")
+    if not isinstance(artifact, dict) or artifact != {
+        "artifact_id": artifact_id,
+        "kind": kind,
+        "media_type": media_type,
+        "sha256": artifact.get("sha256"),
+    } or _TRACE_SHA256.fullmatch(str(artifact.get("sha256"))) is None:
+        raise CapabilityExecutionError("Prime runtime result is invalid")
+    return CapabilityExecutionResult(
+        events=(),
+        artifacts=(
+            {
+                "artifact_id": artifact_id,
+                "media_type": media_type,
+                "value": {
+                    "scope": scope,
+                    "promotion": "unpromoted",
+                    "trace_sha256": artifact["sha256"],
                 },
-            ),
-        )
+            },
+        ),
+    )
 
 
 def create_prime_agent_package() -> InstalledCapabilityPackage:
-    """Load the exact local Prime package payload and its one implementation."""
+    """Load the exact local Prime package payload and implementations."""
 
     payload_root = Path(__file__).resolve().parent / "payload"
     payload = open_portable_payload(payload_root)
@@ -111,9 +142,16 @@ def create_prime_agent_package() -> InstalledCapabilityPackage:
         benchmark_suite_paths=(),
         implementations=(
             CapabilityImplementationBinding(CAPABILITY_REF, PrimeIpythonCodingImplementation()),
+            CapabilityImplementationBinding(
+                P2_CAPABILITY_REF, PrimeProgrammaticLongContextImplementation()
+            ),
         ),
         benchmark_bindings=(),
     )
 
 
-__all__ = ("create_prime_agent_package",)
+__all__ = (
+    "PrimeIpythonCodingImplementation",
+    "PrimeProgrammaticLongContextImplementation",
+    "create_prime_agent_package",
+)

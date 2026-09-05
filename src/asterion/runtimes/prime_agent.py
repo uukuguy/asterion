@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 
 from asterion.runtime.host import (
     AgentRuntimeClient,
@@ -29,11 +30,62 @@ class PrimeAgentRuntimeError(ValueError):
     """Raised before a Prime frame could enter execution."""
 
 
+@dataclass(frozen=True)
+class PrimeVerificationProfile:
+    scope: str
+    artifact_id: str
+    kind: str
+    media_type: str
+
+    def __post_init__(self) -> None:
+        if (
+            self.scope,
+            self.artifact_id,
+            self.kind,
+            self.media_type,
+        ) not in {
+            (
+                "p1-b-development",
+                "prime.p1-b-development.trace",
+                "p1-b-development",
+                "application/vnd.asterion.prime.p1-development-trace+json",
+            ),
+            (
+                "p2-development",
+                "prime.p2-development.trace",
+                "p2-development",
+                "application/vnd.asterion.prime.p2-development-trace+json",
+            ),
+        }:
+            raise PrimeAgentRuntimeError("Prime runtime profile is invalid")
+
+
+PRIME_P1_PROFILE = PrimeVerificationProfile(
+    scope="p1-b-development",
+    artifact_id="prime.p1-b-development.trace",
+    kind="p1-b-development",
+    media_type="application/vnd.asterion.prime.p1-development-trace+json",
+)
+PRIME_P2_PROFILE = PrimeVerificationProfile(
+    scope="p2-development",
+    artifact_id="prime.p2-development.trace",
+    kind="p2-development",
+    media_type="application/vnd.asterion.prime.p2-development-trace+json",
+)
+
 class PrimeAgentRuntimeClient(AgentRuntimeClient):
     """Project one host-owned fixed verification into runtime protocol frames."""
 
-    def __init__(self, service: PrimeSmallVerificationService) -> None:
+    def __init__(
+        self,
+        service: PrimeSmallVerificationService,
+        *,
+        profile: PrimeVerificationProfile = PRIME_P1_PROFILE,
+    ) -> None:
         self._service = service
+        if profile not in (PRIME_P1_PROFILE, PRIME_P2_PROFILE):
+            raise PrimeAgentRuntimeError("Prime runtime profile is invalid")
+        self._profile = profile
 
     @property
     def manifest(self) -> RuntimeManifest:
@@ -82,7 +134,11 @@ class PrimeAgentRuntimeClient(AgentRuntimeClient):
                 payload={"code": "verification-failed", "message": "Prime verification failed"},
             )
             return
-        if type(result) is not PrimeSmallVerificationResult or result.run_id != request.run_id:
+        if (
+            type(result) is not PrimeSmallVerificationResult
+            or result.run_id != request.run_id
+            or result.scope != self._profile.scope
+        ):
             yield RunEvent(
                 run_id=request.run_id,
                 sequence=1,
@@ -108,9 +164,9 @@ class PrimeAgentRuntimeClient(AgentRuntimeClient):
             type="artifact.created",
             payload={
                 "artifact": {
-                    "artifact_id": "prime.p1-b-development.trace",
-                    "kind": "p1-b-development",
-                    "media_type": "application/vnd.asterion.prime.p1-development-trace+json",
+                    "artifact_id": self._profile.artifact_id,
+                    "kind": self._profile.kind,
+                    "media_type": self._profile.media_type,
                     "sha256": result.trace_sha256.removeprefix("sha256:"),
                 }
             },
@@ -140,4 +196,11 @@ def _cancelled_events(run_id: str) -> tuple[RunEvent, RunEvent]:
     )
 
 
-__all__ = ("PRIME_IPYTHON_CAPABILITY", "PRIME_RUNTIME_ID", "PrimeAgentRuntimeClient")
+__all__ = (
+    "PRIME_IPYTHON_CAPABILITY",
+    "PRIME_P1_PROFILE",
+    "PRIME_P2_PROFILE",
+    "PRIME_RUNTIME_ID",
+    "PrimeAgentRuntimeClient",
+    "PrimeVerificationProfile",
+)

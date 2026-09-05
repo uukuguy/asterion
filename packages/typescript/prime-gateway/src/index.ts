@@ -201,6 +201,7 @@ export {
 export {
   PrimeP1DevelopmentSession,
 } from "./p1-development-session.js";
+export { PrimeP2DevelopmentSession } from "./p2-development-session.js";
 export { PrimeP1BDevelopmentSession } from "./p1b-development-session.js";
 export {
   inheritedP1DevelopmentSocket,
@@ -208,6 +209,12 @@ export {
   P1_DEVELOPMENT_MAX_FRAME_BYTES,
   P1DevelopmentBridge,
 } from "./p1-development-bridge.js";
+export {
+  inheritedP2DevelopmentSocket,
+  P2_DEVELOPMENT_GATEWAY_PROTOCOL,
+  P2_DEVELOPMENT_MAX_FRAME_BYTES,
+  P2DevelopmentBridge,
+} from "./p2-development-bridge.js";
 export {
   inheritedP1BDevelopmentSocket,
   P1B_DEVELOPMENT_GATEWAY_PROTOCOL,
@@ -222,6 +229,11 @@ export type {
   PrimeSdkIpythonCallback,
   PrimeSdkModelCallback,
 } from "./p1-development-session.js";
+export type {
+  PrimeP2DevelopmentResult,
+  PrimeP2DevelopmentSessionOptions,
+  PrimeP2DevelopmentUsage,
+} from "./p2-development-session.js";
 export type { PrimeP1BCompactionWitness } from "./p1b-development-session.js";
 export type {
   PrimeContextDescription,

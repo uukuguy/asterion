@@ -1,0 +1,16 @@
+{
+  "protocol": "asterion.application-assembly/v1",
+  "application_id": "prime.programmatic-long-context",
+  "version": "1.0.0",
+  "runtime_id": "prime.agent",
+  "capability_packages": [
+    {"package_id": "prime-agent", "version": "1.0.0"}
+  ],
+  "capabilities": [
+    {"capability_id": "prime.programmatic-long-context", "version": "1.0.0"}
+  ],
+  "host_capabilities": ["prime.programmatic-long-context-development"],
+  "host_policies": [],
+  "host_events": [],
+  "host_artifacts": []
+}
