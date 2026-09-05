@@ -119,12 +119,17 @@ def _receive_packet(bundle: AdmittedAuthorityDescriptors) -> bytes:
         return _receive_authority_packet(bundle)
 
 
+def _send_packet(connection: object, packet: bytes) -> None:
+    with patch.object(socket_module, "MSG_NOSIGNAL", 64, create=True):
+        _send_authority_packet(connection, packet)
+
+
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
     def test_private_packet_send_emits_exact_packet_without_ancillary_or_socket_ownership_change(
         self,
     ) -> None:
         connection = _SendingSocket([3])
-        _send_authority_packet(connection, b"abc", msg_nosignal=64)
+        _send_packet(connection, b"abc")
         self.assertEqual(connection.calls, [([b"abc"], [], 64)])
 
     def test_private_packet_send_rejects_invalid_partial_and_redacts_transport_errors(
@@ -141,7 +146,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             with self.subTest(packet=type(packet), results=results):
                 connection = _SendingSocket(list(results))
                 with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
-                    _send_authority_packet(connection, packet, msg_nosignal=64)  # type: ignore[arg-type]
+                    _send_packet(connection, packet)  # type: ignore[arg-type]
                 self.assertIsNone(raised.exception.__context__)
                 self.assertNotIn(
                     "SEND_SENTINEL",
@@ -150,10 +155,11 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
 
         for capability in (None, False, 0):
             with self.subTest(capability=capability):
-                with self.assertRaises(PrimeP1AuthorityBootstrapError):
-                    _send_authority_packet(
-                        _SendingSocket([1]), b"x", msg_nosignal=capability
-                    )
+                with patch.object(
+                    socket_module, "MSG_NOSIGNAL", capability, create=True
+                ):
+                    with self.assertRaises(PrimeP1AuthorityBootstrapError):
+                        _send_authority_packet(_SendingSocket([1]), b"x")
 
     def test_private_packet_send_retries_eintr_eight_times_then_fails_closed(
         self,
@@ -161,11 +167,11 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         results: list[object] = [OSError(errno.EINTR, "SEND_SENTINEL")] * 8
         results.append(1)
         connection = _SendingSocket(results)
-        _send_authority_packet(connection, b"x", msg_nosignal=64)
+        _send_packet(connection, b"x")
         self.assertEqual(len(connection.calls), 9)
         exhausted = _SendingSocket([OSError(errno.EINTR, "SEND_SENTINEL")] * 9)
         with self.assertRaises(PrimeP1AuthorityBootstrapError):
-            _send_authority_packet(exhausted, b"x", msg_nosignal=64)
+            _send_packet(exhausted, b"x")
         self.assertEqual(len(exhausted.calls), 9)
 
     def test_private_packet_receive_requires_cmsg_cloexec_without_zero_fallback(

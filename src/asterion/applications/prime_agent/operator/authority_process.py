@@ -212,28 +212,23 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
     return result
 
 
-def _send_authority_packet(
-    connection: object, packet: bytes, *, msg_nosignal: int | None = None
-) -> None:
+def _send_authority_packet(connection: object, packet: bytes) -> None:
     """Send one raw authority packet without taking ownership of its socket."""
     failed = False
     try:
-        capability = (
-            getattr(socket, "MSG_NOSIGNAL", None)
-            if msg_nosignal is None
-            else msg_nosignal
-        )
+        capability = getattr(socket, "MSG_NOSIGNAL", None)
         if (
             type(packet) is not bytes
             or not 1 <= len(packet) <= 8192
-            or type(capability) is not int
-            or capability == 0
+            or isinstance(capability, bool)
+            or not isinstance(capability, int)
+            or not int(capability)
         ):
             raise ValueError
         interruptions = 0
         while True:
             try:
-                sent = _sendmsg(connection, [packet], [], capability)
+                sent = _sendmsg(connection, [packet], [], int(capability))
                 break
             except OSError as error:
                 if error.errno == errno.EINTR and interruptions < 8:
