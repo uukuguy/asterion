@@ -35,6 +35,7 @@ _SCOPE = "p1-b-development"
 _PROMOTION = "unpromoted"
 _DEADLINE_SECONDS = 300
 _IMAGE_TAG = "asterion-p1b-development:20260906"
+_CONFIRMED_IMAGE_DIGEST = "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657"
 _DOCKER = "/usr/bin/docker"
 _SOCKET = "/var/run/docker.sock"
 _SECCOMP = "/tmp/asterion-p1-development-seccomp.json"
@@ -122,6 +123,7 @@ class PrimeSmallVerificationService:
         if not self._active:
             return
         self._active = False
+        _close_transport(self._resources.transport)
         descriptor = self._resources.seccomp_fd
         if type(descriptor) is int and descriptor >= 0:
             try:
@@ -176,6 +178,7 @@ def _preflight(repo_root: Path) -> _P1CliResources:
     entrypoint = _regular_file(repo_root / "packages/typescript/prime-gateway/dist/src/p1b-development-main.js")
     source = _regular_directory(repo_root / "packages/typescript/prime-gateway")
     seccomp_fd = _sealed_seccomp(Path(_SECCOMP))
+    transport: object | None = None
     try:
         image_digest = _inspect_image(docker, socket)
         transport = P1BDevelopmentSnapshotTransport(
@@ -188,7 +191,12 @@ def _preflight(repo_root: Path) -> _P1CliResources:
             entrypoint=str(entrypoint), prime_source_root=str(source), seccomp_fd=seccomp_fd,
         )
     except BaseException:
-        os.close(seccomp_fd)
+        if transport is not None:
+            _close_transport(transport)
+        try:
+            os.close(seccomp_fd)
+        except OSError:
+            pass
         raise PrimeP1CliHostError() from None
 
 
@@ -212,9 +220,22 @@ def _inspect_image(docker: Path, socket: Path) -> str:
         value = result.stdout.decode("ascii", "strict")
     except UnicodeDecodeError:
         raise PrimeP1CliHostError() from None
-    if result.returncode != 0 or _DIGEST.fullmatch(value.rstrip("\n")) is None or value != value.rstrip("\n") + "\n":
+    if (
+        result.returncode != 0
+        or value != _CONFIRMED_IMAGE_DIGEST + "\n"
+        or _DIGEST.fullmatch(_CONFIRMED_IMAGE_DIGEST) is None
+    ):
         raise PrimeP1CliHostError()
-    return value[:-1]
+    return _CONFIRMED_IMAGE_DIGEST
+
+
+def _close_transport(transport: object) -> None:
+    close = getattr(transport, "close", None)
+    if callable(close):
+        try:
+            close()
+        except BaseException:
+            pass
 
 
 def _regular_executable(path: Path) -> Path:

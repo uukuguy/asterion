@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from asterion.services.registry import HostServiceFactoryContext
 from asterion.runtimes.prime_agent_host import PrimeSmallVerificationRequest
@@ -30,6 +30,40 @@ class _Signal:
 
 
 class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
+    async def test_image_tag_must_resolve_to_the_confirmed_digest(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        result = SimpleNamespace(
+            returncode=0,
+            stdout=("sha256:" + "a" * 64 + "\n").encode(),
+        )
+        with patch.object(subject.subprocess, "run", return_value=result):
+            with self.assertRaises(subject.PrimeP1CliHostError):
+                subject._inspect_image(Path("/usr/bin/docker"), Path("/var/run/docker.sock"))
+
+    async def test_preflight_failure_closes_created_transport(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        transport = SimpleNamespace(close=Mock())
+        with (
+            patch.object(subject.sys, "platform", "linux"),
+            patch.object(subject.os, "geteuid", return_value=0),
+            patch.object(subject, "_regular_executable", side_effect=(Path("/docker"), Path("/node"))),
+            patch.object(subject.os, "lstat", return_value=SimpleNamespace(st_mode=0)),
+            patch.object(subject.stat, "S_ISSOCK", return_value=True),
+            patch.object(subject, "_regular_file", return_value=Path("/bridge.js")),
+            patch.object(subject, "_regular_directory", return_value=Path("/prime")),
+            patch.object(subject, "_sealed_seccomp", return_value=73),
+            patch.object(subject, "_inspect_image", return_value="sha256:" + "a" * 64),
+            patch.object(subject, "_host_platform", return_value=object()),
+            patch.object(subject, "P1BDevelopmentSnapshotTransport", return_value=transport),
+            patch.object(subject, "_operator_config", side_effect=RuntimeError("SENTINEL")),
+            patch.object(subject.os, "close"),
+        ):
+            with self.assertRaises(subject.PrimeP1CliHostError):
+                subject._preflight(Path("/repo"))
+        transport.close.assert_called_once_with()
+
     async def test_seccomp_memfd_is_sealed_like_docker_admission(self) -> None:
         from asterion.applications.prime_agent.operator import p1_cli_host as subject
 
@@ -66,8 +100,9 @@ class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
     async def test_service_context_close_releases_source_memfd_once(self) -> None:
         from asterion.applications.prime_agent.operator import p1_cli_host as subject
 
+        transport = SimpleNamespace(close=Mock())
         resources = subject._P1CliResources(  # type: ignore[attr-defined]
-            image_digest="sha256:" + "a" * 64, transport=object(), operator_config={},
+            image_digest="sha256:" + "a" * 64, transport=transport, operator_config={},
             node_bin="/operator/node", entrypoint="/operator/bridge.js", prime_source_root="/operator/prime",
             seccomp_fd=73,
         )
@@ -76,6 +111,7 @@ class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
             service._close()  # type: ignore[attr-defined]
             service._close()  # type: ignore[attr-defined]
         close.assert_called_once_with(73)
+        transport.close.assert_called_once_with()
 
     async def test_exact_context_opens_without_starting_the_verification_flow(self) -> None:
         from asterion.applications.prime_agent.operator import p1_cli_host as subject
