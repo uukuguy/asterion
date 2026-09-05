@@ -96,5 +96,30 @@ class TestPrimeP1DevelopmentGateway(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(gateway.child_pid)
 
 
+class TestPrimeP1DevelopmentGatewaySync(unittest.TestCase):
+    def test_prompt_sync_dispatches_synchronous_callbacks_without_event_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            entry = Path(temporary) / "bridge.js"
+            entry.write_text(_CHILD, encoding="utf-8")
+            calls: list[str] = []
+            gateway = PrimeP1DevelopmentGateway(
+                node_bin="node",
+                entrypoint=entry,
+                deadline_seconds=1,
+                model_hook=lambda _: calls.append("model") or {"content": []},
+                tool_hook=lambda _: calls.append("tool") or {"ok": True},
+            )
+            gateway.open_sync(
+                run_id="run-1",
+                session_id="session-1",
+                generation=1,
+                prime_source_root="/tmp/prime",
+                workspace="/tmp/workspace",
+            )
+            self.assertEqual(gateway.prompt_sync("hello"), {"lifecycle": "completed"})
+            self.assertEqual(calls, ["model", "tool", "model"])
+            gateway.close_sync()
+
+
 if __name__ == "__main__":
     unittest.main()

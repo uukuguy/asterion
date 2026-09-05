@@ -306,12 +306,18 @@ class DevelopmentGatewayTransport:
         if hook is None or type(request_id) is not str or type(payload) is not dict:
             raise DevelopmentGatewayTransportError()
         loop = self._event_loop
-        if loop is None or loop.is_closed():
-            raise DevelopmentGatewayTransportError()
         with self._callback_lock:
             if request_id in self._callback_request_ids:
                 raise DevelopmentGatewayTransportError()
             self._callback_request_ids.add(request_id)
+        if loop is None or loop.is_closed():
+            if self._nested_command_kinds:
+                raise DevelopmentGatewayTransportError()
+            response = hook(payload)
+            if inspect.isawaitable(response):
+                raise DevelopmentGatewayTransportError()
+            self._send(response_kind, request_id, {key: response})
+            return
         settled = threading.Event()
 
         async def invoke() -> object:
