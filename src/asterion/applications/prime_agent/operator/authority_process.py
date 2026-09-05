@@ -170,7 +170,9 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
         interruptions = 0
         while True:
             try:
-                received = _recvmsg(connection, 8192)
+                received = _recvmsg(
+                    connection, 8192, socket.CMSG_SPACE(struct.calcsize("i"))
+                )
                 break
             except OSError as error:
                 if error.errno == errno.EINTR and interruptions < 8:
@@ -180,6 +182,7 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
         if type(received) is not tuple or len(received) != 4:
             raise ValueError
         packet, ancillary, flags, _address = received
+        _close_received_rights(ancillary)
         if (
             type(packet) is not bytes
             or not 1 <= len(packet) <= 8192
@@ -380,8 +383,26 @@ def _getsockopt(connection: object, level: int, option: int, *args: int) -> obje
     return cast(Any, connection).getsockopt(level, option, *args)
 
 
-def _recvmsg(connection: object, size: int) -> object:
-    return cast(Any, connection).recvmsg(size)
+def _recvmsg(connection: object, size: int, ancillary_size: int) -> object:
+    return cast(Any, connection).recvmsg(size, ancillary_size)
+
+
+def _close_received_rights(ancillary: object) -> None:
+    if type(ancillary) is not list:
+        return
+    for item in ancillary:
+        if type(item) is not tuple or len(item) != 3:
+            continue
+        level, kind, data = item
+        if (
+            level != socket.SOL_SOCKET
+            or kind != socket.SCM_RIGHTS
+            or type(data) is not bytes
+        ):
+            continue
+        usable = len(data) - (len(data) % struct.calcsize("i"))
+        for (fd,) in struct.iter_unpack("i", data[:usable]):
+            os.close(fd)
 
 
 def _close_socket(connection: object) -> None:

@@ -8,6 +8,7 @@ import threading
 import traceback
 import unittest
 import errno
+from array import array
 from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.authority_process import (
@@ -44,7 +45,7 @@ class _PacketSocket(_Socket):
         self.calls = 0
         self.close_calls = 0
 
-    def recvmsg(self, _size: int) -> object:
+    def recvmsg(self, _size: int, _ancillary_size: int) -> object:
         self.calls += 1
         value = next(self.responses)
         if isinstance(value, BaseException):
@@ -54,6 +55,26 @@ class _PacketSocket(_Socket):
     def close(self) -> None:
         self.close_calls += 1
         super().close()
+
+
+class _RecordingUnixSocket:
+    def __init__(self, connection: socket_module.socket) -> None:
+        self.connection = connection
+        self.ancillary: list[tuple[int, int, bytes]] | None = None
+        self.flags: int | None = None
+
+    def recvmsg(
+        self, size: int, ancillary_size: int
+    ) -> tuple[bytes, list[tuple[int, int, bytes]], int, object]:
+        packet, ancillary, flags, address = self.connection.recvmsg(
+            size, ancillary_size
+        )
+        self.ancillary = ancillary
+        self.flags = flags
+        return packet, ancillary, flags, address
+
+    def close(self) -> None:
+        self.connection.close()
 
 
 class _InstrumentedLock:
@@ -76,6 +97,47 @@ class _InstrumentedLock:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_private_packet_receive_rejects_real_scm_rights_without_obtaining_fd(
+        self,
+    ) -> None:
+        if not all(
+            hasattr(socket_module, name) for name in ("SCM_RIGHTS", "MSG_CTRUNC")
+        ):
+            self.skipTest("SCM_RIGHTS or MSG_CTRUNC is unavailable")
+        sender, receiver = socket_module.socketpair(
+            socket_module.AF_UNIX, socket_module.SOCK_STREAM
+        )
+        sent_fd, write_fd = os.pipe()
+        self.addCleanup(lambda: os.close(write_fd))
+        self.addCleanup(lambda: os.close(sent_fd))
+        self.addCleanup(sender.close)
+        wrapped = _RecordingUnixSocket(receiver)
+        sender.sendmsg(
+            [b"x"],
+            [
+                (
+                    socket_module.SOL_SOCKET,
+                    socket_module.SCM_RIGHTS,
+                    array("i", [sent_fd]),
+                )
+            ],
+        )
+        with self.assertRaises(PrimeP1AuthorityBootstrapError):
+            _receive_authority_packet(
+                AdmittedAuthorityDescriptors(wrapped, 11, 12, lambda _: None)
+            )
+        self.assertIsNotNone(wrapped.ancillary)
+        flags = wrapped.flags
+        assert flags is not None
+        self.assertTrue(wrapped.ancillary or flags & socket_module.MSG_CTRUNC)
+        if wrapped.ancillary:
+            received_fd = array("i")
+            received_fd.frombytes(wrapped.ancillary[0][2])
+            with self.assertRaises(OSError):
+                os.fstat(received_fd[0])
+        with self.assertRaises(OSError):
+            os.fstat(receiver.fileno())
+
     def test_private_packet_receive_returns_one_raw_packet_and_closes_consumed_socket(
         self,
     ) -> None:
