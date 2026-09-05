@@ -1926,3 +1926,8 @@
 - Closed P2 long-context CLI workflow with real Prime, Docker oracle, and cleanup [d4ecb744]
 - Recorded P2 closure and moved active recovery state to P3 [1ff140e1]
 - Defined P3 real RLM closure and reentrant gateway boundary [567bb777]
+- Planned four reviewable P3 increments before implementation [fac53c75]
+- 07:13 Added reentrant nested development callbacks for P3 gateway [67d321ea]
+- 07:18 Restored synchronous P1/P2 callbacks after reentrant transport change [6e971c46]
+- Closed immutable P3 workload identity and fixed ten-callback topology [6f549035]
+- Implemented real Prime child sessions and strict recursive completion [ac99738a]

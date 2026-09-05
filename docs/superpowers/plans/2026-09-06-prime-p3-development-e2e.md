@@ -14,7 +14,7 @@
 - Keep `3th-party/prime-agent` read-only and use its exact pinned SDK APIs.
 - Prime owns root/child sessions; Python owns admission, budgets, Docker, oracle, cleanup, and public trace projection.
 - Use exact application `prime.recursive-workflow@1.0.0`, runtime `prime.agent`, fixed input `fixed-small-verification`, host capability `prime.recursive-workflow-development`, scope `p3-development`, and promotion `unpromoted`.
-- The fixed success path has two depth-one children, one retained review follow-up, eight model callbacks, and four IPython calls.
+- The fixed success path has two depth-one children, one retained review follow-up, ten model callbacks, and four IPython calls. Pinned Prime contributes one normal root continuation and two child terminal-notice cycles after the root tool.
 - Public output contains only fixed IDs, scope, promotion, and digests. No prompt, source, child identity, path, provider value, model content, worker output, or private exception context may escape.
 - Development verification covers the normal path and key identity/depth/count/timeout/cancellation/oracle/redaction boundaries. Do not run promotion or release matrices.
 
@@ -125,7 +125,7 @@ git commit -m "feat(prime): support nested development callbacks"
 **Interfaces:**
 - Consume: nested frame kinds `rlm.spawn`, `rlm.wait`, `rlm.follow_up`, `rlm.list`, and `rlm.delete`.
 - Produce: `PrimeP3DevelopmentSession.open(options)` and one final result with exact `lifecycle`, role-partitioned `usage`, and `observations`.
-- Produce: actual observations `child_count=2`, `max_depth=1`, `retained_follow_up_count=1`, `model_callback_count=8`, `tool_call_count=4`, `remaining_child_count=0`.
+- Produce: actual observations `child_count=2`, `max_depth=1`, `retained_follow_up_count=1`, `model_callback_count=10`, `tool_call_count=4`, `remaining_child_count=0`.
 
 - [ ] **Step 1: Write failing TypeScript session tests.**
 
@@ -139,7 +139,7 @@ review replacement, extra tool, and missing terminal usage.
 expect(observations).toEqual({
   child_count: 2,
   max_depth: 1,
-  model_callback_count: 8,
+  model_callback_count: 10,
   remaining_child_count: 0,
   retained_follow_up_count: 1,
   tool_call_count: 4,
@@ -215,7 +215,7 @@ git commit -m "feat(prime): run real P3 RLM children"
 **Interfaces:**
 - Produce: `run_prime_p3_development(...) -> PrimeP3DevelopmentTrace`.
 - Produce: `PrimeP3DevelopmentGateway`, with `request_nested` enabled only for the five P3 RLM kinds.
-- Produce: a role-multiplexed provider admitting exactly root 2, implementation 2, and review 4 callbacks under one total input/output/cost/deadline ceiling.
+- Produce: a role-multiplexed provider admitting exactly root 4, implementation 2, and review 4 callbacks under one total input/output/cost/deadline ceiling.
 - Produce: three exact Docker worker identities sharing only one validated host workspace; only the root worker receives the local RLM socket.
 
 - [ ] **Step 1: Write failing Python boundary tests.**
@@ -231,7 +231,7 @@ self.assertEqual(
     {
         "child_count": 2,
         "max_depth": 1,
-        "model_callback_count": 8,
+        "model_callback_count": 10,
         "remaining_child_count": 0,
         "retained_follow_up_count": 1,
         "tool_call_count": 4,
@@ -261,7 +261,7 @@ Define canonical source, initial test, expected fixed source, missing boundary
 test, child/follow-up schemas, prompt digests, and oracle cases. Adapt the P2
 killable provider so each callback carries one fixed role; maintain independent
 history for root, implementation, and review, with review admitting four turns.
-Require exact `toolUse/text` pairs and expose terminal usage only when all eight
+Require exact `toolUse/text` pairs and expose terminal usage only when all ten
 callbacks finish within the shared ceiling.
 
 - [ ] **Step 4: Implement workers and restricted root RLM RPC.**

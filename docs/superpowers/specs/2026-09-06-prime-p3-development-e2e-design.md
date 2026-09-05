@@ -51,9 +51,11 @@ and its initial test covers only an interior value.
 5. The root aggregates the child results, deletes both children with
    `deleteRlmSubagent`, and requires `listRlmSubagents()` to be empty.
 
-The fixed normal path has two children at depth one, eight model callbacks and
-four IPython calls: root 2/1, implementation 2/1, review initial 2/1, review
-follow-up 2/1. Counts come from actual callbacks and are partitioned by role;
+The fixed normal path has two children at depth one, ten model callbacks and
+four IPython calls: root 4/1, implementation 2/1, review initial 2/1, review
+follow-up 2/1. Pinned Prime schedules the root's normal post-tool continuation
+and one terminal-notice cycle for each child, which accounts for the last three
+root callbacks. Counts come from actual callbacks and are partitioned by role;
 parent usage never re-adds child usage.
 
 ## Reentrant gateway protocol
