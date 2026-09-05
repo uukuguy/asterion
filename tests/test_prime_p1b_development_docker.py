@@ -58,6 +58,15 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         released.set()
         with self.assertRaises(asyncio.CancelledError): await task
 
+    async def test_reap_rejects_a_wait_that_misses_its_deadline(self) -> None:
+        class Process:
+            returncode = None
+            def kill(self) -> None: pass
+            async def wait(self) -> int: await asyncio.Event().wait(); return 0
+        from asterion.services.restricted_worker import RestrictedWorkerError
+        with self.assertRaises(RestrictedWorkerError):
+            await _reap_process(Process(), deadline=monotonic() + 0.001)
+
     async def test_two_cells_finish_snapshot_and_cleanup_are_ordered(self) -> None:
         transport = _Transport()
         service = P1BDockerPersistentWorkerService(image_digest="sha256:" + "a" * 64, transport=transport, run_id="run", session_id="session")

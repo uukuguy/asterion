@@ -30,13 +30,20 @@ _DIGEST = PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
 _FIXTURE = b"p1b continuity fixture\n"
 
 
-async def _reap_process(process: DockerCliAttachProcess) -> None:
+async def _reap_process(process: DockerCliAttachProcess, *, deadline: float | None = None) -> None:
     if process.returncode is None: process.kill()
     task = asyncio.create_task(process.wait()); cancelled = False
-    async with asyncio.timeout(30):
-        while not task.done():
-            try: await asyncio.shield(task)
-            except asyncio.CancelledError: cancelled = True
+    limit = monotonic() + 30 if deadline is None else deadline
+    while not task.done():
+        remaining = limit - monotonic()
+        if remaining <= 0:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise RestrictedWorkerError("restricted worker value is invalid")
+        try:
+            done, _ = await asyncio.wait({task}, timeout=remaining)
+            if not done: continue
+        except asyncio.CancelledError: cancelled = True
     task.result()
     if cancelled: raise asyncio.CancelledError
 
@@ -342,11 +349,14 @@ class P1BDockerPersistentWorkerService:
             while not task.done():
                 try: await asyncio.shield(task)
                 except asyncio.CancelledError: cancelled = True
-            if task.result(): raise RestrictedWorkerError("restricted worker value is invalid")
+            close_error = task.result()
+            # Absence is the ownership terminal point even if close reported
+            # an error after the container was conclusively removed.
+            self._container = None; self._channel = None; self._state = "closed"
+            if close_error: raise RestrictedWorkerError("restricted worker value is invalid")
         except BaseException:
             # Retain identity and channel for an explicit retry if removal or
             # absence verification was not completed.
             raise
-        else:
-            self._container = None; self._channel = None; self._state = "closed"
+        else: pass
         if cancelled: raise asyncio.CancelledError
