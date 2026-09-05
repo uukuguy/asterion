@@ -10,6 +10,7 @@ import unittest
 from asterion.applications.prime_agent.operator.p1b_development_gateway import (
     PrimeP1BDevelopmentGateway,
     PrimeP1BDevelopmentGatewayError,
+    _safe_witness,
 )
 
 
@@ -30,6 +31,21 @@ _STALL_COMPACT_CHILD = _CHILD.replace(
 
 
 class TestPrimeP1BDevelopmentGateway(unittest.IsolatedAsyncioTestCase):
+    def test_witness_rejects_non_observed_compaction_counts(self) -> None:
+        with self.assertRaises(ValueError):
+            _safe_witness(
+                {
+                    "compact_called": True,
+                    "succeeded": True,
+                    "start_count": 0,
+                    "end_count": 0,
+                    "message_count_before": 2,
+                    "message_count_after": 1,
+                    "tokens_before": 3,
+                    "first_kept_entry_id_sha256": "sha256:" + "a" * 64,
+                }
+            )
+
     async def test_fixed_two_prompt_flow_awaits_five_model_two_tool_callbacks(
         self,
     ) -> None:

@@ -11,6 +11,7 @@ from .development_gateway_transport import DevelopmentGatewayTransport, Hook, _a
 
 _PROTOCOL: Final = "asterion.prime-p1-b-development-gateway/v1"
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_MAX_SAFE_INTEGER: Final = 2**53 - 1
 _WITNESS = frozenset(
     (
         "compact_called",
@@ -265,13 +266,13 @@ def _safe_witness(value: object) -> dict[str, object]:
         or set(value) != _WITNESS
         or value["compact_called"] is not True
         or value["succeeded"] is not True
+        or value["start_count"] != 1
+        or value["end_count"] != 1
     ):
         raise ValueError()
     if any(
-        type(value[key]) is not int or value[key] < 0
+        type(value[key]) is not int or not 0 <= value[key] <= _MAX_SAFE_INTEGER
         for key in (
-            "start_count",
-            "end_count",
             "message_count_before",
             "message_count_after",
             "tokens_before",
