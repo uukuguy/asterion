@@ -7,9 +7,13 @@ Nothing supplied by an application request is permitted to alter a command.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import io
 import json
+import os
 import re
+import stat
+import sys
 import tarfile
 from dataclasses import dataclass
 from hashlib import sha256
@@ -29,6 +33,11 @@ from asterion.applications.prime_agent.operator.docker_worker import (
 from asterion.applications.prime_agent.operator.ipython_workload import (
     PRIME_IPYTHON_CODING_WORKLOAD_DIGEST,
 )
+from asterion.applications.prime_agent.operator.image_input_lock import (
+    ImagePlatformDescriptor,
+    PrimeImageInputLockError,
+    validate_image_platform_descriptor,
+)
 from asterion.services.restricted_worker import (
     RestrictedWorkerError,
     RestrictedWorkerLease,
@@ -39,6 +48,11 @@ _ENVIRONMENT = ("HOME=/workspace", "PATH=/usr/local/bin:/usr/bin:/bin", "PYTHOND
 _ENTRYPOINT = "/usr/local/bin/prime-ipython-coding.py"
 _TMPFS = "/workspace:rw,nodev,noexec,nosuid,size=67108864"
 _OUTPUT_CAP = 65536
+_SECCOMP_PROFILE_CAP = 65536
+# Inspect encodes SecurityOpt as a JSON string.  A canonical profile may be
+# entirely escaped (six bytes per source byte), so this is intentionally not
+# the normal Docker output limit.
+_INSPECT_OUTPUT_CAP = 6 * _SECCOMP_PROFILE_CAP + 4096
 _SNAPSHOT_CAP = 65536
 _CONTAINER_ID = re.compile(r"prime-[0-9a-f]{32}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -317,16 +331,44 @@ class DockerCliEngineTransport(DockerEngineTransport):
     """The exact DockerEngineTransport lifecycle, mapped to fixed CLI argv."""
 
     def __init__(
-        self, *, docker_executable: str, socket_path: str, seccomp_profile: str,
+        self, *, docker_executable: str, socket_path: str, seccomp_profile_fd: int,
+        platform: ImagePlatformDescriptor,
         runner: DockerCliRunner | None = None,
         attach_runner: DockerCliAttachRunner | None = None,
     ) -> None:
-        if not all(type(value) is str and value.startswith("/") for value in (docker_executable, socket_path, seccomp_profile)):
+        if not all(type(value) is str and value.startswith("/") for value in (docker_executable, socket_path)):
             raise RestrictedWorkerError("restricted worker value is invalid")
-        if socket_path.startswith("//") or "\x00" in socket_path or "\x00" in docker_executable or "\x00" in seccomp_profile:
+        if socket_path.startswith("//") or "\x00" in socket_path or "\x00" in docker_executable:
             raise RestrictedWorkerError("restricted worker value is invalid")
+        try:
+            platform = validate_image_platform_descriptor(platform)
+            if sys.platform != "linux" or os.name != "posix" or type(seccomp_profile_fd) is not int:
+                raise ValueError
+            metadata = os.fstat(seccomp_profile_fd)
+            required_seals = (
+                fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW |
+                fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
+            )
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or not 0 < metadata.st_size <= _SECCOMP_PROFILE_CAP
+                or not fcntl.fcntl(seccomp_profile_fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC
+                or fcntl.fcntl(seccomp_profile_fd, fcntl.F_GET_SEALS) != required_seals
+            ):
+                raise ValueError
+            raw_profile = os.pread(seccomp_profile_fd, metadata.st_size, 0)
+            profile = json.loads(raw_profile.decode("utf-8"), parse_constant=lambda _: (_ for _ in ()).throw(ValueError))
+            canonical_profile = json.dumps(
+                profile, separators=(",", ":"), sort_keys=True, ensure_ascii=False,
+            ).encode("utf-8")
+            if type(profile) is not dict or raw_profile != canonical_profile:
+                raise ValueError
+        except (AttributeError, OSError, UnicodeDecodeError, json.JSONDecodeError, PrimeImageInputLockError, ValueError):
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
         self._prefix = (docker_executable, "--host", "unix://" + socket_path)
-        self._seccomp_profile = seccomp_profile
+        self._seccomp_profile_fd = seccomp_profile_fd
+        self._seccomp_profile = canonical_profile.decode("utf-8")
+        self._platform = platform
         self._runner = runner or _ProductionRunner()
         self._attach_runner = attach_runner or _ProductionAttachRunner()
         self._specifications: dict[str, _DockerWorkerSpecification] = {}
@@ -340,16 +382,17 @@ class DockerCliEngineTransport(DockerEngineTransport):
         self._specifications[specification.container_id] = specification
         await self._preflight(control)
         argv = self._prefix + (
-            "create", "--name", specification.container_id, "--pull=never", "--network", "none",
+            "create", "--name", specification.container_id, "--pull=never", "--platform",
+            "/".join(part for part in (self._platform.os, self._platform.architecture, self._platform.variant) if part is not None), "--network", "none",
             "--read-only", "--user", "65534:65534", "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges:true", "--security-opt", "seccomp=" + self._seccomp_profile,
+            "--security-opt", "no-new-privileges:true", "--security-opt", "seccomp=/proc/self/fd/" + str(self._seccomp_profile_fd),
             "--tmpfs", _TMPFS, "--env", _ENVIRONMENT[0], "--env", _ENVIRONMENT[1], "--env", _ENVIRONMENT[2],
             "--pid", "private", "--ipc", "private", "--uts", "private", "--pids-limit", "256",
             "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no",
             "--entrypoint", _ENTRYPOINT, specification.image_digest,
         )
         try:
-            result = await self._call(argv, control)
+            result = await self._call(argv, control, pass_fds=(self._seccomp_profile_fd,))
         except BaseException:
             raise
         daemon_id = self._parse_daemon_id(result.stdout)
@@ -364,7 +407,7 @@ class DockerCliEngineTransport(DockerEngineTransport):
         specification = self._specification(container_id)
         result = await self._call(
             self._prefix + ("container", "inspect", "--format", _INSPECT_PROJECTION, container_id),
-            control,
+            control, max_output_bytes=_INSPECT_OUTPUT_CAP,
         )
         return self._parse_inspection(result.stdout, container_id, specification)
 
@@ -472,20 +515,28 @@ class DockerCliEngineTransport(DockerEngineTransport):
             if not isinstance(self._json(result.stdout), dict):
                 raise RestrictedWorkerError("restricted worker value is invalid")
 
-    async def _call(self, argv: tuple[str, ...], control: _LifecycleCallControl) -> DockerCliResult:
-        result = await self._call_raw(argv, control)
+    async def _call(
+        self, argv: tuple[str, ...], control: _LifecycleCallControl, *,
+        max_output_bytes: int = _OUTPUT_CAP, pass_fds: tuple[int, ...] = (),
+    ) -> DockerCliResult:
+        result = await self._call_raw(
+            argv, control, max_output_bytes=max_output_bytes, pass_fds=pass_fds,
+        )
         if result.returncode != 0:
             raise RestrictedWorkerError("restricted worker value is invalid")
         return result
 
-    async def _call_raw(self, argv: tuple[str, ...], control: _LifecycleCallControl) -> DockerCliResult:
+    async def _call_raw(
+        self, argv: tuple[str, ...], control: _LifecycleCallControl, *,
+        max_output_bytes: int = _OUTPUT_CAP, pass_fds: tuple[int, ...] = (),
+    ) -> DockerCliResult:
         if control.cancelled() or monotonic() >= control.deadline:
             raise asyncio.CancelledError
         result = await self._runner.run(
             argv=argv, env={}, timeout=control.deadline - monotonic(),
-            max_output_bytes=_OUTPUT_CAP, pass_fds=(),
+            max_output_bytes=max_output_bytes, pass_fds=pass_fds,
         )
-        if type(result.returncode) is not int or type(result.stdout) is not bytes or type(result.stderr) is not bytes or len(result.stdout) + len(result.stderr) > _OUTPUT_CAP:
+        if type(result.returncode) is not int or type(result.stdout) is not bytes or type(result.stderr) is not bytes or len(result.stdout) + len(result.stderr) > max_output_bytes:
             raise RestrictedWorkerError("restricted worker value is invalid")
         if control.cancelled():
             raise asyncio.CancelledError
