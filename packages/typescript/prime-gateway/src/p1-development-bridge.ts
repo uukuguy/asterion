@@ -101,6 +101,7 @@ export class P1DevelopmentBridge {
     | "opening"
     | "open"
     | "prompt"
+    | "cancelling"
     | "cancelled"
     | "closing"
     | "closed"
@@ -185,6 +186,7 @@ export class P1DevelopmentBridge {
     if (f.kind === "open") this.#p = "opening";
     if (f.kind === "prompt") this.#p = "prompt";
     if (f.kind === "prompt") this.#activePrompt = f.request_id;
+    if (f.kind === "cancel") this.#p = "cancelling";
     if (f.kind === "close") this.#p = "closing";
     void this.command(f).catch(() => this.fail(f.request_id));
   }
@@ -210,7 +212,7 @@ export class P1DevelopmentBridge {
       const r = await this.session().prompt(text(f.payload, "prompt"));
       if (this.#p === "prompt") {
         this.#p = "open";
-        this.emit("command.result", f.request_id, { result: r });
+        this.#settleActivePrompt(r);
       }
       return;
     }
@@ -218,12 +220,7 @@ export class P1DevelopmentBridge {
       if (!only(f.payload, [])) throw Error("invalid cancel payload");
       this.settle(Error("cancelled"));
       await this.session().cancel();
-      const prompt = this.#activePrompt;
-      this.#activePrompt = undefined;
-      if (prompt)
-        this.emit("command.result", prompt, {
-          result: { lifecycle: "cancelled" },
-        });
+      this.#settleActivePrompt({ lifecycle: "cancelled" });
       this.#p = "cancelled";
       this.emit("command.result", f.request_id, {
         result: { lifecycle: "cancelled" },
@@ -301,6 +298,11 @@ export class P1DevelopmentBridge {
     for (const p of this.#t.values()) p.reject(e);
     this.#m.clear();
     this.#t.clear();
+  }
+  #settleActivePrompt(result: unknown) {
+    const requestId = this.#activePrompt;
+    this.#activePrompt = undefined;
+    if (requestId) this.emit("command.result", requestId, { result });
   }
   callback(k: "model" | "tool") {
     let id: string;

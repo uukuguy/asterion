@@ -151,6 +151,8 @@ test("runs a real SDK prompt through the inherited duplex bridge without exposin
     send(command(6, "close-1", "close"));
     const closed = await next();
     assert.deepEqual(closed.payload.result, { lifecycle: "closed" });
+    const [exitCode] = await once(child, "exit");
+    assert.equal(exitCode, 0);
   } finally {
     client.destroy();
     socket.destroy();

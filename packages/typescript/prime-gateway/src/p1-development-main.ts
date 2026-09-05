@@ -10,7 +10,14 @@ function fail(): never {
 }
 
 // macOS injects this locale key even for spawn({ env: {} }); it is not caller authority.
-delete process.env.__CF_USER_TEXT_ENCODING;
+const macosLocale = process.env.__CF_USER_TEXT_ENCODING;
+if (process.platform === "darwin" && macosLocale !== undefined) {
+  const uid = process.getuid?.();
+  if (uid === undefined) fail();
+  const prefix = `0x${uid.toString(16).toUpperCase()}:`;
+  if (!macosLocale.startsWith(prefix)) fail();
+  delete process.env.__CF_USER_TEXT_ENCODING;
+}
 if (Object.keys(process.env).length !== 0) fail();
 if (process.argv.length !== 3 || !/^[1-9][0-9]*$/.test(process.argv[2] ?? ""))
   fail();
