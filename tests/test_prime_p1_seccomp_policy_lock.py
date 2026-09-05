@@ -19,11 +19,20 @@ from asterion.applications.prime_agent.operator.image_input_lock import (
 from asterion.applications.prime_agent.operator.seccomp_policy_lock import (
     PrimeP1SeccompPolicyLockError,
     PromotedSeccompPolicyCatalog,
+    SeccompArgumentConstraint,
     SeccompPolicyLock,
+    SeccompRuleAtom,
     canonical_seccomp_policy_lock_bytes,
     parse_canonical_seccomp_policy_lock,
     resolve_promoted_seccomp_policy,
     seccomp_policy_lock_sha256,
+)
+
+_READ = SeccompRuleAtom(
+    "read", (SeccompArgumentConstraint(0, "SCMP_CMP_EQ", 0, None),)
+)
+_WRITE = SeccompRuleAtom(
+    "write", (SeccompArgumentConstraint(0, "SCMP_CMP_MASKED_EQ", 1, 3),)
 )
 
 
@@ -39,7 +48,7 @@ def _lock(**changes: object) -> SeccompPolicyLock:
         "starter_sha256": "e" * 64,
         "oracle_sha256": "f" * 64,
         "default_action": "SCMP_ACT_ERRNO",
-        "allowed_rule_atoms": ("read", "write"),
+        "allowed_rule_atoms": (_READ, _WRITE),
         "profile_sha256": "0" * 64,
     }
     values.update(changes)
@@ -58,15 +67,62 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
             seccomp_policy_lock_sha256(lock), hashlib.sha256(first).hexdigest()
         )
         decoded = json.loads(first)
-        self.assertEqual(decoded["platform"], {"architecture": "amd64", "os": "linux", "variant": None})
-        self.assertEqual(decoded["allowed_rule_atoms"], ["read", "write"])
+        self.assertEqual(
+            decoded["platform"],
+            {"architecture": "amd64", "os": "linux", "variant": None},
+        )
+        self.assertEqual(
+            decoded["allowed_rule_atoms"],
+            [
+                {
+                    "arguments": [
+                        {
+                            "index": 0,
+                            "op": "SCMP_CMP_EQ",
+                            "value": 0,
+                            "value_two": None,
+                        }
+                    ],
+                    "syscall": "read",
+                },
+                {
+                    "arguments": [
+                        {
+                            "index": 0,
+                            "op": "SCMP_CMP_MASKED_EQ",
+                            "value": 1,
+                            "value_two": 3,
+                        }
+                    ],
+                    "syscall": "write",
+                },
+            ],
+        )
 
     def test_rejects_noncanonical_locks_and_parser_bytes(self) -> None:
         invalid_locks = (
             _lock(libseccomp_architecture="SCMP_ARCH_NATIVE"),
+            _lock(libseccomp_architecture="SCMP_ARCH_AARCH64"),
             _lock(default_action="SCMP_ACT_ALLOW"),
-            _lock(allowed_rule_atoms=("write", "read")),
-            _lock(allowed_rule_atoms=("read", "read")),
+            _lock(allowed_rule_atoms=(_WRITE, _READ)),
+            _lock(allowed_rule_atoms=(_READ, _READ)),
+            _lock(allowed_rule_atoms=("read",)),
+            _lock(
+                allowed_rule_atoms=(
+                    SeccompRuleAtom(
+                        "read",
+                        (SeccompArgumentConstraint(0, "SCMP_CMP_EQ", 0, 1),),
+                    ),
+                )
+            ),
+            _lock(
+                allowed_rule_atoms=(
+                    SeccompRuleAtom(
+                        "read",
+                        (SeccompArgumentConstraint(True, "SCMP_CMP_EQ", 0, None),),
+                    ),
+                )
+            ),
             _lock(profile_sha256="A" * 64),
             _lock(platform=ImagePlatformDescriptor("Linux", "amd64", None)),
         )
@@ -77,6 +133,33 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
         payload = canonical_seccomp_policy_lock_bytes(_lock())
         with self.assertRaises(PrimeP1SeccompPolicyLockError):
             parse_canonical_seccomp_policy_lock(payload + b" ")
+        with self.assertRaises(PrimeP1SeccompPolicyLockError):
+            parse_canonical_seccomp_policy_lock(
+                payload[:-1] + b',"schema_version":"duplicate"}'
+            )
+        with self.assertRaises(PrimeP1SeccompPolicyLockError):
+            parse_canonical_seccomp_policy_lock(
+                payload.replace(b'"profile_sha256":"' + b"0" * 64 + b'"', b'"profile_sha256":NaN')
+            )
+        with self.assertRaises(PrimeP1SeccompPolicyLockError):
+            parse_canonical_seccomp_policy_lock(
+                payload.replace(b'"profile_sha256":"' + b"0" * 64 + b'"', b'"profile_sha256":Infinity')
+            )
+
+    def test_platform_architecture_mapping_is_exact_and_host_independent(self) -> None:
+        arm64 = _lock(
+            platform=ImagePlatformDescriptor("linux", "arm64", None),
+            libseccomp_architecture="SCMP_ARCH_AARCH64",
+        )
+        self.assertEqual(parse_canonical_seccomp_policy_lock(canonical_seccomp_policy_lock_bytes(arm64)), arm64)
+        with self.assertRaises(PrimeP1SeccompPolicyLockError):
+            canonical_seccomp_policy_lock_bytes(
+                _lock(platform=ImagePlatformDescriptor("linux", "arm64", None))
+            )
+        with self.assertRaises(PrimeP1SeccompPolicyLockError):
+            canonical_seccomp_policy_lock_bytes(
+                _lock(platform=ImagePlatformDescriptor("linux", "amd64", "v8"))
+            )
 
     def test_empty_catalog_and_platform_mismatch_fail_closed(self) -> None:
         with self.assertRaises(PrimeP1SeccompPolicyLockError):
@@ -89,13 +172,18 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
                 resolve_promoted_seccomp_policy(
                     ImagePlatformDescriptor("linux", "arm64", None)
                 )
+        self.assertEqual(list(inspect.signature(resolve_promoted_seccomp_policy).parameters), ["platform"])
+        with self.assertRaises(TypeError):
+            cast(Any, resolve_promoted_seccomp_policy)(
+                ImagePlatformDescriptor("linux", "amd64", None), catalog
+            )
 
     def test_is_immutable_and_has_no_host_or_authority_imports(self) -> None:
         lock = _lock()
         self.assertEqual(repr(lock), "SeccompPolicyLock(redacted)")
         self.assertNotIn("a" * 64, repr(lock))
         with self.assertRaises((AttributeError, TypeError)):
-            cast(Any, lock).allowed_rule_atoms += ("close",)
+            cast(Any, lock).allowed_rule_atoms += (_READ,)
         with self.assertRaises((AttributeError, TypeError, FrozenInstanceError)):
             lock.platform.os = "linux"  # type: ignore[misc]
 
@@ -112,34 +200,36 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
         import asterion.applications.prime_agent.operator.seccomp_policy_lock as module
 
         source = Path(inspect.getfile(module)).read_text(encoding="utf-8")
-        imports = {
-            alias.name
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        } | {
-            node.module or ""
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.ImportFrom)
-        }
-        self.assertFalse(
-            any(
-                forbidden_name in module_name
-                for forbidden_name in (
-                    "authority_config",
-                    "authority_resources",
-                    "docker",
-                    "model_session_host",
-                    "network",
-                    "os",
-                    "socket",
-                    "subprocess",
-                    "sys",
-                )
-                for module_name in imports
-            )
-        )
+        self.assertTrue(_has_only_allowed_direct_imports(source))
+        self.assertFalse(_has_only_allowed_direct_imports("import platform\n"))
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _has_only_allowed_direct_imports(source: str) -> bool:
+    allowed = {
+        (0, "__future__"),
+        (0, "dataclasses"),
+        (0, "hashlib"),
+        (0, "json"),
+        (0, "re"),
+        (0, "typing"),
+        (1, "image_input_lock"),
+    }
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    imports = {
+        (0, alias.name)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    } | {
+        (node.level, node.module or "")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+    }
+    return imports <= allowed
