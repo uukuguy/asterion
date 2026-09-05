@@ -71,6 +71,9 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
         try:
             await self._preflight(control)  # type: ignore[attr-defined]
             result = await self._call(argv, control, pass_fds=(fd,))  # type: ignore[attr-defined]
+            daemon = self._parse_daemon_id(result.stdout)  # type: ignore[attr-defined]
+            self._specifications[daemon] = _P1BSpec(daemon, image_digest, "prime.ipython-coding-p1b-development", run_id, "sha256:" + "0" * 64, _DIGEST)  # type: ignore[attr-defined]
+            return daemon
         except BaseException:
             # Docker may have created the named object before its CLI result is
             # lost.  The code-owned provisional name is the sole recovery key.
@@ -83,18 +86,18 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
             raise
         finally:
             self._close_fd(fd)  # type: ignore[attr-defined]
-        daemon = self._parse_daemon_id(result.stdout)  # type: ignore[attr-defined]
-        self._specifications[daemon] = _P1BSpec(daemon, image_digest, "prime.ipython-coding-p1b-development", run_id, "sha256:" + "0" * 64, _DIGEST)  # type: ignore[attr-defined]
-        return daemon
 
     async def _compensate_provisional(self, name: str) -> None:
         control = _LifecycleCallControl(monotonic() + 30, None)
         removed = await self._call_raw(self._prefix + ("container", "rm", "--force", name), control)  # type: ignore[attr-defined]
         missing = (b"", b"\n")
-        if removed.returncode not in (0, 1) or (removed.returncode == 0 and removed.stdout not in ((name + "\n").encode(), b"")) or (removed.returncode == 1 and removed.stdout not in missing):
+        absent_errors = {("Error: No such object: " + name + "\n").encode(), ("Error: No such container: " + name + "\n").encode(), ("Error response from daemon: No such container: " + name + "\n").encode(), ("No such container: " + name).encode()}
+        if removed.returncode == 0:
+            if removed.stdout not in ((name + "\n").encode(), b"") or removed.stderr: raise RestrictedWorkerError("restricted worker value is invalid")
+        elif removed.returncode != 1 or removed.stdout not in missing or removed.stderr not in absent_errors:
             raise RestrictedWorkerError("restricted worker value is invalid")
         inspected = await self._call_raw(self._prefix + ("container", "inspect", "--format", "{{.Id}}", name), control)  # type: ignore[attr-defined]
-        if inspected.returncode != 1 or inspected.stdout not in missing:
+        if inspected.returncode != 1 or inspected.stdout not in missing or inspected.stderr not in absent_errors:
             raise RestrictedWorkerError("restricted worker value is invalid")
 
     async def inspect(self, container_id: str, *, control: _LifecycleCallControl) -> None:  # type: ignore[override]
