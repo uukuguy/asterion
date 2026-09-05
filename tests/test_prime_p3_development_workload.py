@@ -27,3 +27,21 @@ class TestPrimeP3DevelopmentWorkload(unittest.TestCase):
                     subject.validate_p3_aggregate_bytes(value)
         with self.assertRaises(subject.PrimeP3DevelopmentWorkloadError):
             subject.validate_p3_source_bytes(subject.P3_EXPECTED_SOURCE_BYTES + b"# private\n")
+
+    def test_exported_artifacts_are_immutable_and_cannot_poison_validators(self) -> None:
+        from asterion.applications.prime_agent.operator import p3_development_workload as subject
+
+        for artifact in (subject.P3_IMPLEMENTATION_ARTIFACT, subject.P3_REVIEW_ARTIFACT, subject.P3_FOLLOW_UP_ARTIFACT, subject.P3_AGGREGATE):
+            with self.subTest(artifact=artifact):
+                with self.assertRaises(TypeError):
+                    artifact["private"] = "mutation"
+        with self.assertRaises(TypeError):
+            subject.P3_FOLLOW_UP_ARTIFACT["oracle_cases"][0][0] = True
+        self.assertEqual(subject.validate_p3_aggregate_bytes(subject.P3_AGGREGATE_BYTES), subject.P3_AGGREGATE)
+
+    def test_digests_remain_exact_after_exported_values_are_observed(self) -> None:
+        from hashlib import sha256
+        from asterion.applications.prime_agent.operator import p3_development_workload as subject
+
+        self.assertEqual(subject.P3_EXPECTED_SOURCE_DIGEST, "sha256:" + sha256(subject.P3_EXPECTED_SOURCE_BYTES).hexdigest())
+        self.assertEqual(subject.P3_DEVELOPMENT_WORKLOAD_DIGEST, "sha256:" + sha256(subject.P3_DEVELOPMENT_WORKLOAD_BYTES).hexdigest())

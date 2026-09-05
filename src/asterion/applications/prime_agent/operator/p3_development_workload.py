@@ -27,14 +27,18 @@ P3_ROLE_TOOL_CALLS: Final = MappingProxyType({"root": 1, "implementation": 1, "r
 P3_CHILD_COUNT: Final = 2
 P3_MAX_DEPTH: Final = 1
 
-P3_IMPLEMENTATION_ARTIFACT: Final = {"format": "asterion.prime-p3-implementation/v1", "patched": True, "role": "implementation"}
-P3_REVIEW_ARTIFACT: Final = {"format": "asterion.prime-p3-review/v1", "missing_case": "upper-exclusive", "role": "review"}
-P3_FOLLOW_UP_ARTIFACT: Final = {"format": "asterion.prime-p3-review-follow-up/v1", "oracle_cases": [[5, 1, 5, False], [3, 1, 5, True]], "role": "review", "verified": True}
-P3_AGGREGATE: Final = {"child_count": 2, "implementation": "patched", "max_depth": 1, "model_callback_count": 8, "remaining_child_count": 0, "retained_follow_up_count": 1, "review": "verified", "tool_call_count": 4}
-P3_IMPLEMENTATION_BYTES: Final = _json(P3_IMPLEMENTATION_ARTIFACT)
-P3_REVIEW_BYTES: Final = _json(P3_REVIEW_ARTIFACT)
-P3_FOLLOW_UP_BYTES: Final = _json(P3_FOLLOW_UP_ARTIFACT)
-P3_AGGREGATE_BYTES: Final = _json(P3_AGGREGATE)
+_IMPLEMENTATION_ARTIFACT = {"format": "asterion.prime-p3-implementation/v1", "patched": True, "role": "implementation"}
+_REVIEW_ARTIFACT = {"format": "asterion.prime-p3-review/v1", "missing_case": "upper-exclusive", "role": "review"}
+_FOLLOW_UP_ARTIFACT = {"format": "asterion.prime-p3-review-follow-up/v1", "oracle_cases": ((5, 1, 5, False), (3, 1, 5, True)), "role": "review", "verified": True}
+_AGGREGATE = {"child_count": 2, "implementation": "patched", "max_depth": 1, "model_callback_count": 8, "remaining_child_count": 0, "retained_follow_up_count": 1, "review": "verified", "tool_call_count": 4}
+P3_IMPLEMENTATION_ARTIFACT: Final = MappingProxyType(_IMPLEMENTATION_ARTIFACT)
+P3_REVIEW_ARTIFACT: Final = MappingProxyType(_REVIEW_ARTIFACT)
+P3_FOLLOW_UP_ARTIFACT: Final = MappingProxyType(_FOLLOW_UP_ARTIFACT)
+P3_AGGREGATE: Final = MappingProxyType(_AGGREGATE)
+P3_IMPLEMENTATION_BYTES: Final = _json(_IMPLEMENTATION_ARTIFACT)
+P3_REVIEW_BYTES: Final = _json(_REVIEW_ARTIFACT)
+P3_FOLLOW_UP_BYTES: Final = _json(_FOLLOW_UP_ARTIFACT)
+P3_AGGREGATE_BYTES: Final = _json(_AGGREGATE)
 
 P3_DEVELOPMENT_SCHEMA_BYTES: Final = _json({"format": "asterion.prime-p3-development/v1", "roles": ["implementation", "review", "root"]})
 P3_DEVELOPMENT_WORKLOAD_BYTES: Final = _json({"aggregate_sha256": sha256(P3_AGGREGATE_BYTES).hexdigest(), "format": "asterion.prime-p3-development-workload/v1", "initial_source_sha256": sha256(P3_INITIAL_SOURCE_BYTES).hexdigest(), "initial_test_sha256": sha256(P3_INITIAL_TEST_BYTES).hexdigest(), "oracle_cases": [[5, 1, 5, False], [3, 1, 5, True]]})
@@ -65,7 +69,7 @@ def validate_p3_test_bytes(value: object) -> bytes:
 
 def validate_p3_aggregate_bytes(value: object) -> dict[str, object]:
     _exact(value, P3_AGGREGATE_BYTES)
-    return dict(P3_AGGREGATE)
+    return json.loads(P3_AGGREGATE_BYTES)
 
 
 def validate_p3_artifact_bytes(*, role: object, value: object) -> bytes:
