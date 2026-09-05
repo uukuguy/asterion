@@ -50,9 +50,9 @@ test("runs SDK-owned depth-one children and retains the review session for follo
   });
   try {
     const result = await session.prompt("fixed");
-    assert.equal(calls.root + calls.implementation + calls.review, 8);
-    assert.equal(calls.tools, 4);
-    assert.deepEqual(result.observations, { child_count: 2, max_depth: 1, model_callback_count: 8,
+    assert.deepEqual(calls, { root: 4, implementation: 2, review: 4, tools: 4 });
+    assert.deepEqual(result.observations, { child_count: 2, max_depth: 1, model_callback_count: 10,
       remaining_child_count: 0, retained_follow_up_count: 1, tool_call_count: 4 });
+    assert.deepEqual(result.usage, { root: { input_tokens: 12, output_tokens: 8, total_tokens: 20 }, implementation: { input_tokens: 6, output_tokens: 4, total_tokens: 10 }, review: { input_tokens: 12, output_tokens: 8, total_tokens: 20 } });
   } finally { await session.close(); }
 });
