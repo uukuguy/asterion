@@ -448,7 +448,7 @@ def _assistant_response(request: object, raw: object, turn: int, max_output: int
     base = {"role": "assistant", "api": model["api"], "provider": model["provider"], "model": model["id"], "usage": _usage(input_tokens, output_tokens), "timestamp": int(time.time() * 1000)}
     calls = message.get("tool_calls")
     if turn == 0:
-        if finish != "tool_calls" or message.get("content") is not None or type(calls) is not list or len(calls) != 1 or type(calls[0]) is not dict:
+        if finish != "tool_calls" or message.get("content") not in (None, "") or type(calls) is not list or len(calls) != 1 or type(calls[0]) is not dict:
             raise ValueError
         tool = calls[0]
         function = tool.get("function")

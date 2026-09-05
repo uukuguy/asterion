@@ -62,7 +62,7 @@ class TestPrimeP1DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
             {"DEEPSEEK_API_KEY": "private-key", "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}
         )
         first_reply = {
-            "choices": [{"finish_reason": "tool_calls", "message": {"content": None, "tool_calls": [{"function": {"arguments": '{"code":"print(42)"}', "name": "ipython"}, "id": "call-1", "type": "function"}]}}],
+            "choices": [{"finish_reason": "tool_calls", "message": {"content": "", "tool_calls": [{"function": {"arguments": '{"code":"print(42)"}', "name": "ipython"}, "id": "call-1", "type": "function"}]}}],
             "usage": {"completion_tokens": 7, "prompt_tokens": 11},
         }
         with mock.patch.object(subject, "_post_chat_completion", return_value=first_reply) as post:
