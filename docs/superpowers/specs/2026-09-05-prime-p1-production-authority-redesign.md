@@ -187,6 +187,13 @@ The receipt key authenticates private evidence; later audit is performed by a
 fresh read-only authority invocation, never by giving the key to application
 code.
 
+The single consuming config admission returns an authority-only runtime context
+with an opaque semantic receipt issuer. It exposes neither the raw key nor a
+generic signing operation: the issuer can only issue the exact unavailable
+receipt form from authority-owned live bindings. `authority_protocol.py` stays
+non-authoritative parsing; canonical receipt construction and HMAC remain in the
+authority process boundary.
+
 ## Production resource admission and revalidation
 
 Static readiness performs no Docker or network operation and cannot mint an
