@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import hmac
 import json
 import re
+import threading
 from types import MappingProxyType
 from typing import Any, NoReturn, SupportsIndex
 from weakref import WeakKeyDictionary
@@ -72,6 +73,10 @@ class _IssuedAuthorityReceipt:
 
     _binding: _AuthorityTerminalBinding
     _payload: Mapping[str, object]
+    _consumption_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
+    _consumed: bool = field(default=False, init=False, repr=False, compare=False)
 
     def __repr__(self) -> str:
         return "IssuedAuthorityReceipt(redacted)"
@@ -125,6 +130,22 @@ def _issue_unavailable_receipt(
     except (TypeError, ValueError, UnicodeError):
         pass
     _unavailable()
+
+
+def _consume_issued_unavailable_receipt(
+    receipt: _IssuedAuthorityReceipt, binding: _AuthorityTerminalBinding
+) -> Mapping[str, object]:
+    """Atomically consume a receipt for its exact reserved binding object."""
+    if (
+        type(receipt) is not _IssuedAuthorityReceipt
+        or type(binding) is not _AuthorityTerminalBinding
+    ):
+        _unavailable()
+    with receipt._consumption_lock:
+        if receipt._binding is not binding or receipt._consumed:
+            _unavailable()
+        object.__setattr__(receipt, "_consumed", True)
+        return receipt._payload
 
 
 def _unavailable_payload(

@@ -101,6 +101,20 @@ class TestPrimeP1AuthorityProtocol(unittest.TestCase):
         with self.assertRaises(PrimeP1AuthorityProtocolError):
             authority.terminal_packet(issued)
 
+    def test_issued_receipt_cannot_terminalize_value_identical_session_twice(self) -> None:
+        first_authority, first_supervisor = self._live_pair()
+        second_authority, _ = self._live_pair()
+        first_binding = first_authority.reserve_terminal_binding()
+        second_authority.reserve_terminal_binding()
+        issued = _issue_unavailable_receipt(
+            _new_authority_receipt_issuer("2" * 64), first_binding, _material()
+        )
+
+        first_supervisor.accept_authority_packet(first_authority.terminal_packet(issued))
+
+        with self.assertRaises(PrimeP1AuthorityProtocolError):
+            second_authority.terminal_packet(issued)
+
     def test_terminal_rejects_raw_receipt_mapping_binding_mismatch_and_wrong_state(self) -> None:
         authority = AuthoritySession(SESSION, KEY, CONTRACT, RESOURCE_SET)
         with self.assertRaises(PrimeP1AuthorityProtocolError):

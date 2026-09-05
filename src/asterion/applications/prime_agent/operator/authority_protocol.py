@@ -11,7 +11,11 @@ import re
 from types import MappingProxyType
 from typing import NoReturn, Protocol, cast
 
-from .authority_receipt import _AuthorityTerminalBinding, _IssuedAuthorityReceipt
+from .authority_receipt import (
+    _AuthorityTerminalBinding,
+    _IssuedAuthorityReceipt,
+    _consume_issued_unavailable_receipt,
+)
 
 PROTOCOL = "asterion.prime-p1-authority-ipc/v1"
 _DOMAIN = b"asterion.prime-p1-authority-ipc/v1\0"
@@ -201,14 +205,25 @@ class AuthoritySession:
         return binding
 
     def terminal_packet(self, issued: _IssuedAuthorityReceipt) -> bytes:
-        if self._state != "terminal-reserved" or type(issued) is not _IssuedAuthorityReceipt:
+        if (
+            self._state != "terminal-reserved"
+            or type(issued) is not _IssuedAuthorityReceipt
+        ):
             _unavailable()
-        if issued._binding != self._binding:
+        if type(self._binding) is not _AuthorityTerminalBinding:
+            _unavailable()
+        try:
+            payload = _consume_issued_unavailable_receipt(issued, self._binding)
+        except ValueError:
             _unavailable()
         self._binding = None
         self._state = "terminal-emitted"
         return encode_frame(
-            self._session_key, self._session_id, 1, "terminal", _native_mapping(issued._payload)
+            self._session_key,
+            self._session_id,
+            1,
+            "terminal",
+            _native_mapping(payload),
         )
 
     def _claim(self, frame: AuthorityFrame) -> None:
