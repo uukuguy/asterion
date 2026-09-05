@@ -22,7 +22,7 @@ or merge contracts.
 
 | Package | Current evidence | Remaining closure | Dependencies / status |
 |---|---|---|---|
-| P1 `prime.ipython-coding/v1` | P1-A and P1-B development scopes now complete real Prime SDK/provider/Docker/IPython/oracle/cleanup runs, including two prompts, one compact and persistent kernel continuity | Public fixed-preset runtime/host wiring, then promoted authority resources | **Active**. Functional reproduction is verified as unpromoted local-root development evidence; the public CLI still exposes only provider-free fixture acceptance |
+| P1 `prime.ipython-coding/v1` | P1-A and P1-B development scopes now complete real Prime SDK/provider/Docker/IPython/oracle/cleanup runs; the standard CLI/provider/assembly/runtime/host route is implemented | Stabilize the selected backend's fixed five-turn tool contract, obtain one successful CLI trace, then promoted authority resources | **Active / external-limited**. Provider-free composed CLI projection passes, but the current backend did not complete a real CLI run |
 | P2 `prime.programmatic-long-context/v1` | Workload, worker, launcher, receipt and reducer tests pass; real local Prime/IPython corpus compatibility PASS after canonical JSON fixture correction | Admitted restricted-worker/model execution, fixed oracle, installed public route | Depends on P1 shared execution boundary; existing P2 launcher retained |
 | P3 `prime.recursive-workflow/v1` | Provider-free tests pass; real local Prime two-child message/aggregate/delete compatibility PASS | Real admitted restricted-worker/model execution, exact depth/usage/cancellation and public route | Depends on P1/P2 spine; compatibility evidence does not satisfy bounded-sandboxed gate |
 | P4 `prime.long-session-continuity/v1` | Diagnostic workload, completion, recovery adapter, worker and reducer tests pass | Actual detach/attach/compaction/recovery launcher/host, same oracle after recovery, no blind effect replay | Depends on P1/P3; real launcher/host absent |
@@ -79,7 +79,17 @@ mean seven publicly runnable scenarios.
    import identity, function identity/behavior, cwd and file bytes passed all
    twelve continuity probes. Initial/post snapshots, final AST oracle, provider
    close, Node reap and exact container absence completed. The body-free result
-   is `p1-b-development/unpromoted`; public runtime wiring remains next.
+   is `p1-b-development/unpromoted`.
+5. **P1 standard CLI route — implemented, real run not yet verified:** the
+   installed provider, assembly, capability package, `prime.agent` runtime and
+   one-shot injected host service now compose through `asterion run`. Exact
+   application identity, fixed input, image digest, SDK source root, sealed
+   seccomp profile, cancellation terminal semantics, redaction and cleanup are
+   enforced. A provider-free composed-run E2E passes. Real CLI attempts reached
+   the selected backend but did not return a valid terminal trace: the first
+   characterized response omitted the required tool call, and later attempts
+   ended at the credentialed transport boundary. No Node process or P1-B
+   container remained. This is `External-limited`, not PASS.
 
 The P1-A/P1-B split records existing contract differences, not permission to
 weaken the seven-scenario goal. Production deployment must preserve separate
@@ -96,9 +106,10 @@ the single-cell SDK/provider path. P1-B then closed the original multi-turn
 semantic gap with a real compact operation and one persistent IPython kernel.
 The successful P1-B trace digest is
 `sha256:21ba3699ff291d98349bf2895b3453adacd1a48dd0b6f9fdfd6803321f403d46`.
-Both results remain unpromoted development evidence. The installed CLI still
-validates only the provider-free fixture; the fixed public runtime/host preset
-is the active P1 task.
+Both results remain unpromoted development evidence. The installed CLI now has
+the fixed public runtime/host preset, but it has not completed a real run in the
+current backend environment. The public `verify --level acceptance` command
+still covers only the provider-free fixture and must not be cited as real P1.
 
 The local proc snapshot is an operator development operation. A reduced-
 privilege authority cannot assume it has that root capability; later integration

@@ -1901,3 +1901,15 @@
 - 04:31 Settled late P1-B Docker creates before propagation [58cf15fc]
 - 04:45 Completed real P1-B SDK, compaction, persistent IPython, oracle, and cleanup evidence.
 - 04:46 Advanced P1 from internal closure to public fixed-preset CLI wiring.
+- 04:48 Recorded P1-B closure and shifted active work to public CLI wiring [00d2c779]
+- 05:12 Added fixed P1 verification runtime and safe trace projection [82093b0a]
+- 05:18 Added one-shot P1 CLI host and run identity propagation [0bcc2cbf]
+- 05:20 Bound Prime runtime factory to the exact selected application [266c4bd8]
+- 05:29 Sealed seccomp input and refreshed the application resource lock [d3fd324c]
+- 05:33 Pinned the development image and closed transport descriptors [b3efe21a]
+- 05:39 Distinguished signal cancellation from caller task cancellation [f57cabb6]
+- 05:41 Propagated legal cancelled streams through the capability boundary [63e57230]
+- 05:52 Bound the CLI host to the pinned Prime SDK checkout [d4157133]
+- 05:58 Covered the provider-free composed Prime verification route [e04580db]
+- 06:07 Fixed P1-B tool choice by its five protocol stages [c1c7b080]
+- 06:15 Recorded implemented CLI wiring and external backend limitation.

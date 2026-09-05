@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-06 04:45. **Session remains active — not a final handoff.**
+> Updated: 2026-09-06 06:15. **Session remains active — not a final handoff.**
 
 ## Direction
 
@@ -26,10 +26,10 @@ P1-A与P1-B开发链路均已真实完成。P1-B使用一个Prime SDK session、
 
 ## Next concrete action
 
-1. 将P1-A/P1-B闭环接入标准`CLI → provider → assembly → runtime → injected host service`路径；不让capability实现直接发现Docker、模型或配置。
-2. 为`prime.ipython-production`实现固定small-verification host service，并让`prime.agent` runtime消费该精确服务；用户命令不增加provider/model/cost/deadline旋钮。
-3. 保持`list`、`describe`、`acceptance`、`preflight` provider-free；开发CLI结果明确`unpromoted`且只输出安全身份、状态与trace digest。
-4. CLI可运行后继续P2 admitted restricted-worker/model execution与installed route，复用P1执行spine。
+1. P1标准`CLI → provider → assembly → runtime → injected host service`已实现；不要重复重做接线。
+2. 当前阻点在credentialed backend边界：一次HTTP成功响应未产生首轮唯一`ipython`调用；按轮固定tool choice后，后续尝试在可分类HTTP响应前失败。先做一次窄的backend transport/response compatibility决策，不做盲重试。
+3. 保持严格tool/text响应校验、五次调用和内部成本/期限上限；不要通过接受任意文本来伪造工具证明。
+4. 获得一次真实CLI安全trace并确认零残留后，P1开发CLI才可标记Verified；随后继续P2 admitted execution与installed route。
 
 ## Actual environment
 
