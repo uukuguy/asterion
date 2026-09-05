@@ -11,6 +11,7 @@ from .authority_config import PrimeP1OperatorConfig
 
 
 _EVIDENCE_TOKEN = object()
+_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
 class PrimeP1EvidenceResourceError(ValueError):
@@ -66,13 +67,10 @@ def admit_evidence_root(config: object) -> AdmittedPrimeP1EvidenceRoot:
         if type(config) is not PrimeP1OperatorConfig:
             raise ValueError
         path = config._values["ASTERION_PRIME_P1_EVIDENCE_ROOT"]
-        if type(path) is not str or not os.path.isabs(path):
-            raise ValueError
-        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = _open_absolute_directory_without_symlinks(path)
         info = os.fstat(fd)
         if (
             not stat.S_ISDIR(info.st_mode)
-            or info.st_nlink != 1
             or info.st_uid != os.geteuid()
             or stat.S_IMODE(info.st_mode) != 0o700
         ):
@@ -90,3 +88,32 @@ def admit_evidence_root(config: object) -> AdmittedPrimeP1EvidenceRoot:
     if result is None:
         raise PrimeP1EvidenceResourceError() from None
     return result
+
+
+def _open_absolute_directory_without_symlinks(path: object) -> int:
+    """Open each canonical absolute-path component beneath a descriptor anchor."""
+    if type(path) is not str or not os.path.isabs(path):
+        raise ValueError
+    components = path.split("/")[1:]
+    if not components or any(part in {"", ".", ".."} for part in components):
+        raise ValueError
+    fd: int | None = os.open("/", _DIRECTORY_FLAGS)
+    try:
+        for component in components:
+            child = os.open(component, _DIRECTORY_FLAGS, dir_fd=fd)
+            previous = fd
+            fd = child
+            _close_quietly(previous)
+        result = fd
+        fd = None
+        return result
+    finally:
+        _close_quietly(fd)
+
+
+def _close_quietly(fd: int | None) -> None:
+    if fd is not None:
+        try:
+            os.close(fd)
+        except (OSError, OverflowError):
+            pass
