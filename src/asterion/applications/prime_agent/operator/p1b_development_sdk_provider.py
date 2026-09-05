@@ -222,7 +222,7 @@ def _provider_child(config: _PrivatePrimeModelConfig, request: dict[str, object]
         _close_unneeded_child_fds(request_read, result_write)
         _read_exact(request_read, _INPUT_CAP)
         _close_quietly(request_read)
-        payload = _deepseek_payload(request, config.model_id, max_output)
+        payload = _deepseek_payload(request, config.model_id, max_output, turn=turn)
         raw = _post_chat_completion(config, payload, timeout)
         response, usage = _assistant_response(request, raw, turn, max_output)
         _write_all(result_write, b"S" + struct.pack("!I", len(response)) + response + struct.pack("!QQQ", usage.input_tokens, usage.output_tokens, usage.cost_microunits))
@@ -399,8 +399,14 @@ def _text(value: object) -> str:
     return "".join(texts) if len(texts) == len(value) else ""
 
 
-def _deepseek_payload(request: dict[str, object], model_id: str, max_output: int) -> dict[str, object]:
-    context = request["context"]
+def _deepseek_payload(
+    request: dict[str, object], model_id: str, max_output: int, *, turn: int,
+) -> dict[str, object]:
+    if type(turn) is not int or turn not in range(5):
+        raise ValueError
+    context = request.get("context")
+    if type(context) is not dict or ("tools" in context) != (turn != 2):
+        raise ValueError
     payload_messages: list[dict[str, object]] = [{"role": "system", "content": context["systemPrompt"]}]
     for item in context["messages"]:
         role = item["role"]
@@ -414,9 +420,21 @@ def _deepseek_payload(request: dict[str, object], model_id: str, max_output: int
         else:
             payload_messages.append({"role": "tool", "tool_call_id": item["toolCallId"], "content": _text(item["content"])})
     payload: dict[str, object] = {"max_tokens": max_output, "messages": payload_messages, "model": model_id, "stream": False, "thinking": {"type": "disabled"}}
-    if "tools" in context:
+    if turn != 2:
         tool = context["tools"][0]
-        payload.update({"tool_choice": "auto", "tools": [{"type": "function", "function": {"name": "ipython", "description": tool["description"], "parameters": tool["parameters"]}}]})
+        payload.update({
+            "tool_choice": (
+                {"type": "function", "function": {"name": "ipython"}}
+                if turn in (0, 3) else "none"
+            ),
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "ipython", "description": tool["description"],
+                    "parameters": tool["parameters"],
+                },
+            }],
+        })
     return payload
 
 

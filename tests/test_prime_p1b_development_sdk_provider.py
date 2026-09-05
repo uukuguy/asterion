@@ -58,6 +58,36 @@ def _text_reply(text: str) -> dict[str, object]:
 
 
 class TestPrimeP1BDevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
+    async def test_payload_uses_the_fixed_five_turn_tool_choice_policy(self) -> None:
+        from asterion.applications.prime_agent.operator import p1b_development_sdk_provider as subject
+
+        normal = json.loads(_request([{"content": "solve", "role": "user"}]))
+        compact = json.loads(_request([{"content": "summarize", "role": "user"}], compact=True))
+        named = {"type": "function", "function": {"name": "ipython"}}
+        for turn, request, expected_choice in (
+            (0, normal, named),
+            (1, normal, "none"),
+            (2, compact, None),
+            (3, normal, named),
+            (4, normal, "none"),
+        ):
+            with self.subTest(turn=turn):
+                payload = subject._deepseek_payload(  # noqa: SLF001
+                    request, "deepseek-v4-flash", 1024, turn=turn
+                )
+                if expected_choice is None:
+                    self.assertNotIn("tools", payload)
+                    self.assertNotIn("tool_choice", payload)
+                else:
+                    self.assertEqual(payload["tool_choice"], expected_choice)
+                    self.assertEqual(payload["tools"][0]["function"]["name"], "ipython")
+                    self.assertNotIn("strict", payload["tools"][0]["function"])
+
+        for turn, request in ((-1, normal), (5, normal), (True, normal), (2, normal), (0, compact)):
+            with self.subTest(invalid_turn=turn):
+                with self.assertRaises(ValueError):
+                    subject._deepseek_payload(request, "deepseek-v4-flash", 1024, turn=turn)  # noqa: SLF001
+
     async def test_close_reaps_active_child_and_rejects_new_calls(self) -> None:
         from asterion.applications.prime_agent.operator import p1b_development_sdk_provider as subject
 
