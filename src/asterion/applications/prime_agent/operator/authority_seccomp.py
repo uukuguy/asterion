@@ -26,6 +26,8 @@ from .seccomp_policy_lock import (
 _MAX_BYTES: Final = 65_536
 _MAX_DEPTH: Final = 32
 _MAX_EINTR: Final = 8
+_MAX_PATH_BYTES: Final = 4096
+_MAX_PATH_COMPONENTS: Final = 64
 _U64_MAX: Final = 2**64 - 1
 _OPS: Final = frozenset(
     {
@@ -127,6 +129,8 @@ def admit_static_seccomp_resource(config: object) -> AdmittedPrimeP1SeccompResou
         if not hmac.compare_digest(actual, expected):
             raise ValueError
         _validate_profile(data, policy)
+        if _chain_identities(fds) != identities:
+            raise ValueError
         result = AdmittedPrimeP1SeccompResource(
             fds, path, identities, policy, actual, threading.Lock(), [False]
         )
@@ -159,6 +163,11 @@ def revalidate_static_seccomp_resource(resource: object) -> None:
             if not hmac.compare_digest(digest, resource._sha256):
                 raise ValueError
             _validate_profile(data, resource._policy)
+            if (
+                _chain_identities(resource._fds) != resource._identities
+                or _chain_identities(fds) != resource._identities
+            ):
+                raise ValueError
     except BaseException:
         failed = True
     finally:
@@ -176,7 +185,12 @@ def _open_profile(path: object) -> tuple[int, ...]:
     if type(path) is not str or not path.startswith("/") or "\x00" in path:
         raise ValueError
     components = path.split("/")[1:]
-    if not components or any(not part or part in {".", ".."} for part in components):
+    if (
+        not components
+        or len(path.encode("utf-8")) > _MAX_PATH_BYTES
+        or len(components) > _MAX_PATH_COMPONENTS
+        or any(not part or part in {".", ".."} for part in components)
+    ):
         raise ValueError
     fds = [os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)]
     try:

@@ -261,6 +261,39 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                 admit_static_seccomp_resource(config)
         self.assertIsNone(raised.exception.__context__)
 
+    def test_rejects_ancestor_changed_during_profile_validation(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            validate = module._validate_profile
+
+            def mutate_ancestor(data: bytes, policy: object) -> None:
+                validate(data, policy)  # type: ignore[arg-type]
+                root.chmod(0o777)
+
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(
+                    catalog_module,
+                    "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG",
+                    PromotedSeccompPolicyCatalog((_policy(),)),
+                ),
+                patch.object(module, "_validate_profile", side_effect=mutate_ancestor),
+                self.assertRaises(PrimeP1AuthorityResourceError) as raised,
+            ):
+                admit_static_seccomp_resource(config)
+        self.assertIsNone(raised.exception.__context__)
+
 
 if __name__ == "__main__":
     unittest.main()
