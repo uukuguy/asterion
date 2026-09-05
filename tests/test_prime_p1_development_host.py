@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -21,11 +22,70 @@ _FINAL = b"def answer() -> int:\n    return 42\n"
 
 
 class _Provider:
-    async def __call__(self, _body: bytes) -> bytes:
-        return b"from pathlib import Path\nPath('/workspace/solution.py').write_text('def answer() -> int:\\n    return 42\\n')"
+    def __init__(self) -> None:
+        self.requests: list[bytes] = []
+
+    async def __call__(self, body: bytes) -> bytes:
+        self.requests.append(body)
+        return json.dumps(
+            {
+                "content": [{"text": "done", "type": "text"}],
+                "role": "assistant",
+                "stopReason": "stop",
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
 
     def terminal_usage(self) -> PrimeModelBrokerTokenUsage:
         return PrimeModelBrokerTokenUsage(3, 4, 5)
+
+
+class _Gateway:
+    instances: list["_Gateway"] = []
+
+    def __init__(self, *, model_hook: object, tool_hook: object, **kwargs: object) -> None:
+        self.calls: list[str] = ["constructed"]
+        self.kwargs = kwargs
+        self.model_hook = model_hook
+        self.tool_hook = tool_hook
+        type(self).instances.append(self)
+
+    async def open(self, **kwargs: object) -> None:
+        self.calls.append("open")
+        self.open_kwargs = kwargs
+
+    async def prompt(self, prompt: str) -> object:
+        self.calls.append("prompt")
+        self.prompt_value = prompt
+        first = await self.model_hook(  # type: ignore[operator]
+            {
+                "context": {"messages": [{"content": "verify", "role": "user"}]},
+                "model": {"api": "asterion-p1-development", "id": "p1-development", "provider": "asterion-development"},
+                "options": {},
+            }
+        )
+        self.tool_result = await self.tool_hook(  # type: ignore[operator]
+            {"code": "print(42)", "tool_call_id": "call-1"}
+        )
+        second = await self.model_hook(  # type: ignore[operator]
+            {
+                "context": {
+                    "messages": [
+                        {"content": "verify", "role": "user"},
+                        first,
+                        self.tool_result,
+                    ]
+                },
+                "model": {"api": "asterion-p1-development", "id": "p1-development", "provider": "asterion-development"},
+                "options": {},
+            }
+        )
+        self.second = second
+        return {"lifecycle": "completed"}
+
+    async def close(self) -> None:
+        self.calls.append("close")
 
 
 class TestPrimeP1DevelopmentHost(unittest.IsolatedAsyncioTestCase):
@@ -50,10 +110,13 @@ class TestPrimeP1DevelopmentHost(unittest.IsolatedAsyncioTestCase):
 
         transport.snapshot_solution = snapshot_solution  # type: ignore[method-assign]
         transport.close = lambda: setattr(transport, "closed", True)  # type: ignore[attr-defined]
+        provider = _Provider()
+        _Gateway.instances.clear()
         with (
             patch.object(subject, "uuid4", return_value=SimpleNamespace(hex="a" * 32)),
             patch.object(subject, "DockerCliEngineTransport", return_value=transport),
-            patch.object(subject, "create_prime_p1_development_provider", return_value=_Provider()),
+            patch.object(subject, "PrimeP1DevelopmentGateway", _Gateway),
+            patch.object(subject, "create_prime_p1_development_sdk_provider", return_value=provider),
         ):
             trace = await subject.run_prime_p1_development(
                 docker_executable="/operator/docker",
@@ -62,6 +125,9 @@ class TestPrimeP1DevelopmentHost(unittest.IsolatedAsyncioTestCase):
                 platform=ImagePlatformDescriptor("linux", "amd64", None),
                 image_digest=_IMAGE_DIGEST,
                 operator_config={"DEEPSEEK_API_KEY": "private", "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                node_bin="/operator/node",
+                entrypoint="/operator/p1-development-main.js",
+                prime_source_root="/operator/prime-agent",
             )
 
         self.assertEqual((trace.scope, trace.promotion), ("p1-a-development", "unpromoted"))
@@ -70,5 +136,12 @@ class TestPrimeP1DevelopmentHost(unittest.IsolatedAsyncioTestCase):
             transport.calls.index("model_request"), transport.calls.index("snapshot_solution")
         )
         self.assertEqual(transport.calls.count("snapshot_solution"), 2)
+        self.assertEqual(transport.calls.count("model_response"), 1)
         self.assertEqual(transport.calls[-2:], ["force_remove", "assert_absent"])
         self.assertTrue(transport.closed)  # type: ignore[attr-defined]
+        gateway = _Gateway.instances[0]
+        self.assertEqual(gateway.calls, ["constructed", "open", "prompt", "close"])
+        self.assertEqual(gateway.open_kwargs["prime_source_root"], "/operator/prime-agent")
+        self.assertEqual(gateway.tool_result, {"content": [{"text": "IPython cell completed", "type": "text"}], "details": {}, "isError": False})
+        self.assertEqual(len(provider.requests), 2)
+        self.assertTrue(all(json.loads(body) for body in provider.requests))
