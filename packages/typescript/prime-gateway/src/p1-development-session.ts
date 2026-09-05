@@ -72,7 +72,7 @@ interface PrimeSdkModules {
   };
 }
 
-interface PrimeSdkSession {
+export interface PrimeSdkSession {
   readonly agent: { readonly state: { readonly messages: readonly unknown[] } };
   prompt(prompt: string): Promise<void>;
   waitForIdle(): Promise<void>;
@@ -80,6 +80,7 @@ interface PrimeSdkSession {
   requestAbort(): void;
   abort(): Promise<void>;
   disposeAsync(): Promise<void>;
+  subscribe(listener: (event: unknown) => void): () => void;
 }
 type PrimeSdkRegistry = {
   registerProvider(provider: string, config: unknown): void;
@@ -92,154 +93,103 @@ type SharedRegistry = {
 };
 const sharedRegistries = new Map<string, SharedRegistry>();
 
+export interface PrimeP1DevelopmentSdkSession {
+  readonly session: PrimeSdkSession;
+  unregister(): void;
+  readonly control: { state: "open" | "cancelled" | "closed" };
+}
+
+/** Internal construction seam shared by the bounded P1 development slices. */
+export async function openPrimeP1DevelopmentSdkSession(
+  options: PrimeP1DevelopmentSessionOptions,
+  limits: Readonly<{ model: number; tool: number }>,
+  settings: unknown = {
+    retry: { enabled: false, provider: { maxRetries: 0 } },
+    autoRefine: { enabled: false },
+    compaction: { enabled: false },
+  },
+): Promise<PrimeP1DevelopmentSdkSession> {
+  if (!isAbsolute(options.primeSourceRoot) || !isAbsolute(options.workspace)) {
+    throw new Error("primeSourceRoot and workspace must be absolute paths");
+  }
+  const primeSourceRoot = await canonicalPrimeSourceRoot(options.primeSourceRoot);
+  const modules = await loadPrimeSdk(primeSourceRoot);
+  const identity = randomUUID();
+  const provider = `asterion-p1-development-${identity}`;
+  const modelId = `p1-development-${identity}`;
+  const control: { state: "open" | "cancelled" | "closed" } = { state: "open" };
+  let shared = sharedRegistries.get(primeSourceRoot);
+  if (!shared) {
+    const auth = modules.AuthStorage.inMemory();
+    shared = { auth, registry: modules.ModelRegistry.inMemory(auth) };
+    sharedRegistries.set(primeSourceRoot, shared);
+  }
+  shared.auth.setRuntimeApiKey(provider, "in-memory-development-provider");
+  const registry = shared.registry;
+  let modelCalls = 0;
+  let toolCalls = 0;
+  registry.registerProvider(provider, {
+    api: `asterion-p1-development-${identity}`, baseUrl: "http://127.0.0.1:0", apiKey: "in-memory-development-provider",
+    streamSimple: (model: unknown, context: unknown, streamOptions: unknown) => {
+      assertCallbackAllowed(control);
+      if (++modelCalls > limits.model) throw new Error("Prime P1 development model callback limit exceeded");
+      const stream = options.model(model, context, streamOptions);
+      assertAssistantEventStream(stream);
+      return stream;
+    },
+    models: [{ id: modelId, name: modelId, reasoning: false, input: ["text"], contextWindow: 16_384, maxTokens: 4_096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }],
+  });
+  const model = registry.find(provider, modelId);
+  if (!model) throw new Error("Prime P1 development model registration failed");
+  const agentDir = join(options.workspace, ".asterion-prime-p1-development");
+  const settingsManager = modules.SettingsManager.inMemory(settings);
+  const resourceLoader = new modules.DefaultResourceLoader({
+    cwd: options.workspace, agentDir, settingsManager, noExtensions: true, noSkills: true,
+    noPromptTemplates: true, noThemes: true, noContextFiles: true, bundledSkillsDir: null,
+  });
+  const customIpython = {
+    name: "ipython", description: "Caller-owned IPython execution bridge.", label: "ipython",
+    parameters: modules.Type.Object({ code: modules.Type.String() }),
+    execute: async (toolCallId: string, input: { code: string }, signal: AbortSignal) => {
+      assertCallbackAllowed(control);
+      if (++toolCalls > limits.tool) throw new Error("Prime P1 development ipython callback limit exceeded");
+      return options.ipython(toolCallId, Object.freeze({ code: input.code }), signal);
+    },
+  };
+  const created = await modules.createAgentSession({
+    cwd: options.workspace, agentDir, authStorage: shared.auth, modelRegistry: registry, model,
+    sessionManager: modules.SessionManager.inMemory(options.workspace), settingsManager, resourceLoader,
+    tools: ["ipython"], allowedToolNames: ["ipython"], initialActiveToolNames: ["ipython"], customTools: [customIpython],
+    includeGoals: false, includeCompactSkill: false, prewarmIpythonKernel: false, serializedRefine: true, telemetryDisabled: true,
+  });
+  return Object.freeze({ session: created.session, control, unregister: () => registry.unregisterProvider(provider) });
+}
+
 /** A deliberately narrow development-only bridge to a caller-owned Prime SDK checkout. */
 export class PrimeP1DevelopmentSession {
   #state: "open" | "cancelled" | "closed" = "open";
   readonly #session: PrimeSdkSession;
-  readonly #registry: { unregisterProvider(provider: string): void };
-  readonly #provider: string;
+  readonly #unregister: () => void;
   readonly #control: { state: "open" | "cancelled" | "closed" };
 
   private constructor(
     session: PrimeSdkSession,
-    registry: { unregisterProvider(provider: string): void },
-    provider: string,
+    unregister: () => void,
     control: { state: "open" | "cancelled" | "closed" },
   ) {
     this.#session = session;
-    this.#registry = registry;
-    this.#provider = provider;
+    this.#unregister = unregister;
     this.#control = control;
   }
 
   static async open(
     options: PrimeP1DevelopmentSessionOptions,
   ): Promise<PrimeP1DevelopmentSession> {
-    if (
-      !isAbsolute(options.primeSourceRoot) ||
-      !isAbsolute(options.workspace)
-    ) {
-      throw new Error("primeSourceRoot and workspace must be absolute paths");
-    }
-    const primeSourceRoot = await canonicalPrimeSourceRoot(
-      options.primeSourceRoot,
-    );
-    const modules = await loadPrimeSdk(primeSourceRoot);
-    const identity = randomUUID();
-    const provider = `asterion-p1-development-${identity}`;
-    const modelId = `p1-development-${identity}`;
-    const control: { state: "open" | "cancelled" | "closed" } = {
-      state: "open",
-    };
-    let shared = sharedRegistries.get(primeSourceRoot);
-    if (!shared) {
-      const auth = modules.AuthStorage.inMemory();
-      shared = { auth, registry: modules.ModelRegistry.inMemory(auth) };
-      sharedRegistries.set(primeSourceRoot, shared);
-    }
-    // Prime requires a configured model. This fixed marker is in-memory only and
-    // is never supplied to a network provider because streamSimple is injected.
-    shared.auth.setRuntimeApiKey(provider, "in-memory-development-provider");
-    const registry = shared.registry;
-    let modelCalls = 0;
-    let toolCalls = 0;
-    registry.registerProvider(provider, {
-      api: `asterion-p1-development-${identity}`,
-      baseUrl: "http://127.0.0.1:0",
-      apiKey: "in-memory-development-provider",
-      streamSimple: (
-        model: unknown,
-        context: unknown,
-        streamOptions: unknown,
-      ) => {
-        assertCallbackAllowed(control);
-        if (++modelCalls > MAX_MODEL_CALLS)
-          throw new Error("Prime P1 development model callback limit exceeded");
-        const stream = options.model(model, context, streamOptions);
-        assertAssistantEventStream(stream);
-        return stream;
-      },
-      models: [
-        {
-          id: modelId,
-          name: modelId,
-          reasoning: false,
-          input: ["text"],
-          contextWindow: 16_384,
-          maxTokens: 4_096,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        },
-      ],
+    const sdk = await openPrimeP1DevelopmentSdkSession(options, {
+      model: MAX_MODEL_CALLS,
+      tool: MAX_TOOL_CALLS,
     });
-    const model = registry.find(provider, modelId);
-    if (!model)
-      throw new Error("Prime P1 development model registration failed");
-    const agentDir = join(options.workspace, ".asterion-prime-p1-development");
-    const settingsManager = modules.SettingsManager.inMemory({
-      retry: { enabled: false, provider: { maxRetries: 0 } },
-      autoRefine: { enabled: false },
-      compaction: { enabled: false },
-    });
-    // DefaultResourceLoader is empty until reload(); never reload it here, since
-    // reload discovers workspace and ancestor resources.
-    const resourceLoader = new modules.DefaultResourceLoader({
-      cwd: options.workspace,
-      agentDir,
-      settingsManager,
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
-      bundledSkillsDir: null,
-    });
-    const customIpython = {
-      name: "ipython",
-      description: "Caller-owned IPython execution bridge.",
-      label: "ipython",
-      parameters: modules.Type.Object({ code: modules.Type.String() }),
-      execute: async (
-        toolCallId: string,
-        input: { code: string },
-        signal: AbortSignal,
-      ) => {
-        assertCallbackAllowed(control);
-        if (++toolCalls > MAX_TOOL_CALLS)
-          throw new Error(
-            "Prime P1 development ipython callback limit exceeded",
-          );
-        return options.ipython(
-          toolCallId,
-          Object.freeze({ code: input.code }),
-          signal,
-        );
-      },
-    };
-    const created = await modules.createAgentSession({
-      cwd: options.workspace,
-      agentDir,
-      authStorage: shared.auth,
-      modelRegistry: registry,
-      model,
-      sessionManager: modules.SessionManager.inMemory(options.workspace),
-      settingsManager,
-      resourceLoader,
-      tools: ["ipython"],
-      allowedToolNames: ["ipython"],
-      initialActiveToolNames: ["ipython"],
-      customTools: [customIpython],
-      includeGoals: false,
-      includeCompactSkill: false,
-      prewarmIpythonKernel: false,
-      serializedRefine: true,
-      telemetryDisabled: true,
-    });
-    return new PrimeP1DevelopmentSession(
-      created.session,
-      registry,
-      provider,
-      control,
-    );
+    return new PrimeP1DevelopmentSession(sdk.session, sdk.unregister, sdk.control);
   }
 
   async prompt(prompt: string): Promise<PrimeP1DevelopmentResult> {
@@ -264,7 +214,7 @@ export class PrimeP1DevelopmentSession {
     try {
       await this.#session.disposeAsync();
     } finally {
-      this.#registry.unregisterProvider(this.#provider);
+      this.#unregister();
     }
   }
 

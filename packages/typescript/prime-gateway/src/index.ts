@@ -201,6 +201,7 @@ export {
 export {
   PrimeP1DevelopmentSession,
 } from "./p1-development-session.js";
+export { PrimeP1BDevelopmentSession } from "./p1b-development-session.js";
 export {
   inheritedP1DevelopmentSocket,
   P1_DEVELOPMENT_GATEWAY_PROTOCOL,
@@ -215,6 +216,7 @@ export type {
   PrimeSdkIpythonCallback,
   PrimeSdkModelCallback,
 } from "./p1-development-session.js";
+export type { PrimeP1BCompactionWitness } from "./p1b-development-session.js";
 export type {
   PrimeContextDescription,
   PrimeContextBranchSummaryResult,
