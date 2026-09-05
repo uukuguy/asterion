@@ -49,6 +49,12 @@ export class PrimeP1BDevelopmentSession {
   async compact(): Promise<PrimeP1BCompactionWitness> {
     this.assertState("compact");
     const messagesBefore = this.#sdk.session.agent.state.messages.length;
+    assertSafeCount(messagesBefore, "before compaction");
+    const existingCompactionEntryIds = new Set(
+      this.#sdk.session.sessionManager.getEntries()
+        .filter((entry) => entry.type === "compaction")
+        .map((entry) => entry.id),
+    );
     let starts = 0;
     let ends = 0;
     const unsubscribe = this.#sdk.session.subscribe((event) => {
@@ -61,16 +67,29 @@ export class PrimeP1BDevelopmentSession {
       const result = await this.#sdk.session.compact();
       if (this.#state === "cancelled") throw new Error("Prime P1B development session is cancelled");
       const safe = result as { firstKeptEntryId?: unknown; tokensBefore?: unknown };
-      if (typeof safe.firstKeptEntryId !== "string" || typeof safe.tokensBefore !== "number") {
+      const messagesAfter = this.#sdk.session.agent.state.messages.length;
+      assertSafeCount(messagesAfter, "after compaction");
+      const newCompactionEntries = this.#sdk.session.sessionManager.getEntries().filter(
+        (entry) => entry.type === "compaction" && !existingCompactionEntryIds.has(entry.id),
+      );
+      if (
+        starts !== 1 ||
+        ends !== 1 ||
+        newCompactionEntries.length !== 1 ||
+        typeof safe.firstKeptEntryId !== "string" ||
+        typeof safe.tokensBefore !== "number" ||
+        !Number.isSafeInteger(safe.tokensBefore) ||
+        safe.tokensBefore < 0
+      ) {
         throw new Error("Prime P1B development compaction returned an invalid result");
       }
       this.#state = "prompt2";
       return Object.freeze({
         compact_called: true, succeeded: true, start_count: starts, end_count: ends,
         message_count_before: messagesBefore,
-        message_count_after: this.#sdk.session.agent.state.messages.length,
+        message_count_after: messagesAfter,
         tokens_before: safe.tokensBefore,
-        first_kept_entry_id_sha256: createHash("sha256").update(safe.firstKeptEntryId).digest("hex"),
+        first_kept_entry_id_sha256: `sha256:${createHash("sha256").update(safe.firstKeptEntryId).digest("hex")}`,
       });
     } finally {
       unsubscribe();
@@ -82,7 +101,6 @@ export class PrimeP1BDevelopmentSession {
     this.#state = "cancelled";
     this.#sdk.control.state = "cancelled";
     this.#sdk.session.requestAbort();
-    await this.#sdk.session.abort();
   }
 
   async close(): Promise<void> {
@@ -116,6 +134,9 @@ export class PrimeP1BDevelopmentSession {
 }
 
 function count(value: unknown): number { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0; }
+function assertSafeCount(value: number, phase: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`Prime P1B development has an invalid message count ${phase}`);
+}
 function safeStopReason(value: unknown): PrimeP1DevelopmentResult["assistant"]["stop_reason"] {
   return value === "stop" || value === "length" || value === "toolUse" || value === "error" || value === "aborted" ? value : "error";
 }

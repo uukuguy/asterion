@@ -74,6 +74,9 @@ interface PrimeSdkModules {
 
 export interface PrimeSdkSession {
   readonly agent: { readonly state: { readonly messages: readonly unknown[] } };
+  readonly sessionManager: {
+    getEntries(): readonly { readonly id?: unknown; readonly type?: unknown }[];
+  };
   prompt(prompt: string): Promise<void>;
   waitForIdle(): Promise<void>;
   compact(): Promise<unknown>;

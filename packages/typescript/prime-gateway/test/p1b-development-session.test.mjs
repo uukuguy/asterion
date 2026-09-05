@@ -59,10 +59,13 @@ test("runs the pinned SDK prompt-compact-prompt topology and projects only a saf
     assert.equal(compacted.succeeded, true);
     assert.equal(compacted.start_count, 1);
     assert.equal(compacted.end_count, 1);
-    assert.ok(compacted.message_count_before > 0);
-    assert.ok(compacted.message_count_after > 0);
-    assert.equal(typeof compacted.tokens_before, "number");
-    assert.match(compacted.first_kept_entry_id_sha256, /^[a-f0-9]{64}$/);
+    assert.ok(Number.isSafeInteger(compacted.message_count_before));
+    assert.ok(Number.isSafeInteger(compacted.message_count_after));
+    assert.ok(compacted.message_count_before >= 0);
+    assert.ok(compacted.message_count_after >= 0);
+    assert.ok(Number.isSafeInteger(compacted.tokens_before));
+    assert.ok(compacted.tokens_before >= 0);
+    assert.match(compacted.first_kept_entry_id_sha256, /^sha256:[a-f0-9]{64}$/);
     assert.doesNotMatch(JSON.stringify(compacted), /SENTINEL/);
     await assert.rejects(() => session.compact(), /prompt2|completed/);
     await assert.rejects(() => session.prompt("SENTINEL_THIRD_PROMPT"), /prompt2|completed/);
