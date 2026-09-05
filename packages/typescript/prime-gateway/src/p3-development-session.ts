@@ -394,6 +394,8 @@ export class PrimeP3DevelopmentSession {
     if (!child || child !== this.#childSessions.get(childId)) throw new Error("P3 retained RLM child is unavailable");
     await child.prompt(prompt);
     await child.waitForIdle();
+    if (latestAssistant(child).stopReason !== "stop")
+      throw new Error("P3 review follow-up did not complete");
     this.#usageByRole.set("review", usageOf(child));
     this.#followedUpReview = childId;
   }

@@ -56,3 +56,35 @@ test("runs SDK-owned depth-one children and retains the review session for follo
     assert.deepEqual(result.usage, { root: { input_tokens: 12, output_tokens: 8, total_tokens: 20 }, implementation: { input_tokens: 6, output_tokens: 4, total_tokens: 10 }, review: { input_tokens: 12, output_tokens: 8, total_tokens: 20 } });
   } finally { await session.close(); }
 });
+
+test("rejects an error terminal from the retained review follow-up", async () => {
+  const { PrimeP3DevelopmentSession } = await import("../dist/src/index.js");
+  const { createAssistantMessageEventStream } = await streamFactory();
+  const workspace = await mkdtemp(join(tmpdir(), "asterion-p3-follow-up-error-"));
+  const calls = { root: 0, implementation: 0, review: 0 };
+  let session;
+  session = await PrimeP3DevelopmentSession.open({
+    primeSourceRoot, workspace,
+    model: (role) => {
+      calls[role] += 1;
+      const stream = createAssistantMessageEventStream();
+      const tool = calls[role] === 1 || (role === "review" && calls[role] === 3);
+      const stopReason = role === "review" && calls.review === 4 ? "error" : tool ? "toolUse" : "stop";
+      const message = { role: "assistant", api: "anthropic-messages", provider: "test", model: role,
+        content: tool ? [{ type: "toolCall", id: `${role}-${calls[role]}`, name: "ipython", arguments: { code: "fixed" } }] : [{ type: "text", text: "done" }], usage: usage(), stopReason, timestamp: Date.now() };
+      queueMicrotask(() => { stream.push({ type: "start", partial: { ...message, content: [] } }); stream.push({ type: "done", reason: stopReason, message }); });
+      return stream;
+    },
+    ipython: async (role) => {
+      if (role === "root") {
+        const implementation = await session.spawn("implementation", "implement");
+        const review = await session.spawn("review", "review");
+        await session.wait(implementation.rlm_child_id); await session.wait(review.rlm_child_id);
+        await assert.rejects(() => session.followUp(review.rlm_child_id, "verify"), /follow-up did not complete/);
+        await session.delete(implementation.rlm_child_id); await session.delete(review.rlm_child_id);
+      }
+      return { content: [], details: {}, isError: false };
+    },
+  });
+  try { await assert.rejects(() => session.prompt("fixed")); } finally { await session.close(); }
+});
