@@ -14,6 +14,7 @@ from asterion.runtime.host import (
 )
 from asterion.runtime.protocol import ProtocolError
 from asterion.runtimes.prime_agent_host import (
+    PrimeSmallVerificationCancelled,
     PrimeSmallVerificationRequest,
     PrimeSmallVerificationResult,
     PrimeSmallVerificationService,
@@ -55,10 +56,16 @@ class PrimeAgentRuntimeClient(AgentRuntimeClient):
         ):
             raise PrimeAgentRuntimeError("Prime runtime tool is not declared")
         if signal is not None and signal.cancelled:
-            raise asyncio.CancelledError
+            for event in _cancelled_events(request.run_id):
+                yield event
+            return
         verification = PrimeSmallVerificationRequest(request.run_id)
         try:
             result = await self._service.verify(verification, signal=signal)
+        except PrimeSmallVerificationCancelled:
+            for event in _cancelled_events(request.run_id):
+                yield event
+            return
         except asyncio.CancelledError:
             raise
         except BaseException:
@@ -114,6 +121,23 @@ class PrimeAgentRuntimeClient(AgentRuntimeClient):
             type="run.completed",
             payload={"status": "completed"},
         )
+
+
+def _cancelled_events(run_id: str) -> tuple[RunEvent, RunEvent]:
+    return (
+        RunEvent(
+            run_id=run_id,
+            sequence=1,
+            type="run.started",
+            payload={"capabilities": [PRIME_IPYTHON_CAPABILITY]},
+        ),
+        RunEvent(
+            run_id=run_id,
+            sequence=2,
+            type="run.completed",
+            payload={"status": "cancelled"},
+        ),
+    )
 
 
 __all__ = ("PRIME_IPYTHON_CAPABILITY", "PRIME_RUNTIME_ID", "PrimeAgentRuntimeClient")

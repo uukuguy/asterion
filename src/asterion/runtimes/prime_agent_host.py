@@ -19,6 +19,13 @@ class PrimeSmallVerificationContractError(ValueError):
     """Raised when a public Prime verification value is malformed."""
 
 
+class PrimeSmallVerificationCancelled(RuntimeError):
+    """Public-safe result of cancellation requested through the host signal."""
+
+    def __init__(self) -> None:
+        super().__init__("Prime verification was cancelled")
+
+
 @dataclass(frozen=True)
 class PrimeSmallVerificationRequest:
     run_id: str
@@ -60,6 +67,7 @@ class PrimeSmallVerificationService(Protocol):
 
 __all__ = (
     "PrimeSmallVerificationContractError",
+    "PrimeSmallVerificationCancelled",
     "PrimeSmallVerificationRequest",
     "PrimeSmallVerificationResult",
     "PrimeSmallVerificationService",

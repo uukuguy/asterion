@@ -21,6 +21,7 @@ from asterion.applications.prime_agent.operator.p1b_development_docker import P1
 from asterion.applications.prime_agent.operator.p1b_development_host import run_prime_p1b_development
 from asterion.runtime.host import CancellationSignal
 from asterion.runtimes.prime_agent_host import (
+    PrimeSmallVerificationCancelled,
     PrimeSmallVerificationRequest,
     PrimeSmallVerificationResult,
 )
@@ -92,7 +93,7 @@ class PrimeSmallVerificationService:
             raise PrimeP1CliHostError()
         self._consumed = True
         if _cancelled(signal):
-            raise asyncio.CancelledError
+            raise PrimeSmallVerificationCancelled()
         task = asyncio.create_task(
             run_prime_p1b_development(
                 image_digest=self._resources.image_digest,
@@ -110,6 +111,10 @@ class PrimeSmallVerificationService:
             return PrimeSmallVerificationResult(
                 run_id=request.run_id, trace_sha256=trace.trace_sha256
             )
+        except PrimeSmallVerificationCancelled:
+            task.cancel()
+            await _shielded_wait(task)
+            raise
         except asyncio.CancelledError:
             task.cancel()
             await _shielded_wait(task)
@@ -343,7 +348,7 @@ def _cancelled(signal: CancellationSignal | None) -> bool:
 async def _await_with_cancellation(task: asyncio.Task[object], signal: CancellationSignal | None) -> object:
     while not task.done():
         if _cancelled(signal):
-            raise asyncio.CancelledError
+            raise PrimeSmallVerificationCancelled()
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=0.05)
         except TimeoutError:
@@ -366,6 +371,7 @@ async def _shielded_wait(task: asyncio.Task[object]) -> None:
 
 
 __all__ = (
-    "PrimeP1CliHostError", "PrimeSmallVerificationService",
+    "PrimeP1CliHostError", "PrimeSmallVerificationCancelled",
+    "PrimeSmallVerificationService",
     "create_host_service_factory", "create_prime_p1_cli_factory",
 )

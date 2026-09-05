@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 import re
 
@@ -59,8 +60,11 @@ class PrimeIpythonCodingImplementation:
             or tuple(event.type for event in parsed)
             != ("run.started", "artifact.created", "run.completed")
             or parsed[0].payload != {"capabilities": ["prime.tool.ipython"]}
-            or parsed[-1].payload != {"status": "completed"}
         ):
+            raise CapabilityExecutionError("Prime runtime did not complete")
+        if parsed[-1].payload == {"status": "cancelled"}:
+            raise asyncio.CancelledError
+        if parsed[-1].payload != {"status": "completed"}:
             raise CapabilityExecutionError("Prime runtime did not complete")
         artifact = parsed[1].payload.get("artifact")
         if not isinstance(artifact, dict) or artifact != {

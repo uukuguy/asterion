@@ -26,7 +26,8 @@ def _context(**changes: object) -> HostServiceFactoryContext:
 
 
 class _Signal:
-    cancelled = False
+    def __init__(self) -> None:
+        self.cancelled = False
 
 
 class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
@@ -201,6 +202,41 @@ class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0)
                 task.cancel()
                 with self.assertRaises(asyncio.CancelledError):
+                    await task
+        self.assertTrue(completed.is_set())
+
+    async def test_signal_flip_cancels_p1b_then_returns_public_outcome(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        ready = subject._P1CliResources(  # type: ignore[attr-defined]
+            image_digest="sha256:" + "a" * 64, transport=object(), operator_config={},
+            node_bin="/operator/node", entrypoint="/operator/bridge.js", prime_source_root="/operator/prime",
+        )
+        started = asyncio.Event()
+        completed = asyncio.Event()
+        signal = _Signal()
+
+        async def pending(**_: object) -> object:
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                completed.set()
+
+        binding = subject.create_prime_p1_cli_factory(repo_root=Path("/unavailable"))
+        with (
+            patch.object(subject, "_preflight", return_value=ready),
+            patch.object(subject, "run_prime_p1b_development", side_effect=pending),
+        ):
+            async with binding.factory(_context()) as service:
+                task = asyncio.create_task(
+                    service.verify(
+                        PrimeSmallVerificationRequest("caller-run-1"), signal=signal
+                    )
+                )
+                await started.wait()
+                signal.cancelled = True
+                with self.assertRaises(subject.PrimeSmallVerificationCancelled):
                     await task
         self.assertTrue(completed.is_set())
 
