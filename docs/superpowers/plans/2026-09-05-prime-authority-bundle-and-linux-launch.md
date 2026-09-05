@@ -4,7 +4,7 @@
 
 **Goal:** Deliver the trusted Linux execution boundary needed by Prime P1, then reuse it for the remaining six scenarios.
 
-**Architecture:** The operator-owned manager launches distinct-identity supervisor, authority and application processes in one Linux guest. Authority code runs from an exact immutable CPython bundle; executable, code bundle and launch policy have separate identities. A parsed record never grants execution authority.
+**Architecture:** The operator-owned manager also serves as trusted supervisor and launches authority and application processes under distinct identities in one Linux guest. Authority code runs from an exact immutable CPython bundle; executable, code bundle and launch policy have separate identities. A parsed record never grants execution authority.
 
 **Tech Stack:** Python orchestration and unittest; Linux Unix sockets, peer credentials and process/FD ownership; existing Prime runtime and Docker worker; current public Asterion contracts.
 
@@ -59,7 +59,7 @@ Canonical bundle hashing binds the exact inventory format/version, target and en
 
 ## Task 3: manager, supervisor and authority process path
 
-**Create:** `src/asterion/applications/prime_agent/operator/authority_manager.py`, `src/asterion/applications/prime_agent/operator/authority_supervisor.py`, `tests/test_prime_authority_linux_launch.py`.
+**Development implementation:** `operator/authority_linux_launch.py`, `operator/authority_linux_policy.py`, then `operator/authority_qualification.py`, `operator/authority_qualification_entry.py` and their focused tests. The manager owns the trusted supervisor role; no additional supervisor process is required.
 **Integrate:** `authority_process.py`, existing admission/configuration and exact runtime proxy.
 
 **Consumes:** admitted bundle, exact operator identities, finite scenario profile, authority-only configuration and key descriptors.
@@ -198,6 +198,48 @@ native implementation, not handwritten ctypes signal-action structures.
 Verify repeated WNOWAIT observations before final reap, non-restoration of
 dangerous actions on every outcome, no signaling after ECHILD, actual timeout,
 concurrent lifecycle cleanup, and restoration-failure redaction/cleanup.
+
+### Active development slice: real qualification IPC (Astra, 2026-09-06)
+
+The trusted manager may also be the supervisor: both roles are in the operator
+TCB. Authority remains a separate UID; the later untrusted application uses a
+different UID. The manager owns connection, authenticated result verification,
+cancellation, final safe rendering and reaping. Authority creates its own
+`SOCK_SEQPACKET` listener after privilege drop, binds `authority.sock` in the
+FD5 runtime directory, and accepts one connection. Both sides check exact
+`SO_PEERCRED` PID/UID before sending protocol data.
+
+FD6 contains canonical JSON with exactly: `format` equal to
+`asterion.prime-p1-authority-launch-instance/v2`, `purpose=qualification`,
+`run_id`, `session_id`, `supervisor_pid`, `supervisor_uid`, `runtime_identity`
+(the three full I/B/P field names), `request_contract_sha256`,
+`resource_set_sha256`, `application_request_sha256`, and
+`workload_id=bounded-ipc-qualification-v1`. All identities are manager-owned;
+there is no authority PID or configurable command/path in this instance.
+
+Use the separate `asterion.prime-p1-authority-qualification-ipc/v2` protocol and
+the same bytes plus NUL as the HMAC domain. FD4 supplies exactly 32 session-key
+bytes, not a production receipt key. Reuse the existing canonical/HMAC/strict
+validation algorithms without changing v1 constants or receipt semantics.
+Authority emits ready sequence 0 and terminal sequence 1; manager sends execute
+sequence 0 and optionally cancel sequence 1. Frames bind run/session, I/B/P and
+the exact request/resource/application identities. Authority checks I/B/P
+against FD8 release data; manager checks them against its admitted identity.
+
+The immutable bootstrap restores CLOEXEC on 3–9 and validates prefix/import
+roots. After exec, reset/verify dumpable and parent-death policy before reading
+secret descriptors. The self-contained qualification entry performs only fixed
+finite deterministic work and checks cancellation/deadline. A terminal reports
+qualification `completed`, `failed` or `cancelled`; it is never a production
+PASS, receipt or evidence ID. Manager returns completed only after an authentic
+terminal and child reaping. EOF, timeout or forced kill cannot create a terminal.
+
+First implement a real normal exchange, then cancellation/reaping and key
+peer/identity/HMAC rejection assertions. Do not require release catalogs,
+complete mapping certification or another full promotion run before developing
+this unpromoted path. The next integration point is the workload function after
+execute validation: connect the existing P1 worker/model/oracle there and reuse
+the same manager connection and cleanup path.
 
 ## Task 4: semantic scenario qualification and reuse
 
