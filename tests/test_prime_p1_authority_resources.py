@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import asyncio
 import hashlib
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -194,6 +195,19 @@ def _artifacts_with_two_oci_configs() -> tuple[ImageArtifact, ...]:
 
 
 class TestPrimeP1AuthorityResources(unittest.TestCase):
+    def test_authority_artifact_paths_are_lexicographically_sorted(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_artifact_lock as module
+
+        descriptor = module._package_root() / "resources" / "authority-artifact-lock.json"
+        packaged = tuple(
+            item["path"] for item in json.loads(descriptor.read_bytes())["artifacts"]
+        )
+        self.assertEqual(
+            module._EXPECTED_ARTIFACT_PATHS,
+            tuple(sorted(module._EXPECTED_ARTIFACT_PATHS)),
+        )
+        self.assertEqual(packaged, tuple(sorted(packaged)))
+
     def _config(self) -> object:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
             path = Path(temp) / "operator.env"
@@ -330,6 +344,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
 
         artifacts = _artifact_lock()
+        application = _application_resources()
         static = AdmittedStaticAuthorityResources(
             object(),
             _CountingResource([], "nested"),
@@ -343,6 +358,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         socket = _socket()
         original_static_close = AdmittedStaticAuthorityResources.close
         original_artifacts_close = AdmittedPrimeP1AuthorityArtifacts.close
+        original_application_close = AdmittedPrimeP1ApplicationResources.close
         original_evidence_close = AdmittedPrimeP1EvidenceRoot.close
         original_docker_close = AdmittedPrimeP1DockerExecutable.close
         original_socket_close = AdmittedPrimeP1DockerSocket.close
@@ -354,6 +370,10 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         def close_artifacts(resource: AdmittedPrimeP1AuthorityArtifacts) -> None:
             events.append("artifacts")
             original_artifacts_close(resource)
+
+        def close_application(resource: AdmittedPrimeP1ApplicationResources) -> None:
+            events.append("application")
+            original_application_close(resource)
 
         def close_evidence(resource: AdmittedPrimeP1EvidenceRoot) -> None:
             events.append("evidence")
@@ -369,6 +389,9 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
 
         with (
             patch.object(module, "admit_authority_artifact_lock", return_value=artifacts) as admit_artifacts,
+            patch.object(
+                module, "admit_prime_p1_application_resources", return_value=application
+            ) as admit_application,
             patch.object(
                 module, "admit_static_authority_resources", return_value=static
             ) as admit_static,
@@ -386,6 +409,12 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 "close",
                 autospec=True,
                 side_effect=close_artifacts,
+            ),
+            patch.object(
+                AdmittedPrimeP1ApplicationResources,
+                "close",
+                autospec=True,
+                side_effect=close_application,
             ),
             patch.object(
                 AdmittedStaticAuthorityResources,
@@ -414,6 +443,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         ):
             resources = admit_production_authority_resources(config)
             admit_artifacts.assert_called_once_with()
+            admit_application.assert_called_once_with()
             admit_static.assert_called_once_with(config)
             admit_evidence.assert_called_once_with(config)
             admit_docker.assert_called_once_with(config)
@@ -428,7 +458,10 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 thread.start()
             for thread in threads:
                 thread.join()
-        self.assertEqual(events, ["socket", "docker", "evidence", "static", "artifacts"])
+        self.assertEqual(
+            events,
+            ["socket", "docker", "evidence", "static", "application", "artifacts"],
+        )
 
     def test_evidence_failure_closes_static_once_in_reverse_acquisition_order(
         self,

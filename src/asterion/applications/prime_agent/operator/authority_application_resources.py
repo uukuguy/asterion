@@ -20,13 +20,13 @@ _PROTOCOL: Final = "asterion.prime-p1-application-resource-lock/v1"
 _DESCRIPTOR_PARTS: Final = ("resources", "prime-p1-application-resource-lock.json")
 _EXPECTED_PATHS: Final = (
     "applications/prime_agent/assemblies/prime-ipython-coding.json",
-    "capabilities/prime_agent/payload/capability-package.json",
-    "capabilities/prime_agent/payload/capabilities/ipython-coding.json",
-    "capabilities/prime_agent/payload/resources/prime-ipython-coding.fixture",
     "applications/prime_agent/operator/image/fixture/fixture-lock.json",
-    "applications/prime_agent/operator/image/fixture/starter/solution.py",
     "applications/prime_agent/operator/image/fixture/oracle/oracle.py",
+    "applications/prime_agent/operator/image/fixture/starter/solution.py",
     "applications/prime_agent/operator/image/launcher.py",
+    "capabilities/prime_agent/payload/capabilities/ipython-coding.json",
+    "capabilities/prime_agent/payload/capability-package.json",
+    "capabilities/prime_agent/payload/resources/prime-ipython-coding.fixture",
 )
 _DIRECTORY_FLAGS: Final = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
 _FILE_FLAGS: Final = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)

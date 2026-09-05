@@ -54,3 +54,30 @@ During focused verification, one authority-process test exposed global mocking
 of `os.close`; the verifier now captures the close primitive at import time,
 matching the existing artifact-lock verifier and preserving descriptor cleanup
 test isolation.
+
+## Review-fix evidence (2026-09-05)
+
+- RED: the added lexical-order assertions failed before the fix because both
+  declared tuples were non-lexical. The application tuple put capability paths
+  before application image paths; the artifact tuple put
+  `authority_artifact_lock.py` before
+  `authority_application_resources.py`.
+- GREEN:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_artifact_lock tests.test_prime_p1_authority_application_resources tests.test_prime_p1_authority_request_contract tests.test_prime_p1_authority_resources
+Ran 41 tests in 0.069s
+OK
+
+uv run ruff check src/asterion/applications/prime_agent/operator/authority_application_resources.py src/asterion/applications/prime_agent/operator/authority_artifact_lock.py tests/test_prime_p1_authority_application_resources.py tests/test_prime_p1_authority_resources.py
+All checks passed!
+
+authority artifact digests: verified
+git diff --check
+exit 0
+```
+
+- Regression coverage now asserts sorted code/JSON paths, descriptor schema,
+  identity, and digest mutation rejection, hardlink creation during a read,
+  and aggregate acquisition/cleanup ordering with the application child
+  immediately after/before the artifact child respectively.
