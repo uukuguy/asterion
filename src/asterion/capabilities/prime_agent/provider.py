@@ -54,16 +54,23 @@ class PrimeIpythonCodingImplementation:
             parsed = parse_event_stream(event.to_mapping() for event in events)
         except Exception as error:
             raise CapabilityExecutionError("Prime runtime result is invalid") from error
+        if any(event.run_id != invocation.run_id for event in parsed):
+            raise CapabilityExecutionError("Prime runtime result is invalid")
+        if (
+            len(parsed) == 2
+            and tuple(event.type for event in parsed)
+            == ("run.started", "run.completed")
+            and parsed[0].payload == {"capabilities": ["prime.tool.ipython"]}
+            and parsed[-1].payload == {"status": "cancelled"}
+        ):
+            raise asyncio.CancelledError
         if (
             len(parsed) != 3
-            or any(event.run_id != invocation.run_id for event in parsed)
             or tuple(event.type for event in parsed)
             != ("run.started", "artifact.created", "run.completed")
             or parsed[0].payload != {"capabilities": ["prime.tool.ipython"]}
         ):
             raise CapabilityExecutionError("Prime runtime did not complete")
-        if parsed[-1].payload == {"status": "cancelled"}:
-            raise asyncio.CancelledError
         if parsed[-1].payload != {"status": "completed"}:
             raise CapabilityExecutionError("Prime runtime did not complete")
         artifact = parsed[1].payload.get("artifact")

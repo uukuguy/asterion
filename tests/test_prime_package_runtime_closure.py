@@ -26,6 +26,7 @@ from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegist
 from asterion.runtime.host import RunEvent, RunRequest
 from asterion.runtimes.prime_agent import PrimeAgentRuntimeClient, PrimeAgentRuntimeError
 from asterion.runtimes.prime_agent_host import (
+    PrimeSmallVerificationCancelled,
     PrimeSmallVerificationRequest,
     PrimeSmallVerificationResult,
 )
@@ -279,6 +280,51 @@ class TestPrimePackageRuntimeClosure(unittest.TestCase):
         for bad in ("invalid", PrimeSmallVerificationResult(run_id="other", trace_sha256="sha256:" + "b" * 64)):
             with self.subTest(bad=type(bad).__name__), self.assertRaisesRegex(Exception, "Prime"):
                 asyncio.run(execute(bad))
+
+    def test_cancelled_runtime_stream_cancels_the_capability(self) -> None:
+        run_id = "prime-cancelled-run"
+        manifest = json.loads(
+            (Path(__file__).parents[1] / "src/asterion/capabilities/prime_agent/payload/capabilities/ipython-coding.json").read_text()
+        )
+
+        async def collect() -> tuple[RunEvent, ...]:
+            return tuple(
+                [
+                    event
+                    async for event in PrimeAgentRuntimeClient(
+                        _VerificationService(PrimeSmallVerificationCancelled())
+                    ).run(
+                        RunRequest(
+                            run_id=run_id,
+                            input_text="fixed-small-verification",
+                            requested_capabilities=("prime.tool.ipython",),
+                        )
+                    )
+                ]
+            )
+
+        self.assertEqual(
+            tuple(event.type for event in asyncio.run(collect())),
+            ("run.started", "run.completed"),
+        )
+
+        async def execute() -> object:
+            return await PrimeIpythonCodingImplementation().execute(
+                CapabilityInvocation(
+                    capability_ref=CapabilityRef("prime.ipython-coding", "1.0.0"),
+                    manifest=manifest,
+                    run_id=run_id,
+                    input_text="fixed-small-verification",
+                    upstream_artifacts=(),
+                    runtime=PrimeAgentRuntimeClient(
+                        _VerificationService(PrimeSmallVerificationCancelled())
+                    ),
+                    host_services={},
+                )
+            )
+
+        with self.assertRaises(asyncio.CancelledError):
+            asyncio.run(execute())
 
     def test_host_failure_is_redacted_and_cancellation_is_rethrown(self) -> None:
         run_id = "prime-failure-run"
