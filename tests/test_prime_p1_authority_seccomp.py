@@ -839,6 +839,40 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                     with self.assertRaises(OSError):
                         os.fstat(fd)
 
+    def test_consume_revalidates_before_the_mocked_memfd_boundary(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                source = resource._fds
+                with patch.object(
+                    module,
+                    "_make_sealed_memfd",
+                    side_effect=lambda _: os.open(profile, os.O_RDONLY | os.O_CLOEXEC),
+                ) as sealed:
+                    result = resource._consume_sealed_memfd()
+                try:
+                    self.assertEqual(os.read(result, len(_PROFILE) + 1), _PROFILE)
+                    sealed.assert_called_once_with(_PROFILE)
+                finally:
+                    os.close(result)
+                for fd in source:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+
     def test_consume_missing_linux_seal_support_never_creates_memfd(self) -> None:
         from asterion.applications.prime_agent.operator.authority_seccomp import (
             PrimeP1AuthorityResourceError,

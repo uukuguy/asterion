@@ -102,7 +102,7 @@ class AdmittedPrimeP1SeccompResource:
                 else:
                     self._consumed[0] = True
                     try:
-                        data = _revalidated_profile_bytes(self)
+                        data = _revalidated_profile_bytes(self, allow_consumed=True)
                         result = _make_sealed_memfd(data)
                     except BaseException:
                         failed = True
@@ -188,13 +188,15 @@ def revalidate_static_seccomp_resource(resource: object) -> None:
         raise PrimeP1AuthorityResourceError() from None
 
 
-def _revalidated_profile_bytes(resource: AdmittedPrimeP1SeccompResource) -> bytes:
+def _revalidated_profile_bytes(
+    resource: AdmittedPrimeP1SeccompResource, *, allow_consumed: bool = False
+) -> bytes:
     """Read a profile only while the resource lock is held by the caller."""
     fds: tuple[int, ...] = ()
     try:
         if (
             resource._closed[0]
-            or resource._consumed[0]
+            or (resource._consumed[0] and not allow_consumed)
             or _chain_identities(resource._fds) != resource._identities
         ):
             raise ValueError
