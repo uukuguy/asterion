@@ -32,6 +32,23 @@ _GOLDEN = (
     b'"workload_sha256":"f4ebce1e8a4576db9235f6d8c67dffd9718931f64a07960e1d83b3809d3ce022"}'
 )
 _DIGEST = "b574630f0d31c7ea92f93812389a8efe79ac4b953da04797a2d598329f99aa34"
+_ALLOWED_IMPORT_MODULES = frozenset({"__future__", "hashlib", "json"})
+
+
+def _has_only_allowed_imports(source: str) -> bool:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level != 0 or node.module is None:
+                return False
+            modules.add(node.module)
+    return modules <= _ALLOWED_IMPORT_MODULES
 
 
 class TestPrimeP1AuthorityRequestContract(unittest.TestCase):
@@ -94,30 +111,7 @@ class TestPrimeP1AuthorityRequestContract(unittest.TestCase):
         import asterion.applications.prime_agent.operator.authority_request_contract as module
 
         source = Path(inspect.getfile(module)).read_text(encoding="utf-8")
-        imports = {
-            alias.name.split(".")[0]
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.Import)
-            for alias in node.names
-        } | {
-            (node.module or "").split(".")[0]
-            for node in ast.walk(ast.parse(source))
-            if isinstance(node, ast.ImportFrom)
-        }
-        self.assertTrue(
-            imports.isdisjoint(
-                {
-                    "authority_config",
-                    "authority_resources",
-                    "docker",
-                    "model_session_host",
-                    "network",
-                    "os",
-                    "socket",
-                    "subprocess",
-                }
-            )
-        )
+        self.assertTrue(_has_only_allowed_imports(source))
         decoded = json.loads(canonical_prime_p1_request_contract_bytes())
         keys = {
             key.lower()
@@ -142,6 +136,13 @@ class TestPrimeP1AuthorityRequestContract(unittest.TestCase):
                 }
             )
         )
+
+    def test_import_allowlist_rejects_absolute_authority_host_import(self) -> None:
+        hostile_source = (
+            "from asterion.applications.prime_agent.operator.model_session_host "
+            "import PrimeP1ModelSessionHost\n"
+        )
+        self.assertFalse(_has_only_allowed_imports(hostile_source))
 
 
 def _walk(value: object) -> tuple[object, ...]:
