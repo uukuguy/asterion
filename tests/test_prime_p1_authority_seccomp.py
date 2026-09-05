@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import fcntl
 from pathlib import Path
 import tempfile
 import threading
@@ -767,6 +768,184 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                 for fd in original:
                     with self.assertRaises(OSError):
                         os.fstat(fd)
+
+    def test_consume_sealed_memfd_returns_sealed_rewound_copy_and_closes_source(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        if not all(hasattr(fcntl, name) for name in (
+            "F_ADD_SEALS", "F_GET_SEALS", "F_SEAL_WRITE", "F_SEAL_GROW",
+            "F_SEAL_SHRINK", "F_SEAL_SEAL",
+        )) or not hasattr(os, "memfd_create"):
+            self.skipTest("sealed memfd syscalls are unavailable")
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                source = resource._fds
+                result = resource._consume_sealed_memfd()
+                try:
+                    self.assertEqual(os.lseek(result, 0, os.SEEK_CUR), 0)
+                    self.assertEqual(os.read(result, len(_PROFILE) + 1), _PROFILE)
+                    seals = fcntl.fcntl(result, fcntl.F_GET_SEALS)
+                    self.assertEqual(seals, fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL)
+                    self.assertTrue(fcntl.fcntl(result, fcntl.F_GETFD) & fcntl.FD_CLOEXEC)
+                finally:
+                    os.close(result)
+                for fd in source:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+
+    def test_consume_on_non_linux_has_no_memfd_effect_and_closes_source(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                source = resource._fds
+                with (
+                    patch.object(module.sys, "platform", "darwin"),
+                    patch.object(module.os, "memfd_create", side_effect=AssertionError("memfd"), create=True) as created,
+                    self.assertRaises(PrimeP1AuthorityResourceError) as raised,
+                ):
+                    resource._consume_sealed_memfd()
+                created.assert_not_called()
+                self.assertIsNone(raised.exception.__context__)
+                self.assertNotIn("SECCOMP_SECRET_SENTINEL", str(raised.exception))
+                for fd in source:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+
+    def test_consume_missing_linux_seal_support_never_creates_memfd(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                source = resource._fds
+                with (
+                    patch.object(module.fcntl, "F_ADD_SEALS", None, create=True),
+                    patch.object(module.os, "memfd_create", side_effect=AssertionError("memfd"), create=True) as created,
+                    self.assertRaises(PrimeP1AuthorityResourceError),
+                ):
+                    resource._consume_sealed_memfd()
+                created.assert_not_called()
+                for fd in source:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+
+    def test_consume_is_single_owner_under_a_dual_consumer_race(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                source = resource._fds
+                gate = threading.Barrier(3)
+                returned: list[int] = []
+                errors: list[BaseException] = []
+
+                def consume() -> None:
+                    gate.wait()
+                    try:
+                        returned.append(resource._consume_sealed_memfd())
+                    except BaseException as error:
+                        errors.append(error)
+
+                with (
+                    patch.object(module, "_revalidated_profile_bytes", return_value=_PROFILE),
+                    patch.object(module, "_make_sealed_memfd", side_effect=lambda _: os.open(profile, os.O_RDONLY | os.O_CLOEXEC)) as sealed,
+                ):
+                    workers = [threading.Thread(target=consume), threading.Thread(target=consume)]
+                    for worker in workers:
+                        worker.start()
+                    gate.wait()
+                    for worker in workers:
+                        worker.join(1)
+                self.assertEqual(sealed.call_count, 1)
+                self.assertEqual(len(returned), 1)
+                self.assertEqual(len(errors), 1)
+                self.assertIsInstance(errors[0], PrimeP1AuthorityResourceError)
+                os.close(returned[0])
+                for fd in source:
+                    with self.assertRaises(OSError):
+                        os.fstat(fd)
+
+    def test_close_wins_over_consume_without_creating_a_memfd(self) -> None:
+        from asterion.applications.prime_agent.operator.authority_seccomp import (
+            PrimeP1AuthorityResourceError,
+            admit_static_seccomp_resource,
+        )
+        import asterion.applications.prime_agent.operator.authority_seccomp as module
+        import asterion.applications.prime_agent.operator.seccomp_policy_lock as catalog_module
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
+            root = Path(temporary)
+            profile = root / "profile.json"
+            profile.write_bytes(_PROFILE)
+            profile.chmod(0o600)
+            config = self._config(root, profile)
+            with (
+                patch.object(module.sys, "platform", "linux"),
+                patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((_policy(),))),
+            ):
+                resource = admit_static_seccomp_resource(config)
+                resource.close()
+                with (
+                    patch.object(module, "_make_sealed_memfd", side_effect=AssertionError("memfd")) as sealed,
+                    self.assertRaises(PrimeP1AuthorityResourceError),
+                ):
+                    resource._consume_sealed_memfd()
+                sealed.assert_not_called()
 
 
 if __name__ == "__main__":

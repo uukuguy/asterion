@@ -74,6 +74,7 @@ class AdmittedPrimeP1SeccompResource:
     _sha256: str
     _lock: threading.Lock
     _closed: list[bool]
+    _consumed: list[bool]
 
     @property
     def sha256(self) -> str:
@@ -86,6 +87,33 @@ class AdmittedPrimeP1SeccompResource:
                 self._closed[0] = True
                 fds = self._fds
         _close_all(fds)
+
+    def _consume_sealed_memfd(self) -> int:
+        """Transfer the validated profile once as a sealed, caller-owned memfd."""
+        source: tuple[int, ...] = ()
+        result = -1
+        failed = False
+        if type(self) is not AdmittedPrimeP1SeccompResource:
+            failed = True
+        else:
+            with self._lock:
+                if self._closed[0] or self._consumed[0]:
+                    failed = True
+                else:
+                    self._consumed[0] = True
+                    try:
+                        data = _revalidated_profile_bytes(self)
+                        result = _make_sealed_memfd(data)
+                    except BaseException:
+                        failed = True
+                    finally:
+                        self._closed[0] = True
+                        source = self._fds
+        _close_all(source)
+        if failed:
+            _close_quietly(result)
+            raise PrimeP1AuthorityResourceError() from None
+        return result
 
     def __repr__(self) -> str:
         return "AdmittedPrimeP1SeccompResource(redacted)"
@@ -133,7 +161,7 @@ def admit_static_seccomp_resource(config: object) -> AdmittedPrimeP1SeccompResou
         if _chain_identities(fds) != identities:
             raise ValueError
         result = AdmittedPrimeP1SeccompResource(
-            fds, path, identities, policy, actual, threading.Lock(), [False]
+            fds, path, identities, policy, actual, threading.Lock(), [False], [False]
         )
         fds = ()
     except BaseException:
@@ -147,39 +175,119 @@ def admit_static_seccomp_resource(config: object) -> AdmittedPrimeP1SeccompResou
 
 def revalidate_static_seccomp_resource(resource: object) -> None:
     """Rewalk and recheck a retained static profile at its next safe use."""
-    fds: tuple[int, ...] = ()
     failed = False
     try:
         if type(resource) is not AdmittedPrimeP1SeccompResource:
             raise ValueError
         _require_linux_posix()
         with resource._lock:
-            if resource._closed[0] or _chain_identities(resource._fds) != resource._identities:
-                raise ValueError
-            fds = _open_profile(resource._path)
-            identities = _chain_identities(fds)
-            if identities != resource._identities:
-                raise ValueError
-            data, digest = _read_profile(fds[-1], identities[-1])
-            if not hmac.compare_digest(digest, resource._sha256):
-                raise ValueError
-            _validate_profile(data, resource._policy)
-            if (
-                _chain_identities(resource._fds) != resource._identities
-                or _chain_identities(fds) != resource._identities
-            ):
-                raise ValueError
+            _revalidated_profile_bytes(resource)
     except BaseException:
         failed = True
-    finally:
-        _close_all(fds)
     if failed:
         raise PrimeP1AuthorityResourceError() from None
+
+
+def _revalidated_profile_bytes(resource: AdmittedPrimeP1SeccompResource) -> bytes:
+    """Read a profile only while the resource lock is held by the caller."""
+    fds: tuple[int, ...] = ()
+    try:
+        if (
+            resource._closed[0]
+            or resource._consumed[0]
+            or _chain_identities(resource._fds) != resource._identities
+        ):
+            raise ValueError
+        fds = _open_profile(resource._path)
+        identities = _chain_identities(fds)
+        if identities != resource._identities:
+            raise ValueError
+        data, digest = _read_profile(fds[-1], identities[-1])
+        if not hmac.compare_digest(digest, resource._sha256):
+            raise ValueError
+        _validate_profile(data, resource._policy)
+        if (
+            _chain_identities(resource._fds) != resource._identities
+            or _chain_identities(fds) != resource._identities
+        ):
+            raise ValueError
+        return data
+    finally:
+        _close_all(fds)
 
 
 def _require_linux_posix() -> None:
     if sys.platform != "linux" or os.name != "posix":
         raise ValueError
+
+
+def _make_sealed_memfd(data: bytes) -> int:
+    """Create the one sealed descriptor accepted by the controlled executor."""
+    fd = -1
+    try:
+        _require_linux_posix()
+        memfd_create = getattr(os, "memfd_create", None)
+        cloexec = getattr(os, "MFD_CLOEXEC", None)
+        allow_sealing = getattr(os, "MFD_ALLOW_SEALING", None)
+        constants = tuple(
+            getattr(fcntl, name, None)
+            for name in (
+                "F_ADD_SEALS",
+                "F_GET_SEALS",
+                "F_SEAL_WRITE",
+                "F_SEAL_GROW",
+                "F_SEAL_SHRINK",
+                "F_SEAL_SEAL",
+            )
+        )
+        if (
+            not callable(memfd_create)
+            or type(cloexec) is not int
+            or type(allow_sealing) is not int
+            or any(type(value) is not int for value in constants)
+        ):
+            raise ValueError
+        add_seals, get_seals, seal_write, seal_grow, seal_shrink, seal_seal = constants
+        seals = seal_write | seal_grow | seal_shrink | seal_seal
+        fd = memfd_create("asterion-prime-p1-seccomp", cloexec | allow_sealing)
+        if type(fd) is not int or fd < 0:
+            raise ValueError
+        _require_cloexec(fd)
+        _write_all(fd, data)
+        if os.fstat(fd).st_size != len(data):
+            raise ValueError
+        if os.lseek(fd, 0, os.SEEK_SET) != 0:
+            raise ValueError
+        fcntl.fcntl(fd, add_seals, seals)
+        if fcntl.fcntl(fd, get_seals) != seals:
+            raise ValueError
+        _require_cloexec(fd)
+        if os.fstat(fd).st_size != len(data) or os.lseek(fd, 0, os.SEEK_CUR) != 0:
+            raise ValueError
+        result = fd
+        fd = -1
+        return result
+    finally:
+        _close_quietly(fd)
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    if type(data) is not bytes or len(data) > _MAX_BYTES:
+        raise ValueError
+    offset = 0
+    retries = 0
+    while offset < len(data):
+        try:
+            written = os.write(fd, data[offset:])
+        except InterruptedError:
+            retries += 1
+            if retries > _MAX_EINTR:
+                raise ValueError from None
+            continue
+        if type(written) is not int or not 0 < written <= len(data) - offset:
+            raise ValueError
+        offset += written
+        retries = 0
 
 
 def _open_profile(path: object) -> tuple[int, ...]:
