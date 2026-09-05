@@ -34,6 +34,7 @@ prime-agent = "asterion.applications.prime_agent.provider:create_provider"
 "prime.capability-program__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
 "prime.ipython-coding__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
 "prime.programmatic-long-context__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
+"prime.recursive-workflow__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
 
 [project.entry-points."asterion.host_services"]
 "corpus.local-root" = "asterion.capabilities.dci.implementation.services:create_local_corpus_service_factory"
@@ -41,6 +42,7 @@ prime-agent = "asterion.applications.prime_agent.provider:create_provider"
 "model.bounded-session" = "asterion.applications.prime_agent.operator.model_session_host:create_host_service_factory"
 "prime.ipython-production" = "asterion.applications.prime_agent.operator.p1_cli_host:create_host_service_factory"
 "prime.programmatic-long-context-development" = "asterion.applications.prime_agent.operator.p2_cli_host:create_host_service_factory"
+"prime.recursive-workflow-development" = "asterion.applications.prime_agent.operator.p3_cli_host:create_host_service_factory"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/asterion"]

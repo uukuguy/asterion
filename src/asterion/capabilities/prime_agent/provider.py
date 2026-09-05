@@ -23,6 +23,7 @@ from asterion.runtime.host import parse_event_stream
 PACKAGE_REF = CapabilityPackageRef("prime-agent", "1.0.0")
 CAPABILITY_REF = CapabilityRef("prime.ipython-coding", "1.0.0")
 P2_CAPABILITY_REF = CapabilityRef("prime.programmatic-long-context", "1.0.0")
+P3_CAPABILITY_REF = CapabilityRef("prime.recursive-workflow", "1.0.0")
 
 
 _TRACE_ARTIFACT_ID = "prime.p1-b-development.trace"
@@ -53,6 +54,19 @@ class PrimeProgrammaticLongContextImplementation:
             kind="p2-development",
             media_type="application/vnd.asterion.prime.p2-development-trace+json",
             scope="p2-development",
+        )
+
+
+class PrimeRecursiveWorkflowImplementation:
+    """Project only P3's public-safe development trace."""
+
+    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
+        return await _execute_fixed_verification(
+            invocation,
+            artifact_id="prime.p3-development.trace",
+            kind="p3-development",
+            media_type="application/vnd.asterion.prime.p3-development-trace+json",
+            scope="p3-development",
         )
 
 
@@ -145,6 +159,9 @@ def create_prime_agent_package() -> InstalledCapabilityPackage:
             CapabilityImplementationBinding(
                 P2_CAPABILITY_REF, PrimeProgrammaticLongContextImplementation()
             ),
+            CapabilityImplementationBinding(
+                P3_CAPABILITY_REF, PrimeRecursiveWorkflowImplementation()
+            ),
         ),
         benchmark_bindings=(),
     )
@@ -153,5 +170,6 @@ def create_prime_agent_package() -> InstalledCapabilityPackage:
 __all__ = (
     "PrimeIpythonCodingImplementation",
     "PrimeProgrammaticLongContextImplementation",
+    "PrimeRecursiveWorkflowImplementation",
     "create_prime_agent_package",
 )

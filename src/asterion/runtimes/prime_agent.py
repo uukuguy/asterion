@@ -56,6 +56,12 @@ class PrimeVerificationProfile:
                 "p2-development",
                 "application/vnd.asterion.prime.p2-development-trace+json",
             ),
+            (
+                "p3-development",
+                "prime.p3-development.trace",
+                "p3-development",
+                "application/vnd.asterion.prime.p3-development-trace+json",
+            ),
         }:
             raise PrimeAgentRuntimeError("Prime runtime profile is invalid")
 
@@ -72,6 +78,12 @@ PRIME_P2_PROFILE = PrimeVerificationProfile(
     kind="p2-development",
     media_type="application/vnd.asterion.prime.p2-development-trace+json",
 )
+PRIME_P3_PROFILE = PrimeVerificationProfile(
+    scope="p3-development",
+    artifact_id="prime.p3-development.trace",
+    kind="p3-development",
+    media_type="application/vnd.asterion.prime.p3-development-trace+json",
+)
 
 class PrimeAgentRuntimeClient(AgentRuntimeClient):
     """Project one host-owned fixed verification into runtime protocol frames."""
@@ -83,7 +95,7 @@ class PrimeAgentRuntimeClient(AgentRuntimeClient):
         profile: PrimeVerificationProfile = PRIME_P1_PROFILE,
     ) -> None:
         self._service = service
-        if profile not in (PRIME_P1_PROFILE, PRIME_P2_PROFILE):
+        if profile not in (PRIME_P1_PROFILE, PRIME_P2_PROFILE, PRIME_P3_PROFILE):
             raise PrimeAgentRuntimeError("Prime runtime profile is invalid")
         self._profile = profile
 
