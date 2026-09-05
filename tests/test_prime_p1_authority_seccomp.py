@@ -497,10 +497,17 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
         valid = (
             payload([]),
             _PROFILE,
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}]),
             payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_MASKED_EQ", "value": 1, "valueTwo": 3}], "names": ["write"]}]),
         )
         invalid = (
             payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": ["write"]}]),
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 1, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}]),
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_NE", "value": 0}], "names": ["write"]}]),
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_MASKED_EQ", "value": 1}], "names": ["write"]}]),
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 0, "valueTwo": 1}], "names": ["write"]}]),
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": True, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}]),
+            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 6, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}]),
             payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": ["read", "write"]}]),
             payload([{"action": "SCMP_ACT_ALLOW", "names": ["read"]}]),
             payload([], architectures=["SCMP_ARCH_AARCH64"]),
