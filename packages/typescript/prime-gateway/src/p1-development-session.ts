@@ -1,9 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { inspect } from "node:util";
 
-const PROVIDER = "asterion-p1-development";
-const MODEL = "p1-development";
 const MAX_MODEL_CALLS = 2;
 const MAX_TOOL_CALLS = 1;
 
@@ -21,7 +21,7 @@ export interface PrimeSdkAssistantMessageEventStream extends AsyncIterable<unkno
 export type PrimeSdkIpythonCallback = (
   toolCallId: string,
   input: Readonly<{ code: string }>,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
 ) => Promise<unknown>;
 
 export interface PrimeP1DevelopmentSessionOptions {
@@ -50,74 +50,98 @@ interface PrimeSdkModules {
   readonly createAgentSession: (options: Record<string, unknown>) => Promise<{ session: PrimeSdkSession }>;
   readonly SessionManager: { inMemory(workspace: string): unknown };
   readonly AuthStorage: { inMemory(): { setRuntimeApiKey(provider: string, apiKey: string): void } };
-  readonly ModelRegistry: { inMemory(auth: unknown): { registerProvider(provider: string, config: unknown): void; find(provider: string, model: string): unknown } };
+  readonly ModelRegistry: { inMemory(auth: unknown): { registerProvider(provider: string, config: unknown): void; unregisterProvider(provider: string): void; find(provider: string, model: string): unknown } };
   readonly DefaultResourceLoader: new (options: Record<string, unknown>) => { reload(): Promise<void> };
   readonly SettingsManager: { inMemory(settings?: unknown): unknown };
   readonly Type: { Object(properties: Record<string, unknown>): unknown; String(): unknown };
 }
 
 interface PrimeSdkSession {
-  readonly agent: { readonly state: { readonly messages: readonly unknown[] }; continue(): Promise<void> };
+  readonly agent: { readonly state: { readonly messages: readonly unknown[] } };
   prompt(prompt: string): Promise<void>;
   waitForIdle(): Promise<void>;
   compact(): Promise<unknown>;
   abort(): Promise<void>;
   disposeAsync(): Promise<void>;
 }
+type PrimeSdkRegistry = { registerProvider(provider: string, config: unknown): void; unregisterProvider(provider: string): void; find(provider: string, model: string): unknown };
+type SharedRegistry = { auth: { setRuntimeApiKey(provider: string, apiKey: string): void }; registry: PrimeSdkRegistry };
+const sharedRegistries = new Map<string, SharedRegistry>();
 
 /** A deliberately narrow development-only bridge to a caller-owned Prime SDK checkout. */
 export class PrimeP1DevelopmentSession {
-  private state: "open" | "cancelled" | "closed" = "open";
+  #state: "open" | "cancelled" | "closed" = "open";
+  readonly #session: PrimeSdkSession;
+  readonly #registry: { unregisterProvider(provider: string): void };
+  readonly #provider: string;
+  readonly #control: { state: "open" | "cancelled" | "closed" };
 
-  private constructor(private readonly session: PrimeSdkSession) {}
+  private constructor(
+    session: PrimeSdkSession,
+    registry: { unregisterProvider(provider: string): void },
+    provider: string,
+    control: { state: "open" | "cancelled" | "closed" },
+  ) { this.#session = session; this.#registry = registry; this.#provider = provider; this.#control = control; }
 
   static async open(options: PrimeP1DevelopmentSessionOptions): Promise<PrimeP1DevelopmentSession> {
     if (!isAbsolute(options.primeSourceRoot) || !isAbsolute(options.workspace)) {
       throw new Error("primeSourceRoot and workspace must be absolute paths");
     }
     const modules = await loadPrimeSdk(options.primeSourceRoot);
-    const auth = modules.AuthStorage.inMemory();
+    const identity = randomUUID();
+    const provider = `asterion-p1-development-${identity}`;
+    const modelId = `p1-development-${identity}`;
+    const control: { state: "open" | "cancelled" | "closed" } = { state: "open" };
+    let shared = sharedRegistries.get(options.primeSourceRoot);
+    if (!shared) {
+      const auth = modules.AuthStorage.inMemory();
+      shared = { auth, registry: modules.ModelRegistry.inMemory(auth) };
+      sharedRegistries.set(options.primeSourceRoot, shared);
+    }
     // Prime requires a configured model. This fixed marker is in-memory only and
     // is never supplied to a network provider because streamSimple is injected.
-    auth.setRuntimeApiKey(PROVIDER, "in-memory-development-provider");
-    const registry = modules.ModelRegistry.inMemory(auth);
+    shared.auth.setRuntimeApiKey(provider, "in-memory-development-provider");
+    const registry = shared.registry;
     let modelCalls = 0;
     let toolCalls = 0;
-    registry.registerProvider(PROVIDER, {
-      api: "anthropic-messages",
+    registry.registerProvider(provider, {
+      api: `asterion-p1-development-${identity}`,
       baseUrl: "http://127.0.0.1:0",
       apiKey: "in-memory-development-provider",
       streamSimple: (model: unknown, context: unknown, streamOptions: unknown) => {
+        assertCallbackAllowed(control);
         if (++modelCalls > MAX_MODEL_CALLS) throw new Error("Prime P1 development model callback limit exceeded");
         const stream = options.model(model, context, streamOptions);
         assertAssistantEventStream(stream);
         return stream;
       },
       models: [{
-        id: MODEL, name: MODEL, reasoning: false, input: ["text"],
+        id: modelId, name: modelId, reasoning: false, input: ["text"],
         contextWindow: 16_384, maxTokens: 4_096,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       }],
     });
-    const model = registry.find(PROVIDER, MODEL);
+    const model = registry.find(provider, modelId);
     if (!model) throw new Error("Prime P1 development model registration failed");
     const agentDir = join(options.workspace, ".asterion-prime-p1-development");
     const settingsManager = modules.SettingsManager.inMemory({
       retry: { enabled: false, provider: { maxRetries: 0 } },
       autoRefine: { enabled: false },
     });
+    // DefaultResourceLoader is empty until reload(); never reload it here, since
+    // reload discovers workspace and ancestor resources.
     const resourceLoader = new modules.DefaultResourceLoader({
       cwd: options.workspace, agentDir, settingsManager,
       noExtensions: true, noSkills: true, noPromptTemplates: true,
       noThemes: true, noContextFiles: true, bundledSkillsDir: null,
     });
-    await resourceLoader.reload();
     const customIpython = {
       name: "ipython",
       description: "Caller-owned IPython execution bridge.",
       label: "ipython",
       parameters: modules.Type.Object({ code: modules.Type.String() }),
       execute: async (toolCallId: string, input: { code: string }, signal: AbortSignal) => {
+        assertCallbackAllowed(control);
         if (++toolCalls > MAX_TOOL_CALLS) throw new Error("Prime P1 development ipython callback limit exceeded");
         return options.ipython(toolCallId, Object.freeze({ code: input.code }), signal);
       },
@@ -125,7 +149,7 @@ export class PrimeP1DevelopmentSession {
     const created = await modules.createAgentSession({
       cwd: options.workspace,
       agentDir,
-      authStorage: auth,
+      authStorage: shared.auth,
       modelRegistry: registry,
       model,
       sessionManager: modules.SessionManager.inMemory(options.workspace),
@@ -141,62 +165,60 @@ export class PrimeP1DevelopmentSession {
       serializedRefine: true,
       telemetryDisabled: true,
     });
-    return new PrimeP1DevelopmentSession(created.session);
+    return new PrimeP1DevelopmentSession(created.session, registry, provider, control);
   }
 
   async prompt(prompt: string): Promise<PrimeP1DevelopmentResult> {
     this.assertDispatchable();
-    await this.session.prompt(prompt);
-    await this.session.waitForIdle();
-    for (let continuation = 0; continuation < MAX_MODEL_CALLS - 1; continuation += 1) {
-      if (!latestAssistantUsesTool(this.session.agent.state.messages)) break;
-      this.assertDispatchable();
-      await this.session.agent.continue();
-      await this.session.waitForIdle();
-    }
-    return this.result("completed");
-  }
-
-  async compact(): Promise<PrimeP1DevelopmentResult> {
-    this.assertDispatchable();
-    await this.session.compact();
+    await this.#session.prompt(prompt);
+    await this.#session.waitForIdle();
+    if (this.#state !== "open") return this.result("cancelled");
     return this.result("completed");
   }
 
   async cancel(): Promise<void> {
-    if (this.state === "closed") return;
-    this.state = "cancelled";
-    await this.session.abort();
+    if (this.#state === "closed") return;
+    this.#state = "cancelled";
+    this.#control.state = "cancelled";
+    await this.#session.abort();
   }
 
   async close(): Promise<void> {
-    if (this.state === "closed") return;
-    this.state = "closed";
-    await this.session.disposeAsync();
+    if (this.#state === "closed") return;
+    this.#state = "closed";
+    this.#control.state = "closed";
+    try { await this.#session.disposeAsync(); }
+    finally { this.#registry.unregisterProvider(this.#provider); }
   }
 
   private assertDispatchable(): void {
-    if (this.state === "cancelled") throw new Error("Prime P1 development session is cancelled");
-    if (this.state === "closed") throw new Error("Prime P1 development session is closed");
+    if (this.#state === "cancelled") throw new Error("Prime P1 development session is cancelled");
+    if (this.#state === "closed") throw new Error("Prime P1 development session is closed");
   }
 
   private result(lifecycle: "completed" | "cancelled"): PrimeP1DevelopmentResult {
-    const assistants = this.session.agent.state.messages.filter(isAssistant);
+    const assistants = this.#session.agent.state.messages.filter(isAssistant);
     const usage = assistants.reduce((total, message) => ({
       input_tokens: total.input_tokens + numberAt(message, "usage", "input"),
       output_tokens: total.output_tokens + numberAt(message, "usage", "output"),
       total_tokens: total.total_tokens + numberAt(message, "usage", "totalTokens"),
     }), { input_tokens: 0, output_tokens: 0, total_tokens: 0 });
     const latest = assistants.at(-1);
-    return {
+    return Object.freeze({
       lifecycle,
-      usage,
-      assistant: {
-        completed: latest?.stopReason === "stop",
-        stop_reason: latest?.stopReason ?? null,
-      },
-    };
+      usage: Object.freeze(usage),
+      assistant: Object.freeze({
+        completed: lifecycle === "completed" && latest?.stopReason === "stop",
+        stop_reason: lifecycle === "cancelled" ? "aborted" : safeStopReason(latest?.stopReason),
+      }),
+    });
   }
+
+  toJSON(): Pick<PrimeP1DevelopmentResult, "lifecycle" | "usage" | "assistant"> {
+    return this.result(this.#state === "cancelled" ? "cancelled" : "completed");
+  }
+
+  [inspect.custom](): string { return "PrimeP1DevelopmentSession { lifecycle: safe }"; }
 }
 
 async function loadPrimeSdk(root: string): Promise<PrimeSdkModules> {
@@ -232,10 +254,13 @@ function isAssistant(message: unknown): message is { stopReason?: PrimeP1Develop
 
 function numberAt(message: { usage?: Record<string, number> }, key: "usage", field: "input" | "output" | "totalTokens"): number {
   const value = message[key]?.[field];
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
-function latestAssistantUsesTool(messages: readonly unknown[]): boolean {
-  const latest = messages.filter(isAssistant).at(-1) as { stopReason?: unknown } | undefined;
-  return latest?.stopReason === "toolUse";
+function assertCallbackAllowed(control: { state: "open" | "cancelled" | "closed" }): void {
+  if (control.state !== "open") throw new Error("Prime P1 development session is cancelled");
+}
+
+function safeStopReason(value: unknown): PrimeP1DevelopmentResult["assistant"]["stop_reason"] {
+  return value === "stop" || value === "length" || value === "toolUse" || value === "error" || value === "aborted" ? value : "error";
 }
