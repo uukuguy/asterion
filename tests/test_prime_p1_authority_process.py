@@ -241,7 +241,9 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                 self.addCleanup(lambda fd=config_write: os.close(fd))
                 os.write(key_write, key)
                 os.close(key_write)
-                connection = _ExchangeSocket((packet, [], 0, None))
+                connection = _ExchangeSocket(
+                    packet if isinstance(packet, OSError) else (packet, [], 0, None)
+                )
                 bundle = AdmittedAuthorityDescriptors(
                     connection, key_read, config_read, os.close
                 )
@@ -258,6 +260,8 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                     "".join(traceback.format_exception(raised.exception)),
                 )
                 self.assertTrue(connection.closed)
+                self.assertEqual(len(connection.calls), 1)
+                self.assertEqual(connection.calls[0][2], 64)
                 with self.assertRaises(OSError):
                     os.fstat(key_read)
                 with self.assertRaises(OSError):
