@@ -269,11 +269,10 @@ def _run_ready_execute_exchange(
     descriptors: AdmittedAuthorityDescriptors,
     session_id: str,
 ) -> NoReturn:
-    """Emit one authenticated ready packet, then stop unavailable.
+    """Admit one authenticated execute packet, then stop unavailable.
 
-    This deliberately does not receive an execute packet or perform any
-    authority work beyond complete local resource admission and the ready
-    transport binding.
+    This deliberately performs no authority work beyond complete local resource
+    admission, ready transport binding, and protocol-owned execute admission.
     """
     config_fd: int | None = None
     connection: object | None = None
@@ -299,6 +298,8 @@ def _run_ready_execute_exchange(
             resource_set_sha256,
         )
         _send_authority_packet(connection, session.ready_packet())
+        packet = _receive_authority_packet_from_connection(connection)
+        session.accept_supervisor_packet(packet)
     except BaseException:
         pass
     finally:

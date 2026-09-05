@@ -29,7 +29,10 @@ from asterion.applications.prime_agent.operator.authority_process import (
     _run_ready_execute_exchange,
     _send_authority_packet,
 )
-from asterion.applications.prime_agent.operator.authority_protocol import decode_frame
+from asterion.applications.prime_agent.operator.authority_protocol import (
+    decode_frame,
+    encode_frame,
+)
 from asterion.applications.prime_agent.operator.authority_request_contract import (
     prime_p1_request_contract_sha256,
 )
@@ -88,12 +91,14 @@ class _ExchangeSocket(_SendingSocket):
         super().__init__([])
         self.received = received
         self.closed = False
+        self.recv_calls = 0
 
     def sendmsg(self, buffers: object, ancillary: object, flags: int) -> object:
         self.calls.append((buffers, ancillary, flags))
         return sum(len(buffer) for buffer in cast(list[bytes], buffers))
 
     def recvmsg(self, _size: int, _ancillary_size: int, _flags: int) -> object:
+        self.recv_calls += 1
         if isinstance(self.received, BaseException):
             raise self.received
         return self.received
@@ -411,13 +416,26 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         self.assertNotIn("SOCKET_CLOSE_SENTINEL", rendered)
         self.assertNotIn("FD_CLOSE_SENTINEL", rendered)
 
-    def test_ready_transport_sends_one_authenticated_frame_without_receive(
+    def test_ready_transport_admits_one_exact_execute_without_terminal_or_external_effect(
         self,
     ) -> None:
+        session_id = "a" * 64
+        application = "d" * 64
+        execute = encode_frame(
+            b"k" * 32,
+            session_id,
+            0,
+            "execute",
+            {
+                "run_id": "run-1",
+                "request_contract_sha256": prime_p1_request_contract_sha256(),
+                "application_request_sha256": application,
+            },
+        )
         key_read, key_write = os.pipe()
         os.write(key_write, b"k" * 32)
         os.close(key_write)
-        connection = _ExchangeSocket(AssertionError("transport must not run"))
+        connection = _ExchangeSocket((execute, [], 0, None))
         bundle = AdmittedAuthorityDescriptors(
             connection, key_read, self._config_fd(), os.close
         )
@@ -445,14 +463,16 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             ) as admit,
             patch.object(
                 module, "_receive_authority_packet", side_effect=ForbiddenAccess
-            ) as receive,
+            ) as descriptor_receive,
+            patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True),
             self.assertRaises(PrimeP1AuthorityBootstrapError),
         ):
-            _run_ready_execute_exchange(bundle, "a" * 64)
+            _run_ready_execute_exchange(bundle, session_id)
         admit.assert_called_once()
-        receive.assert_not_called()
+        descriptor_receive.assert_not_called()
         self.assertEqual(resources.close_calls, 1)
         self.assertEqual(len(connection.calls), 1)
+        self.assertEqual(connection.recv_calls, 1)
         packet = b"".join(cast(list[bytes], connection.calls[0][0]))
         frame = decode_frame(packet, b"k" * 32)
         self.assertEqual(frame.kind, "ready")
@@ -462,6 +482,64 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         )
         self.assertEqual(frame.payload["resource_set_sha256"], "c" * 64)
         self.assertTrue(connection.closed)
+
+    def test_ready_transport_rejects_non_execute_admission_packets_redacted_and_closed(
+        self,
+    ) -> None:
+        session_id = "a" * 64
+        key = b"k" * 32
+        contract = prime_p1_request_contract_sha256()
+        packets = {
+            "malformed": b"MALFORMED_PACKET_SENTINEL",
+            "second-ready": encode_frame(
+                key,
+                session_id,
+                0,
+                "ready",
+                {"request_contract_sha256": contract, "resource_set_sha256": "c" * 64},
+            ),
+            "cancel": encode_frame(key, session_id, 1, "cancel", {}),
+            "extra-terminal": encode_frame(key, session_id, 1, "terminal", {}),
+        }
+        import asterion.applications.prime_agent.operator.authority_process as module
+
+        class RetainedProductionResources:
+            def __init__(self) -> None:
+                self.close_calls = 0
+
+            def _resource_set_sha256(self) -> str:
+                return "c" * 64
+
+            def close(self) -> None:
+                self.close_calls += 1
+
+        for label, packet in packets.items():
+            with self.subTest(packet=label):
+                key_read, key_write = os.pipe()
+                os.write(key_write, key)
+                os.close(key_write)
+                connection = _ExchangeSocket((packet, [], 0, None))
+                resources = RetainedProductionResources()
+                bundle = AdmittedAuthorityDescriptors(
+                    connection, key_read, self._config_fd(), os.close
+                )
+                with (
+                    patch.object(
+                        module,
+                        "admit_production_authority_resources",
+                        return_value=resources,
+                    ),
+                    patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True),
+                    self.assertRaises(PrimeP1AuthorityBootstrapError) as raised,
+                ):
+                    _run_ready_execute_exchange(bundle, session_id)
+                self.assertIsNone(raised.exception.__context__)
+                rendered = "".join(traceback.format_exception(raised.exception))
+                self.assertNotIn("MALFORMED_PACKET_SENTINEL", rendered)
+                self.assertEqual(len(connection.calls), 1)
+                self.assertEqual(connection.recv_calls, 1)
+                self.assertTrue(connection.closed)
+                self.assertEqual(resources.close_calls, 1)
 
     def test_ready_transport_derives_resource_set_before_consuming_key_or_socket(
         self,
@@ -483,7 +561,18 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         class ForbiddenAccess(BaseException):
             pass
 
-        connection = _ExchangeSocket(AssertionError("transport must not receive"))
+        execute = encode_frame(
+            b"k" * 32,
+            "a" * 64,
+            0,
+            "execute",
+            {
+                "run_id": "run-1",
+                "request_contract_sha256": prime_p1_request_contract_sha256(),
+                "application_request_sha256": "d" * 64,
+            },
+        )
+        connection = _ExchangeSocket((execute, [], 0, None))
         bundle = AdmittedAuthorityDescriptors(connection, 101, 102, closed_fds.append)
         with (
             patch.object(
@@ -499,6 +588,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             patch.object(module, "_consume_session_key", side_effect=lambda _: events.append("key") or b"k" * 32),
             patch.object(bundle, "consume_socket", side_effect=lambda: events.append("socket") or connection),
             patch.object(module, "_receive_authority_packet", side_effect=ForbiddenAccess),
+            patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True),
             self.assertRaises(PrimeP1AuthorityBootstrapError),
         ):
             _run_ready_execute_exchange(bundle, "a" * 64)
@@ -507,6 +597,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             ["config", "resources", "resource-digest", "key", "socket", "resources-close"],
         )
         self.assertEqual(closed_fds, [101])
+        self.assertEqual(connection.recv_calls, 1)
         self.assertTrue(connection.closed)
 
     def test_failed_production_resource_admission_never_consumes_key_or_socket(self) -> None:
