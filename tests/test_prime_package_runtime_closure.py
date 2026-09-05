@@ -234,9 +234,20 @@ class TestPrimePackageRuntimeClosure(unittest.TestCase):
         )
         from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 
-        for services in ({}, {"prime.ipython-production": service, "extra": object()}):
-            with self.subTest(services=tuple(services)), self.assertRaises(RuntimeFactoryError):
-                binding.factory(RuntimeFactoryContext(**base, host_services=services))
+        cases = (
+            ({}, {}),
+            ({"prime.ipython-production": service, "extra": object()}, {}),
+            ({"prime.ipython-production": service}, {"provider_id": "other"}),
+            ({"prime.ipython-production": service}, {"application_id": "other"}),
+            ({"prime.ipython-production": service}, {"application_version": "2.0.0"}),
+        )
+        for services, changes in cases:
+            with self.subTest(services=tuple(services), changes=changes), self.assertRaises(RuntimeFactoryError):
+                binding.factory(
+                    RuntimeFactoryContext(
+                        **{**base, **changes, "host_services": services}
+                    )
+                )
 
     def test_capability_projects_only_safe_trace_fields_and_rejects_noncompletion(self) -> None:
         run_id = "prime-capability-run"

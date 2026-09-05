@@ -91,7 +91,10 @@ def default_runtime_factory_registry() -> RuntimeFactoryRegistry:
 
 def _create_prime_agent_runtime(context: RuntimeFactoryContext) -> PrimeAgentRuntimeClient:
     if (
-        context.runtime_id != PRIME_RUNTIME_ID
+        context.provider_id != "prime-agent"
+        or context.application_id != "prime.ipython-coding"
+        or context.application_version != "1.0.0"
+        or context.runtime_id != PRIME_RUNTIME_ID
         or context.options
         or set(context.host_services) != {"prime.ipython-production"}
     ):

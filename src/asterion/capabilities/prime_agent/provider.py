@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from asterion.capability_sdk import (
     CapabilityExecutionError,
@@ -24,6 +25,7 @@ CAPABILITY_REF = CapabilityRef("prime.ipython-coding", "1.0.0")
 
 _TRACE_ARTIFACT_ID = "prime.p1-b-development.trace"
 _TRACE_MEDIA_TYPE = "application/vnd.asterion.prime.p1-development-trace+json"
+_TRACE_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class PrimeIpythonCodingImplementation:
@@ -66,7 +68,7 @@ class PrimeIpythonCodingImplementation:
             "kind": "p1-b-development",
             "media_type": _TRACE_MEDIA_TYPE,
             "sha256": artifact.get("sha256"),
-        }:
+        } or _TRACE_SHA256.fullmatch(str(artifact.get("sha256"))) is None:
             raise CapabilityExecutionError("Prime runtime result is invalid")
         return CapabilityExecutionResult(
             events=(),
