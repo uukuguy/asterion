@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 import threading
+from dataclasses import dataclass
 from typing import SupportsIndex
 
 from .authority_config import PrimeP1OperatorConfig
@@ -12,6 +13,15 @@ from .authority_config import PrimeP1OperatorConfig
 
 _EVIDENCE_TOKEN = object()
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+@dataclass(frozen=True, repr=False, slots=True)
+class _EvidenceIdentity:
+    device: int
+    inode: int
+    mode: int
+    owner: int
+    group: int
 
 
 class PrimeP1EvidenceResourceError(ValueError):
@@ -24,12 +34,15 @@ class PrimeP1EvidenceResourceError(ValueError):
 class AdmittedPrimeP1EvidenceRoot:
     """Opaque owner of one admitted evidence-root directory descriptor."""
 
-    __slots__ = ("_fd", "_lock")
+    __slots__ = ("_fd", "_identity", "_lock")
 
-    def __init__(self, fd: int, *, _token: object | None = None) -> None:
+    def __init__(
+        self, fd: int, identity: _EvidenceIdentity | None = None, *, _token: object | None = None
+    ) -> None:
         if _token is not _EVIDENCE_TOKEN:
             raise PrimeP1EvidenceResourceError() from None
         self._fd: int | None = fd
+        self._identity = identity
         self._lock = threading.Lock()
 
     def __repr__(self) -> str:
@@ -58,6 +71,19 @@ class AdmittedPrimeP1EvidenceRoot:
             except (OSError, OverflowError):
                 pass
 
+    def _resource_set_contribution(self) -> bytes:
+        """Bind only the retained directory inode identity, never its configured path."""
+        with self._lock:
+            fd = self._fd
+            identity = self._identity
+            if fd is None or type(identity) is not _EvidenceIdentity:
+                raise ValueError
+            info = os.fstat(fd)
+        observed = _EvidenceIdentity(info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+        if observed != identity or not stat.S_ISDIR(info.st_mode):
+            raise ValueError
+        return _canonical_contribution(b"evidence-root", ((b"inode", _identity_bytes(identity)),))
+
 
 def admit_evidence_root(config: object) -> AdmittedPrimeP1EvidenceRoot:
     """Open the exact authority-owned evidence directory without retaining its path."""
@@ -75,7 +101,8 @@ def admit_evidence_root(config: object) -> AdmittedPrimeP1EvidenceRoot:
             or stat.S_IMODE(info.st_mode) != 0o700
         ):
             raise ValueError
-        result = AdmittedPrimeP1EvidenceRoot(fd, _token=_EVIDENCE_TOKEN)
+        identity = _EvidenceIdentity(info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+        result = AdmittedPrimeP1EvidenceRoot(fd, identity, _token=_EVIDENCE_TOKEN)
         fd = None
     except BaseException:
         pass
@@ -117,3 +144,18 @@ def _close_quietly(fd: int | None) -> None:
             os.close(fd)
         except (OSError, OverflowError):
             pass
+
+
+def _identity_bytes(identity: _EvidenceIdentity) -> bytes:
+    return b"".join(value.to_bytes(8, "big", signed=False) for value in (
+        identity.device, identity.inode, identity.mode, identity.owner, identity.group
+    ))
+
+
+def _canonical_contribution(kind: bytes, fields: tuple[tuple[bytes, bytes], ...]) -> bytes:
+    if tuple(sorted(fields)) != fields or len({name for name, _ in fields}) != len(fields):
+        raise ValueError
+    return kind + b"\0" + b"".join(
+        len(name).to_bytes(4, "big") + name + len(value).to_bytes(8, "big") + value
+        for name, value in fields
+    )

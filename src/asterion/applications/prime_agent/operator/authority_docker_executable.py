@@ -99,6 +99,20 @@ class AdmittedPrimeP1DockerExecutable:
         if failed:
             raise PrimeP1DockerExecutableError() from None
 
+    def _resource_set_contribution(self) -> bytes:
+        """Bind retained executable identity and byte digest without a pathname."""
+        with self._lock:
+            fd = self._fd
+            identity = self._identity
+            digest = self._digest
+            if fd is None or type(identity) is not _ExecutableIdentity or type(digest) is not bytes or len(digest) != 32:
+                raise ValueError
+            if _identity_for_fd(fd) != identity:
+                raise ValueError
+        return _canonical_contribution(
+            b"docker-executable", ((b"identity", _identity_bytes(identity)), (b"sha256", digest))
+        )
+
 
 def admit_docker_executable(config: object) -> AdmittedPrimeP1DockerExecutable:
     """Admit only the exact configured Docker executable without retaining its path."""
@@ -183,6 +197,22 @@ def _digest_fd(fd: int, identity: _ExecutableIdentity) -> bytes:
     if total != identity.size or _identity_for_fd(fd) != identity:
         raise ValueError
     return digest.digest()
+
+
+def _identity_bytes(identity: _ExecutableIdentity) -> bytes:
+    return b"".join(value.to_bytes(8, "big", signed=False) for value in (
+        identity.device, identity.inode, identity.mode, identity.owner, identity.group,
+        identity.size, identity.mtime_ns,
+    ))
+
+
+def _canonical_contribution(kind: bytes, fields: tuple[tuple[bytes, bytes], ...]) -> bytes:
+    if tuple(sorted(fields)) != fields or len({name for name, _ in fields}) != len(fields):
+        raise ValueError
+    return kind + b"\0" + b"".join(
+        len(name).to_bytes(4, "big") + name + len(value).to_bytes(8, "big") + value
+        for name, value in fields
+    )
 
 
 def _close_quietly(fd: int | None) -> None:

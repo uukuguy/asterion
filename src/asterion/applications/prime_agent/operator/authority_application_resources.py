@@ -39,12 +39,13 @@ _OS_CLOSE = os.close
 class AdmittedPrimeP1ApplicationResources:
     """Opaque, idempotently closeable proof of exact application resources."""
 
-    __slots__ = ("_closed", "_lock")
+    __slots__ = ("_closed", "_identity", "_lock")
 
-    def __init__(self, *, _token: object | None = None) -> None:
+    def __init__(self, identity: bytes | None = None, *, _token: object | None = None) -> None:
         if type(self) is not AdmittedPrimeP1ApplicationResources or _token is not _TOKEN:
             raise PrimeP1AuthorityResourceError() from None
         self._closed = False
+        self._identity = identity
         self._lock = threading.Lock()
 
     def __repr__(self) -> str:
@@ -66,6 +67,14 @@ class AdmittedPrimeP1ApplicationResources:
         with self._lock:
             self._closed = True
 
+    def _resource_set_contribution(self) -> bytes:
+        """Return the opaque identity of this admitted fixed resource descriptor."""
+        with self._lock:
+            identity = self._identity
+            if self._closed or type(identity) is not bytes or len(identity) != 32:
+                raise ValueError
+        return _canonical_contribution(b"application-resources", ((b"descriptor-sha256", identity),))
+
 
 def admit_prime_p1_application_resources() -> AdmittedPrimeP1ApplicationResources:
     """Admit only the descriptor's fixed P1 application resource bytes."""
@@ -76,7 +85,9 @@ def admit_prime_p1_application_resources() -> AdmittedPrimeP1ApplicationResource
         root = _asterion_root()
         for path, digest in resources:
             _read_verified_resource(root, path, digest)
-        admitted = AdmittedPrimeP1ApplicationResources(_token=_TOKEN)
+        admitted = AdmittedPrimeP1ApplicationResources(
+            _descriptor_identity(identity, resources), _token=_TOKEN
+        )
     except BaseException:
         pass
     if admitted is None:
@@ -149,6 +160,26 @@ def _validate_contract_identity(identity: dict[str, str]) -> None:
         not hmac.compare_digest(identity[key], expected[key]) for key in expected
     ):
         raise ValueError
+
+
+def _descriptor_identity(
+    identity: dict[str, str], resources: tuple[tuple[str, str], ...]
+) -> bytes:
+    """Hash only the exact descriptor values already admitted by this module."""
+    document = {"identity": identity, "resources": [dict(path=path, sha256=digest) for path, digest in resources]}
+    return hashlib.sha256(
+        json.dumps(document, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+    ).digest()
+
+
+def _canonical_contribution(kind: bytes, fields: tuple[tuple[bytes, bytes], ...]) -> bytes:
+    ordered = tuple(sorted(fields))
+    if not kind or ordered != fields or len({name for name, _ in fields}) != len(fields):
+        raise ValueError
+    return kind + b"\0" + b"".join(
+        len(name).to_bytes(4, "big") + name + len(value).to_bytes(8, "big") + value
+        for name, value in fields
+    )
 
 
 def _read_verified_resource(root: Path, path: str, digest: str) -> None:

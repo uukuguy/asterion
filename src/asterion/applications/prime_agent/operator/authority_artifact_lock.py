@@ -65,12 +65,13 @@ class _Descriptor:
 class AdmittedPrimeP1AuthorityArtifacts:
     """Opaque, idempotently closeable proof of local artifact admission."""
 
-    __slots__ = ("_closed", "_lock")
+    __slots__ = ("_closed", "_identity", "_lock")
 
-    def __init__(self, *, _token: object | None = None) -> None:
+    def __init__(self, identity: bytes | None = None, *, _token: object | None = None) -> None:
         if type(self) is not AdmittedPrimeP1AuthorityArtifacts or _token is not _TOKEN:
             raise PrimeP1AuthorityResourceError() from None
         self._closed = False
+        self._identity = identity
         self._lock = threading.Lock()
 
     def __repr__(self) -> str:
@@ -92,6 +93,14 @@ class AdmittedPrimeP1AuthorityArtifacts:
         with self._lock:
             self._closed = True
 
+    def _resource_set_contribution(self) -> bytes:
+        """Return the retained descriptor identity without exposing its contents."""
+        with self._lock:
+            identity = self._identity
+            if self._closed or type(identity) is not bytes or len(identity) != 32:
+                raise ValueError
+        return _canonical_contribution(b"authority-artifacts", ((b"descriptor-sha256", identity),))
+
 
 def admit_authority_artifact_lock() -> AdmittedPrimeP1AuthorityArtifacts:
     """Admit only the descriptor's exact, code-owned authority source set."""
@@ -100,7 +109,9 @@ def admit_authority_artifact_lock() -> AdmittedPrimeP1AuthorityArtifacts:
         root = _package_root()
         for artifact in descriptor.artifacts:
             _read_verified_artifact(root, artifact)
-        return AdmittedPrimeP1AuthorityArtifacts(_token=_TOKEN)
+        return AdmittedPrimeP1AuthorityArtifacts(
+            hashlib.sha256(_canonical_descriptor_bytes(descriptor)).digest(), _token=_TOKEN
+        )
     except BaseException:
         raise PrimeP1AuthorityResourceError() from None
 
@@ -144,6 +155,26 @@ def _load_packaged_descriptor() -> _Descriptor:
     if paths != _EXPECTED_ARTIFACT_PATHS:
         raise ValueError
     return _Descriptor(tuple(artifacts))
+
+
+def _canonical_descriptor_bytes(descriptor: _Descriptor) -> bytes:
+    """Encode the admitted descriptor with fixed ordering and no paths released."""
+    result = bytearray(_PROTOCOL.encode("ascii") + b"\0")
+    for artifact in descriptor.artifacts:
+        result.extend(artifact.path.encode("ascii"))
+        result.append(0)
+        result.extend(bytes.fromhex(artifact.sha256))
+    return bytes(result)
+
+
+def _canonical_contribution(kind: bytes, fields: tuple[tuple[bytes, bytes], ...]) -> bytes:
+    ordered = tuple(sorted(fields))
+    if not kind or ordered != fields or len({name for name, _ in fields}) != len(fields):
+        raise ValueError
+    return kind + b"\0" + b"".join(
+        len(name).to_bytes(4, "big") + name + len(value).to_bytes(8, "big") + value
+        for name, value in fields
+    )
 
 
 def _read_verified_artifact(root: Path, artifact: _Artifact) -> None:

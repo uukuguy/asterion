@@ -119,6 +119,35 @@ class AdmittedPrimeP1DockerSocket:
         if failed:
             raise PrimeP1DockerSocketError() from None
 
+    def _resource_set_contribution(self) -> bytes:
+        """Bind retained socket and expected daemon identities without its pathname."""
+        with self._lock:
+            parent_fd = self._parent_fd
+            identities = self._identities
+            socket_identity = self._socket
+            api_version = self._expected_api_version
+            version = self._expected_version
+            if (
+                parent_fd is None
+                or type(socket_identity) is not _Identity
+                or type(identities) is not tuple
+                or not identities
+                or any(type(identity) is not _Identity for identity in identities)
+                or type(api_version) is not str
+                or type(version) is not str
+                or _identity_for_fd(parent_fd) != identities[-1]
+            ):
+                raise ValueError
+        return _canonical_contribution(
+            b"docker-socket",
+            (
+                (b"daemon-api", api_version.encode("ascii")),
+                (b"daemon-version", version.encode("ascii")),
+                (b"parent-chain", b"".join(_identity_bytes(identity) for identity in identities)),
+                (b"socket", _identity_bytes(socket_identity)),
+            ),
+        )
+
     async def _verify_daemon_projection(self, deadline: float) -> None:
         """Privately verify the admitted daemon's fixed /version projection."""
         client: socket.socket | None = None
@@ -266,6 +295,21 @@ def _identity_for_fd(fd: int) -> _Identity:
 
 def _identity_from_stat(info: os.stat_result) -> _Identity:
     return _Identity(info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid)
+
+
+def _identity_bytes(identity: _Identity) -> bytes:
+    return b"".join(value.to_bytes(8, "big", signed=False) for value in (
+        identity.device, identity.inode, identity.mode, identity.owner, identity.group
+    ))
+
+
+def _canonical_contribution(kind: bytes, fields: tuple[tuple[bytes, bytes], ...]) -> bytes:
+    if tuple(sorted(fields)) != fields or len({name for name, _ in fields}) != len(fields):
+        raise ValueError
+    return kind + b"\0" + b"".join(
+        len(name).to_bytes(4, "big") + name + len(value).to_bytes(8, "big") + value
+        for name, value in fields
+    )
 
 
 def _close_quietly(fd: int | None) -> None:

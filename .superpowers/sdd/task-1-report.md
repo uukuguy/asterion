@@ -81,3 +81,84 @@ exit 0
   identity, and digest mutation rejection, hardlink creation during a read,
   and aggregate acquisition/cleanup ordering with the application child
   immediately after/before the artifact child respectively.
+
+## Review-fix evidence: aggregate admission order (2026-09-05)
+
+- RED: before wiring admission mock side effects, the strengthened lifecycle
+  assertion observed only reverse cleanup order and failed against the expected
+  acquisition-plus-cleanup sequence.
+- GREEN:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_resources
+Ran 26 tests in 0.061s
+OK
+
+uv run ruff check tests/test_prime_p1_authority_resources.py
+All checks passed!
+
+git diff --check
+exit 0
+```
+
+The aggregate lifecycle test now records and asserts exact acquisition order
+`artifacts, application, static, evidence, docker, socket`, followed by the
+existing reverse close order. This specifically rejects swapping artifacts /
+application or application / static.
+
+## Resource-set identity delivery (2026-09-05)
+
+### Scope delivered
+
+- Added the private `AdmittedProductionAuthorityResources._resource_set_sha256()`
+  aggregate. It requires the exact six admitted child types, rejects closed or
+  substituted children, performs the Docker executable's retained-FD/byte
+  revalidation and the Docker socket's descriptor-relative path revalidation
+  before returning a digest, and redacts every failure as
+  `PrimeP1AuthorityResourceError`.
+- Bound all six existing retained private identities: authority artifact
+  descriptor, application-resource descriptor, static image/seccomp resource,
+  evidence-root FD inode, Docker executable identity plus byte digest, and
+  Docker socket parent/socket identities plus its expected daemon version
+  projection. No configured path, descriptor text, credential, prompt, or
+  model output contributes to or is exposed by the digest.
+- Encoding is SHA-256 over the fixed domain
+  `asterion.prime-p1.resource-set/v1\\0`, followed by six fixed-order,
+  length-delimited typed contributions. Each child contribution encodes sorted,
+  unique field names and length-delimited field values.
+- Refreshed the packaged authority artifact descriptor hashes after source
+  stabilization; descriptor admission passes with the new source set.
+
+### TDD evidence
+
+RED was observed before implementation:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_resource_set_identity
+ERROR: AdmittedProductionAuthorityResources has no attribute
+_resource_set_sha256; exact child classes have no
+_resource_set_contribution.
+```
+
+GREEN and focused regression verification:
+
+```text
+uv run ruff check src/asterion/applications/prime_agent/operator/authority_resources.py src/asterion/applications/prime_agent/operator/authority_artifact_lock.py src/asterion/applications/prime_agent/operator/authority_application_resources.py src/asterion/applications/prime_agent/operator/authority_evidence.py src/asterion/applications/prime_agent/operator/authority_docker_executable.py src/asterion/applications/prime_agent/operator/authority_docker_socket.py tests/test_prime_p1_authority_resources.py tests/test_prime_p1_resource_set_identity.py
+All checks passed!
+
+uv run python -m unittest -v tests.test_prime_p1_resource_set_identity tests.test_prime_p1_authority_resources tests.test_prime_p1_authority_artifact_lock tests.test_prime_p1_authority_application_resources tests.test_prime_p1_authority_docker_executable tests.test_prime_p1_authority_docker_socket
+Ran 71 tests in 2.377s
+OK (skipped=1)
+
+git diff --check
+exit 0
+```
+
+The one skip is the existing platform-specific atomic-Linux-socket test.
+
+### Safety and limits
+
+No Docker connection, daemon projection probe, subprocess, network request,
+model invocation, readiness frame, execute request, or production claim was
+performed. The new identity operation is a static retained-resource check;
+later authority-process work must decide when it is consumed.

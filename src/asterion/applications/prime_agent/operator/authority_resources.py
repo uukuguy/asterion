@@ -38,6 +38,7 @@ from .seccomp_policy_lock import seccomp_policy_lock_sha256
 _STATIC_AUTHORITY_RESOURCES_TOKEN = object()
 _PRODUCTION_AUTHORITY_RESOURCES_TOKEN = object()
 _IDENTITY_DOMAIN = b"asterion.prime-p1.static-authority-resources/v1\0"
+_RESOURCE_SET_DOMAIN = b"asterion.prime-p1.resource-set/v1\0"
 
 
 class PrimeP1AuthorityResourceError(ValueError):
@@ -101,6 +102,25 @@ class AdmittedStaticAuthorityResources:
                 resource.close()
             except BaseException:
                 pass
+
+    def _resource_set_contribution(self) -> bytes:
+        """Bind the retained static image/seccomp identity while it remains live."""
+        with self._lock:
+            identity = self._identity
+            seccomp = self._seccomp_resource
+            if (
+                self._closed
+                or type(identity) is not _StaticAuthorityResourceIdentity
+                or type(seccomp) is not AdmittedPrimeP1SeccompResource
+                or type(identity.digest) is not str
+                or len(identity.digest) != 64
+                or any(character not in "0123456789abcdef" for character in identity.digest)
+                or seccomp._closed[0]
+            ):
+                raise ValueError
+        return _canonical_contribution(
+            b"static-image-seccomp", ((b"sha256", bytes.fromhex(identity.digest)),)
+        )
 
 
 class AdmittedProductionAuthorityResources:
@@ -203,6 +223,61 @@ class AdmittedProductionAuthorityResources:
             failed = True
         if failed:
             raise PrimeP1AuthorityResourceError() from None
+
+    def _resource_set_sha256(self) -> str:
+        """Return the complete opaque identity of exactly this live resource set."""
+        from .authority_artifact_lock import AdmittedPrimeP1AuthorityArtifacts
+        from .authority_application_resources import AdmittedPrimeP1ApplicationResources
+
+        failed = False
+        result = ""
+        try:
+            with self._lock:
+                artifacts = self._artifacts
+                application = self._application_resources
+                static = self._static_resources
+                evidence = self._evidence_resource
+                docker = self._docker_executable
+                socket = self._docker_socket
+            children = (
+                (b"authority-artifacts", artifacts, AdmittedPrimeP1AuthorityArtifacts),
+                (b"application-resources", application, AdmittedPrimeP1ApplicationResources),
+                (b"static-image-seccomp", static, AdmittedStaticAuthorityResources),
+                (b"evidence-root", evidence, AdmittedPrimeP1EvidenceRoot),
+                (b"docker-executable", docker, AdmittedPrimeP1DockerExecutable),
+                (b"docker-socket", socket, AdmittedPrimeP1DockerSocket),
+            )
+            if any(type(child) is not expected for _, child, expected in children):
+                raise ValueError
+            docker.revalidate_for_spawn()
+            socket.revalidate_path()
+            digest = hashlib.sha256(_RESOURCE_SET_DOMAIN)
+            for kind, child, _ in children:
+                contribution = child._resource_set_contribution()
+                if type(contribution) is not bytes or not contribution.startswith(kind + b"\0"):
+                    raise ValueError
+                digest.update(_length_delimited(contribution))
+            result = digest.hexdigest()
+        except BaseException:
+            failed = True
+        if failed:
+            raise PrimeP1AuthorityResourceError() from None
+        return result
+
+
+def _length_delimited(value: bytes) -> bytes:
+    if len(value) > 65_536:
+        raise ValueError
+    return len(value).to_bytes(8, "big", signed=False) + value
+
+
+def _canonical_contribution(kind: bytes, fields: tuple[tuple[bytes, bytes], ...]) -> bytes:
+    if tuple(sorted(fields)) != fields or len({name for name, _ in fields}) != len(fields):
+        raise ValueError
+    return kind + b"\0" + b"".join(
+        len(name).to_bytes(4, "big") + name + len(value).to_bytes(8, "big") + value
+        for name, value in fields
+    )
 
 
 def _static_authority_resource_identity(
