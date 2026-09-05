@@ -22,8 +22,13 @@ from asterion.capabilities.prime_agent.provider import (
     create_prime_agent_package,
 )
 from asterion.runtime.defaults import default_runtime_factory_registry
-from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
+from asterion.runtime.factory import (
+    RuntimeFactoryBinding,
+    RuntimeFactoryContext,
+    RuntimeFactoryRegistry,
+)
 from asterion.runtime.host import RunEvent, RunRequest
+from asterion.runner.composed import run_composed_application
 from asterion.runtimes.prime_agent import PrimeAgentRuntimeClient, PrimeAgentRuntimeError
 from asterion.runtimes.prime_agent_host import (
     PrimeSmallVerificationCancelled,
@@ -82,6 +87,65 @@ class TestPrimePackageRuntimeClosure(unittest.TestCase):
             selected.assemblies[0].plan.host_capabilities,
             ("prime.ipython-production",),
         )
+
+    def test_standard_composed_run_projects_one_safe_prime_artifact(self) -> None:
+        run_id = "prime-composed-run"
+        sentinel = "SENTINEL-PRIME-HOST-BODY"
+        service = _VerificationService(
+            PrimeSmallVerificationResult(
+                run_id=run_id, trace_sha256="sha256:" + "c" * 64
+            )
+        )
+        resolved = resolve_installed_provider(
+            self.provider,
+            runtime_factories=default_runtime_factory_registry(),
+            installed_packages=(self.package,),
+        )
+        application = next(
+            item
+            for item in resolved.applications
+            if item.application_id == "prime.ipython-coding"
+        )
+        assembly = application.assemblies[0]
+        runtime = default_runtime_factory_registry().select("prime.agent").factory(
+            RuntimeFactoryContext(
+                provider_id="prime-agent",
+                application_id="prime.ipython-coding",
+                application_version="1.0.0",
+                runtime_id="prime.agent",
+                assembly_path=assembly.path,
+                options={},
+                host_services={"prime.ipython-production": service},
+            )
+        )
+
+        result = asyncio.run(
+            run_composed_application(
+                assembly.plan,
+                implementations=application.implementations,
+                runtime=runtime,
+                run_id=run_id,
+                input_text="fixed-small-verification",
+                host_services={"prime.ipython-production": service},
+            )
+        )
+
+        self.assertEqual(service.requests, [PrimeSmallVerificationRequest(run_id)])
+        self.assertEqual(
+            result.artifacts,
+            (
+                {
+                    "artifact_id": "prime.p1-b-development.trace",
+                    "media_type": "application/vnd.asterion.prime.p1-development-trace+json",
+                    "value": {
+                        "scope": "p1-b-development",
+                        "promotion": "unpromoted",
+                        "trace_sha256": "c" * 64,
+                    },
+                },
+            ),
+        )
+        self.assertNotIn(sentinel, repr(result))
 
     def test_resolution_rejects_runtime_with_an_alternate_tool(self) -> None:
         binding = default_runtime_factory_registry().select("prime.agent")
