@@ -123,7 +123,8 @@ def _issue_unavailable_receipt(
         }
         return _IssuedAuthorityReceipt(binding, _freeze(payload))
     except (TypeError, ValueError, UnicodeError):
-        _unavailable()
+        pass
+    _unavailable()
 
 
 def _unavailable_payload(

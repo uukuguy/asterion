@@ -56,7 +56,7 @@ class TestPrimeP1AuthorityReceiptCustody(unittest.TestCase):
     def test_malformed_material_is_public_safe_after_custody_consumption(self) -> None:
         for malformed in (
             _material(image_config_digest=object()),
-            _material(authority_version="\ud800"),
+            _material(authority_version="CONFIG_SECRET_SENTINEL\ud800"),
             _material(receipt_key_id="\ud800"),
         ):
             with self.subTest(malformed=repr(malformed)):
@@ -68,6 +68,7 @@ class TestPrimeP1AuthorityReceiptCustody(unittest.TestCase):
                 self.assertEqual(
                     str(raised.exception), "prime P1 authority receipt is unavailable"
                 )
+                self.assertIsNone(raised.exception.__context__)
                 rendered = "".join(traceback.format_exception(raised.exception))
                 self.assertNotIn(sentinel, rendered)
                 self.assertNotIn("CONFIG_SECRET_SENTINEL", rendered)
