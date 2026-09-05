@@ -25,11 +25,24 @@ _MODEL_COUNT = 5
 _TOOL_COUNT = 2
 _PROBE_COUNT = 12
 _HOST_TRACE_DOMAIN = "asterion.prime.p1-b-development.host-trace/v1"
-_INITIAL_SNAPSHOT_SHA256 = (
-    "sha256:4f8e0bca0f70582bad96caa292823ac29577633bebd9f76257617dc92ab6832f"
-)
-_PROMPT_ONE = "Complete the first fixed P1-B development cell using ipython."
-_PROMPT_TWO = "Complete the second fixed P1-B development cell using ipython."
+_STARTER_SHA256 = "4f8e0bca0f70582bad96caa292823ac29577633bebd9f76257617dc92ab6832f"
+_PROMPT_ONE = """Use the ipython tool exactly once. Submit exactly this Python cell:
+from pathlib import Path as P1BPath
+p1b_value = 41
+def p1b_answer():
+    return 42
+import os
+P1BPath("p1b-state").mkdir()
+os.chdir(P1BPath.cwd() / "p1b-state")
+P1BPath("continuity.txt").write_bytes(b"p1b continuity fixture\\n")
+assert P1BPath("continuity.txt").read_bytes() == b"p1b continuity fixture\\n"
+"""
+_PROMPT_TWO = """Use the ipython tool exactly once. Use the preserved p1b_value, P1BPath, p1b_answer, current directory, and continuity.txt. Submit exactly this Python cell:
+assert p1b_value == 41
+assert p1b_answer() == 42
+assert P1BPath("continuity.txt").read_bytes() == b"p1b continuity fixture\\n"
+P1BPath("/workspace/solution.py").write_text("def answer() -> int:\\n    return 42\\n", encoding="utf-8")
+"""
 
 
 class PrimeP1BDevelopmentHostError(ValueError):
@@ -75,6 +88,8 @@ async def run_prime_p1b_development(
     provider: object | None = None
     gateway_open = False
     gateway_closed = False
+    provider_closed = False
+    cleanup_complete = False
     try:
         provider = create_prime_p1b_development_sdk_provider(operator_config)
         service = P1BDockerPersistentWorkerService(
@@ -84,6 +99,11 @@ async def run_prime_p1b_development(
             session_id=session_id,
         )
         await service.acquire()
+        initial = await service.initial_snapshot()
+        if "sha256:" + sha256(
+            initial
+        ).hexdigest() != "sha256:" + _STARTER_SHA256 or inspect_answer_source(initial):
+            raise ValueError
         model_calls = 0
         tool_calls = 0
         tool_ids: set[str] = set()
@@ -170,27 +190,32 @@ async def run_prime_p1b_development(
             or completion.probe_count != _PROBE_COUNT
         ):
             raise ValueError
-        return PrimeP1BDevelopmentTrace(
-            trace_sha256=_trace_digest(
-                run_id=run_id,
-                session_id=session_id,
-                compact=compact,
-                post=post,
-            )
+        trace_sha256 = _trace_digest(
+            run_id=run_id,
+            session_id=session_id,
+            compact=compact,
+            initial=initial,
+            post=post,
         )
+        await _close_provider(provider)
+        provider_closed = True
+        await service.cleanup()
+        cleanup_complete = True
+        return PrimeP1BDevelopmentTrace(trace_sha256=trace_sha256)
     except asyncio.CancelledError:
         raise
     except BaseException:
         raise PrimeP1BDevelopmentHostError() from None
     finally:
-        if gateway is not None and gateway_open and not gateway_closed:
-            await _stop_gateway(gateway)
-        await _stop_provider(provider)
-        if service is not None:
-            try:
-                await service.cleanup()
-            except BaseException:
-                pass
+        if not cleanup_complete:
+            await _shielded_best_effort_cleanup(
+                gateway=gateway,
+                gateway_open=gateway_open,
+                gateway_closed=gateway_closed,
+                provider=provider,
+                provider_closed=provider_closed,
+                service=service,
+            )
 
 
 async def _stop_gateway(gateway: PrimeP1BDevelopmentGateway) -> None:
@@ -204,16 +229,50 @@ async def _stop_gateway(gateway: PrimeP1BDevelopmentGateway) -> None:
         pass
 
 
-async def _stop_provider(provider: object | None) -> None:
-    """Support a future explicit provider closer without widening its public API."""
+async def _close_provider(provider: object | None) -> None:
+    """Close the bounded provider before Docker cleanup can authorize a trace."""
     closer = getattr(provider, "close", None)
-    if callable(closer):
+    if not callable(closer):
+        raise ValueError
+    result = closer()
+    if not hasattr(result, "__await__"):
+        raise ValueError
+    await result
+
+
+async def _shielded_best_effort_cleanup(
+    *,
+    gateway: PrimeP1BDevelopmentGateway | None,
+    gateway_open: bool,
+    gateway_closed: bool,
+    provider: object | None,
+    provider_closed: bool,
+    service: P1BDockerPersistentWorkerService | None,
+) -> None:
+    async def cleanup() -> None:
+        if gateway is not None and gateway_open and not gateway_closed:
+            await _stop_gateway(gateway)
+        if provider is not None and not provider_closed:
+            try:
+                await _close_provider(provider)
+            except BaseException:
+                pass
+        if service is not None:
+            try:
+                await service.cleanup()
+            except BaseException:
+                pass
+
+    task = asyncio.create_task(cleanup())
+    cancelled = False
+    while not task.done():
         try:
-            result = closer()
-            if hasattr(result, "__await__"):
-                await result
-        except BaseException:
-            pass
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    task.result()
+    if cancelled:
+        raise asyncio.CancelledError
 
 
 def _terminal_provider_usage(provider: object | None) -> None:
@@ -229,7 +288,12 @@ def _terminal_provider_usage(provider: object | None) -> None:
 
 
 def _trace_digest(
-    *, run_id: str, session_id: str, compact: dict[str, object], post: bytes
+    *,
+    run_id: str,
+    session_id: str,
+    compact: dict[str, object],
+    initial: bytes,
+    post: bytes,
 ) -> str:
     value = {
         "domain": _HOST_TRACE_DOMAIN,
@@ -244,7 +308,7 @@ def _trace_digest(
         "kernel_generation_count": 1,
         "kernel_restart_count": 0,
         "continuity_probe_count": _PROBE_COUNT,
-        "initial_snapshot_sha256": _INITIAL_SNAPSHOT_SHA256,
+        "initial_snapshot_sha256": "sha256:" + sha256(initial).hexdigest(),
         "post_snapshot_sha256": "sha256:" + sha256(post).hexdigest(),
         "initial_ast_oracle_passed": False,
         "final_ast_oracle_passed": True,
