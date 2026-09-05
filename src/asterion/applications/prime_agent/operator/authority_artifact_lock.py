@@ -59,6 +59,7 @@ class _Artifact:
 
 @dataclass(frozen=True, slots=True)
 class _Descriptor:
+    authority_version: str
     artifacts: tuple[_Artifact, ...]
 
 
@@ -154,12 +155,14 @@ def _load_packaged_descriptor() -> _Descriptor:
     paths = tuple(artifact.path for artifact in artifacts)
     if paths != _EXPECTED_ARTIFACT_PATHS:
         raise ValueError
-    return _Descriptor(tuple(artifacts))
+    return _Descriptor(value["authority_version"], tuple(artifacts))
 
 
 def _canonical_descriptor_bytes(descriptor: _Descriptor) -> bytes:
     """Encode the admitted descriptor with fixed ordering and no paths released."""
-    result = bytearray(_PROTOCOL.encode("ascii") + b"\0")
+    result = bytearray(
+        _PROTOCOL.encode("ascii") + b"\0" + descriptor.authority_version.encode("ascii") + b"\0"
+    )
     for artifact in descriptor.artifacts:
         result.extend(artifact.path.encode("ascii"))
         result.append(0)

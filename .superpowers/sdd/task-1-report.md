@@ -158,6 +158,59 @@ The one skip is the existing platform-specific atomic-Linux-socket test.
 
 ### Safety and limits
 
+## Resource-set identity review fix (2026-09-05)
+
+- `authority_version` is now retained by the authority-artifact descriptor and
+  included in its canonical identity input. A version-only descriptor mutation
+  changes the admitted artifact identity.
+- Resource-set assembly now collects and validates all six exact child
+  contributions first; Docker executable and socket revalidation occur only
+  immediately before the final SHA-256 computation. The socket contribution
+  also path-revalidates, so a retained parent descriptor cannot mask a replaced
+  socket path during contribution collection.
+- The resource-set tests now use genuine exact child objects and contribution
+  methods (with only the path revalidation seam suppressed where no real Docker
+  socket is admitted). They cover every child closing, retained identity-value
+  changes, final revalidation order, and isolated Docker/socket revalidation
+  failures. This detects the previously omitted `authority_version`.
+
+### TDD and verification evidence
+
+RED, before the descriptor change:
+
+```text
+TypeError: _Descriptor.__init__() takes 2 positional arguments but 3 were given
+```
+
+GREEN:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_resource_set_identity
+Ran 5 tests in 0.008s
+OK
+
+uv run python -m unittest -v tests.test_prime_p1_resource_set_identity \
+  tests.test_prime_p1_authority_artifact_lock \
+  tests.test_prime_p1_authority_docker_socket \
+  tests.test_prime_p1_authority_docker_executable \
+  tests.test_prime_p1_authority_resources
+Ran 67 tests in 2.503s
+OK (skipped=1: existing platform-specific atomic socket flag test)
+
+uv run ruff check src/asterion/applications/prime_agent/operator/authority_artifact_lock.py \
+  src/asterion/applications/prime_agent/operator/authority_resources.py \
+  src/asterion/applications/prime_agent/operator/authority_docker_socket.py \
+  tests/test_prime_p1_resource_set_identity.py
+All checks passed!
+
+git diff --check
+exit 0
+```
+
+The authority-artifact descriptor hashes were refreshed after sources
+stabilized. No Docker connection, daemon probe, network, subprocess, model,
+readiness, or execution action was performed.
+
 No Docker connection, daemon projection probe, subprocess, network request,
 model invocation, readiness frame, execute request, or production claim was
 performed. The new identity operation is a static retained-resource check;

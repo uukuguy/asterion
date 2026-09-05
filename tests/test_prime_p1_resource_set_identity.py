@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import tempfile
+import threading
 import unittest
+from contextlib import ExitStack
 from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.authority_application_resources import (
@@ -95,45 +99,192 @@ def _resources() -> AdmittedProductionAuthorityResources:
     )
 
 
+def _real_resources(directory: str) -> AdmittedProductionAuthorityResources:
+    """Build exact admitted child objects whose contributions validate locally."""
+    import asterion.applications.prime_agent.operator.authority_application_resources as application_module
+    import asterion.applications.prime_agent.operator.authority_artifact_lock as artifact_module
+    import asterion.applications.prime_agent.operator.authority_docker_executable as docker_module
+    import asterion.applications.prime_agent.operator.authority_docker_socket as socket_module
+    import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
+    import asterion.applications.prime_agent.operator.authority_resources as resources_module
+    from asterion.applications.prime_agent.operator.authority_seccomp import (
+        AdmittedPrimeP1SeccompResource,
+    )
+
+    evidence_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    info = os.fstat(evidence_fd)
+    executable_fd = os.open("/usr/bin/env", os.O_RDONLY | os.O_CLOEXEC)
+    executable_identity = docker_module._identity_for_fd(executable_fd)
+    root_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    root_identity = socket_module._identity_for_fd(root_fd)
+    seccomp = AdmittedPrimeP1SeccompResource(
+        (), "", (), object(), "c" * 64, threading.Lock(), [False], [False]
+    )
+    return AdmittedProductionAuthorityResources(
+        AdmittedPrimeP1AuthorityArtifacts(b"a" * 32, _token=artifact_module._TOKEN),
+        AdmittedPrimeP1ApplicationResources(b"b" * 32, _token=application_module._TOKEN),
+        AdmittedStaticAuthorityResources(
+            resources_module._StaticAuthorityResourceIdentity("c" * 64),
+            seccomp,
+            _token=resources_module._STATIC_AUTHORITY_RESOURCES_TOKEN,
+        ),
+        AdmittedPrimeP1EvidenceRoot(
+            evidence_fd,
+            evidence_module._EvidenceIdentity(
+                info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid
+            ),
+            _token=evidence_module._EVIDENCE_TOKEN,
+        ),
+        AdmittedPrimeP1DockerExecutable(
+            executable_fd,
+            executable_identity,
+            docker_module._digest_fd(executable_fd, executable_identity),
+            _token=docker_module._ADMITTED_DOCKER_EXECUTABLE_TOKEN,
+        ),
+        AdmittedPrimeP1DockerSocket(
+            root_fd,
+            ("docker.sock",),
+            (root_identity,),
+            socket_module._Identity(1, 2, 3, 4, 5),
+            "1.41",
+            "26.1.4",
+            _token=socket_module._ADMITTED_DOCKER_SOCKET_TOKEN,
+        ),
+        _token=resources_module._PRODUCTION_AUTHORITY_RESOURCES_TOKEN,
+    )
+
+
 class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
-    def test_digest_is_exact_deterministic_and_binds_every_child(self) -> None:
-        resource = _resources()
-        children = (
-            AdmittedPrimeP1AuthorityArtifacts,
-            AdmittedPrimeP1ApplicationResources,
-            AdmittedStaticAuthorityResources,
-            AdmittedPrimeP1EvidenceRoot,
-            AdmittedPrimeP1DockerExecutable,
-            AdmittedPrimeP1DockerSocket,
+    def test_authority_artifact_identity_binds_authority_version(self) -> None:
+        import asterion.applications.prime_agent.operator.authority_artifact_lock as module
+
+        artifacts = (module._Artifact("authority_resources.py", "a" * 64),)
+        first = module._Descriptor("0.1.0", artifacts)
+        second = module._Descriptor("0.1.1", artifacts)
+
+        self.assertNotEqual(
+            hashlib.sha256(module._canonical_descriptor_bytes(first)).digest(),
+            hashlib.sha256(module._canonical_descriptor_bytes(second)).digest(),
         )
-        contributions = (
-            b"authority-artifacts\0artifact",
-            b"application-resources\0application",
-            b"static-image-seccomp\0static",
-            b"evidence-root\0evidence",
-            b"docker-executable\0executable",
-            b"docker-socket\0socket",
-        )
-        try:
-            with (
-                patch.object(children[0], "_resource_set_contribution", return_value=contributions[0]),
-                patch.object(children[1], "_resource_set_contribution", return_value=contributions[1]),
-                patch.object(children[2], "_resource_set_contribution", return_value=contributions[2]),
-                patch.object(children[3], "_resource_set_contribution", return_value=contributions[3]),
-                patch.object(children[4], "_resource_set_contribution", return_value=contributions[4]),
-                patch.object(children[5], "_resource_set_contribution", return_value=contributions[5]),
-                patch.object(children[4], "revalidate_for_spawn"),
-                patch.object(children[5], "revalidate_path"),
-            ):
-                digest = resource._resource_set_sha256()
-                self.assertEqual(digest, resource._resource_set_sha256())
-                self.assertEqual(digest, "ccad79cf72a7ed149c1f923c9e2c400fc30d36cfebca4c6e0d0e1cb9d355d400")
-                for position, child in enumerate(children):
-                    replacement = contributions[:position] + (contributions[position] + b"changed",) + contributions[position + 1 :]
-                    with patch.object(child, "_resource_set_contribution", return_value=replacement[position]):
-                        self.assertNotEqual(digest, resource._resource_set_sha256())
-        finally:
-            resource.close()
+
+    def test_digest_uses_real_child_contributions_and_rejects_every_closed_child(self) -> None:
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
+            resource = _real_resources(directory)
+            try:
+                with patch.object(AdmittedPrimeP1DockerSocket, "revalidate_path"):
+                    digest = resource._resource_set_sha256()
+                    self.assertEqual(digest, resource._resource_set_sha256())
+                    for child in (
+                        resource._artifacts,
+                        resource._application_resources,
+                        resource._static_resources,
+                        resource._evidence_resource,
+                        resource._docker_executable,
+                        resource._docker_socket,
+                    ):
+                        self.assertIsNotNone(child)
+                        contribution = child._resource_set_contribution()
+                        self.assertTrue(contribution)
+            finally:
+                resource.close()
+
+            for name in ("_artifacts", "_application_resources", "_static_resources", "_evidence_resource", "_docker_executable", "_docker_socket"):
+                resource = _real_resources(directory)
+                try:
+                    child = getattr(resource, name)
+                    child.close()
+                    with patch.object(AdmittedPrimeP1DockerSocket, "revalidate_path"), self.assertRaises(PrimeP1AuthorityResourceError):
+                        resource._resource_set_sha256()
+                finally:
+                    resource.close()
+
+    def test_real_child_contributions_bind_retained_identity_values(self) -> None:
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
+            resource = _real_resources(directory)
+            try:
+                with patch.object(AdmittedPrimeP1DockerSocket, "revalidate_path"):
+                    children_and_mutations = (
+                        (resource._artifacts, "_identity", b"d" * 32),
+                        (resource._application_resources, "_identity", b"e" * 32),
+                        (
+                            resource._static_resources,
+                            "_identity",
+                            type(resource._static_resources._identity)("f" * 64),
+                        ),
+                        (
+                            resource._evidence_resource,
+                            "_identity",
+                            type(resource._evidence_resource._identity)(9, 8, 7, 6, 5),
+                        ),
+                        (resource._docker_executable, "_digest", b"g" * 32),
+                        (
+                            resource._docker_socket,
+                            "_socket",
+                            type(resource._docker_socket._socket)(9, 8, 7, 6, 5),
+                        ),
+                        (resource._docker_socket, "_expected_api_version", "1.42"),
+                        (resource._docker_socket, "_expected_version", "26.1.5"),
+                    )
+                    for child, attribute, changed in children_and_mutations:
+                        original = getattr(child, attribute)
+                        baseline = child._resource_set_contribution()
+                        setattr(child, attribute, changed)
+                        if attribute == "_identity" and child is resource._evidence_resource:
+                            with self.assertRaises(ValueError):
+                                child._resource_set_contribution()
+                        else:
+                            self.assertNotEqual(baseline, child._resource_set_contribution())
+                        setattr(child, attribute, original)
+            finally:
+                resource.close()
+
+    def test_final_revalidations_run_only_after_real_contributions(self) -> None:
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
+            resource = _real_resources(directory)
+            events: list[str] = []
+            try:
+                children = (
+                    resource._artifacts,
+                    resource._application_resources,
+                    resource._static_resources,
+                    resource._evidence_resource,
+                    resource._docker_executable,
+                    resource._docker_socket,
+                )
+                originals = tuple(type(child)._resource_set_contribution for child in children)
+                patches = [
+                    patch.object(
+                        type(child),
+                        "_resource_set_contribution",
+                        autospec=True,
+                        side_effect=lambda child, original=original: (
+                            events.append(type(child).__name__), original(child)
+                        )[1],
+                    )
+                    for child, original in zip(children, originals, strict=True)
+                ]
+                with ExitStack() as stack:
+                    for contribution_patch in patches:
+                        stack.enter_context(contribution_patch)
+                    stack.enter_context(
+                        patch.object(
+                            AdmittedPrimeP1DockerExecutable,
+                            "revalidate_for_spawn",
+                            side_effect=lambda: events.append("docker-final"),
+                        )
+                    )
+                    stack.enter_context(
+                        patch.object(
+                            AdmittedPrimeP1DockerSocket,
+                            "revalidate_path",
+                            side_effect=lambda: events.append("socket-revalidate"),
+                        )
+                    )
+                    resource._resource_set_sha256()
+                self.assertEqual(events[-2:], ["docker-final", "socket-revalidate"])
+                self.assertEqual(len(events), 9)
+            finally:
+                resource.close()
 
     def test_closed_child_and_revalidation_fail_before_digest_without_leaks(self) -> None:
         resource = _resources()
@@ -150,31 +301,39 @@ class TestPrimeP1ResourceSetIdentity(unittest.TestCase):
         finally:
             resource.close()
 
-        resource = _resources()
-        try:
-            with patch.object(
-                AdmittedPrimeP1DockerExecutable,
-                "revalidate_for_spawn",
-                side_effect=PrimeP1DockerExecutableError("RESOURCE_SET_SECRET_SENTINEL"),
-            ), self.assertRaises(PrimeP1AuthorityResourceError) as raised:
-                resource._resource_set_sha256()
-            self.assertNotIn("RESOURCE_SET_SECRET_SENTINEL", str(raised.exception))
-            self.assertIsNone(raised.exception.__context__)
-        finally:
-            resource.close()
+        with tempfile.TemporaryDirectory(dir=os.getcwd()) as directory:
+            resource = _real_resources(directory)
+            try:
+                with (
+                    patch.object(AdmittedPrimeP1DockerSocket, "revalidate_path"),
+                    patch.object(
+                        AdmittedPrimeP1DockerExecutable,
+                        "revalidate_for_spawn",
+                        side_effect=PrimeP1DockerExecutableError("RESOURCE_SET_SECRET_SENTINEL"),
+                    ),
+                    self.assertRaises(PrimeP1AuthorityResourceError) as raised,
+                ):
+                    resource._resource_set_sha256()
+                self.assertNotIn("RESOURCE_SET_SECRET_SENTINEL", str(raised.exception))
+                self.assertIsNone(raised.exception.__context__)
+            finally:
+                resource.close()
 
-        resource = _resources()
-        try:
-            with patch.object(
-                AdmittedPrimeP1DockerSocket,
-                "revalidate_path",
-                side_effect=PrimeP1DockerSocketError("RESOURCE_SET_SECRET_SENTINEL"),
-            ), self.assertRaises(PrimeP1AuthorityResourceError) as raised:
-                resource._resource_set_sha256()
-            self.assertNotIn("RESOURCE_SET_SECRET_SENTINEL", str(raised.exception))
-            self.assertIsNone(raised.exception.__context__)
-        finally:
-            resource.close()
+            resource = _real_resources(directory)
+            try:
+                with (
+                    patch.object(
+                        AdmittedPrimeP1DockerSocket,
+                        "revalidate_path",
+                        side_effect=(None, PrimeP1DockerSocketError("RESOURCE_SET_SECRET_SENTINEL")),
+                    ),
+                    self.assertRaises(PrimeP1AuthorityResourceError) as raised,
+                ):
+                    resource._resource_set_sha256()
+                self.assertNotIn("RESOURCE_SET_SECRET_SENTINEL", str(raised.exception))
+                self.assertIsNone(raised.exception.__context__)
+            finally:
+                resource.close()
 
 
 if __name__ == "__main__":

@@ -249,13 +249,16 @@ class AdmittedProductionAuthorityResources:
             )
             if any(type(child) is not expected for _, child, expected in children):
                 raise ValueError
-            docker.revalidate_for_spawn()
-            socket.revalidate_path()
-            digest = hashlib.sha256(_RESOURCE_SET_DOMAIN)
+            contributions: list[bytes] = []
             for kind, child, _ in children:
                 contribution = child._resource_set_contribution()
                 if type(contribution) is not bytes or not contribution.startswith(kind + b"\0"):
                     raise ValueError
+                contributions.append(contribution)
+            docker.revalidate_for_spawn()
+            socket.revalidate_path()
+            digest = hashlib.sha256(_RESOURCE_SET_DOMAIN)
+            for contribution in contributions:
                 digest.update(_length_delimited(contribution))
             result = digest.hexdigest()
         except BaseException:

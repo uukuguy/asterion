@@ -121,6 +121,7 @@ class AdmittedPrimeP1DockerSocket:
 
     def _resource_set_contribution(self) -> bytes:
         """Bind retained socket and expected daemon identities without its pathname."""
+        self.revalidate_path()
         with self._lock:
             parent_fd = self._parent_fd
             identities = self._identities
