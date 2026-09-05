@@ -23,6 +23,9 @@ from asterion.applications.prime_agent.operator.authority_resources import (
     admit_static_authority_resources,
     admit_static_image_resource,
 )
+from asterion.applications.prime_agent.operator.authority_artifact_lock import (
+    AdmittedPrimeP1AuthorityArtifacts,
+)
 from asterion.applications.prime_agent.operator.authority_evidence import (
     AdmittedPrimeP1EvidenceRoot,
     PrimeP1EvidenceResourceError,
@@ -86,6 +89,12 @@ class _CountingResource:
     def close(self) -> None:
         self.close_calls += 1
         self._events.append(self._name)
+
+
+def _artifact_lock() -> AdmittedPrimeP1AuthorityArtifacts:
+    import asterion.applications.prime_agent.operator.authority_artifact_lock as module
+
+    return AdmittedPrimeP1AuthorityArtifacts(_token=module._TOKEN)
 
 
 class _StaticResourceSubclass(AdmittedStaticAuthorityResources):
@@ -245,6 +254,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         docker = _docker()
         socket = _socket()
         resource = AdmittedProductionAuthorityResources(
+            _artifact_lock(),
             static,
             evidence,
             docker,
@@ -279,6 +289,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             _token=evidence_module._EVIDENCE_TOKEN,
         )
         resource = AdmittedProductionAuthorityResources(
+            _artifact_lock(),
             static,
             evidence,
             _docker(),
@@ -307,6 +318,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         import asterion.applications.prime_agent.operator.authority_resources as module
         import asterion.applications.prime_agent.operator.authority_evidence as evidence_module
 
+        artifacts = _artifact_lock()
         static = AdmittedStaticAuthorityResources(
             object(),
             _CountingResource([], "nested"),
@@ -319,6 +331,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         docker = _docker()
         socket = _socket()
         original_static_close = AdmittedStaticAuthorityResources.close
+        original_artifacts_close = AdmittedPrimeP1AuthorityArtifacts.close
         original_evidence_close = AdmittedPrimeP1EvidenceRoot.close
         original_docker_close = AdmittedPrimeP1DockerExecutable.close
         original_socket_close = AdmittedPrimeP1DockerSocket.close
@@ -326,6 +339,10 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
         def close_static(resource: AdmittedStaticAuthorityResources) -> None:
             events.append("static")
             original_static_close(resource)
+
+        def close_artifacts(resource: AdmittedPrimeP1AuthorityArtifacts) -> None:
+            events.append("artifacts")
+            original_artifacts_close(resource)
 
         def close_evidence(resource: AdmittedPrimeP1EvidenceRoot) -> None:
             events.append("evidence")
@@ -340,6 +357,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             original_socket_close(resource)
 
         with (
+            patch.object(module, "admit_authority_artifact_lock", return_value=artifacts) as admit_artifacts,
             patch.object(
                 module, "admit_static_authority_resources", return_value=static
             ) as admit_static,
@@ -352,6 +370,12 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             patch.object(
                 module, "admit_docker_socket", return_value=socket
             ) as admit_socket,
+            patch.object(
+                AdmittedPrimeP1AuthorityArtifacts,
+                "close",
+                autospec=True,
+                side_effect=close_artifacts,
+            ),
             patch.object(
                 AdmittedStaticAuthorityResources,
                 "close",
@@ -378,6 +402,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
             ),
         ):
             resources = admit_production_authority_resources(config)
+            admit_artifacts.assert_called_once_with()
             admit_static.assert_called_once_with(config)
             admit_evidence.assert_called_once_with(config)
             admit_docker.assert_called_once_with(config)
@@ -392,7 +417,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 thread.start()
             for thread in threads:
                 thread.join()
-        self.assertEqual(events, ["socket", "docker", "evidence", "static"])
+        self.assertEqual(events, ["socket", "docker", "evidence", "static", "artifacts"])
 
     def test_evidence_failure_closes_static_once_in_reverse_acquisition_order(
         self,
@@ -700,6 +725,7 @@ class TestPrimeP1AuthorityResources(unittest.TestCase):
                 ):
                     with self.assertRaises(PrimeP1AuthorityResourceError):
                         constructor(
+                            _artifact_lock(),
                             static_child,
                             evidence_child,
                             docker_child,
