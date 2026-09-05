@@ -198,6 +198,17 @@ export {
   PrimeSession,
   PrimeSessionError,
 } from "./prime-session.js";
+export {
+  PrimeP1DevelopmentSession,
+} from "./p1-development-session.js";
+export type {
+  PrimeP1DevelopmentResult,
+  PrimeP1DevelopmentSessionOptions,
+  PrimeP1DevelopmentUsage,
+  PrimeSdkAssistantMessageEventStream,
+  PrimeSdkIpythonCallback,
+  PrimeSdkModelCallback,
+} from "./p1-development-session.js";
 export type {
   PrimeContextDescription,
   PrimeContextBranchSummaryResult,
