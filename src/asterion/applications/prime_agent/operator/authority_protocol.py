@@ -11,6 +11,8 @@ import re
 from types import MappingProxyType
 from typing import NoReturn, Protocol, cast
 
+from .authority_receipt import _AuthorityTerminalBinding, _IssuedAuthorityReceipt
+
 PROTOCOL = "asterion.prime-p1-authority-ipc/v1"
 _DOMAIN = b"asterion.prime-p1-authority-ipc/v1\0"
 _RECEIPT_FORMAT = "asterion.prime-p1-authority-receipt/v1"
@@ -105,14 +107,12 @@ class AuthoritySession:
         resource_set_sha256: str,
         *,
         replay_ledger: ReplayLedger | None = None,
-        receipt_hmac_key: bytes | None = None,
     ) -> None:
         if not (
             _is_session_id(session_id)
             and _is_key(session_key)
             and _is_sha256(request_contract_sha256)
             and _is_sha256(resource_set_sha256)
-            and (receipt_hmac_key is None or _is_key(receipt_hmac_key))
         ):
             _unavailable()
         (
@@ -121,9 +121,9 @@ class AuthoritySession:
             self._contract,
             self._resource,
             self._ledger,
-            self._receipt_key,
             self._run_id,
             self._application,
+            self._binding,
             self._state,
         ) = (
             session_id,
@@ -131,7 +131,7 @@ class AuthoritySession:
             request_contract_sha256,
             resource_set_sha256,
             replay_ledger,
-            receipt_hmac_key,
+            None,
             None,
             None,
             "await-ready",
@@ -186,19 +186,30 @@ class AuthoritySession:
         self._state = next_state
         return frame
 
-    def terminal_packet(self, receipt: Mapping[str, object]) -> bytes:
-        if self._state not in {"await-cancel-or-terminal", "cancelled"}:
+    def reserve_terminal_binding(self) -> _AuthorityTerminalBinding:
+        if (
+            self._state != "await-cancel-or-terminal"
+            or not isinstance(self._run_id, str)
+            or not isinstance(self._application, str)
+        ):
             _unavailable()
-        if self._receipt_key is None or not isinstance(self._run_id, str) or not isinstance(self._application, str):
-            _unavailable()
-        result = _receipt(
-            receipt, self._session_id, self._contract, self._receipt_key,
-            self._run_id, self._application, self._resource,
+        binding = _AuthorityTerminalBinding(
+            self._session_id, self._run_id, self._contract, self._application, self._resource
         )
-        if self._state == "cancelled" and result.status != "CANCELLED":
+        self._binding = binding
+        self._state = "terminal-reserved"
+        return binding
+
+    def terminal_packet(self, issued: _IssuedAuthorityReceipt) -> bytes:
+        if self._state != "terminal-reserved" or type(issued) is not _IssuedAuthorityReceipt:
             _unavailable()
+        if issued._binding != self._binding:
+            _unavailable()
+        self._binding = None
         self._state = "terminal-emitted"
-        return encode_frame(self._session_key, self._session_id, 1, "terminal", receipt)
+        return encode_frame(
+            self._session_key, self._session_id, 1, "terminal", _native_mapping(issued._payload)
+        )
 
     def _claim(self, frame: AuthorityFrame) -> None:
         if self._ledger is None:
@@ -735,6 +746,13 @@ def _freeze(value: object) -> Mapping[str, object]:
             for key, item in value.items()
         }
     )
+
+
+def _native_mapping(value: Mapping[str, object]) -> dict[str, object]:
+    return {
+        name: _native_mapping(item) if isinstance(item, Mapping) else item
+        for name, item in value.items()
+    }
 
 
 def _json(value: object) -> bytes:
