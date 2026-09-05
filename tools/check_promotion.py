@@ -220,6 +220,8 @@ expected = {
         'asterion.application-assembly/v1',
     'applications/prime_agent/assemblies/prime-capability-program.json':
         'asterion.application-assembly/v1',
+    'applications/prime_agent/assemblies/prime-ipython-coding.json':
+        'asterion.application-assembly/v1',
     'capabilities/controlled_code/capability-package.json':
         'asterion.capability-package/v1',
     'capabilities/controlled_code/manifests/code-quality-evaluation.json':

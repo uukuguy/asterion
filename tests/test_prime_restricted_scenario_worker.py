@@ -130,7 +130,6 @@ class TestRestrictedScenarioWorker(unittest.IsolatedAsyncioTestCase):
     async def test_cleanup_completes_before_cancelled_caller_exits(self) -> None:
         from asterion.applications.prime_agent.operator.restricted_scenario_worker import (
             RestrictedScenarioAdapter,
-            RestrictedScenarioInspection,
             RestrictedScenarioWorker,
         )
 

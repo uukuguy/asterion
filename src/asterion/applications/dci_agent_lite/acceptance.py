@@ -56,10 +56,12 @@ _EXPECTED_PACKAGED_ASSEMBLIES = (
     "dci-research-capability-claude.json",
     "applications/dci_agent_lite/assemblies/dci-research-capability.json",
     "applications/prime_agent/assemblies/prime-capability-program.json",
+    "applications/prime_agent/assemblies/prime-ipython-coding.json",
 )
 _EXPECTED_UNBOUND_ASSEMBLIES = (
     "applications/dci_agent_lite/assemblies/dci-local-research.json",
     "applications/prime_agent/assemblies/prime-capability-program.json",
+    "applications/prime_agent/assemblies/prime-ipython-coding.json",
 )
 _EXPECTED_BOUND_ASSEMBLIES = tuple(
     identity

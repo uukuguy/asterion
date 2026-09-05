@@ -28,14 +28,18 @@ uv run asterion verify --provider dci-agent-lite --level acceptance
 ```
 
 `acceptance` reports installed inventory and executable reachability
-separately. The wheel packages six assembly resources; providers bind five,
-all five compose against exact runtime manifests, and all five have complete
-implementation bindings. The unbound
-`applications/dci_agent_lite/assemblies/dci-local-research.json` resource is
-reported as package-relative inventory, not as a product entry point. The
-check also covers providers, capability manifests, context profiles, benchmark
-identities, and paper scopes. It does not construct runtime clients, contact an
-Agent or Judge, or run a dataset.
+separately. In the selected controlled-code and DCI provider acceptance scope,
+the wheel packages 10/10 expected assembly resources; 7/7 are bound, compose
+against exact runtime manifests, and have complete implementation bindings. The unbound
+resources are `applications/dci_agent_lite/assemblies/dci-local-research.json`,
+`applications/prime_agent/assemblies/prime-capability-program.json`, and
+`applications/prime_agent/assemblies/prime-ipython-coding.json`; they are
+reported as package-relative inventory, not as product entry points for that
+acceptance scope. The check also covers providers, capability manifests,
+context profiles, benchmark identities, and paper scopes. This provider-free
+acceptance checks metadata and entry-point reachability only; it does not
+execute a runtime or model, construct runtime clients, contact an Agent or
+Judge, or run a dataset.
 
 ## External Pi and resources
 

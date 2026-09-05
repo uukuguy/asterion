@@ -1053,6 +1053,7 @@ class AsterionCliTests(unittest.TestCase):
                 "dci-local-research.json",
                 "applications/prime_agent/assemblies/"
                 "prime-capability-program.json",
+                "applications/prime_agent/assemblies/prime-ipython-coding.json",
             ],
         )
 
