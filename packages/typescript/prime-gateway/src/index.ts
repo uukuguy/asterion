@@ -208,6 +208,12 @@ export {
   P1_DEVELOPMENT_MAX_FRAME_BYTES,
   P1DevelopmentBridge,
 } from "./p1-development-bridge.js";
+export {
+  inheritedP1BDevelopmentSocket,
+  P1B_DEVELOPMENT_GATEWAY_PROTOCOL,
+  P1B_DEVELOPMENT_MAX_FRAME_BYTES,
+  P1BDevelopmentBridge,
+} from "./p1b-development-bridge.js";
 export type {
   PrimeP1DevelopmentResult,
   PrimeP1DevelopmentSessionOptions,
