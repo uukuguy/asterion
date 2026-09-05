@@ -251,8 +251,11 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             closed.append(fd)
             native_close(fd)
 
+        class ForbiddenAccess(BaseException):
+            pass
+
         def forbidden(*_: object, **__: object) -> object:
-            raise AssertionError("host or handshake access is forbidden")
+            raise ForbiddenAccess("host or handshake access is forbidden")
 
         import asterion.applications.prime_agent.operator.authority_config as config_module
         import asterion.applications.prime_agent.operator.authority_process as module
@@ -282,6 +285,89 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         self.assertTrue(connection.closed)
         self.assertEqual(closed.count(key_read), 1)
         self.assertEqual(closed.count(config_read), 1)
+
+    def test_pre_ready_cleanup_normalizes_arbitrary_socket_and_fd_close_errors(
+        self,
+    ) -> None:
+        class RuntimeCloseSocket(_ExchangeSocket):
+            def __init__(self) -> None:
+                super().__init__(AssertionError("transport must not run"))
+                self.close_attempts = 0
+
+            def close(self) -> None:
+                self.close_attempts += 1
+                raise RuntimeError("SOCKET_CLOSE_SENTINEL")
+
+        key_read, key_write = os.pipe()
+        os.write(key_write, b"k" * 32)
+        os.close(key_write)
+        config_read = self._config_fd()
+        connection = RuntimeCloseSocket()
+        close_attempts: list[int] = []
+
+        def failing_close(fd: int) -> None:
+            close_attempts.append(fd)
+            raise RuntimeError("FD_CLOSE_SENTINEL")
+
+        def cleanup_key() -> None:
+            try:
+                os.close(key_read)
+            except OSError:
+                pass
+
+        self.addCleanup(cleanup_key)
+        bundle = AdmittedAuthorityDescriptors(
+            connection, key_read, config_read, failing_close
+        )
+        with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+            _run_ready_execute_exchange(bundle, "a" * 64)
+        self.assertIsNone(raised.exception.__context__)
+        rendered = "".join(traceback.format_exception(raised.exception))
+        self.assertNotIn("SOCKET_CLOSE_SENTINEL", rendered)
+        self.assertNotIn("FD_CLOSE_SENTINEL", rendered)
+        self.assertEqual(connection.close_attempts, 1)
+        self.assertEqual(close_attempts, [key_read])
+        with self.assertRaises(OSError):
+            os.fstat(config_read)
+
+    def test_rejected_descriptor_subclass_uses_base_cleanup_without_override(
+        self,
+    ) -> None:
+        class OverrideCloseBundle(AdmittedAuthorityDescriptors):
+            def __init__(self, connection: object, close_fd: object) -> None:
+                super().__init__(connection, 101, 102, cast(Any, close_fd))
+                self.override_called = False
+
+            def close(self) -> None:
+                self.override_called = True
+                raise RuntimeError("OVERRIDE_CLOSE_SENTINEL")
+
+        class RuntimeCloseSocket:
+            def __init__(self) -> None:
+                self.attempts = 0
+
+            def close(self) -> None:
+                self.attempts += 1
+                raise RuntimeError("SOCKET_CLOSE_SENTINEL")
+
+        connection = RuntimeCloseSocket()
+        closed: list[int] = []
+
+        def failing_close(fd: int) -> None:
+            closed.append(fd)
+            raise RuntimeError("FD_CLOSE_SENTINEL")
+
+        bundle = OverrideCloseBundle(connection, failing_close)
+        with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
+            _run_ready_execute_exchange(bundle, "a" * 64)
+        self.assertIsNone(raised.exception.__context__)
+        self.assertFalse(bundle.override_called)
+        self.assertEqual(connection.attempts, 1)
+        self.assertEqual(closed, [101, 102])
+        rendered = "".join(traceback.format_exception(raised.exception))
+        self.assertNotIn("OVERRIDE_CLOSE_SENTINEL", rendered)
+        self.assertNotIn("SOCKET_CLOSE_SENTINEL", rendered)
+        self.assertNotIn("FD_CLOSE_SENTINEL", rendered)
 
     def test_pre_ready_resource_gate_stays_unavailable_after_future_resolution(
         self,

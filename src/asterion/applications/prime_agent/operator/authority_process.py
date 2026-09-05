@@ -89,13 +89,13 @@ class AdmittedAuthorityDescriptors:
         if connection is not None:
             try:
                 _close_socket(connection)
-            except OSError:
+            except Exception:
                 pass
         for fd in fds:
             if fd is not None:
                 try:
                     self._close_fd(fd)
-                except (OSError, OverflowError, TypeError):
+                except Exception:
                     pass
 
     def _take(self, attribute: str) -> object:
@@ -291,10 +291,13 @@ def _run_ready_execute_exchange(
         if config_fd is not None:
             try:
                 descriptors._close_fd(config_fd)
-            except (OSError, OverflowError, TypeError):
+            except Exception:
                 pass
-        if type(descriptors) is AdmittedAuthorityDescriptors:
-            descriptors.close()
+        if isinstance(descriptors, AdmittedAuthorityDescriptors):
+            try:
+                AdmittedAuthorityDescriptors.close(descriptors)
+            except Exception:
+                pass
     _unavailable()
 
 
