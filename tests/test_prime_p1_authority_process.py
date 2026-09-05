@@ -22,6 +22,7 @@ from asterion.applications.prime_agent.operator.authority_process import (
     admit_retained_authority_descriptors,
     _consume_session_key,
     _receive_authority_packet,
+    _receive_authority_packet_from_connection,
     _send_authority_packet,
 )
 
@@ -126,6 +127,27 @@ def _send_packet(connection: object, packet: bytes) -> None:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_connection_level_packet_receive_never_closes_caller_connection(
+        self,
+    ) -> None:
+        for responses, expected in (
+            ([(b"x", [], 0, None)], b"x"),
+            ([(b"x", [], socket_module.MSG_TRUNC, None)], None),
+        ):
+            with self.subTest(responses=responses):
+                connection = _PacketSocket(list(responses))
+                with patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True):
+                    if expected is None:
+                        with self.assertRaises(PrimeP1AuthorityBootstrapError):
+                            _receive_authority_packet_from_connection(connection)
+                    else:
+                        self.assertEqual(
+                            _receive_authority_packet_from_connection(connection),
+                            expected,
+                        )
+                self.assertFalse(connection.closed)
+                self.assertEqual(connection.close_calls, 0)
+
     def test_private_packet_send_emits_exact_packet_without_ancillary_or_socket_ownership_change(
         self,
     ) -> None:

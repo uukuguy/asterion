@@ -167,6 +167,25 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
         if not isinstance(descriptors, AdmittedAuthorityDescriptors):
             _unavailable()
         connection = descriptors.consume_socket()
+        result = _receive_authority_packet_from_connection(connection)
+    except (OSError, OverflowError, TypeError, ValueError):
+        failed = True
+    finally:
+        if connection is not None:
+            try:
+                _close_socket(connection)
+            except (OSError, OverflowError, TypeError):
+                failed = True
+    if failed or result is None:
+        _unavailable()
+    return result
+
+
+def _receive_authority_packet_from_connection(connection: object) -> bytes:
+    """Validate one raw packet without closing the caller-owned connection."""
+    result: bytes | None = None
+    failed = False
+    try:
         capability = getattr(socket, "MSG_CMSG_CLOEXEC", None)
         if (
             isinstance(capability, bool)
@@ -205,12 +224,6 @@ def _receive_authority_packet(descriptors: AdmittedAuthorityDescriptors) -> byte
         result = packet
     except (OSError, OverflowError, TypeError, ValueError):
         failed = True
-    finally:
-        if connection is not None:
-            try:
-                _close_socket(connection)
-            except (OSError, OverflowError, TypeError):
-                failed = True
     if failed or result is None:
         _unavailable()
     return result
