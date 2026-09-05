@@ -13,6 +13,8 @@ import sys
 import threading
 from typing import Any, NoReturn, cast
 
+from .authority_config import load_operator_config
+
 from asterion.applications.prime_agent.operator.authority_protocol import (
     AuthoritySession,
 )
@@ -291,6 +293,9 @@ def _run_ready_execute_exchange(
         if not isinstance(descriptors, AdmittedAuthorityDescriptors):
             raise ValueError
         config_fd = descriptors.consume_config_fd()
+        loader_owned_config_fd = config_fd
+        config_fd = None
+        load_operator_config(loader_owned_config_fd)
         session_key = _consume_session_key(descriptors)
         connection = descriptors.consume_socket()
         session = AuthoritySession(

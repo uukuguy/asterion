@@ -6,6 +6,8 @@ import os
 import socket as socket_module
 import sys
 import threading
+import tempfile
+from pathlib import Path
 import traceback
 import unittest
 import enum
@@ -152,6 +154,74 @@ def _send_packet(connection: object, packet: bytes) -> None:
 
 
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def _config_fd(self, *, values: dict[str, str] | None = None) -> int:
+        root = Path(tempfile.mkdtemp(dir=Path.cwd()))
+        path = root / "operator.env"
+        self.addCleanup(lambda: root.rmdir())
+        self.addCleanup(lambda: path.unlink(missing_ok=True))
+        settings = values or {
+            "ASTERION_PRIME_P1_DOCKER_EXECUTABLE": "/usr/bin/docker",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET": "/var/run/docker.sock",
+            "ASTERION_PRIME_P1_SECCOMP_PROFILE": "/etc/a",
+            "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST": "sha256:" + "a" * 64,
+            "ASTERION_PRIME_P1_MODEL_ID": "model",
+            "ASTERION_PRIME_P1_EVIDENCE_ROOT": "/var/a",
+            "ASTERION_PRIME_P1_RECEIPT_KEY_ID": "key",
+            "ASTERION_PRIME_P1_RECEIPT_HMAC_KEY": "b" * 64,
+            "DEEPSEEK_API_KEY": "secret",
+        }
+        path.write_text("".join(f"{key}={value}\n" for key, value in settings.items()))
+        path.chmod(0o600)
+        return os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+
+    def test_private_ready_execute_exchange_rejects_malformed_config_before_ready_and_closes_once(
+        self,
+    ) -> None:
+        session_id, contract, resource = "a" * 64, "b" * 64, "c" * 64
+        secret = "CONFIG_SECRET_SENTINEL"
+        settings = {
+            "ASTERION_PRIME_P1_DOCKER_EXECUTABLE": "/usr/bin/docker",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET": "/var/run/docker.sock",
+            "ASTERION_PRIME_P1_SECCOMP_PROFILE": "/etc/a",
+            "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST": "sha256:" + "a" * 64,
+            "ASTERION_PRIME_P1_EVIDENCE_ROOT": "/var/a",
+            "ASTERION_PRIME_P1_RECEIPT_KEY_ID": "key",
+            "ASTERION_PRIME_P1_RECEIPT_HMAC_KEY": "b" * 64,
+            "DEEPSEEK_API_KEY": secret,
+        }
+        key_read, key_write = os.pipe()
+        os.write(key_write, b"k" * 32)
+        os.close(key_write)
+        config_read = self._config_fd(values=settings)
+        connection = _ExchangeSocket((b"unused", [], 0, None))
+        native_close = os.close
+        closed: list[int] = []
+
+        def close_fd(fd: int) -> None:
+            closed.append(fd)
+            native_close(fd)
+
+        import asterion.applications.prime_agent.operator.authority_config as config_module
+
+        bundle = AdmittedAuthorityDescriptors(
+            connection, key_read, config_read, close_fd
+        )
+        with (
+            patch.object(config_module.os, "close", side_effect=close_fd),
+            patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True),
+            patch.object(socket_module, "MSG_NOSIGNAL", 64, create=True),
+            self.assertRaises(PrimeP1AuthorityBootstrapError) as raised,
+        ):
+            _run_ready_execute_exchange(bundle, session_id, contract, resource)
+        self.assertEqual(connection.calls, [])
+        self.assertTrue(connection.closed)
+        self.assertEqual(closed.count(key_read), 1)
+        self.assertEqual(closed.count(config_read), 1)
+        self.assertIsNone(raised.exception.__context__)
+        rendered = "".join(traceback.format_exception(raised.exception))
+        self.assertNotIn(secret, rendered)
+        self.assertNotIn(secret, repr(raised.exception))
+
     def test_private_ready_execute_exchange_returns_only_execute_and_closes_unused_descriptors(
         self,
     ) -> None:
@@ -161,8 +231,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         application = "d" * 64
         key = b"k" * 32
         key_read, key_write = os.pipe()
-        config_read, config_write = os.pipe()
-        self.addCleanup(lambda: os.close(config_write))
+        config_read = self._config_fd()
         os.write(key_write, key)
         os.close(key_write)
         execute = encode_frame(
@@ -237,8 +306,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         for packet in invalid_packets:
             with self.subTest(packet=type(packet).__name__):
                 key_read, key_write = os.pipe()
-                config_read, config_write = os.pipe()
-                self.addCleanup(lambda fd=config_write: os.close(fd))
+                config_read = self._config_fd()
                 os.write(key_write, key)
                 os.close(key_write)
                 connection = _ExchangeSocket(
