@@ -1725,4 +1725,162 @@
 - 11:10 Covered P1 seccomp revalidation and concurrent close ownership [194f66e]
 - 11:15 Covered P1 seccomp close-wins revalidation rejection [120ed40]
 - 11:20 Covered P1 seccomp revalidation mutation transient cleanup [c4aa87d]
+- 11:25 Strengthened P1 seccomp revalidation lock-race evidence [a1380d3]
+- 11:30 Covered P1 seccomp tuple-allocation cleanup ownership [ceed653]
+- 11:35 Covered P1 seccomp canonical semantic profile matrix [face385]
+- 11:40 Expanded P1 seccomp constrained-atom validation coverage [70f1b34]
+- 11:45 Bound P1 seccomp lock digests to canonical maximum profiles [fb96d1c]
+- 11:50 Validated P1 maximum-profile rendering against bound digests [613776c]
 - 11:25 Closed P1 seccomp allocation-time descriptor ownership windows [pending commit]
+- 11:26 Committed allocation-safe P1 seccomp descriptor ownership [732d54e]
+- 11:54 Fixed P1 seccomp fixture digest self-validation regression [0a143b4]
+- 11:55 Expanded P1 seccomp semantic rejection matrix with matching digests [f5b40ae]
+- 11:56 Rejected P1 seccomp numeric type lookalikes to preserve exact typing [9363977]
+- 12:02 Wired retained P1 seccomp admission before authority transport [c0e4068]
+- 12:10 Bound P1 image admission to its sole OCI config digest [329de2b]
+- 12:13 Covered P1 duplicate and matching OCI config image locks [cf35d02]
+- 12:23 Sealed one-shot P1 seccomp memfd handoff with cleanup and races [b60d4a0]
+- 12:25 Permitted in-flight P1 memfd revalidation without reopening consumed resources [fb6b145]
+- 12:27 Covered P1 sealed memfd transient cleanup and terminal failed-consume state [de9039e]
+- 12:41 Forwarded Docker CLI pass_fds with explicit empty defaults [557bc4a]
+- 12:44 Closed Docker attach pass_fds forwarding seam [e006bb5]
+- 12:50 Passed sealed seccomp profiles to Docker only by inherited FD [e041cc7]
+- 12:55 Quarantined legacy P1 production host before Docker or model construction [pending commit]
+- 12:57 correction: legacy P1 host quarantine committed [c1e333c]
+- 12:56 Owned Docker seccomp FD, validated duplicate, and normalized spawn failures [fb8b600]
+- 13:02 Transferred Docker seccomp FD before preflight to prevent close races [3ce1852]
+- 13:10 Added provider-free Prime P1 product discovery and acceptance verification; basic remains unavailable pending authority [pending commit]
+- 13:11 correction: Prime P1 provider-free verification committed [b5cc678]
+- 13:26 Bound aggregate P1 static resources to exact image, policy, and profile identities [32178cb]
+- 13:32 Added independent static-resource binding and ownership NO-GO proof [881f7c8]
+- 13:36 Independent Sol review accepted P1 static resource bindings; 92 focused tests passed with 2 platform skips, Ruff and diff checks clean
+- 13:42 Admitted descriptor-only P1 evidence root; authority remains unavailable [32d89e7]
+- 13:48 Hardened P1 evidence-root descriptor traversal and ownership; independent Sol re-review PASS [88138d9]
+- 13:47 Hardened P1 evidence traversal against ancestor symlinks [88138d9]
+- 13:55 Bound static and evidence resources into opaque production owner; readiness remains unavailable [07d87f9]
+- 14:04 Hardened P1 production aggregate against forged child ownership [772d98c]
+- 14:10 Independent Sol whole-plan review accepted P1 evidence-root and production aggregate groundwork; authority/basic remain unavailable
+- 14:24 Independent Sol review accepted P1 Docker executable descriptor admission and full mutation/path/bound proof [fdfb238]
+- 14:32 Independent Sol review accepted three-child P1 production aggregate; authority remains unavailable [3588a6f]
+- 14:41 Independent Sol review accepted P1 Docker socket private policy contract [d1a1dee]
+- 14:54 Independent Sol review accepted P1 Docker socket descriptor admission with complete zero-side-effect proof [cdbf453]
+- 15:20 Independent Sol review accepted unit-verified private P1 Docker daemon projection probe; native Docker remains unqualified [b91d7bf]
+- 14:16 Admitted and revalidated descriptor-only Docker executable resource; transport remains unwired [962b5f0]
+- 14:20 Amended Docker executable NO-GO proof coverage; resource boundary unchanged [343894c]
+- 14:24 Corrected valid mode-snapshot proof against normalized mock failures [fdfb238]
+- 14:35 Bound P1 Docker executable into opaque aggregate; reverse cleanup stays fail-closed [3588a6f]
+- 14:48 Added closed P1 Docker socket/server config contract for later admission [d1a1dee]
+- 15:12 Bound opaque Docker socket into four-child P1 aggregate; authority remains unavailable [ca0fa9d]
+- 15:45 Added fake-daemon lifecycle proof for private Docker projection probe [8c08fce]
+- 15:55 Reject all C0 Docker header controls; expand fake-daemon probe proof [b91d7bf]
+- 16:04 Admitted complete P1 production resources before intentional unavailable boundary [5a68af6]
+- 16:20 Locked exact P1 authority artifacts before aggregate admission [eaf947b]
+- 16:28 Hardened P1 artifact FIFO and post-read link identity checks [703643a]
+- 16:38 Declared offline promotion npm cache contract; cold cache fails before promotion [bda199a]
+- 16:43 Hash tracked Prime artifact lock to invalidate promotion cache correctly [2077aa6]
+- 16:53 Locked P1 application resources before static Docker admission [4643eed]
+- 17:04 Sorted Prime P1 resource locks and added mutation/order regressions [dbe57f6]
+- 17:07 Strengthened Prime P1 aggregate admission test with exact acquisition order and reverse cleanup coverage [59b9233]
+- 17:17 Bound complete opaque P1 resource-set identity for future authenticated readiness [d97176e]
+- 17:27 Closed P1 resource identity version and revalidation gaps with real-child proof [f3d1ea6]
+- 17:35 Strengthened representative P1 resource identity digest/order evidence [c7b58d6]
+- 17:39 Emitted authenticated P1 ready after complete resource admission; execution remains unavailable [28cb3db]
+- 17:39 correction: ready transport commit amended for explicit no-receive assertion [3578071]
+- 17:44 Normalized arbitrary BaseException during P1 descriptor cleanup; all owners close once [33a47f5]
+- 18:02 Issued one-use opaque P1 unavailable receipts; execution remains unavailable [9e909ec]
+- 18:05 Normalized malformed P1 receipt material failures to preserve public-safe redaction [e5934ec]
+- 18:09 Cleared malformed P1 receipt exception context to prevent serialized secret leakage [9b5ea03]
+- 18:18 Bound P1 unavailable receipts to one IPC terminal reservation; execution remains unavailable [53e92ea]
+- 18:25 Made P1 issued receipts atomically one-use across value-identical sessions [f51a107]
+- 18:29 Required private issuance provenance for P1 terminal receipt consumption [0231ba4]
+- 18:38 Bound P1 receipts to admitted config without retaining receipt key [17d0392]
+- 18:52 Defined canonical P1 workload identity separate from expected completion result [ba942c1]
+- 19:00 Migrated P1 consumers and locks to canonical workload identity; promotion remains fail-closed [7fc98af]
+- 19:14 Retained verified P1 application identities for future receipts; forged projections fail closed [3e4e479]
+- 19:35 Added empty promoted authority-ELF lock to prevent source identity impersonation [625c351]
+- 20:22 Framework-first review: 146 focused tests passed; reproduced research execution skip and builtin lock mismatch; proposal in docs/reviews/2026-09-05-framework-integration-assessment.md.
+- 20:58 User prioritized Prime seven-scenario closure; Prime/Native are parallel runtimes; Astra/Terra/Luna/Sol ownership recorded.
+- 20:58 Prime P2-P7 provider-free groups passed (69/64); P3 real local compatibility PASS; no model/Docker workload.
+- 20:58 Existing kernel found; P2 probe advanced from missing-prerequisite to unsupported-prime-api, reaped; remains External-limited.
+- 21:07 P1 executable aggregate implemented; 42 focused tests, Ruff, scoped Pyright passed; Sol independently approved no-execution boundary.
+- 21:07 P2 canonical JSON oracle corrected; real Prime/IPython compatibility PASS with disposal/reap; no model/Docker workload.
+- 21:07 Astra/Sol proposed all-Linux immutable-Python authority deployment and versioned identities; existing production contracts remain unchanged.
+- 21:09 Promotion failed installed acceptance (10 failures, assembly inventory10 vs9); Terra diagnosing P1 distribution closure; no promotion PASS.
+- 21:24 P1 installed assembly inventory and strict promotion map corrected (10 resources, 7 bound); root combined 91 tests PASS.
+- 21:24 Removed one unused restricted-worker test import; Ruff and 4 worker tests PASS; make lint docs-check check-rust build PASS (176 Markdown, 57 links; 19 Rust integration tests).
+- 21:24 Interrupted stale make check after inventory fix; not PASS. Fresh isolated promotion remains running; no model/container/full dataset work.
+- 21:51 Stale isolated promotion completed from a pre-unused-import-fix snapshot: 3222 tests in 2107.136s, 1 failure, 21 errors, 2 skipped; installed acceptance inventory assertion omitted `prime-ipython-coding.json`; promotion failed and no PASS is claimed.
+- 22:21 Correction: the 21:51 entry's stale-snapshot attribution is unproven because the surviving directory was not the confirmed `xp7vtcxf` promotion ancestry. The direct evidence is limited to 3222 tests, 1 failure, 21 errors, 2 skipped, with the remaining 21 error details unavailable from the bounded tail; the CLI inventory failure is now fixed in the current tree.
+- 23:05 Fresh diagnostic promotion isolated the prior 22 errors to `tests/test_prime_p1_authority_docker_socket.py` setup failures (`OSError: AF_UNIX path too long`) in the deep temporary copy path; Terra fixed the socket fixture, and a new full promotion is running. No promotion PASS is claimed.
+- 00:00 Fresh full diagnostic promotion stage 7 passed 3223 Python tests; stage 24 failed `npm test --prefix packages/typescript/prime-gateway` with 349 tests (323 pass, 26 fail). Failures were 17 socket `EADDRINUSE`/one socket `ENOENT`, 8 `SkillBridgeConfigurationError`, and one fake-daemon timeout; no promotion PASS.
+- 00:00 Diagnostic qualification: the 26 npm failures share the long isolated `TMPDIR` ancestry (`.../asterion-promotion-bumw43nb/.asterion-operational-env/tmp`, socket paths 141–160 bytes); skill-bridge errors are the bridge's redacted listen failure and verified-loop is fake-daemon readiness failure. Root terminated the stalled `rlm-host-bridge` child, so that stage's result includes an operator termination effect and is not an undisturbed natural npm PASS.
+- 22:33 Goal active: user authorized continuous delivery along Prime-seven-first evaluated mainline; scope retained through later framework integration optimization.
+- 22:33 CLI unbound inventory assertion corrected; CLI+DCI61 tests PASS. Linux SocketKind guard fixed and exact source hash refreshed; blocked accept fixture cleanup fixed.
+- 22:33 Linux live-source/installed-metadata boundary: all16 P1 modules,215 tests PASS with clean EXIT=0; no model/container workload. Log /tmp/prime-p1-linux-all-clean-exit.log.
+- 22:33 Astra froze private authority bundle contract after Sol review; Terra implementing exact inventory/profile and FD admission. Fresh full diagnostic promotion started separately, no PASS claim.
+- 2026-09-05 22:59 Real Linux CPython candidate fd-exec probe: uid65534, exact proc-FD argv, isolated/no-site/no-bytecode, bundle prefix and20 file-module origins in bundle, exit0. Candidate /tmp/asterion-authority-candidate-9hpk1mgz (Linux); qualification feasibility only, no production receipt.
+- 2026-09-05 22:59 Bundle filesystem admission implemented by Terra; root Linux combined18 tests OK with1 identity-specific skip/exit0; mac44 combined tests OK with8 platform/identity skips. Sol still withholding approval pending exact FD numeric types and retained CLOEXEC fixes.
+- 92ddef7: Complete Prime resource aggregation and fix Linux socket admission/testing so the execution boundary can advance.
+- ae4bb27: Canonicalize corpus oracle JSON to remove false unsupported-API results from actual Prime compatibility execution.
+- b36f580: Align installed assembly inventory and strict promotion expectations, preserving metadata-only verification and exact equality.
+- aeadac3: Add exact bundle/profile identities and descriptor admission to support the reviewed Linux authority launch boundary.
+- 2026-09-05 23:13 Sol APPROVED bounded bundle admission/revalidation after all identified fixes; no production launch or P1 PASS implied.
+- 2026-09-05 23:13 Actual CPython candidate: 658 files,30446649 bytes,5 canonical external libraries; exact admission/revalidation and FD cleanup passed, exit0. Unpromoted resource proof only.
+- fd186a3: Make Prime seven-scenario closure canonical and retain evidence boundaries so continuation follows the accepted priority.
+- 47cd008: Transfer admitted bundle descriptors atomically and verify concurrent cleanup to prepare the real Linux authority launch.
+- 2026-09-05 23:41 Actual launch exposed root-level bootstrap basename IndexError in descriptor helper; Terra correcting with regression before qualification.
+- 2026-09-05 23:42 Root-level bootstrap corrected; Terra actual OrbStack candidate fd-exec/exit/reap test passed. Full launch security contract remains incomplete.
+- 2026-09-05 23:42 Sol froze exec handshake, WNOWAIT cleanup, PID semantics and Linux privilege/FD requirements; make docs-check passed178 files/57links.
+- 0a8899b: Freeze independently reviewed Linux launch semantics so implementation and real process tests share exact acceptance boundaries.
+- 2026-09-05 23:50 Root reran four actual OrbStack launch tests: success, exec failure, immediate cancellation/reap, unknown-FD isolation; all passed, scoped qualification only.
+- 1e22c2c: Correct root-level bootstrap basename lookup and add independent filesystem regression, enabling actual candidate descriptor handoff.
+- 2026-09-06 00:07 Diagnostic promotion4506: stages1–23 passed (Python3223); stage24 npm failed26/349 after root terminated stuck RLM test. Full private stdout4506-1788623989 retained.
+- 2026-09-06 00:07 Long TMPDIR collision is a hypothesis pending parallel contrast; single-file long/short both passed, so ancestry alone proves no root cause.
+- 2026-09-06 00:10 User switched root to Sol; Terra retains implementation, Luna mechanical checks, Astra reserved for new complex contracts.
+- 2026-09-06 00:10 Node parallel contrast: TMPDIR24 bytes30/30 passed;155 bytes29/30 passed. Terra fixing short private promotion workspace/TMPDIR.
+- a74c39a: Shorten private promotion workspace and TMPDIR to prevent Unix socket path collisions while preserving environment isolation.
+- Correction: short closed gateway npm349 tests passed348/failed1 in ecosystem.test.mjs:370 special permission-bit fixture, not a Python test.
+- 2026-09-06 00:17 Node mode failure diagnosed: /tmp inheritedgid0 absent from operatorgroups; chmod02700 became0700. Current-primary-gid fixture retains02700; strict validator unchanged.
+- 2026-09-06 00:17 Sol identified manager SIGCHLD autoreap/PID reuse boundary; dedicated Astra manager_pid_contract owns minimal design, Terra retains implementation.
+- 2026-09-06 00:25 User narrowed development verification to normal flows and boundary assertions; defer exhaustive matrices/native helper/repeated full promotion and advance functional integration.
+- 2026-09-06 00:25 Closed short-path Gateway npm suite349/349 passed exit0 after special-mode fixture fix; promotion remains not fully rerun.
+- f9ac751: Set the special-mode fixture group explicitly so macOS retains setgid and strict rejection remains meaningfully tested.
+- 2e6022d: Add Linux bundle launch, privilege policy and focused boundaries so development can proceed to real authority IPC.
+- 2026-09-06 Qualification IPC normal/cancel/identity and descriptor-handoff checks passed: four focused Linux tests; no production receipt or scenario PASS.
+- 2026-09-06 Astra selected unpromoted P1 development integration next; Terra owns execution completion barrier and cancellable provider process, without release matrices.
+- d103447: Add authenticated qualification IPC and bootstrap boundaries to unblock real Prime execution integration.
+- 6408ab9: Wait for cell completion and preserve snapshot availability so host oracle observes executed work before cleanup.
+- c4a7969: Run bounded development model calls in a cancellable child so broker cleanup can await confirmed reaping.
+- 1a12fda: Align Dockerfile COPY paths with the canonical archive so the actual Prime development image builds successfully.
+- Linux development image build passed: linux/arm64 sha256:409e984d536540f0f1df69c1fe19d7cc1957d23b743f8e17a01f64e3279fd0a3; input 6d4ee4f710c5d6fbb73bc1f6c117c0a16210531e8a1b115d60ead5f147911881. Unpromoted; no scenario run yet.
+- Real development create reached Docker and rejected invalid --pid private; no model call or container remained. Terra fixes actual CLI isolation/stdio wiring.
+- 9a6c789: Connect concrete development worker, model broker and host oracle with unique runs; refresh launcher resource identity.
+- Real Docker create/remove now succeeds; inspect needs exact environment normalization and empty-port projection; absence needs actual daemon error format. No model call yet.
+- f371e1a: Align Docker isolation, interactive startup, environment projection and absence checks with actual CLI behavior.
+- Actual Linux create/inspect/remove/absence passed; launcher rejects standard shared-memory/masked-proc mounts and inaccessible sentinel. Astra approved narrow image/self-check correction.
+- Rebuilt Linux development image sha256:cdaa182cd3dfd3377aaf93757d8edfdd2c96025e2becf0be86f2fb9e6a053d5c; input739aeadbb639c78cb9cb40e9e02881989efb9f8d8165e9de7526d250aef0dcfe. No promotion.
+- Actual startup exposed daemon IDs with numeric first character entering canonical worker IDs; preserve host worker name separately. Terra fixes adapter only.
+- f689b69: Separate logical worker identity and configure writable tmpfs ownership while preserving standard Docker mount and credential boundaries.
+- Actual launcher initialized and emitted model request; Docker cp cannot see its live tmpfs snapshot. Zero model calls so far.
+- Astra selected local-root development proc snapshot under daemon pause; Terra qualification_protocol implements the narrow subclass, not generic authority capability.
+- d3f9c92: Read paused local development tmpfs through daemon-bound process descriptors so host oracle receives actual workspace bytes.
+- Real initial snapshot succeeded. Provider HTTP200 exhausted output on reasoning; fixed P1 non-thinking request then returned99 input/44 output tokens.
+- Last bounded real run rejected a Markdown code fence; strict single-fence normalization now has focused local evidence, not a rerun.
+- 850365c: Disable thinking for the short P1 preset and normalize one fenced cell while retaining finite limits.
+- Latest focused provider format checks passed2/2 in0.006s; no network. Four reserved development calls exhausted this burst; no further paid rerun.
+- 6393b27: Record focused development verification and actual Prime execution limits so release gates no longer delay functional closure.
+- 2026-09-06 One bounded real-model rerun remained unavailable after safe cleanup; no broad claim or blind retry followed.
+- 2026-09-06 Deterministic provider completed real Docker→IPython→host-oracle→cleanup, proving the development spine independently of model variability.
+- 2026-09-06 Prime SDK integration is now the active semantic gap; Astra owns the reusable Node/Python process-boundary decision.
+- 2026-09-06 Prime SDK session boundary fixed at host-side Node Gateway; Python retains authority, resources and final oracle.
+- 02:24 Added bounded P1 inherited-FD duplex bridge with canonical private frames and real SDK callback coverage [5aec1992]
+- 02:31 Hardened P1 bridge lifecycle, cancellation, private inspection, and abnormal exit behavior [548e2549]
+- 02:38 Added bounded two-turn structured DeepSeek SDK provider for Prime bridge callbacks [15efffd7]
+- 02:55 Bound SDK turns, fixed bridge option projection, and child isolation for safe two-turn execution [46cfc62e]
+- 02:58 Added async P1 Node gateway with private canonical frames and reaping [4f3c88be]
+- 03:02 Reaped cancelled P1 gateway prompts to prevent private child retention [c8ae1e8c]
+- 03:07 Distinguished worker exchange count from provider callbacks for exact P1 host evidence [0362c161]
+- 03:14 Isolated SDK workspace and fixed the P1 prompt for reproducible host execution [1082d9e8]
+- 03:22 Accepted backend empty tool-call content while preserving the single-ipython boundary [764c6f3b]
+- 03:04 Wired P1 host to SDK gateway for bounded two-turn callbacks [c309abd1]
+- 03:25 Completed one real P1-A SDK/provider/IPython/oracle/cleanup run; evidence remains unpromoted.

@@ -22,7 +22,7 @@ or merge contracts.
 
 | Package | Current evidence | Remaining closure | Dependencies / status |
 |---|---|---|---|
-| P1 `prime.ipython-coding/v1` | Fixture, package/assembly, default inert runtime, authority/resource contracts exist; actual basic is NOT RUN | P1-A: authenticated real execution spine and bounded coding oracle. P1-B: persistent namespace/imports/functions/cwd/files across turns and compaction, with real restricted-worker evidence | **Active**. Empty promoted image/seccomp/authority ELF catalogs; trusted supervisor/service-manager/real model transport and public runtime wiring incomplete |
+| P1 `prime.ipython-coding/v1` | P1-A development scope now completes a real Prime SDK session, two bounded provider callbacks, one Docker-backed IPython tool call, host oracle and cleanup | P1-B: persistent namespace/imports/functions/cwd/files across turns and compaction; then public runtime wiring and promoted authority resources | **Active**. P1-A is verified only as unpromoted local-root development evidence; production catalogs remain empty |
 | P2 `prime.programmatic-long-context/v1` | Workload, worker, launcher, receipt and reducer tests pass; real local Prime/IPython corpus compatibility PASS after canonical JSON fixture correction | Admitted restricted-worker/model execution, fixed oracle, installed public route | Depends on P1 shared execution boundary; existing P2 launcher retained |
 | P3 `prime.recursive-workflow/v1` | Provider-free tests pass; real local Prime two-child message/aggregate/delete compatibility PASS | Real admitted restricted-worker/model execution, exact depth/usage/cancellation and public route | Depends on P1/P2 spine; compatibility evidence does not satisfy bounded-sandboxed gate |
 | P4 `prime.long-session-continuity/v1` | Diagnostic workload, completion, recovery adapter, worker and reducer tests pass | Actual detach/attach/compaction/recovery launcher/host, same oracle after recovery, no blind effect replay | Depends on P1/P3; real launcher/host absent |
@@ -65,13 +65,14 @@ mean seven publicly runnable scenarios.
    qualification exchange is implemented: four focused Linux tests cover normal
    completion, cancellation, identity mismatch and FD handoff ownership. It
    issues no production receipt.
-3. **P1-A real spine:** first connect a private development hook using the
-   actual Docker worker, killable model transport, trusted oracle and cleanup.
-   Record the selected image and execution scope as unpromoted; production
-   receipt/catalog publication is not a development prerequisite. Qualification
-   IPC remains a separate fixed workload. Then bind the accepted execution path
-   to the public preset. The current image calls IPython but does not yet invoke
-   Prime SDK: a one-cell model smoke result alone cannot close P1.
+3. **P1-A real spine — development verified:** the private development hook now
+   uses the actual Docker worker, killable two-turn model transport, real Prime
+   SDK `session.prompt()`, one `ipython` callback, trusted oracle and cleanup.
+   The host-side Node Gateway owns SDK session semantics; Python owns admission,
+   budgets, model/Docker processes, snapshots and the only final trace. The
+   worker retains only its IPython kernel and workspace. One bounded live run
+   completed with scope `p1-a-development` and promotion `unpromoted`. Public
+   preset wiring and production receipt/catalog publication remain separate.
 4. **P1-B semantic closure:** current production workload permits one model
    request/IPython call, while the original P1 fixture requires multiple turns
    and post-compaction witnesses. Preserve P1-A's exact contract; add a reviewed
@@ -88,16 +89,21 @@ authority executable.
 The development path now constructs a real Linux/arm64 image, starts the
 restricted Docker worker, passes its self-check, initializes the coding task,
 and reads the initial tmpfs snapshot from the same-guest root host. Real model
-requests reached HTTP 200. The last complete command still exited 1 because the
-provider returned a fenced cell; `850365c` fixes that format with two focused,
-provider-free passing checks. **The real command was not rerun after that fix.**
-No final coding oracle, complete P1, public runtime route or production receipt
-has been verified by these development attempts.
+requests reached HTTP 200 but did not close the SDK path. The new structured
+adapter exposed one concrete compatibility defect: the backend returned the
+valid tool-call shape with empty-string content instead of null. After the
+narrow compatibility fix, one bounded run completed the real Prime-SDK→two-
+provider-turns→Docker-IPython→snapshot→host-oracle→broker-revoke→container-
+cleanup chain and emitted only an unpromoted development trace. This closes
+P1-A development behavior. Complete P1, P1-B persistence/compaction, public
+runtime routing and production receipt remain unverified.
 
 The local proc snapshot is an operator development operation. A reduced-
 privilege authority cannot assume it has that root capability; later integration
-must inject a narrow manager-owned operation. The image still invokes IPython
-directly rather than the Prime SDK. Preserve those two remaining boundaries.
+must inject a narrow manager-owned operation. Prime session, compaction and RLM
+semantics remain in the TypeScript Gateway; Python must not grow a second
+session engine. P1-B must extend that same gateway with a persistent session/
+kernel and one real compact operation.
 
 Development verification follows the user's explicit scope: normal execution
 plus identity/isolation, limits, cancellation/cleanup and redaction assertions.
