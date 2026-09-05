@@ -23,6 +23,7 @@ from typing import Final
 _PROTOCOL: Final = "asterion.prime-p1-development-gateway/v1"
 _MAX_FRAME_BYTES: Final = 1024 * 1024
 _STDERR_LIMIT: Final = 4096
+_READ_POLL_SECONDS: Final = 0.05
 _ID_MAX: Final = 128
 _FRAME_KEYS: Final = frozenset((
     "generation", "kind", "payload", "protocol", "request_id", "run_id",
@@ -46,7 +47,7 @@ class PrimeP1DevelopmentGateway:
     __slots__ = (
         "_child", "_deadline", "_entrypoint", "_identity", "_input_sequence",
         "_lock", "_model_hook", "_output_sequence", "_socket", "_state",
-        "_stderr", "_stderr_thread", "_tool_hook", "_event_loop",
+        "_stderr", "_stderr_thread", "_tool_hook", "_event_loop", "_reap_lock",
     )
 
     def __init__(
@@ -77,6 +78,7 @@ class PrimeP1DevelopmentGateway:
         self._stderr = bytearray()
         self._stderr_thread: threading.Thread | None = None
         self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._reap_lock = threading.Lock()
 
     @staticmethod
     def _resolve_node(candidate: str | os.PathLike[str] | None) -> str:
@@ -128,7 +130,11 @@ class PrimeP1DevelopmentGateway:
 
     async def prompt(self, prompt: str) -> Mapping[str, object]:
         self._event_loop = asyncio.get_running_loop()
-        return await asyncio.to_thread(self.prompt_sync, prompt)
+        try:
+            return await asyncio.to_thread(self.prompt_sync, prompt)
+        except asyncio.CancelledError:
+            await asyncio.shield(asyncio.to_thread(self._abort_active_prompt))
+            raise
 
     def prompt_sync(self, prompt: str) -> Mapping[str, object]:
         with self._lock:
@@ -149,12 +155,15 @@ class PrimeP1DevelopmentGateway:
 
     async def cancel(self) -> Mapping[str, object]:
         self._event_loop = asyncio.get_running_loop()
+        if self._state == "prompt":
+            await asyncio.shield(asyncio.to_thread(self._abort_active_prompt))
+            raise PrimeP1DevelopmentGatewayError()
         return await asyncio.to_thread(self.cancel_sync)
 
     def cancel_sync(self) -> Mapping[str, object]:
         with self._lock:
             try:
-                if self._state not in {"open", "prompt"}:
+                if self._state != "open":
                     raise ValueError
                 request_id = self._send("cancel", self._next_request_id("cancel"), {})
                 frame = self._receive_until(request_id, {"command.result"})
@@ -300,8 +309,11 @@ class PrimeP1DevelopmentGateway:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError
-            sock.settimeout(remaining)
-            chunk = sock.recv(length - sum(map(len, chunks)))
+            sock.settimeout(min(remaining, _READ_POLL_SECONDS))
+            try:
+                chunk = sock.recv(length - sum(map(len, chunks)))
+            except TimeoutError:
+                continue
             if not chunk:
                 raise EOFError
             chunks.append(chunk)
@@ -314,37 +326,43 @@ class PrimeP1DevelopmentGateway:
         self._state = "failed"
         self._reap(graceful=False)
 
+    def _abort_active_prompt(self) -> None:
+        """Break a reader blocked in another thread and reclaim its child."""
+        self._state = "failed"
+        self._reap(graceful=False)
+
     def _reap(self, *, graceful: bool) -> None:
-        sock, self._socket = self._socket, None
-        if sock is not None:
-            try:
-                sock.close()
-            except OSError:
-                pass
-        child, self._child = self._child, None
-        if child is None:
-            return
-        try:
-            if graceful:
-                child.wait(timeout=min(self._deadline, 1.0))
-            else:
-                child.terminate()
-                child.wait(timeout=0.25)
-        except subprocess.TimeoutExpired:
-            try:
-                child.kill()
-            except OSError:
-                pass
-            try:
-                child.wait(timeout=1.0)
-            except subprocess.TimeoutExpired:
-                pass
-        finally:
-            if child.stderr is not None:
+        with self._reap_lock:
+            sock, self._socket = self._socket, None
+            if sock is not None:
                 try:
-                    child.stderr.close()
+                    sock.close()
                 except OSError:
                     pass
+            child, self._child = self._child, None
+            if child is None:
+                return
+            try:
+                if graceful:
+                    child.wait(timeout=min(self._deadline, 1.0))
+                else:
+                    child.terminate()
+                    child.wait(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                try:
+                    child.kill()
+                except OSError:
+                    pass
+                try:
+                    child.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    pass
+            finally:
+                if child.stderr is not None:
+                    try:
+                        child.stderr.close()
+                    except OSError:
+                        pass
 
 
 def _valid_id(value: object) -> bool:
