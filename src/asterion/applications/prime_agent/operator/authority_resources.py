@@ -23,6 +23,10 @@ from .authority_evidence import (
     AdmittedPrimeP1EvidenceRoot,
     admit_evidence_root,
 )
+from .authority_docker_executable import (
+    AdmittedPrimeP1DockerExecutable,
+    admit_docker_executable,
+)
 from .seccomp_policy_lock import seccomp_policy_lock_sha256
 
 
@@ -97,12 +101,18 @@ class AdmittedStaticAuthorityResources:
 class AdmittedProductionAuthorityResources:
     """Opaque owner of all admitted production resources."""
 
-    __slots__ = ("_evidence_resource", "_lock", "_static_resources")
+    __slots__ = (
+        "_docker_executable",
+        "_evidence_resource",
+        "_lock",
+        "_static_resources",
+    )
 
     def __init__(
         self,
         static_resources: AdmittedStaticAuthorityResources,
         evidence_resource: AdmittedPrimeP1EvidenceRoot,
+        docker_executable: AdmittedPrimeP1DockerExecutable,
         *,
         _token: object | None = None,
     ) -> None:
@@ -111,10 +121,12 @@ class AdmittedProductionAuthorityResources:
             or _token is not _PRODUCTION_AUTHORITY_RESOURCES_TOKEN
             or type(static_resources) is not AdmittedStaticAuthorityResources
             or type(evidence_resource) is not AdmittedPrimeP1EvidenceRoot
+            or type(docker_executable) is not AdmittedPrimeP1DockerExecutable
         ):
             raise PrimeP1AuthorityResourceError() from None
         self._static_resources: AdmittedStaticAuthorityResources | None = static_resources
         self._evidence_resource: AdmittedPrimeP1EvidenceRoot | None = evidence_resource
+        self._docker_executable: AdmittedPrimeP1DockerExecutable | None = docker_executable
         self._lock = threading.Lock()
 
     def __repr__(self) -> str:
@@ -135,11 +147,13 @@ class AdmittedProductionAuthorityResources:
     def close(self) -> None:
         """Release owned children once, in reverse acquisition order."""
         with self._lock:
+            docker = self._docker_executable
             evidence = self._evidence_resource
             static = self._static_resources
+            self._docker_executable = None
             self._evidence_resource = None
             self._static_resources = None
-        for resource in (evidence, static):
+        for resource in (docker, evidence, static):
             if resource is not None:
                 try:
                     resource.close()
@@ -210,9 +224,10 @@ def admit_static_authority_resources(config: object) -> AdmittedStaticAuthorityR
 def admit_production_authority_resources(
     config: object,
 ) -> AdmittedProductionAuthorityResources:
-    """Admit and retain static and evidence resources as one opaque owner."""
+    """Admit and retain static, evidence, and Docker resources as one owner."""
     static: AdmittedStaticAuthorityResources | None = None
     evidence: AdmittedPrimeP1EvidenceRoot | None = None
+    docker: AdmittedPrimeP1DockerExecutable | None = None
     result: AdmittedProductionAuthorityResources | None = None
     try:
         static_candidate = admit_static_authority_resources(config)
@@ -223,15 +238,20 @@ def admit_production_authority_resources(
         if type(evidence_candidate) is not AdmittedPrimeP1EvidenceRoot:
             raise ValueError
         evidence = evidence_candidate
+        docker_candidate = admit_docker_executable(config)
+        if type(docker_candidate) is not AdmittedPrimeP1DockerExecutable:
+            raise ValueError
+        docker = docker_candidate
         result = AdmittedProductionAuthorityResources(
-            static, evidence, _token=_PRODUCTION_AUTHORITY_RESOURCES_TOKEN
+            static, evidence, docker, _token=_PRODUCTION_AUTHORITY_RESOURCES_TOKEN
         )
         static = None
         evidence = None
+        docker = None
     except BaseException:
         pass
     finally:
-        for resource in (evidence, static):
+        for resource in (docker, evidence, static):
             if resource is not None:
                 try:
                     resource.close()
