@@ -34,6 +34,15 @@ s.on("data", c => { b=Buffer.concat([b,c]); while (b.length >= 4 && b.length >= 
 
 
 class TestPrimeP1DevelopmentGateway(unittest.IsolatedAsyncioTestCase):
+    def test_transport_canonical_json_rejects_floats_for_p1a_protocol(self) -> None:
+        from asterion.applications.prime_agent.operator.development_gateway_transport import (
+            DevelopmentGatewayTransportError,
+            _canonical_json,
+        )
+
+        with self.assertRaises(DevelopmentGatewayTransportError):
+            _canonical_json(1.5)
+
     async def test_prompt_dispatches_model_and_tool_then_closes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             entry = Path(temporary) / "bridge.js"

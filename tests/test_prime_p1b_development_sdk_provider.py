@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -56,6 +58,83 @@ def _text_reply(text: str) -> dict[str, object]:
 
 
 class TestPrimeP1BDevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
+    async def test_real_pinned_bridge_runs_prompt_compact_prompt_through_provider(
+        self,
+    ) -> None:
+        """The fourth callback retains the SDK wrapper, completion, and prompt."""
+        from asterion.applications.prime_agent.operator import p1b_development_sdk_provider as subject
+        from asterion.applications.prime_agent.operator.p1b_development_gateway import PrimeP1BDevelopmentGateway
+
+        provider = subject.create_prime_p1b_development_sdk_provider(
+            {
+                "DEEPSEEK_API_KEY": "private-key",
+                "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash",
+            }
+        )
+        requests: list[dict[str, object]] = []
+        tools: list[dict[str, object]] = []
+
+        async def model(payload: object) -> object:
+            self.assertIsInstance(payload, dict)
+            requests.append(payload)
+            return json.loads(await provider(subject._canonical_json(payload).encode()))
+
+        async def tool(payload: object) -> object:
+            self.assertIsInstance(payload, dict)
+            tools.append(payload)
+            return {
+                "content": [{"text": "completed", "type": "text"}],
+                "details": {},
+                "isError": False,
+            }
+
+        def post(_: object, payload: object, __: object) -> object:
+            self.assertIsInstance(payload, dict)
+            messages = payload["messages"]  # type: ignore[index]
+            if "tools" not in payload:
+                return _text_reply("summary")
+            if messages[-1]["role"] == "tool":
+                return _text_reply("done")
+            return _tool_reply(
+                "call-1" if len(messages) == 2 else "call-2", "print(1)"
+            )
+
+        root = Path(__file__).resolve().parents[1] / "3th-party/prime-agent"
+        with tempfile.TemporaryDirectory() as workspace:
+            gateway = PrimeP1BDevelopmentGateway(
+                model_hook=model, tool_hook=tool, deadline_seconds=10
+            )
+            with mock.patch.object(subject, "_post_chat_completion", side_effect=post):
+                await gateway.open(
+                    run_id="run-1",
+                    session_id="session-1",
+                    generation=1,
+                    prime_source_root=str(root),
+                    workspace=workspace,
+                )
+                await gateway.prompt("first task")
+                await gateway.compact()
+                await gateway.prompt("second task")
+                await gateway.close()
+
+        self.assertEqual(len(requests), 5)
+        self.assertEqual(len(tools), 2)
+        fourth = requests[3]["context"]  # type: ignore[index]
+        messages = fourth["messages"]  # type: ignore[index]
+        self.assertEqual([message["role"] for message in messages], ["user", "assistant", "user"])
+        self.assertEqual(
+            requests[2]["context"]["messages"][0]["content"],  # type: ignore[index]
+            subject._compaction_source(provider._issued),  # noqa: SLF001
+        )
+        self.assertEqual(
+            messages[0]["content"],
+            subject._compaction_wrapper(  # noqa: SLF001
+                provider._issued[2][0], provider._issued[2][1]  # noqa: SLF001
+            ),
+        )
+        self.assertEqual(messages[1], provider._issued[1][1])  # noqa: SLF001
+        self.assertEqual(messages[2]["content"], [{"text": "second task", "type": "text"}])
+
     async def test_runs_exact_five_stage_sequence_and_exposes_terminal_usage(self) -> None:
         from asterion.applications.prime_agent.operator import p1b_development_sdk_provider as subject
 
@@ -78,9 +157,23 @@ class TestPrimeP1BDevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(subject, "_post_chat_completion", side_effect=post):
             one = json.loads(await provider(_request(initial)))
             two = json.loads(await provider(_request(initial + [one, {"content": [{"text": "ok", "type": "text"}], "isError": False, "role": "toolResult", "toolCallId": "call-1", "toolName": "ipython"}])))
-            compact_input = [{"content": "compact source", "role": "user"}]
+            compact_input = [
+                {
+                    "content": subject._compaction_source(provider._issued),  # noqa: SLF001
+                    "role": "user",
+                }
+            ]
             three = json.loads(await provider(_request(compact_input, compact=True)))
-            four_input = [{"content": "solve", "role": "user"}, three, {"content": "continue", "role": "user"}]
+            four_input = [
+                {
+                    "content": subject._compaction_wrapper(  # noqa: SLF001
+                        provider._issued[2][0], provider._issued[2][1]  # noqa: SLF001
+                    ),
+                    "role": "user",
+                },
+                two,
+                {"content": "continue", "role": "user"},
+            ]
             four = json.loads(await provider(_request(four_input)))
             five = json.loads(await provider(_request(four_input + [four, {"content": [{"text": "ok", "type": "text"}], "isError": False, "role": "toolResult", "toolCallId": "call-2", "toolName": "ipython"}])) )
         self.assertEqual((one["stopReason"], two["stopReason"], three["stopReason"], four["stopReason"], five["stopReason"]), ("toolUse", "stop", "stop", "toolUse", "stop"))

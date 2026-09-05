@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Callable, Mapping
 import inspect
 import json
-import math
 import os
 from pathlib import Path
 import shutil
@@ -334,9 +333,7 @@ def _canonical_json(value: object) -> str:
     if value is None or type(value) in (str, bool, int):
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if type(value) is float:
-        if not math.isfinite(value):
-            raise DevelopmentGatewayTransportError()
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        raise DevelopmentGatewayTransportError()
     if type(value) is list:
         return "[" + ",".join(_canonical_json(x) for x in value) + "]"
     if type(value) is dict and all(type(key) is str for key in value):

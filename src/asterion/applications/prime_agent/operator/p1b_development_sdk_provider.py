@@ -257,7 +257,7 @@ def _validate_request(value: dict[str, object], turn: int, issued: list[tuple[di
     if len(issued) != turn or _canonical_json(model) != _canonical_json(issued[0][0]["model"]):
         raise ValueError
     if compact:
-        if not messages or any(type(item) is not dict or item.get("role") != "user" or not _text(item.get("content")) for item in messages):
+        if len(messages) != 1 or type(messages[0]) is not dict or messages[0].get("role") != "user" or _canonical_json(messages[0].get("content")) != _canonical_json(_compaction_source(issued)):
             raise ValueError
     elif turn == 1:
         previous, answer = issued[0]
@@ -267,7 +267,7 @@ def _validate_request(value: dict[str, object], turn: int, issued: list[tuple[di
     elif turn == 3:
         summary = issued[2][1]
         initial_context = issued[0][0]["context"]
-        if _canonical_json(context["systemPrompt"]) != _canonical_json(initial_context["systemPrompt"]) or _canonical_json(context["tools"]) != _canonical_json(initial_context["tools"]) or len(messages) != 3 or [item.get("role") if type(item) is dict else None for item in messages] != ["user", "assistant", "user"] or _canonical_json(messages[1]) != _canonical_json(summary) or not _text(messages[0].get("content")) or not _text(messages[2].get("content")):
+        if _canonical_json(context["systemPrompt"]) != _canonical_json(initial_context["systemPrompt"]) or _canonical_json(context["tools"]) != _canonical_json(initial_context["tools"]) or len(messages) != 3 or [item.get("role") if type(item) is dict else None for item in messages] != ["user", "assistant", "user"] or _canonical_json(messages[0].get("content")) != _canonical_json(_compaction_wrapper(issued[2][0], summary)) or _canonical_json(messages[1]) != _canonical_json(issued[1][1]) or not _text(messages[2].get("content")):
             raise ValueError
     else:
         previous, answer = issued[3]
@@ -314,6 +314,67 @@ def _validate_tool_pair(answer: dict[str, object], result: object) -> None:
         raise ValueError
 
 
+def _compaction_source(
+    issued: list[tuple[dict[str, object], dict[str, object]]],
+) -> list[dict[str, str]]:
+    """Render the pinned SDK's sole compaction input from the first tool turn."""
+    first_context = issued[0][0]["context"]
+    second_context = issued[1][0]["context"]
+    initial = first_context["messages"]
+    continued = second_context["messages"]
+    answer = issued[0][1]
+    if (
+        type(initial) is not list
+        or len(initial) != 1
+        or type(initial[0]) is not dict
+        or initial[0].get("role") != "user"
+        or type(continued) is not list
+        or len(continued) != 3
+        or _canonical_json(continued[0]) != _canonical_json(initial[0])
+        or _canonical_json(continued[1]) != _canonical_json(answer)
+    ):
+        raise ValueError
+    call = answer.get("content")
+    if type(call) is not list or len(call) != 1 or type(call[0]) is not dict:
+        raise ValueError
+    code = call[0].get("arguments")
+    if type(code) is not dict or type(code.get("code")) is not str:
+        raise ValueError
+    tool_result = continued[2]
+    if type(tool_result) is not dict:
+        raise ValueError
+    source = (
+        "<conversation>\n[User]: "
+        + _text(initial[0].get("content"))
+        + "\n\n[Assistant tool calls]: ipython(code="
+        + json.dumps(code["code"], ensure_ascii=False)
+        + ")\n\n[Tool result]: "
+        + _text(tool_result.get("content"))
+        + "\n</conversation>\n\nThis is the PREFIX of a turn that was too large to keep. "
+        + "The SUFFIX (recent work) is retained.\n\nSummarize the prefix to provide context for the retained suffix:\n\n"
+        + "## Original Request\n[What did the user ask for in this turn?]\n\n## Early Progress\n"
+        + "- [Key decisions and work done in the prefix]\n\n## Context for Suffix\n"
+        + "- [Information needed to understand the retained recent work]\n\n"
+        + "Be concise. Focus on what's needed to understand the kept suffix."
+    )
+    return [{"type": "text", "text": source}]
+
+
+def _compaction_wrapper(
+    request: dict[str, object], summary: dict[str, object]
+) -> list[dict[str, str]]:
+    context = request["context"]
+    if type(context) is not dict or type(context.get("messages")) is not list:
+        raise ValueError
+    source = context["messages"]
+    if len(source) != 1 or type(source[0]) is not dict:
+        raise ValueError
+    return [
+        {
+            "type": "text",
+            "text": "The conversation history before this point was compacted into the following summary:\n\n<summary>\nNo prior history.\n\n---\n\n**Turn Context (split turn):**\n\n" + _text(summary.get("content")) + "\n</summary>",
+        }
+    ]
 def _text(value: object) -> str:
     if type(value) is str and value:
         return value
