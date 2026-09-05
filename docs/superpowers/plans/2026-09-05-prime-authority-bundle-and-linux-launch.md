@@ -60,6 +60,97 @@ The manager launches authority before connection; authority binds/listens itself
 - [ ] Wire preflight to actual side-effect-free readiness and preserve acceptance as installed contract verification.
 - [ ] Connect killable model transport and the existing worker/oracle chain only after the process boundary passes independent review.
 
+### First concrete consumer: Linux child launch
+
+Implement the private process primitive in `operator/authority_linux_launch.py`
+with `tests/test_prime_authority_linux_launch.py`. It consumes the admitted
+bundle and manager-owned configuration, key, runtime-directory and
+launch-instance descriptors. This is one component of Task 3, not a second
+runner or a claim that the supervisor/IPC/application path is complete.
+
+The callable is `launch_authority_child(bundle, *, config_fd, session_key_fd,
+runtime_directory_fd, launch_instance_fd) -> AuthorityLinuxChild`. The child
+owner exposes `wait(*, deadline=None)`, `cancel()` and `close()`, plus a private
+`_process_identity()` returning the manager's exact `(pid, uid)`. Wait returns
+only `exited`, `failed`, `cancelled` or `timed-out`; `exited` means exit code zero,
+never an authority receipt or scenario PASS. A supplied absolute monotonic
+deadline may only shorten the internal profile deadline. The owner has a sealed
+constructor, redacted repr and rejects copying/pickling. Concurrent wait and
+cleanup must never reap or signal the same numeric PID after ownership ends.
+
+The manager is a dedicated single-threaded Linux root process. Reject other
+platforms, non-root callers and existing additional threads before forking.
+Input descriptors transfer on entry, become CLOEXEC immediately, and close on
+every rejection. Configuration, key and launch-instance inputs must be regular
+sealed memfds (WRITE/GROW/SHRINK/SEAL), with bounded sizes and a 32-byte key;
+the runtime directory must have the profile's authority UID/GID and mode 0700.
+The primitive validates deployment resources, not scenario authorization.
+
+In the child, duplicate every source descriptor above the fixed descriptor
+range before remapping to 3–9, so arbitrary input FD numbering cannot overwrite
+another source. Preserve the interpreter only as a CLOEXEC fd-exec input.
+Redirect 0–2 to `/dev/null`, close all other descriptors, establish a new session,
+apply the exact resource limits and no-new-privileges policy, clear supplementary
+groups and permanently set all real/effective/saved UID/GID values. Apply the
+profile umask, descriptor-selected cwd, exact argv and empty environment.
+No path-exec fallback, shell, caller callback or arbitrary program is accepted.
+
+The immutable bootstrap first uses frozen `os`/`sys` to restore CLOEXEC on 3–9,
+before importing ordinary modules. It must reject an ambient interpreter prefix
+or module origin. Real startup qualification uses the actual admitted CPython
+candidate and a separately identified qualification bootstrap; it never issues
+a production receipt. Complete loaded-library mapping admission and the
+authenticated authority-owned listener remain mandatory subsequent Task 3 work.
+
+Return only an opaque child owner with bounded wait/cancel/close operations.
+Use a monotonic deadline no later than the selected profile limit; kill the
+owned process group on cancellation/deadline and reap the direct child on every
+outcome. Keep an exited leader unreaped until group cleanup, preventing PID reuse
+from targeting another process group. Child output and exception text are never
+public output. Tests must cover successful real fd-exec after UID drop,
+descriptor collisions/leaks, invalid inputs, failed exec, cancellation,
+deadline and idempotent cleanup. Mocked syscall tests alone cannot close this
+boundary.
+
+### Independent review corrections for the consumer
+
+- The sealed launch instance contains only pre-fork facts: run/session and
+  expected supervisor identity. Authority obtains its own PID from `getpid()`;
+  the supervisor compares it with the manager's fork result. The bundle
+  contract's reference to dynamic PID fields does not require an unknowable
+  pre-fork authority PID. The v1 launch contract is not reused.
+- Use a CLOEXEC child-status pipe with a fixed failure byte and finite
+  handshake deadline. Return the child owner only after exec closes the pipe,
+  so immediate cancellation cannot precede creation of the child's process
+  group. EOF is exec-handshake evidence only, not authenticated readiness.
+  Reject any failure marker or already-observed abnormal child termination,
+  including a signal before exec; always clean up on handshake failure.
+- Observe exit with `waitid(..., WNOWAIT)` before group cleanup and direct-child
+  `waitpid`. Serialize lifecycle ownership; no later call may signal a reused
+  PID after reaping. Enforce the launch-time profile deadline even for `wait()`
+  with no argument.
+- Before fork, check `/proc/self/task` contains exactly the current TID;
+  `threading.active_count()` alone misses native threads. Load needed modules
+  before this final check and do not invoke callbacks between it and fork.
+- Reject duplicate numeric descriptors and dev/inode aliases among the three
+  sealed inputs and four bundle descriptors. Stage all sources, interpreter and
+  status pipe with `F_DUPFD_CLOEXEC` above 9; preserve an exact descriptor
+  whitelist. Use `fchdir(5)` and reset readable input offsets.
+- The runtime directory is deployment-unique, empty and stable at launch with
+  exact authority owner/group and 0700 mode. The deployment manager must reserve
+  distinct authority/application identities; a numeric UID alone does not prove
+  absence of other same-UID processes.
+- Child setup includes parent-death signal and parent-race check, reset signal
+  mask/ignored dispositions, `RLIMIT_CORE=0`, and explicit bounding/ambient/
+  effective/permitted/inheritable capability clearing. Set all GID/UID slots,
+  then no-new-privileges and verify the resulting IDs/groups/capabilities and
+  policy before exec. Re-arm parent-death signal after credential changes,
+  which may clear it, and check the expected parent again.
+  Set and verify `PR_SET_DUMPABLE=0` after credential changes as well.
+- Concrete consumer limits are 1–65,536 bytes each for configuration and launch
+  instance, exactly 32 bytes for the key, and at least 32 open files in the
+  selected profile. Reject unsupported lower descriptor ceilings before fork.
+
 ## Task 4: semantic scenario qualification and reuse
 
 **Integrate:** P1 workload/request/receipt profiles and existing P2/P3 launchers; P4–P7 missing host/launcher routes follow the canonical seven-scenario worklist.
