@@ -19,6 +19,11 @@ _KEYS = frozenset(
     {
         "ASTERION_PRIME_P1_DOCKER_EXECUTABLE",
         "ASTERION_PRIME_P1_DOCKER_SOCKET",
+        "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID",
+        "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID",
+        "ASTERION_PRIME_P1_DOCKER_SOCKET_MODE",
+        "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION",
+        "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION",
         "ASTERION_PRIME_P1_SECCOMP_PROFILE",
         "ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256",
         "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST",
@@ -35,7 +40,13 @@ _KEYS = frozenset(
 _RECEIPT_KEY = re.compile(r"[0-9a-f]{64}\Z")
 _OCI_COMPONENT = re.compile(r"[a-z0-9]+\Z")
 _OCI_VARIANT = re.compile(r"v[0-9]+\Z")
+_CANONICAL_UINT32 = re.compile(r"(?:0|[1-9][0-9]{0,9})\Z")
+_CANONICAL_API_VERSION = re.compile(
+    r"(?:0|[1-9][0-9]{0,9})\.(?:0|[1-9][0-9]{0,9})\Z"
+)
+_SAFE_ASCII_TOKEN = re.compile(r"[!-~]{1,64}\Z")
 _MAX_BYTES = 65536
+_MAX_UINT32 = 4294967294
 
 
 class PrimeP1OperatorConfigError(ValueError):
@@ -194,6 +205,21 @@ def _parse_verified_bytes(data: bytes) -> dict[str, str]:
             )
             is None
         )
+        or not _valid_uint32(
+            values["ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID"]
+        )
+        or not _valid_uint32(
+            values["ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID"]
+        )
+        or values["ASTERION_PRIME_P1_DOCKER_SOCKET_MODE"] not in {"0600", "0660"}
+        or _CANONICAL_API_VERSION.fullmatch(
+            values["ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION"]
+        )
+        is None
+        or _SAFE_ASCII_TOKEN.fullmatch(
+            values["ASTERION_PRIME_P1_DOCKER_SERVER_VERSION"]
+        )
+        is None
     ):
         raise ValueError
     return values
@@ -201,3 +227,10 @@ def _parse_verified_bytes(data: bytes) -> dict[str, str]:
 
 def _unsafe_text(value: str) -> bool:
     return any(unicodedata.category(char) in {"Cc", "Cf", "Zl", "Zp"} for char in value)
+
+
+def _valid_uint32(value: str) -> bool:
+    return (
+        _CANONICAL_UINT32.fullmatch(value) is not None
+        and int(value) <= _MAX_UINT32
+    )

@@ -20,6 +20,11 @@ from asterion.applications.prime_agent.operator.authority_config import (
 VALUES = {
     "ASTERION_PRIME_P1_DOCKER_EXECUTABLE": "/usr/bin/docker",
     "ASTERION_PRIME_P1_DOCKER_SOCKET": "/var/run/docker.sock",
+    "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID": "0",
+    "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID": "0",
+    "ASTERION_PRIME_P1_DOCKER_SOCKET_MODE": "0600",
+    "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION": "1.41",
+    "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION": "26.1.4",
     "ASTERION_PRIME_P1_SECCOMP_PROFILE": "/etc/asterion/seccomp.json",
     "ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256": "c" * 64,
     "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST": "sha256:" + "a" * 64,
@@ -233,6 +238,103 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
             for label, values in cases.items():
                 with self.subTest(label=label):
                     fd = self._open_config(root, text=self._text(values))
+                    with self.assertRaises(PrimeP1OperatorConfigError):
+                        load_operator_config(fd)
+
+    def test_requires_canonical_docker_socket_policy_and_server_projection(self) -> None:
+        socket_values = {
+            **VALUES,
+            "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID": "0",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID": "0",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET_MODE": "0600",
+            "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION": "1.41",
+            "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION": "26.1.4",
+        }
+        malformed = {
+            "owner-uid-leading-zero": (
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID",
+                "00",
+            ),
+            "owner-uid-negative": (
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID",
+                "-1",
+            ),
+            "owner-uid-overflow": (
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID",
+                "4294967295",
+            ),
+            "group-gid-leading-zero": (
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID",
+                "00",
+            ),
+            "group-gid-negative": (
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID",
+                "-1",
+            ),
+            "group-gid-overflow": (
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID",
+                "4294967295",
+            ),
+            "mode-other": ("ASTERION_PRIME_P1_DOCKER_SOCKET_MODE", "0644"),
+            "mode-world-writable": (
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_MODE",
+                "0666",
+            ),
+            "mode-short": ("ASTERION_PRIME_P1_DOCKER_SOCKET_MODE", "600"),
+            "api-missing-dot": (
+                "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION",
+                "141",
+            ),
+            "api-leading-zero": (
+                "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION",
+                "01.41",
+            ),
+            "api-extra-component": (
+                "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION",
+                "1.41.0",
+            ),
+            "server-version-empty": (
+                "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION",
+                "",
+            ),
+            "server-version-overlong": (
+                "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION",
+                "v" * 65,
+            ),
+            "server-version-whitespace": (
+                "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION",
+                "26. 1.4",
+            ),
+            "server-version-control": (
+                "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION",
+                "26.1.4\t",
+            ),
+        }
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
+            root = Path(temp)
+            config = load_operator_config(self._open_config(root, text=self._text(socket_values)))
+            self.assertEqual(config.model_id, "deepseek-chat")
+            for label, (key, value) in malformed.items():
+                with self.subTest(label=label):
+                    fd = self._open_config(
+                        root, text=self._text({**socket_values, key: value})
+                    )
+                    with self.assertRaises(PrimeP1OperatorConfigError):
+                        load_operator_config(fd)
+            for key in (
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID",
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID",
+                "ASTERION_PRIME_P1_DOCKER_SOCKET_MODE",
+                "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION",
+                "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION",
+            ):
+                with self.subTest(missing=key):
+                    fd = self._open_config(
+                        root,
+                        text=self._text(
+                            {name: value for name, value in socket_values.items() if name != key}
+                        ),
+                    )
                     with self.assertRaises(PrimeP1OperatorConfigError):
                         load_operator_config(fd)
 

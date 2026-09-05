@@ -156,6 +156,11 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         settings = values or {
             "ASTERION_PRIME_P1_DOCKER_EXECUTABLE": "/usr/bin/docker",
             "ASTERION_PRIME_P1_DOCKER_SOCKET": "/var/run/docker.sock",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID": "0",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID": "0",
+            "ASTERION_PRIME_P1_DOCKER_SOCKET_MODE": "0600",
+            "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION": "1.41",
+            "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION": "26.1.4",
             "ASTERION_PRIME_P1_SECCOMP_PROFILE": "/etc/a",
             "ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256": "c" * 64,
             "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST": "sha256:" + "a" * 64,
@@ -231,6 +236,11 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                 **{
                     "ASTERION_PRIME_P1_DOCKER_EXECUTABLE": "/usr/bin/docker",
                     "ASTERION_PRIME_P1_DOCKER_SOCKET": "/var/run/docker.sock",
+                    "ASTERION_PRIME_P1_DOCKER_SOCKET_OWNER_UID": "0",
+                    "ASTERION_PRIME_P1_DOCKER_SOCKET_GROUP_GID": "0",
+                    "ASTERION_PRIME_P1_DOCKER_SOCKET_MODE": "0600",
+                    "ASTERION_PRIME_P1_DOCKER_SERVER_API_VERSION": "1.41",
+                    "ASTERION_PRIME_P1_DOCKER_SERVER_VERSION": "26.1.4",
                     "ASTERION_PRIME_P1_SECCOMP_PROFILE": "/etc/a",
                     "ASTERION_PRIME_P1_SECCOMP_PROFILE_SHA256": "c" * 64,
                     "ASTERION_PRIME_P1_IMAGE_CONFIG_DIGEST": "sha256:" + "a" * 64,
