@@ -116,10 +116,15 @@ class _ProductionRunner:
         self, *, argv: tuple[str, ...], env: dict[str, str], timeout: float,
         max_output_bytes: int, pass_fds: tuple[int, ...],
     ) -> DockerCliResult:
-        process = await asyncio.create_subprocess_exec(
-            *argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, env=env, pass_fds=pass_fds,
-        )
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE, env=env, pass_fds=pass_fds,
+            )
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            raise RestrictedWorkerError("restricted worker value is invalid") from None
         if process.stdout is None or process.stderr is None:
             await self._stop_and_reap(process, ())
             raise RestrictedWorkerError("restricted worker value is invalid")
@@ -344,11 +349,11 @@ class DockerCliEngineTransport(DockerEngineTransport):
             platform = validate_image_platform_descriptor(platform)
             if sys.platform != "linux" or os.name != "posix" or type(seccomp_profile_fd) is not int:
                 raise ValueError
-            metadata = os.fstat(seccomp_profile_fd)
             required_seals = (
                 fcntl.F_SEAL_WRITE | fcntl.F_SEAL_GROW |
                 fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_SEAL
             )
+            metadata = os.fstat(seccomp_profile_fd)
             if (
                 not stat.S_ISREG(metadata.st_mode)
                 or not 0 < metadata.st_size <= _SECCOMP_PROFILE_CAP
@@ -356,22 +361,46 @@ class DockerCliEngineTransport(DockerEngineTransport):
                 or fcntl.fcntl(seccomp_profile_fd, fcntl.F_GET_SEALS) != required_seals
             ):
                 raise ValueError
-            raw_profile = os.pread(seccomp_profile_fd, metadata.st_size, 0)
+            owned_seccomp_profile_fd = os.dup(seccomp_profile_fd)
+            os.set_inheritable(owned_seccomp_profile_fd, False)
+            metadata = os.fstat(owned_seccomp_profile_fd)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or not 0 < metadata.st_size <= _SECCOMP_PROFILE_CAP
+                or not fcntl.fcntl(owned_seccomp_profile_fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC
+                or fcntl.fcntl(owned_seccomp_profile_fd, fcntl.F_GET_SEALS) != required_seals
+            ):
+                raise ValueError
+            raw_profile = os.pread(owned_seccomp_profile_fd, metadata.st_size, 0)
             profile = json.loads(raw_profile.decode("utf-8"), parse_constant=lambda _: (_ for _ in ()).throw(ValueError))
             canonical_profile = json.dumps(
                 profile, separators=(",", ":"), sort_keys=True, ensure_ascii=False,
             ).encode("utf-8")
             if type(profile) is not dict or raw_profile != canonical_profile:
                 raise ValueError
-        except (AttributeError, OSError, UnicodeDecodeError, json.JSONDecodeError, PrimeImageInputLockError, ValueError):
+        except (AttributeError, OSError, RecursionError, UnicodeDecodeError, json.JSONDecodeError, PrimeImageInputLockError, ValueError):
+            if "owned_seccomp_profile_fd" in locals():
+                try:
+                    os.close(owned_seccomp_profile_fd)
+                except OSError:
+                    pass
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         self._prefix = (docker_executable, "--host", "unix://" + socket_path)
-        self._seccomp_profile_fd = seccomp_profile_fd
+        self._seccomp_profile_fd: int | None = owned_seccomp_profile_fd
         self._seccomp_profile = canonical_profile.decode("utf-8")
         self._platform = platform
         self._runner = runner or _ProductionRunner()
         self._attach_runner = attach_runner or _ProductionAttachRunner()
         self._specifications: dict[str, _DockerWorkerSpecification] = {}
+
+    def close(self) -> None:
+        """Release the one-create seccomp descriptor without touching caller state."""
+        fd, self._seccomp_profile_fd = self._seccomp_profile_fd, None
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
     async def create(self, specification: _DockerWorkerSpecification, *, control: _LifecycleCallControl) -> str:
         self._valid_specification(specification)
@@ -380,21 +409,24 @@ class DockerCliEngineTransport(DockerEngineTransport):
         # Keep the requested name only long enough to compensate an uncertain
         # create; successful creation is immediately re-keyed by daemon ID.
         self._specifications[specification.container_id] = specification
-        await self._preflight(control)
+        fd = self._seccomp_profile_fd
+        if type(fd) is not int:
+            raise RestrictedWorkerError("restricted worker value is invalid")
         argv = self._prefix + (
             "create", "--name", specification.container_id, "--pull=never", "--platform",
             "/".join(part for part in (self._platform.os, self._platform.architecture, self._platform.variant) if part is not None), "--network", "none",
             "--read-only", "--user", "65534:65534", "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges:true", "--security-opt", "seccomp=/proc/self/fd/" + str(self._seccomp_profile_fd),
+            "--security-opt", "no-new-privileges:true", "--security-opt", "seccomp=/proc/self/fd/" + str(fd),
             "--tmpfs", _TMPFS, "--env", _ENVIRONMENT[0], "--env", _ENVIRONMENT[1], "--env", _ENVIRONMENT[2],
             "--pid", "private", "--ipc", "private", "--uts", "private", "--pids-limit", "256",
             "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no",
             "--entrypoint", _ENTRYPOINT, specification.image_digest,
         )
         try:
-            result = await self._call(argv, control, pass_fds=(self._seccomp_profile_fd,))
-        except BaseException:
-            raise
+            await self._preflight(control)
+            result = await self._call(argv, control, pass_fds=(fd,))
+        finally:
+            self.close()
         daemon_id = self._parse_daemon_id(result.stdout)
         if daemon_id in self._specifications:
             raise RestrictedWorkerError("restricted worker value is invalid")

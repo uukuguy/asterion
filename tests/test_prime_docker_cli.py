@@ -215,7 +215,9 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self._profile_file.close()
 
-    def _construct(self, **kwargs: object) -> DockerCliEngineTransport:
+    def _construct(
+        self, *, fcntl_values: tuple[int, ...] | None = None, **kwargs: object,
+    ) -> DockerCliEngineTransport:
         import asterion.applications.prime_agent.operator.docker_cli as module
 
         with (
@@ -225,7 +227,9 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
             mock.patch.object(module.fcntl, "F_SEAL_GROW", 2, create=True),
             mock.patch.object(module.fcntl, "F_SEAL_SHRINK", 4, create=True),
             mock.patch.object(module.fcntl, "F_SEAL_SEAL", 8, create=True),
-            mock.patch.object(module.fcntl, "fcntl", side_effect=(module.fcntl.FD_CLOEXEC, 15)),
+            mock.patch.object(module.fcntl, "fcntl", side_effect=fcntl_values or (
+                module.fcntl.FD_CLOEXEC, 15, module.fcntl.FD_CLOEXEC, 15,
+            )),
         ):
             return DockerCliEngineTransport(**kwargs)  # type: ignore[arg-type]
 
@@ -239,13 +243,47 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
     async def test_create_preflights_and_uses_only_the_fixed_argv_and_empty_environment(self) -> None:
         daemon_id = "a" * 64
         transport, runner = self._transport([_Result(stdout=b"{}"), _Result(stdout=b"{}"), _Result(stdout=(daemon_id + "\n").encode())])
+        self.assertFalse(os.get_inheritable(transport._seccomp_profile_fd))
 
         self.assertEqual(await transport.create(_spec(), control=self._control()), daemon_id)
         self.assertEqual(runner.calls[0][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "version", "--format", "{{json .Server}}"))
         self.assertEqual(runner.calls[1][0][-3:], ("info", "--format", "{{json .}}"))
-        self.assertEqual(runner.calls[2][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "create", "--name", _CONTAINER, "--pull=never", "--platform", "linux/amd64", "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", f"seccomp=/proc/self/fd/{self.seccomp_fd}", "--tmpfs", "/workspace:rw,nodev,noexec,nosuid,size=67108864", "--env", "HOME=/workspace", "--env", "PATH=/usr/local/bin:/usr/bin:/bin", "--env", "PYTHONDONTWRITEBYTECODE=1", "--pid", "private", "--ipc", "private", "--uts", "private", "--pids-limit", "256", "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no", "--entrypoint", "/usr/local/bin/prime-ipython-coding.py", _IMAGE))
+        owned_fd = runner.calls[2][4][0]
+        self.assertNotEqual(owned_fd, self.seccomp_fd)
+        self.assertEqual(runner.calls[2][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "create", "--name", _CONTAINER, "--pull=never", "--platform", "linux/amd64", "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", f"seccomp=/proc/self/fd/{owned_fd}", "--tmpfs", "/workspace:rw,nodev,noexec,nosuid,size=67108864", "--env", "HOME=/workspace", "--env", "PATH=/usr/local/bin:/usr/bin:/bin", "--env", "PYTHONDONTWRITEBYTECODE=1", "--pid", "private", "--ipc", "private", "--uts", "private", "--pids-limit", "256", "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no", "--entrypoint", "/usr/local/bin/prime-ipython-coding.py", _IMAGE))
         self.assertTrue(all(env == {} for _, env, _, _, _ in runner.calls))
-        self.assertEqual([pass_fds for _, _, _, _, pass_fds in runner.calls], [(), (), (self.seccomp_fd,)])
+        self.assertEqual([pass_fds for _, _, _, _, pass_fds in runner.calls], [(), (), (owned_fd,)])
+        with self.assertRaises(OSError):
+            os.fstat(owned_fd)
+
+    async def test_create_uses_owned_seccomp_descriptor_after_caller_closes_and_reuses_its_number(self) -> None:
+        daemon_id = "a" * 64
+        transport, runner = self._transport([
+            _Result(stdout=b"{}"), _Result(stdout=b"{}"),
+            _Result(stdout=(daemon_id + "\n").encode()),
+        ])
+        caller_fd = self.seccomp_fd
+        self._profile_file.close()
+        replacement = tempfile.TemporaryFile(dir=".")
+        self.addCleanup(replacement.close)
+        self.assertEqual(replacement.fileno(), caller_fd)
+
+        self.assertEqual(await transport.create(_spec(), control=self._control()), daemon_id)
+        owned_fd = runner.calls[-1][4][0]
+        self.assertNotEqual(owned_fd, caller_fd)
+        self.assertIn(f"seccomp=/proc/self/fd/{owned_fd}", runner.calls[-1][0])
+
+    async def test_create_failure_closes_owned_seccomp_descriptor(self) -> None:
+        transport, runner = self._transport([
+            _Result(stdout=b"{}"), _Result(stdout=b"{}"), _Result(returncode=1),
+        ])
+
+        with self.assertRaises(RestrictedWorkerError):
+            await transport.create(_spec(), control=self._control())
+
+        owned_fd = runner.calls[-1][4][0]
+        with self.assertRaises(OSError):
+            os.fstat(owned_fd)
 
     async def test_create_keeps_requested_name_separate_from_daemon_id(self) -> None:
         daemon_id = "a" * 64
@@ -709,6 +747,46 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
             with self.subTest(values=values), self.assertRaises(RestrictedWorkerError):
                 self._construct(docker_executable=values[0], socket_path=values[1], seccomp_profile_fd=self.seccomp_fd, platform=_PLATFORM, runner=_Runner([]))
 
+    def test_constructor_rejects_untrusted_seccomp_descriptor_shapes_and_contents(self) -> None:
+        values: list[object] = [True, "6"]
+        read_fd, write_fd = os.pipe()
+        self.addCleanup(os.close, read_fd)
+        self.addCleanup(os.close, write_fd)
+        values.append(read_fd)
+        profiles = (
+            b"",
+            b"x" * 65537,
+            b"not-json",
+            b"\xff",
+            b'{"a":1,"a":1}',
+            b'{"a":NaN}',
+            b"{" * 1100 + b"}" * 1100,
+            b"{} ",
+        )
+        for value in values:
+            with self.subTest(value=value), self.assertRaises(RestrictedWorkerError):
+                self._construct(
+                    docker_executable="/docker", socket_path=_SOCKET,
+                    seccomp_profile_fd=value, platform=_PLATFORM, runner=_Runner([]),
+                )
+        for profile in profiles:
+            with self.subTest(profile=profile), tempfile.TemporaryFile(dir=".") as file:
+                file.write(profile)
+                file.flush()
+                with self.assertRaises(RestrictedWorkerError):
+                    self._construct(
+                        docker_executable="/docker", socket_path=_SOCKET,
+                        seccomp_profile_fd=file.fileno(), platform=_PLATFORM,
+                        runner=_Runner([]),
+                    )
+        for fcntl_values in ((0, 15), (1, 7), (1, 31)):
+            with self.subTest(fcntl_values=fcntl_values), self.assertRaises(RestrictedWorkerError):
+                self._construct(
+                    docker_executable="/docker", socket_path=_SOCKET,
+                    seccomp_profile_fd=self.seccomp_fd, platform=_PLATFORM,
+                    runner=_Runner([]), fcntl_values=fcntl_values,
+                )
+
     async def test_production_runner_forwards_requested_file_descriptors(self) -> None:
         process = _Process(_Pipe(), _Pipe())
         subprocess_exec = mock.AsyncMock(return_value=process)
@@ -726,6 +804,19 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env={},
             pass_fds=(41, 42),
         )
+
+    async def test_production_runner_redacts_spawn_failure(self) -> None:
+        with mock.patch(
+            "asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec",
+            new=mock.AsyncMock(side_effect=OSError("sentinel spawn failure")),
+        ):
+            with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
+                await _ProductionRunner().run(
+                    argv=("/operator/docker", "version"), env={}, timeout=1,
+                    max_output_bytes=3, pass_fds=(),
+                )
+
+        self.assertNotIn("sentinel", str(raised.exception))
 
     async def test_production_attach_runner_forwards_requested_file_descriptors(self) -> None:
         process = _AttachProcess(b"")
