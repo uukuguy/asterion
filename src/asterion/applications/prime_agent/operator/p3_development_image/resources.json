@@ -1,1 +1,1 @@
-{"format":"asterion.prime-p3-development-image/v1","rlm_root_only":true,"workspace":"/workspace"}
+{"format":"asterion.prime-p3-development-image/v1","rlm_root_only":true,"rlm_socket":"/run/asterion-rlm/rlm.sock","rlm_socket_mode":"0600","workspace":"/workspace"}
