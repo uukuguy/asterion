@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Literal
 from uuid import uuid4
 
@@ -198,36 +199,37 @@ def _development_operations(
                 "isError": False,
             }
 
-        gateway = PrimeP1DevelopmentGateway(
-            node_bin=node_bin, entrypoint=entrypoint, deadline_seconds=60,
-            model_hook=model_request, tool_hook=tool_request,
-        )
-        opened = False
-        try:
-            await gateway.open(
-                run_id=lease.run_id, session_id=session_id, generation=1,
-                prime_source_root=prime_source_root, workspace=str(Path.cwd()),
+        with TemporaryDirectory(prefix="asterion-prime-p1-") as workspace:
+            gateway = PrimeP1DevelopmentGateway(
+                node_bin=node_bin, entrypoint=entrypoint, deadline_seconds=60,
+                model_hook=model_request, tool_hook=tool_request,
             )
-            opened = True
-            result = await gateway.prompt(_P1_DEVELOPMENT_PROMPT)
-            if type(result) is not dict or result.get("lifecycle") != "completed" or code_digest is None:
-                raise PrimeModelBrokerError("prime model broker is unavailable")
-        except BaseException:
-            if opened:
-                try:
-                    await gateway.cancel()
-                except BaseException:
-                    pass
-            if opened:
-                try:
-                    await gateway.close()
-                except BaseException:
-                    pass
-            raise
-        try:
-            await gateway.close()
-        except BaseException:
-            raise PrimeModelBrokerError("prime model broker is unavailable") from None
+            opened = False
+            try:
+                await gateway.open(
+                    run_id=lease.run_id, session_id=session_id, generation=1,
+                    prime_source_root=prime_source_root, workspace=str(Path(workspace)),
+                )
+                opened = True
+                result = await gateway.prompt(_P1_DEVELOPMENT_PROMPT)
+                if type(result) is not dict or result.get("lifecycle") != "completed" or code_digest is None:
+                    raise PrimeModelBrokerError("prime model broker is unavailable")
+            except BaseException:
+                if opened:
+                    try:
+                        await gateway.cancel()
+                    except BaseException:
+                        pass
+                if opened:
+                    try:
+                        await gateway.close()
+                    except BaseException:
+                        pass
+                raise
+            try:
+                await gateway.close()
+            except BaseException:
+                raise PrimeModelBrokerError("prime model broker is unavailable") from None
         if code_digest is None:
             raise PrimeModelBrokerError("prime model broker is unavailable")
         if response is None:
@@ -262,7 +264,12 @@ def _development_operations(
     )
 
 
-_P1_DEVELOPMENT_PROMPT = "Run the fixed IPython verification cell."
+_P1_DEVELOPMENT_PROMPT = (
+    "Use the ipython tool exactly once. In that call, overwrite "
+    "/workspace/solution.py with exactly this UTF-8 content:\n"
+    "def answer() -> int:\n    return 42\n"
+    "Do not use another tool. After the call succeeds, reply with a short confirmation."
+)
 
 
 def _canonical_json_object_bytes(value: object) -> bytes:
@@ -317,6 +324,7 @@ def _host_observed_model_evidence_digest(
         "challenge_digest": usage.challenge_digest,
         "workload_digest": workload_digest,
         "cell_digest": cell_digest,
+        "expected_provider_request_count": _EXPECTED_PROVIDER_REQUEST_COUNT,
         "broker_usage": {
             "request_count": usage.request_count,
             "input_bytes": usage.input_bytes,
