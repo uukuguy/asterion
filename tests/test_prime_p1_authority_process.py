@@ -32,37 +32,118 @@ class _Socket:
         self.closed = True
 
 
+class _InstrumentedLock:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.first = threading.Event()
+        self.second = threading.Event()
+        self.release = threading.Event()
+
+    def __enter__(self) -> None:
+        if not self._lock.acquire(blocking=False):
+            self.second.set()
+            self._lock.acquire()
+            return
+        self.first.set()
+        self.release.wait()
+
+    def __exit__(self, *_: object) -> None:
+        self._lock.release()
+
+
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
+    def test_instrumented_consume_vs_consume_has_one_owner(self) -> None:
+        closed: list[int] = []
+        bundle = AdmittedAuthorityDescriptors(
+            _Socket(peer=(300, 400)), 11, 12, closed.append
+        )
+        lock = _InstrumentedLock()
+        bundle._lock = lock  # type: ignore[assignment]
+        results: list[object] = []
+
+        def consume() -> None:
+            try:
+                results.append(bundle.consume_session_key_fd())
+            except PrimeP1AuthorityBootstrapError:
+                results.append("unavailable")
+
+        first, second = (
+            threading.Thread(target=consume),
+            threading.Thread(target=consume),
+        )
+        first.start()
+        self.assertTrue(lock.first.wait(1))
+        second.start()
+        self.assertTrue(lock.second.wait(1))
+        lock.release.set()
+        first.join()
+        second.join()
+        self.assertCountEqual(results, [11, "unavailable"])
+
+    def test_instrumented_consume_vs_close_preserves_returned_fd(self) -> None:
+        closed: list[int] = []
+        bundle = AdmittedAuthorityDescriptors(
+            _Socket(peer=(300, 400)), 11, 12, closed.append
+        )
+        lock = _InstrumentedLock()
+        bundle._lock = lock  # type: ignore[assignment]
+        result: list[int] = []
+        consumer = threading.Thread(
+            target=lambda: result.append(bundle.consume_session_key_fd())
+        )
+        consumer.start()
+        self.assertTrue(lock.first.wait(1))
+        closer = threading.Thread(target=bundle.close)
+        closer.start()
+        self.assertTrue(lock.second.wait(1))
+        lock.release.set()
+        consumer.join()
+        closer.join()
+        self.assertEqual(result, [11])
+        self.assertEqual(closed, [12])
+
     def test_consume_then_close_never_closes_returned_fd(self) -> None:
         closed: list[int] = []
-        bundle = AdmittedAuthorityDescriptors(_Socket(peer=(300, 400)), 11, 12, closed.append)
+        bundle = AdmittedAuthorityDescriptors(
+            _Socket(peer=(300, 400)), 11, 12, closed.append
+        )
         self.assertEqual(bundle.consume_session_key_fd(), 11)
         bundle.close()
         self.assertEqual(closed, [12])
 
     def test_close_wins_before_consume_closes_fd_once(self) -> None:
         closed: list[int] = []
-        bundle = AdmittedAuthorityDescriptors(_Socket(peer=(300, 400)), 11, 12, closed.append)
+        bundle = AdmittedAuthorityDescriptors(
+            _Socket(peer=(300, 400)), 11, 12, closed.append
+        )
         bundle.close()
         with self.assertRaises(PrimeP1AuthorityBootstrapError):
             bundle.consume_session_key_fd()
         self.assertEqual(closed, [11, 12])
+
     def test_concurrent_consumers_have_exactly_one_owner(self) -> None:
         admitted = admit_retained_authority_descriptors(
             AuthorityLaunchContract(10, 11, 12, 100, 200, 300, 400),
-            platform_name="linux", effective_uid=lambda: 100, process_id=lambda: 200,
-            socket_factory=lambda _: _Socket(peer=(300, 400)), get_fd_flags=lambda _: 1,
-            peer_credentials=lambda _: (300, 400), close_fd=lambda _: None,
-            seqpacket_type=5, peercred_option=17,
+            platform_name="linux",
+            effective_uid=lambda: 100,
+            process_id=lambda: 200,
+            socket_factory=lambda _: _Socket(peer=(300, 400)),
+            get_fd_flags=lambda _: 1,
+            peer_credentials=lambda _: (300, 400),
+            close_fd=lambda _: None,
+            seqpacket_type=5,
+            peercred_option=17,
         )
         barrier = threading.Barrier(3)
         results: list[object] = []
+
         def consume() -> None:
             barrier.wait()
             try:
                 results.append(admitted.consume_session_key_fd())
             except PrimeP1AuthorityBootstrapError:
                 results.append("unavailable")
+
         threads = [threading.Thread(target=consume), threading.Thread(target=consume)]
         for thread in threads:
             thread.start()
@@ -74,16 +155,26 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
     def test_constructor_failure_closes_every_inherited_descriptor(self) -> None:
         closed: list[int] = []
         connection = _Socket(peer=(300, 400))
-        with patch("asterion.applications.prime_agent.operator.authority_process.AdmittedAuthorityDescriptors", side_effect=MemoryError):
+        with patch(
+            "asterion.applications.prime_agent.operator.authority_process.AdmittedAuthorityDescriptors",
+            side_effect=MemoryError,
+        ):
             with self.assertRaises(PrimeP1AuthorityBootstrapError):
                 admit_retained_authority_descriptors(
-                    AuthorityLaunchContract(10, 11, 12, 100, 200, 300, 400), platform_name="linux",
-                    effective_uid=lambda: 100, process_id=lambda: 200, socket_factory=lambda _: connection,
-                    get_fd_flags=lambda _: 1, peer_credentials=lambda _: (300, 400), close_fd=closed.append,
-                    seqpacket_type=5, peercred_option=17,
+                    AuthorityLaunchContract(10, 11, 12, 100, 200, 300, 400),
+                    platform_name="linux",
+                    effective_uid=lambda: 100,
+                    process_id=lambda: 200,
+                    socket_factory=lambda _: connection,
+                    get_fd_flags=lambda _: 1,
+                    peer_credentials=lambda _: (300, 400),
+                    close_fd=closed.append,
+                    seqpacket_type=5,
+                    peercred_option=17,
                 )
         self.assertTrue(connection.closed)
         self.assertEqual(closed, [11, 12])
+
     def test_retained_bundle_transfers_each_descriptor_once_and_closes_only_unconsumed(
         self,
     ) -> None:
