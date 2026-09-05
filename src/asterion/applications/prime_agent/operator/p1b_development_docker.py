@@ -255,11 +255,15 @@ class P1BDockerPersistentWorkerService:
         control = _LifecycleCallControl(monotonic() + 30, None)
         try:
             container = await self._transport.create(image_digest=self._image, run_id=self._run, session_id=self._session, control=control)
+            # Register as soon as Docker returns its daemon identity: every
+            # subsequent admission failure owns a concrete destruction target.
+            self._container = container
             await self._transport.inspect(container, control=control); await self._transport.start(container, control=control)
             channel = await self._transport.channel(container, run_id=self._run, session_id=self._session, control=control)
+            self._channel = channel
             check = await channel.self_check(control=control)
             if not (check.nonloopback_network_absent and check.root_read_only and check.workspace_only_writable and check.credentials_absent and check.effective_capabilities == 0 and check.no_new_privileges == 1 and check.seccomp_mode == 2 and check.effective_user_id == 65534): raise ValueError
-            self._container, self._channel, self._state = container, channel, "cell-1"
+            self._state = "cell-1"
         except BaseException:
             await self.cleanup(); raise RestrictedWorkerError("restricted worker value is invalid") from None
 

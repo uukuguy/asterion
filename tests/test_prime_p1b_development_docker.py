@@ -21,9 +21,11 @@ class _Channel:
 
 
 class _Transport:
-    def __init__(self) -> None: self.calls: list[str] = []; self.channel_value = _Channel()
+    def __init__(self) -> None: self.calls: list[str] = []; self.channel_value = _Channel(); self.inspect_error = False
     async def create(self, **_: object) -> str: self.calls.append("create"); return "d" * 64
-    async def inspect(self, *_: object, **__: object) -> None: self.calls.append("inspect")
+    async def inspect(self, *_: object, **__: object) -> None:
+        self.calls.append("inspect")
+        if self.inspect_error: raise ValueError
     async def start(self, *_: object, **__: object) -> None: self.calls.append("start")
     async def channel(self, *_: object, **__: object) -> _Channel: self.calls.append("attach"); return self.channel_value
     async def snapshot(self, *_: object, **__: object) -> bytes: self.calls.append("snapshot"); return b"p1b continuity fixture\n"
@@ -44,3 +46,10 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await service.snapshot(), b"p1b continuity fixture\n")
         await service.cleanup()
         self.assertEqual(transport.calls, ["create", "inspect", "start", "attach", "initial_snapshot", "snapshot", "remove", "absent"])
+
+    async def test_inspect_rejection_after_create_still_removes_and_proves_absence(self) -> None:
+        transport = _Transport(); transport.inspect_error = True
+        service = P1BDockerPersistentWorkerService(image_digest="sha256:" + "a" * 64, transport=transport, run_id="run", session_id="session")
+        with self.assertRaises(Exception):
+            await service.acquire()
+        self.assertEqual(transport.calls, ["create", "inspect", "remove", "absent"])
