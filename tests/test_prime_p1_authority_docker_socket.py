@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+import asyncio
+from contextlib import ExitStack, contextmanager
 import copy
 from pathlib import Path
 import os
 import pickle
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -85,26 +87,108 @@ class TestPrimeP1AuthorityDockerSocket(unittest.TestCase):
         ):
             yield
 
+    @contextmanager
+    def _forbidden_effects(self):
+        """Prove socket admission does not cross into effectful APIs."""
+        with ExitStack() as stack:
+            guards = []
+            for target, name in (
+                (socket.socket, "connect"),
+                (socket.socket, "connect_ex"),
+                (socket, "create_connection"),
+                (asyncio, "open_unix_connection"),
+                (asyncio.BaseEventLoop, "create_unix_connection"),
+                (asyncio, "create_subprocess_exec"),
+                (asyncio, "create_subprocess_shell"),
+                (subprocess, "run"),
+                (subprocess, "Popen"),
+                *(
+                    (os, name)
+                    for name in (
+                        "spawnv", "spawnve", "spawnvp", "spawnvpe",
+                        "execv", "execve", "execvp", "execvpe",
+                    )
+                    if hasattr(os, name)
+                ),
+            ):
+                guards.append(
+                    stack.enter_context(
+                        patch.object(target, name, side_effect=AssertionError(name))
+                    )
+                )
+            yield guards
+            for guard in guards:
+                guard.assert_not_called()
+
     def test_admits_exact_socket_without_connecting_or_spawning(self) -> None:
         from asterion.applications.prime_agent.operator.authority_docker_socket import (
             AdmittedPrimeP1DockerSocket,
             admit_docker_socket,
         )
         import asterion.applications.prime_agent.operator.authority_docker_socket as module
+        import asterion.applications.prime_agent.operator.authority_process as process
+        import asterion.applications.prime_agent.operator.authority_resources as resources
 
         with (
             self._linux(module),
             patch.object(module.os, "fstat", side_effect=self._root_owned_stat),
-            patch.object(socket.socket, "connect", side_effect=AssertionError("connect")) as connect,
-            patch.object(subprocess, "run", side_effect=AssertionError("subprocess")) as run,
+            self._forbidden_effects(),
+            patch.object(
+                resources,
+                "admit_production_authority_resources",
+                side_effect=AssertionError("aggregate"),
+            ) as aggregate,
+            patch.object(
+                process,
+                "admit_authority_launch",
+                side_effect=AssertionError("authority-ready"),
+            ) as ready,
         ):
             resource = admit_docker_socket(_config(path=str(self.socket)))
             self.assertIsInstance(resource, AdmittedPrimeP1DockerSocket)
             resource.revalidate_path()
         self.assertEqual(repr(resource), "AdmittedPrimeP1DockerSocket(redacted)")
-        connect.assert_not_called()
-        run.assert_not_called()
+        aggregate.assert_not_called()
+        ready.assert_not_called()
         resource.close()
+
+    def test_import_is_platform_neutral_without_linux_flags_or_config_dependency(self) -> None:
+        script = """
+import importlib.abc
+import os
+import sys
+
+import asterion.applications.prime_agent.operator
+assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.modules
+sys.modules.pop('fcntl', None)
+
+class BlockFcntl(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'fcntl':
+            raise ImportError('fcntl denied')
+        return None
+
+sys.meta_path.insert(0, BlockFcntl())
+for name in ('O_DIRECTORY', 'O_NOFOLLOW', 'O_CLOEXEC'):
+    delattr(os, name)
+module = __import__('asterion.applications.prime_agent.operator.authority_docker_socket', fromlist=['*'])
+module.sys.platform = 'darwin'
+try:
+    module.admit_docker_socket(object())
+except module.PrimeP1DockerSocketError as error:
+    assert str(error) == 'prime P1 Docker socket resource is unavailable'
+else:
+    raise AssertionError('admission unexpectedly succeeded')
+assert 'asterion.applications.prime_agent.operator.authority_config' not in sys.modules
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path.cwd(),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_rejects_wrong_config_and_non_linux_before_filesystem_access(self) -> None:
         from asterion.applications.prime_agent.operator.authority_docker_socket import (

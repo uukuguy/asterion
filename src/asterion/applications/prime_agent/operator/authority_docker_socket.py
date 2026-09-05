@@ -7,13 +7,10 @@ import os
 import stat
 import sys
 import threading
-from typing import Final, SupportsIndex
-
-from .authority_config import PrimeP1OperatorConfig
+from typing import SupportsIndex
 
 
 _ADMITTED_DOCKER_SOCKET_TOKEN = object()
-_DIRECTORY_FLAGS: Final = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
 class PrimeP1DockerSocketError(ValueError):
@@ -114,6 +111,8 @@ def admit_docker_socket(config: object) -> AdmittedPrimeP1DockerSocket:
     result: AdmittedPrimeP1DockerSocket | None = None
     try:
         _require_linux_posix()
+        from .authority_config import PrimeP1OperatorConfig
+
         if type(config) is not PrimeP1OperatorConfig:
             raise ValueError
         values = config._values
@@ -161,12 +160,14 @@ def _path_components(path: object) -> tuple[str, ...]:
 
 def _open_parent(components: tuple[str, ...]) -> tuple[int, tuple[_Identity, ...]]:
     """Open each ancestor from slash without following symlinks, retaining parent."""
-    directory: int | None = os.open("/", _DIRECTORY_FLAGS)
+    _require_linux_posix()
+    flags = _directory_flags()
+    directory: int | None = os.open("/", flags)
     identities: list[_Identity] = []
     try:
         identities.append(_safe_directory_identity(directory))
         for component in components[:-1]:
-            child = os.open(component, _DIRECTORY_FLAGS, dir_fd=directory)
+            child = os.open(component, flags, dir_fd=directory)
             _close_quietly(directory)
             directory = child
             identities.append(_safe_directory_identity(directory))
@@ -188,6 +189,17 @@ def _safe_directory_identity(fd: int) -> _Identity:
     ):
         raise ValueError
     return identity
+
+
+def _directory_flags() -> int:
+    values = tuple(
+        getattr(os, name, None)
+        for name in ("O_RDONLY", "O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    )
+    if any(type(value) is not int for value in values):
+        raise ValueError
+    readonly, directory, nofollow, cloexec = values
+    return readonly | directory | nofollow | cloexec
 
 
 def _socket_identity(parent_fd: int, name: str) -> _Identity:
