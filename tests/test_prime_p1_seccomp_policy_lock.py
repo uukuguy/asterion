@@ -49,7 +49,7 @@ def _lock(**changes: object) -> SeccompPolicyLock:
         "oracle_sha256": "f" * 64,
         "default_action": "SCMP_ACT_ERRNO",
         "allowed_rule_atoms": (_READ, _WRITE),
-        "profile_sha256": "0" * 64,
+        "maximum_profile_sha256": "0" * 64,
     }
     values.update(changes)
     return SeccompPolicyLock(**values)  # type: ignore[arg-type]
@@ -123,7 +123,7 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
                     ),
                 )
             ),
-            _lock(profile_sha256="A" * 64),
+            _lock(maximum_profile_sha256="A" * 64),
             _lock(platform=ImagePlatformDescriptor("Linux", "amd64", None)),
         )
         for lock in invalid_locks:
@@ -139,11 +139,17 @@ class TestPrimeP1SeccompPolicyLock(unittest.TestCase):
             )
         with self.assertRaises(PrimeP1SeccompPolicyLockError):
             parse_canonical_seccomp_policy_lock(
-                payload.replace(b'"profile_sha256":"' + b"0" * 64 + b'"', b'"profile_sha256":NaN')
+                payload.replace(
+                    b'"maximum_profile_sha256":"' + b"0" * 64 + b'"',
+                    b'"maximum_profile_sha256":NaN',
+                )
             )
         with self.assertRaises(PrimeP1SeccompPolicyLockError):
             parse_canonical_seccomp_policy_lock(
-                payload.replace(b'"profile_sha256":"' + b"0" * 64 + b'"', b'"profile_sha256":Infinity')
+                payload.replace(
+                    b'"maximum_profile_sha256":"' + b"0" * 64 + b'"',
+                    b'"maximum_profile_sha256":Infinity',
+                )
             )
 
     def test_platform_architecture_mapping_is_exact_and_host_independent(self) -> None:

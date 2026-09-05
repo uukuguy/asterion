@@ -47,7 +47,7 @@ _LOCK_KEYS: Final = frozenset(
         "libseccomp_architecture",
         "oracle_sha256",
         "platform",
-        "profile_sha256",
+        "maximum_profile_sha256",
         "schema_version",
         "starter_sha256",
         "workload_sha256",
@@ -105,7 +105,7 @@ class SeccompPolicyLock:
     oracle_sha256: str
     default_action: str
     allowed_rule_atoms: tuple[SeccompRuleAtom, ...]
-    profile_sha256: str
+    maximum_profile_sha256: str
 
     def __repr__(self) -> str:
         return "SeccompPolicyLock(redacted)"
@@ -177,7 +177,7 @@ def parse_canonical_seccomp_policy_lock(data: object) -> SeccompPolicyLock:
             oracle_sha256=decoded["oracle_sha256"],
             default_action=decoded["default_action"],
             allowed_rule_atoms=tuple(_parse_rule_atom(item) for item in decoded["allowed_rule_atoms"]),
-            profile_sha256=decoded["profile_sha256"],
+            maximum_profile_sha256=decoded["maximum_profile_sha256"],
         )
         if canonical_seccomp_policy_lock_bytes(lock) != data:
             raise ValueError
@@ -223,7 +223,7 @@ def _lock_mapping(lock: object) -> dict[str, object]:
             "os": checked.platform.os,
             "variant": checked.platform.variant,
         },
-        "profile_sha256": checked.profile_sha256,
+        "maximum_profile_sha256": checked.maximum_profile_sha256,
         "schema_version": checked.schema_version,
         "starter_sha256": checked.starter_sha256,
         "workload_sha256": checked.workload_sha256,
@@ -255,7 +255,7 @@ def _validated_lock(value: object) -> SeccompPolicyLock:
         value.workload_sha256,
         value.starter_sha256,
         value.oracle_sha256,
-        value.profile_sha256,
+        value.maximum_profile_sha256,
     )
     if (
         type(value.schema_version) is not str
