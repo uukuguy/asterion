@@ -86,6 +86,7 @@ class _Channel(DockerLauncherChannel):
         self.transport.controls.append(control)
         if not self.released:
             raise RestrictedWorkerError("restricted worker value is invalid")
+        self.transport._cancel("launcher_result")
         return DockerWorkerCompletion(
             PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, self.transport.result
         )
@@ -557,6 +558,48 @@ class TestDockerRestrictedWorkerService(unittest.IsolatedAsyncioTestCase):
                 await self.service.execution_receipt(lease)
 
         self.assertNotIn("launcher_result", self.transport.calls)
+
+    async def test_host_model_response_waits_for_completion_before_snapshot(self) -> None:
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+        self.addAsyncCleanup(context.__aexit__, None, None, None)
+        artifacts = self.service._host_artifacts(lease)
+
+        await self.service._host_model_request(artifacts)
+        await self.service._host_model_response(
+            artifacts,
+            DockerWorkerModelResponse(
+                PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, "ipython", "private cell"
+            ),
+        )
+        snapshot = await self.service._snapshot_solution(lease)
+
+        self.assertEqual(
+            self.transport.calls[-3:],
+            ["model_response", "launcher_result", "snapshot_solution"],
+        )
+        self.assertEqual(snapshot, DockerWorkerWorkspaceSnapshot(self.transport.snapshot))
+
+    async def test_cancelled_completion_still_cleans_up_the_worker(self) -> None:
+        context = self.service.open(_request())
+        lease = await context.__aenter__()
+        artifacts = self.service._host_artifacts(lease)
+        await self.service._host_model_request(artifacts)
+        self.transport.cancel_at = "launcher_result"
+
+        with self.assertRaises(asyncio.CancelledError):
+            await self.service._host_model_response(
+                artifacts,
+                DockerWorkerModelResponse(
+                    PRIME_IPYTHON_CODING_WORKLOAD_DIGEST, "ipython", "private cell"
+                ),
+            )
+        await context.__aexit__(None, None, None)
+
+        self.assertEqual(
+            self.transport.calls[-3:],
+            ["close_channel", "force_remove", "assert_absent"],
+        )
 
     async def test_verified_teardown_inspects_removes_and_proves_absence_in_order(self) -> None:
         async with self.service.open(_request()) as lease:

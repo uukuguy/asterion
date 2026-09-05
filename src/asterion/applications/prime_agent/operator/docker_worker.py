@@ -476,6 +476,14 @@ class DockerRestrictedWorkerService:
             raise RestrictedWorkerError("restricted worker value is invalid")
         control = _LifecycleCallControl(monotonic() + _LIFECYCLE_SECONDS, state.signal)
         await self._within_deadline(state.channel.model_response(response, control=control), control)
+        completion = await self._within_deadline(
+            state.channel.completed_result(control=control), control
+        )
+        if (
+            type(completion) is not DockerWorkerCompletion
+            or completion.workload_digest != typed.lease.workload_digest
+        ):
+            raise RestrictedWorkerError("restricted worker value is invalid")
 
     async def _host_force_remove(self, artifacts: object) -> None:
         typed = self._host_validate_artifacts(artifacts)
@@ -749,6 +757,9 @@ class _DockerWorkerLeaseContext(AbstractAsyncContextManager[RestrictedWorkerLeas
     async def _call_release(self, control: _LifecycleCallControl) -> None:
         if self._channel is None:
             raise RestrictedWorkerError("restricted worker value is invalid")
+        state = self._service._leases.get(self._lease.worker_id) if self._lease is not None else None
+        if state is not None and state.host_launcher_released:
+            return
         await self._within_deadline(
             self._channel.release(control=control), control
         )

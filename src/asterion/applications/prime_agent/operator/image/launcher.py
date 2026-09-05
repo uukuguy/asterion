@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import select
 import subprocess
 import sys
 from typing import NoReturn
@@ -34,6 +35,7 @@ _MODEL_CELL_PROGRAM = (
     "sys.exit(result.error_in_exec is not None or result.error_before_exec is not None)"
 )
 _MODEL_CELL_TIMEOUT_SECONDS = 5
+_POST_COMPLETION_WAIT_SECONDS = 30
 _WRITABLE_KERNEL_MOUNTS = {"/dev", "/dev/mqueue", "/dev/pts", "/proc", "/sys"}
 _CREDENTIAL_SENTINELS = (Path("/run/secrets"), Path("/root/.aws"), Path("/home/node/.aws"), Path("/home/node/.config/gcloud"), Path("/workspace/.env"))
 
@@ -185,6 +187,14 @@ def emit_completion() -> None:
     _emit_frame({"host_model_operations": 1, "model_caused_ipython_mutation": True, "oracle_eventually_passed": True, "oracle_initially_failed": True, "result": result, "result_digest": "sha256:" + hashlib.sha256(result_bytes).hexdigest(), "terminal": "completed", "tools": ["ipython"], "workload_digest": WORKLOAD_DIGEST})
 
 
+def await_host_removal() -> None:
+    """Keep the completed workspace available for one bounded host snapshot."""
+    try:
+        select.select((sys.stdin.buffer,), (), (), _POST_COMPLETION_WAIT_SECONDS)
+    except (OSError, ValueError):
+        invalid_worker()
+
+
 def main() -> None:
     require_closed_worker()
     sys.stdout.buffer.write(_SELF_CHECK + b"\n")
@@ -196,6 +206,7 @@ def main() -> None:
     execute_model_ipython_cell(cell)
     final_oracle_success()
     emit_completion()
+    await_host_removal()
 
 
 if __name__ == "__main__":
