@@ -8,6 +8,18 @@
 
 **Tech Stack:** Python orchestration and unittest; Linux Unix sockets, peer credentials and process/FD ownership; existing Prime runtime and Docker worker; current public Asterion contracts.
 
+## Development verification scope — user correction, 2026-09-06
+
+The user explicitly prioritizes development over release qualification. Keep
+normal-flow tests and focused boundary-control assertions; do not block the
+next functional slice on exhaustive fault matrices, native signal-action test
+helpers, repeated full promotion runs or production certification. Fix already
+demonstrated ownership/redaction defects with narrow regression assertions,
+then connect the actual authority IPC and Prime execution path. The detailed
+qualification lists below remain later release-reference material wherever
+they exceed this development scope. This correction changes verification
+intensity, not the runtime/protocol boundaries or the meaning of scenario PASS.
+
 ## Global constraints
 
 - Preserve `asterion.agent-runtime/v1`, `asterion.capability/v1`, `asterion.capability-package/v1` and `asterion.application-assembly/v1`.
@@ -150,6 +162,42 @@ boundary.
 - Concrete consumer limits are 1–65,536 bytes each for configuration and launch
   instance, exactly 32 bytes for the key, and at least 32 open files in the
   selected profile. Reject unsupported lower descriptor ceilings before fork.
+
+### Manager wait-status ownership decision (Astra, 2026-09-06)
+
+The manager is a dedicated, trusted CPython main-interpreter/main-thread process
+and the sole consumer of each owned child's wait status. Before the first
+authority fork, within the blocked-signal region, unconditionally call
+`signal.signal(SIGCHLD, SIG_DFL)`, then prepare the child identity-policy signal
+snapshot and perform the final thread check. Keep this SIGCHLD action for the
+entire manager/child-owner lifetime; never restore an inherited reaping handler
+after launch or error cleanup. Restore the parent's signal mask separately.
+No other `wait*` consumer, signal handler, at-fork callback or native component
+may reap an owned child. This is a manager TCB obligation, not something a
+one-time Python thread check can prove forever.
+
+The currently inspected and Linux-qualified manager is CPython 3.13.7.
+Its `signal.signal()` invokes the native `PyOS_setsig()` implementation, which
+uses the target's compiled `sigaction` layout and replaces action flags,
+clearing `SA_NOCLDWAIT`. `getsignal()` alone sees Python's cache and is
+insufficient to detect native action changes. Do not infer qualification for
+arbitrary Python implementations from the wheel's general Python requirement.
+See the [CPython signal implementation](https://github.com/python/cpython/blob/v3.13.7/Modules/signalmodule.c)
+and [native action setter](https://github.com/python/cpython/blob/v3.13.7/Python/pylifecycle.c).
+
+All cleanup paths share wait-status ownership. On `ECHILD`, permanently mark
+ownership lost and never signal the saved numeric PID/group again; return the
+fixed safe error. Probe with `waitid(...WNOWAIT...)` before the first numeric
+signal as defense in depth, while retaining the sole-reaper requirement.
+Mask-restoration failures must neither skip FD/child cleanup nor expose raw
+exceptions, and must not return a live owner as success.
+
+Qualify Python ignored/reaping SIGCHLD actions and native `SIG_DFL|SA_NOCLDWAIT`
+using an architecture-compiled, test-only C helper. Production uses CPython's
+native implementation, not handwritten ctypes signal-action structures.
+Verify repeated WNOWAIT observations before final reap, non-restoration of
+dangerous actions on every outcome, no signaling after ECHILD, actual timeout,
+concurrent lifecycle cleanup, and restoration-failure redaction/cleanup.
 
 ## Task 4: semantic scenario qualification and reuse
 
