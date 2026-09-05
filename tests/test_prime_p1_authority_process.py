@@ -100,6 +100,11 @@ class _InstrumentedLock:
         self._lock.release()
 
 
+def _receive_packet(bundle: AdmittedAuthorityDescriptors) -> bytes:
+    with patch.object(socket_module, "MSG_CMSG_CLOEXEC", 1, create=True):
+        return _receive_authority_packet(bundle)
+
+
 class TestPrimeP1AuthorityProcess(unittest.TestCase):
     def test_private_packet_receive_requires_cmsg_cloexec_without_zero_fallback(
         self,
@@ -185,9 +190,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
     ) -> None:
         connection = _PacketSocket([(b'{"canonical":true}', [], 0, None)])
         bundle = AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
-        self.assertEqual(
-            _receive_authority_packet(bundle, cmsg_cloexec=1), b'{"canonical":true}'
-        )
+        self.assertEqual(_receive_packet(bundle), b'{"canonical":true}')
         self.assertTrue(connection.closed)
         self.assertEqual(connection.close_calls, 1)
         self.assertEqual(connection.flags, [1])
@@ -214,7 +217,7 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
                     connection, 11, 12, lambda _: None
                 )
                 with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
-                    _receive_authority_packet(bundle, cmsg_cloexec=1)
+                    _receive_packet(bundle)
                 self.assertIsNone(raised.exception.__context__)
                 self.assertNotIn(
                     "RECV_SENTINEL",
@@ -226,27 +229,24 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
             [OSError(errno.EINTR, "SENTINEL"), (b"x", [], 0, None)]
         )
         self.assertEqual(
-            _receive_authority_packet(
-                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None),
-                cmsg_cloexec=1,
+            _receive_packet(
+                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
             ),
             b"x",
         )
         self.assertEqual(connection.calls, 2)
         exhausted = _PacketSocket([OSError(errno.EINTR, "SENTINEL")] * 9)
         with self.assertRaises(PrimeP1AuthorityBootstrapError):
-            _receive_authority_packet(
-                AdmittedAuthorityDescriptors(exhausted, 11, 12, lambda _: None),
-                cmsg_cloexec=1,
+            _receive_packet(
+                AdmittedAuthorityDescriptors(exhausted, 11, 12, lambda _: None)
             )
         self.assertEqual(exhausted.calls, 9)
         success_responses: list[object] = [OSError(errno.EINTR, "SENTINEL")] * 8
         success_responses.append((b"x", [], 0, None))
         succeeded = _PacketSocket(success_responses)
         self.assertEqual(
-            _receive_authority_packet(
-                AdmittedAuthorityDescriptors(succeeded, 11, 12, lambda _: None),
-                cmsg_cloexec=1,
+            _receive_packet(
+                AdmittedAuthorityDescriptors(succeeded, 11, 12, lambda _: None)
             ),
             b"x",
         )
@@ -256,9 +256,8 @@ class TestPrimeP1AuthorityProcess(unittest.TestCase):
         connection = _PacketSocket([(b"x", [], 0, None)])
         connection.close = lambda: (_ for _ in ()).throw(OSError("CLOSE_SENTINEL"))  # type: ignore[method-assign]
         with self.assertRaises(PrimeP1AuthorityBootstrapError) as raised:
-            _receive_authority_packet(
-                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None),
-                cmsg_cloexec=1,
+            _receive_packet(
+                AdmittedAuthorityDescriptors(connection, 11, 12, lambda _: None)
             )
         self.assertIsNone(raised.exception.__context__)
         self.assertNotIn(
