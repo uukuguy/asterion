@@ -11,6 +11,8 @@ import stat
 from types import MappingProxyType
 import unicodedata
 
+from .authority_receipt import _AuthorityReceiptIssuer, _new_authority_receipt_issuer
+
 
 _KEYS = frozenset(
     {
@@ -39,6 +41,7 @@ class PrimeP1OperatorConfigError(ValueError):
 @dataclass(frozen=True, repr=False)
 class PrimeP1OperatorConfig:
     _values: Mapping[str, str]
+    _receipt_issuer: _AuthorityReceiptIssuer
 
     @property
     def model_id(self) -> str:
@@ -55,6 +58,8 @@ def load_operator_config(config_fd: int) -> PrimeP1OperatorConfig:
     path, identity, command-line, environment, or parser configuration input.
     """
     fd: int | None = config_fd if type(config_fd) is int else None
+    result: PrimeP1OperatorConfig | None = None
+    failed = False
     try:
         if fd is None:
             raise ValueError
@@ -66,15 +71,22 @@ def load_operator_config(config_fd: int) -> PrimeP1OperatorConfig:
         after = os.fstat(fd)
         if _stable_identity(before) != _stable_identity(after):
             raise ValueError
-        return PrimeP1OperatorConfig(MappingProxyType(_parse_verified_bytes(data)))
+        values = _parse_verified_bytes(data)
+        issuer = _new_authority_receipt_issuer(
+            values.pop("ASTERION_PRIME_P1_RECEIPT_HMAC_KEY")
+        )
+        result = PrimeP1OperatorConfig(MappingProxyType(values), issuer)
     except (OSError, OverflowError, TypeError, UnicodeError, ValueError):
-        raise PrimeP1OperatorConfigError() from None
+        failed = True
     finally:
         if fd is not None:
             try:
                 os.close(fd)
             except (OSError, OverflowError):
                 pass
+    if failed or result is None:
+        raise PrimeP1OperatorConfigError() from None
+    return result
 
 
 def _validate_close_on_exec(fd: int) -> None:
@@ -133,10 +145,19 @@ def _parse_verified_bytes(data: bytes) -> dict[str, str]:
         if line.count("=") < 1:
             raise ValueError
         key, value = line.split("=", 1)
-        if key not in _KEYS or key in values or not value or _unsafe_text(key) or _unsafe_text(value):
+        if (
+            key not in _KEYS
+            or key in values
+            or not value
+            or _unsafe_text(key)
+            or _unsafe_text(value)
+        ):
             raise ValueError
         values[key] = value
-    if set(values) != _KEYS or _RECEIPT_KEY.fullmatch(values["ASTERION_PRIME_P1_RECEIPT_HMAC_KEY"]) is None:
+    if (
+        set(values) != _KEYS
+        or _RECEIPT_KEY.fullmatch(values["ASTERION_PRIME_P1_RECEIPT_HMAC_KEY"]) is None
+    ):
         raise ValueError
     return values
 

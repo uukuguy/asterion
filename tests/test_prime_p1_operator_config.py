@@ -75,12 +75,16 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
                         os.fchmod(fd, mode)
                         if label == "hard-linked":
                             os.link(root / "operator.env", root / "operator-link.env")
-                    with self.assertRaisesRegex(PrimeP1OperatorConfigError, "unavailable"):
+                    with self.assertRaisesRegex(
+                        PrimeP1OperatorConfigError, "unavailable"
+                    ):
                         load_operator_config(fd)
                     with self.assertRaises(OSError):
                         os.fstat(fd)
 
-    def test_rejects_a_descriptor_not_owned_by_the_live_authority_identity(self) -> None:
+    def test_rejects_a_descriptor_not_owned_by_the_live_authority_identity(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
             fd = self._open_config(Path(temp))
             import asterion.applications.prime_agent.operator.authority_config as module
@@ -121,17 +125,27 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
                 calls += 1
                 result = real_fstat(target_fd)
                 if calls == 2:
-                    return os.stat_result(tuple(result[:8]) + (result.st_mtime + 1, result.st_ctime))
+                    return os.stat_result(
+                        tuple(result[:8]) + (result.st_mtime + 1, result.st_ctime)
+                    )
                 return result
 
             with patch.object(module.os, "fstat", side_effect=changed_fstat):
                 with self.assertRaises(PrimeP1OperatorConfigError):
                     load_operator_config(fd)
 
-    def test_rejects_closed_schema_and_unicode_controls_without_interpolation(self) -> None:
+    def test_rejects_closed_schema_and_unicode_controls_without_interpolation(
+        self,
+    ) -> None:
         cases = {
             "duplicate": self._text() + b"DEEPSEEK_API_KEY=other\n",
-            "missing": self._text({key: value for key, value in VALUES.items() if key != "DEEPSEEK_API_KEY"}),
+            "missing": self._text(
+                {
+                    key: value
+                    for key, value in VALUES.items()
+                    if key != "DEEPSEEK_API_KEY"
+                }
+            ),
             "extra": self._text() + b"EXTRA=value\n",
             "empty": self._text({**VALUES, "DEEPSEEK_API_KEY": ""}),
             "blank-entry": self._text() + b"\n",
@@ -139,7 +153,9 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
             "nul": self._text({**VALUES, "DEEPSEEK_API_KEY": "bad\x00value"}),
             "c1": self._text({**VALUES, "DEEPSEEK_API_KEY": "bad\u0085value"}),
             "format": self._text({**VALUES, "DEEPSEEK_API_KEY": "bad\u200evalue"}),
-            "line-separator": self._text({**VALUES, "DEEPSEEK_API_KEY": "bad\u2028value"}),
+            "line-separator": self._text(
+                {**VALUES, "DEEPSEEK_API_KEY": "bad\u2028value"}
+            ),
         }
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp:
             root = Path(temp)
@@ -151,8 +167,13 @@ class TestPrimeP1OperatorConfig(unittest.TestCase):
 
     def test_interpolation_is_literal_and_environment_is_never_merged(self) -> None:
         values = {**VALUES, "DEEPSEEK_API_KEY": "${UNSET_SENTINEL}"}
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp, patch.dict(os.environ, {"UNSET_SENTINEL": "leaked"}):
-            config = load_operator_config(self._open_config(Path(temp), text=self._text(values)))
+        with (
+            tempfile.TemporaryDirectory(dir=Path.cwd()) as temp,
+            patch.dict(os.environ, {"UNSET_SENTINEL": "leaked"}),
+        ):
+            config = load_operator_config(
+                self._open_config(Path(temp), text=self._text(values))
+            )
         self.assertNotIn("leaked", repr(config))
 
 
