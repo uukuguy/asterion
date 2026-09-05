@@ -131,7 +131,16 @@ def _consume_session_key(
             if type(chunk) is not bytes or not chunk or len(chunk) > 32 - len(data):
                 raise ValueError
             data.extend(chunk)
-        if reader(fd, 1):
+        while True:
+            try:
+                extra = reader(fd, 1)
+                break
+            except OSError as error:
+                if error.errno == errno.EINTR and interruptions < 8:
+                    interruptions += 1
+                    continue
+                raise
+        if type(extra) is not bytes or extra != b"":
             raise ValueError
         return bytes(data)
     except (OSError, OverflowError, TypeError, ValueError):
@@ -326,4 +335,4 @@ def _close_socket(connection: object) -> None:
 
 
 def _unavailable() -> NoReturn:
-    raise PrimeP1AuthorityBootstrapError()
+    raise PrimeP1AuthorityBootstrapError() from None
