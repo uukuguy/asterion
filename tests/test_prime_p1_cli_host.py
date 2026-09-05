@@ -65,6 +65,39 @@ class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
                 subject._preflight(Path("/repo"))
         transport.close.assert_called_once_with()
 
+    async def test_preflight_binds_the_exact_prime_sdk_source_root(self) -> None:
+        from asterion.applications.prime_agent.operator import p1_cli_host as subject
+
+        transport = SimpleNamespace(close=Mock())
+        root = Path("/repo")
+        source = root / "3th-party/prime-agent"
+        gateway = root / "packages/typescript/prime-gateway/dist/src/p1b-development-main.js"
+        sdk = source / "packages/coding-agent/dist/core/sdk.js"
+        typebox = source / "node_modules/typebox/build/index.mjs"
+        with (
+            patch.object(subject.sys, "platform", "linux"),
+            patch.object(subject.os, "geteuid", return_value=0),
+            patch.object(subject, "_regular_executable", side_effect=(Path("/docker"), Path("/node"))),
+            patch.object(subject.os, "lstat", return_value=SimpleNamespace(st_mode=0)),
+            patch.object(subject.stat, "S_ISSOCK", return_value=True),
+            patch.object(subject, "_regular_file", side_effect=(gateway, sdk, typebox)) as regular_file,
+            patch.object(subject, "_regular_directory", return_value=source) as regular_directory,
+            patch.object(subject, "_sealed_seccomp", return_value=73),
+            patch.object(subject, "_inspect_image", return_value="sha256:" + "a" * 64),
+            patch.object(subject, "_host_platform", return_value=object()),
+            patch.object(subject, "P1BDevelopmentSnapshotTransport", return_value=transport),
+            patch.object(subject, "_operator_config", return_value={}),
+            patch.object(subject.os, "close"),
+        ):
+            resources = subject._preflight(root)
+        self.assertEqual(resources.prime_source_root, str(source))
+        regular_directory.assert_called_once_with(source)
+        self.assertEqual(regular_file.call_args_list, [
+            ((gateway,),),
+            ((sdk,),),
+            ((typebox,),),
+        ])
+
     async def test_seccomp_memfd_is_sealed_like_docker_admission(self) -> None:
         from asterion.applications.prime_agent.operator import p1_cli_host as subject
 

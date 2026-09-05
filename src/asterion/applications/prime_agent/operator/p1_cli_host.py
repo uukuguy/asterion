@@ -181,7 +181,9 @@ def _preflight(repo_root: Path) -> _P1CliResources:
         raise PrimeP1CliHostError()
     node = _regular_executable(Path(_NODE))
     entrypoint = _regular_file(repo_root / "packages/typescript/prime-gateway/dist/src/p1b-development-main.js")
-    source = _regular_directory(repo_root / "packages/typescript/prime-gateway")
+    source = _regular_directory(repo_root / "3th-party/prime-agent")
+    _regular_file(source / "packages/coding-agent/dist/core/sdk.js")
+    _regular_file(source / "node_modules/typebox/build/index.mjs")
     seccomp_fd = _sealed_seccomp(Path(_SECCOMP))
     transport: object | None = None
     try:
