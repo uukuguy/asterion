@@ -502,27 +502,49 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
             return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
 
         valid = (
-            payload([]),
-            _PROFILE,
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}]),
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_MASKED_EQ", "value": 1, "valueTwo": 3}], "names": ["write"]}]),
+            ("empty subset", payload([])),
+            ("read subset", _PROFILE),
+            ("write equality subset", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}])),
+            ("write masked equality subset", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_MASKED_EQ", "value": 1, "valueTwo": 3}], "names": ["write"]}])),
+            # Every allowed atom has at most one constraint, so this is the
+            # applicable sorted multi-rule maximum profile.
+            ("sorted maximum profile", _MAXIMUM_PROFILE),
         )
         invalid = (
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": ["write"]}]),
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 1, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}]),
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_NE", "value": 0}], "names": ["write"]}]),
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_MASKED_EQ", "value": 1}], "names": ["write"]}]),
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 0, "valueTwo": 1}], "names": ["write"]}]),
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": True, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}]),
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 6, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}]),
-            payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": ["read", "write"]}]),
-            payload([{"action": "SCMP_ACT_ALLOW", "names": ["read"]}]),
-            payload([], architectures=["SCMP_ARCH_AARCH64"]),
-            payload([], defaultAction="SCMP_ACT_ALLOW"),
-            payload([], extra=True),
-            b'{"architectures":["SCMP_ARCH_X86_64"],"defaultAction":"SCMP_ACT_ERRNO","syscalls":NaN}',
-            _PROFILE + b" ",
+            ("omitted equality constraint", payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": ["write"]}])),
+            ("wrong constraint index", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 1, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}])),
+            ("wrong constraint operator", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_NE", "value": 0}], "names": ["write"]}])),
+            ("wrong constraint value", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 1}], "names": ["write"]}])),
+            ("omitted masked valueTwo", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_MASKED_EQ", "value": 1}], "names": ["write"]}])),
+            ("added equality valueTwo", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 0, "valueTwo": 1}], "names": ["write"]}])),
+            ("added constraint", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 0}, {"index": 1, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}])),
+            ("duplicate constraint", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 0}, {"index": 0, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}])),
+            ("out of order constraints", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 1, "op": "SCMP_CMP_EQ", "value": 0}, {"index": 0, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}])),
+            ("boolean constraint index", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": True, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}])),
+            ("out of range constraint index", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 6, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}])),
+            ("multiple syscall names", payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": ["read", "write"]}])),
+            ("malformed action", payload([{"action": "SCMP_ACT_ERRNO", "args": [], "names": ["read"]}])),
+            ("malformed args", payload([{"action": "SCMP_ACT_ALLOW", "args": {}, "names": ["read"]}])),
+            ("malformed names", payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": "read"}])),
+            ("missing rule member", payload([{"action": "SCMP_ACT_ALLOW", "names": ["read"]}])),
+            ("duplicate rule", payload([{"action": "SCMP_ACT_ALLOW", "args": [], "names": ["read"]}, {"action": "SCMP_ACT_ALLOW", "args": [], "names": ["read"]}])),
+            ("out of order rules", payload([{"action": "SCMP_ACT_ALLOW", "args": [{"index": 0, "op": "SCMP_CMP_EQ", "value": 0}], "names": ["write"]}, {"action": "SCMP_ACT_ALLOW", "args": [], "names": ["read"]}])),
+            ("non-list syscalls", payload({})),
+            ("native architecture", payload([], architectures=["SCMP_ARCH_NATIVE"])),
+            ("multiple architectures", payload([], architectures=["SCMP_ARCH_X86_64", "SCMP_ARCH_AARCH64"])),
+            ("wrong architecture", payload([], architectures=["SCMP_ARCH_AARCH64"])),
+            ("wrong default action", payload([], defaultAction="SCMP_ACT_ALLOW")),
+            ("extra top-level member", payload([], extra=True)),
+            ("non-finite JSON", b'{"architectures":["SCMP_ARCH_X86_64"],"defaultAction":"SCMP_ACT_ERRNO","syscalls":NaN}'),
+            ("top-level duplicate key", b'{"architectures":["SCMP_ARCH_X86_64"],"architectures":["SCMP_ARCH_X86_64"],"defaultAction":"SCMP_ACT_ERRNO","syscalls":[]}'),
+            ("nested duplicate key", b'{"architectures":["SCMP_ARCH_X86_64"],"defaultAction":"SCMP_ACT_ERRNO","syscalls":[{"action":"SCMP_ACT_ALLOW","args":[],"names":["read"],"names":["read"]}]}'),
+            ("invalid UTF-8", _PROFILE[:-1] + b"\xff}"),
+            ("noncanonical whitespace", _PROFILE + b" "),
         )
+        excessive_depth: object = []
+        for _ in range(33):
+            excessive_depth = [excessive_depth]
+        invalid += (("excessive JSON depth", payload(excessive_depth)),)
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temporary:
             root = Path(temporary)
             profile = root / "profile.json"
@@ -530,14 +552,14 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
                 patch.object(module.sys, "platform", "linux"),
                 patch.object(catalog_module, "PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG", PromotedSeccompPolicyCatalog((policy,))),
             ):
-                for item in valid:
-                    with self.subTest(valid=item[:24]):
+                for label, item in valid:
+                    with self.subTest(valid=label):
                         profile.write_bytes(item)
                         profile.chmod(0o600)
                         resource = admit_static_seccomp_resource(self._config(root, profile, profile_bytes=item))
                         resource.close()
-                for item in invalid:
-                    with self.subTest(invalid=item[:24]):
+                for label, item in invalid:
+                    with self.subTest(invalid=label):
                         profile.write_bytes(item)
                         profile.chmod(0o600)
                         with self.assertRaises(PrimeP1AuthorityResourceError) as raised:
