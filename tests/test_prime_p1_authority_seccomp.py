@@ -97,10 +97,11 @@ class TestPrimeP1AuthoritySeccomp(unittest.TestCase):
 
             with (
                 patch.object(module.sys, "platform", "linux"),
-                patch.object(module.os, "open", side_effect=AssertionError("filesystem")),
+                patch.object(module.os, "open", side_effect=AssertionError("filesystem")) as opened,
                 self.assertRaises(PrimeP1AuthorityResourceError) as raised,
             ):
                 admit_static_seccomp_resource(config)
+        opened.assert_not_called()
         self.assertIsNone(raised.exception.__context__)
         self.assertNotIn("SECCOMP_SECRET_SENTINEL", str(raised.exception))
 
