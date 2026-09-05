@@ -26,40 +26,27 @@ _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
-class P1DevelopmentSnapshotTransport(DockerCliEngineTransport):
-    """Read a paused tmpfs workspace through its daemon-bound container PID."""
+def _require_local_root_snapshot_authority(operator_confirmed_same_guest: bool) -> None:
+    if (
+        sys.platform != "linux"
+        or os.geteuid() != 0
+        or type(operator_confirmed_same_guest) is not bool
+        or not operator_confirmed_same_guest
+    ):
+        raise RestrictedWorkerError("restricted worker value is invalid")
 
-    def __init__(
+
+class _LocalRootProcSnapshot:
+    """Private fixed-path snapshot primitive for an explicitly local daemon."""
+
+    async def _snapshot_workspace_from_proc(
         self,
+        container_id: str,
         *,
-        docker_executable: str,
-        socket_path: str,
-        seccomp_profile_fd: int,
-        platform: ImagePlatformDescriptor,
-        operator_confirmed_same_guest: bool,
-        runner: DockerCliRunner | None = None,
-        attach_runner: DockerCliAttachRunner | None = None,
-    ) -> None:
-        if (
-            sys.platform != "linux"
-            or os.geteuid() != 0
-            or type(operator_confirmed_same_guest) is not bool
-            or not operator_confirmed_same_guest
-        ):
-            raise RestrictedWorkerError("restricted worker value is invalid")
-        super().__init__(
-            docker_executable=docker_executable,
-            socket_path=socket_path,
-            seccomp_profile_fd=seccomp_profile_fd,
-            platform=platform,
-            runner=runner,
-            attach_runner=attach_runner,
-        )
-
-    async def snapshot_solution(
-        self, container_id: str, *, control: _LifecycleCallControl
+        control: _LifecycleCallControl,
+        continuity_fixture: bytes | None = None,
     ) -> bytes:
-        self._specification(container_id)
+        self._specification(container_id)  # type: ignore[reportAttributeAccessIssue] - concrete Docker transport
         pause_attempted = True
         paused = False
         try:
@@ -69,7 +56,7 @@ class P1DevelopmentSnapshotTransport(DockerCliEngineTransport):
             )
             paused = True
             inspection = await self._snapshot_inspection(container_id, control)
-            proc_fd = workspace_fd = solution_fd = root_fd = None
+            proc_fd = workspace_fd = solution_fd = root_fd = state_fd = continuity_fd = None
             try:
                 proc_fd = self._open_proc(inspection["Pid"])
                 proc_identity = _identity(proc_fd)
@@ -82,33 +69,42 @@ class P1DevelopmentSnapshotTransport(DockerCliEngineTransport):
                     os.O_RDONLY | os.O_DIRECTORY | _CLOEXEC | _NOFOLLOW,
                     dir_fd=root_fd,
                 )
+                if continuity_fixture is not None:
+                    state_fd = os.open(
+                        "p1b-state",
+                        os.O_RDONLY | os.O_DIRECTORY | _CLOEXEC | _NOFOLLOW,
+                        dir_fd=workspace_fd,
+                    )
+                    continuity_fd = os.open(
+                        "continuity.txt",
+                        os.O_RDONLY | os.O_NONBLOCK | _CLOEXEC | _NOFOLLOW,
+                        dir_fd=state_fd,
+                    )
+                    if _read_stable_regular_file(continuity_fd) != continuity_fixture:
+                        raise ValueError
                 solution_fd = os.open(
                     "solution.py",
                     os.O_RDONLY | os.O_NONBLOCK | _CLOEXEC | _NOFOLLOW,
                     dir_fd=workspace_fd,
                 )
-                before = _stable_regular_file(solution_fd)
-                data = os.pread(solution_fd, before[2] + 1, 0)
-                if (
-                    len(data) != before[2]
-                    or _stable_regular_file(solution_fd) != before
-                ):
-                    raise ValueError
+                data = _read_stable_regular_file(solution_fd)
                 after = await self._snapshot_inspection(container_id, control)
                 if after != inspection:
                     raise ValueError
                 self._same_live_process(proc_fd, inspection["Pid"], proc_identity)
                 return data
             finally:
-                for descriptor in (solution_fd, workspace_fd, root_fd, proc_fd):
+                for descriptor in (
+                    solution_fd, continuity_fd, state_fd, workspace_fd, root_fd, proc_fd,
+                ):
                     _close_quietly(descriptor)
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             raise RestrictedWorkerError("restricted worker value is invalid") from None
         finally:
             if paused:
-                await self._resume_or_destroy(container_id)
+                await self._resume_or_destroy(container_id)  # type: ignore[reportAttributeAccessIssue] - concrete Docker transport
             elif pause_attempted:
-                await self._destroy_after_uncertain_pause(container_id)
+                await self._destroy_after_uncertain_pause(container_id)  # type: ignore[reportAttributeAccessIssue] - concrete Docker transport
 
     async def _snapshot_inspection(
         self, container_id: str, control: _LifecycleCallControl
@@ -158,6 +154,36 @@ class P1DevelopmentSnapshotTransport(DockerCliEngineTransport):
         os.kill(pid, 0)
 
 
+class P1DevelopmentSnapshotTransport(_LocalRootProcSnapshot, DockerCliEngineTransport):
+    """Read a paused tmpfs workspace through its daemon-bound container PID."""
+
+    def __init__(
+        self,
+        *,
+        docker_executable: str,
+        socket_path: str,
+        seccomp_profile_fd: int,
+        platform: ImagePlatformDescriptor,
+        operator_confirmed_same_guest: bool,
+        runner: DockerCliRunner | None = None,
+        attach_runner: DockerCliAttachRunner | None = None,
+    ) -> None:
+        _require_local_root_snapshot_authority(operator_confirmed_same_guest)
+        super().__init__(
+            docker_executable=docker_executable,
+            socket_path=socket_path,
+            seccomp_profile_fd=seccomp_profile_fd,
+            platform=platform,
+            runner=runner,
+            attach_runner=attach_runner,
+        )
+
+    async def snapshot_solution(
+        self, container_id: str, *, control: _LifecycleCallControl
+    ) -> bytes:
+        return await self._snapshot_workspace_from_proc(container_id, control=control)
+
+
 def _stable_regular_file(descriptor: int) -> tuple[int, int, int, int, int]:
     metadata = os.fstat(descriptor)
     if not stat.S_ISREG(metadata.st_mode) or not 0 <= metadata.st_size <= _SNAPSHOT_CAP:
@@ -169,6 +195,14 @@ def _stable_regular_file(descriptor: int) -> tuple[int, int, int, int, int]:
         metadata.st_mtime_ns,
         metadata.st_ctime_ns,
     )
+
+
+def _read_stable_regular_file(descriptor: int) -> bytes:
+    before = _stable_regular_file(descriptor)
+    data = os.pread(descriptor, before[2] + 1, 0)
+    if len(data) != before[2] or _stable_regular_file(descriptor) != before:
+        raise ValueError
+    return data
 
 
 def _identity(descriptor: int) -> tuple[int, int]:

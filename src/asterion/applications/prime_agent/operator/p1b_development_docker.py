@@ -20,6 +20,10 @@ from .docker_cli import (
 )
 from .docker_worker import DockerWorkerLauncherSelfCheck, _LifecycleCallControl
 from .image_input_lock import ImagePlatformDescriptor
+from .p1_development_snapshot import (
+    _LocalRootProcSnapshot,
+    _require_local_root_snapshot_authority,
+)
 from .p1b_workload import PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
 from asterion.services.restricted_worker import RestrictedWorkerError
 
@@ -180,6 +184,35 @@ class P1BDockerCliTransport(DockerCliEngineTransport):
             data = source.read(_FRAME_CAP + 1)
             if len(data) != members[0].size or len(data) > _FRAME_CAP: raise ValueError
             return data
+
+
+class P1BDevelopmentSnapshotTransport(_LocalRootProcSnapshot, P1BDockerCliTransport):
+    """P1-B's explicit-local-root transport for live tmpfs snapshots."""
+
+    def __init__(
+        self, *, docker_executable: str, socket_path: str, seccomp_profile_fd: int,
+        platform: ImagePlatformDescriptor, operator_confirmed_same_guest: bool,
+        runner: DockerCliRunner | None = None,
+        attach_runner: DockerCliAttachRunner | None = None,
+    ) -> None:
+        _require_local_root_snapshot_authority(operator_confirmed_same_guest)
+        super().__init__(
+            docker_executable=docker_executable, socket_path=socket_path,
+            seccomp_profile_fd=seccomp_profile_fd, platform=platform,
+            runner=runner, attach_runner=attach_runner,
+        )
+
+    async def initial_snapshot(
+        self, container_id: str, *, control: _LifecycleCallControl,
+    ) -> bytes:
+        return await self._snapshot_workspace_from_proc(container_id, control=control)
+
+    async def snapshot(
+        self, container_id: str, *, control: _LifecycleCallControl,
+    ) -> bytes:
+        return await self._snapshot_workspace_from_proc(
+            container_id, control=control, continuity_fixture=_FIXTURE,
+        )
 
 
 @dataclass(frozen=True, repr=False)

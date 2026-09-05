@@ -3,13 +3,18 @@ from __future__ import annotations
 import unittest
 from time import monotonic
 import asyncio
+import json
+from unittest.mock import patch
 
 from asterion.applications.prime_agent.operator.docker_worker import DockerWorkerLauncherSelfCheck
 from asterion.applications.prime_agent.operator.p1b_development_docker import (
-    P1BDockerCompletion, P1BDockerPersistentWorkerService, P1BDockerCliTransport, _reap_process,
+    P1BDevelopmentSnapshotTransport, P1BDockerCompletion,
+    P1BDockerPersistentWorkerService, P1BDockerCliTransport, _reap_process,
 )
 from asterion.applications.prime_agent.operator.docker_cli import DockerCliResult
 from asterion.applications.prime_agent.operator.docker_worker import _LifecycleCallControl
+from asterion.applications.prime_agent.operator import p1_development_snapshot as snapshots
+from asterion.applications.prime_agent.operator.image_input_lock import ImagePlatformDescriptor
 from asterion.applications.prime_agent.operator.p1b_workload import PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
 
 
@@ -41,6 +46,76 @@ class _Transport:
 
 
 class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
+    def test_local_root_snapshot_transport_requires_explicit_same_guest_confirmation(self) -> None:
+        with patch.object(P1BDockerCliTransport, "__init__", return_value=None) as base:
+            for platform, euid, confirmed in (
+                ("darwin", 0, True),
+                ("linux", 501, True),
+                ("linux", 0, False),
+                ("linux", 0, "true"),
+            ):
+                with (
+                    patch.object(snapshots.sys, "platform", platform),
+                    patch.object(snapshots.os, "geteuid", return_value=euid),
+                ):
+                    with self.assertRaisesRegex(Exception, "restricted worker value is invalid"):
+                        P1BDevelopmentSnapshotTransport(
+                            docker_executable="/operator/docker", socket_path="/operator/docker.sock",
+                            seccomp_profile_fd=9, platform=ImagePlatformDescriptor("linux", "amd64", None),
+                            operator_confirmed_same_guest=confirmed,  # type: ignore[arg-type]
+                        )
+            with (
+                patch.object(snapshots.sys, "platform", "linux"),
+                patch.object(snapshots.os, "geteuid", return_value=0),
+            ):
+                P1BDevelopmentSnapshotTransport(
+                    docker_executable="/operator/docker", socket_path="/operator/docker.sock",
+                    seccomp_profile_fd=9, platform=ImagePlatformDescriptor("linux", "amd64", None),
+                    operator_confirmed_same_guest=True,
+                )
+        self.assertEqual(base.call_count, 1)
+
+    async def test_proc_snapshots_use_fixed_paths_and_validate_continuity_before_solution(self) -> None:
+        container = "d" * 64
+        subject = object.__new__(P1BDevelopmentSnapshotTransport)
+        subject._prefix = ("/operator/docker", "--host", "unix:///operator/docker.sock")
+        subject._specifications = {container: object()}
+        calls: list[tuple[str, ...]] = []
+
+        async def call(argv: tuple[str, ...], *_: object, **__: object) -> DockerCliResult:
+            calls.append(argv)
+            if "inspect" in argv:
+                return DockerCliResult(stdout=json.dumps([{
+                    "Id": container, "Pid": 77, "Running": True, "Paused": True,
+                }], separators=(",", ":")).encode())
+            return DockerCliResult()
+
+        subject._call = call
+        contents = {
+            13: b"def answer() -> int:\n    return 0\n",
+            17: b"p1b continuity fixture\n",
+            18: b"def answer() -> int:\n    return 42\n",
+        }
+        with (
+            patch.object(subject, "_open_proc", return_value=10),
+            patch.object(subject, "_same_live_process"),
+            patch.object(snapshots, "_identity", return_value=(1, 2)),
+            patch.object(snapshots.os, "open", side_effect=[11, 12, 13, 14, 15, 16, 17, 18]) as opened,
+            patch.object(snapshots.os, "pread", side_effect=lambda fd, _count, _offset: contents[fd]),
+            patch.object(snapshots, "_stable_regular_file", side_effect=lambda fd: (1, fd, len(contents[fd]), 0, 0)),
+            patch.object(snapshots.os, "close"),
+        ):
+            initial = await subject.initial_snapshot(container, control=_LifecycleCallControl(monotonic() + 30, None))
+            final = await subject.snapshot(container, control=_LifecycleCallControl(monotonic() + 30, None))
+
+        self.assertEqual(initial, contents[13])
+        self.assertEqual(final, contents[18])
+        self.assertEqual(
+            [item.args[0] for item in opened.call_args_list],
+            ["root", "workspace", "solution.py", "root", "workspace", "p1b-state", "continuity.txt", "solution.py"],
+        )
+        self.assertFalse(any("cp" in argv for argv in calls))
+
     async def test_reap_completes_wait_before_propagating_cancellation(self) -> None:
         released = asyncio.Event()
         class Process:
