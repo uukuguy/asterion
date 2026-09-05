@@ -15,6 +15,7 @@ from asterion.applications.prime_agent.operator.docker_cli import (
     DockerCliAttachRunner,
     DockerCliEngineTransport,
     DockerCliResult as _Result,
+    _ProductionAttachRunner,
     _ProductionRunner,
 )
 from asterion.applications.prime_agent.operator.docker_worker import (
@@ -135,10 +136,12 @@ class _Signal:
 class _AttachRunner:
     def __init__(self, process: _AttachProcess) -> None:
         self.process = process
-        self.calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
+        self.calls: list[tuple[tuple[str, ...], dict[str, str], tuple[int, ...]]] = []
 
-    async def open(self, *, argv: tuple[str, ...], env: dict[str, str]) -> _AttachProcess:
-        self.calls.append((argv, env))
+    async def open(
+        self, *, argv: tuple[str, ...], env: dict[str, str], pass_fds: tuple[int, ...]
+    ) -> _AttachProcess:
+        self.calls.append((argv, env, pass_fds))
         return self.process
 
 
@@ -478,6 +481,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(check.effective_user_id, 65534)
         self.assertEqual(runner.calls[1][0][-2:], ("start", _CONTAINER))
         self.assertEqual(attach.calls[0][0][-3:], ("attach", "--sig-proxy=false", _CONTAINER))
+        self.assertEqual(attach.calls[0][2], ())
         self.assertEqual(attach.process.stdin.writes, [_CONTROL])
         self.assertTrue(attach.process.waited)
         self.assertEqual(runner.calls[2][0][-4:], ("inspect", "--format", "{{.Id}}", _CONTAINER))
@@ -681,6 +685,26 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         subprocess_exec.assert_awaited_once_with(
             "/operator/docker", "version", stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env={},
+            pass_fds=(41, 42),
+        )
+
+    async def test_production_attach_runner_forwards_requested_file_descriptors(self) -> None:
+        process = _AttachProcess(b"")
+        subprocess_exec = mock.AsyncMock(return_value=process)
+        with mock.patch(
+            "asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec",
+            new=subprocess_exec,
+        ):
+            self.assertIs(
+                await _ProductionAttachRunner().open(
+                    argv=("/operator/docker", "attach"), env={}, pass_fds=(41, 42),
+                ),
+                process,
+            )
+
+        subprocess_exec.assert_awaited_once_with(
+            "/operator/docker", "attach", stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env={},
             pass_fds=(41, 42),
         )
 

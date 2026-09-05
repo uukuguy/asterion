@@ -93,7 +93,7 @@ class DockerCliAttachProcess(Protocol):
 
 class DockerCliAttachRunner(Protocol):
     async def open(
-        self, *, argv: tuple[str, ...], env: dict[str, str]
+        self, *, argv: tuple[str, ...], env: dict[str, str], pass_fds: tuple[int, ...]
     ) -> DockerCliAttachProcess: ...
 
 
@@ -168,11 +168,11 @@ class _DockerCliOutputLimit(Exception):
 
 class _ProductionAttachRunner:
     async def open(
-        self, *, argv: tuple[str, ...], env: dict[str, str]
+        self, *, argv: tuple[str, ...], env: dict[str, str], pass_fds: tuple[int, ...]
     ) -> DockerCliAttachProcess:
         return cast(DockerCliAttachProcess, await asyncio.create_subprocess_exec(
             *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL, env=env,
+            stderr=asyncio.subprocess.DEVNULL, env=env, pass_fds=pass_fds,
         ))
 
 
@@ -380,7 +380,8 @@ class DockerCliEngineTransport(DockerEngineTransport):
         if control.cancelled() or monotonic() >= control.deadline:
             raise asyncio.CancelledError
         process = await self._attach_runner.open(
-            argv=self._prefix + ("container", "attach", "--sig-proxy=false", container_id), env={}
+            argv=self._prefix + ("container", "attach", "--sig-proxy=false", container_id),
+            env={}, pass_fds=(),
         )
         if process.stdin is None or process.stdout is None:
             await _DockerCliLauncherChannel(process).close(control=control)
