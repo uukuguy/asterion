@@ -76,7 +76,7 @@ class DockerCliRunner(Protocol):
 
     async def run(
         self, *, argv: tuple[str, ...], env: dict[str, str], timeout: float,
-        max_output_bytes: int,
+        max_output_bytes: int, pass_fds: tuple[int, ...],
     ) -> DockerCliResult: ...
 
 
@@ -100,11 +100,11 @@ class DockerCliAttachRunner(Protocol):
 class _ProductionRunner:
     async def run(
         self, *, argv: tuple[str, ...], env: dict[str, str], timeout: float,
-        max_output_bytes: int,
+        max_output_bytes: int, pass_fds: tuple[int, ...],
     ) -> DockerCliResult:
         process = await asyncio.create_subprocess_exec(
             *argv, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE, env=env,
+            stderr=asyncio.subprocess.PIPE, env=env, pass_fds=pass_fds,
         )
         if process.stdout is None or process.stderr is None:
             await self._stop_and_reap(process, ())
@@ -480,7 +480,10 @@ class DockerCliEngineTransport(DockerEngineTransport):
     async def _call_raw(self, argv: tuple[str, ...], control: _LifecycleCallControl) -> DockerCliResult:
         if control.cancelled() or monotonic() >= control.deadline:
             raise asyncio.CancelledError
-        result = await self._runner.run(argv=argv, env={}, timeout=control.deadline - monotonic(), max_output_bytes=_OUTPUT_CAP)
+        result = await self._runner.run(
+            argv=argv, env={}, timeout=control.deadline - monotonic(),
+            max_output_bytes=_OUTPUT_CAP, pass_fds=(),
+        )
         if type(result.returncode) is not int or type(result.stdout) is not bytes or type(result.stderr) is not bytes or len(result.stdout) + len(result.stderr) > _OUTPUT_CAP:
             raise RestrictedWorkerError("restricted worker value is invalid")
         if control.cancelled():

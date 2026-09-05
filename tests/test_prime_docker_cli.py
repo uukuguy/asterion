@@ -45,10 +45,10 @@ _CONTROL = (
 class _Runner:
     def __init__(self, results: list[_Result]) -> None:
         self.results = results
-        self.calls: list[tuple[tuple[str, ...], dict[str, str], float, int]] = []
+        self.calls: list[tuple[tuple[str, ...], dict[str, str], float, int, tuple[int, ...]]] = []
 
-    async def run(self, *, argv: tuple[str, ...], env: dict[str, str], timeout: float, max_output_bytes: int) -> _Result:
-        self.calls.append((argv, env, timeout, max_output_bytes))
+    async def run(self, *, argv: tuple[str, ...], env: dict[str, str], timeout: float, max_output_bytes: int, pass_fds: tuple[int, ...]) -> _Result:
+        self.calls.append((argv, env, timeout, max_output_bytes, pass_fds))
         return self.results.pop(0)
 
 
@@ -212,7 +212,8 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runner.calls[0][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "version", "--format", "{{json .Server}}"))
         self.assertEqual(runner.calls[1][0][-3:], ("info", "--format", "{{json .}}"))
         self.assertEqual(runner.calls[2][0], ("/usr/local/bin/docker", "--host", "unix:///var/run/docker.sock", "create", "--name", _CONTAINER, "--pull=never", "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", f"seccomp={_SECCOMP}", "--tmpfs", "/workspace:rw,nodev,noexec,nosuid,size=67108864", "--env", "HOME=/workspace", "--env", "PATH=/usr/local/bin:/usr/bin:/bin", "--env", "PYTHONDONTWRITEBYTECODE=1", "--pid", "private", "--ipc", "private", "--uts", "private", "--pids-limit", "256", "--memory", "536870912", "--memory-swap", "536870912", "--cpus", "1", "--restart", "no", "--entrypoint", "/usr/local/bin/prime-ipython-coding.py", _IMAGE))
-        self.assertTrue(all(env == {} for _, env, _, _ in runner.calls))
+        self.assertTrue(all(env == {} for _, env, _, _, _ in runner.calls))
+        self.assertTrue(all(pass_fds == () for _, _, _, _, pass_fds in runner.calls))
 
     async def test_create_keeps_requested_name_separate_from_daemon_id(self) -> None:
         daemon_id = "a" * 64
@@ -665,11 +666,29 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
             with self.subTest(values=values), self.assertRaises(RestrictedWorkerError):
                 DockerCliEngineTransport(docker_executable=values[0], socket_path=values[1], seccomp_profile=values[2], runner=_Runner([]))
 
+    async def test_production_runner_forwards_requested_file_descriptors(self) -> None:
+        process = _Process(_Pipe(), _Pipe())
+        subprocess_exec = mock.AsyncMock(return_value=process)
+        with mock.patch(
+            "asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec",
+            new=subprocess_exec,
+        ):
+            await _ProductionRunner().run(
+                argv=("/operator/docker", "version"), env={}, timeout=1,
+                max_output_bytes=3, pass_fds=(41, 42),
+            )
+
+        subprocess_exec.assert_awaited_once_with(
+            "/operator/docker", "version", stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env={},
+            pass_fds=(41, 42),
+        )
+
     async def test_production_runner_caps_combined_streams_and_reaps_without_exposing_output(self) -> None:
         process = _Process(_Pipe(b"ab"), _Pipe(b"sentinel"))
         with mock.patch("asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
             with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
-                await _ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=1, max_output_bytes=3)
+                await _ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=1, max_output_bytes=3, pass_fds=())
 
         self.assertTrue(process.killed)
         self.assertTrue(process.waited)
@@ -680,7 +699,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         process = _Process(_Pipe(blocks=True), _Pipe(blocks=True))
         with mock.patch("asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
             with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
-                await _ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=0.001, max_output_bytes=3)
+                await _ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=0.001, max_output_bytes=3, pass_fds=())
 
         self.assertTrue(process.killed)
         self.assertTrue(process.waited)
@@ -690,7 +709,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
         process = _Process(_Pipe(failure=OSError("sentinel pipe failure")), _Pipe())
         with mock.patch("asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
             with self.assertRaisesRegex(RestrictedWorkerError, "restricted worker value is invalid") as raised:
-                await _ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=1, max_output_bytes=3)
+                await _ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=1, max_output_bytes=3, pass_fds=())
 
         self.assertTrue(process.killed)
         self.assertTrue(process.waited)
@@ -699,7 +718,7 @@ class TestDockerCliEngineTransport(unittest.IsolatedAsyncioTestCase):
     async def test_production_runner_cancellation_reaps_the_child(self) -> None:
         process = _Process(_Pipe(blocks=True), _Pipe(blocks=True))
         with mock.patch("asterion.applications.prime_agent.operator.docker_cli.asyncio.create_subprocess_exec", new=mock.AsyncMock(return_value=process)):
-            running = asyncio.create_task(_ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=1, max_output_bytes=3))
+            running = asyncio.create_task(_ProductionRunner().run(argv=("/operator/docker", "version"), env={}, timeout=1, max_output_bytes=3, pass_fds=()))
             await asyncio.sleep(0)
             running.cancel()
             with self.assertRaises(asyncio.CancelledError):
