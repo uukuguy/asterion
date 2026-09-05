@@ -38,7 +38,12 @@ _DIRECTORY_FLAGS: Final = (
     | getattr(os, "O_NOFOLLOW", 0)
     | getattr(os, "O_CLOEXEC", 0)
 )
-_FILE_FLAGS: Final = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+_FILE_FLAGS: Final = (
+    os.O_RDONLY
+    | getattr(os, "O_NONBLOCK", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
 _MAX_DESCRIPTOR_BYTES: Final = 64 * 1024
 _MAX_ARTIFACT_BYTES: Final = 1024 * 1024
 _READ_BYTES: Final = 64 * 1024
@@ -159,22 +164,11 @@ def _read_relative_file(root: Path, parts: tuple[str, ...], maximum: int) -> byt
             directory = child
         fd = os.open(parts[-1], _FILE_FLAGS, dir_fd=directory)
         before = os.fstat(fd)
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or before.st_nlink != 1
-            or before.st_mode & 0o022
-            or not 0 <= before.st_size <= maximum
-        ):
+        if not _is_admissible_file(before, maximum):
             raise ValueError
         data = _read_bounded(fd, maximum)
         after = os.fstat(fd)
-        if (before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns) != (
-            after.st_dev,
-            after.st_ino,
-            after.st_mode,
-            after.st_size,
-            after.st_mtime_ns,
-        ):
+        if not _is_admissible_file(after, maximum) or _file_identity(before) != _file_identity(after):
             raise ValueError
         return data
     finally:
@@ -194,6 +188,27 @@ def _read_bounded(fd: int, maximum: int) -> bytes:
         chunks.append(chunk)
         total += len(chunk)
     raise ValueError
+
+
+def _is_admissible_file(info: os.stat_result, maximum: int) -> bool:
+    return (
+        stat.S_ISREG(info.st_mode)
+        and info.st_nlink == 1
+        and not info.st_mode & 0o022
+        and 0 <= info.st_size <= maximum
+    )
+
+
+def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
 
 
 def _close_quietly(fd: int | None) -> None:
