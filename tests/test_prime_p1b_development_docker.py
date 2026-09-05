@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from time import monotonic
 
 from asterion.applications.prime_agent.operator.docker_worker import DockerWorkerLauncherSelfCheck
 from asterion.applications.prime_agent.operator.p1b_development_docker import (
-    P1BDockerCompletion, P1BDockerPersistentWorkerService,
+    P1BDockerCompletion, P1BDockerPersistentWorkerService, P1BDockerCliTransport,
 )
+from asterion.applications.prime_agent.operator.docker_cli import DockerCliResult
+from asterion.applications.prime_agent.operator.docker_worker import _LifecycleCallControl
 from asterion.applications.prime_agent.operator.p1b_workload import PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
 
 
@@ -53,3 +56,18 @@ class TestP1BDockerPersistentWorkerService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             await service.acquire()
         self.assertEqual(transport.calls, ["create", "inspect", "remove", "absent"])
+
+    async def test_uncertain_create_compensation_removes_provisional_name_then_asserts_absence(self) -> None:
+        class Runner:
+            def __init__(self) -> None: self.argv: list[tuple[str, ...]] = []
+            async def run(self, *, argv: tuple[str, ...], **_: object) -> DockerCliResult:
+                self.argv.append(argv)
+                if "rm" in argv: return DockerCliResult(0, b"prime-p1b-provisional\n", b"")
+                return DockerCliResult(1, b"", b"Error: No such object: prime-p1b-provisional\n")
+        runner = Runner()
+        subject = object.__new__(P1BDockerCliTransport)
+        subject._prefix = ("/operator/docker", "--host", "unix:///operator/docker.sock")
+        subject._runner = runner
+        await subject._compensate_provisional("prime-p1b-provisional")
+        self.assertEqual(runner.argv[0][-4:], ("container", "rm", "--force", "prime-p1b-provisional"))
+        self.assertEqual(runner.argv[1][-5:], ("container", "inspect", "--format", "{{.Id}}", "prime-p1b-provisional"))
