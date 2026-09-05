@@ -74,6 +74,10 @@ assert P1BPath("continuity.txt").read_bytes() == b"p1b continuity fixture\\n"
 
 
 class TestPrimeP1BLauncherClosedWorkerGate(unittest.TestCase):
+    def test_prepares_starter_before_emitting_self_check(self) -> None:
+        source = Path(p1b_launcher.__file__).read_text(encoding="utf-8")
+        self.assertLess(source.index("state = _prepare_workspace(workspace)"), source.index("stdout.write(_SELF_CHECK"))
+
     def test_checks_the_closed_worker_before_reading_the_first_protocol_frame(self) -> None:
         workspace = Path("/workspace")
         with patch.object(p1b_launcher, "require_closed_worker") as self_check, patch.object(

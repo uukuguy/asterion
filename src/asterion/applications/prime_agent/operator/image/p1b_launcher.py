@@ -212,10 +212,12 @@ def run_development_worker(*, workspace: Path, stdin: TextIO, stdout: TextIO) ->
     try:
         # No protocol witness may be emitted before the P1-A-equivalent gate.
         require_closed_worker()
-        stdout.write(_SELF_CHECK.decode("ascii") + "\n")
-        stdout.flush()
         workspace = workspace.resolve()
         state = _prepare_workspace(workspace)
+        # The host may snapshot immediately after this witness, so the fixed
+        # starter must already exist before attach progress becomes visible.
+        stdout.write(_SELF_CHECK.decode("ascii") + "\n")
+        stdout.flush()
         os.chdir(workspace)
         from IPython.core.interactiveshell import InteractiveShell
 
