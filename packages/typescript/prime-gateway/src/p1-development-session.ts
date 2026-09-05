@@ -48,13 +48,28 @@ export interface PrimeP1DevelopmentResult {
 }
 
 interface PrimeSdkModules {
-  readonly createAgentSession: (options: Record<string, unknown>) => Promise<{ session: PrimeSdkSession }>;
+  readonly createAgentSession: (
+    options: Record<string, unknown>,
+  ) => Promise<{ session: PrimeSdkSession }>;
   readonly SessionManager: { inMemory(workspace: string): unknown };
-  readonly AuthStorage: { inMemory(): { setRuntimeApiKey(provider: string, apiKey: string): void } };
-  readonly ModelRegistry: { inMemory(auth: unknown): { registerProvider(provider: string, config: unknown): void; unregisterProvider(provider: string): void; find(provider: string, model: string): unknown } };
-  readonly DefaultResourceLoader: new (options: Record<string, unknown>) => { reload(): Promise<void> };
+  readonly AuthStorage: {
+    inMemory(): { setRuntimeApiKey(provider: string, apiKey: string): void };
+  };
+  readonly ModelRegistry: {
+    inMemory(auth: unknown): {
+      registerProvider(provider: string, config: unknown): void;
+      unregisterProvider(provider: string): void;
+      find(provider: string, model: string): unknown;
+    };
+  };
+  readonly DefaultResourceLoader: new (options: Record<string, unknown>) => {
+    reload(): Promise<void>;
+  };
   readonly SettingsManager: { inMemory(settings?: unknown): unknown };
-  readonly Type: { Object(properties: Record<string, unknown>): unknown; String(): unknown };
+  readonly Type: {
+    Object(properties: Record<string, unknown>): unknown;
+    String(): unknown;
+  };
 }
 
 interface PrimeSdkSession {
@@ -62,11 +77,19 @@ interface PrimeSdkSession {
   prompt(prompt: string): Promise<void>;
   waitForIdle(): Promise<void>;
   compact(): Promise<unknown>;
+  requestAbort(): void;
   abort(): Promise<void>;
   disposeAsync(): Promise<void>;
 }
-type PrimeSdkRegistry = { registerProvider(provider: string, config: unknown): void; unregisterProvider(provider: string): void; find(provider: string, model: string): unknown };
-type SharedRegistry = { auth: { setRuntimeApiKey(provider: string, apiKey: string): void }; registry: PrimeSdkRegistry };
+type PrimeSdkRegistry = {
+  registerProvider(provider: string, config: unknown): void;
+  unregisterProvider(provider: string): void;
+  find(provider: string, model: string): unknown;
+};
+type SharedRegistry = {
+  auth: { setRuntimeApiKey(provider: string, apiKey: string): void };
+  registry: PrimeSdkRegistry;
+};
 const sharedRegistries = new Map<string, SharedRegistry>();
 
 /** A deliberately narrow development-only bridge to a caller-owned Prime SDK checkout. */
@@ -82,18 +105,32 @@ export class PrimeP1DevelopmentSession {
     registry: { unregisterProvider(provider: string): void },
     provider: string,
     control: { state: "open" | "cancelled" | "closed" },
-  ) { this.#session = session; this.#registry = registry; this.#provider = provider; this.#control = control; }
+  ) {
+    this.#session = session;
+    this.#registry = registry;
+    this.#provider = provider;
+    this.#control = control;
+  }
 
-  static async open(options: PrimeP1DevelopmentSessionOptions): Promise<PrimeP1DevelopmentSession> {
-    if (!isAbsolute(options.primeSourceRoot) || !isAbsolute(options.workspace)) {
+  static async open(
+    options: PrimeP1DevelopmentSessionOptions,
+  ): Promise<PrimeP1DevelopmentSession> {
+    if (
+      !isAbsolute(options.primeSourceRoot) ||
+      !isAbsolute(options.workspace)
+    ) {
       throw new Error("primeSourceRoot and workspace must be absolute paths");
     }
-    const primeSourceRoot = await canonicalPrimeSourceRoot(options.primeSourceRoot);
+    const primeSourceRoot = await canonicalPrimeSourceRoot(
+      options.primeSourceRoot,
+    );
     const modules = await loadPrimeSdk(primeSourceRoot);
     const identity = randomUUID();
     const provider = `asterion-p1-development-${identity}`;
     const modelId = `p1-development-${identity}`;
-    const control: { state: "open" | "cancelled" | "closed" } = { state: "open" };
+    const control: { state: "open" | "cancelled" | "closed" } = {
+      state: "open",
+    };
     let shared = sharedRegistries.get(primeSourceRoot);
     if (!shared) {
       const auth = modules.AuthStorage.inMemory();
@@ -110,21 +147,33 @@ export class PrimeP1DevelopmentSession {
       api: `asterion-p1-development-${identity}`,
       baseUrl: "http://127.0.0.1:0",
       apiKey: "in-memory-development-provider",
-      streamSimple: (model: unknown, context: unknown, streamOptions: unknown) => {
+      streamSimple: (
+        model: unknown,
+        context: unknown,
+        streamOptions: unknown,
+      ) => {
         assertCallbackAllowed(control);
-        if (++modelCalls > MAX_MODEL_CALLS) throw new Error("Prime P1 development model callback limit exceeded");
+        if (++modelCalls > MAX_MODEL_CALLS)
+          throw new Error("Prime P1 development model callback limit exceeded");
         const stream = options.model(model, context, streamOptions);
         assertAssistantEventStream(stream);
         return stream;
       },
-      models: [{
-        id: modelId, name: modelId, reasoning: false, input: ["text"],
-        contextWindow: 16_384, maxTokens: 4_096,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      }],
+      models: [
+        {
+          id: modelId,
+          name: modelId,
+          reasoning: false,
+          input: ["text"],
+          contextWindow: 16_384,
+          maxTokens: 4_096,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        },
+      ],
     });
     const model = registry.find(provider, modelId);
-    if (!model) throw new Error("Prime P1 development model registration failed");
+    if (!model)
+      throw new Error("Prime P1 development model registration failed");
     const agentDir = join(options.workspace, ".asterion-prime-p1-development");
     const settingsManager = modules.SettingsManager.inMemory({
       retry: { enabled: false, provider: { maxRetries: 0 } },
@@ -134,19 +183,36 @@ export class PrimeP1DevelopmentSession {
     // DefaultResourceLoader is empty until reload(); never reload it here, since
     // reload discovers workspace and ancestor resources.
     const resourceLoader = new modules.DefaultResourceLoader({
-      cwd: options.workspace, agentDir, settingsManager,
-      noExtensions: true, noSkills: true, noPromptTemplates: true,
-      noThemes: true, noContextFiles: true, bundledSkillsDir: null,
+      cwd: options.workspace,
+      agentDir,
+      settingsManager,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+      bundledSkillsDir: null,
     });
     const customIpython = {
       name: "ipython",
       description: "Caller-owned IPython execution bridge.",
       label: "ipython",
       parameters: modules.Type.Object({ code: modules.Type.String() }),
-      execute: async (toolCallId: string, input: { code: string }, signal: AbortSignal) => {
+      execute: async (
+        toolCallId: string,
+        input: { code: string },
+        signal: AbortSignal,
+      ) => {
         assertCallbackAllowed(control);
-        if (++toolCalls > MAX_TOOL_CALLS) throw new Error("Prime P1 development ipython callback limit exceeded");
-        return options.ipython(toolCallId, Object.freeze({ code: input.code }), signal);
+        if (++toolCalls > MAX_TOOL_CALLS)
+          throw new Error(
+            "Prime P1 development ipython callback limit exceeded",
+          );
+        return options.ipython(
+          toolCallId,
+          Object.freeze({ code: input.code }),
+          signal,
+        );
       },
     };
     const created = await modules.createAgentSession({
@@ -168,7 +234,12 @@ export class PrimeP1DevelopmentSession {
       serializedRefine: true,
       telemetryDisabled: true,
     });
-    return new PrimeP1DevelopmentSession(created.session, registry, provider, control);
+    return new PrimeP1DevelopmentSession(
+      created.session,
+      registry,
+      provider,
+      control,
+    );
   }
 
   async prompt(prompt: string): Promise<PrimeP1DevelopmentResult> {
@@ -183,57 +254,92 @@ export class PrimeP1DevelopmentSession {
     if (this.#state === "closed") return;
     this.#state = "cancelled";
     this.#control.state = "cancelled";
-    await this.#session.abort();
+    this.#session.requestAbort();
   }
 
   async close(): Promise<void> {
     if (this.#state === "closed") return;
     this.#state = "closed";
     this.#control.state = "closed";
-    try { await this.#session.disposeAsync(); }
-    finally { this.#registry.unregisterProvider(this.#provider); }
+    try {
+      await this.#session.disposeAsync();
+    } finally {
+      this.#registry.unregisterProvider(this.#provider);
+    }
   }
 
   private assertDispatchable(): void {
-    if (this.#state === "cancelled") throw new Error("Prime P1 development session is cancelled");
-    if (this.#state === "closed") throw new Error("Prime P1 development session is closed");
+    if (this.#state === "cancelled")
+      throw new Error("Prime P1 development session is cancelled");
+    if (this.#state === "closed")
+      throw new Error("Prime P1 development session is closed");
   }
 
-  private result(lifecycle: "completed" | "cancelled"): PrimeP1DevelopmentResult {
+  private result(
+    lifecycle: "completed" | "cancelled",
+  ): PrimeP1DevelopmentResult {
     const assistants = this.#session.agent.state.messages.filter(isAssistant);
-    const usage = assistants.reduce((total, message) => ({
-      input_tokens: total.input_tokens + numberAt(message, "usage", "input"),
-      output_tokens: total.output_tokens + numberAt(message, "usage", "output"),
-      total_tokens: total.total_tokens + numberAt(message, "usage", "totalTokens"),
-    }), { input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+    const usage = assistants.reduce(
+      (total, message) => ({
+        input_tokens: total.input_tokens + numberAt(message, "usage", "input"),
+        output_tokens:
+          total.output_tokens + numberAt(message, "usage", "output"),
+        total_tokens:
+          total.total_tokens + numberAt(message, "usage", "totalTokens"),
+      }),
+      { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    );
     const latest = assistants.at(-1);
     return Object.freeze({
       lifecycle,
       usage: Object.freeze(usage),
       assistant: Object.freeze({
         completed: lifecycle === "completed" && latest?.stopReason === "stop",
-        stop_reason: lifecycle === "cancelled" ? "aborted" : safeStopReason(latest?.stopReason),
+        stop_reason:
+          lifecycle === "cancelled"
+            ? "aborted"
+            : safeStopReason(latest?.stopReason),
       }),
     });
   }
 
-  toJSON(): Pick<PrimeP1DevelopmentResult, "lifecycle" | "usage" | "assistant"> {
+  toJSON(): Pick<
+    PrimeP1DevelopmentResult,
+    "lifecycle" | "usage" | "assistant"
+  > {
     return this.result(this.#state === "cancelled" ? "cancelled" : "completed");
   }
 
-  [inspect.custom](): string { return "PrimeP1DevelopmentSession { lifecycle: safe }"; }
+  [inspect.custom](): string {
+    return "PrimeP1DevelopmentSession { lifecycle: safe }";
+  }
 }
 
 async function loadPrimeSdk(root: string): Promise<PrimeSdkModules> {
   const coding = join(root, "packages/coding-agent/dist");
-  const required = ["core/sdk.js", "core/session-manager.js", "core/model-registry.js", "core/auth-storage.js", "core/resource-loader.js", "core/settings-manager.js"];
-  if (!required.every((path) => existsSync(join(coding, path)))) throw new Error("Prime SDK dist is unavailable at primeSourceRoot");
+  const required = [
+    "core/sdk.js",
+    "core/session-manager.js",
+    "core/model-registry.js",
+    "core/auth-storage.js",
+    "core/resource-loader.js",
+    "core/settings-manager.js",
+  ];
+  if (!required.every((path) => existsSync(join(coding, path))))
+    throw new Error("Prime SDK dist is unavailable at primeSourceRoot");
   const load = (path: string) => import(pathToFileURL(join(coding, path)).href);
-  const [sdk, sessions, models, auth, resources, settings, typebox] = await Promise.all([
-    load("core/sdk.js"), load("core/session-manager.js"), load("core/model-registry.js"),
-    load("core/auth-storage.js"), load("core/resource-loader.js"), load("core/settings-manager.js"),
-    import(pathToFileURL(join(root, "node_modules/typebox/build/index.mjs")).href),
-  ]);
+  const [sdk, sessions, models, auth, resources, settings, typebox] =
+    await Promise.all([
+      load("core/sdk.js"),
+      load("core/session-manager.js"),
+      load("core/model-registry.js"),
+      load("core/auth-storage.js"),
+      load("core/resource-loader.js"),
+      load("core/settings-manager.js"),
+      import(
+        pathToFileURL(join(root, "node_modules/typebox/build/index.mjs")).href
+      ),
+    ]);
   return {
     createAgentSession: sdk.createAgentSession,
     SessionManager: sessions.SessionManager,
@@ -246,29 +352,72 @@ async function loadPrimeSdk(root: string): Promise<PrimeSdkModules> {
 }
 
 async function canonicalPrimeSourceRoot(root: string): Promise<string> {
-  try { return await realpath(root); }
-  catch { throw new Error("Prime SDK source root is unavailable"); }
-}
-
-function assertAssistantEventStream(value: unknown): asserts value is { [Symbol.asyncIterator](): AsyncIterator<unknown>; result(): Promise<unknown> } {
-  if (!value || typeof value !== "object" || typeof (value as { result?: unknown }).result !== "function" || typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] !== "function") {
-    throw new Error("model callback must return a Prime AssistantMessageEventStream");
+  try {
+    return await realpath(root);
+  } catch {
+    throw new Error("Prime SDK source root is unavailable");
   }
 }
 
-function isAssistant(message: unknown): message is { stopReason?: PrimeP1DevelopmentResult["assistant"]["stop_reason"]; usage?: Record<string, number> } {
-  return !!message && typeof message === "object" && (message as { role?: unknown }).role === "assistant";
+function assertAssistantEventStream(
+  value: unknown,
+): asserts value is {
+  [Symbol.asyncIterator](): AsyncIterator<unknown>;
+  result(): Promise<unknown>;
+} {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    typeof (value as { result?: unknown }).result !== "function" ||
+    typeof (value as { [Symbol.asyncIterator]?: unknown })[
+      Symbol.asyncIterator
+    ] !== "function"
+  ) {
+    throw new Error(
+      "model callback must return a Prime AssistantMessageEventStream",
+    );
+  }
 }
 
-function numberAt(message: { usage?: Record<string, number> }, key: "usage", field: "input" | "output" | "totalTokens"): number {
+function isAssistant(
+  message: unknown,
+): message is {
+  stopReason?: PrimeP1DevelopmentResult["assistant"]["stop_reason"];
+  usage?: Record<string, number>;
+} {
+  return (
+    !!message &&
+    typeof message === "object" &&
+    (message as { role?: unknown }).role === "assistant"
+  );
+}
+
+function numberAt(
+  message: { usage?: Record<string, number> },
+  key: "usage",
+  field: "input" | "output" | "totalTokens",
+): number {
   const value = message[key]?.[field];
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : 0;
 }
 
-function assertCallbackAllowed(control: { state: "open" | "cancelled" | "closed" }): void {
-  if (control.state !== "open") throw new Error("Prime P1 development session is cancelled");
+function assertCallbackAllowed(control: {
+  state: "open" | "cancelled" | "closed";
+}): void {
+  if (control.state !== "open")
+    throw new Error("Prime P1 development session is cancelled");
 }
 
-function safeStopReason(value: unknown): PrimeP1DevelopmentResult["assistant"]["stop_reason"] {
-  return value === "stop" || value === "length" || value === "toolUse" || value === "error" || value === "aborted" ? value : "error";
+function safeStopReason(
+  value: unknown,
+): PrimeP1DevelopmentResult["assistant"]["stop_reason"] {
+  return value === "stop" ||
+    value === "length" ||
+    value === "toolUse" ||
+    value === "error" ||
+    value === "aborted"
+    ? value
+    : "error";
 }

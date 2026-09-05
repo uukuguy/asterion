@@ -30,6 +30,7 @@ function canonical(value) {
 
 function reader(socket) {
   let buffered = Buffer.alloc(0);
+  const queued = [];
   const waiting = [];
   socket.on("data", (chunk) => {
     buffered = Buffer.concat([buffered, chunk]);
@@ -40,10 +41,17 @@ function reader(socket) {
       const length = buffered.readUInt32BE();
       const value = JSON.parse(buffered.subarray(4, 4 + length));
       buffered = buffered.subarray(4 + length);
-      waiting.shift()?.(value);
+      const resolve = waiting.shift();
+      if (resolve) resolve(value);
+      else queued.push(value);
     }
   });
-  return () => new Promise((resolve) => waiting.push(resolve));
+  return () => {
+    const value = queued.shift();
+    return value === undefined
+      ? new Promise((resolve) => waiting.push(resolve))
+      : Promise.resolve(value);
+  };
 }
 
 function command(sequence, request_id, kind, payload = {}) {
@@ -171,6 +179,141 @@ test("keeps bridge inspection free of transport and path sentinels", async () =>
   const rendered = `${inspect(bridge)}${JSON.stringify(bridge)}`;
   assert.doesNotMatch(rendered, /SENTINEL|buffer|path|socket/i);
   socket.destroy();
+});
+
+test("settles the active prompt and cancellation once each before a graceful close", async () => {
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const connected = once(server, "connection");
+  const client = await new Promise((resolve) => {
+    const socket = createConnection({
+      port: server.address().port,
+      host: "127.0.0.1",
+    });
+    socket.once("connect", () => resolve(socket));
+  });
+  const [socket] = await connected;
+  const child = spawn(
+    process.execPath,
+    ["dist/src/p1-development-main.js", "3"],
+    {
+      cwd: gatewayRoot,
+      env: {},
+      stdio: ["ignore", "ignore", "pipe", socket],
+    },
+  );
+  const receive = reader(client);
+  const next = () =>
+    Promise.race([
+      receive(),
+      new Promise((_, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("bridge response timed out")),
+          5_000,
+        );
+        timer.unref();
+      }),
+    ]);
+  const send = (value) => client.write(frame(value));
+  const workspace = await mkdtemp(join(tmpdir(), "asterion-p1-cancel-"));
+  try {
+    send(
+      command(1, "open-1", "open", {
+        prime_source_root: primeSourceRoot,
+        workspace,
+      }),
+    );
+    assert.equal((await next()).kind, "ready");
+    send(
+      command(2, "prompt-1", "prompt", { prompt: "SENTINEL_CANCEL_PROMPT" }),
+    );
+    const model = await next();
+    assert.equal(model.kind, "model.request");
+    send(command(3, "cancel-1", "cancel"));
+    const first = await next();
+    const second = await next();
+    assert.deepEqual(
+      [first, second]
+        .map((event) => [event.kind, event.request_id, event.payload.result])
+        .sort((a, b) => a[1].localeCompare(b[1])),
+      [
+        ["command.result", "cancel-1", { lifecycle: "cancelled" }],
+        ["command.result", "prompt-1", { lifecycle: "cancelled" }],
+      ],
+    );
+    send(command(4, "close-1", "close"));
+    assert.deepEqual((await next()).payload.result, { lifecycle: "closed" });
+    assert.equal((await once(child, "exit"))[0], 0);
+  } finally {
+    client.destroy();
+    socket.destroy();
+    server.close();
+    child.kill();
+  }
+});
+
+test("rejects a late model response after cancellation", async () => {
+  const server = createServer();
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const connected = once(server, "connection");
+  const client = await new Promise((resolve) => {
+    const socket = createConnection({
+      port: server.address().port,
+      host: "127.0.0.1",
+    });
+    socket.once("connect", () => resolve(socket));
+  });
+  const [socket] = await connected;
+  const child = spawn(
+    process.execPath,
+    ["dist/src/p1-development-main.js", "3"],
+    {
+      cwd: gatewayRoot,
+      env: {},
+      stdio: ["ignore", "ignore", "pipe", socket],
+    },
+  );
+  const receive = reader(client);
+  const next = () =>
+    Promise.race([
+      receive(),
+      new Promise((_, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error("bridge response timed out")),
+          5_000,
+        );
+        timer.unref();
+      }),
+    ]);
+  const send = (value) => client.write(frame(value));
+  const workspace = await mkdtemp(join(tmpdir(), "asterion-p1-late-"));
+  try {
+    send(
+      command(1, "open-1", "open", {
+        prime_source_root: primeSourceRoot,
+        workspace,
+      }),
+    );
+    await next();
+    send(command(2, "prompt-1", "prompt", { prompt: "SENTINEL_LATE" }));
+    const model = await next();
+    send(command(3, "cancel-1", "cancel"));
+    await next();
+    await next();
+    send(
+      command(4, model.request_id, "model.response", {
+        message: assistantDoneMessage(),
+      }),
+    );
+    assert.equal((await once(child, "exit"))[0], 1);
+  } finally {
+    client.destroy();
+    socket.destroy();
+    server.close();
+    child.kill();
+  }
 });
 
 function assistantToolMessage() {

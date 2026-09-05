@@ -15,7 +15,8 @@ if (process.platform === "darwin" && macosLocale !== undefined) {
   const uid = process.getuid?.();
   if (uid === undefined) fail();
   const prefix = `0x${uid.toString(16).toUpperCase()}:`;
-  if (!macosLocale.startsWith(prefix)) fail();
+  if (!new RegExp(`^${prefix}0x[0-9A-F]+:0x[0-9A-F]+$`, "i").test(macosLocale))
+    fail();
   delete process.env.__CF_USER_TEXT_ENCODING;
 }
 if (Object.keys(process.env).length !== 0) fail();
