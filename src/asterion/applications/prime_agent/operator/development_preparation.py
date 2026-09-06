@@ -26,6 +26,7 @@ _MESSAGE = "Prime development preparation is unavailable"
 _SCENARIOS = frozenset({"p1", "p2", "p3", "p4", "p5", "p6", "p7"})
 _MAX_ARCHIVE = 128 * 1024 * 1024
 _MAX_EXTRACTED = 512 * 1024 * 1024
+_MAX_COMMAND_OUTPUT = 4096
 
 
 class PrimeDevelopmentPreparationError(ValueError):
@@ -227,16 +228,13 @@ def _publish_node(root: Path, archive: Path) -> Path:
     stage = Path(tempfile.mkdtemp(prefix=".node.", suffix=".stage", dir=root))
     try:
         extracted = _extract_node(archive, stage)
-        target, old = root / "node", root / ".node.previous"
-        if old.exists():
-            _remove_tree(old)
+        target = root / ("node-" + _digest(archive)[:16])
         if target.exists():
-            os.replace(target, old)
+            _remove_tree(stage)
+            return target / "bin" / "node"
         os.replace(extracted, target)
         _fsync_directory(root)
         _remove_tree(stage)
-        if old.exists():
-            _remove_tree(old)
         return target / "bin" / "node"
     except (OSError, PrimeDevelopmentPreparationError):
         if stage.exists():
@@ -246,13 +244,18 @@ def _publish_node(root: Path, archive: Path) -> Path:
 
 def _run(argv: list[str], *, runner: Callable[..., object]) -> object:
     try:
-        return runner(
+        result = runner(
             argv,
             check=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             timeout=120,
             env={"PATH": "/usr/bin:/bin"},
         )
+        output = getattr(result, "stdout", b"")
+        if type(output) is not bytes or len(output) > _MAX_COMMAND_OUTPUT:
+            raise ValueError
+        return result
     except Exception:
         raise PrimeDevelopmentPreparationError() from None
 
@@ -301,10 +304,10 @@ def _node(
         or not all(type(x) is str for x in record.values())
     ):
         raise PrimeDevelopmentPreparationError()
-    archive, node = root / "node.tar.xz", root / "node" / "bin" / "node"
+    archive = root / "node.tar.xz"
     if not archive.exists() or _digest(archive) != record["archive_sha256"]:
         try:
-            data = downloader(record["url"]).read(_MAX_ARCHIVE + 1)
+            data = downloader(record["url"], timeout=120).read(_MAX_ARCHIVE + 1)
             if (
                 type(data) is not bytes
                 or len(data) > _MAX_ARCHIVE
@@ -314,6 +317,7 @@ def _node(
         except Exception:
             raise PrimeDevelopmentPreparationError() from None
         archive = _publish_bytes(root, "node.tar.xz", data)
+    node = root / ("node-" + _digest(archive)[:16]) / "bin" / "node"
     if not node.exists() or _digest(node) != record["node_sha256"]:
         node = _publish_node(root, archive)
     if (
@@ -376,7 +380,7 @@ def _identities(
         or type(source) is not dict
     ):
         raise PrimeDevelopmentPreparationError()
-    node = root / "node" / "bin" / "node"
+    node = root / ("node-" + nodes[arch]["archive_sha256"][:16]) / "bin" / "node"
     if (
         _digest(node) != nodes[arch].get("node_sha256")
         or getattr(_run([str(node), "--version"], runner=runner), "stdout", b"")
@@ -506,7 +510,10 @@ def resolve_prepared_prime_development(
     lock, repo, arch = _lock(), repo_root.resolve(), _arch(platform_machine())
     root = _root(repo)
     try:
-        receipt = json.loads((root / "receipt.json").read_text(encoding="utf-8"))
+        receipt_path = root / "receipt.json"
+        if receipt_path.is_symlink() or not stat.S_ISREG(receipt_path.lstat().st_mode):
+            raise ValueError
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         scenarios = receipt.get("scenarios") if type(receipt) is dict else None
         if (
             type(scenarios) is not list
@@ -532,7 +539,7 @@ def resolve_prepared_prime_development(
         raise PrimeDevelopmentPreparationError() from None
     return PrimeDevelopmentPaths(
         root,
-        root / "node" / "bin" / "node",
+        root / ("node-" + lock["node"][arch]["archive_sha256"][:16]) / "bin" / "node",  # type: ignore[index]
         root / "prime-development-seccomp.json",
         repo / "packages" / "typescript" / "prime-gateway",
         repo / "3th-party" / "prime-agent",
