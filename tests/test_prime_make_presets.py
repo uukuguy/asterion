@@ -84,6 +84,25 @@ class TestPrimeMakePresets(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, recipe)
 
+    def test_p5_p6_and_p7_self_prepare_with_safe_progress(self) -> None:
+        makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
+        cases = (
+            ("p5", "prime-p6-run:", "Bounded autonomy: diagnose, repair, and validate the fixed clamp task", "prime.bounded-autonomy@1.0.0"),
+            ("p6", "prime-p7-run:", "Continual improvement: evaluate, refine, holdout-test, then activate or roll back", "prime.continual-improvement@1.0.0"),
+            ("p7", "test.prime-session-context-parity.provider-free:", "ARC-AGI-3: run one offline episode capped at four actions and replay its score", "prime.arc-agi-3@1.0.0"),
+        )
+        for scenario, next_target, purpose, application in cases:
+            with self.subTest(scenario=scenario):
+                recipe = makefile.split(f"prime-{scenario}-run:\n", 1)[1].split("\n" + next_target, 1)[0]
+                self.assertIn(f"[prime-{scenario}] {purpose}", recipe)
+                self.assertEqual(recipe.count('orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)"'), 1)
+                self.assertLess(recipe.index(f"tools/prepare_prime_development.py --scenario {scenario}"), recipe.index("asterion run --progress"))
+                self.assertIn("--status-stream stderr", recipe)
+                self.assertIn('--run-id "$$1"', recipe)
+                self.assertIn(f"' prime-{scenario}-run \"$$run_id\"", recipe)
+                for required in ("--extra prime", "--python /usr/bin/python3", "--isolated", "--provider prime-agent", f"--application {application}", "--runtime prime.agent", "--input fixed-small-verification"):
+                    self.assertIn(required, recipe)
+
 
 if __name__ == "__main__":
     unittest.main()
