@@ -17,12 +17,15 @@
   parity and broad framework restructuring are not prerequisites for Prime
   closure.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
-  preparation, and W1c runtime-provider separation are complete.
+  preparation, W1c runtime-provider separation, and W1d core-only isolation are
+  complete.
   The public SDK's `research` kind now reaches its exact implementation through
   provider, assembly, and runner. Package sources now share one prepare/load
   lifecycle with exact lock and authorization binding. Prime now owns its exact
   runtime binding and P1-P7 routes; the domain-neutral default registry contains
-  no Prime routing. Active framework slice: W1d core-only import/install boundary.
+  no Prime routing. The dependency-free wheel gate imports the complete core
+  allowlist without product modules. Active framework slice: W2 copyable public
+  extension through isolated installed CLI execution.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source

@@ -2078,3 +2078,4 @@
 - 15:58 Aligned packaged assembly acceptance with the closed Prime inventory [5ef11e53]
 - 16:02 Advanced the framework mainline to the core-only boundary after W1c closure [c22c0182]
 - 16:03 Defined the core-only import and dependency boundary before W1d implementation [1b5e2a41]
+- 16:27 Isolated the dependency-free core while preserving explicit first-party integration [a179bb05]

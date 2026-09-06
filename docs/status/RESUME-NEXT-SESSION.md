@@ -29,10 +29,10 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 ## Next concrete action
 
 W0 inventory alignment, W1a executable-kind consistency, W1b exact source
-preparation, and W1c runtime-provider separation are complete. Continue W1d:
-establish a core-only import/install gate, remove mandatory core-to-product
-imports and product-only dependencies, and preserve selected provider entry
-points as explicit integrations.
+preparation, W1c runtime-provider separation, and W1d core-only isolation are
+complete. Continue W2: turn the minimal external distribution fixture into a
+copyable public extension with an application provider, exact assembly and
+runtime binding, then execute its documented command from isolated wheels.
 
 The seven Prime development scenarios are closed at their named boundaries.
 Native Phase 3.2 remains a parallel track. Full multi-game ARC-AGI-3 work and
