@@ -184,6 +184,12 @@ class TestP5DevelopmentHost(unittest.TestCase):
 
         valid = b"def clamp(value, lower, upper):\n    return min(max(value, lower), upper)\n"
         validate_p5_development_snapshot(valid, repaired=True)
+        formatting_equivalent = (
+            b"\n\n"
+            b"def clamp(value, lower, upper):\n"
+            b"    return min(max(value, lower), upper)\n\n"
+        )
+        validate_p5_development_snapshot(formatting_equivalent, repaired=True)
         for source in (
             b"import os\n",
             b"def clamp(x, y, z):\n return x + y\n",

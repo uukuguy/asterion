@@ -268,8 +268,6 @@ async def run_p5_development_lifecycle(
 def validate_p5_development_snapshot(source: object, *, repaired: bool) -> None:
     if type(source) is not bytes:
         raise ValueError
-    if repaired and source != _REPAIRED_SOURCE:
-        raise ValueError
     try:
         tree = ast.parse(source.decode("utf-8", "strict"), mode="exec")
     except (SyntaxError, UnicodeError):
@@ -303,16 +301,25 @@ def validate_p5_development_snapshot(source: object, *, repaired: bool) -> None:
     if not names <= {"value", "lower", "upper", "min", "max"}:
         raise ValueError
     expression = function.body[0].value
+    def named(node: ast.AST, identifier: str) -> bool:
+        return (
+            isinstance(node, ast.Name)
+            and node.id == identifier
+            and isinstance(node.ctx, ast.Load)
+        )
+
     exact = (
         isinstance(expression, ast.Call)
-        and isinstance(expression.func, ast.Name)
-        and expression.func.id == "min"
+        and named(expression.func, "min")
+        and not expression.keywords
         and len(expression.args) == 2
         and isinstance(expression.args[0], ast.Call)
-        and isinstance(expression.args[0].func, ast.Name)
-        and expression.args[0].func.id == "max"
-        and isinstance(expression.args[1], ast.Name)
-        and expression.args[1].id == "upper"
+        and named(expression.args[0].func, "max")
+        and not expression.args[0].keywords
+        and len(expression.args[0].args) == 2
+        and named(expression.args[0].args[0], "value")
+        and named(expression.args[0].args[1], "lower")
+        and named(expression.args[1], "upper")
     )
     if repaired is not exact:
         raise ValueError
