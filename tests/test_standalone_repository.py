@@ -177,6 +177,8 @@ class StandaloneRepositoryTests(unittest.TestCase):
             "prime-p1-run": "prime.ipython-coding@1.0.0",
             "prime-p2-run": "prime.programmatic-long-context@1.0.0",
             "prime-p3-run": "prime.recursive-workflow@1.0.0",
+            "prime-p4-run": "prime.long-session-continuity@1.0.0",
+            "prime-p5-run": "prime.bounded-autonomy@1.0.0",
         }
         for target, application in expected.items():
             with self.subTest(target=target):

@@ -11,7 +11,13 @@ from asterion.runtime.host import CancellationSignal
 
 _PRESET = "fixed-small-verification"
 _SCOPES = frozenset(
-    ("p1-b-development", "p2-development", "p3-development", "p4-development")
+    (
+        "p1-b-development",
+        "p2-development",
+        "p3-development",
+        "p4-development",
+        "p5-development",
+    )
 )
 _PROMOTION = "unpromoted"
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
