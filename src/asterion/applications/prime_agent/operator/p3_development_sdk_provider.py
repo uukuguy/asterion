@@ -23,7 +23,7 @@ _TOTAL_INPUT_TOKENS = 40_960
 _TOTAL_OUTPUT_TOKENS = 5_120
 _TOTAL_COST_MICROUNITS = 50_000
 _RESERVATION = _TOTAL_COST_MICROUNITS // sum(P3_ROLE_MODEL_CALLBACKS.values())
-_DEADLINE_SECONDS = 60.0
+_DEADLINE_SECONDS = 180.0
 _REAP_GRACE_SECONDS = 2.0
 _POLL_SECONDS = 0.01
 _USAGE_SIZE = struct.calcsize("!QQQ")
@@ -439,9 +439,11 @@ def _child(
         _p2._read_exact(left, 1)
         _p2._close_quietly(left)
         raw = _p2._post_chat_completion(
-            config, _payload(request, config.model_id, role), timeout
+            config, _payload(request, config.model_id, role, call), timeout
         )
-        response, usage = _assistant_response(request, raw)
+        response, usage = _assistant_response(
+            request, raw, expected_tool=_tool_turn(role, call)
+        )
         _p2._write_all(
             result_right,
             b"S"
@@ -464,7 +466,7 @@ def _child(
 
 
 def _payload(
-    request: dict[str, object], model_id: str, callback_role: str
+    request: dict[str, object], model_id: str, callback_role: str, call: int = 0
 ) -> dict[str, object]:
     context = request["context"]
     messages: list[dict[str, object]] = []
@@ -517,7 +519,7 @@ def _payload(
         "model": model_id,
         "stream": False,
         "thinking": {"type": "disabled"},
-        "tool_choice": "auto",
+        "tool_choice": "auto" if _tool_turn(callback_role, call) else "none",
         "tools": [
             {
                 "type": "function",
@@ -532,7 +534,7 @@ def _payload(
 
 
 def _assistant_response(
-    request: dict[str, object], raw: object
+    request: dict[str, object], raw: object, *, expected_tool: bool
 ) -> tuple[bytes, PrimeModelBrokerTokenUsage]:
     if (
         type(raw) is not dict
@@ -565,7 +567,8 @@ def _assistant_response(
     }
     calls = message.get("tool_calls")
     if (
-        finish == "tool_calls"
+        expected_tool
+        and finish == "tool_calls"
         and (message.get("content") is None or type(message.get("content")) is str)
         and type(calls) is list
         and len(calls) == 1
@@ -602,7 +605,8 @@ def _assistant_response(
             }
         )
     elif (
-        finish in {"stop", "length"}
+        not expected_tool
+        and finish == "stop"
         and calls is None
         and type(message.get("content")) is str
         and message["content"]
@@ -618,6 +622,12 @@ def _assistant_response(
     return _p2._canonical_json(base).encode(), PrimeModelBrokerTokenUsage(
         usage["prompt_tokens"], usage["completion_tokens"], _RESERVATION
     )
+
+
+def _tool_turn(role: str, call: int) -> bool:
+    if role not in P3_ROLE_MODEL_CALLBACKS or type(call) is not int or call < 0:
+        raise ValueError
+    return call == 0 or (role == "review" and call == 2)
 
 
 def _decode_result(raw: bytes) -> tuple[bytes, PrimeModelBrokerTokenUsage]:

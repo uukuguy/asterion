@@ -23,48 +23,97 @@ P3_SEED_FILENAMES: Final = ("solution.py", "test_solution.py")
 P3_ARTIFACT_FILENAMES: Final = (
     "implementation.json", "review.json", "review-follow-up.json", "aggregate.json",
 )
-P3_ROOT_PROMPT: Final = """You are the root coordinator for one fixed verification in /workspace.
-On your first turn, call ipython exactly once. In that single cell import
-asterion_rlm and execute this exact order: spawn('implementation'),
-wait('implementation'), spawn('review'), wait('review'), follow_up(),
-delete('implementation'), delete('review'), then list_children(). Require every
-operation to report completion and the final list to equal {'subagents': []}.
-Read implementation.json, review.json, and review-follow-up.json and require
-their exact fixed role/format fields. Then write aggregate.json as canonical
-sorted compact JSON plus one newline with exactly these facts: child_count 2,
-implementation 'patched', max_depth 1, model_callback_count 10,
-remaining_child_count 0, retained_follow_up_count 1, review 'verified', and
-tool_call_count 4. Do not print file contents. After the tool result, and on
-each later child terminal notice, reply only: P3 root complete. Never call a
-second tool and never create a child except through that first cell."""
-P3_IMPLEMENTATION_PROMPT: Final = """You are the implementation child in /workspace.
-Call ipython exactly once. Read solution.py and test_solution.py. Change only
-the upper-bound comparison in in_range from <= high to < high, preserving the
-function signature, other whitespace, and final newline. Require in_range(5,
-1, 5) is False and in_range(3, 1, 5) is True. Do not change test_solution.py.
-Write implementation.json as canonical sorted compact JSON plus one newline:
-{'format':'asterion.prime-p3-implementation/v1','patched':true,
-'role':'implementation'}. After the tool result reply only:
-P3 implementation complete. Do not send a parent message."""
-P3_REVIEW_PROMPT: Final = """You are the retained review child in /workspace.
-Call ipython exactly once. Read the repaired solution.py, the still-initial
-test_solution.py, and implementation.json. Confirm the source uses an
-exclusive upper bound and the tests omit the upper-bound case. Do not modify
-source or tests. Write review.json as canonical sorted compact JSON plus one
-newline: {'format':'asterion.prime-p3-review/v1',
-'missing_case':'upper-exclusive','role':'review'}. After the tool result reply
-only: P3 review complete. Remain available for one follow-up and do not send a
-parent message."""
-P3_FOLLOW_UP_PROMPT: Final = """Continue in the same review session in /workspace.
-Call ipython exactly once. Require review.json to contain the fixed prior
-review. Append exactly one test named test_upper_bound_is_exclusive asserting
-in_range(5, 1, 5) is False, preserving the exact existing test and final
-newline. Load solution.py and the updated tests in fresh namespaces, run the
-fixed cases (5,1,5)->False and (3,1,5)->True, and call both test functions.
-Write review-follow-up.json as canonical sorted compact JSON plus one newline
-with format asterion.prime-p3-review-follow-up/v1, oracle_cases
-[[5,1,5,false],[3,1,5,true]], role review, verified true. After the tool result
-reply only: P3 review verified. Do not send a parent message."""
+P3_ROOT_PROMPT: Final = r"""You are the root coordinator in /workspace. On the
+first turn call ipython exactly once and copy this complete Python cell without
+changing its operations or values:
+
+import json
+from pathlib import Path
+import asterion_rlm as rlm
+
+done = {"status": "completed"}
+assert rlm.spawn("implementation") == done
+assert rlm.wait("implementation") == done
+assert rlm.spawn("review") == done
+assert rlm.wait("review") == done
+assert rlm.follow_up() == done
+assert rlm.delete("implementation") == done
+assert rlm.delete("review") == done
+assert rlm.list_children() == {"subagents": []}
+implementation = json.loads(Path("implementation.json").read_text())
+review = json.loads(Path("review.json").read_text())
+follow_up = json.loads(Path("review-follow-up.json").read_text())
+assert implementation == {"format": "asterion.prime-p3-implementation/v1", "patched": True, "role": "implementation"}
+assert review == {"format": "asterion.prime-p3-review/v1", "missing_case": "upper-exclusive", "role": "review"}
+assert follow_up == {"format": "asterion.prime-p3-review-follow-up/v1", "oracle_cases": [[5, 1, 5, False], [3, 1, 5, True]], "role": "review", "verified": True}
+aggregate = {"child_count": 2, "implementation": "patched", "max_depth": 1, "model_callback_count": 10, "remaining_child_count": 0, "retained_follow_up_count": 1, "review": "verified", "tool_call_count": 4}
+Path("aggregate.json").write_text(json.dumps(aggregate, separators=(",", ":"), sort_keys=True) + "\n")
+
+Do not print file contents. After this tool result, and on every later child
+terminal notice, reply only `P3 root complete`. Never call a second tool."""
+P3_IMPLEMENTATION_PROMPT: Final = r"""You are the implementation child in
+/workspace. Call ipython exactly once and copy this complete Python cell:
+
+import json
+from pathlib import Path
+
+source_path = Path("solution.py")
+test_path = Path("test_solution.py")
+source = source_path.read_text()
+old = "    return low <= value <= high\n"
+new = "    return low <= value < high\n"
+assert source.count(old) == 1
+source_path.write_text(source.replace(old, new))
+assert test_path.read_bytes() == b"from solution import in_range\n\n\ndef test_interior_value() -> None:\n    assert in_range(3, 1, 5) is True\n"
+namespace = {}
+exec(compile(source_path.read_bytes(), "solution.py", "exec"), namespace)
+assert namespace["in_range"](5, 1, 5) is False
+assert namespace["in_range"](3, 1, 5) is True
+artifact = {"format": "asterion.prime-p3-implementation/v1", "patched": True, "role": "implementation"}
+Path("implementation.json").write_text(json.dumps(artifact, separators=(",", ":"), sort_keys=True) + "\n")
+
+After the tool result reply only `P3 implementation complete`. Never call a
+second tool and do not send a parent message."""
+P3_REVIEW_PROMPT: Final = r"""You are the retained review child in /workspace.
+Call ipython exactly once and copy this complete Python cell:
+
+import json
+from pathlib import Path
+
+assert Path("solution.py").read_bytes() == b"def in_range(value: int, low: int, high: int) -> bool:\n    return low <= value < high\n"
+assert Path("test_solution.py").read_bytes() == b"from solution import in_range\n\n\ndef test_interior_value() -> None:\n    assert in_range(3, 1, 5) is True\n"
+assert json.loads(Path("implementation.json").read_text()) == {"format": "asterion.prime-p3-implementation/v1", "patched": True, "role": "implementation"}
+artifact = {"format": "asterion.prime-p3-review/v1", "missing_case": "upper-exclusive", "role": "review"}
+Path("review.json").write_text(json.dumps(artifact, separators=(",", ":"), sort_keys=True) + "\n")
+
+After the tool result reply only `P3 review complete`. Never call a second tool,
+remain available for one follow-up, and do not send a parent message."""
+P3_FOLLOW_UP_PROMPT: Final = r"""Continue in the same review session in
+/workspace. Call ipython exactly once and copy this complete Python cell:
+
+import json
+from pathlib import Path
+
+assert json.loads(Path("review.json").read_text()) == {"format": "asterion.prime-p3-review/v1", "missing_case": "upper-exclusive", "role": "review"}
+initial = b"from solution import in_range\n\n\ndef test_interior_value() -> None:\n    assert in_range(3, 1, 5) is True\n"
+addition = b"\n\ndef test_upper_bound_is_exclusive() -> None:\n    assert in_range(5, 1, 5) is False\n"
+test_path = Path("test_solution.py")
+assert test_path.read_bytes() == initial
+test_path.write_bytes(initial + addition)
+source_namespace = {}
+exec(compile(Path("solution.py").read_bytes(), "solution.py", "exec"), source_namespace)
+assert source_namespace["in_range"](5, 1, 5) is False
+assert source_namespace["in_range"](3, 1, 5) is True
+test_namespace = {"in_range": source_namespace["in_range"]}
+test_source = test_path.read_text().removeprefix("from solution import in_range\n\n\n")
+exec(compile(test_source, "test_solution.py", "exec"), test_namespace)
+test_namespace["test_interior_value"]()
+test_namespace["test_upper_bound_is_exclusive"]()
+artifact = {"format": "asterion.prime-p3-review-follow-up/v1", "oracle_cases": [[5, 1, 5, False], [3, 1, 5, True]], "role": "review", "verified": True}
+Path("review-follow-up.json").write_text(json.dumps(artifact, separators=(",", ":"), sort_keys=True) + "\n")
+
+After the tool result reply only `P3 review verified`. Never call another tool
+and do not send a parent message."""
 P3_EXPECTED_SOURCE_BYTES: Final = b"def in_range(value: int, low: int, high: int) -> bool:\n    return low <= value < high\n"
 P3_EXPECTED_TEST_BYTES: Final = b"from solution import in_range\n\n\ndef test_interior_value() -> None:\n    assert in_range(3, 1, 5) is True\n\n\ndef test_upper_bound_is_exclusive() -> None:\n    assert in_range(5, 1, 5) is False\n"
 P3_ORACLE_CASES: Final = ((5, 1, 5, False), (3, 1, 5, True))

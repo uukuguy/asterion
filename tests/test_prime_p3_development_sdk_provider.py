@@ -111,6 +111,7 @@ class TestPrimeP3DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
                 ],
                 "usage": {"completion_tokens": 1, "prompt_tokens": 1},
             },
+            expected_tool=True,
         )
         projected = json.loads(response)
         self.assertEqual(projected["stopReason"], "toolUse")
@@ -135,6 +136,20 @@ class TestPrimeP3DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
             subject._TERMINAL_NOTICE["implementation"],
         )  # noqa: SLF001
         self.assertNotIn("SENTINEL_CHILD_ID", repr(payload))
+        self.assertEqual(payload["tool_choice"], "auto")
+        self.assertEqual(
+            subject._payload(request, "deepseek-v4-flash", "root", 1)[
+                "tool_choice"
+            ],
+            "none",
+        )  # noqa: SLF001
+        review = subject._decode_request(_body("review", role="review"), None, "review")
+        self.assertEqual(
+            subject._payload(review, "deepseek-v4-flash", "review", 2)[
+                "tool_choice"
+            ],
+            "auto",
+        )  # noqa: SLF001
 
     async def test_roles_keep_independent_histories_and_return_child_response(
         self,
