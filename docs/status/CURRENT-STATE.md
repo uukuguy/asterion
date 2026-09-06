@@ -19,7 +19,7 @@
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
   W2 public extension reference, W3a cross-package evidence, and W3b
-  cross-runtime evidence are complete.
+  cross-runtime evidence, and W4 protocol review are complete.
   The public SDK's `research` kind now reaches its exact implementation through
   provider, assembly, and runner. Package sources now share one prepare/load
   lifecycle with exact lock and authorization binding. Prime now owns its exact
@@ -33,8 +33,8 @@
   ownership derived from one prepared catalog snapshot. The same installed
   Acme capability now preserves exact public outputs through Acme and Contoso
   runtime adapters, including two cancellation timings and shared preflight
-  rejection boundaries. Active framework slice: W4 evidence-led protocol
-  evolution decision.
+  rejection boundaries. W4 found no demonstrated need for v2 and retains all
+  four closed v1 contracts. Active framework slice: W5 layered release gates.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -63,6 +63,12 @@
   generated evidence remain external and operator-owned.
 
 ## Verified Boundary
+
+- W4 is complete. `docs/architecture/protocol-evolution-decision.md` maps every
+  demonstrated W2/W3 requirement to an existing v1 field or host/provider API.
+  No schema, closed Python validator, or TypeScript contract changed across the
+  evidence range. Sol approved retaining v1 and the explicit future-version
+  triggers.
 
 - W3b is complete. `make test.cross-runtime-extension` builds and installs the
   core, Acme, and Contoso wheels, executes the same Acme capability through

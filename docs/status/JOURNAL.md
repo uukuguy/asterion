@@ -2087,5 +2087,6 @@
 - 18:20 Advanced the framework mainline to cross-runtime evidence [f3f05a4a]
 - 18:40 Proved one capability's semantics through two provider-owned runtimes [ad8db896]
 - 18:50 Advanced the framework mainline to protocol evolution review [6d54cda8]
+- 19:00 Retained closed v1 because W2 and W3 exposed no protocol gap [0bf1cd8d]
 - 17:44 Reviewed the cross-package extension ownership design [2059dfd7]
 - 17:58 Defined the reviewed cross-runtime extension evidence [c070c2b1]

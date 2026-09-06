@@ -1,6 +1,6 @@
 # Evidence-Led Protocol Evolution Decision
 
-> Status: proposed W4 decision. Decision: retain the closed v1 contracts.
+> Status: approved W4 decision. Decision: retain the closed v1 contracts.
 
 ## Decision
 

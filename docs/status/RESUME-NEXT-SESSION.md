@@ -30,11 +30,11 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 
 W0 inventory alignment, W1a executable-kind consistency, W1b exact source
 preparation, W1c runtime-provider separation, W1d core-only isolation, W2
-public extension reference, W3a cross-package composition, and W3b
-cross-runtime equivalence are complete. `make test.cross-runtime-extension` is
-the isolated two-adapter acceptance command. Continue W4: use the actual W2/W3
-evidence to decide whether a new protocol version is necessary. Retain closed
-v1 unchanged unless a demonstrated integration requirement cannot be expressed.
+public extension reference, W3a cross-package composition, W3b cross-runtime
+equivalence, and W4 protocol review are complete. W4 retains all four closed v1
+contracts because no W2/W3 requirement needs a new version. Continue W5:
+separate core, cross-language contract, extension wheel, provider integration,
+and bounded end-to-end gates while retaining full release regression.
 
 The seven Prime development scenarios are closed at their named boundaries.
 Native Phase 3.2 remains a parallel track. Full multi-game ARC-AGI-3 work and
