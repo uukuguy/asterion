@@ -242,8 +242,9 @@ class TestPrimeP3DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
             first = _body("first")
             await provider.callback("root", first)
             attributed = json.loads(result)
-            attributed["usage"]["input"] = 9
-            attributed["usage"]["totalTokens"] = 10
+            attributed["usage"]["input"] = 17_427
+            attributed["usage"]["output"] = 1_383
+            attributed["usage"]["totalTokens"] = 3_094
             second = _follow(
                 first,
                 json.dumps(attributed, separators=(",", ":"), sort_keys=True).encode(),
@@ -257,6 +258,28 @@ class TestPrimeP3DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
                     "root",
                     json.dumps(forged, separators=(",", ":"), sort_keys=True).encode(),
                 )
+
+    def test_usage_attribution_requires_closed_nonnegative_finite_shape(self) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p3_development_sdk_provider as subject,
+        )
+
+        issued = json.loads(_response("answer"))
+        observed = json.loads(_response("answer"))
+        observed["usage"].update(
+            {"input": 17_427, "output": 1_383, "totalTokens": 3_094}
+        )
+        self.assertEqual(subject._normalize_issued(issued, observed), issued)  # noqa: SLF001
+        for mutation in (
+            lambda usage: usage.pop("cost"),
+            lambda usage: usage.__setitem__("input", -1),
+            lambda usage: usage["cost"].__setitem__("total", float("inf")),
+        ):
+            with self.subTest(mutation=mutation):
+                malformed = json.loads(json.dumps(observed))
+                mutation(malformed["usage"])
+                with self.assertRaises(ValueError):
+                    subject._normalize_issued(issued, malformed)  # noqa: SLF001
 
     async def test_cancellation_reaps_active_child_and_hides_usage(self) -> None:
         from asterion.applications.prime_agent.operator import (

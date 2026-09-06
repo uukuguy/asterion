@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from types import MappingProxyType
 import json
+import math
 import os
 import re
 import signal
@@ -399,16 +400,17 @@ def _valid_usage(value: object) -> bool:
         value["cacheWrite"],
         value["totalTokens"],
     )
-    if any(type(item) is not int or item < 0 for item in counts) or value[
-        "totalTokens"
-    ] != sum(counts[:4]):
+    if any(type(item) is not int or item < 0 for item in counts):
         return False
     cost = value["cost"]
     return (
         type(cost) is dict
         and set(cost) == {"input", "output", "cacheRead", "cacheWrite", "total"}
         and all(
-            type(item) in (int, float) and not isinstance(item, bool) and item >= 0
+            type(item) in (int, float)
+            and not isinstance(item, bool)
+            and math.isfinite(item)
+            and item >= 0
             for item in cost.values()
         )
     )
