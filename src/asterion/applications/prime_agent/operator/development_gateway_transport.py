@@ -419,7 +419,7 @@ class DevelopmentGatewayTransport:
                     sock.close()
                 except OSError:
                     pass
-            child, self._child = self._child, None
+            child = self._child
             if child is None:
                 return
             try:
@@ -435,9 +435,11 @@ class DevelopmentGatewayTransport:
                     pass
                 try:
                     child.wait(timeout=1.0)
-                except subprocess.TimeoutExpired:
-                    pass
+                except subprocess.TimeoutExpired as error:
+                    raise DevelopmentGatewayTransportError() from error
             finally:
+                if child.poll() is not None:
+                    self._child = None
                 if child.stderr is not None:
                     try:
                         child.stderr.close()

@@ -19,7 +19,7 @@ class PrimeP5DevelopmentGatewayError(ValueError):
 class PrimeP5DevelopmentGateway(DevelopmentGatewayTransport):
     """One private inherited-FD bridge session with synchronous and async APIs."""
 
-    __slots__ = ("_state",)
+    __slots__ = ("_state", "_prompts", "_terminal_witness")
 
     def __init__(
         self,
@@ -45,6 +45,8 @@ class PrimeP5DevelopmentGateway(DevelopmentGatewayTransport):
         except ValueError:
             raise PrimeP5DevelopmentGatewayError() from None
         self._state = "new"
+        self._prompts = 0
+        self._terminal_witness: Mapping[str, object] | None = None
 
     def __repr__(self) -> str:
         return "PrimeP5DevelopmentGateway(redacted)"
@@ -132,10 +134,11 @@ class PrimeP5DevelopmentGateway(DevelopmentGatewayTransport):
                     {"command.result"},
                 )
                 result = frame["payload"].get("result")
-                if type(result) is not dict:
-                    raise ValueError()
+                normalized, witness = _normalize_result(result, self._prompts + 1)
+                self._prompts += 1
+                self._terminal_witness = witness
                 self._state = "open"
-                return result
+                return normalized
             except BaseException:
                 self._fail()
                 raise PrimeP5DevelopmentGatewayError() from None
@@ -233,3 +236,13 @@ class PrimeP5DevelopmentGateway(DevelopmentGatewayTransport):
 
 
 __all__ = ("PrimeP5DevelopmentGateway", "PrimeP5DevelopmentGatewayError")
+
+
+def _normalize_result(value: object, prompt_count: int) -> tuple[dict[str, object], Mapping[str, object]]:
+    if type(value) is not dict or set(value) != {"lifecycle", "usage", "assistant", "observations"}:
+        raise ValueError()
+    usage, assistant, observations = value["usage"], value["assistant"], value["observations"]
+    expected = {"active_tool_names": ["ipython"], "compact_count": 0, "model_callback_count": prompt_count * 2, "rlm_child_count": 0, "tool_call_count": prompt_count}
+    if value["lifecycle"] != "completed" or assistant != {"completed": True, "stop_reason": "stop"} or observations != expected or type(usage) is not dict or set(usage) != {"input_tokens", "output_tokens", "total_tokens"} or any(type(usage[key]) is not int or usage[key] < 0 for key in usage) or usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]:
+        raise ValueError()
+    return ({"lifecycle": "completed", "model_callback_count": prompt_count * 2, "tool_callback_count": prompt_count}, value)
