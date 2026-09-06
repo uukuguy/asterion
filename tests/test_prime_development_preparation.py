@@ -307,3 +307,65 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
 
         self.assertEqual(PRIME_IPYTHON_IMAGE_INPUT_CATALOG.locks, ())
         self.assertEqual(PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG.locks, ())
+
+    def test_gateway_rebuilds_only_when_outputs_do_not_match_locked_inventory(self) -> None:
+        with TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            gateway = repo / "packages/typescript/prime-gateway"
+            (gateway / "src").mkdir(parents=True)
+            (gateway / "src/input.ts").write_text("export {};\n")
+            lock = {
+                "inputs": ["src/input.ts"],
+                "inputs_sha256": subject._aggregate(gateway, ["src/input.ts"]),
+                "outputs": ["dist/src/output.js"],
+                "outputs_sha256": "0" * 64,
+            }
+            calls: list[list[str]] = []
+            def runner(argv: list[str], **_: object) -> object:
+                calls.append(argv)
+                (gateway / "dist/src").mkdir(parents=True)
+                (gateway / "dist/src/output.js").write_text("built\n")
+                lock["outputs_sha256"] = subject._aggregate(gateway, ["dist/src/output.js"])
+                return SimpleNamespace(stdout=b"", stderr=b"")
+            subject._prepare_gateway(repo, lock, runner=runner)
+            self.assertEqual(calls, [["npm", "--prefix", "packages/typescript/prime-gateway", "run", "build"]])
+
+    def test_gateway_rejects_untrusted_inputs_without_building(self) -> None:
+        with TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            gateway = repo / "packages/typescript/prime-gateway"
+            (gateway / "src").mkdir(parents=True)
+            (gateway / "src/input.ts").write_text("changed\n")
+            lock = {"inputs": ["src/input.ts"], "inputs_sha256": "0" * 64, "outputs": [], "outputs_sha256": subject._aggregate(gateway, [])}
+            with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+                subject._prepare_gateway(repo, lock, runner=lambda *_args, **_kwargs: self.fail("must not build"))
+
+    def test_selected_image_is_inspected_then_built_and_reinspected(self) -> None:
+        record = {"tag": "asterion-p1b-development:20260906", "digest": "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "dockerfile": "image/Dockerfile", "context": "src/asterion/applications/prime_agent/operator", "platforms": ["linux/amd64"]}
+        calls: list[list[str]] = []
+        responses = [SimpleNamespace(stdout=b"", stderr=b""), SimpleNamespace(stdout=b"", stderr=b""), SimpleNamespace(stdout=(record["digest"] + "\n").encode(), stderr=b"")]
+        def runner(argv: list[str], **_: object) -> object:
+            calls.append(argv)
+            return responses.pop(0)
+        subject._prepare_image(Path.cwd(), "p1", record, "linux/amd64", runner=runner)
+        self.assertEqual(calls[0], ["/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "image", "inspect", "--format", "{{.Id}}", record["tag"]])
+        self.assertIn("build", calls[1])
+        self.assertEqual(calls[2], calls[0])
+
+    def test_selected_image_is_not_built_when_inspection_matches(self) -> None:
+        record = {"tag": "asterion-p1b-development:20260906", "digest": "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "dockerfile": "image/Dockerfile", "context": "src/asterion/applications/prime_agent/operator", "platforms": ["linux/amd64"]}
+        calls: list[list[str]] = []
+        subject._prepare_image(Path.cwd(), "p1", record, "linux/amd64", runner=lambda argv, **_: calls.append(argv) or SimpleNamespace(stdout=(record["digest"] + "\n").encode(), stderr=b""))
+        self.assertEqual(len(calls), 1)
+
+    def test_selected_image_rejects_wrong_digest_after_build(self) -> None:
+        record = {"tag": "asterion-p1b-development:20260906", "digest": "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "dockerfile": "image/Dockerfile", "context": "src/asterion/applications/prime_agent/operator", "platforms": ["linux/amd64"]}
+        responses = [SimpleNamespace(stdout=b"", stderr=b""), SimpleNamespace(stdout=b"", stderr=b""), SimpleNamespace(stdout=b"sha256:" + b"0" * 64 + b"\n", stderr=b"")]
+        with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+            subject._prepare_image(Path.cwd(), "p1", record, "linux/amd64", runner=lambda *_args, **_kwargs: responses.pop(0))
+
+    def test_p7_resources_are_validated_only_for_p7(self) -> None:
+        seen: list[Path] = []
+        with patch.object(subject, "verify_p7_development_resources", side_effect=lambda root: seen.append(root) or SimpleNamespace(resource_sha256="sha256:" + "a" * 64)), patch.object(subject, "verify_p7_development_runtime", return_value=SimpleNamespace(runtime_sha256="sha256:" + "b" * 64)):
+            self.assertEqual(subject._p7_identities(Path("/repo"), {"external_root": "external-prime/arc-agi-3", "resource_sha256": "sha256:" + "a" * 64, "runtime_wheels": {"arc_agi": subject.P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256, "arcengine": subject.P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256}}), {"p7_resource_sha256": "sha256:" + "a" * 64, "p7_runtime_sha256": "sha256:" + "b" * 64})
+        self.assertEqual(seen, [Path("/external-prime/arc-agi-3/environment_files/ls20/9607627b")])

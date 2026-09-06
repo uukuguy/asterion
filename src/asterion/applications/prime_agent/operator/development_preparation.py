@@ -23,6 +23,16 @@ from asterion.applications.prime_agent.source_lock import (
     prime_source_lock_sha256,
     verify_prime_source_lock,
 )
+from asterion.applications.prime_agent.operator.p7_resource_lock import (
+    verify_p7_development_resources,
+)
+from asterion.applications.prime_agent.operator.p7_runtime_lock import (
+    verify_p7_development_runtime,
+)
+from asterion.applications.prime_agent.operator.p7_development_workload import (
+    P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256,
+    P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256,
+)
 
 _MESSAGE = "Prime development preparation is unavailable"
 _SCENARIOS = frozenset({"p1", "p2", "p3", "p4", "p5", "p6", "p7"})
@@ -475,36 +485,136 @@ def _node(
 
 
 def _gateway_identity(repo: Path, gateway: object) -> dict[str, str]:
+    return {
+        "inputs": _gateway_aggregate(repo, gateway, "inputs"),
+        "outputs": _gateway_aggregate(repo, gateway, "outputs"),
+    }
+
+
+def _gateway_record(gateway: object) -> dict[str, object]:
     if type(gateway) is not dict or set(gateway) != {
-        "inputs",
-        "inputs_sha256",
-        "outputs",
-        "outputs_sha256",
+        "inputs", "inputs_sha256", "outputs", "outputs_sha256",
     }:
         raise PrimeDevelopmentPreparationError()
-    root = repo / "packages" / "typescript" / "prime-gateway"
-    result = {}
     for kind in ("inputs", "outputs"):
-        names = gateway[kind]
+        names, digest = gateway[kind], gateway[kind + "_sha256"]
         if (
             type(names) is not list
             or names != sorted(set(names))
-            or not all(
-                type(name) is str
-                and not Path(name).is_absolute()
-                and ".." not in Path(name).parts
-                for name in names
-            )
+            or type(digest) is not str
+            or len(digest) != 64
+            or any(char not in "0123456789abcdef" for char in digest)
+            or not all(type(name) is str and not Path(name).is_absolute() and ".." not in Path(name).parts for name in names)
         ):
             raise PrimeDevelopmentPreparationError()
-        records = [{"path": name, "sha256": _digest(root / name)} for name in names]
-        digest = sha256(
-            json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
-        if digest != gateway[kind + "_sha256"]:
-            raise PrimeDevelopmentPreparationError()
-        result[kind] = digest
-    return result
+    return gateway
+
+
+def _aggregate(root: Path, names: list[str]) -> str:
+    records = [{"path": name, "sha256": _digest(root / name)} for name in names]
+    return sha256(
+        json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _gateway_aggregate(repo: Path, gateway: object, kind: str) -> str:
+    gateway = _gateway_record(gateway)
+    if kind not in {"inputs", "outputs"}:
+        raise PrimeDevelopmentPreparationError()
+    names = gateway[kind]
+    digest = _aggregate(repo / "packages" / "typescript" / "prime-gateway", names)
+    if digest != gateway[kind + "_sha256"]:
+        raise PrimeDevelopmentPreparationError()
+    return digest
+
+
+def _prepare_gateway(repo: Path, gateway: object, *, runner: Callable[..., object]) -> None:
+    """Build only reviewed inputs; a changed input is never a build authority."""
+    _gateway_record(gateway)
+    _gateway_aggregate(repo, gateway, "inputs")
+    try:
+        _gateway_aggregate(repo, gateway, "outputs")
+        return
+    except PrimeDevelopmentPreparationError:
+        pass
+    _run(
+        ["npm", "--prefix", "packages/typescript/prime-gateway", "run", "build"],
+        runner=runner,
+    )
+    _gateway_aggregate(repo, gateway, "outputs")
+
+
+def _image_record(record: object, scenario: str, platform: str) -> dict[str, object]:
+    if (
+        type(record) is not dict
+        or set(record) != {"tag", "digest", "dockerfile", "context", "platforms"}
+        or type(record["tag"]) is not str
+        or type(record["digest"]) is not str
+        or len(record["digest"]) != 71
+        or not record["digest"].startswith("sha256:")
+        or any(char not in "0123456789abcdef" for char in record["digest"][7:])
+        or any(type(record[name]) is not str or Path(record[name]).is_absolute() or ".." in Path(record[name]).parts for name in ("dockerfile", "context"))
+        or type(record["platforms"]) is not list
+        or record["platforms"] != sorted(set(record["platforms"]))
+        or platform not in record["platforms"]
+    ):
+        raise PrimeDevelopmentPreparationError()
+    image = _SECCOMP_LOCK_PROVENANCE["images"].get(scenario)
+    if type(image) is not list or [record["tag"], record["digest"]] != image:
+        raise PrimeDevelopmentPreparationError()
+    return record
+
+
+def _inspect_image(tag: str, *, runner: Callable[..., object]) -> str | None:
+    argv = ["/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "image", "inspect", "--format", "{{.Id}}", tag]
+    try:
+        result = runner(argv, check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=_COMMAND_TIMEOUT, env={"PATH": "/usr/bin:/bin"})
+        stdout, stderr = getattr(result, "stdout", b""), getattr(result, "stderr", b"")
+        if type(stdout) is not bytes or type(stderr) is not bytes or len(stdout) + len(stderr) > _MAX_COMMAND_OUTPUT:
+            raise ValueError
+        if getattr(result, "returncode", 0) != 0:
+            return None
+        value = stdout.decode("ascii", "strict")
+        return value[:-1] if value.endswith("\n") and "\n" not in value[:-1] else None
+    except Exception:
+        raise PrimeDevelopmentPreparationError() from None
+
+
+def _prepare_image(repo: Path, scenario: str, record: object, platform: str, *, runner: Callable[..., object]) -> None:
+    image = _image_record(record, scenario, platform)
+    tag, digest = image["tag"], image["digest"]
+    if _inspect_image(tag, runner=runner) == digest:
+        return
+    _run([
+        "/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "build",
+        "--pull=false", "--platform", platform, "--file", str(repo / image["dockerfile"]),
+        "--tag", tag, str(repo / image["context"]),
+    ], runner=runner)
+    if _inspect_image(tag, runner=runner) != digest:
+        raise PrimeDevelopmentPreparationError()
+
+
+def _p7_identities(repo: Path, record: object) -> dict[str, str]:
+    if (
+        type(record) is not dict
+        or set(record) != {"external_root", "resource_sha256", "runtime_wheels"}
+        or record["external_root"] != "external-prime/arc-agi-3"
+        or type(record["resource_sha256"]) is not str
+        or type(record["runtime_wheels"]) is not dict
+        or set(record["runtime_wheels"]) != {"arc_agi", "arcengine"}
+        or any(type(value) is not str or len(value) != 71 or not value.startswith("sha256:") for value in record["runtime_wheels"].values())
+        or record["runtime_wheels"] != {
+            "arc_agi": P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256,
+            "arcengine": P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256,
+        }
+    ):
+        raise PrimeDevelopmentPreparationError()
+    external = repo.parent / record["external_root"]
+    resources = verify_p7_development_resources(external / "environment_files/ls20/9607627b")
+    runtime = verify_p7_development_runtime(external)
+    if resources.resource_sha256 != record["resource_sha256"]:
+        raise PrimeDevelopmentPreparationError()
+    return {"p7_resource_sha256": resources.resource_sha256, "p7_runtime_sha256": runtime.runtime_sha256}
 
 
 def _identities(
@@ -541,7 +651,7 @@ def _identities(
         verify_prime_source_lock(repo / "3th-party" / "prime-agent", source_lock)
     except Exception:
         raise PrimeDevelopmentPreparationError() from None
-    images = seccomp_lock["images"]
+    images = lock.get("images")
     if type(images) is not dict:
         raise PrimeDevelopmentPreparationError()
     result = {
@@ -552,15 +662,14 @@ def _identities(
     }
     for selected in sorted(set(scenarios)):
         image = images.get(selected)
-        if (
-            type(image) is not list
-            or len(image) != 2
-            or not all(type(value) is str for value in image)
-        ):
+        image = _image_record(image, selected, "linux/" + arch)
+        if _inspect_image(image["tag"], runner=runner) != image["digest"]:
             raise PrimeDevelopmentPreparationError()
         result["image_" + selected] = sha256(
-            json.dumps(image, separators=(",", ":")).encode()
+            json.dumps([image["tag"], image["digest"]], separators=(",", ":")).encode()
         ).hexdigest()
+    if "p7" in scenarios:
+        result.update(_p7_identities(repo, lock.get("p7")))
     return result
 
 
@@ -602,20 +711,49 @@ def prepare_prime_development(
     nodes = lock.get("node")
     if type(nodes) is not dict:
         raise PrimeDevelopmentPreparationError()
-    if emit:
-        emit("source", "started")
-    node = _node(root, nodes.get(arch), downloader=downloader, runner=runner)
-    profile = _bytes("prime-development-seccomp.json")
-    if (
-        sha256(profile).hexdigest() != seccomp_lock["canonical_sha256"]
-        or sha256(_bytes("moby-profiles-LICENSE.txt")).hexdigest()
-        != seccomp_lock["license_sha256"]
-    ):
-        raise PrimeDevelopmentPreparationError()
-    _publish_bytes(root, "prime-development-seccomp.json", profile)
-    identities = _identities(
-        repo, root, lock, arch, scenarios, seccomp_lock, runner=runner
-    )
+    try:
+        if emit:
+            emit("gateway", "started")
+        _prepare_gateway(repo, lock.get("gateway"), runner=runner)
+        if emit:
+            emit("gateway", "succeeded")
+    except PrimeDevelopmentPreparationError:
+        if emit:
+            emit("gateway", "failed")
+        raise
+    try:
+        if emit:
+            emit("image", "started")
+        images = lock.get("images")
+        if type(images) is not dict:
+            raise PrimeDevelopmentPreparationError()
+        for scenario in sorted(set(scenarios)):
+            _prepare_image(repo, scenario, images.get(scenario), "linux/" + arch, runner=runner)
+        if emit:
+            emit("image", "succeeded")
+    except PrimeDevelopmentPreparationError:
+        if emit:
+            emit("image", "failed")
+        raise
+    try:
+        if emit:
+            emit("source", "started")
+        node = _node(root, nodes.get(arch), downloader=downloader, runner=runner)
+        profile = _bytes("prime-development-seccomp.json")
+        if (
+            sha256(profile).hexdigest() != seccomp_lock["canonical_sha256"]
+            or sha256(_bytes("moby-profiles-LICENSE.txt")).hexdigest()
+            != seccomp_lock["license_sha256"]
+        ):
+            raise PrimeDevelopmentPreparationError()
+        _publish_bytes(root, "prime-development-seccomp.json", profile)
+        identities = _identities(
+            repo, root, lock, arch, scenarios, seccomp_lock, runner=runner
+        )
+    except PrimeDevelopmentPreparationError:
+        if emit:
+            emit("source", "failed")
+        raise
     _publish_bytes(
         root,
         "receipt.json",
@@ -625,6 +763,8 @@ def prepare_prime_development(
             separators=(",", ":"),
         ).encode(),
     )
+    # Recheck the receipt and all selected identities before handing it back.
+    resolve_prepared_prime_development(repo, scenarios[0], runner=runner, platform_machine=platform_machine)
     if emit:
         emit("source", "succeeded")
     return {

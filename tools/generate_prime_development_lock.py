@@ -15,6 +15,12 @@ SECCOMP_LOCK = (
     / "src/asterion/applications/prime_agent/operator/resources"
     / "prime-development-seccomp-lock.json"
 )
+OPERATOR = ROOT / "src/asterion/applications/prime_agent/operator"
+_IMAGE_SPECS = {
+    "p1": ("asterion-p1b-development:20260906", "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "image/Dockerfile"),
+    "p2": ("asterion-p2-development:20260906", "sha256:7d97b51a21bfffe6caa574063294f72205c60b05d8650fab8c70fdf661921c33", "p2_development_image/Dockerfile"),
+    "p3": ("asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243", "p3_development_image/Dockerfile"),
+}
 
 
 def aggregate(root: Path, paths: list[Path]) -> tuple[list[str], str]:
@@ -81,18 +87,21 @@ def main() -> None:
             "package_lock_sha256": PRIME_IPYTHON_SOURCE.package_lock_sha256,
         },
         "images": {
-            "p1": [
-                "asterion-p1b-development:20260906",
-                "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657",
-            ],
-            "p2": [
-                "asterion-p2-development:20260906",
-                "sha256:7d97b51a21bfffe6caa574063294f72205c60b05d8650fab8c70fdf661921c33",
-            ],
-            "p3": [
-                "asterion-p3-development:20260906",
-                "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243",
-            ],
+            scenario: {
+                "tag": _IMAGE_SPECS[base][0], "digest": _IMAGE_SPECS[base][1],
+                "dockerfile": _IMAGE_SPECS[base][2],
+                "context": "src/asterion/applications/prime_agent/operator",
+                "platforms": ["linux/amd64", "linux/arm64"],
+            }
+            for scenario, base in {"p1": "p1", "p2": "p2", "p3": "p3", "p4": "p1", "p5": "p3", "p6": "p3", "p7": "p3"}.items()
+        },
+        "p7": {
+            "external_root": "external-prime/arc-agi-3",
+            "resource_sha256": "sha256:210d4f6423e6d577b239fa441b90b91c79c06fe983d6be3019ff119a99d39ebd",
+            "runtime_wheels": {
+                "arc_agi": "sha256:a0536df47b5ab93af16ba708083f74261cd1b7801bb2e0802824623c04d59e50",
+                "arcengine": "sha256:5f9739d6d0055780a4581fd6fe09066bb08775c4c8212c9adcca2eb008aef59c",
+            },
         },
     }
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
