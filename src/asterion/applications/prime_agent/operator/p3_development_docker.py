@@ -119,6 +119,35 @@ class PrimeP3DevelopmentDockerTransport(DockerCliEngineTransport):
             await self._cleanup_uncertain(containers, ())
             raise PrimeP3DevelopmentDockerError() from None
 
+    async def assert_absent(
+        self,
+        containers: tuple[P3DevelopmentContainer, ...],
+        control: _LifecycleCallControl,
+    ) -> None:
+        self._exact_workers(containers)
+        for container in containers:
+            result = await self._call_raw(
+                self._prefix
+                + ("container", "inspect", "--format", "{{.Id}}", container.container_id),
+                control,
+            )  # type: ignore[attr-defined]
+            absent_errors = {
+                ("Error: No such object: " + container.container_id + "\n").encode(),
+                ("Error: No such container: " + container.container_id + "\n").encode(),
+                (
+                    "Error response from daemon: No such container: "
+                    + container.container_id
+                    + "\n"
+                ).encode(),
+                ("No such container: " + container.container_id).encode(),
+            }
+            if (
+                result.returncode != 1
+                or result.stdout not in (b"", b"\n")
+                or result.stderr not in absent_errors
+            ):
+                raise PrimeP3DevelopmentDockerError()
+
     def _create_argv(self, *, role: str, name: str, image_digest: str, workspace: str, rlm_socket_directory: str, fd: int) -> tuple[str, ...]:
         platform = "/".join(item for item in (self._platform.os, self._platform.architecture, self._platform.variant) if item is not None)  # type: ignore[attr-defined]
         argv = self._prefix + (  # type: ignore[attr-defined]

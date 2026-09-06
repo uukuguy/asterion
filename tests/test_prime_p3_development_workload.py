@@ -71,7 +71,7 @@ class TestPrimeP3DevelopmentWorkload(unittest.TestCase):
         manifest = json.loads(subject.P3_DEVELOPMENT_WORKLOAD_BYTES)
         self.assertEqual(subject.P3_SEED_FILENAMES, ("solution.py", "test_solution.py"))
         self.assertEqual(len(subject.P3_ARTIFACT_FILENAMES), 4)
-        self.assertIn("spawn and wait implementation", subject.P3_ROOT_PROMPT)
+        self.assertIn("spawn('implementation')", subject.P3_ROOT_PROMPT)
         self.assertEqual(manifest["seed_sha256"]["solution.py"], sha256(subject.P3_INITIAL_SOURCE_BYTES).hexdigest())
         self.assertEqual(manifest["prompts_sha256"]["root"], sha256(subject.P3_ROOT_PROMPT.encode()).hexdigest())
         self.assertEqual(manifest["artifact_schema_sha256"], sha256(subject.P3_ARTIFACT_SCHEMA_BYTES).hexdigest())

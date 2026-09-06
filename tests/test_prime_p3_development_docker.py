@@ -77,6 +77,20 @@ class TestPrimeP3DevelopmentDocker(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             P3DevelopmentContainer("other", "d" * 64)
 
+    async def test_absence_requires_all_three_daemon_identities_missing(self) -> None:
+        transport = self._transport()
+        workers = tuple(P3DevelopmentContainer(role, char * 64) for role, char in (("root", "a"), ("implementation", "b"), ("review", "c")))
+        transport._call_raw = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                DockerCliResult(returncode=1, stderr=("Error: No such object: " + worker.container_id + "\n").encode())
+                for worker in workers
+            ]
+        )
+
+        await transport.assert_absent(workers, object())  # type: ignore[arg-type]
+
+        self.assertEqual(transport._call_raw.await_count, 3)  # type: ignore[attr-defined]
+
     async def test_start_failure_forces_reverse_cleanup(self) -> None:
         transport = self._transport()
         workers = tuple(P3DevelopmentContainer(role, char * 64) for role, char in (("root", "a"), ("implementation", "b"), ("review", "c")))

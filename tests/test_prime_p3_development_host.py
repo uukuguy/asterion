@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 import unittest
@@ -12,22 +13,48 @@ class TestPrimeP3DevelopmentHost(unittest.IsolatedAsyncioTestCase):
         from asterion.applications.prime_agent.operator.p3_development_host import _open_rlm_server
 
         class Gateway:
-            async def request_nested(self, kind: str, payload: object) -> dict[str, str]:
-                self.assertEqual(kind, "rlm.list")
-                self.assertEqual(payload, {})
-                return {"status": "ok"}
+            async def request_nested(self, kind: str, payload: object) -> dict[str, object]:
+                if kind == "rlm.spawn":
+                    role = payload["role"]  # type: ignore[index]
+                    return {"rlm_child_id": "child-" + role}  # type: ignore[operator]
+                if kind == "rlm.list":
+                    return {"subagents": []}
+                return {}
 
-            def assertEqual(self, left: object, right: object) -> None:
-                TestPrimeP3DevelopmentHost().assertEqual(left, right)
+        async def request(directory: str, value: dict[str, object]) -> dict[str, object]:
+            reader, writer = await asyncio.open_unix_connection(str(Path(directory) / "rlm.sock"))
+            writer.write(json.dumps(value).encode() + b"\n")
+            await writer.drain()
+            response = json.loads(await reader.readline())
+            writer.close()
+            await writer.wait_closed()
+            return response
 
         with TemporaryDirectory() as directory:
             server = await _open_rlm_server(Path(directory), Gateway())
-            reader, writer = await asyncio.open_unix_connection(str(Path(directory) / "rlm.sock"))
-            writer.write(b'{"kind":"list"}\n')
-            await writer.drain()
-            self.assertEqual(json.loads(await reader.readline()), {"ok": True, "result": {"status": "ok"}})
-            writer.close()
-            await writer.wait_closed()
+            commands = [
+                {"kind": "spawn", "role": "implementation"},
+                {"kind": "wait", "role": "implementation"},
+                {"kind": "spawn", "role": "review"},
+                {"kind": "wait", "role": "review"},
+                {"kind": "follow_up"},
+                {"kind": "delete", "role": "implementation"},
+                {"kind": "delete", "role": "review"},
+                {"kind": "list"},
+            ]
+            for command in commands[:-1]:
+                self.assertEqual(
+                    await request(directory, command),
+                    {"ok": True, "result": {"status": "completed"}},
+                )
+            self.assertEqual(
+                await request(directory, commands[-1]),
+                {"ok": True, "result": {"subagents": []}},
+            )
+            self.assertEqual(
+                await request(directory, {"kind": "list", "extra": True}),
+                {"ok": False, "result": {}},
+            )
             server.close()
             await server.wait_closed()
     async def test_concrete_route_uses_role_provider_workers_and_gateway_hooks(self) -> None:
@@ -42,8 +69,8 @@ class TestPrimeP3DevelopmentHost(unittest.IsolatedAsyncioTestCase):
                 events.append(("model", role))
                 return b'{"role":"assistant"}'
 
-            def terminal_usage(self) -> dict[str, object]:
-                return {"implementation": {}, "review": {}, "root": {}}
+            def terminal_usage(self) -> object:
+                return SimpleNamespace(input_tokens=3, output_tokens=3, cost_microunits=6)
 
         class Transport:
             async def create_workers(self, **_: object):
@@ -63,11 +90,17 @@ class TestPrimeP3DevelopmentHost(unittest.IsolatedAsyncioTestCase):
                 return {
                     "solution.py": work.P3_EXPECTED_SOURCE_BYTES,
                     "test_solution.py": work.P3_EXPECTED_TEST_BYTES,
+                    "implementation.json": work.P3_IMPLEMENTATION_BYTES,
+                    "review.json": work.P3_REVIEW_BYTES,
+                    "review-follow-up.json": work.P3_FOLLOW_UP_BYTES,
                     "aggregate.json": work.P3_AGGREGATE_BYTES,
                 }[name]
 
             async def cleanup(self, workers: tuple[str, ...], _: object) -> None:
                 events.append(("cleanup", workers))
+
+            async def assert_absent(self, workers: tuple[str, ...], _: object) -> None:
+                events.append(("absent", workers))
 
         class Gateway:
             instance: "Gateway"
@@ -98,7 +131,11 @@ class TestPrimeP3DevelopmentHost(unittest.IsolatedAsyncioTestCase):
                         )
                 return {
                     "lifecycle": "completed",
-                    "usage": {"implementation": {}, "review": {}, "root": {}},
+                    "usage": {
+                        "implementation": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                        "review": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                        "root": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+                    },
                     "assistant": {"completed": True, "stop_reason": "stop"},
                     "observations": {
                         "child_count": 2,
@@ -139,3 +176,4 @@ class TestPrimeP3DevelopmentHost(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events.count(("model", "review")), 4)
         self.assertEqual(len([event for event in events if isinstance(event, tuple) and event[0] == "tool"]), 4)
         self.assertIn(("cleanup", ("root", "implementation", "review")), events)
+        self.assertIn(("absent", ("root", "implementation", "review")), events)
