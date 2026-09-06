@@ -21,6 +21,8 @@
 - Reuse requires content rehashing against a packaged code-owned lock and the current execution context. Path existence, version output, mtime, or receipt content alone never permits reuse.
 - Staging and receipt publication use sibling temporary paths plus atomic rename; incomplete staged content is never reused.
 - Preparation may download exact artifacts, build the locked Gateway, prepare exact Prime source, and inspect/build pinned images. It never reads `.env`, provider credentials, or model configuration.
+- The development seccomp profile is canonicalized from Moby `profiles` tag `seccomp/v0.2.3`, commit `836ae4d37ef2ec995c77c99fc55f5b5f3af3a897`: upstream raw SHA-256 `536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74`, canonical SHA-256 `9da637d2ab0a204fcbd91bd88f1be9e004a3acab61c571a9f5b8870e588a17d2`.
+- Development seccomp/image locks remain separate from production `Promoted*` catalogs; the promoted catalogs remain empty and fail closed.
 - Verification is limited to focused normal-path and boundary assertions plus one real P2 command and zero-residue inspection.
 
 ---
@@ -94,6 +96,9 @@ Commit only Task 1 files with: `feat(services): add safe host progress reporting
 
 **Files:**
 - Create: `src/asterion/applications/prime_agent/operator/resources/prime-development-preparation-lock.json`
+- Create: `src/asterion/applications/prime_agent/operator/resources/prime-development-seccomp.json`
+- Create: `src/asterion/applications/prime_agent/operator/resources/prime-development-seccomp-lock.json`
+- Create: `src/asterion/applications/prime_agent/operator/resources/moby-profiles-LICENSE.txt`
 - Create: `src/asterion/applications/prime_agent/operator/development_preparation.py`
 - Create: `tools/prepare_prime_development.py`
 - Create: `tools/generate_prime_development_lock.py`
@@ -105,11 +110,12 @@ Commit only Task 1 files with: `feat(services): add safe host progress reporting
 - Produces: `PrimeDevelopmentPaths(root: Path, node: Path, seccomp: Path, gateway_root: Path, source_root: Path)`.
 - Produces: `prepare_prime_development(repo_root: Path, scenarios: tuple[str, ...], *, emit: Callable[[str, str], None] | None = None) -> Mapping[str, PrimeDevelopmentPaths]`.
 - Produces CLI: `python tools/prepare_prime_development.py --scenario p2`; repeatable `--scenario` supports P1-P7 and `--all`.
-- Consumes existing exact locks from `source_lock.py`, `image_input_lock.py`, `seccomp_policy_lock.py`, `p7_resource_lock.py`, `p7_runtime_lock.py`, and Prime Gateway resource locks.
+- Consumes the existing exact source validator from `src/asterion/applications/prime_agent/source_lock.py`, existing P7 locks, Prime Gateway resource locks, and the existing development image identities currently enforced by P1-P7 CLI hosts.
+- Keeps `PRIME_P1_PROMOTED_SECCOMP_POLICY_CATALOG` and `PRIME_IPYTHON_IMAGE_INPUT_CATALOG` unchanged and empty.
 
 - [ ] **Step 1: Add failing preparation tests**
 
-Cover canonical cache derivation, x64/arm64 Node lock selection, archive and executable digest mismatch, generated seccomp digest validation, Gateway input/output aggregate mismatch, source lock mismatch, selected-image mismatch, receipt context mismatch, interrupted staging, idempotent reuse after full rehash, stale `/tmp` independence, and proof that `dotenv_values`/credential access is never invoked.
+Cover canonical cache derivation, x64/arm64 Node lock selection, archive and executable digest mismatch, packaged seccomp raw/canonical/provenance validation, wrong architecture, Gateway input/output aggregate mismatch, source lock mismatch, selected-image mismatch, receipt-only rejection, receipt context mismatch, interrupted staging, idempotent reuse after full rehash, stale `/tmp` independence, unchanged empty production resolvers, and proof that `dotenv_values`/credential access is never invoked.
 
 Use temporary directories and injected download/subprocess/platform functions; do not perform real downloads or Docker operations in unit tests.
 
@@ -120,7 +126,9 @@ Expected: FAIL because `development_preparation` does not exist.
 
 - [ ] **Step 3: Add the code-owned preparation lock**
 
-The canonical JSON lock must include format `asterion.prime-development-preparation-lock/v1`, Linux `amd64` and `arm64` Node records with the exact URLs and hashes in Global Constraints, the promoted seccomp profile digest per architecture, the sorted Gateway locked-input file list and aggregate digest, the sorted Gateway output file list and aggregate digest, the exact Prime source commit/tree/package-lock identities from `source_lock.py`, all P1-P7 image tags/digests, and the P7 resource/runtime lock identities.
+Commit the canonical Moby profile bytes, its upstream Apache-2.0 license, and a separate `asterion.prime-development-seccomp-lock/v1` containing upstream tag/commit/raw SHA-256, canonical SHA-256, supported Linux architectures, and applicable development image digests. This lock is development compatibility identity only; it never calls or populates a `Promoted*` resolver.
+
+The canonical preparation lock must include format `asterion.prime-development-preparation-lock/v1`, Linux `amd64` and `arm64` Node records with the exact URLs and hashes in Global Constraints, the development seccomp lock digest per architecture, the sorted Gateway locked-input file list and aggregate digest, the sorted Gateway output file list and aggregate digest, the exact Prime source commit/tree/package-lock identities validated through existing `source_lock.py`, these existing development image bindings: P1/P4 `asterion-p1b-development:20260906` → `sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657`; P2 `asterion-p2-development:20260906` → `sha256:7d97b51a21bfffe6caa574063294f72205c60b05d8650fab8c70fdf661921c33`; P3/P5/P6/P7 `asterion-p3-development:20260906` → `sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243`; and the P7 resource/runtime lock identities.
 
 `tools/generate_prime_development_lock.py` computes canonical sorted aggregates and refuses missing, symlinked, non-regular, duplicate, or out-of-root inputs. Generation is maintainer tooling; runtime preparation only reads and validates the packaged lock.
 
@@ -130,14 +138,14 @@ Use `importlib.resources` to load the packaged lock. Derive `repo_root/.asterion
 
 1. rehash every referenced cached artifact;
 2. download the exact Node archive only when the cache is invalid, cap bytes/time, verify archive SHA-256 before extraction, verify `bin/node` SHA-256 and `--version == v22.23.2`;
-3. render the promoted seccomp profile and verify its digest;
+3. rehash the packaged development-only seccomp profile, validate provenance/platform/image binding, and materialize those exact canonical bytes without consulting production resolvers;
 4. rebuild Gateway using `npm --prefix packages/typescript/prime-gateway run build` only after locked inputs mismatch, then verify every output and aggregate;
 5. invoke existing exact source preparation/validation without reading `.env`;
 6. inspect the selected image and build from its reviewed Dockerfile only when absent/mismatched, then require its exact digest;
 7. prepare the locked offline environment only for P7;
 8. write canonical receipt bytes to a sibling staged file, fsync, and publish with `os.replace`.
 
-All subprocesses use direct argv, cleared/allowlisted env, finite timeout, and capped captured output. Emit only fixed component/state pairs.
+All subprocesses use direct argv, cleared/allowlisted env, finite timeout, and capped captured output. Emit only fixed component/state pairs. Immediately before Docker create, consumers rehash the packaged profile, recheck platform and selected image digest, and seal the verified bytes into a memfd. Do not claim the resource is the lost historical `/tmp` profile, promoted, production-ready, or an OS sandbox.
 
 - [ ] **Step 5: Add the operator CLI and package inclusion**
 

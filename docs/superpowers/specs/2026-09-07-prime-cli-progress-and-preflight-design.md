@@ -196,6 +196,27 @@ contains a format version and exact expected identities for:
 - every scenario image tag and image digest; and
 - the P7 offline-environment lock when P7 is prepared.
 
+The seccomp input is a separate development-only resource and lock; it does not
+populate or reuse the production `PromotedSeccompPolicyCatalog`. The committed
+profile is the canonical JSON form of Moby `profiles` tag
+`seccomp/v0.2.3` at commit
+`836ae4d37ef2ec995c77c99fc55f5b5f3af3a897`. Its upstream raw SHA-256 is
+`536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74`;
+the committed canonical bytes have SHA-256
+`9da637d2ab0a204fcbd91bd88f1be9e004a3acab61c571a9f5b8870e588a17d2`.
+The repository also records the upstream Apache-2.0 license bytes and source
+revision. The development lock binds that profile to Linux amd64 and arm64 and
+to the exact scenario image digests. Hosts rehash the packaged profile and
+recheck platform and image identity immediately before Docker create, then pass
+the verified bytes through a sealed memfd.
+
+The existing promoted seccomp and image-input catalogs remain empty and fail
+closed. This new lock is compatibility/input identity for the explicit
+development command, not execution authorization, release authority, an OS
+sandbox claim, or evidence of production readiness. It is a new development
+input and is not claimed to reproduce the lost `/tmp` profile or retroactively
+upgrade earlier P1-P7 evidence.
+
 Preparation writes a cache receipt under
 `.asterion-private/prime-development/`. The receipt also binds the selected Orb
 machine, user, working-tree identity, OS, architecture, and Docker daemon
@@ -306,4 +327,8 @@ Use focused development checks only:
 The work is complete when P1-P7 each state their purpose before execution,
 render actual safe progress while running, keep final JSON machine-readable,
 identify the safe failure component, pass aggregate provider-free preflight,
-and P2 completes through the exact Make command with zero residue.
+and P2 completes through the exact Make command with zero residue. Tampered
+profile bytes, a wrong architecture, a wrong image digest, or a receipt without
+matching code-owned resources must fail before execution. Production resolvers
+must still reject because their promoted catalogs remain empty, and new command
+evidence retains a development/unpromoted scope.
