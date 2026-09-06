@@ -3,7 +3,6 @@
 from __future__ import annotations
 import asyncio
 import os
-import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
@@ -261,10 +260,6 @@ class PrimeP7DevelopmentGateway(DevelopmentGatewayTransport):
     def _fail(self) -> None:
         self._state = "failed"
         self._fail_transport()
-        thread = self._stderr_thread
-        if thread is not None:
-            thread.join(timeout=0.1)
-        print(f"p7-sdk-gateway category={_stderr_category(self._stderr)}", flush=True)
 
     def _abort_active_prompt(self) -> None:
         self._fail()
@@ -281,15 +276,3 @@ def _normalize_result(value: object, prompt_count: int) -> tuple[dict[str, objec
     if value["lifecycle"] != "completed" or type(assistant) is not dict or assistant.get("completed") is not True or assistant.get("stop_reason") != "stop" or set(assistant) != {"completed", "stop_reason"} or type(observations) is not dict or observations.get("active_tool_names") != ["ipython"] or any(type(observations.get(key)) is not int or observations[key] != expected[key] for key in ("compact_count", "model_callback_count", "rlm_child_count", "tool_call_count")) or type(usage) is not dict or set(usage) != {"input_tokens", "output_tokens", "total_tokens"} or any(type(usage[key]) is not int or usage[key] < 0 for key in usage) or usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]:
         raise ValueError()
     return ({"lifecycle": "completed", "model_callback_count": prompt_count * 2, "tool_callback_count": prompt_count}, value)
-
-
-def _stderr_category(value: object) -> str:
-    """Return a fixed error type from the child stderr, never its message."""
-    try:
-        text = bytes(value).decode("utf-8", "strict")
-        matches = re.findall(r"p7 bridge failed:([A-Za-z][A-Za-z0-9_]*)", text)
-        if len(matches) == 1:
-            return matches[0]
-    except (TypeError, UnicodeDecodeError):
-        pass
-    return "unavailable"

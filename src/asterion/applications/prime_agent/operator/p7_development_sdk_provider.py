@@ -133,11 +133,7 @@ class PrimeP7DevelopmentSdkProvider:
         try:
             request = _decode_request(body, self._calls, self._issued)
         except BaseException:
-            print(
-                f"p7-sdk-provider turn={self._calls} category=request", flush=True
-            )
             raise PrimeP7DevelopmentSdkProviderError() from None
-        print(f"p7-sdk-provider turn={self._calls} category=accepted", flush=True)
         if self._deadline is None:
             self._deadline = time.monotonic() + _DEADLINE_SECONDS
         remaining = self._deadline - time.monotonic()
@@ -201,21 +197,13 @@ class PrimeP7DevelopmentSdkProvider:
                 self._uncertain = False
             return response
         except asyncio.CancelledError:
-            print(f"p7-sdk-provider turn={turn} category=cancelled", flush=True)
             self._cancelled = True
             self._terminal = None
             await self._reap_shielded()
             raise
         except BaseException as error:
-            category = "internal"
             if type(error) is _ProviderFailure:
                 self._failure = error
-                category = error.kind
-            elif isinstance(error, TimeoutError):
-                category = "deadline"
-            print(
-                f"p7-sdk-provider turn={turn} category={category}", flush=True
-            )
             self._terminal = None
             await self._reap_shielded()
             failed = True
