@@ -10,6 +10,7 @@ import json
 import os
 import re
 from typing import Protocol
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 from asterion.applications.prime_agent.continual_improvement_acceptance import (
     continual_improvement_revision_sha256,
@@ -66,13 +67,15 @@ class P6DevelopmentWorker(Protocol):
     async def cleanup(self) -> None: ...
 
 
-async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provider: P6DevelopmentProvider, worker: P6DevelopmentWorker, run_id: str, session_id: str, prime_source_root: str, workspace: str) -> P6DevelopmentReceipt:
+async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provider: P6DevelopmentProvider, worker: P6DevelopmentWorker, run_id: str, session_id: str, prime_source_root: str, workspace: str, progress: HostProgressReporter | None = None) -> P6DevelopmentReceipt:
     if not _inputs(gateway, provider, worker, run_id, session_id, prime_source_root, workspace):
         raise PrimeP6DevelopmentHostError()
-    opened = provider_closed = cleaned = False
+    opened = provider_closed = cleaned = validation_started = validation_complete = False
     cancelled = False
     try:
+        _emit(progress, "worker", "started")
         await worker.acquire()
+        _emit(progress, "worker", "succeeded")
         image_sha256 = _worker_digest(worker, "image_digest")
         container_sha256 = "sha256:" + _worker_daemon(worker)
         _baseline_snapshot(await worker.snapshot())
@@ -82,16 +85,22 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
             nonlocal model_calls
             if type(payload) is not dict or model_calls >= 6:
                 raise ValueError
+            current = model_calls + 1
+            _emit(progress, "model", "started", current, 6)
             response = await provider(_canonical(payload))
             model_calls += 1
+            _emit(progress, "model", "succeeded", current, 6)
             return _provider_reply(response)
 
         async def tool_hook(payload: object) -> dict[str, object]:
             nonlocal tool_calls
             if type(payload) is not dict or set(payload) != {"tool_call_id", "code"} or type(payload["tool_call_id"]) is not str or not payload["tool_call_id"] or type(payload["code"]) is not str or not payload["code"] or tool_calls >= 3:
                 raise ValueError
+            current = tool_calls + 1
+            _emit(progress, "tool", "started", current, 3)
             tool_calls += 1
             result = await worker.execute_cell(payload["code"])
+            _emit(progress, "tool", "succeeded", current, 3)
             if type(result) is not dict or result != {"cell_count": tool_calls}:
                 raise ValueError
             return {"content": [{"type": "text", "text": "IPython cell completed"}], "details": {}, "isError": False}
@@ -129,8 +138,12 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
         opened = False
         await provider.close()
         provider_closed = True
+        _emit(progress, "cleanup", "started")
         await worker.cleanup()
+        _emit(progress, "cleanup", "succeeded")
         cleaned = True
+        _emit(progress, "validation", "started")
+        validation_started = True
         final_source = P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256 if holdout_passed else P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256
         receipt = P6DevelopmentReceipt(
             P6_DEVELOPMENT_WORKLOAD_DIGEST, P6_DEVELOPMENT_SCHEMA_DIGEST, P6_DEVELOPMENT_MODEL_DIGEST, P6_DEVELOPMENT_ORACLE_DIGEST,
@@ -140,14 +153,18 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
             "project", ("ipython",), 3, 6, 3, 1, 1, 0 if holdout_passed else 1, outcome, True, True,
         )
         validate_p6_development_receipt(receipt)
+        _emit(progress, "validation", "succeeded")
+        validation_complete = True
         return receipt
     except asyncio.CancelledError:
         cancelled = True
     except BaseException:
+        if validation_started and not validation_complete:
+            _emit(progress, "validation", "failed")
         pass
     finally:
         if not cleaned:
-            await _cleanup(gateway, provider, worker, opened, provider_closed)
+            await _cleanup(gateway, provider, worker, opened, provider_closed, progress)
     if cancelled:
         raise asyncio.CancelledError()
     raise PrimeP6DevelopmentHostError()
@@ -358,7 +375,8 @@ def _inputs(gateway: object, provider: object, worker: object, run_id: object, s
     return all(type(value) is str and value for value in (run_id, session_id)) and all(type(value) is str and os.path.isabs(value) for value in (prime_source_root, workspace)) and all(callable(getattr(gateway, name, None)) for name in ("bind", "open", "prompt", "terminal_witness", "close", "cancel")) and all(callable(getattr(provider, name, None)) for name in ("__call__", "terminal_usage", "close")) and all(callable(getattr(worker, name, None)) for name in ("acquire", "snapshot", "execute_cell", "restore_baseline", "cleanup"))
 
 
-async def _cleanup(gateway: object, provider: object, worker: object, opened: bool, provider_closed: bool) -> None:
+async def _cleanup(gateway: object, provider: object, worker: object, opened: bool, provider_closed: bool, progress: HostProgressReporter | None = None) -> None:
+    _emit(progress, "cleanup", "started")
     if opened:
         for name in ("cancel", "close"):
             try:
@@ -372,6 +390,16 @@ async def _cleanup(gateway: object, provider: object, worker: object, opened: bo
             pass
     try:
         await worker.cleanup()
+        _emit(progress, "cleanup", "succeeded")
+    except BaseException:
+        _emit(progress, "cleanup", "failed")
+
+
+def _emit(reporter: HostProgressReporter | None, component: str, state: str, current: int | None = None, total: int | None = None) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
     except BaseException:
         pass
 

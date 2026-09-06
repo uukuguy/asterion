@@ -9,6 +9,7 @@ from hashlib import sha256
 import json
 import re
 from typing import Protocol
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 from .p5_development_receipt import (
     P5DevelopmentReceipt,
@@ -94,6 +95,7 @@ async def run_p5_development_lifecycle(
     goal_id: str,
     prime_source_root: str = "/prime",
     workspace: str = "/workspace",
+    progress: HostProgressReporter | None = None,
 ) -> PrimeP5DevelopmentTrace:
     if not _inputs(
         gateway,
@@ -109,10 +111,12 @@ async def run_p5_development_lifecycle(
         raise PrimeP5DevelopmentHostError()
     if goal_id != _GOAL_ID:
         raise PrimeP5DevelopmentHostError()
-    opened = provider_closed = cleaned = False
+    opened = provider_closed = cleaned = validation_started = validation_complete = False
     cancelled = False
     try:
+        _emit(progress, "worker", "started")
         await worker.acquire()
+        _emit(progress, "worker", "succeeded")
         observed_daemon = getattr(worker, "daemon_id", None)
         if (
             type(observed_daemon) is not str
@@ -131,8 +135,11 @@ async def run_p5_development_lifecycle(
             nonlocal model_calls
             if type(payload) is not dict or model_calls >= 4:
                 raise ValueError
+            current = model_calls + 1
+            _emit(progress, "model", "started", current, 4)
             reply = _strict_json(await provider(_canonical(payload)))
             model_calls += 1
+            _emit(progress, "model", "succeeded", current, 4)
             return reply
 
         async def tool_hook(payload: object) -> dict[str, object]:
@@ -147,8 +154,11 @@ async def run_p5_development_lifecycle(
                 or tool_calls >= 2
             ):
                 raise ValueError
+            current = tool_calls + 1
+            _emit(progress, "tool", "started", current, 2)
             result = await worker.execute_cell(payload["code"])
             tool_calls += 1
+            _emit(progress, "tool", "succeeded", current, 2)
             if type(result) is not dict or result.get("cell_count") != tool_calls:
                 raise ValueError
             return {
@@ -213,8 +223,12 @@ async def run_p5_development_lifecycle(
             raise ValueError
         if _worker_image(worker) != image_digest:
             raise ValueError
+        _emit(progress, "cleanup", "started")
         await worker.cleanup()
+        _emit(progress, "cleanup", "succeeded")
         cleaned = True
+        _emit(progress, "validation", "started")
+        validation_started = True
         receipt = P5DevelopmentReceipt(
             P5_DEVELOPMENT_WORKLOAD_DIGEST,
             P5_DEVELOPMENT_SCHEMA_DIGEST,
@@ -252,14 +266,18 @@ async def run_p5_development_lifecycle(
             True,
         )
         validate_p5_development_receipt(receipt)
+        _emit(progress, "validation", "succeeded")
+        validation_complete = True
         return trace_p5_development_receipt(receipt)
     except asyncio.CancelledError:
         cancelled = True
     except BaseException:
+        if validation_started and not validation_complete:
+            _emit(progress, "validation", "failed")
         pass
     finally:
         if not cleaned:
-            await _cleanup(gateway, provider, worker, opened, provider_closed)
+            await _cleanup(gateway, provider, worker, opened, provider_closed, progress)
     if cancelled:
         raise asyncio.CancelledError
     raise PrimeP5DevelopmentHostError()
@@ -640,8 +658,10 @@ def _inputs(g: object, p: object, w: object, *ids: object) -> bool:
 
 
 async def _cleanup(
-    g: object, p: object, w: object, opened: bool, provider_closed: bool
+    g: object, p: object, w: object, opened: bool, provider_closed: bool,
+    progress: HostProgressReporter | None = None,
 ) -> None:
+    _emit(progress, "cleanup", "started")
     if opened:
         try:
             await g.cancel()  # type: ignore[attr-defined]
@@ -658,6 +678,16 @@ async def _cleanup(
             pass
     try:
         await w.cleanup()  # type: ignore[attr-defined]
+        _emit(progress, "cleanup", "succeeded")
+    except BaseException:
+        _emit(progress, "cleanup", "failed")
+
+
+def _emit(reporter: HostProgressReporter | None, component: str, state: str, current: int | None = None, total: int | None = None) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
     except BaseException:
         pass
 

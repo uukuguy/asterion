@@ -135,6 +135,32 @@ class _Gateway:
 
 
 class TestP5DevelopmentHost(unittest.TestCase):
+    def test_emits_closed_coarse_progress_for_the_fixed_chain(self) -> None:
+        from asterion.applications.prime_agent.operator.p5_development_host import (
+            run_p5_development_lifecycle,
+        )
+
+        class Reporter:
+            def __init__(self) -> None:
+                self.events: list[tuple[str, str, int | None, int | None]] = []
+
+            def emit(self, event: object) -> None:
+                self.events.append((event.component, event.state, event.current, event.total))  # type: ignore[attr-defined]
+
+        reporter = Reporter()
+        asyncio.run(
+            run_p5_development_lifecycle(
+                gateway=_Gateway(), provider=_Provider(), worker=_Worker(),
+                run_id="run", session_id="session", container_id="container",
+                goal_id="prime.bounded-autonomy/v1", progress=reporter,
+            )
+        )
+        self.assertIn(("worker", "succeeded", None, None), reporter.events)
+        self.assertIn(("model", "succeeded", 4, 4), reporter.events)
+        self.assertIn(("tool", "succeeded", 2, 2), reporter.events)
+        self.assertIn(("validation", "succeeded", None, None), reporter.events)
+        self.assertIn(("cleanup", "succeeded", None, None), reporter.events)
+
     def test_stage_prompts_require_the_sole_ipython_call_to_complete_the_artifact(
         self,
     ) -> None:

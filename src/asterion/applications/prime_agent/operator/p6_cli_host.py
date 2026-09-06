@@ -21,6 +21,10 @@ from dotenv import dotenv_values
 from asterion.applications.prime_agent.operator.image_input_lock import (
     ImagePlatformDescriptor,
 )
+from asterion.applications.prime_agent.operator.development_preparation import (
+    PrimeDevelopmentPaths,
+    resolve_prepared_prime_development,
+)
 from asterion.applications.prime_agent.operator.p6_development_docker import (
     P6DevelopmentDockerTransport,
     P6DevelopmentDockerWorkerService,
@@ -47,6 +51,7 @@ from asterion.services.registry import (
     HostServiceFactoryBinding,
     HostServiceFactoryContext,
 )
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 
 _CAPABILITY_ID = "prime.continual-improvement-development"
@@ -61,8 +66,6 @@ _CONFIRMED_IMAGE_DIGEST = (
 )
 _DOCKER = "/usr/bin/docker"
 _SOCKET = "/var/run/docker.sock"
-_SECCOMP = "/tmp/asterion-p1-development-seccomp.json"
-_NODE = "/tmp/asterion-node22/bin/node"
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _RUN_ID = re.compile(r"[a-z][a-z0-9.-]*\Z")
 
@@ -83,17 +86,18 @@ class _P6CliResources:
     seccomp_fd: int | None = None
 
 
-_LifecycleRunner = Callable[[_P6CliResources, str], Awaitable[object]]
+_LifecycleRunner = Callable[[_P6CliResources, str, HostProgressReporter | None], Awaitable[object]]
 
 
 class PrimeP6SmallVerificationService:
-    __slots__ = ("_active", "_consumed", "_lifecycle_runner", "_resources")
+    __slots__ = ("_active", "_consumed", "_lifecycle_runner", "_progress", "_resources")
 
     def __init__(
         self,
         resources: _P6CliResources,
         *,
         lifecycle_runner: _LifecycleRunner | None = None,
+        progress: HostProgressReporter | None = None,
     ) -> None:
         self._active = True
         self._consumed = False
@@ -103,6 +107,7 @@ class PrimeP6SmallVerificationService:
             else lifecycle_runner
         )
         self._resources = resources
+        self._progress = progress
 
     def __repr__(self) -> str:
         return "PrimeP6SmallVerificationService(redacted)"
@@ -125,7 +130,7 @@ class PrimeP6SmallVerificationService:
         if _cancelled(signal):
             raise PrimeSmallVerificationCancelled()
         task = asyncio.create_task(
-            self._lifecycle_runner(self._resources, request.run_id)
+            self._lifecycle_runner(self._resources, request.run_id, self._progress)
         )
         try:
             async with asyncio.timeout(_DEADLINE_SECONDS):
@@ -171,8 +176,14 @@ def create_prime_p6_cli_factory(*, repo_root: Path) -> HostServiceFactoryBinding
     async def factory(context: HostServiceFactoryContext):
         _validate_context(context)
         try:
-            service = PrimeP6SmallVerificationService(_preflight(root))
+            _emit(context.progress, "preflight", "started")
+            paths = _prepared_paths(root)
+            _emit(context.progress, "preflight", "succeeded")
+            service = PrimeP6SmallVerificationService(
+                _preflight(root, context.progress, paths), progress=context.progress
+            )
         except BaseException:
+            _emit(context.progress, "preflight", "failed")
             raise PrimeP6CliHostError() from None
         try:
             yield service
@@ -198,24 +209,36 @@ def _validate_context(context: object) -> None:
         raise PrimeP6CliHostError()
 
 
-def _preflight(repo_root: Path) -> _P6CliResources:
-    if sys.platform != "linux" or os.geteuid() != 0:
-        raise PrimeP6CliHostError()
-    docker = _regular_executable(Path(_DOCKER))
-    socket = Path(_SOCKET)
+def _preflight(
+    repo_root: Path,
+    progress: HostProgressReporter | None = None,
+    paths: PrimeDevelopmentPaths | None = None,
+) -> _P6CliResources:
+    paths = paths or _prepared_paths(repo_root)
     try:
+        _emit(progress, "image", "started")
+        docker = _regular_executable(Path(_DOCKER))
+        socket = Path(_SOCKET)
         if not stat.S_ISSOCK(os.lstat(socket).st_mode):
             raise ValueError
+        image_digest = _inspect_image(docker, socket)
+        _emit(progress, "image", "succeeded")
     except (OSError, ValueError):
+        _emit(progress, "image", "failed")
         raise PrimeP6CliHostError() from None
-    node = _regular_executable(Path(_NODE))
-    entrypoint = _regular_file(
-        repo_root / "packages/typescript/prime-gateway/dist/src/p6-development-main.js"
-    )
-    source = _regular_directory(repo_root / "3th-party/prime-agent")
-    _regular_file(source / "packages/coding-agent/dist/core/sdk.js")
-    _regular_file(source / "node_modules/typebox/build/index.mjs")
-    seccomp_fd = _sealed_seccomp(Path(_SECCOMP))
+    try:
+        _emit(progress, "source", "started")
+        node = _regular_executable(paths.node)
+        entrypoint = _regular_file(paths.gateway_root / "dist/src/p6-development-main.js")
+        source = _regular_directory(paths.source_root)
+        _regular_file(source / "packages/coding-agent/dist/core/sdk.js")
+        _regular_file(source / "node_modules/typebox/build/index.mjs")
+        seccomp_fd = _sealed_seccomp(paths.seccomp)
+        operator_config = _operator_config(repo_root / ".env")
+        _emit(progress, "source", "succeeded")
+    except BaseException:
+        _emit(progress, "source", "failed")
+        raise PrimeP6CliHostError() from None
     transport: object | None = None
     try:
         transport = P6DevelopmentDockerTransport(
@@ -225,9 +248,9 @@ def _preflight(repo_root: Path) -> _P6CliResources:
             platform=_host_platform(),
         )
         return _P6CliResources(
-            image_digest=_inspect_image(docker, socket),
+            image_digest=image_digest,
             transport=transport,
-            operator_config=_operator_config(repo_root / ".env"),
+            operator_config=operator_config,
             node_bin=str(node),
             entrypoint=str(entrypoint),
             prime_source_root=str(source),
@@ -244,7 +267,7 @@ def _preflight(repo_root: Path) -> _P6CliResources:
 
 
 async def _run_p6_development_lifecycle(
-    resources: _P6CliResources, run_id: str
+    resources: _P6CliResources, run_id: str, progress: HostProgressReporter | None = None
 ) -> P6DevelopmentReceipt:
     session_id = "prime-p6-session-" + sha256(run_id.encode("ascii")).hexdigest()
     try:
@@ -263,6 +286,7 @@ async def _run_p6_development_lifecycle(
                 session_id=session_id,
                 goal_id="prime.continual-improvement/v1",
                 workspace=workspace,
+                progress=progress,
             )
             return await run_p6_development_lifecycle(
                 gateway=gateway,
@@ -277,6 +301,30 @@ async def _run_p6_development_lifecycle(
         raise
     except BaseException:
         raise PrimeP6CliHostError() from None
+
+
+def _prepared_paths(repo_root: Path) -> PrimeDevelopmentPaths:
+    if sys.platform != "linux" or os.geteuid() != 0:
+        raise PrimeP6CliHostError()
+    try:
+        return resolve_prepared_prime_development(repo_root, "p6")
+    except BaseException:
+        raise PrimeP6CliHostError() from None
+
+
+def _emit(
+    reporter: HostProgressReporter | None,
+    component: str,
+    state: str,
+    current: int | None = None,
+    total: int | None = None,
+) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
+    except BaseException:
+        pass
 
 
 def _prepare_workspace(workspace: Path) -> None:

@@ -14,6 +14,18 @@ class TestP6CliHost(unittest.TestCase):
 
         self.assertEqual(P6_CLI_DEADLINE_SECONDS, 300)
 
+    def test_resolves_the_rehashed_prepared_p6_paths(self) -> None:
+        from asterion.applications.prime_agent.operator import p6_cli_host as subject
+
+        expected = object()
+        with (
+            patch.object(subject.sys, "platform", "linux"),
+            patch.object(subject.os, "geteuid", return_value=0),
+            patch.object(subject, "resolve_prepared_prime_development", return_value=expected) as resolve,
+        ):
+            self.assertIs(subject._prepared_paths(Path("/repo")), expected)
+        resolve.assert_called_once_with(Path("/repo"), "p6")
+
     def test_prepares_only_the_owned_p6_baseline(self) -> None:
         from asterion.applications.prime_agent.operator.p6_cli_host import (
             _prepare_workspace,

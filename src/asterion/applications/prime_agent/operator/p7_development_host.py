@@ -9,6 +9,7 @@ from hashlib import sha256
 import json
 import re
 from typing import Protocol
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 from .p7_development_receipt import (
     P7DevelopmentReceipt,
@@ -92,6 +93,7 @@ async def run_p7_development_lifecycle(
     prime_source_root: str,
     workspace: str = "/workspace",
     runtime: P7DevelopmentRuntimeSet,
+    progress: HostProgressReporter | None = None,
 ) -> PrimeP7DevelopmentTrace:
     if not _inputs(
         gateway,
@@ -105,23 +107,29 @@ async def run_p7_development_lifecycle(
         runtime,
     ):
         raise PrimeP7DevelopmentHostError()
-    opened = provider_closed = worker_cleaned = broker_closed = False
+    opened = provider_closed = worker_cleaned = broker_closed = validation_started = validation_complete = False
     cancelled = False
     try:
+        _emit(progress, "worker", "started")
         client = broker.start(client_socket_path="/broker/model.sock")
         if type(client) is not bytes or not client:
             raise ValueError
         await worker.acquire(client, "/broker")
         _worker_identity(worker)
+        _emit(progress, "worker", "succeeded")
         calls = tools = 0
 
         async def model_hook(payload: object) -> dict[str, object]:
             nonlocal calls
             if type(payload) is not dict or calls >= 6:
                 raise ValueError
+            current = calls + 1
+            _emit(progress, "model", "started", current, 6)
             body = _canonical(payload)
             calls += 1
-            return _reply(await provider(body))
+            result = _reply(await provider(body))
+            _emit(progress, "model", "succeeded", current, 6)
+            return result
 
         async def tool_hook(payload: object) -> dict[str, object]:
             nonlocal tools
@@ -135,10 +143,13 @@ async def run_p7_development_lifecycle(
                 or tools >= 3
             ):
                 raise ValueError
+            current = tools + 1
+            _emit(progress, "tool", "started", current, 3)
             tools += 1
             result = await worker.execute_cell(payload["code"])
             if result != {"cell_count": tools}:
                 raise ValueError
+            _emit(progress, "tool", "succeeded", current, 3)
             return {
                 "content": [{"type": "text", "text": "IPython cell completed"}],
                 "details": {},
@@ -173,10 +184,14 @@ async def run_p7_development_lifecycle(
         opened = False
         await provider.close()
         provider_closed = True
+        _emit(progress, "cleanup", "started")
         await worker.cleanup()
+        _emit(progress, "cleanup", "succeeded")
         worker_cleaned = True
         broker.close()
         broker_closed = True
+        _emit(progress, "validation", "started")
+        validation_started = True
         receipt = _receipt(
             run_id,
             session_id,
@@ -192,10 +207,14 @@ async def run_p7_development_lifecycle(
             runtime,
         )
         validate_p7_development_receipt(receipt)
+        _emit(progress, "validation", "succeeded")
+        validation_complete = True
         return PrimeP7DevelopmentTrace(p7_development_public_trace_digest(receipt))
     except asyncio.CancelledError:
         cancelled = True
     except BaseException:
+        if validation_started and not validation_complete:
+            _emit(progress, "validation", "failed")
         pass
     finally:
         if not (worker_cleaned and broker_closed):
@@ -207,7 +226,7 @@ async def run_p7_development_lifecycle(
                 opened,
                 provider_closed,
                 worker_cleaned,
-                broker_closed,
+                broker_closed, progress,
             )
     if cancelled:
         raise asyncio.CancelledError()
@@ -465,6 +484,7 @@ async def _cleanup(
     provider_closed: bool,
     worker_cleaned: bool,
     broker_closed: bool,
+    progress: HostProgressReporter | None = None,
 ) -> None:
     if opened:
         try:
@@ -477,15 +497,26 @@ async def _cleanup(
         except BaseException:
             pass
     if not worker_cleaned:
+        _emit(progress, "cleanup", "started")
         try:
             await worker.cleanup()
+            _emit(progress, "cleanup", "succeeded")
         except BaseException:
-            pass
+            _emit(progress, "cleanup", "failed")
     if not broker_closed:
         try:
             broker.close()
         except BaseException:
             pass
+
+
+def _emit(reporter: HostProgressReporter | None, component: str, state: str, current: int | None = None, total: int | None = None) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
+    except BaseException:
+        pass
 
 
 __all__ = (
