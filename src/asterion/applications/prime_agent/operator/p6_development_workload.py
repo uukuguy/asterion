@@ -41,7 +41,7 @@ P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256: Final = "sha256:" + sha256(
     _CANDIDATE_SOURCE
 ).hexdigest()
 P6_DEVELOPMENT_TASK_A_RESULT_SHA256: Final = _digest(
-    {"fixture": "clamp-task-a/v1", "passed": True}
+    {"fixture": "clamp-task-a/v1", "passed": False}
 )
 _PRESERVED_BRANCH: Final = {
     "final_source_sha256": P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
