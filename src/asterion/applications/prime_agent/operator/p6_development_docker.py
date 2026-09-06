@@ -11,7 +11,7 @@ from .docker_cli import _CLEARED_BASE_IMAGE_ENVIRONMENT, _ENVIRONMENT
 from .docker_worker import _LifecycleCallControl
 from .p5_development_docker import (
     P5DevelopmentDockerTransport,
-    PrimeP5DevelopmentDockerError,
+    _CELL_CAP,
     _READ_CAP,
 )
 
@@ -59,10 +59,14 @@ class P6DevelopmentDockerTransport(P5DevelopmentDockerTransport):
             self._close_fd(fd)
 
     async def execute_p6(self, container_id: str, cell: str, control: _LifecycleCallControl) -> None:
+        if _ID.fullmatch(container_id) is None or type(cell) is not str or not cell or len(cell.encode()) > _CELL_CAP:
+            raise PrimeP6DevelopmentDockerError()
         try:
-            await self.execute_p5(container_id, cell, control)
-        except PrimeP5DevelopmentDockerError as error:
-            raise PrimeP6DevelopmentDockerError() from error
+            await self._call(self._prefix + ("container", "exec", "--workdir", "/workspace", "--user", "65534:65534", "--env", "HOME=/tmp", "--env", "IPYTHONDIR=/tmp/ipython", container_id, "/usr/local/bin/ipython", "--no-banner", "--no-confirm-exit", "-c", cell), control, max_output_bytes=4096)
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            raise PrimeP6DevelopmentDockerError() from None
 
     async def read_p6(self, container_id: str, name: str, expected: tuple[str, ...], control: _LifecycleCallControl) -> bytes:
         if _ID.fullmatch(container_id) is None or name not in expected or expected not in {("baseline.py",), ("baseline.py", "task-a.json"), ("baseline.py", "task-a.json", "candidate.py"), ("baseline.py", "task-a.json", "candidate.py", "task-b.json")}:
