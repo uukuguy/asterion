@@ -71,6 +71,24 @@ def _response(text: str, *, role: str = "root") -> bytes:
     ).encode()
 
 
+def _tool_response(*, role: str = "root") -> bytes:
+    value = json.loads(_response("placeholder", role=role))
+    value.update(
+        {
+            "content": [
+                {
+                    "arguments": {"code": "pass"},
+                    "id": "tool-1",
+                    "name": "ipython",
+                    "type": "toolCall",
+                }
+            ],
+            "stopReason": "toolUse",
+        }
+    )
+    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+
+
 def _follow(previous: bytes, response: bytes, text: str) -> bytes:
     value = json.loads(previous)
     value["context"]["messages"].extend(
@@ -238,7 +256,7 @@ class TestPrimeP3DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
         usage = subject.PrimeModelBrokerTokenUsage(1, 1, 1)
         with mock.patch.object(
             type(provider), "_run_child", return_value=(result, usage)
-        ):
+        ) as child:
             first = _body("first")
             await provider.callback("root", first)
             attributed = json.loads(result)
@@ -251,13 +269,80 @@ class TestPrimeP3DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
                 "next",
             )
             await provider.callback("root", second)
-            forged = json.loads(second)
+            third = json.loads(second)
+            third["context"]["messages"][1]["usage"]["input"] = 20_000
+            third["context"]["messages"].extend(
+                [json.loads(result), {"content": "third", "role": "user"}]
+            )
+            forged = json.loads(json.dumps(third))
             forged["context"]["messages"][1]["content"][0]["text"] = "forged"
             with self.assertRaises(subject.PrimeP3DevelopmentSdkProviderError):
                 await provider.callback(
                     "root",
                     json.dumps(forged, separators=(",", ":"), sort_keys=True).encode(),
                 )
+            self.assertEqual(child.call_count, 2)
+            await provider.callback(
+                "root",
+                json.dumps(third, separators=(",", ":"), sort_keys=True).encode(),
+            )
+
+    async def test_rejects_earlier_tool_id_tampering_before_child(self) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p3_development_sdk_provider as subject,
+        )
+
+        provider = subject.create_prime_p3_development_sdk_provider(
+            {
+                "DEEPSEEK_API_KEY": "private-key",
+                "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash",
+            }
+        )
+        result = _tool_response()
+        usage = subject.PrimeModelBrokerTokenUsage(1, 1, 1)
+        with mock.patch.object(
+            type(provider), "_run_child", return_value=(result, usage)
+        ) as child:
+            first = _body("first")
+            await provider.callback("root", first)
+            second = json.loads(first)
+            second["context"]["messages"].extend(
+                [
+                    json.loads(result),
+                    {
+                        "content": [{"text": "ok", "type": "text"}],
+                        "isError": False,
+                        "role": "toolResult",
+                        "toolCallId": "tool-1",
+                        "toolName": "ipython",
+                    },
+                ]
+            )
+            await provider.callback(
+                "root",
+                json.dumps(second, separators=(",", ":"), sort_keys=True).encode(),
+            )
+            third = json.loads(json.dumps(second))
+            third["context"]["messages"].extend(
+                [
+                    json.loads(result),
+                    {
+                        "content": [{"text": "ok", "type": "text"}],
+                        "isError": False,
+                        "role": "toolResult",
+                        "toolCallId": "tool-1",
+                        "toolName": "ipython",
+                    },
+                ]
+            )
+            third["context"]["messages"][1]["content"][0]["id"] = "forged"
+            third["context"]["messages"][2]["toolCallId"] = "forged"
+            with self.assertRaises(subject.PrimeP3DevelopmentSdkProviderError):
+                await provider.callback(
+                    "root",
+                    json.dumps(third, separators=(",", ":"), sort_keys=True).encode(),
+                )
+            self.assertEqual(child.call_count, 2)
 
     def test_usage_attribution_requires_closed_nonnegative_finite_shape(self) -> None:
         from asterion.applications.prime_agent.operator import (

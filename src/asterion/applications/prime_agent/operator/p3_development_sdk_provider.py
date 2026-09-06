@@ -337,10 +337,16 @@ def _decode_request(
             != _p2._canonical_json(old_context.get("tools"))
         ):
             raise ValueError
-        if len(messages) <= len(old_messages) or _p2._canonical_json(
-            messages[: len(old_messages)]
-        ) != _p2._canonical_json(old_messages):
+        if len(messages) <= len(old_messages):
             raise ValueError
+        for index, old_item in enumerate(old_messages):
+            observed_item = messages[index]
+            if type(old_item) is not dict or type(observed_item) is not dict:
+                raise ValueError
+            if old_item.get("role") == "assistant":
+                messages[index] = _normalize_issued(old_item, observed_item)
+            elif _p2._canonical_json(observed_item) != _p2._canonical_json(old_item):
+                raise ValueError
         messages[len(old_messages)] = _normalize_issued(
             issued, messages[len(old_messages)]
         )
