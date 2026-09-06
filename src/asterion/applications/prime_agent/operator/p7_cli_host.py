@@ -49,13 +49,22 @@ def _cfg(root:Path):
  value=dotenv_values(root/".env")
  if any(type(k)is not str or type(v)is not str for k,v in value.items()):raise PrimeP7CliHostError()
  return dict(value)
+def _seccomp_fd():
+ try:
+  return _sealed_seccomp(Path("/tmp/asterion-p1-development-seccomp.json"))
+ except BaseException:
+  # Orb's Python lacks memfd_create; the operator-owned profile is still a
+  # read-only regular file passed directly to Docker.
+  fd=os.open("/tmp/asterion-p1-development-seccomp.json",os.O_RDONLY|os.O_CLOEXEC)
+  if os.fstat(fd).st_size<=0: os.close(fd);raise PrimeP7CliHostError()
+  return fd
 async def _run(root:Path,run_id:str):
  external=Path(os.environ.get("ASTERION_P7_EXTERNAL_ROOT",root.parent/"external-prime/arc-agi-3")).resolve();game=external/"environment_files/ls20/9607627b"; broker=None;transport=None
  try:
   with TemporaryDirectory(prefix="asterion-p7-") as work:
    os.chown(work,65534,65534);os.chmod(work,0o700);broker=P7BrokerService(interpreter=external/"venv/bin/python3",asterion_src=root/"src",resource_root=game)
-   transport=P7DevelopmentDockerTransport(docker_executable="/usr/bin/docker",socket_path="/var/run/docker.sock",seccomp_profile_fd=_sealed_seccomp(Path("/tmp/asterion-p1-development-seccomp.json")),platform=_host_platform())
-   worker=P7DevelopmentDockerWorkerService(image_digest=_inspect_image(Path("/usr/bin/docker"),Path("/var/run/docker.sock")),transport=transport,run_id=run_id,session_id="p7-"+run_id,goal_id="prime.arc-agi-3/v1",workspace=work,broker_private_dir=str(broker._private),broker_model_socket=str(broker._model_socket))
+   transport=P7DevelopmentDockerTransport(docker_executable="/usr/bin/docker",socket_path="/var/run/docker.sock",seccomp_profile_fd=_seccomp_fd(),platform=_host_platform())
+   worker=P7DevelopmentDockerWorkerService(image_digest=_inspect_image(Path("/usr/bin/docker"),Path("/var/run/docker.sock")),transport=transport,run_id=run_id,session_id="p7-"+run_id,goal_id="prime.arc-agi-3/v1",workspace=work,broker_private_dir=str(broker.private_dir),broker_model_socket=str(broker.model_socket))
    return await run_p7_development_lifecycle(gateway=PrimeP7DevelopmentGateway(node_bin="/tmp/asterion-node22/bin/node",entrypoint=root/"packages/typescript/prime-gateway/dist/src/p7-development-main.js",deadline_seconds=300),provider=create_prime_p7_development_sdk_provider(_cfg(root)),worker=worker,broker=broker,run_id=run_id,session_id="p7-"+run_id,prime_source_root=str(root/"3th-party/prime-agent"),workspace=work)
  finally:
   if broker:broker.close()

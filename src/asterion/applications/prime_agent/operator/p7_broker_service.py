@@ -49,6 +49,16 @@ class P7BrokerService:
     def __repr__(self) -> str:
         return "P7BrokerService(redacted)"
 
+    @property
+    def private_dir(self) -> Path:
+        """Host-only bind source for the model socket's parent directory."""
+        return self._private
+
+    @property
+    def model_socket(self) -> Path:
+        """Host-only bind source; never include this pathname in public results."""
+        return self._model_socket
+
     def start(self, *, client_socket_path: str = "/broker/model.sock") -> bytes:
         if self._process is not None:
             raise P7BrokerServiceError()
