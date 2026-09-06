@@ -20,7 +20,7 @@ class TestP6DevelopmentReceipt(unittest.TestCase):
             "model_sha256": workload.P6_DEVELOPMENT_MODEL_DIGEST,
             "oracle_sha256": workload.P6_DEVELOPMENT_ORACLE_DIGEST,
             "baseline_source_sha256": workload.P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256,
-            "candidate_source_sha256": workload.P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
+            "candidate_source_sha256": branch["candidate_source_sha256"],
             "task_a_result_sha256": workload.P6_DEVELOPMENT_TASK_A_RESULT_SHA256,
             "holdout_result_sha256": branch["holdout_result_sha256"],
             "final_source_sha256": branch["final_source_sha256"],

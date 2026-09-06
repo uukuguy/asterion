@@ -24,12 +24,12 @@ class _Provider:
 
 
 class _Worker:
-    def __init__(self, *, holdout_passed: bool = True) -> None:
+    def __init__(self, *, candidate: bytes | None = None) -> None:
         from asterion.applications.prime_agent.operator import p6_development_host as host
 
         self.cells = 0
         self.cleaned = False
-        self.holdout_passed = holdout_passed
+        self.candidate = candidate or host._CANDIDATE_SOURCE
         self._host = host
 
     @property
@@ -48,9 +48,9 @@ class _Worker:
         if self.cells >= 1:
             values["task-a.json"] = self._host._task_a_artifact("run", "session")
         if self.cells >= 2:
-            values["candidate.py"] = self._host._CANDIDATE_SOURCE
+            values["candidate.py"] = self.candidate
         if self.cells >= 3:
-            values["task-b.json"] = self._host._task_b_artifact("run", "session", self.holdout_passed)
+            values["task-b.json"] = self._host._task_b_artifact("run", "session", self.candidate)
         return values
 
     async def execute_cell(self, _: str) -> dict[str, int]:
@@ -111,7 +111,9 @@ class TestP6DevelopmentHost(unittest.TestCase):
         self.assertTrue(worker.cleaned)
 
     def test_rolls_back_the_exact_candidate_after_failed_holdout(self) -> None:
-        receipt = self._run(_Worker(holdout_passed=False))
+        from asterion.applications.prime_agent.operator import p6_development_host as host
+
+        receipt = self._run(_Worker(candidate=host._BAD_CANDIDATE_SOURCE))
         self.assertEqual(receipt.outcome, "rolled-back")
         self.assertEqual(receipt.rollback_count, 1)
         self.assertIsNotNone(receipt.rollback_revision_sha256)
@@ -128,6 +130,21 @@ class TestP6DevelopmentHost(unittest.TestCase):
 
         with self.assertRaises(PrimeP6DevelopmentHostError):
             self._run(Mutated())
+
+    def test_rejects_forged_passed_result(self) -> None:
+        class Forged(_Worker):
+            async def snapshot(self):
+                value = await super().snapshot()
+                if self.cells == 1:
+                    item = json.loads(value["task-a.json"])
+                    item["passed"] = True
+                    value["task-a.json"] = _canonical(item)
+                return value
+
+        from asterion.applications.prime_agent.operator.p6_development_host import PrimeP6DevelopmentHostError
+
+        with self.assertRaises(PrimeP6DevelopmentHostError):
+            self._run(Forged())
 
 
 if __name__ == "__main__":

@@ -30,7 +30,9 @@ from .p6_development_workload import (
 
 _BASELINE_SOURCE = b"def clamp(value, lower, upper):\n    return min(upper, value)\n"
 _CANDIDATE_SOURCE = b"def clamp(value, lower, upper):\n    return min(max(value, lower), upper)\n"
-_CASES = ((-4, -2, 3), (1, -2, 3), (4, -2, 3))
+_BAD_CANDIDATE_SOURCE = b"def clamp(value, lower, upper):\n    return max(value, lower)\n"
+_TASK_A_CASES = ((-4, -2, 3),)
+_HOLDOUT_CASES = ((4, -2, 3),)
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
@@ -103,9 +105,9 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
         candidate_revision = coordinator.apply(proposal)
         candidate_harness = coordinator.snapshot()
         selected = _selected_candidate(candidate_harness, body_store)
-        if selected != candidate or not _clamp_passes(selected):
+        if selected != candidate:
             raise ValueError
-        _completed(await gateway.prompt(_prompt(3)), 6, 3)
+        _completed(await gateway.prompt(_prompt(3, "sha256:" + sha256(selected).hexdigest())), 6, 3)
         holdout_passed, holdout = _task_b_snapshot(await worker.snapshot(), run_id, session_id, selected)
         if (model_calls, tool_calls) != (6, 3):
             raise ValueError
@@ -128,7 +130,7 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
         final_source = P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256 if holdout_passed else P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256
         receipt = P6DevelopmentReceipt(
             P6_DEVELOPMENT_WORKLOAD_DIGEST, P6_DEVELOPMENT_SCHEMA_DIGEST, P6_DEVELOPMENT_MODEL_DIGEST, P6_DEVELOPMENT_ORACLE_DIGEST,
-            P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256, P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256, _digest(task_a), _digest(holdout), final_source, _digest({"outcome": outcome}),
+            P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256, "sha256:" + sha256(selected).hexdigest(), _digest(task_a), _digest(holdout), final_source, _digest({"outcome": outcome}),
             _digest({"run": run_id}), _digest({"session": session_id}), container_sha256, image_sha256, usage_sha256,
             continual_improvement_scope_sha256(baseline.scope), continual_improvement_snapshot_sha256(baseline), continual_improvement_snapshot_sha256(candidate_harness), continual_improvement_snapshot_sha256(final_harness), "sha256:" + proposal.digest, continual_improvement_revision_sha256(candidate_revision), None if rollback is None else continual_improvement_revision_sha256(rollback),
             "project", ("ipython",), 3, 6, 3, 1, 1, 0 if holdout_passed else 1, outcome, True, True,
@@ -187,7 +189,7 @@ def _task_a_snapshot(value: object, run_id: str, session_id: str) -> dict[str, o
 
 
 def _candidate_snapshot(value: object) -> bytes:
-    if type(value) is not dict or set(value) != {"baseline.py", "task-a.json", "candidate.py"} or value["baseline.py"] != _BASELINE_SOURCE or value["candidate.py"] != _CANDIDATE_SOURCE or not _clamp_passes(value["candidate.py"]):
+    if type(value) is not dict or set(value) != {"baseline.py", "task-a.json", "candidate.py"} or value["baseline.py"] != _BASELINE_SOURCE or not _admitted_candidate(value["candidate.py"]):
         raise ValueError
     return value["candidate.py"]
 
@@ -211,11 +213,12 @@ def _artifact(raw: object, fixture: str, stage: str, run_id: str, session_id: st
         raise ValueError
     inputs = item["inputs"]
     outputs = item["outputs"]
-    if not isinstance(inputs, list) or not isinstance(outputs, list) or inputs != [list(case) for case in _CASES] or len(outputs) != len(_CASES) or any(type(value) is not int for value in outputs):
+    cases = _TASK_A_CASES if stage == "task-a" else _HOLDOUT_CASES
+    if not isinstance(inputs, list) or not isinstance(outputs, list) or inputs != [list(case) for case in cases] or len(outputs) != len(cases) or any(type(value) is not int for value in outputs):
         raise ValueError
-    actual = [_evaluate_clamp(source, *case) for case in _CASES]
-    expected_outputs = [min(max(*case[:2]), case[2]) for case in _CASES]
-    if outputs != actual or (stage == "task-a" and item["passed"] != (actual == expected_outputs)):
+    actual = [_evaluate_clamp(source, *case) for case in cases]
+    expected_outputs = [min(max(*case[:2]), case[2]) for case in cases]
+    if outputs != actual or item["passed"] != (actual == expected_outputs):
         raise ValueError
     return item
 
@@ -224,23 +227,27 @@ def _task_a_artifact(run_id: str, session_id: str) -> bytes:
     return _artifact_bytes("clamp-task-a/v1", "task-a", run_id, session_id, _BASELINE_SOURCE)
 
 
-def _task_b_artifact(run_id: str, session_id: str, passed: bool) -> bytes:
-    raw = _artifact_bytes("clamp-task-b/v1", "task-b", run_id, session_id, _CANDIDATE_SOURCE)
-    if passed:
-        return raw
-    item = json.loads(raw)
-    item["passed"] = False
-    return _canonical(item)
+def _task_b_artifact(run_id: str, session_id: str, source: bytes = _CANDIDATE_SOURCE) -> bytes:
+    return _artifact_bytes("clamp-task-b/v1", "task-b", run_id, session_id, source)
 
 
 def _artifact_bytes(fixture: str, stage: str, run_id: str, session_id: str, source: bytes) -> bytes:
-    outputs = [_evaluate_clamp(source, *case) for case in _CASES]
-    expected = [min(max(*case[:2]), case[2]) for case in _CASES]
-    return _canonical({"fixture": fixture, "inputs": [list(case) for case in _CASES], "outputs": outputs, "passed": outputs == expected, "run_id": run_id, "session_id": session_id, "source_sha256": "sha256:" + sha256(source).hexdigest(), "stage": stage})
+    cases = _TASK_A_CASES if stage == "task-a" else _HOLDOUT_CASES
+    outputs = [_evaluate_clamp(source, *case) for case in cases]
+    expected = [min(max(*case[:2]), case[2]) for case in cases]
+    return _canonical({"fixture": fixture, "inputs": [list(case) for case in cases], "outputs": outputs, "passed": outputs == expected, "run_id": run_id, "session_id": session_id, "source_sha256": "sha256:" + sha256(source).hexdigest(), "stage": stage})
+
+
+def _admitted_candidate(source: object) -> bool:
+    return type(source) is bytes and source in {_CANDIDATE_SOURCE, _BAD_CANDIDATE_SOURCE} and _candidate_ast(source)
 
 
 def _clamp_passes(source: bytes) -> bool:
-    return source == _CANDIDATE_SOURCE and all(_evaluate_clamp(source, *case) == min(max(*case[:2]), case[2]) for case in _CASES)
+    return _admitted_candidate(source) and all(_evaluate_clamp(source, *case) == min(max(*case[:2]), case[2]) for case in _HOLDOUT_CASES)
+
+
+def _candidate_ast(source: bytes) -> bool:
+    return source in {_CANDIDATE_SOURCE, _BAD_CANDIDATE_SOURCE}
 
 
 def _evaluate_clamp(source: bytes, value: int, lower: int, upper: int) -> int:
@@ -305,8 +312,16 @@ def _usage(value: object) -> dict[str, int]:
     return {field: getattr(value, field) for field in fields}
 
 
-def _prompt(stage: int) -> str:
-    return f"P6 stage {stage}: inspect the staged clamp evidence and make exactly one completion-only IPython call; do not select scope, authority, or rollback."
+def _prompt(stage: int, candidate_sha256: str | None = None) -> str:
+    prompts = {
+        1: "P6 stage 1: read baseline.py only; write canonical task-a.json with fixture, stage, run_id, session_id, source_sha256, inputs, outputs, passed. Use one completion-only IPython call; no printing, inspection, subprocess, scope, authority, or rollback.",
+        2: "P6 stage 2: read baseline.py and task-a.json; write candidate.py only. Use one completion-only IPython call; no printing, inspection, subprocess, task-b.json, scope, authority, or rollback.",
+    }
+    if stage == 3 and _DIGEST.fullmatch(candidate_sha256 or ""):
+        return f"P6 stage 3: selected candidate digest is {candidate_sha256}; read candidate.py and write canonical task-b.json with fixture, stage, run_id, session_id, source_sha256, inputs [[4,-2,3]], outputs, passed. Use one completion-only IPython call; no printing, inspection, subprocess, scope, authority, or rollback."
+    if stage in prompts:
+        return prompts[stage]
+    raise ValueError
 
 
 def _canonical(value: object) -> bytes:

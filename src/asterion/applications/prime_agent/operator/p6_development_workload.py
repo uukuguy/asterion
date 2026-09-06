@@ -34,16 +34,24 @@ _CANDIDATE_SOURCE: Final = (
     b"def clamp(value, lower, upper):\n"
     b"    return min(max(value, lower), upper)\n"
 )
+_BAD_CANDIDATE_SOURCE: Final = (
+    b"def clamp(value, lower, upper):\n"
+    b"    return max(value, lower)\n"
+)
 P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256: Final = "sha256:" + sha256(
     _BASELINE_SOURCE
 ).hexdigest()
 P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256: Final = "sha256:" + sha256(
     _CANDIDATE_SOURCE
 ).hexdigest()
+P6_DEVELOPMENT_BAD_CANDIDATE_SNAPSHOT_SHA256: Final = "sha256:" + sha256(
+    _BAD_CANDIDATE_SOURCE
+).hexdigest()
 P6_DEVELOPMENT_TASK_A_RESULT_SHA256: Final = _digest(
     {"fixture": "clamp-task-a/v1", "passed": False}
 )
 _PRESERVED_BRANCH: Final = {
+    "candidate_source_sha256": P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
     "final_source_sha256": P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
     "holdout_result_sha256": _digest(
         {"fixture": "clamp-task-b/v1", "passed": True}
@@ -52,6 +60,7 @@ _PRESERVED_BRANCH: Final = {
     "rollback_count": 0,
 }
 _ROLLED_BACK_BRANCH: Final = {
+    "candidate_source_sha256": P6_DEVELOPMENT_BAD_CANDIDATE_SNAPSHOT_SHA256,
     "final_source_sha256": P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256,
     "holdout_result_sha256": _digest(
         {"fixture": "clamp-task-b/v1", "passed": False}
@@ -65,8 +74,8 @@ _BRANCH_FACTS: Final = {
 }
 
 _MANIFEST: Final = {
+    "admitted_candidate_snapshot_sha256s": sorted((P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256, P6_DEVELOPMENT_BAD_CANDIDATE_SNAPSHOT_SHA256)),
     "candidate_count": 1,
-    "candidate_snapshot_sha256": P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
     "format": "asterion.prime-p6-development-workload/v1",
     "holdout_count": 1,
     "ipython_call_count": 3,

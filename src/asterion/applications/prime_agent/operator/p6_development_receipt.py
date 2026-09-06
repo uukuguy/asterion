@@ -10,7 +10,6 @@ from typing import Final, Literal
 
 from .p6_development_workload import (
     P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256,
-    P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
     P6_DEVELOPMENT_MODEL_DIGEST,
     P6_DEVELOPMENT_ORACLE_DIGEST,
     P6_DEVELOPMENT_SCHEMA_DIGEST,
@@ -110,7 +109,6 @@ def validate_p6_development_receipt(receipt: object) -> None:
         or receipt.model_sha256 != P6_DEVELOPMENT_MODEL_DIGEST
         or receipt.oracle_sha256 != P6_DEVELOPMENT_ORACLE_DIGEST
         or receipt.baseline_source_sha256 != P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256
-        or receipt.candidate_source_sha256 != P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256
         or receipt.scope_kind != "project"
         or receipt.tool_names != ("ipython",)
         or any(
@@ -128,7 +126,8 @@ def validate_p6_development_receipt(receipt: object) -> None:
     except ValueError:
         raise P6DevelopmentReceiptError() from None
     if (
-        receipt.final_source_sha256 != branch["final_source_sha256"]
+        receipt.candidate_source_sha256 != branch["candidate_source_sha256"]
+        or receipt.final_source_sha256 != branch["final_source_sha256"]
         or receipt.rollback_count != branch["rollback_count"]
     ):
         raise P6DevelopmentReceiptError()
