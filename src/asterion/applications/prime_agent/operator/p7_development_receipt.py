@@ -30,6 +30,7 @@ class P7DevelopmentReceipt:
     model_sha256: str
     oracle_sha256: str
     resource_sha256: str
+    runtime_environment_sha256: str
     run_sha256: str
     session_sha256: str
     container_sha256: str

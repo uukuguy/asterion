@@ -22,6 +22,7 @@ from .p7_development_workload import (
     P7_DEVELOPMENT_SCHEMA_DIGEST,
     P7_DEVELOPMENT_WORKLOAD_DIGEST,
 )
+from .p7_runtime_lock import P7DevelopmentRuntimeSet
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
@@ -90,6 +91,7 @@ async def run_p7_development_lifecycle(
     session_id: str,
     prime_source_root: str,
     workspace: str = "/workspace",
+    runtime: P7DevelopmentRuntimeSet,
 ) -> PrimeP7DevelopmentTrace:
     if not _inputs(
         gateway,
@@ -100,6 +102,7 @@ async def run_p7_development_lifecycle(
         session_id,
         prime_source_root,
         workspace,
+        runtime,
     ):
         raise PrimeP7DevelopmentHostError()
     opened = provider_closed = worker_cleaned = broker_closed = False
@@ -186,6 +189,7 @@ async def run_p7_development_lifecycle(
             usage,
             len(action_rows),
             terminal,
+            runtime,
         )
         validate_p7_development_receipt(receipt)
         return PrimeP7DevelopmentTrace(p7_development_public_trace_digest(receipt))
@@ -242,10 +246,15 @@ def _prompt(stage: int, run_id: str, session_id: str) -> str:
 
 
 def _inputs(*values: object) -> bool:
+    if len(values) != 9:
+        return False
+    gateway, provider, worker, broker, run_id, session_id, prime_source_root, workspace, runtime = values
     return (
-        all(value is not None for value in values)
-        and all(type(value) is str and value.startswith("/") for value in values[-2:])
-        and all(type(value) is str and value for value in values[-4:-2])
+        all(value is not None for value in (gateway, provider, worker, broker))
+        and all(type(value) is str and value for value in (run_id, session_id))
+        and all(type(value) is str and value.startswith("/") for value in (prime_source_root, workspace))
+        and type(runtime) is P7DevelopmentRuntimeSet
+        and _DIGEST.fullmatch(runtime.runtime_sha256) is not None
     )
 
 
@@ -404,7 +413,10 @@ def _receipt(
     usage: dict[str, int],
     action_count: int,
     terminal: Mapping[str, object],
+    runtime: P7DevelopmentRuntimeSet,
 ) -> P7DevelopmentReceipt:
+    if type(runtime) is not P7DevelopmentRuntimeSet or _DIGEST.fullmatch(runtime.runtime_sha256) is None:
+        raise ValueError
     transcript = seal["transcript_sha256"]
     assert type(transcript) is str
     return P7DevelopmentReceipt(
@@ -413,6 +425,7 @@ def _receipt(
         P7_DEVELOPMENT_MODEL_DIGEST,
         P7_DEVELOPMENT_ORACLE_DIGEST,
         P7_DEVELOPMENT_RESOURCE_DIGEST,
+        runtime.runtime_sha256,
         _digest({"run": run_id}),
         _digest({"session": session_id}),
         _digest({"container": worker.daemon_id}),

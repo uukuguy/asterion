@@ -19,6 +19,7 @@ class TestP7DevelopmentReceipt(unittest.TestCase):
             "model_sha256": workload.P7_DEVELOPMENT_MODEL_DIGEST,
             "oracle_sha256": workload.P7_DEVELOPMENT_ORACLE_DIGEST,
             "resource_sha256": workload.P7_DEVELOPMENT_RESOURCE_DIGEST,
+            "runtime_environment_sha256": _digest("d"),
             "run_sha256": _digest("1"), "session_sha256": _digest("2"), "container_sha256": _digest("3"),
             "image_sha256": _digest("4"), "initial_observation_sha256": _digest("5"),
             "action_chain_sha256": _digest("6"), "terminal_sha256": _digest("7"), "score_sha256": _digest("8"),
@@ -42,7 +43,7 @@ class TestP7DevelopmentReceipt(unittest.TestCase):
     def test_rejects_mutation_private_data_and_noncanonical_closure(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_receipt import P7DevelopmentReceiptError, validate_p7_development_receipt
 
-        for receipt in (self._receipt(action_count=5), self._receipt(action_count=True), self._receipt(broker_call_count=5), self._receipt(observation_count=2), self._receipt(status_count=0), self._receipt(score_replayed=False), self._receipt(broker_quiescent=False), self._receipt(worker_destroyed=False), self._receipt(full_cleanup=False), self._receipt(terminal_reason="won"), self._receipt(workload_sha256=_digest("0"))):
+        for receipt in (self._receipt(action_count=5), self._receipt(action_count=True), self._receipt(broker_call_count=5), self._receipt(observation_count=2), self._receipt(status_count=0), self._receipt(score_replayed=False), self._receipt(broker_quiescent=False), self._receipt(worker_destroyed=False), self._receipt(full_cleanup=False), self._receipt(terminal_reason="won"), self._receipt(workload_sha256=_digest("0")), self._receipt(runtime_environment_sha256="unverified")):
             with self.subTest(receipt=receipt), self.assertRaises(P7DevelopmentReceiptError):
                 validate_p7_development_receipt(receipt)
         receipt = self._receipt()

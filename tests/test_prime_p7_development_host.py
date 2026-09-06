@@ -44,6 +44,7 @@ def _witness() -> dict[str, object]:
 class TestP7DevelopmentHost(unittest.TestCase):
     def test_receipt_uses_the_sealed_score_digest(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_host import _receipt
+        from asterion.applications.prime_agent.operator.p7_runtime_lock import P7DevelopmentRuntimeSet
 
         score = _digest("b")
         receipt = _receipt(
@@ -58,6 +59,7 @@ class TestP7DevelopmentHost(unittest.TestCase):
             {"input_tokens": 1, "output_tokens": 2, "cost_microunits": 99},
             4,
             {"terminal": True, "terminal_reason": "engine-terminal"},
+            P7DevelopmentRuntimeSet(_digest("d")),
         )
         self.assertEqual(receipt.score_sha256, score)
 
