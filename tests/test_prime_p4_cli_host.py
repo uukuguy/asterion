@@ -1,9 +1,48 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
+from unittest.mock import AsyncMock, patch
 
 
 class TestPrimeP4CliHost(unittest.IsolatedAsyncioTestCase):
+    async def test_timeout_kills_and_reaps_the_node_process(self) -> None:
+        from asterion.applications.prime_agent.operator import p4_cli_host as subject
+
+        class Process:
+            returncode: int | None = None
+
+            def __init__(self) -> None:
+                self.kills = 0
+                self.waits = 0
+
+            async def communicate(self) -> tuple[bytes, bytes]:
+                await asyncio.Future()
+
+            def kill(self) -> None:
+                self.kills += 1
+
+            async def wait(self) -> int:
+                self.waits += 1
+                self.returncode = -9
+                return self.returncode
+
+        process = Process()
+        with (
+            patch.object(
+                subject.asyncio,
+                "create_subprocess_exec",
+                AsyncMock(return_value=process),
+            ),
+            patch.object(subject, "_DEADLINE_SECONDS", 0.01),
+            self.assertRaises(subject.PrimeP4CliHostError),
+        ):
+            await subject._run_p4_development(
+                subject._P4CliResources("node", "entry", "/prime"), "p4-timeout"
+            )
+        self.assertEqual(process.kills, 1)
+        self.assertEqual(process.waits, 1)
+
     async def test_service_projects_only_a_digest_from_the_private_session_result(self) -> None:
         from asterion.applications.prime_agent.operator import p4_cli_host as subject
         from asterion.runtimes.prime_agent_host import PrimeSmallVerificationRequest

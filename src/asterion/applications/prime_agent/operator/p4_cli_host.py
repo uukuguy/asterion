@@ -33,6 +33,7 @@ _APPLICATION_VERSION = "1.0.0"
 _RUN_ID = re.compile(r"[a-z][a-z0-9.-]*\Z")
 _MAX_OUTPUT_BYTES = 4096
 _DEADLINE_SECONDS = 30
+_REAP_WAIT_SECONDS = 1
 
 
 class PrimeP4CliHostError(ValueError):
@@ -184,7 +185,7 @@ async def _run_p4_development(resources: _P4CliResources, _: str) -> object:
         async with asyncio.timeout(_DEADLINE_SECONDS):
             stdout, _stderr = await process.communicate()
     except BaseException:
-        _terminate(process if "process" in locals() else None)
+        await _terminate_and_reap(process if "process" in locals() else None)
         raise PrimeP4CliHostError() from None
     if process.returncode != 0 or len(stdout) > _MAX_OUTPUT_BYTES:
         raise PrimeP4CliHostError()
@@ -250,6 +251,23 @@ async def _shielded_wait(task: asyncio.Task[object]) -> None:
         pass
 
 
-def _terminate(process: asyncio.subprocess.Process | None) -> None:
-    if process is not None and process.returncode is None:
-        process.kill()
+async def _terminate_and_reap(process: asyncio.subprocess.Process | None) -> None:
+    if process is None or process.returncode is not None:
+        return
+    _kill(process)
+    for _ in range(2):
+        try:
+            await asyncio.wait_for(process.wait(), _REAP_WAIT_SECONDS)
+            return
+        except ProcessLookupError:
+            return
+        except TimeoutError:
+            _kill(process)
+
+
+def _kill(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
