@@ -10,6 +10,11 @@ from asterion.applications.prime_agent.operator.release_recipe import (
 
 ROOT = Path(__file__).resolve().parents[1]
 GATEWAY = ROOT / "packages/typescript/prime-gateway"
+SECCOMP_LOCK = (
+    ROOT
+    / "src/asterion/applications/prime_agent/operator/resources"
+    / "prime-development-seccomp-lock.json"
+)
 
 
 def aggregate(root: Path, paths: list[Path]) -> tuple[list[str], str]:
@@ -31,6 +36,7 @@ def aggregate(root: Path, paths: list[Path]) -> tuple[list[str], str]:
 
 
 def main() -> None:
+    seccomp_lock_sha256 = sha256(SECCOMP_LOCK.read_bytes()).hexdigest()
     inputs, input_digest = aggregate(
         GATEWAY,
         list((GATEWAY / "src").rglob("*.ts"))
@@ -58,9 +64,10 @@ def main() -> None:
             },
         },
         "seccomp": {
-            "canonical_sha256": "9da637d2ab0a204fcbd91bd88f1be9e004a3acab61c571a9f5b8870e588a17d2",
-            "raw_sha256": "536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74",
-            "commit": "836ae4d37ef2ec995c77c99fc55f5b5f3af3a897",
+            "lock_sha256_by_arch": {
+                "amd64": seccomp_lock_sha256,
+                "arm64": seccomp_lock_sha256,
+            },
         },
         "gateway": {
             "inputs": inputs,

@@ -27,6 +27,25 @@ _SCENARIOS = frozenset({"p1", "p2", "p3", "p4", "p5", "p6", "p7"})
 _MAX_ARCHIVE = 128 * 1024 * 1024
 _MAX_EXTRACTED = 512 * 1024 * 1024
 _MAX_COMMAND_OUTPUT = 4096
+_SECCOMP_LOCK_FORMAT = "asterion.prime-development-seccomp-lock/v1"
+_SECCOMP_LOCK_PROVENANCE = {
+    "format": _SECCOMP_LOCK_FORMAT,
+    "tag": "seccomp/v0.2.3",
+    "commit": "836ae4d37ef2ec995c77c99fc55f5b5f3af3a897",
+    "raw_sha256": "536529b665dd0972c37bfb569f5d4ac8a53592e7b00752bc39ff063ca9864c74",
+    "canonical_sha256": "9da637d2ab0a204fcbd91bd88f1be9e004a3acab61c571a9f5b8870e588a17d2",
+    "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "platforms": ["linux/amd64", "linux/arm64"],
+    "images": {
+        "p1": ["asterion-p1b-development:20260906", "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657"],
+        "p2": ["asterion-p2-development:20260906", "sha256:7d97b51a21bfffe6caa574063294f72205c60b05d8650fab8c70fdf661921c33"],
+        "p3": ["asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"],
+        "p4": ["asterion-p1b-development:20260906", "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657"],
+        "p5": ["asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"],
+        "p6": ["asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"],
+        "p7": ["asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"],
+    },
+}
 
 
 class PrimeDevelopmentPreparationError(ValueError):
@@ -68,29 +87,39 @@ def _lock() -> dict[str, object]:
     )
 
 
-def _seccomp_lock() -> dict[str, object]:
-    value = _resource(
-        "prime-development-seccomp-lock.json",
-        "asterion.prime-development-seccomp-lock/v1",
-    )
-    if (
-        set(value)
-        != {
-            "format",
-            "tag",
-            "commit",
-            "raw_sha256",
-            "canonical_sha256",
-            "license_sha256",
-            "platforms",
-            "images",
-        }
-        or value.get("platforms") != ["linux/amd64", "linux/arm64"]
-        or type(value.get("images")) is not dict
-        or set(value["images"]) != _SCENARIOS
-    ):
+def _seccomp_lock(raw: bytes | None = None) -> dict[str, object]:
+    try:
+        value = json.loads(_bytes("prime-development-seccomp-lock.json") if raw is None else raw)
+        if type(value) is not dict or value != _SECCOMP_LOCK_PROVENANCE:
+            raise ValueError
+    except (UnicodeError, json.JSONDecodeError, ValueError, OSError):
         raise PrimeDevelopmentPreparationError()
     return value
+
+
+def _validated_seccomp_lock(
+    preparation_lock: dict[str, object], arch: str
+) -> dict[str, object]:
+    binding = preparation_lock.get("seccomp")
+    if (
+        type(binding) is not dict
+        or set(binding) != {"lock_sha256_by_arch"}
+        or type(binding.get("lock_sha256_by_arch")) is not dict
+        or set(binding["lock_sha256_by_arch"]) != {"amd64", "arm64"}
+        or any(
+            type(digest) is not str or len(digest) != 64
+            for digest in binding["lock_sha256_by_arch"].values()
+        )
+        or arch not in binding["lock_sha256_by_arch"]
+    ):
+        raise PrimeDevelopmentPreparationError()
+    try:
+        raw = _bytes("prime-development-seccomp-lock.json")
+    except OSError:
+        raise PrimeDevelopmentPreparationError() from None
+    if sha256(raw).hexdigest() != binding["lock_sha256_by_arch"][arch]:
+        raise PrimeDevelopmentPreparationError()
+    return _seccomp_lock(raw)
 
 
 def _digest(path: Path) -> str:
@@ -225,13 +254,12 @@ def _extract_node(archive: Path, stage: Path) -> Path:
 
 
 def _publish_node(root: Path, archive: Path) -> Path:
+    target = root / ("node-" + _digest(archive)[:16])
+    if target.exists():
+        return target / "bin" / "node"
     stage = Path(tempfile.mkdtemp(prefix=".node.", suffix=".stage", dir=root))
     try:
         extracted = _extract_node(archive, stage)
-        target = root / ("node-" + _digest(archive)[:16])
-        if target.exists():
-            _remove_tree(stage)
-            return target / "bin" / "node"
         os.replace(extracted, target)
         _fsync_directory(root)
         _remove_tree(stage)
@@ -370,6 +398,7 @@ def _identities(
     lock: dict[str, object],
     arch: str,
     scenarios: tuple[str, ...],
+    seccomp_lock: dict[str, object],
     *,
     runner: Callable[..., object],
 ) -> dict[str, str]:
@@ -390,7 +419,6 @@ def _identities(
     ):
         raise PrimeDevelopmentPreparationError()
     seccomp = root / "prime-development-seccomp.json"
-    seccomp_lock = _seccomp_lock()
     if _digest(seccomp) != seccomp_lock["canonical_sha256"]:
         raise PrimeDevelopmentPreparationError()
     try:
@@ -454,6 +482,7 @@ def prepare_prime_development(
     ):
         raise PrimeDevelopmentPreparationError()
     lock, repo, arch = _lock(), repo_root.resolve(), _arch(platform_machine())
+    seccomp_lock = _validated_seccomp_lock(lock, arch)
     root = _root(repo)
     nodes = lock.get("node")
     if type(nodes) is not dict:
@@ -461,7 +490,6 @@ def prepare_prime_development(
     if emit:
         emit("source", "started")
     node = _node(root, nodes.get(arch), downloader=downloader, runner=runner)
-    seccomp_lock = _seccomp_lock()
     profile = _bytes("prime-development-seccomp.json")
     if (
         sha256(profile).hexdigest() != seccomp_lock["canonical_sha256"]
@@ -470,7 +498,9 @@ def prepare_prime_development(
     ):
         raise PrimeDevelopmentPreparationError()
     _publish_bytes(root, "prime-development-seccomp.json", profile)
-    identities = _identities(repo, root, lock, arch, scenarios, runner=runner)
+    identities = _identities(
+        repo, root, lock, arch, scenarios, seccomp_lock, runner=runner
+    )
     _publish_bytes(
         root,
         "receipt.json",
@@ -508,6 +538,7 @@ def resolve_prepared_prime_development(
     ):
         raise PrimeDevelopmentPreparationError()
     lock, repo, arch = _lock(), repo_root.resolve(), _arch(platform_machine())
+    seccomp_lock = _validated_seccomp_lock(lock, arch)
     root = _root(repo)
     try:
         receipt_path = root / "receipt.json"
@@ -525,7 +556,9 @@ def resolve_prepared_prime_development(
             _context(repo, arch, runner),
             lock,
             tuple(scenarios),
-            _identities(repo, root, lock, arch, tuple(scenarios), runner=runner),
+            _identities(
+                repo, root, lock, arch, tuple(scenarios), seccomp_lock, runner=runner
+            ),
         )
         if receipt != expected or scenario not in scenarios:
             raise ValueError
