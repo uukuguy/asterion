@@ -1,27 +1,78 @@
 from __future__ import annotations
+from unittest.mock import patch
 import unittest
 
 
 class TestPrimeP3DevelopmentHost(unittest.IsolatedAsyncioTestCase):
-    async def test_host_binds_gateway_oracle_and_cleanup(self) -> None:
-        from asterion.applications.prime_agent.operator.p3_development_host import (
-            run_prime_p3_development,
-        )
+    async def test_concrete_route_uses_role_provider_workers_and_gateway_hooks(self) -> None:
         from asterion.applications.prime_agent.operator import (
-            p3_development_workload as work,
+            p3_development_host as subject,
         )
 
-        events: list[str] = []
+        events: list[object] = []
+
+        class Provider:
+            async def callback(self, role: str, _: bytes) -> bytes:
+                events.append(("model", role))
+                return b'{"role":"assistant"}'
+
+            def terminal_usage(self) -> dict[str, object]:
+                return {"implementation": {}, "review": {}, "root": {}}
+
+        class Transport:
+            async def create_workers(self, **_: object):
+                return ("root", "implementation", "review")
+
+            async def start_workers(self, workers: tuple[str, ...], _: object) -> None:
+                events.append(("start", workers))
+
+            async def execute(self, worker: str, cell: str, _: object) -> None:
+                events.append(("tool", worker, cell))
+
+            async def read(self, _: str, name: str, __: object) -> bytes:
+                from asterion.applications.prime_agent.operator import (
+                    p3_development_workload as work,
+                )
+
+                return {
+                    "solution.py": work.P3_EXPECTED_SOURCE_BYTES,
+                    "test_solution.py": work.P3_EXPECTED_TEST_BYTES,
+                    "aggregate.json": work.P3_AGGREGATE_BYTES,
+                }[name]
+
+            async def cleanup(self, workers: tuple[str, ...], _: object) -> None:
+                events.append(("cleanup", workers))
 
         class Gateway:
+            instance: "Gateway"
+
+            def __init__(self, *, model_hook, tool_hook, **_: object) -> None:
+                self.model_hook = model_hook
+                self.tool_hook = tool_hook
+                Gateway.instance = self
+
             async def open(self, **_: object) -> None:
                 events.append("open")
 
             async def prompt(self, _: str) -> dict[str, object]:
-                events.append("prompt")
+                for role, count in (("root", 4), ("implementation", 2), ("review", 4)):
+                    for _ in range(count):
+                        await self.model_hook(
+                            {
+                                "role": role,
+                                "model": {},
+                                "context": {},
+                                "options": {},
+                            }
+                        )
+                for role, count in (("root", 1), ("implementation", 1), ("review", 2)):
+                    for index in range(count):
+                        await self.tool_hook(
+                            {"role": role, "tool_call_id": role + str(index), "code": "x = 1"}
+                        )
                 return {
                     "lifecycle": "completed",
-                    "usage": {},
+                    "usage": {"implementation": {}, "review": {}, "root": {}},
                     "assistant": {"completed": True, "stop_reason": "stop"},
                     "observations": {
                         "child_count": 2,
@@ -42,29 +93,23 @@ class TestPrimeP3DevelopmentHost(unittest.IsolatedAsyncioTestCase):
             async def request_nested(self, _: str, __: object) -> dict[str, object]:
                 return {}
 
-        class Service:
-            async def start(self) -> None:
-                events.append("start")
+        with (
+            patch.object(subject, "create_prime_p3_development_sdk_provider", return_value=Provider()),
+            patch.object(subject, "PrimeP3DevelopmentGateway", Gateway),
+        ):
+            trace = await subject.run_prime_p3_development(
+                image_digest="sha256:" + "a" * 64,
+                transport=Transport(),
+                operator_config={"opaque": "value"},
+                node_bin="node",
+                entrypoint="entry",
+                prime_source_root="/prime",
+                run_id="p3-concrete-run",
+            )
 
-            async def execute(self, _: str, __: str) -> None:
-                return None
-
-            async def read(self, name: str) -> bytes:
-                return {
-                    "solution.py": work.P3_EXPECTED_SOURCE_BYTES,
-                    "test_solution.py": work.P3_EXPECTED_TEST_BYTES,
-                    "aggregate.json": work.P3_AGGREGATE_BYTES,
-                }[name]
-
-            async def cleanup(self) -> None:
-                events.append("cleanup")
-
-        trace = await run_prime_p3_development(
-            gateway=Gateway(),
-            service=Service(),
-            run_id="run",
-            session_id="session",
-            prompt="fixed",
-        )
         self.assertRegex(trace.trace_sha256, r"^sha256:[0-9a-f]{64}$")
-        self.assertEqual(events, ["start", "open", "prompt", "close", "cleanup"])
+        self.assertEqual(events.count(("model", "root")), 4)
+        self.assertEqual(events.count(("model", "implementation")), 2)
+        self.assertEqual(events.count(("model", "review")), 4)
+        self.assertEqual(len([event for event in events if isinstance(event, tuple) and event[0] == "tool"]), 4)
+        self.assertIn(("cleanup", ("root", "implementation", "review")), events)
