@@ -28,6 +28,7 @@ from .p4_development_workload import (
     P4_DEVELOPMENT_SCHEMA_DIGEST,
     P4_DEVELOPMENT_WORKLOAD_DIGEST,
 )
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 
 # The P4 host deliberately retains P1-B's bounded provider and persistent
@@ -123,6 +124,7 @@ async def run_p4_development_lifecycle(
     session_id: str,
     prime_source_root: str,
     workspace: str,
+    progress: HostProgressReporter | None = None,
 ) -> PrimeP4DevelopmentTrace:
     """Run P4 exactly once; no failed or uncertain action is replayed."""
     if not _inputs_are_valid(
@@ -131,8 +133,11 @@ async def run_p4_development_lifecycle(
         raise PrimeP4DevelopmentHostError()
     opened = provider_closed = cleaned = False
     cancelled = False
+    validation_complete = False
     try:
+        _emit(progress, "worker", "started")
         await worker.acquire()
+        _emit(progress, "worker", "succeeded")
         initial = await worker.initial_snapshot()
         if (
             type(initial) is not bytes
@@ -148,8 +153,15 @@ async def run_p4_development_lifecycle(
             nonlocal model_calls
             if model_calls >= _MODEL_COUNT or type(payload) is not dict:
                 raise ValueError
-            reply = _strict_json_object(await provider(_canonical(payload)))
+            current = model_calls + 1
+            _emit(progress, "model", "started", current, _MODEL_COUNT)
+            try:
+                reply = _strict_json_object(await provider(_canonical(payload)))
+            except BaseException:
+                _emit(progress, "model", "failed", current, _MODEL_COUNT)
+                raise
             model_calls += 1
+            _emit(progress, "model", "succeeded", current, _MODEL_COUNT)
             return reply
 
         async def tool_hook(payload: object) -> dict[str, object]:
@@ -166,8 +178,15 @@ async def run_p4_development_lifecycle(
             ):
                 raise ValueError
             tool_ids.add(payload["tool_call_id"])
-            observed = await worker.execute_cell(payload["code"])
+            current = tool_calls + 1
+            _emit(progress, "worker", "started", current, _TOOL_COUNT)
+            try:
+                observed = await worker.execute_cell(payload["code"])
+            except BaseException:
+                _emit(progress, "worker", "failed", current, _TOOL_COUNT)
+                raise
             tool_calls += 1
+            _emit(progress, "worker", "succeeded", current, _TOOL_COUNT)
             if (
                 type(observed) is not dict
                 or observed.get("cell_count") != tool_calls
@@ -197,6 +216,7 @@ async def run_p4_development_lifecycle(
         compact = await gateway.compact()
         compact = _compaction_witness(compact)
         second = await gateway.prompt(_PROMPT_TWO)
+        _emit(progress, "validation", "started")
         if (
             type(second) is not dict
             or second.get("lifecycle") != "completed"
@@ -222,8 +242,10 @@ async def run_p4_development_lifecycle(
             raise ValueError
         await provider.close()
         provider_closed = True
+        _emit(progress, "cleanup", "started")
         await worker.cleanup()
         cleaned = True
+        _emit(progress, "cleanup", "succeeded")
         receipt = _receipt(
             candidate=candidate,
             compact=compact,
@@ -232,10 +254,14 @@ async def run_p4_development_lifecycle(
             post=post,
         )
         validate_p4_development_receipt(receipt)
+        _emit(progress, "validation", "succeeded")
+        validation_complete = True
         return trace_p4_development_receipt(receipt)
     except asyncio.CancelledError:
         cancelled = True
     except BaseException:
+        if not validation_complete:
+            _emit(progress, "validation", "failed")
         pass
     finally:
         if not cleaned:
@@ -245,6 +271,7 @@ async def run_p4_development_lifecycle(
                 worker=worker,
                 opened=opened,
                 provider_closed=provider_closed,
+                progress=progress,
             )
     if cancelled:
         raise asyncio.CancelledError
@@ -274,8 +301,10 @@ async def _cleanup(
     worker: P4DevelopmentWorker,
     opened: bool,
     provider_closed: bool,
+    progress: HostProgressReporter | None = None,
 ) -> None:
     async def action() -> None:
+        _emit(progress, "cleanup", "started")
         if opened:
             try:
                 await gateway.cancel()
@@ -294,6 +323,8 @@ async def _cleanup(
             await worker.cleanup()
         except BaseException:
             pass
+        else:
+            _emit(progress, "cleanup", "succeeded")
 
     task = asyncio.create_task(action())
     interrupted = False
@@ -305,6 +336,18 @@ async def _cleanup(
     task.result()
     if interrupted:
         raise asyncio.CancelledError
+
+
+def _emit(
+    reporter: HostProgressReporter | None, component: str, state: str,
+    current: int | None = None, total: int | None = None,
+) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
+    except BaseException:
+        pass
 
 
 def _checkpoint_candidate(first: object) -> dict[str, object]:

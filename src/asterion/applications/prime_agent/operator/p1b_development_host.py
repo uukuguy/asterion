@@ -21,6 +21,7 @@ from .p1b_development_sdk_provider import (
     create_prime_p1b_development_sdk_provider,
 )
 from .p1b_workload import PRIME_IPYTHON_CODING_P1B_DEVELOPMENT_WORKLOAD_DIGEST
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 
 _SCOPE = "p1-b-development"
@@ -82,6 +83,7 @@ async def run_prime_p1b_development(
     prime_source_root: str,
     run_id: str | None = None,
     _observation: _P1BObservation | None = None,
+    progress: HostProgressReporter | None = None,
 ) -> PrimeP1BDevelopmentTrace:
     """Run the one fixed P1-B development flow and emit only its safe trace."""
     if type(_observation) not in (type(None), _P1BObservation) or not isinstance(operator_config, Mapping):
@@ -113,8 +115,10 @@ async def run_prime_p1b_development(
         )
         _record(_observation, "setup", state="succeeded")
         active_work = ("worker.acquire", None)
+        _emit(progress, "worker", "started")
         _record(_observation, "worker.acquire")
         await service.acquire()
+        _emit(progress, "worker", "succeeded")
         _record(_observation, "worker.acquire", state="succeeded")
         active_work = ("worker.snapshot0", None)
         _record(_observation, "worker.snapshot0")
@@ -145,6 +149,7 @@ async def run_prime_p1b_development(
             active_work = ("provider.callback", index)
             _record(_observation, "provider.callback", index=index)
             try:
+                _emit(progress, "model", "started", index + 1, _MODEL_COUNT)
                 body = _canonical_json(payload).encode("utf-8")
                 reply = await provider(body)
                 value = _strict_json_object(reply)
@@ -152,6 +157,7 @@ async def run_prime_p1b_development(
                 active_work = previous_work
                 raise
             except BaseException:
+                _emit(progress, "model", "failed", index + 1, _MODEL_COUNT)
                 _record(
                     _observation, "provider.callback", index=index,
                     state=_provider_failure_state(provider),
@@ -159,6 +165,7 @@ async def run_prime_p1b_development(
                 active_work = previous_work
                 raise
             model_calls += 1
+            _emit(progress, "model", "succeeded", index + 1, _MODEL_COUNT)
             _record(_observation, "provider.callback", index=index, state="succeeded")
             active_work = previous_work
             return value
@@ -182,11 +189,13 @@ async def run_prime_p1b_development(
             tool_ids.add(payload["tool_call_id"])
             _record(_observation, "worker.cell", index=index)
             try:
+                _emit(progress, "tool", "started", index + 1, _TOOL_COUNT)
                 observed = await service.execute_cell(payload["code"])
             except asyncio.CancelledError:
                 active_work = previous_work
                 raise
             except BaseException:
+                _emit(progress, "tool", "failed", index + 1, _TOOL_COUNT)
                 _record(_observation, "worker.cell", index=index, state="failed")
                 active_work = previous_work
                 raise
@@ -201,6 +210,7 @@ async def run_prime_p1b_development(
                 active_work = previous_work
                 raise ValueError
             _record(_observation, "worker.cell", index=index, state="succeeded")
+            _emit(progress, "tool", "succeeded", index + 1, _TOOL_COUNT)
             active_work = previous_work
             return {
                 "content": [{"text": "IPython cell completed", "type": "text"}],
@@ -253,6 +263,7 @@ async def run_prime_p1b_development(
             _record(_observation, "gateway.close", state="succeeded")
             active_work = None
         active_work = ("conversation.validate", None)
+        _emit(progress, "validation", "started")
         _record(_observation, "conversation.validate")
         if (
             model_calls != _MODEL_COUNT
@@ -293,6 +304,7 @@ async def run_prime_p1b_development(
             post=post,
         )
         _record(_observation, "trace", state="succeeded")
+        _emit(progress, "validation", "succeeded")
         active_work = ("provider.close", None)
         _record(_observation, "provider.close")
         await _close_provider(provider)
@@ -300,13 +312,17 @@ async def run_prime_p1b_development(
         _record(_observation, "provider.close", state="succeeded")
         active_work = None
         _record(_observation, "worker.cleanup", lane="cleanup")
+        _emit(progress, "cleanup", "started")
         await service.cleanup()
         cleanup_complete = True
         _record(_observation, "worker.cleanup", lane="cleanup", state="succeeded")
+        _emit(progress, "cleanup", "succeeded")
         return PrimeP1BDevelopmentTrace(trace_sha256=trace_sha256)
     except asyncio.CancelledError:
         raise
     except BaseException:
+        if active_work is not None:
+            _emit(progress, "validation", "failed")
         if active_work is not None:
             _record(_observation, active_work[0], index=active_work[1], state="failed")
         failed = True
@@ -320,6 +336,7 @@ async def run_prime_p1b_development(
                 provider_closed=provider_closed,
                 service=service,
                 observation=_observation,
+                progress=progress,
             )
     if failed:
         raise PrimeP1BDevelopmentHostError() from None
@@ -339,6 +356,21 @@ def _record(
             observation.record(stage, lane=lane, state=state, index=index)
         except BaseException:
             pass
+
+
+def _emit(
+    reporter: HostProgressReporter | None,
+    component: str,
+    state: str,
+    current: int | None = None,
+    total: int | None = None,
+) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
+    except BaseException:
+        pass
 
 
 def _provider_failure_state(provider: object) -> str:
@@ -393,8 +425,10 @@ async def _shielded_best_effort_cleanup(
     provider_closed: bool,
     service: P1BDockerPersistentWorkerService | None,
     observation: _P1BObservation | None,
+    progress: HostProgressReporter | None = None,
 ) -> None:
     async def cleanup() -> None:
+        _emit(progress, "cleanup", "started")
         if gateway is not None and gateway_open and not gateway_closed:
             await _stop_gateway(gateway, observation)
         if provider is not None and not provider_closed:
@@ -413,6 +447,7 @@ async def _shielded_best_effort_cleanup(
                 _record(observation, "worker.cleanup", lane="cleanup", state="failed")
             else:
                 _record(observation, "worker.cleanup", lane="cleanup", state="succeeded")
+                _emit(progress, "cleanup", "succeeded")
 
     task = asyncio.create_task(cleanup())
     cancelled = False

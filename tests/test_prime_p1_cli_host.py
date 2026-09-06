@@ -46,6 +46,10 @@ class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
         from asterion.applications.prime_agent.operator import p1_cli_host as subject
 
         transport = SimpleNamespace(close=Mock())
+        paths = subject.PrimeDevelopmentPaths(
+            Path("/cache"), Path("/node"), Path("/seccomp"),
+            Path("/gateway"), Path("/prime"),
+        )
         with (
             patch.object(subject.sys, "platform", "linux"),
             patch.object(subject.os, "geteuid", return_value=0),
@@ -59,6 +63,7 @@ class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
             patch.object(subject, "_host_platform", return_value=object()),
             patch.object(subject, "P1BDevelopmentSnapshotTransport", return_value=transport),
             patch.object(subject, "_operator_config", side_effect=RuntimeError("SENTINEL")),
+            patch.object(subject, "_prepared_paths", return_value=paths),
             patch.object(subject.os, "close"),
         ):
             with self.assertRaises(subject.PrimeP1CliHostError):
@@ -74,6 +79,10 @@ class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
         gateway = root / "packages/typescript/prime-gateway/dist/src/p1b-development-main.js"
         sdk = source / "packages/coding-agent/dist/core/sdk.js"
         typebox = source / "node_modules/typebox/build/index.mjs"
+        paths = subject.PrimeDevelopmentPaths(
+            Path("/cache"), Path("/node"), Path("/seccomp"),
+            root / "packages/typescript/prime-gateway", source,
+        )
         with (
             patch.object(subject.sys, "platform", "linux"),
             patch.object(subject.os, "geteuid", return_value=0),
@@ -87,6 +96,7 @@ class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
             patch.object(subject, "_host_platform", return_value=object()),
             patch.object(subject, "P1BDevelopmentSnapshotTransport", return_value=transport),
             patch.object(subject, "_operator_config", return_value={}),
+            patch.object(subject, "_prepared_paths", return_value=paths),
             patch.object(subject.os, "close"),
         ):
             resources = subject._preflight(root)
@@ -190,7 +200,7 @@ class TestPrimeP1CliHost(unittest.IsolatedAsyncioTestCase):
         run.assert_awaited_once_with(
             image_digest=ready.image_digest, transport=ready.transport, operator_config=ready.operator_config,
             node_bin=ready.node_bin, entrypoint=ready.entrypoint, prime_source_root=ready.prime_source_root,
-            run_id="caller-run-1",
+            run_id="caller-run-1", progress=_context().progress,
         )
 
     async def test_context_exit_and_bad_request_fail_closed_without_secret(self) -> None:

@@ -16,6 +16,7 @@ from typing import Literal, Protocol
 from .docker_worker import _LifecycleCallControl
 from .p3_development_gateway import PrimeP3DevelopmentGateway
 from .p3_development_sdk_provider import create_prime_p3_development_sdk_provider
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 from .p3_development_workload import (
     P3_AGGREGATE_BYTES,
@@ -85,9 +86,11 @@ async def run_prime_p3_development(
     entrypoint: str,
     prime_source_root: str,
     run_id: str,
+    progress: HostProgressReporter | None = None,
 ) -> PrimeP3DevelopmentTrace:
     """Run the fixed P3 graph through real provider, gateway, and workers."""
     opened = cleaned = False
+    validation_complete = False
     workers: tuple[object, ...] = ()
     server: asyncio.AbstractServer | None = None
     control = _LifecycleCallControl(monotonic() + 180.0, None)
@@ -111,11 +114,18 @@ async def run_prime_p3_development(
             request = {key: value for key, value in payload.items() if key != "role"}
             if set(request) != {"model", "context", "options"}:
                 raise ValueError
-            reply = await provider.callback(role, _canonical(request))
+            current = sum(calls.values()) + 1
+            _emit(progress, "model", "started", current, 10)
+            try:
+                reply = await provider.callback(role, _canonical(request))
+            except BaseException:
+                _emit(progress, "model", "failed", current, 10)
+                raise
             value = json.loads(reply)
             if type(value) is not dict or value.get("role") != "assistant":
                 raise ValueError
             calls[role] += 1
+            _emit(progress, "model", "succeeded", current, 10)
             return value
 
         async def tool_hook(payload: object) -> object:
@@ -134,9 +144,16 @@ async def run_prime_p3_development(
             worker = next((item for item in workers if getattr(item, "role", item) == role), None)
             if worker is None:
                 raise ValueError
-            await transport.execute(worker, payload["code"], control)
+            current = sum(tools.values()) + 1
+            _emit(progress, "worker", "started", current, 4)
+            try:
+                await transport.execute(worker, payload["code"], control)
+            except BaseException:
+                _emit(progress, "worker", "failed", current, 4)
+                raise
             tool_ids.add(payload["tool_call_id"])
             tools[role] += 1
+            _emit(progress, "worker", "succeeded", current, 4)
             return {"content": [{"text": "IPython cell completed", "type": "text"}], "details": {}, "isError": False}
 
         gateway = PrimeP3DevelopmentGateway(
@@ -200,6 +217,7 @@ async def run_prime_p3_development(
             server = await _open_rlm_server(
                 Path(socket_directory), gateway, after_step=validate_boundary
             )
+            _emit(progress, "worker", "started")
             workers = await transport.create_workers(
                 image_digest=image_digest, run_id=run_id, workspace=workspace,
                 rlm_socket_directory=socket_directory, control=control,
@@ -207,6 +225,7 @@ async def run_prime_p3_development(
             if tuple(getattr(item, "role", item) for item in workers) != ("root", "implementation", "review"):
                 raise ValueError
             await transport.start_workers(workers, control)
+            _emit(progress, "worker", "succeeded")
             # The bridge, rather than this host, owns child identity and recursion.
             # Root RPC is admitted only through its five closed bridge commands.
             await gateway.open(
@@ -215,6 +234,7 @@ async def run_prime_p3_development(
             )
             opened = True
             result = await gateway.prompt(P3_ROOT_PROMPT)
+            _emit(progress, "validation", "started")
             observations, gateway_usage = _gateway_result(result)
             if calls != {"root": 4, "implementation": 2, "review": 4} or tools != {"root": 1, "implementation": 1, "review": 2}:
                 raise ValueError
@@ -235,15 +255,19 @@ async def run_prime_p3_development(
             validate_p3_artifact_bytes(role="review-follow-up", value=follow_up)
             validate_p3_aggregate_bytes(aggregate)
             _run_oracle(source, tests)
+            _emit(progress, "validation", "succeeded")
+            validation_complete = True
             await gateway.close()
             opened = False
             server.close()
             await server.wait_closed()
             server = None
             cleanup_control = _LifecycleCallControl(monotonic() + 15.0, None)
+            _emit(progress, "cleanup", "started")
             await transport.cleanup(workers, cleanup_control)
             await transport.assert_absent(workers, cleanup_control)
             cleaned = True
+            _emit(progress, "cleanup", "succeeded")
         return PrimeP3DevelopmentTrace(
             "sha256:" + sha256(_canonical({
                 "artifacts_sha256": {
@@ -269,6 +293,8 @@ async def run_prime_p3_development(
     except asyncio.CancelledError:
         raise
     except BaseException:
+        if not validation_complete:
+            _emit(progress, "validation", "failed")
         raise PrimeP3DevelopmentHostError() from None
     finally:
         if server is not None:
@@ -284,12 +310,28 @@ async def run_prime_p3_development(
             except BaseException:
                 pass
         if workers and not cleaned:
+            _emit(progress, "cleanup", "started")
             try:
                 cleanup_control = _LifecycleCallControl(monotonic() + 15.0, None)
                 await transport.cleanup(workers, cleanup_control)
                 await transport.assert_absent(workers, cleanup_control)
             except BaseException:
+                _emit(progress, "cleanup", "failed")
                 pass
+            else:
+                _emit(progress, "cleanup", "succeeded")
+
+
+def _emit(
+    reporter: HostProgressReporter | None, component: str, state: str,
+    current: int | None = None, total: int | None = None,
+) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
+    except BaseException:
+        pass
 
 
 def _gateway_result(result: object) -> tuple[dict[str, int], dict[str, dict[str, int]]]:

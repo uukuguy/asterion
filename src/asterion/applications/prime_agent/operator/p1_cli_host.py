@@ -17,6 +17,10 @@ import sys
 from dotenv import dotenv_values
 
 from asterion.applications.prime_agent.operator.image_input_lock import ImagePlatformDescriptor
+from asterion.applications.prime_agent.operator.development_preparation import (
+    PrimeDevelopmentPaths,
+    resolve_prepared_prime_development,
+)
 from asterion.applications.prime_agent.operator.p1b_development_docker import P1BDevelopmentSnapshotTransport
 from asterion.applications.prime_agent.operator.p1b_development_host import run_prime_p1b_development
 from asterion.runtime.host import CancellationSignal
@@ -26,6 +30,7 @@ from asterion.runtimes.prime_agent_host import (
     PrimeSmallVerificationResult,
 )
 from asterion.services.registry import HostServiceFactoryBinding, HostServiceFactoryContext
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 
 _CAPABILITY_ID = "prime.ipython-production"
@@ -39,8 +44,6 @@ _IMAGE_TAG = "asterion-p1b-development:20260906"
 _CONFIRMED_IMAGE_DIGEST = "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657"
 _DOCKER = "/usr/bin/docker"
 _SOCKET = "/var/run/docker.sock"
-_SECCOMP = "/tmp/asterion-p1-development-seccomp.json"
-_NODE = "/tmp/asterion-node22/bin/node"
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _RUN_ID = re.compile(r"[a-z][a-z0-9.-]*\Z")
 
@@ -66,11 +69,14 @@ class _P1CliResources:
 class PrimeSmallVerificationService:
     """One active-context, one-shot, fixed-request verification service."""
 
-    __slots__ = ("_active", "_consumed", "_resources")
+    __slots__ = ("_active", "_consumed", "_progress", "_resources")
 
-    def __init__(self, resources: _P1CliResources) -> None:
+    def __init__(
+        self, resources: _P1CliResources, progress: HostProgressReporter | None = None
+    ) -> None:
         self._active = True
         self._consumed = False
+        self._progress = progress
         self._resources = resources
 
     def __repr__(self) -> str:
@@ -103,6 +109,7 @@ class PrimeSmallVerificationService:
                 entrypoint=self._resources.entrypoint,
                 prime_source_root=self._resources.prime_source_root,
                 run_id=request.run_id,
+                progress=self._progress,
             )
         )
         try:
@@ -143,11 +150,14 @@ def create_prime_p1_cli_factory(*, repo_root: Path) -> HostServiceFactoryBinding
     @asynccontextmanager
     async def factory(context: HostServiceFactoryContext):
         _validate_context(context)
+        _emit(context.progress, "preflight", "started")
         try:
-            resources = _preflight(root)
-            service = PrimeSmallVerificationService(resources)
+            resources = _preflight(root, context.progress)
+            service = PrimeSmallVerificationService(resources, context.progress)
         except BaseException:
+            _emit(context.progress, "preflight", "failed")
             raise PrimeP1CliHostError() from None
+        _emit(context.progress, "preflight", "succeeded")
         try:
             yield service
         finally:
@@ -172,22 +182,32 @@ def _validate_context(context: object) -> None:
         raise PrimeP1CliHostError()
 
 
-def _preflight(repo_root: Path) -> _P1CliResources:
-    if sys.platform != "linux" or os.geteuid() != 0:
-        raise PrimeP1CliHostError()
-    docker = _regular_executable(Path(_DOCKER))
-    socket = Path(_SOCKET)
-    if not stat.S_ISSOCK(os.lstat(socket).st_mode):
-        raise PrimeP1CliHostError()
-    node = _regular_executable(Path(_NODE))
-    entrypoint = _regular_file(repo_root / "packages/typescript/prime-gateway/dist/src/p1b-development-main.js")
-    source = _regular_directory(repo_root / "3th-party/prime-agent")
-    _regular_file(source / "packages/coding-agent/dist/core/sdk.js")
-    _regular_file(source / "node_modules/typebox/build/index.mjs")
-    seccomp_fd = _sealed_seccomp(Path(_SECCOMP))
+def _preflight(
+    repo_root: Path,
+    progress: HostProgressReporter | None = None,
+    paths: PrimeDevelopmentPaths | None = None,
+) -> _P1CliResources:
+    paths = paths or _prepared_paths(repo_root)
     transport: object | None = None
+    seccomp_fd = -1
+    image_ready = False
     try:
+        _emit(progress, "image", "started")
+        docker = _regular_executable(Path(_DOCKER))
+        socket = Path(_SOCKET)
+        if not stat.S_ISSOCK(os.lstat(socket).st_mode):
+            raise ValueError
         image_digest = _inspect_image(docker, socket)
+        _emit(progress, "image", "succeeded")
+        image_ready = True
+        node = _regular_executable(paths.node)
+        entrypoint = _regular_file(
+            paths.gateway_root / "dist/src/p1b-development-main.js"
+        )
+        source = _regular_directory(paths.source_root)
+        _regular_file(source / "packages/coding-agent/dist/core/sdk.js")
+        _regular_file(source / "node_modules/typebox/build/index.mjs")
+        seccomp_fd = _sealed_seccomp(paths.seccomp)
         transport = P1BDevelopmentSnapshotTransport(
             docker_executable=str(docker), socket_path=str(socket), seccomp_profile_fd=seccomp_fd,
             platform=_host_platform(), operator_confirmed_same_guest=True,
@@ -198,13 +218,40 @@ def _preflight(repo_root: Path) -> _P1CliResources:
             entrypoint=str(entrypoint), prime_source_root=str(source), seccomp_fd=seccomp_fd,
         )
     except BaseException:
+        if not image_ready:
+            _emit(progress, "image", "failed")
         if transport is not None:
             _close_transport(transport)
-        try:
-            os.close(seccomp_fd)
-        except OSError:
-            pass
+        if seccomp_fd >= 0:
+            try:
+                os.close(seccomp_fd)
+            except OSError:
+                pass
         raise PrimeP1CliHostError() from None
+
+
+def _prepared_paths(repo_root: Path) -> PrimeDevelopmentPaths:
+    if sys.platform != "linux" or os.geteuid() != 0:
+        raise PrimeP1CliHostError()
+    try:
+        return resolve_prepared_prime_development(repo_root, "p1")
+    except BaseException:
+        raise PrimeP1CliHostError() from None
+
+
+def _emit(
+    reporter: HostProgressReporter | None,
+    component: str,
+    state: str,
+    current: int | None = None,
+    total: int | None = None,
+) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
+    except BaseException:
+        pass
 
 
 def _operator_config(path: Path) -> Mapping[str, object]:

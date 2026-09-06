@@ -21,6 +21,10 @@ from dotenv import dotenv_values
 from asterion.applications.prime_agent.operator.image_input_lock import (
     ImagePlatformDescriptor,
 )
+from asterion.applications.prime_agent.operator.development_preparation import (
+    PrimeDevelopmentPaths,
+    resolve_prepared_prime_development,
+)
 from asterion.applications.prime_agent.operator.p1b_development_docker import (
     P1BDevelopmentSnapshotTransport,
     P1BDockerPersistentWorkerService,
@@ -45,6 +49,7 @@ from asterion.services.registry import (
     HostServiceFactoryBinding,
     HostServiceFactoryContext,
 )
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 
 _CAPABILITY_ID = "prime.long-session-continuity-development"
@@ -58,8 +63,6 @@ _CONFIRMED_IMAGE_DIGEST = (
 )
 _DOCKER = "/usr/bin/docker"
 _SOCKET = "/var/run/docker.sock"
-_SECCOMP = "/tmp/asterion-p1-development-seccomp.json"
-_NODE = "/tmp/asterion-node22/bin/node"
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _RUN_ID = re.compile(r"[a-z][a-z0-9.-]*\Z")
 
@@ -84,13 +87,14 @@ _LifecycleRunner = Callable[[_P4CliResources, str], Awaitable[object]]
 
 
 class PrimeP4SmallVerificationService:
-    __slots__ = ("_active", "_consumed", "_lifecycle_runner", "_resources")
+    __slots__ = ("_active", "_consumed", "_lifecycle_runner", "_progress", "_resources")
 
     def __init__(
         self,
         resources: _P4CliResources,
         *,
         lifecycle_runner: _LifecycleRunner | None = None,
+        progress: HostProgressReporter | None = None,
     ) -> None:
         self._active = True
         self._consumed = False
@@ -99,6 +103,7 @@ class PrimeP4SmallVerificationService:
             if lifecycle_runner is None
             else lifecycle_runner
         )
+        self._progress = progress
         self._resources = resources
 
     def __repr__(self) -> str:
@@ -121,7 +126,11 @@ class PrimeP4SmallVerificationService:
         self._consumed = True
         if _cancelled(signal):
             raise PrimeSmallVerificationCancelled()
-        task = asyncio.create_task(self._lifecycle_runner(self._resources, request.run_id))
+        task = asyncio.create_task(
+            self._lifecycle_runner(self._resources, request.run_id, self._progress)
+            if lifecycle_runner_accepts_progress(self._lifecycle_runner)
+            else self._lifecycle_runner(self._resources, request.run_id)
+        )
         try:
             async with asyncio.timeout(_DEADLINE_SECONDS):
                 trace = await _await_with_cancellation(task, signal)
@@ -165,10 +174,15 @@ def create_prime_p4_cli_factory(*, repo_root: Path) -> HostServiceFactoryBinding
     @asynccontextmanager
     async def factory(context: HostServiceFactoryContext):
         _validate_context(context)
+        _emit(context.progress, "preflight", "started")
         try:
-            service = PrimeP4SmallVerificationService(_preflight(root))
+            service = PrimeP4SmallVerificationService(
+                _preflight(root, context.progress), progress=context.progress
+            )
         except BaseException:
+            _emit(context.progress, "preflight", "failed")
             raise PrimeP4CliHostError() from None
+        _emit(context.progress, "preflight", "succeeded")
         try:
             yield service
         finally:
@@ -193,26 +207,26 @@ def _validate_context(context: object) -> None:
         raise PrimeP4CliHostError()
 
 
-def _preflight(repo_root: Path) -> _P4CliResources:
-    if sys.platform != "linux" or os.geteuid() != 0:
-        raise PrimeP4CliHostError()
-    docker = _regular_executable(Path(_DOCKER))
-    socket = Path(_SOCKET)
+def _preflight(
+    repo_root: Path,
+    progress: HostProgressReporter | None = None,
+    paths: PrimeDevelopmentPaths | None = None,
+) -> _P4CliResources:
+    paths = paths or _prepared_paths(repo_root)
+    transport: object | None = None
+    seccomp_fd = -1
     try:
+        _emit(progress, "gateway", "started")
+        docker = _regular_executable(Path(_DOCKER))
+        socket = Path(_SOCKET)
         if not stat.S_ISSOCK(os.lstat(socket).st_mode):
             raise ValueError
-    except (OSError, ValueError):
-        raise PrimeP4CliHostError() from None
-    node = _regular_executable(Path(_NODE))
-    entrypoint = _regular_file(
-        repo_root / "packages/typescript/prime-gateway/dist/src/p4-development-main.js"
-    )
-    source = _regular_directory(repo_root / "3th-party/prime-agent")
-    _regular_file(source / "packages/coding-agent/dist/core/sdk.js")
-    _regular_file(source / "node_modules/typebox/build/index.mjs")
-    seccomp_fd = _sealed_seccomp(Path(_SECCOMP))
-    transport: object | None = None
-    try:
+        node = _regular_executable(paths.node)
+        entrypoint = _regular_file(paths.gateway_root / "dist/src/p4-development-main.js")
+        source = _regular_directory(paths.source_root)
+        _regular_file(source / "packages/coding-agent/dist/core/sdk.js")
+        _regular_file(source / "node_modules/typebox/build/index.mjs")
+        seccomp_fd = _sealed_seccomp(paths.seccomp)
         transport = P1BDevelopmentSnapshotTransport(
             docker_executable=str(docker),
             socket_path=str(socket),
@@ -220,7 +234,7 @@ def _preflight(repo_root: Path) -> _P4CliResources:
             platform=_host_platform(),
             operator_confirmed_same_guest=True,
         )
-        return _P4CliResources(
+        result = _P4CliResources(
             image_digest=_inspect_image(docker, socket),
             transport=transport,
             operator_config=_operator_config(repo_root / ".env"),
@@ -229,18 +243,31 @@ def _preflight(repo_root: Path) -> _P4CliResources:
             prime_source_root=str(source),
             seccomp_fd=seccomp_fd,
         )
+        _emit(progress, "gateway", "succeeded")
+        return result
     except BaseException:
+        _emit(progress, "gateway", "failed")
         if transport is not None:
             _close_transport(transport)
-        try:
-            os.close(seccomp_fd)
-        except OSError:
-            pass
+        if seccomp_fd >= 0:
+            try:
+                os.close(seccomp_fd)
+            except OSError:
+                pass
+        raise PrimeP4CliHostError() from None
+
+
+def _prepared_paths(repo_root: Path) -> PrimeDevelopmentPaths:
+    if sys.platform != "linux" or os.geteuid() != 0:
+        raise PrimeP4CliHostError()
+    try:
+        return resolve_prepared_prime_development(repo_root, "p4")
+    except BaseException:
         raise PrimeP4CliHostError() from None
 
 
 async def _run_p4_development_lifecycle(
-    resources: _P4CliResources, run_id: str
+    resources: _P4CliResources, run_id: str, progress: HostProgressReporter | None = None,
 ) -> PrimeP4DevelopmentTrace:
     session_id = "prime-p4-session-" + sha256(run_id.encode("ascii")).hexdigest()
     try:
@@ -266,6 +293,7 @@ async def _run_p4_development_lifecycle(
                 session_id=session_id,
                 prime_source_root=resources.prime_source_root,
                 workspace=workspace,
+                progress=progress,
             )
     except asyncio.CancelledError:
         raise
@@ -289,6 +317,22 @@ def _operator_config(path: Path) -> Mapping[str, object]:
     ):
         raise PrimeP4CliHostError()
     return dict(values)
+
+
+def lifecycle_runner_accepts_progress(runner: _LifecycleRunner) -> bool:
+    return runner is _run_p4_development_lifecycle
+
+
+def _emit(
+    reporter: HostProgressReporter | None, component: str, state: str,
+    current: int | None = None, total: int | None = None,
+) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
+    except BaseException:
+        pass
 
 
 def _inspect_image(docker: Path, socket: Path) -> str:

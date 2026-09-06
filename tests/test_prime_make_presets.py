@@ -7,6 +7,58 @@ from pathlib import Path
 
 
 class TestPrimeMakePresets(unittest.TestCase):
+    def test_p1_p3_and_p4_self_prepare_with_a_safe_progress_stream(self) -> None:
+        makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
+        cases = (
+            (
+                "p1",
+                "prime-p2-run:",
+                "IPython coding: preserve state across two cells and validate the generated solution",
+                "prime.ipython-coding@1.0.0",
+            ),
+            (
+                "p3",
+                "prime-p4-run:",
+                "Recursive workflow: coordinate two child roles and validate the combined result",
+                "prime.recursive-workflow@1.0.0",
+            ),
+            (
+                "p4",
+                "prime-p5-run:",
+                "Long session continuity: detach, reattach, and validate the preserved session",
+                "prime.long-session-continuity@1.0.0",
+            ),
+        )
+        for scenario, next_target, purpose, application in cases:
+            with self.subTest(scenario=scenario):
+                recipe = makefile.split(f"prime-{scenario}-run:\n", 1)[1].split(
+                    "\n" + next_target, 1
+                )[0]
+                self.assertIn(f"[prime-{scenario}] {purpose}", recipe)
+                self.assertEqual(
+                    recipe.count('orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)"'),
+                    1,
+                )
+                self.assertLess(
+                    recipe.index(
+                        f"tools/prepare_prime_development.py --scenario {scenario}"
+                    ),
+                    recipe.index("asterion run --progress"),
+                )
+                self.assertIn('--run-id "$$1"', recipe)
+                self.assertIn(f"' prime-{scenario}-run \"$$run_id\"", recipe)
+                self.assertIn("--status-stream stderr", recipe)
+                for required in (
+                    "--extra prime",
+                    "--python /usr/bin/python3",
+                    "--isolated",
+                    "--provider prime-agent",
+                    f"--application {application}",
+                    "--runtime prime.agent",
+                    "--input fixed-small-verification",
+                ):
+                    self.assertIn(required, recipe)
+
     def test_p2_self_prepares_then_runs_with_progress_in_one_orb_shell(self) -> None:
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
         recipe = makefile.split("prime-p2-run:\n", 1)[1].split("\nprime-p3-run:", 1)[0]

@@ -13,6 +13,7 @@ import sys
 from .p3_development_host import PrimeP3DevelopmentTrace
 from .p3_development_host import run_prime_p3_development
 from .p3_development_docker import PrimeP3DevelopmentDockerTransport
+from .development_preparation import PrimeDevelopmentPaths, resolve_prepared_prime_development
 from asterion.runtime.host import CancellationSignal
 from asterion.runtimes.prime_agent_host import (
     PrimeSmallVerificationCancelled,
@@ -20,6 +21,7 @@ from asterion.runtimes.prime_agent_host import (
     PrimeSmallVerificationResult,
 )
 from asterion.services.registry import HostServiceFactoryBinding, HostServiceFactoryContext
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 _CAPABILITY = "prime.recursive-workflow-development"
 _TAG = "asterion-p3-development:20260906"
@@ -45,6 +47,7 @@ class _Resources:
     entrypoint: str
     source: str
     seccomp_fd: int
+    progress: HostProgressReporter | None = None
 
 
 class PrimeP3SmallVerificationService:
@@ -57,7 +60,7 @@ class PrimeP3SmallVerificationService:
         self._consumed = True
         if signal is not None and signal.cancelled:
             raise PrimeSmallVerificationCancelled()
-        task = asyncio.create_task(run_prime_p3_development(image_digest=_DIGEST, transport=self._resources.transport, operator_config=self._resources.config, node_bin=self._resources.node, entrypoint=self._resources.entrypoint, prime_source_root=self._resources.source, run_id=request.run_id))
+        task = asyncio.create_task(run_prime_p3_development(image_digest=_DIGEST, transport=self._resources.transport, operator_config=self._resources.config, node_bin=self._resources.node, entrypoint=self._resources.entrypoint, prime_source_root=self._resources.source, run_id=request.run_id, progress=self._resources.progress))
         try:
             while not task.done():
                 if signal is not None and signal.cancelled:
@@ -115,7 +118,16 @@ def create_prime_p3_cli_factory(*, repo_root: Path) -> HostServiceFactoryBinding
     async def factory(context: HostServiceFactoryContext):
         if type(context) is not HostServiceFactoryContext or (context.provider_id, context.application_id, context.application_version, context.capability_id, dict(context.options)) != ("prime-agent", "prime.recursive-workflow", "1.0.0", _CAPABILITY, {}):
             raise ValueError("prime P3 development host is unavailable")
-        service = PrimeP3SmallVerificationService(_preflight(repo_root.resolve()))
+        _emit(context.progress, "preflight", "started")
+        try:
+            paths = _prepared_paths(repo_root.resolve())
+        except BaseException:
+            _emit(context.progress, "preflight", "failed")
+            raise ValueError("prime P3 development host is unavailable") from None
+        _emit(context.progress, "preflight", "succeeded")
+        service = PrimeP3SmallVerificationService(
+            _preflight(repo_root.resolve(), context.progress, paths)
+        )
         try:
             yield service
         finally:
@@ -127,26 +139,64 @@ def create_host_service_factory() -> HostServiceFactoryBinding:
     return create_prime_p3_cli_factory(repo_root=Path.cwd())
 
 
-def _preflight(root: Path) -> _Resources:
-    if sys.platform != "linux" or os.geteuid() != 0:
-        raise ValueError("prime P3 development host is unavailable")
+def _preflight(
+    root: Path,
+    progress: HostProgressReporter | None = None,
+    paths: PrimeDevelopmentPaths | None = None,
+) -> _Resources:
+    paths = paths or _prepared_paths(root)
     from . import p2_cli_host as p2
-    docker = p2._regular_executable(Path("/usr/bin/docker"))
-    socket = Path("/var/run/docker.sock")
-    if not stat.S_ISSOCK(os.lstat(socket).st_mode):
-        raise ValueError("prime P3 development host is unavailable")
-    node = p2._regular_executable(Path("/tmp/asterion-node22/bin/node"))
-    entry = p2._regular_file(root / "packages/typescript/prime-gateway/dist/src/p3-development-main.js")
-    source = p2._regular_directory(root / "3th-party/prime-agent")
-    p2._regular_file(source / "packages/coding-agent/dist/core/sdk.js")
-    descriptor = p2._sealed_seccomp(Path("/tmp/asterion-p1-development-seccomp.json"))
+    descriptor = -1
+    source_ready = gateway_ready = False
     try:
+        _emit(progress, "source", "started")
+        node = p2._regular_executable(paths.node)
+        entry = p2._regular_file(paths.gateway_root / "dist/src/p3-development-main.js")
+        source = p2._regular_directory(paths.source_root)
+        p2._regular_file(source / "packages/coding-agent/dist/core/sdk.js")
+        descriptor = p2._sealed_seccomp(paths.seccomp)
+        _emit(progress, "source", "succeeded")
+        source_ready = True
+        _emit(progress, "gateway", "started")
+        docker = p2._regular_executable(Path("/usr/bin/docker"))
+        socket = Path("/var/run/docker.sock")
+        if not stat.S_ISSOCK(os.lstat(socket).st_mode):
+            raise ValueError
         _inspect_image(docker, socket)
         transport = PrimeP3DevelopmentDockerTransport(docker_executable=str(docker), socket_path=str(socket), seccomp_profile_fd=descriptor, platform=p2._host_platform())
-        return _Resources(transport, dict(p2._operator_config(root / ".env")), str(node), str(entry), str(source), descriptor)
+        value = _Resources(transport, dict(p2._operator_config(root / ".env")), str(node), str(entry), str(source), descriptor, progress)
+        _emit(progress, "gateway", "succeeded")
+        gateway_ready = True
+        return value
     except BaseException:
-        os.close(descriptor)
+        if not source_ready:
+            _emit(progress, "source", "failed")
+        elif not gateway_ready:
+            _emit(progress, "gateway", "failed")
+        if descriptor >= 0:
+            os.close(descriptor)
         raise ValueError("prime P3 development host is unavailable") from None
+
+
+def _prepared_paths(root: Path) -> PrimeDevelopmentPaths:
+    if sys.platform != "linux" or os.geteuid() != 0:
+        raise ValueError("prime P3 development host is unavailable")
+    try:
+        return resolve_prepared_prime_development(root, "p3")
+    except BaseException:
+        raise ValueError("prime P3 development host is unavailable") from None
+
+
+def _emit(
+    reporter: HostProgressReporter | None, component: str, state: str,
+    current: int | None = None, total: int | None = None,
+) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
+    except BaseException:
+        pass
 
 
 def _inspect_image(docker: Path, socket: Path) -> None:

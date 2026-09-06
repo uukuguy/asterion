@@ -204,12 +204,15 @@ prime-verify-provider-free:
 
 prime-p1-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p1-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run \
-			--provider prime-agent \
-			--application prime.ipython-coding@1.0.0 \
-			--runtime prime.agent \
-			--run-id "$$run_id" \
-			--input fixed-small-verification
+		printf '%s\n' '[prime-p1] IPython coding: preserve state across two cells and validate the generated solution' >&2; \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
+			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p1 --status-stream stderr; \
+			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+				--provider prime-agent \
+				--application prime.ipython-coding@1.0.0 \
+				--runtime prime.agent \
+				--run-id "$$1" \
+				--input fixed-small-verification' prime-p1-run "$$run_id"
 
 prime-p2-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p2-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
@@ -225,21 +228,27 @@ prime-p2-run:
 
 prime-p3-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p3-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run \
-			--provider prime-agent \
-			--application prime.recursive-workflow@1.0.0 \
-			--runtime prime.agent \
-			--run-id "$$run_id" \
-			--input fixed-small-verification
+		printf '%s\n' '[prime-p3] Recursive workflow: coordinate two child roles and validate the combined result' >&2; \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
+			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p3 --status-stream stderr; \
+			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+				--provider prime-agent \
+				--application prime.recursive-workflow@1.0.0 \
+				--runtime prime.agent \
+				--run-id "$$1" \
+				--input fixed-small-verification' prime-p3-run "$$run_id"
 
 prime-p4-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p4-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run \
-			--provider prime-agent \
-			--application prime.long-session-continuity@1.0.0 \
-			--runtime prime.agent \
-			--run-id "$$run_id" \
-			--input fixed-small-verification
+		printf '%s\n' '[prime-p4] Long session continuity: detach, reattach, and validate the preserved session' >&2; \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
+			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p4 --status-stream stderr; \
+			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+				--provider prime-agent \
+				--application prime.long-session-continuity@1.0.0 \
+				--runtime prime.agent \
+				--run-id "$$1" \
+				--input fixed-small-verification' prime-p4-run "$$run_id"
 
 prime-p5-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p5-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \

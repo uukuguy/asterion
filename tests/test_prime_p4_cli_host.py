@@ -68,6 +68,10 @@ class TestPrimeP4CliHost(unittest.IsolatedAsyncioTestCase):
         from asterion.applications.prime_agent.operator import p4_cli_host as subject
 
         transport = SimpleNamespace(close=Mock())
+        paths = subject.PrimeDevelopmentPaths(
+            Path("/cache"), Path("/node"), Path("/seccomp"),
+            Path("/gateway"), Path("/prime"),
+        )
         with (
             patch.object(subject.sys, "platform", "linux"),
             patch.object(subject.os, "geteuid", return_value=0),
@@ -83,6 +87,7 @@ class TestPrimeP4CliHost(unittest.IsolatedAsyncioTestCase):
             patch.object(subject, "_host_platform", return_value=object()),
             patch.object(subject, "P1BDevelopmentSnapshotTransport", return_value=transport),
             patch.object(subject, "_operator_config", side_effect=RuntimeError("SENTINEL")),
+            patch.object(subject, "_prepared_paths", return_value=paths),
             patch.object(subject.os, "close"),
         ):
             with self.assertRaises(subject.PrimeP4CliHostError) as raised:
