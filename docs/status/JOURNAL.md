@@ -1989,3 +1989,8 @@
 - 11:29 Made P5 tool calls completion-only to prevent artifact-less inspection turns [63ed2c7f]
 - 11:32 Admitted observed private IPC and tested late-create cleanup to unblock real P5 execution [6f688d08]
 - 11:45 Closed P5 exact CLI: one Prime session, 4 callbacks, 2 completion-only cells, failed-quality feedback, repair, host gates and cleanup; trace 866420d6 [6f688d08]
+- 11:34 Corrected P5 closure timestamp and advanced recovery boundary to P6 [83edc540]
+- 11:40 Rejected non-callable clamp AST bypass before P5 success [b9c6714b]
+- 11:41 Accepted formatting-only P5 clamp repairs with exact AST validation [f6f05c1c]
+- 11:42 Fixed P5 provider temperature across all turns for deterministic responses [5acceaf4]
+- 11:44 Closed Sol oracle finding and reran deterministic P5 CLI; trace 64268243, zero residue [5acceaf4]

@@ -134,7 +134,7 @@
   IPython actions, failed-quality feedback, exact repair, independent host gates
   and cleanup. `make prime-p5-run` exited 0 with
   `p5-development/unpromoted` trace
-  `sha256:866420d60d698890d1114f054dbb7753dabc4551401f1e120d5af671ff2e8894`;
+  `sha256:64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`;
   residue inspection found zero P5 containers, gateways and workspaces.
 - P6 `prime.continual-improvement/v1` has the fixed task-A/candidate/task-B
   preserve-or-exact-rollback chain over `HarnessCoordinator`, scoped evidence,

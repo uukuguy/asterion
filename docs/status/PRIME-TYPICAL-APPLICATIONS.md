@@ -157,7 +157,7 @@ action to repair the source. The host independently validated actual source and
 artifact bytes, the AST oracle, both result gates and both quality outcomes.
 The public `make prime-p5-run` command exited 0 with scope `p5-development`,
 promotion `unpromoted`, and trace
-`sha256:866420d60d698890d1114f054dbb7753dabc4551401f1e120d5af671ff2e8894`.
+`sha256:64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`.
 Post-run inspection found zero P5 containers, gateway processes and temporary
 workspaces. This closes the fixed development reproduction; production
 promotion and broader autonomous task classes remain separate.
