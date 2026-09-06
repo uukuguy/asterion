@@ -96,11 +96,15 @@ async def _run(root:Path,run_id:str,progress:HostProgressReporter|None=None,path
    worker=P7DevelopmentDockerWorkerService(image_digest=image,transport=transport,run_id=run_id,session_id="p7-"+run_id,goal_id="prime.arc-agi-3/v1",workspace=work,broker_private_dir=str(broker.private_dir),broker_model_socket=str(broker.model_socket))
    return await run_p7_development_lifecycle(gateway=PrimeP7DevelopmentGateway(node_bin=str(paths.node),entrypoint=paths.gateway_root/"dist/src/p7-development-main.js",deadline_seconds=300),provider=create_prime_p7_development_sdk_provider(_cfg(root)),worker=worker,broker=broker,run_id=run_id,session_id="p7-"+run_id,prime_source_root=str(paths.source_root),workspace=work,runtime=runtime,progress=progress)
  finally:
-  if broker:broker.close()
-  if transport:transport.close()
+  if broker:
+   try:broker.close()
+   except BaseException:pass
+  if transport:
+   try:transport.close()
+   except BaseException:pass
   if seccomp_fd>=0:
    try:os.close(seccomp_fd)
-   except OSError:pass
+   except BaseException:pass
 def _emit(reporter:HostProgressReporter|None,component:str,state:str,current:int|None=None,total:int|None=None)->None:
  if reporter is None:return
  try:reporter.emit(HostProgressEvent(component,state,current,total))
