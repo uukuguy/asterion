@@ -49,8 +49,13 @@ class P7BrokerService:
     def __repr__(self) -> str:
         return "P7BrokerService(redacted)"
 
-    def start(self) -> bytes:
+    def start(self, *, client_socket_path: str = "/broker/model.sock") -> bytes:
         if self._process is not None:
+            raise P7BrokerServiceError()
+        if (
+            type(client_socket_path) is not str
+            or client_socket_path != "/broker/model.sock"
+        ):
             raise P7BrokerServiceError()
         try:
             if self._temporary:
@@ -68,7 +73,9 @@ class P7BrokerService:
                     if stat.S_IMODE(self._private.stat().st_mode) != 0o711 or stat.S_IMODE(self._control_socket.stat().st_mode) != 0o600:
                         raise ValueError
                     if self._control("ready") == {"ready": True}:
-                        return p7_model_client_module_bytes(str(self._model_socket), self._model_token)
+                        # The model runs in a container: never disclose the host-private
+                        # socket pathname in the generated module.
+                        return p7_model_client_module_bytes(client_socket_path, self._model_token)
                 time.sleep(.02)
             raise ValueError
         except BaseException:
