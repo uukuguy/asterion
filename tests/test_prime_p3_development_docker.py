@@ -45,6 +45,8 @@ class TestPrimeP3DevelopmentDocker(unittest.IsolatedAsyncioTestCase):
         commands = [call.args[0] for call in transport._call.await_args_list]  # type: ignore[attr-defined]
         self.assertEqual(len(commands), 3)
         self.assertIn("/host/workspace:/workspace:rw,rprivate", commands[0])
+        self.assertNotIn("/workspace:rw,nodev,noexec,nosuid,size=67108864,uid=65534,gid=65534,mode=0700", commands[0])
+        self.assertIn("/tmp:rw,nodev,noexec,nosuid,size=16777216,uid=65534,gid=65534,mode=0700", commands[0])
         self.assertIn("/host/rlm:/run/asterion-rlm:ro,rprivate", commands[0])
         for command in commands[1:]:
             self.assertIn("/host/workspace:/workspace:rw,rprivate", command)

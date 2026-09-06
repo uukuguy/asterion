@@ -9,7 +9,7 @@ import secrets
 from dataclasses import dataclass
 from time import monotonic
 
-from .docker_cli import DockerCliEngineTransport, _CLEARED_BASE_IMAGE_ENVIRONMENT, _ENVIRONMENT, _TMPFS
+from .docker_cli import DockerCliEngineTransport, _CLEARED_BASE_IMAGE_ENVIRONMENT, _ENVIRONMENT
 from .docker_worker import _LifecycleCallControl
 
 _ROLES = ("root", "implementation", "review")
@@ -151,7 +151,7 @@ class PrimeP3DevelopmentDockerTransport(DockerCliEngineTransport):
     def _create_argv(self, *, role: str, name: str, image_digest: str, workspace: str, rlm_socket_directory: str, fd: int) -> tuple[str, ...]:
         platform = "/".join(item for item in (self._platform.os, self._platform.architecture, self._platform.variant) if item is not None)  # type: ignore[attr-defined]
         argv = self._prefix + (  # type: ignore[attr-defined]
-            "create", "--name", name, "--pull=never", "--platform", platform, "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", "seccomp=/proc/self/fd/" + str(fd), "--tmpfs", _TMPFS, "--volume", workspace + ":/workspace:rw,rprivate", "--env", _ENVIRONMENT[0], "--env", _ENVIRONMENT[1], "--env", _ENVIRONMENT[2], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[0], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[1], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[2], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[3], "--pids-limit", "64", "--memory", "268435456", "--memory-swap", "268435456", "--cpus", "1", "--restart", "no", "--label", "asterion.prime.p3.role=" + role,
+            "create", "--name", name, "--pull=never", "--platform", platform, "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", "seccomp=/proc/self/fd/" + str(fd), "--tmpfs", "/tmp:rw,nodev,noexec,nosuid,size=16777216,uid=65534,gid=65534,mode=0700", "--volume", workspace + ":/workspace:rw,rprivate", "--env", _ENVIRONMENT[0], "--env", _ENVIRONMENT[1], "--env", _ENVIRONMENT[2], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[0], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[1], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[2], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[3], "--pids-limit", "64", "--memory", "268435456", "--memory-swap", "268435456", "--cpus", "1", "--restart", "no", "--label", "asterion.prime.p3.role=" + role,
         )
         if role == "root":
             argv += ("--volume", rlm_socket_directory + ":/run/asterion-rlm:ro,rprivate")
