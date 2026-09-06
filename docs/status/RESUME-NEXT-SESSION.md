@@ -10,7 +10,7 @@ Canonical worklist: `docs/status/FRAMEWORK-INTEGRATION-WORKLIST.md`.
 
 ## Closed Prime applications
 
-- P1 `make prime-p1-run`: exact installed CLI, five model callbacks, two Docker IPython cells, compact, oracle and cleanup; trace `sha256:a8be640bdcee9c93ea3e382729db561e4c29e071d3ff776335daac4ff572c703`.
+- P1 `PRIME_RUN_ID=prime-p1-20260907-fixed make prime-p1-run`: exact installed CLI with the explicit `prime` extra, five model callbacks, two Docker IPython cells, compact, oracle and cleanup; trace `sha256:9672ba00a1b439c39e319a7f6ae8607e7d00a14795047c7b42f9e56c7686dbcf`.
 - P2 `make prime-p2-run`: two model callbacks, one Docker IPython cell, fixed corpus oracle and cleanup; trace `sha256:4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`.
 - P3 `make prime-p3-run`: two recursive children, ten model callbacks, four Docker IPython cells, host oracle and cleanup; trace `sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`.
 - P4 `make prime-p4-run`: direct native daemon checkpoint, exact zero-gap detach/reattach, one compact, five model callbacks, two Docker IPython cells, same AST oracle and cleanup; trace `sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
@@ -33,6 +33,11 @@ four closed v1 contracts because no W2/W3 requirement needs a new version.
 `make test.framework-provider-free` is the development gate; full `check` and
 `promotion-check` remain separate release regression. Select the next milestone
 from framework integration needs rather than reopening closed Prime parity.
+
+The W1d core dependency split requires every isolated Prime development preset
+to pass `--extra prime`; commit `b495dd63` enforces this for P1-P7 and adds
+allowlisted host-service failure stages. The exact P1 command above passed after
+the fix and left no container, process, or temporary workspace residue.
 
 The seven Prime development scenarios are closed at their named boundaries.
 Native Phase 3.2 remains a parallel track. Full multi-game ARC-AGI-3 work and
