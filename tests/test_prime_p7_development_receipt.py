@@ -23,9 +23,10 @@ class TestP7DevelopmentReceipt(unittest.TestCase):
             "image_sha256": _digest("4"), "initial_observation_sha256": _digest("5"),
             "action_chain_sha256": _digest("6"), "terminal_sha256": _digest("7"), "score_sha256": _digest("8"),
             "replay_sha256": _digest("9"), "usage_sha256": _digest("a"), "broker_sha256": _digest("b"), "cleanup_sha256": _digest("c"),
-            "tool_names": ("ipython",), "game_count": 1, "action_count": 4, "prompt_count": 3,
-            "provider_callback_count": 6, "ipython_call_count": 3, "terminal_reason": "action-limit",
-            "terminal": True, "cleanup_complete": True,
+            "tool_names": ("ipython",), "game_count": 1, "action_count": 4, "broker_call_count": 6,
+            "observation_count": 1, "status_count": 1, "prompt_count": 3, "provider_callback_count": 6,
+            "ipython_call_count": 3, "terminal_reason": "action-limit", "episode_closed": True,
+            "score_replayed": True, "broker_quiescent": True, "worker_destroyed": True, "full_cleanup": True,
         }
         values.update(changes)
         return P7DevelopmentReceipt(**values)
@@ -41,7 +42,7 @@ class TestP7DevelopmentReceipt(unittest.TestCase):
     def test_rejects_mutation_private_data_and_noncanonical_closure(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_receipt import P7DevelopmentReceiptError, validate_p7_development_receipt
 
-        for receipt in (self._receipt(action_count=5), self._receipt(action_count=True), self._receipt(terminal_reason="won"), self._receipt(cleanup_complete=False), self._receipt(workload_sha256=_digest("0"))):
+        for receipt in (self._receipt(action_count=5), self._receipt(action_count=True), self._receipt(broker_call_count=5), self._receipt(observation_count=2), self._receipt(status_count=0), self._receipt(score_replayed=False), self._receipt(broker_quiescent=False), self._receipt(worker_destroyed=False), self._receipt(full_cleanup=False), self._receipt(terminal_reason="won"), self._receipt(workload_sha256=_digest("0"))):
             with self.subTest(receipt=receipt), self.assertRaises(P7DevelopmentReceiptError):
                 validate_p7_development_receipt(receipt)
         receipt = self._receipt()
@@ -50,4 +51,4 @@ class TestP7DevelopmentReceipt(unittest.TestCase):
             validate_p7_development_receipt(receipt)
         self.assertNotIn("P7-PRIVATE-SENTINEL", repr(receipt))
         with self.assertRaises(FrozenInstanceError):
-            receipt.terminal = False  # type: ignore[misc]
+            receipt.episode_closed = False  # type: ignore[misc]

@@ -45,12 +45,18 @@ class P7DevelopmentReceipt:
     tool_names: tuple[str, ...]
     game_count: int
     action_count: int
+    broker_call_count: int
+    observation_count: int
+    status_count: int
     prompt_count: int
     provider_callback_count: int
     ipython_call_count: int
     terminal_reason: Literal["action-limit", "engine-terminal"]
-    terminal: bool
-    cleanup_complete: bool
+    episode_closed: bool
+    score_replayed: bool
+    broker_quiescent: bool
+    worker_destroyed: bool
+    full_cleanup: bool
 
     def __repr__(self) -> str:
         return "P7DevelopmentReceipt(redacted)"
@@ -58,7 +64,7 @@ class P7DevelopmentReceipt:
 
 _FIELDS: Final = frozenset(P7DevelopmentReceipt.__dataclass_fields__)
 _DIGEST_FIELDS: Final = tuple(name for name in _FIELDS if name.endswith("_sha256"))
-_EXACT_COUNTS: Final = {"game_count": 1, "prompt_count": 3, "provider_callback_count": 6, "ipython_call_count": 3}
+_EXACT_COUNTS: Final = {"game_count": 1, "observation_count": 1, "status_count": 1, "prompt_count": 3, "provider_callback_count": 6, "ipython_call_count": 3}
 
 
 def validate_p7_development_receipt(receipt: object) -> None:
@@ -70,10 +76,10 @@ def validate_p7_development_receipt(receipt: object) -> None:
         or receipt.tool_names != ("ipython",)
         or any(type(getattr(receipt, name)) is not int or getattr(receipt, name) != expected for name, expected in _EXACT_COUNTS.items())
         or type(receipt.action_count) is not int or not 1 <= receipt.action_count <= 4
+        or type(receipt.broker_call_count) is not int or receipt.broker_call_count != receipt.action_count + 2
         or receipt.terminal_reason not in {"action-limit", "engine-terminal"}
         or receipt.terminal_reason == "action-limit" and receipt.action_count != 4
-        or receipt.terminal is not True
-        or receipt.cleanup_complete is not True
+        or any(getattr(receipt, name) is not True for name in ("episode_closed", "score_replayed", "broker_quiescent", "worker_destroyed", "full_cleanup"))
     ):
         raise P7DevelopmentReceiptError()
 

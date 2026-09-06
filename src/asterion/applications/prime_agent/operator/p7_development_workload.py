@@ -25,7 +25,13 @@ P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256: Final = "sha256:5f9739d6d0055780a4581fd6f
 
 _MODEL_DECLARATION: Final = {"format": "asterion.prime-p7-development-model/v1", "tools": ["ipython"]}
 _ORACLE_DECLARATION: Final = {"format": "asterion.prime-p7-development-oracle/v1", "kind": "episode-replay"}
-_SCHEMA_DECLARATION: Final = {"format": "asterion.prime-p7-development-receipt-schema/v1", "terminal_reasons": ["action-limit", "engine-terminal"]}
+_SCHEMA_DECLARATION: Final = {
+    "boolean_facts": ["episode_closed", "score_replayed", "broker_quiescent", "worker_destroyed", "full_cleanup"],
+    "format": "asterion.prime-p7-development-receipt-schema/v1",
+    "relations": ["broker_call_count=action_count+2", "action-limit=>action_count=4"],
+    "strict_counts": ["game_count=1", "observation_count=1", "status_count=1", "prompt_count=3", "provider_callback_count=6", "ipython_call_count=3"],
+    "terminal_reasons": ["action-limit", "engine-terminal"],
+}
 _RESOURCE_DECLARATION: Final = {
     "arc_agi": {"version": "0.9.9", "wheel_sha256": P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256},
     "arcengine": {"version": "0.9.3", "wheel_sha256": P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256},
@@ -44,6 +50,7 @@ _MANIFEST: Final = {
     "model_sha256": P7_DEVELOPMENT_MODEL_DIGEST, "oracle_sha256": P7_DEVELOPMENT_ORACLE_DIGEST,
     "prompt_count": 3, "promotion": P7_DEVELOPMENT_PROMOTION,
     "provider_callback_count": 6, "resource_sha256": P7_DEVELOPMENT_RESOURCE_DIGEST,
+    "receipt_schema": _SCHEMA_DECLARATION,
     "schema_sha256": P7_DEVELOPMENT_SCHEMA_DIGEST, "scope": P7_DEVELOPMENT_SCOPE,
     "seed": 0, "terminal_reasons": ["action-limit", "engine-terminal"], "tool_names": ["ipython"],
 }

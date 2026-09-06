@@ -20,6 +20,8 @@ class TestP7DevelopmentWorkload(unittest.TestCase):
         self.assertEqual(manifest["provider_callback_count"], 6)
         self.assertEqual(manifest["ipython_call_count"], 3)
         self.assertEqual(manifest["terminal_reasons"], ["action-limit", "engine-terminal"])
+        self.assertIn("episode_closed", manifest["receipt_schema"]["boolean_facts"])
+        self.assertIn("broker_call_count=action_count+2", manifest["receipt_schema"]["relations"])
         self.assertEqual(workload.P7_DEVELOPMENT_WORKLOAD_DIGEST, "sha256:" + sha256(payload).hexdigest())
         self.assertNotIn("prompt", manifest)
         self.assertTrue(workload.is_p7_development_workload(workload.P7_DEVELOPMENT_WORKLOAD_DIGEST))
