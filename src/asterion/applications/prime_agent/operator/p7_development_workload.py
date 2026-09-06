@@ -19,7 +19,8 @@ P7_DEVELOPMENT_SCOPE: Final = "p7-development"
 P7_DEVELOPMENT_PROMOTION: Final = "unpromoted"
 P7_DEVELOPMENT_GAME_ID: Final = "ls20-9607627b"
 P7_DEVELOPMENT_GAME_SOURCE_SHA256: Final = "sha256:298c810da2850d557c95d92a2cbd846df29a45d7134e20888617bedf5dafcd92"
-P7_DEVELOPMENT_GAME_METADATA_SHA256: Final = "sha256:cbd1318adeda3c2d34165f757483f5aa9d10c8d2014e52df0da1a90413c93d2b"
+# Stable canonical projection of official metadata; volatile local path/time are excluded.
+P7_DEVELOPMENT_GAME_METADATA_SHA256: Final = "sha256:71595f7ea98ef49e14f7ca972fabe649569302adc64958d70429a63e310a28de"
 P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256: Final = "sha256:a0536df47b5ab93af16ba708083f74261cd1b7801bb2e0802824623c04d59e50"
 P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256: Final = "sha256:5f9739d6d0055780a4581fd6fe09066bb08775c4c8212c9adcca2eb008aef59c"
 
@@ -36,7 +37,7 @@ _RESOURCE_DECLARATION: Final = {
     "arc_agi": {"version": "0.9.9", "wheel_sha256": P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256},
     "arcengine": {"version": "0.9.3", "wheel_sha256": P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256},
     "game_id": P7_DEVELOPMENT_GAME_ID,
-    "metadata_file": "metadata.json", "metadata_sha256": P7_DEVELOPMENT_GAME_METADATA_SHA256,
+    "metadata_file": "metadata.json", "metadata_projection_sha256": P7_DEVELOPMENT_GAME_METADATA_SHA256,
     "source_file": "ls20.py", "source_sha256": P7_DEVELOPMENT_GAME_SOURCE_SHA256,
 }
 P7_DEVELOPMENT_MODEL_DIGEST: Final = _digest(_MODEL_DECLARATION)
