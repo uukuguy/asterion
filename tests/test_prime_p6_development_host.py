@@ -132,6 +132,8 @@ class TestP6DevelopmentHost(unittest.TestCase):
         self.assertIn("compact sorted-key UTF-8 JSON", gateway.prompt_bodies[0])
         self.assertIn("inputs MUST equal exactly [[-4,-2,3]]", gateway.prompt_bodies[0])
         self.assertIn("one row only and no extra cases", gateway.prompt_bodies[0])
+        self.assertIn("built-in `open('/workspace/candidate.py','w').write(...)`", gateway.prompt_bodies[1])
+        self.assertIn("do not use pathlib", gateway.prompt_bodies[1])
         self.assertNotIn("[[4,-2,3]]", gateway.prompt_bodies[0])
         self.assertNotIn("[[4,-2,3]]", gateway.prompt_bodies[1])
         self.assertIn("clamp-task-b/v1", gateway.prompt_bodies[2])
