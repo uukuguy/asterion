@@ -20,6 +20,7 @@ from .p7_development_gateway import PrimeP7DevelopmentGateway
 from .p7_development_host import run_p7_development_lifecycle
 from .p7_development_sdk_provider import create_prime_p7_development_sdk_provider
 from .p7_resource_lock import verify_p7_development_resources
+from .p7_runtime_lock import verify_p7_development_runtime
 _CAPABILITY_ID="prime.arc-agi-3-development"; _PROVIDER_ID="prime-agent"; _APPLICATION_ID="prime.arc-agi-3"; _APPLICATION_VERSION="1.0.0"; _RUN=re.compile(r"[a-z][a-z0-9.-]*\Z")
 _DEADLINE_SECONDS = 300
 _LifecycleRunner = Callable[[Path, str], Awaitable[object]]
@@ -55,6 +56,7 @@ def _preflight(root:Path)->None:
  external=Path(os.environ.get("ASTERION_P7_EXTERNAL_ROOT",root.parent/"external-prime/arc-agi-3")).resolve(); game=external/"environment_files/ls20/9607627b"
  if sys.platform!="linux" or os.geteuid()!=0 or not all(p.is_file() for p in (Path("/usr/bin/docker"),Path("/tmp/asterion-node22/bin/node"),root/"packages/typescript/prime-gateway/dist/src/p7-development-main.js",external/"venv/bin/python3")) or not (root/"3th-party/prime-agent").is_dir() or not dotenv_values(root/".env"):raise PrimeP7CliHostError()
  verify_p7_development_resources(game)
+ verify_p7_development_runtime(external)
 def _cfg(root:Path):
  value=dotenv_values(root/".env")
  if any(type(k)is not str or type(v)is not str for k,v in value.items()):raise PrimeP7CliHostError()
@@ -72,10 +74,12 @@ async def _run(root:Path,run_id:str):
  external=Path(os.environ.get("ASTERION_P7_EXTERNAL_ROOT",root.parent/"external-prime/arc-agi-3")).resolve();game=external/"environment_files/ls20/9607627b"; broker=None;transport=None
  try:
   with TemporaryDirectory(prefix="asterion-p7-") as work:
+   verify_p7_development_resources(game)
+   runtime=verify_p7_development_runtime(external)
    os.chown(work,65534,65534);os.chmod(work,0o700);broker=P7BrokerService(interpreter=external/"venv/bin/python3",asterion_src=root/"src",resource_root=game)
    transport=P7DevelopmentDockerTransport(docker_executable="/usr/bin/docker",socket_path="/var/run/docker.sock",seccomp_profile_fd=_seccomp_fd(),platform=_host_platform())
    worker=P7DevelopmentDockerWorkerService(image_digest=_inspect_image(Path("/usr/bin/docker"),Path("/var/run/docker.sock")),transport=transport,run_id=run_id,session_id="p7-"+run_id,goal_id="prime.arc-agi-3/v1",workspace=work,broker_private_dir=str(broker.private_dir),broker_model_socket=str(broker.model_socket))
-   return await run_p7_development_lifecycle(gateway=PrimeP7DevelopmentGateway(node_bin="/tmp/asterion-node22/bin/node",entrypoint=root/"packages/typescript/prime-gateway/dist/src/p7-development-main.js",deadline_seconds=300),provider=create_prime_p7_development_sdk_provider(_cfg(root)),worker=worker,broker=broker,run_id=run_id,session_id="p7-"+run_id,prime_source_root=str(root/"3th-party/prime-agent"),workspace=work)
+   return await run_p7_development_lifecycle(gateway=PrimeP7DevelopmentGateway(node_bin="/tmp/asterion-node22/bin/node",entrypoint=root/"packages/typescript/prime-gateway/dist/src/p7-development-main.js",deadline_seconds=300),provider=create_prime_p7_development_sdk_provider(_cfg(root)),worker=worker,broker=broker,run_id=run_id,session_id="p7-"+run_id,prime_source_root=str(root/"3th-party/prime-agent"),workspace=work,runtime=runtime)
  finally:
   if broker:broker.close()
   if transport:transport.close()
