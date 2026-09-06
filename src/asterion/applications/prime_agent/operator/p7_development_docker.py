@@ -440,6 +440,8 @@ class P7DevelopmentDockerWorkerService:
                 try:
                     if os.write(fd, self._client) != len(self._client):
                         raise ValueError
+                    os.fchown(fd, 65534, 65534)
+                    os.fchmod(fd, 0o600)
                 finally:
                     os.close(fd)
             finally:

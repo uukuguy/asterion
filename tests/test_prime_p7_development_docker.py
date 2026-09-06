@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class _Transport:
@@ -76,7 +77,11 @@ class TestP7DevelopmentDocker(unittest.TestCase):
                 )
                 await worker.cleanup()
 
-            asyncio.run(exercise())
+            with patch(
+                "asterion.applications.prime_agent.operator.p7_development_docker.os.fchown"
+            ) as transfer:
+                asyncio.run(exercise())
+            transfer.assert_called_once_with(unittest.mock.ANY, 65534, 65534)
 
     def test_rejects_client_that_does_not_target_container_socket(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_docker import (
