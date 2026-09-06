@@ -48,7 +48,7 @@ def _request(value: dict[str, object]) -> dict[str, object]:
         raise RlmRequestError()
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(5.0)
+            client.settimeout(60.0)
             client.connect(_SOCKET)
             client.sendall(encoded)
             response = _read(client)

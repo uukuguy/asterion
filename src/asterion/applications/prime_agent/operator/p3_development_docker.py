@@ -93,7 +93,7 @@ class PrimeP3DevelopmentDockerTransport(DockerCliEngineTransport):
             raise PrimeP3DevelopmentDockerError() from None
 
     async def read(self, container: P3DevelopmentContainer, name: str, control: _LifecycleCallControl) -> bytes:
-        if type(name) is not str or name not in {"solution.py", "test_solution.py", "aggregate.json"}:
+        if type(name) is not str or name not in {"solution.py", "test_solution.py", "implementation.json", "review.json", "review-follow-up.json", "aggregate.json"}:
             raise PrimeP3DevelopmentDockerError()
         try:
             result = await self._call(self._prefix + ("container", "exec", "--user", "65534:65534", container.container_id, "cat", "/workspace/" + name), control, max_output_bytes=_RESULT_CAP)  # type: ignore[attr-defined]

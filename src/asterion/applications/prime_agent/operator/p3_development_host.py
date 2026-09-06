@@ -20,6 +20,10 @@ from .p3_development_sdk_provider import create_prime_p3_development_sdk_provide
 from .p3_development_workload import (
     P3_AGGREGATE_BYTES,
     P3_DEVELOPMENT_WORKLOAD_DIGEST,
+    P3_ROOT_PROMPT,
+    P3_IMPLEMENTATION_PROMPT,
+    P3_REVIEW_PROMPT,
+    P3_FOLLOW_UP_PROMPT,
     validate_p3_aggregate_bytes,
     validate_p3_source_bytes,
     validate_p3_test_bytes,
@@ -146,7 +150,7 @@ async def run_prime_p3_development(
                 prime_source_root=prime_source_root, workspace=workspace,
             )
             opened = True
-            result = await gateway.prompt("fixed-small-verification")
+            result = await gateway.prompt(P3_ROOT_PROMPT)
             observations = _observations(result)
             if calls != {"root": 4, "implementation": 2, "review": 4} or tools != {"root": 1, "implementation": 1, "review": 2}:
                 raise ValueError
@@ -225,22 +229,32 @@ def _canonical(value: object) -> bytes:
 async def _open_rlm_server(directory: Path, gateway: P3Gateway) -> asyncio.AbstractServer:
     """Expose exactly one root-only JSONL RLM request at a time."""
     child_ids: dict[str, str] = {}
+    lock, step, poisoned = asyncio.Lock(), 0, False
+    order = (("spawn", "implementation"), ("wait", "implementation"), ("spawn", "review"), ("wait", "review"), ("follow_up", None), ("delete", "implementation"), ("delete", "review"), ("list", None))
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        nonlocal step, poisoned
         try:
-            raw = await reader.readuntil(b"\n")
+            async with lock:
+                if poisoned:
+                    raise ValueError
+                raw = await reader.readuntil(b"\n")
             if not raw or len(raw) > 4096:
                 raise ValueError
             request = json.loads(raw)
             if type(request) is not dict or type(request.get("kind")) is not str:
                 raise ValueError
             kind = request["kind"]
+            role_value = request.get("role")
+            if step >= len(order) or (kind, role_value if kind not in {"follow_up", "list"} else None) != order[step]:
+                poisoned = True
+                raise ValueError
             if kind in {"spawn", "wait", "delete"}:
                 if set(request) != {"kind", "role"} or request["role"] not in {"implementation", "review"}:
                     raise ValueError
                 role = request["role"]
                 if kind == "spawn":
-                    result = await gateway.request_nested("rlm.spawn", {"role": role, "prompt": "fixed-small-verification"})
+                    result = await gateway.request_nested("rlm.spawn", {"role": role, "prompt": P3_IMPLEMENTATION_PROMPT if role == "implementation" else P3_REVIEW_PROMPT})
                     child_id = result.get("rlm_child_id")
                     if type(child_id) is not str or not child_id or role in child_ids:
                         raise ValueError
@@ -253,7 +267,7 @@ async def _open_rlm_server(directory: Path, gateway: P3Gateway) -> asyncio.Abstr
             elif kind == "follow_up":
                 if set(request) != {"kind"} or "review" not in child_ids:
                     raise ValueError
-                result = await gateway.request_nested("rlm.follow_up", {"child_id": child_ids["review"], "prompt": "fixed-small-verification"})
+                result = await gateway.request_nested("rlm.follow_up", {"child_id": child_ids["review"], "prompt": P3_FOLLOW_UP_PROMPT})
             elif kind == "list":
                 if set(request) != {"kind"}:
                     raise ValueError
@@ -262,9 +276,12 @@ async def _open_rlm_server(directory: Path, gateway: P3Gateway) -> asyncio.Abstr
                 raise ValueError
             if type(result) is not dict:
                 raise ValueError
-            writer.write(_canonical({"ok": True, "result": result}) + b"\n")
+            step += 1
+            safe = {"subagents": []} if kind == "list" else {"status": "completed"}
+            writer.write(_canonical({"ok": True, "result": safe}) + b"\n")
             await writer.drain()
         except BaseException:
+            poisoned = True
             writer.write(b'{"ok":false,"result":{}}\n')
             try:
                 await writer.drain()
