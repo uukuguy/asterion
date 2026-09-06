@@ -2,84 +2,93 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+from asterion.runtimes.prime_agent_host import PrimeSmallVerificationRequest
 
 
 class TestPrimeP4CliHost(unittest.IsolatedAsyncioTestCase):
-    async def test_timeout_kills_and_reaps_the_node_process(self) -> None:
+    async def test_service_projects_the_injected_lifecycle_trace(self) -> None:
         from asterion.applications.prime_agent.operator import p4_cli_host as subject
 
-        class Process:
-            returncode: int | None = None
+        observed: list[tuple[object, str]] = []
 
-            def __init__(self) -> None:
-                self.kills = 0
-                self.waits = 0
-
-            async def communicate(self) -> tuple[bytes, bytes]:
-                await asyncio.Future()
-
-            def kill(self) -> None:
-                self.kills += 1
-
-            async def wait(self) -> int:
-                self.waits += 1
-                self.returncode = -9
-                return self.returncode
-
-        process = Process()
-        with (
-            patch.object(
-                subject.asyncio,
-                "create_subprocess_exec",
-                AsyncMock(return_value=process),
-            ),
-            patch.object(subject, "_DEADLINE_SECONDS", 0.01),
-            self.assertRaises(subject.PrimeP4CliHostError),
-        ):
-            await subject._run_p4_development(
-                subject._P4CliResources("node", "entry", "/prime"), "p4-timeout"
-            )
-        self.assertEqual(process.kills, 1)
-        self.assertEqual(process.waits, 1)
-
-    async def test_service_projects_only_a_digest_from_the_private_session_result(self) -> None:
-        from asterion.applications.prime_agent.operator import p4_cli_host as subject
-        from asterion.runtimes.prime_agent_host import PrimeSmallVerificationRequest
-
-        observed = []
-
-        async def runner(resources: object, run_id: str) -> object:
+        async def lifecycle(resources: object, run_id: str) -> object:
             observed.append((resources, run_id))
-            return {
-                "activeSessionId": "private-session-identity",
-                "cursor": {"generation": "private-generation", "sequence": 7},
-            }
+            return SimpleNamespace(trace_sha256="sha256:" + "a" * 64)
 
-        resources = subject._P4CliResources("node", "entry", "/prime")
-        service = subject.PrimeP4SmallVerificationService(resources, runner=runner)
+        resources = subject._P4CliResources(
+            "sha256:" + "b" * 64, object(), {}, "node", "entry", "/prime", -1
+        )
+        service = subject.PrimeP4SmallVerificationService(
+            resources, lifecycle_runner=lifecycle
+        )
         result = await service.verify(PrimeSmallVerificationRequest("p4-projection"))
 
         self.assertEqual(observed, [(resources, "p4-projection")])
         self.assertEqual(result.run_id, "p4-projection")
         self.assertEqual(result.scope, "p4-development")
         self.assertEqual(result.promotion, "unpromoted")
-        self.assertRegex(result.trace_sha256, r"\Asha256:[0-9a-f]{64}\Z")
-        self.assertNotIn("private", repr(result))
+        self.assertEqual(result.trace_sha256, "sha256:" + "a" * 64)
 
-    async def test_service_rejects_invalid_private_runner_result_without_exposing_it(self) -> None:
+    async def test_cancellation_waits_for_injected_lifecycle_cleanup(self) -> None:
         from asterion.applications.prime_agent.operator import p4_cli_host as subject
-        from asterion.runtimes.prime_agent_host import PrimeSmallVerificationRequest
+        from asterion.runtimes.prime_agent_host import PrimeSmallVerificationCancelled
 
-        async def runner(_: object, __: str) -> object:
-            return {"activeSessionId": "secret", "cursor": {"sequence": 1}}
+        cleaned = asyncio.Event()
 
+        async def lifecycle(_: object, __: str) -> object:
+            try:
+                await asyncio.Future()
+            finally:
+                cleaned.set()
+
+        class Signal:
+            cancelled = False
+
+        signal = Signal()
         service = subject.PrimeP4SmallVerificationService(
-            subject._P4CliResources("node", "entry", "/prime"), runner=runner
+            subject._P4CliResources(
+                "sha256:" + "b" * 64, object(), {}, "node", "entry", "/prime", -1
+            ),
+            lifecycle_runner=lifecycle,
         )
-        with self.assertRaisesRegex(subject.PrimeP4CliHostError, "unavailable") as raised:
-            await service.verify(PrimeSmallVerificationRequest("p4-invalid"))
-        self.assertNotIn("secret", str(raised.exception))
+        task = asyncio.create_task(
+            service.verify(PrimeSmallVerificationRequest("p4-cancel"), signal=signal)
+        )
+        await asyncio.sleep(0.06)
+        signal.cancelled = True
+        with self.assertRaises(PrimeSmallVerificationCancelled):
+            await task
+        self.assertTrue(cleaned.is_set())
+
+    async def test_preflight_redacts_and_closes_created_transport_on_failure(self) -> None:
+        from asterion.applications.prime_agent.operator import p4_cli_host as subject
+
+        transport = SimpleNamespace(close=Mock())
+        with (
+            patch.object(subject.sys, "platform", "linux"),
+            patch.object(subject.os, "geteuid", return_value=0),
+            patch.object(
+                subject, "_regular_executable", side_effect=(Path("/docker"), Path("/node"))
+            ),
+            patch.object(subject.os, "lstat", return_value=SimpleNamespace(st_mode=0)),
+            patch.object(subject.stat, "S_ISSOCK", return_value=True),
+            patch.object(subject, "_regular_file", return_value=Path("/entry")),
+            patch.object(subject, "_regular_directory", return_value=Path("/prime")),
+            patch.object(subject, "_sealed_seccomp", return_value=73),
+            patch.object(subject, "_inspect_image", return_value="sha256:" + "a" * 64),
+            patch.object(subject, "_host_platform", return_value=object()),
+            patch.object(subject, "P1BDevelopmentSnapshotTransport", return_value=transport),
+            patch.object(subject, "_operator_config", side_effect=RuntimeError("SENTINEL")),
+            patch.object(subject.os, "close"),
+        ):
+            with self.assertRaises(subject.PrimeP4CliHostError) as raised:
+                subject._preflight(Path("/repo"))
+        self.assertNotIn("SENTINEL", str(raised.exception))
+        transport.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

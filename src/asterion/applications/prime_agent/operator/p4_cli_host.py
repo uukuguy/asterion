@@ -3,17 +3,38 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+import fcntl
 from hashlib import sha256
-import json
 import os
 from pathlib import Path
 import re
+import stat
+import subprocess
 import sys
+from tempfile import TemporaryDirectory
 
-from asterion.applications.prime_agent.operator import p2_cli_host as _p2
+from dotenv import dotenv_values
+
+from asterion.applications.prime_agent.operator.image_input_lock import (
+    ImagePlatformDescriptor,
+)
+from asterion.applications.prime_agent.operator.p1b_development_docker import (
+    P1BDevelopmentSnapshotTransport,
+    P1BDockerPersistentWorkerService,
+)
+from asterion.applications.prime_agent.operator.p1b_development_sdk_provider import (
+    create_prime_p1b_development_sdk_provider,
+)
+from asterion.applications.prime_agent.operator.p4_development_gateway import (
+    PrimeP4DevelopmentGateway,
+)
+from asterion.applications.prime_agent.operator.p4_development_host import (
+    PrimeP4DevelopmentTrace,
+    run_p4_development_lifecycle,
+)
 from asterion.runtime.host import CancellationSignal
 from asterion.runtimes.prime_agent_host import (
     PrimeSmallVerificationCancelled,
@@ -30,10 +51,17 @@ _CAPABILITY_ID = "prime.long-session-continuity-development"
 _PROVIDER_ID = "prime-agent"
 _APPLICATION_ID = "prime.long-session-continuity"
 _APPLICATION_VERSION = "1.0.0"
+_DEADLINE_SECONDS = 300
+_IMAGE_TAG = "asterion-p1b-development:20260906"
+_CONFIRMED_IMAGE_DIGEST = (
+    "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657"
+)
+_DOCKER = "/usr/bin/docker"
+_SOCKET = "/var/run/docker.sock"
+_SECCOMP = "/tmp/asterion-p1-development-seccomp.json"
+_NODE = "/tmp/asterion-node22/bin/node"
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _RUN_ID = re.compile(r"[a-z][a-z0-9.-]*\Z")
-_MAX_OUTPUT_BYTES = 4096
-_DEADLINE_SECONDS = 30
-_REAP_WAIT_SECONDS = 1
 
 
 class PrimeP4CliHostError(ValueError):
@@ -43,24 +71,35 @@ class PrimeP4CliHostError(ValueError):
 
 @dataclass(frozen=True, repr=False)
 class _P4CliResources:
+    image_digest: str
+    transport: object
+    operator_config: Mapping[str, object]
     node_bin: str
     entrypoint: str
     prime_source_root: str
+    seccomp_fd: int | None = None
 
 
-_Runner = Callable[[_P4CliResources, str], Awaitable[object]]
+_LifecycleRunner = Callable[[_P4CliResources, str], Awaitable[object]]
 
 
 class PrimeP4SmallVerificationService:
-    __slots__ = ("_active", "_consumed", "_resources", "_runner")
+    __slots__ = ("_active", "_consumed", "_lifecycle_runner", "_resources")
 
     def __init__(
-        self, resources: _P4CliResources, *, runner: _Runner | None = None
+        self,
+        resources: _P4CliResources,
+        *,
+        lifecycle_runner: _LifecycleRunner | None = None,
     ) -> None:
         self._active = True
         self._consumed = False
+        self._lifecycle_runner = (
+            _run_p4_development_lifecycle
+            if lifecycle_runner is None
+            else lifecycle_runner
+        )
         self._resources = resources
-        self._runner = _run_p4_development if runner is None else runner
 
     def __repr__(self) -> str:
         return "PrimeP4SmallVerificationService(redacted)"
@@ -82,10 +121,13 @@ class PrimeP4SmallVerificationService:
         self._consumed = True
         if _cancelled(signal):
             raise PrimeSmallVerificationCancelled()
-        task = asyncio.create_task(self._runner(self._resources, request.run_id))
+        task = asyncio.create_task(self._lifecycle_runner(self._resources, request.run_id))
         try:
-            result = await _await_with_cancellation(task, signal)
-            digest = _private_result_digest(result, request.run_id)
+            async with asyncio.timeout(_DEADLINE_SECONDS):
+                trace = await _await_with_cancellation(task, signal)
+            digest = getattr(trace, "trace_sha256", None)
+            if type(digest) is not str or _DIGEST.fullmatch(digest) is None:
+                raise ValueError
             return PrimeSmallVerificationResult(
                 run_id=request.run_id,
                 trace_sha256=digest,
@@ -105,7 +147,16 @@ class PrimeP4SmallVerificationService:
             raise PrimeP4CliHostError() from None
 
     def _close(self) -> None:
+        if not self._active:
+            return
         self._active = False
+        _close_transport(self._resources.transport)
+        descriptor = self._resources.seccomp_fd
+        if type(descriptor) is int and descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 def create_prime_p4_cli_factory(*, repo_root: Path) -> HostServiceFactoryBinding:
@@ -145,93 +196,211 @@ def _validate_context(context: object) -> None:
 def _preflight(repo_root: Path) -> _P4CliResources:
     if sys.platform != "linux" or os.geteuid() != 0:
         raise PrimeP4CliHostError()
-    node = _p2._regular_executable(Path("/tmp/asterion-node22/bin/node"))
-    entrypoint = _p2._regular_file(
-        repo_root / "packages/typescript/prime-gateway/dist/src/p4-development-session.js"
-    )
-    source = _p2._regular_directory(repo_root / "3th-party/prime-agent")
-    _p2._regular_file(
-        source
-        / "node_modules/@earendil-works/pi-coding-agent/dist/modes/daemon/daemon-mode.js"
-    )
-    _p2._regular_file(
-        source
-        / "node_modules/@earendil-works/pi-coding-agent/dist/modes/daemon/daemon-client.js"
-    )
-    _p2._regular_file(source / "node_modules/@earendil-works/pi-coding-agent/dist/index.js")
-    return _P4CliResources(str(node), str(entrypoint), str(source))
-
-
-async def _run_p4_development(resources: _P4CliResources, _: str) -> object:
-    script = (
-        "import { pathToFileURL } from 'node:url';"
-        "const module = await import(pathToFileURL(process.argv[1]).href);"
-        "const value = await module.runPrimeP4DevelopmentSmoke(process.argv[2]);"
-        "process.stdout.write(JSON.stringify(value));"
-    )
+    docker = _regular_executable(Path(_DOCKER))
+    socket = Path(_SOCKET)
     try:
-        process = await asyncio.create_subprocess_exec(
-            resources.node_bin,
-            "--input-type=module",
-            "--eval",
-            script,
-            resources.entrypoint,
-            resources.prime_source_root,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            env={},
+        if not stat.S_ISSOCK(os.lstat(socket).st_mode):
+            raise ValueError
+    except (OSError, ValueError):
+        raise PrimeP4CliHostError() from None
+    node = _regular_executable(Path(_NODE))
+    entrypoint = _regular_file(
+        repo_root / "packages/typescript/prime-gateway/dist/src/p4-development-main.js"
+    )
+    source = _regular_directory(repo_root / "3th-party/prime-agent")
+    _regular_file(source / "packages/coding-agent/dist/core/sdk.js")
+    _regular_file(source / "node_modules/typebox/build/index.mjs")
+    seccomp_fd = _sealed_seccomp(Path(_SECCOMP))
+    transport: object | None = None
+    try:
+        transport = P1BDevelopmentSnapshotTransport(
+            docker_executable=str(docker),
+            socket_path=str(socket),
+            seccomp_profile_fd=seccomp_fd,
+            platform=_host_platform(),
+            operator_confirmed_same_guest=True,
         )
-        async with asyncio.timeout(_DEADLINE_SECONDS):
-            stdout, _stderr = await process.communicate()
+        return _P4CliResources(
+            image_digest=_inspect_image(docker, socket),
+            transport=transport,
+            operator_config=_operator_config(repo_root / ".env"),
+            node_bin=str(node),
+            entrypoint=str(entrypoint),
+            prime_source_root=str(source),
+            seccomp_fd=seccomp_fd,
+        )
     except BaseException:
-        await _terminate_and_reap(process if "process" in locals() else None)
+        if transport is not None:
+            _close_transport(transport)
+        try:
+            os.close(seccomp_fd)
+        except OSError:
+            pass
         raise PrimeP4CliHostError() from None
-    if process.returncode != 0 or len(stdout) > _MAX_OUTPUT_BYTES:
-        raise PrimeP4CliHostError()
+
+
+async def _run_p4_development_lifecycle(
+    resources: _P4CliResources, run_id: str
+) -> PrimeP4DevelopmentTrace:
+    session_id = "prime-p4-session-" + sha256(run_id.encode("ascii")).hexdigest()
     try:
-        return json.loads(stdout.decode("utf-8", "strict"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        provider = create_prime_p1b_development_sdk_provider(resources.operator_config)
+        worker = P1BDockerPersistentWorkerService(
+            image_digest=resources.image_digest,
+            transport=resources.transport,  # type: ignore[arg-type]
+            run_id=run_id,
+            session_id=session_id,
+        )
+        gateway = PrimeP4DevelopmentGateway(
+            node_bin=resources.node_bin,
+            entrypoint=resources.entrypoint,
+            deadline_seconds=_DEADLINE_SECONDS,
+        )
+        with TemporaryDirectory(prefix="asterion-prime-p4-") as workspace:
+            _prepare_workspace(Path(workspace))
+            return await run_p4_development_lifecycle(
+                gateway=gateway,
+                provider=provider,
+                worker=worker,
+                run_id=run_id,
+                session_id=session_id,
+                prime_source_root=resources.prime_source_root,
+                workspace=workspace,
+            )
+    except asyncio.CancelledError:
+        raise
+    except BaseException:
         raise PrimeP4CliHostError() from None
 
 
-def _private_result_digest(result: object, run_id: str) -> str:
-    if type(result) is not dict or set(result) != {"activeSessionId", "cursor"}:
-        raise PrimeP4CliHostError()
-    active_session_id = result["activeSessionId"]
-    cursor = result["cursor"]
-    if (
-        type(active_session_id) is not str
-        or not active_session_id
-        or type(cursor) is not dict
-        or set(cursor) != {"generation", "sequence"}
-        or type(cursor["generation"]) is not str
-        or not cursor["generation"]
-        or type(cursor["sequence"]) is not int
-        or isinstance(cursor["sequence"], bool)
-        or cursor["sequence"] < 0
+def _prepare_workspace(workspace: Path) -> None:
+    try:
+        os.chown(workspace, 65534, 65534)
+        os.chmod(workspace, 0o700)
+    except OSError:
+        raise PrimeP4CliHostError() from None
+
+
+def _operator_config(path: Path) -> Mapping[str, object]:
+    values = dotenv_values(path)
+    if not values or any(
+        type(key) is not str or type(value) is not str
+        for key, value in values.items()
     ):
         raise PrimeP4CliHostError()
-    encoded = json.dumps(
-        {"run_id": run_id, "session": result},
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return "sha256:" + sha256(encoded).hexdigest()
+    return dict(values)
+
+
+def _inspect_image(docker: Path, socket: Path) -> str:
+    try:
+        result = subprocess.run(
+            (str(docker), "--host", "unix://" + str(socket), "image", "inspect", "--format", "{{.Id}}", _IMAGE_TAG),
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            env={}, timeout=10, check=False,
+        )
+        value = result.stdout.decode("ascii", "strict")
+    except BaseException:
+        raise PrimeP4CliHostError() from None
+    if result.returncode != 0 or value != _CONFIRMED_IMAGE_DIGEST + "\n":
+        raise PrimeP4CliHostError()
+    return _CONFIRMED_IMAGE_DIGEST
+
+
+def _close_transport(transport: object) -> None:
+    close = getattr(transport, "close", None)
+    if callable(close):
+        try:
+            close()
+        except BaseException:
+            pass
+
+
+def _regular_executable(path: Path) -> Path:
+    value = _regular_file(path)
+    if value.stat().st_mode & 0o111 == 0:
+        raise PrimeP4CliHostError()
+    return value
+
+
+def _regular_file(path: Path) -> Path:
+    try:
+        details = os.lstat(path)
+        if not stat.S_ISREG(details.st_mode) or details.st_size <= 0:
+            raise ValueError
+    except (OSError, ValueError):
+        raise PrimeP4CliHostError() from None
+    return path
+
+
+def _regular_directory(path: Path) -> Path:
+    try:
+        if not stat.S_ISDIR(os.lstat(path).st_mode):
+            raise ValueError
+    except (OSError, ValueError):
+        raise PrimeP4CliHostError() from None
+    return path
+
+
+def _sealed_seccomp(path: Path) -> int:
+    source = _regular_file(path).read_bytes()
+    constants = tuple(getattr(fcntl, name, None) for name in (
+        "F_ADD_SEALS", "F_GET_SEALS", "F_SEAL_WRITE", "F_SEAL_GROW",
+        "F_SEAL_SHRINK", "F_SEAL_SEAL", "F_GETFD", "FD_CLOEXEC",
+    ))
+    if not source or len(source) > 64 * 1024 or not hasattr(os, "memfd_create") or any(type(value) is not int for value in constants):
+        raise PrimeP4CliHostError()
+    add, get, write, grow, shrink, seal, get_fd, cloexec = constants
+    descriptor = -1
+    try:
+        descriptor = os.memfd_create("asterion-p4-development-seccomp", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)  # type: ignore[attr-defined]
+        offset = 0
+        while offset < len(source):
+            written = os.write(descriptor, source[offset:])
+            if type(written) is not int or written <= 0:
+                raise ValueError
+            offset += written
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        seals = write | grow | shrink | seal
+        if not fcntl.fcntl(descriptor, get_fd) & cloexec:
+            raise ValueError
+        fcntl.fcntl(descriptor, add, seals)
+        if fcntl.fcntl(descriptor, get) != seals:
+            raise ValueError
+        result = descriptor
+        descriptor = -1
+        return result
+    except BaseException:
+        raise PrimeP4CliHostError() from None
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _host_platform() -> ImagePlatformDescriptor:
+    architecture = {"x86_64": "amd64", "aarch64": "arm64"}.get(os.uname().machine)
+    if architecture is None:
+        raise PrimeP4CliHostError()
+    return ImagePlatformDescriptor("linux", architecture, None)
 
 
 def _cancelled(signal: CancellationSignal | None) -> bool:
-    return signal is not None and signal.cancelled
+    if signal is None:
+        return False
+    try:
+        return signal.cancelled is True
+    except BaseException:
+        raise PrimeP4CliHostError() from None
 
 
-async def _await_with_cancellation(
-    task: asyncio.Task[object], signal: CancellationSignal | None
-) -> object:
+async def _await_with_cancellation(task: asyncio.Task[object], signal: CancellationSignal | None) -> object:
     while not task.done():
         if _cancelled(signal):
             raise PrimeSmallVerificationCancelled()
         try:
-            await asyncio.wait_for(asyncio.shield(task), 0.05)
+            await asyncio.wait_for(asyncio.shield(task), timeout=0.05)
         except TimeoutError:
             continue
     return task.result()
@@ -249,25 +418,3 @@ async def _shielded_wait(task: asyncio.Task[object]) -> None:
         task.result()
     except BaseException:
         pass
-
-
-async def _terminate_and_reap(process: asyncio.subprocess.Process | None) -> None:
-    if process is None or process.returncode is not None:
-        return
-    _kill(process)
-    for _ in range(2):
-        try:
-            await asyncio.wait_for(process.wait(), _REAP_WAIT_SECONDS)
-            return
-        except ProcessLookupError:
-            return
-        except TimeoutError:
-            _kill(process)
-
-
-def _kill(process: asyncio.subprocess.Process) -> None:
-    if process.returncode is None:
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
