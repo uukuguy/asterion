@@ -43,6 +43,59 @@ def _witness() -> dict[str, object]:
 
 
 class TestP7DevelopmentHost(unittest.TestCase):
+    def test_worker_failure_is_reported_before_cleanup(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_development_host import (
+            PrimeP7DevelopmentHostError,
+            run_p7_development_lifecycle,
+        )
+        from asterion.applications.prime_agent.operator.p7_runtime_lock import (
+            P7DevelopmentRuntimeSet,
+        )
+
+        class Reporter:
+            def __init__(self) -> None:
+                self.events: list[tuple[str, str]] = []
+
+            def emit(self, event: object) -> None:
+                self.events.append((event.component, event.state))  # type: ignore[attr-defined]
+
+        class Gateway:
+            def bind(self, **_: object) -> None: return None
+            async def open(self, **_: object) -> None: return None
+            async def prompt(self, _: str) -> object: return {}
+            def terminal_witness(self) -> object: return {}
+            async def close(self) -> None: return None
+            async def cancel(self) -> None: return None
+
+        class Provider:
+            async def __call__(self, _: bytes) -> bytes: return b"{}"
+            def terminal_usage(self) -> object: return object()
+            async def close(self) -> None: return None
+
+        class Worker:
+            async def acquire(self, _: bytes, __: str = "/broker") -> None: raise ValueError
+            async def snapshot(self) -> object: return {}
+            async def execute_cell(self, _: str) -> object: return {}
+            async def cleanup(self) -> None: return None
+
+        class Broker:
+            def start(self, **_: object) -> bytes: return b"client"
+            def seal(self) -> object: return {}
+            def replay(self) -> object: return {}
+            def close(self) -> None: return None
+
+        reporter = Reporter()
+        with self.assertRaises(PrimeP7DevelopmentHostError):
+            asyncio.run(
+                run_p7_development_lifecycle(
+                    gateway=Gateway(), provider=Provider(), worker=Worker(), broker=Broker(),
+                    run_id="run", session_id="session", prime_source_root="/prime",
+                    runtime=P7DevelopmentRuntimeSet(_digest("a")), progress=reporter,
+                )
+            )
+        self.assertLess(reporter.events.index(("worker", "failed")), reporter.events.index(("cleanup", "started")))
+        self.assertNotIn(("worker", "succeeded"), reporter.events)
+
     def test_cleanup_reports_failure_when_broker_close_fails(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_host import _cleanup
 

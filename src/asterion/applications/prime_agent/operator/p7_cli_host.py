@@ -82,7 +82,7 @@ def _cfg(root:Path):
  if any(type(k)is not str or type(v)is not str for k,v in value.items()):raise PrimeP7CliHostError()
  return dict(value)
 async def _run(root:Path,run_id:str,progress:HostProgressReporter|None=None,paths:PrimeDevelopmentPaths|None=None):
- external=Path(os.environ.get("ASTERION_P7_EXTERNAL_ROOT",root.parent/"external-prime/arc-agi-3")).resolve();game=external/"environment_files/ls20/9607627b"; broker=None;transport=None
+ external=Path(os.environ.get("ASTERION_P7_EXTERNAL_ROOT",root.parent/"external-prime/arc-agi-3")).resolve();game=external/"environment_files/ls20/9607627b"; broker=None;transport=None;seccomp_fd=-1
  try:
   paths=paths or _prepared_paths(root)
   with TemporaryDirectory(prefix="asterion-p7-") as work:
@@ -92,12 +92,15 @@ async def _run(root:Path,run_id:str,progress:HostProgressReporter|None=None,path
    image=_inspect_image(Path("/usr/bin/docker"),Path("/var/run/docker.sock"))
    _emit(progress,"image","succeeded")
    os.chown(work,65534,65534);os.chmod(work,0o700);broker=P7BrokerService(interpreter=external/"venv/bin/python3",asterion_src=root/"src",resource_root=game)
-   transport=P7DevelopmentDockerTransport(docker_executable="/usr/bin/docker",socket_path="/var/run/docker.sock",seccomp_profile_fd=_sealed_seccomp(paths.seccomp),platform=_host_platform())
+   seccomp_fd=_sealed_seccomp(paths.seccomp);transport=P7DevelopmentDockerTransport(docker_executable="/usr/bin/docker",socket_path="/var/run/docker.sock",seccomp_profile_fd=seccomp_fd,platform=_host_platform())
    worker=P7DevelopmentDockerWorkerService(image_digest=image,transport=transport,run_id=run_id,session_id="p7-"+run_id,goal_id="prime.arc-agi-3/v1",workspace=work,broker_private_dir=str(broker.private_dir),broker_model_socket=str(broker.model_socket))
    return await run_p7_development_lifecycle(gateway=PrimeP7DevelopmentGateway(node_bin=str(paths.node),entrypoint=paths.gateway_root/"dist/src/p7-development-main.js",deadline_seconds=300),provider=create_prime_p7_development_sdk_provider(_cfg(root)),worker=worker,broker=broker,run_id=run_id,session_id="p7-"+run_id,prime_source_root=str(paths.source_root),workspace=work,runtime=runtime,progress=progress)
  finally:
   if broker:broker.close()
   if transport:transport.close()
+  if seccomp_fd>=0:
+   try:os.close(seccomp_fd)
+   except OSError:pass
 def _emit(reporter:HostProgressReporter|None,component:str,state:str,current:int|None=None,total:int|None=None)->None:
  if reporter is None:return
  try:reporter.emit(HostProgressEvent(component,state,current,total))

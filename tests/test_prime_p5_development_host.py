@@ -161,6 +161,35 @@ class TestP5DevelopmentHost(unittest.TestCase):
         self.assertIn(("validation", "succeeded", None, None), reporter.events)
         self.assertIn(("cleanup", "succeeded", None, None), reporter.events)
 
+    def test_model_failure_is_reported_before_cleanup(self) -> None:
+        from asterion.applications.prime_agent.operator.p5_development_host import (
+            PrimeP5DevelopmentHostError,
+            run_p5_development_lifecycle,
+        )
+
+        class Reporter:
+            def __init__(self) -> None:
+                self.events: list[tuple[str, str]] = []
+
+            def emit(self, event: object) -> None:
+                self.events.append((event.component, event.state))  # type: ignore[attr-defined]
+
+        class RejectingProvider(_Provider):
+            async def __call__(self, _: bytes) -> bytes:
+                raise ValueError
+
+        reporter = Reporter()
+        with self.assertRaises(PrimeP5DevelopmentHostError):
+            asyncio.run(
+                run_p5_development_lifecycle(
+                    gateway=_Gateway(), provider=RejectingProvider(), worker=_Worker(),
+                    run_id="run", session_id="session", container_id="container",
+                    goal_id="prime.bounded-autonomy/v1", progress=reporter,
+                )
+            )
+        self.assertLess(reporter.events.index(("model", "failed")), reporter.events.index(("cleanup", "started")))
+        self.assertNotIn(("model", "succeeded"), reporter.events)
+
     def test_stage_prompts_require_the_sole_ipython_call_to_complete_the_artifact(
         self,
     ) -> None:

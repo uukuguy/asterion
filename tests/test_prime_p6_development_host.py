@@ -203,6 +203,35 @@ class TestP6DevelopmentHost(unittest.TestCase):
         with self.assertRaises(PrimeP6DevelopmentHostError):
             self._run(Forged())
 
+    def test_tool_failure_is_reported_before_cleanup(self) -> None:
+        from asterion.applications.prime_agent.operator.p6_development_host import (
+            PrimeP6DevelopmentHostError,
+            run_p6_development_lifecycle,
+        )
+
+        class Reporter:
+            def __init__(self) -> None:
+                self.events: list[tuple[str, str]] = []
+
+            def emit(self, event: object) -> None:
+                self.events.append((event.component, event.state))  # type: ignore[attr-defined]
+
+        class RejectingWorker(_Worker):
+            async def execute_cell(self, _: str) -> dict[str, int]:
+                raise ValueError
+
+        reporter = Reporter()
+        with self.assertRaises(PrimeP6DevelopmentHostError):
+            asyncio.run(
+                run_p6_development_lifecycle(
+                    gateway=_Gateway(), provider=_Provider(), worker=RejectingWorker(),
+                    run_id="run", session_id="session", prime_source_root="/prime",
+                    workspace="/workspace", progress=reporter,
+                )
+            )
+        self.assertLess(reporter.events.index(("tool", "failed")), reporter.events.index(("cleanup", "started")))
+        self.assertNotIn(("tool", "succeeded"), reporter.events)
+
 
 if __name__ == "__main__":
     unittest.main()

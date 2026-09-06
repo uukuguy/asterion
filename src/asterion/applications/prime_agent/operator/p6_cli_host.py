@@ -215,6 +215,7 @@ def _preflight(
     paths: PrimeDevelopmentPaths | None = None,
 ) -> _P6CliResources:
     paths = paths or _prepared_paths(repo_root)
+    seccomp_fd = -1
     try:
         _emit(progress, "image", "started")
         docker = _regular_executable(Path(_DOCKER))
@@ -238,6 +239,11 @@ def _preflight(
         _emit(progress, "source", "succeeded")
     except BaseException:
         _emit(progress, "source", "failed")
+        if seccomp_fd >= 0:
+            try:
+                os.close(seccomp_fd)
+            except OSError:
+                pass
         raise PrimeP6CliHostError() from None
     transport: object | None = None
     try:
@@ -295,6 +301,7 @@ async def _run_p6_development_lifecycle(
                 session_id=session_id,
                 prime_source_root=resources.prime_source_root,
                 workspace=workspace,
+                progress=progress,
             )
     except asyncio.CancelledError:
         raise

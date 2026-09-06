@@ -113,10 +113,26 @@ async def run_p5_development_lifecycle(
         raise PrimeP5DevelopmentHostError()
     opened = provider_closed = cleaned = validation_started = validation_complete = False
     cancelled = False
+    active_component: tuple[str, int | None, int | None] | None = None
+
+    def start(component: str, current: int | None = None, total: int | None = None) -> None:
+        nonlocal active_component
+        active_component = (component, current, total)
+        _emit(progress, component, "started", current, total)
+
+    def succeed(component: str, current: int | None = None, total: int | None = None) -> None:
+        nonlocal active_component
+        _emit(progress, component, "succeeded", current, total)
+        active_component = None
+
+    def fail_active() -> None:
+        nonlocal active_component
+        if active_component is not None:
+            _emit(progress, active_component[0], "failed", active_component[1], active_component[2])
+            active_component = None
     try:
-        _emit(progress, "worker", "started")
+        start("worker")
         await worker.acquire()
-        _emit(progress, "worker", "succeeded")
         observed_daemon = getattr(worker, "daemon_id", None)
         if (
             type(observed_daemon) is not str
@@ -129,6 +145,7 @@ async def run_p5_development_lifecycle(
         if initial != _INITIAL_SOURCE:
             raise ValueError
         validate_p5_development_snapshot(initial, repaired=False)
+        succeed("worker")
         model_calls = tool_calls = 0
 
         async def model_hook(payload: object) -> dict[str, object]:
@@ -136,10 +153,10 @@ async def run_p5_development_lifecycle(
             if type(payload) is not dict or model_calls >= 4:
                 raise ValueError
             current = model_calls + 1
-            _emit(progress, "model", "started", current, 4)
+            start("model", current, 4)
             reply = _strict_json(await provider(_canonical(payload)))
             model_calls += 1
-            _emit(progress, "model", "succeeded", current, 4)
+            succeed("model", current, 4)
             return reply
 
         async def tool_hook(payload: object) -> dict[str, object]:
@@ -155,12 +172,12 @@ async def run_p5_development_lifecycle(
             ):
                 raise ValueError
             current = tool_calls + 1
-            _emit(progress, "tool", "started", current, 2)
+            start("tool", current, 2)
             result = await worker.execute_cell(payload["code"])
             tool_calls += 1
-            _emit(progress, "tool", "succeeded", current, 2)
             if type(result) is not dict or result.get("cell_count") != tool_calls:
                 raise ValueError
+            succeed("tool", current, 2)
             return {
                 "content": [{"type": "text", "text": "IPython cell completed"}],
                 "details": {},
@@ -270,8 +287,10 @@ async def run_p5_development_lifecycle(
         validation_complete = True
         return trace_p5_development_receipt(receipt)
     except asyncio.CancelledError:
+        fail_active()
         cancelled = True
     except BaseException:
+        fail_active()
         if validation_started and not validation_complete:
             _emit(progress, "validation", "failed")
         pass

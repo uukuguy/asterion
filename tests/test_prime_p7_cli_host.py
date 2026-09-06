@@ -67,6 +67,58 @@ class TestPrimeP7CliHost(unittest.IsolatedAsyncioTestCase):
             await task
         self.assertTrue(cleaned.is_set())
 
+    async def test_run_closes_original_seccomp_descriptor_after_transport_copy(self) -> None:
+        from asterion.applications.prime_agent.operator import p7_cli_host as subject
+
+        paths = type("Paths", (), {
+            "node": Path("/node"), "gateway_root": Path("/gateway"),
+            "source_root": Path("/source"), "seccomp": Path("/seccomp"),
+        })()
+
+        class Broker:
+            private_dir = Path("/broker/private")
+            model_socket = Path("/broker/model.sock")
+
+            def close(self) -> None:
+                return None
+
+        class Transport:
+            closed = False
+
+            def __init__(self, **_: object) -> None:
+                return None
+
+            def close(self) -> None:
+                self.closed = True
+
+        transport = Transport()
+
+        async def reject(**_: object) -> object:
+            raise ValueError
+
+        with (
+            patch.object(subject, "_prepared_paths", return_value=paths),
+            patch.object(subject, "verify_p7_development_resources"),
+            patch.object(subject, "verify_p7_development_runtime", return_value=object()),
+            patch.object(subject, "_inspect_image", return_value="sha256:" + "a" * 64),
+            patch.object(subject, "_sealed_seccomp", return_value=31),
+            patch.object(subject, "_host_platform", return_value="linux/arm64"),
+            patch.object(subject, "P7BrokerService", return_value=Broker()),
+            patch.object(subject, "P7DevelopmentDockerTransport", return_value=transport),
+            patch.object(subject, "P7DevelopmentDockerWorkerService", return_value=object()),
+            patch.object(subject, "PrimeP7DevelopmentGateway", return_value=object()),
+            patch.object(subject, "create_prime_p7_development_sdk_provider", return_value=object()),
+            patch.object(subject, "_cfg", return_value={}),
+            patch.object(subject, "run_p7_development_lifecycle", reject),
+            patch.object(subject.os, "chown"),
+            patch.object(subject.os, "chmod"),
+            patch.object(subject.os, "close") as close,
+        ):
+            with self.assertRaises(ValueError):
+                await subject._run(Path("/repo"), "p7-run", paths=paths)
+        self.assertTrue(transport.closed)
+        self.assertTrue(any(record.args == (31,) for record in close.call_args_list))
+
 
 if __name__ == "__main__":
     unittest.main()

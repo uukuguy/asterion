@@ -109,14 +109,31 @@ async def run_p7_development_lifecycle(
         raise PrimeP7DevelopmentHostError()
     opened = provider_closed = worker_cleaned = broker_closed = validation_started = validation_complete = False
     cancelled = False
+    active_component: tuple[str, int | None, int | None] | None = None
+
+    def start(component: str, current: int | None = None, total: int | None = None) -> None:
+        nonlocal active_component
+        active_component = (component, current, total)
+        _emit(progress, component, "started", current, total)
+
+    def succeed(component: str, current: int | None = None, total: int | None = None) -> None:
+        nonlocal active_component
+        _emit(progress, component, "succeeded", current, total)
+        active_component = None
+
+    def fail_active() -> None:
+        nonlocal active_component
+        if active_component is not None:
+            _emit(progress, active_component[0], "failed", active_component[1], active_component[2])
+            active_component = None
     try:
-        _emit(progress, "worker", "started")
+        start("worker")
         client = broker.start(client_socket_path="/broker/model.sock")
         if type(client) is not bytes or not client:
             raise ValueError
         await worker.acquire(client, "/broker")
         _worker_identity(worker)
-        _emit(progress, "worker", "succeeded")
+        succeed("worker")
         calls = tools = 0
 
         async def model_hook(payload: object) -> dict[str, object]:
@@ -124,11 +141,11 @@ async def run_p7_development_lifecycle(
             if type(payload) is not dict or calls >= 6:
                 raise ValueError
             current = calls + 1
-            _emit(progress, "model", "started", current, 6)
+            start("model", current, 6)
             body = _canonical(payload)
             calls += 1
             result = _reply(await provider(body))
-            _emit(progress, "model", "succeeded", current, 6)
+            succeed("model", current, 6)
             return result
 
         async def tool_hook(payload: object) -> dict[str, object]:
@@ -144,12 +161,12 @@ async def run_p7_development_lifecycle(
             ):
                 raise ValueError
             current = tools + 1
-            _emit(progress, "tool", "started", current, 3)
+            start("tool", current, 3)
             tools += 1
             result = await worker.execute_cell(payload["code"])
             if result != {"cell_count": tools}:
                 raise ValueError
-            _emit(progress, "tool", "succeeded", current, 3)
+            succeed("tool", current, 3)
             return {
                 "content": [{"type": "text", "text": "IPython cell completed"}],
                 "details": {},
@@ -211,8 +228,10 @@ async def run_p7_development_lifecycle(
         validation_complete = True
         return PrimeP7DevelopmentTrace(p7_development_public_trace_digest(receipt))
     except asyncio.CancelledError:
+        fail_active()
         cancelled = True
     except BaseException:
+        fail_active()
         if validation_started and not validation_complete:
             _emit(progress, "validation", "failed")
         pass

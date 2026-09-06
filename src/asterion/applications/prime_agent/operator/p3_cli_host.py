@@ -147,6 +147,7 @@ def _preflight(
     paths = paths or _prepared_paths(root)
     from . import p2_cli_host as p2
     descriptor = -1
+    transport: object | None = None
     source_ready = gateway_ready = False
     try:
         _emit(progress, "source", "started")
@@ -173,6 +174,13 @@ def _preflight(
             _emit(progress, "source", "failed")
         elif not gateway_ready:
             _emit(progress, "gateway", "failed")
+        if transport is not None:
+            close = getattr(transport, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except BaseException:
+                    pass
         if descriptor >= 0:
             os.close(descriptor)
         raise ValueError("prime P3 development host is unavailable") from None

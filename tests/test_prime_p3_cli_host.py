@@ -1,6 +1,8 @@
 from __future__ import annotations
 import asyncio
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -21,6 +23,43 @@ class TestPrimeP3CliHost(unittest.TestCase):
             ),
             {"scope", "promotion", "trace_sha256"},
         )
+
+    def test_preflight_closes_transport_and_original_descriptor_when_config_rejects(self) -> None:
+        from asterion.applications.prime_agent.operator import p2_cli_host as p2
+        from asterion.applications.prime_agent.operator import p3_cli_host as subject
+
+        paths = type("Paths", (), {
+            "node": Path("/node"), "gateway_root": Path("/gateway"),
+            "source_root": Path("/source"), "seccomp": Path("/seccomp"),
+        })()
+
+        class Transport:
+            closed = False
+
+            def __init__(self, **_: object) -> None:
+                return None
+
+            def close(self) -> None:
+                self.closed = True
+
+        transport = Transport()
+        with (
+            patch.object(p2, "_regular_executable", side_effect=lambda path: path),
+            patch.object(p2, "_regular_file", side_effect=lambda path: path),
+            patch.object(p2, "_regular_directory", side_effect=lambda path: path),
+            patch.object(p2, "_sealed_seccomp", return_value=31),
+            patch.object(p2, "_operator_config", side_effect=ValueError),
+            patch.object(p2, "_host_platform", return_value="linux/arm64"),
+            patch.object(subject, "_inspect_image"),
+            patch.object(subject, "PrimeP3DevelopmentDockerTransport", return_value=transport),
+            patch.object(subject.os, "lstat", return_value=SimpleNamespace(st_mode=0)),
+            patch.object(subject.stat, "S_ISSOCK", return_value=True),
+            patch.object(subject.os, "close") as close,
+        ):
+            with self.assertRaises(ValueError):
+                subject._preflight(Path("/repo"), paths=paths)
+        self.assertTrue(transport.closed)
+        close.assert_called_once_with(31)
 
 
 class TestPrimeP3CliService(unittest.IsolatedAsyncioTestCase):
