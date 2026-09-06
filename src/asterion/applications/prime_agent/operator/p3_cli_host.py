@@ -37,32 +37,6 @@ def project_p3_development_trace(trace: object) -> dict[str, str]:
     }
 
 
-async def run_p3_cli(
-    *,
-    application_id: object,
-    capability_id: object,
-    preset: object,
-    gateway: object,
-    service: object,
-    run_id: object,
-    session_id: object,
-) -> dict[str, str]:
-    if (application_id, capability_id, preset) != (
-        "prime.recursive-workflow@1.0.0",
-        "prime.recursive-workflow@1.0.0",
-        "fixed-small-verification",
-    ):
-        raise ValueError("prime P3 development host is unavailable")
-    trace = await run_prime_p3_development(
-        gateway=gateway,
-        service=service,
-        run_id=run_id,
-        session_id=session_id,
-        prompt="fixed-small-verification",
-    )
-    return project_p3_development_trace(trace)
-
-
 @dataclass(frozen=True, repr=False)
 class _Resources:
     transport: object
@@ -89,22 +63,51 @@ class PrimeP3SmallVerificationService:
                 if signal is not None and signal.cancelled:
                     task.cancel()
                     raise PrimeSmallVerificationCancelled()
-                await asyncio.wait_for(asyncio.shield(task), 0.05)
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), 0.05)
+                except TimeoutError:
+                    continue
             trace = task.result()
             return PrimeSmallVerificationResult(request.run_id, trace.trace_sha256, "p3-development")
         except PrimeSmallVerificationCancelled:
             task.cancel()
+            await _shielded_wait(task)
+            raise
+        except asyncio.CancelledError:
+            task.cancel()
+            await _shielded_wait(task)
             raise
         except BaseException:
             task.cancel()
+            await _shielded_wait(task)
             raise ValueError("prime P3 development host is unavailable") from None
 
     def close(self) -> None:
         self._active = False
+        close = getattr(self._resources.transport, "close", None)
+        if callable(close):
+            try:
+                close()
+            except BaseException:
+                pass
         try:
             os.close(self._resources.seccomp_fd)
         except OSError:
             pass
+
+
+async def _shielded_wait(task: asyncio.Task[object]) -> None:
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+        except BaseException:
+            break
+    try:
+        task.result()
+    except BaseException:
+        pass
 
 
 def create_prime_p3_cli_factory(*, repo_root: Path) -> HostServiceFactoryBinding:
