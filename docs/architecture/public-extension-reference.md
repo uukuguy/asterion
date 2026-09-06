@@ -1,6 +1,6 @@
 # Public Extension Reference Boundary
 
-> Status: proposed for W2 implementation. Protocol impact: none.
+> Status: implemented and verified for W2. Protocol impact: none.
 
 ## Purpose
 
@@ -14,8 +14,8 @@ The reference extension is an authoring example and an executable integration
 fixture. It uses only two stable imports:
 
 ```python
-from asterion.capability_sdk import ...
-from asterion.application_sdk import ...
+from asterion.capability_sdk import CapabilityRef
+from asterion.application_sdk import RuntimeManifest
 ```
 
 Extension code must not import from `asterion.applications`,

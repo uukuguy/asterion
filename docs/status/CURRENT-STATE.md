@@ -18,8 +18,8 @@
   closure.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
-  W2 public extension reference, W3a cross-package evidence, and W3b
-  cross-runtime evidence, and W4 protocol review are complete.
+  W2 public extension reference, W3a cross-package evidence, W3b
+  cross-runtime evidence, W4 protocol review, and W5 layered gates are complete.
   The public SDK's `research` kind now reaches its exact implementation through
   provider, assembly, and runner. Package sources now share one prepare/load
   lifecycle with exact lock and authorization binding. Prime now owns its exact
@@ -34,7 +34,8 @@
   Acme capability now preserves exact public outputs through Acme and Contoso
   runtime adapters, including two cancellation timings and shared preflight
   rejection boundaries. W4 found no demonstrated need for v2 and retains all
-  four closed v1 contracts. Active framework slice: W5 layered release gates.
+  four closed v1 contracts. The framework integration worklist is complete at
+  its named development boundary.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -63,6 +64,13 @@
   generated evidence remain external and operator-owned.
 
 ## Verified Boundary
+
+- W5 is complete. `make test.framework-provider-free` separates and passes the
+  core-only import gate, Python/TypeScript contract gate, three installed-wheel
+  extension gates, and fixed `dci-agent-lite` acceptance. It ran no provider
+  operation, model, Docker, external Prime source, general run, benchmark, or
+  full release regression. `make check` and `make promotion-check` retain their
+  prior full-regression roles. Sol approved the final dependency closure.
 
 - W4 is complete. `docs/architecture/protocol-evolution-decision.md` maps every
   demonstrated W2/W3 requirement to an existing v1 field or host/provider API.
@@ -267,8 +275,8 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Continue `FRAMEWORK-INTEGRATION-WORKLIST.md` from W1c. Treat the seven Prime
-   development scenarios as closed at their named boundaries. Native Phase 3.2
-   remains a parallel track; product promotion is separate.
+4. Select the next framework milestone from current integration needs. Treat
+   W0-W5 and the seven Prime development scenarios as closed at their named
+   boundaries. Native Phase 3.2 remains parallel; product promotion is separate.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

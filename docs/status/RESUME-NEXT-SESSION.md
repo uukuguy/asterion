@@ -4,7 +4,7 @@
 
 ## Direction
 
-按评估后的主线持续推进直至完成。Asterion 的核心是统一智能体框架与能力包集成协议；Prime 和 Native 是并行 runtime。七项 Prime 端到端复现已收口，当前推进跨包与跨 runtime 框架证据。研发验证只保留正常链路和关键边界断言，不运行 promotion 或极端矩阵。
+按评估后的主线持续推进直至完成。Asterion 的核心是统一智能体框架与能力包集成协议；Prime 和 Native 是并行 runtime。七项 Prime 端到端复现和 W0-W5 框架集成主线均已收口。研发验证只保留正常链路和关键边界断言，不运行 promotion 或极端矩阵。
 
 Canonical worklist: `docs/status/FRAMEWORK-INTEGRATION-WORKLIST.md`.
 
@@ -28,13 +28,11 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 
 ## Next concrete action
 
-W0 inventory alignment, W1a executable-kind consistency, W1b exact source
-preparation, W1c runtime-provider separation, W1d core-only isolation, W2
-public extension reference, W3a cross-package composition, W3b cross-runtime
-equivalence, and W4 protocol review are complete. W4 retains all four closed v1
-contracts because no W2/W3 requirement needs a new version. Continue W5:
-separate core, cross-language contract, extension wheel, provider integration,
-and bounded end-to-end gates while retaining full release regression.
+W0 inventory alignment through W5 layered gates are complete. W4 retains all
+four closed v1 contracts because no W2/W3 requirement needs a new version.
+`make test.framework-provider-free` is the development gate; full `check` and
+`promotion-check` remain separate release regression. Select the next milestone
+from framework integration needs rather than reopening closed Prime parity.
 
 The seven Prime development scenarios are closed at their named boundaries.
 Native Phase 3.2 remains a parallel track. Full multi-game ARC-AGI-3 work and

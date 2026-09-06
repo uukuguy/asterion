@@ -1,6 +1,6 @@
 # Layered framework gates
 
-Status: proposed for W5 implementation
+Status: implemented and verified for W5
 
 ## Purpose
 

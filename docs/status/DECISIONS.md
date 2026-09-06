@@ -13,6 +13,7 @@
 | D-2026-09-05-01 | 🟢 active | Prime and Native remain parallel runtimes; close Prime's seven end-to-end scenarios first |
 | D-2026-09-06-01 | 🟢 active | Resume the framework-first integration sequence after Prime closure |
 | D-2026-09-06-02 | 🟢 active | Retain closed v1 contracts after W2/W3 integration evidence |
+| D-2026-09-06-03 | 🟢 active | Separate provider-free framework gates from release regression |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -156,3 +157,18 @@
   `make test.public-extension`; `make test.cross-package-extension`;
   `make test.cross-runtime-extension`; commits `598f01f8`, `aa6730ff`, and
   `ad8db896`.
+
+## D-2026-09-06-03 — Separate provider-free framework gates from release regression
+
+- Status: 🟢 active
+- Decision: Use `make test.framework-provider-free` for ordinary framework
+  development. It composes core-only, cross-language contracts, installed
+  extension wheels, and fixed provider acceptance as separate failure layers.
+- Rationale: Whole-repository and promotion checks include product, executor,
+  packaging, or external-source concerns that obscure framework integration
+  failures and cost too much for the normal development loop.
+- Consequence: Bounded product presets and operator-authorized run/benchmark
+  commands remain explicit and outside the aggregate. Existing `make check`
+  and `make promotion-check` retain their full regression behavior.
+- Evidence: `docs/architecture/layered-framework-gates.md`;
+  `make test.framework-provider-free`; commit `62c56284`.

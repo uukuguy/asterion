@@ -1,6 +1,6 @@
 # Framework Integration Worklist
 
-> Updated: 2026-09-06. Status: active.
+> Updated: 2026-09-06. Status: complete.
 
 ## Goal
 
@@ -34,7 +34,7 @@ evidence proves all of the following:
    credentials, Docker, or a model provider. Product integrations retain their
    own bounded end-to-end gates.
 
-## Active sequence
+## Completed sequence
 
 | ID | Work package | Deliverable and acceptance boundary | Status | Depends on |
 |---|---|---|---|---|
@@ -47,7 +47,7 @@ evidence proves all of the following:
 | W3a | Cross-package evidence | Two different-domain extension wheels install, compose, and execute outside the source tree with deterministic ordering and exact bindings | Complete | W2 |
 | W3b | Cross-runtime evidence | One neutral capability passes the same lifecycle/output suite through two compatible adapters, including cancellation and missing-service rejection | Complete | W3a |
 | W4 | Evidence-led protocol evolution | Record whether real W2/W3 cases require a new protocol. If required, introduce a separate version with schema, Python, TypeScript, fixture, and migration parity; otherwise retain v1 unchanged | Complete | W3 |
-| W5 | Layered release gates | Separate core, cross-language contracts, extension wheel, provider integration, and bounded end-to-end commands; retain full release regression separately | Active | W4 |
+| W5 | Layered release gates | Separate core, cross-language contracts, extension wheel, provider integration, and bounded end-to-end commands; retain full release regression separately | Complete | W4 |
 
 ## Parallel tracks and exclusions
 
@@ -62,17 +62,16 @@ evidence proves all of the following:
 - Closed v1 contracts are not extended in place. New routing, cardinality, or
   port semantics require evidence from W2/W3 and a separate version decision.
 
-## Decision queue
+## Resolved and deferred decisions
 
-1. Define the public host operation that validates a discovered source payload
-   and returns a digest-bearing candidate without loading provider code.
-2. Separate provider-owned runtime bindings from the domain-neutral default
-   registry while retaining metadata-only list and selected-only loading.
-3. Define how the desired Native runtime integration relates to the existing
-   Native control provider before adding an application route.
-4. Decide TypeScript package naming and executor protocol migration only after
-   the core integration path has an independent consumer and compatibility
-   plan.
+1. W1b resolved source preparation through a public digest-bearing candidate
+   operation without loading provider code during discovery.
+2. W1c resolved provider-owned runtime bindings while preserving metadata-only
+   list and selected-only loading.
+3. Native runtime integration remains a parallel future milestone and must be
+   related explicitly to the existing control provider before a route is added.
+4. TypeScript package naming and executor protocol migration remain deferred
+   until a concrete compatibility requirement justifies them.
 
 ## Evidence policy
 
