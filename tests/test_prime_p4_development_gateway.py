@@ -124,7 +124,15 @@ class TestPrimeP4DevelopmentGateway(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(recovered["replay_status"], "complete")
             self.assertEqual(recovered["to_cursor"]["sequence"], 7)
             await gateway.compact()
-            await gateway.prompt("private-second")
+            second = await gateway.prompt("private-second")
+            self.assertEqual(
+                second,
+                {
+                    "lifecycle": "completed",
+                    "model_callback_count": 5,
+                    "tool_callback_count": 2,
+                },
+            )
             await gateway.close()
             self.assertEqual(
                 callbacks, ["model", "tool", "model", "model", "model", "tool", "model"]

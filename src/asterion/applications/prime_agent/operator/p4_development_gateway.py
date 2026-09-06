@@ -193,11 +193,11 @@ class PrimeP4DevelopmentGateway(DevelopmentGatewayTransport):
                         "lifecycle": "completed",
                         "checkpoint_candidate": _public_candidate(candidate),
                     }
-                _second_prompt(result)
+                result = _second_prompt(result)
                 if self._model_count != 5 or self._tool_count != 2:
                     raise ValueError()
                 self._state = "close_ready"
-                return {"lifecycle": "completed"}
+                return result
             except BaseException:
                 self._fail()
                 raise PrimeP4DevelopmentGatewayError() from None
@@ -571,13 +571,14 @@ def _compaction(value: object) -> dict[str, object]:
     return {key: value[key] for key in sorted(_COMPACTION_KEYS)}
 
 
-def _second_prompt(value: object) -> None:
+def _second_prompt(value: object) -> dict[str, object]:
     if value != {
         "lifecycle": "completed",
         "model_callback_count": 5,
         "tool_callback_count": 2,
     }:
         raise ValueError()
+    return dict(value)
 
 
 def _close_result(value: object, models: int, tools: int) -> None:
