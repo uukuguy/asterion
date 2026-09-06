@@ -29,9 +29,6 @@ from asterion.capability_packages.protocol import (
 )
 
 
-_CONFORMANCE_EXECUTABLE_KINDS = EXECUTABLE_CAPABILITY_KINDS | frozenset({"research"})
-
-
 @dataclass(frozen=True, slots=True)
 class _CapabilityConformanceResult:
     passed: bool
@@ -163,7 +160,7 @@ def _implementation_errors(
     expected = {
         CapabilityRef(str(manifest["capability_id"]), str(manifest["version"]))
         for manifest in manifests
-        if manifest.get("kind") in _CONFORMANCE_EXECUTABLE_KINDS
+        if manifest.get("kind") in EXECUTABLE_CAPABILITY_KINDS
     }
     seen: set[CapabilityRef] = set()
     for binding in implementations:

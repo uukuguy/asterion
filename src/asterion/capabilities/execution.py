@@ -17,7 +17,14 @@ if TYPE_CHECKING:
 
 
 EXECUTABLE_CAPABILITY_KINDS = frozenset(
-    {"capability", "workflow", "memory", "observability", "evaluation"}
+    {
+        "capability",
+        "workflow",
+        "memory",
+        "observability",
+        "evaluation",
+        "research",
+    }
 )
 
 

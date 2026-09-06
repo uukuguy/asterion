@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 import unittest
 from collections.abc import AsyncIterator
 from pathlib import Path
 from types import MappingProxyType
 
+from asterion.applications.provider import (
+    APPLICATION_PROVIDER_PROTOCOL,
+    ApplicationProviderError,
+    InstalledApplication,
+    InstalledApplicationProvider,
+    resolve_installed_provider,
+)
 from asterion.assembly.protocol import resolve_assembly
 from asterion.capabilities.catalog import (
     CatalogEntry,
@@ -17,13 +26,22 @@ from asterion.capabilities.execution import (
     InProcessArtifactPayload,
     CapabilityExecutionError,
     CapabilityExecutionResult,
+    CapabilityImplementation,
+    CapabilityImplementationBinding,
     CapabilityInvocation,
     project_public_value,
     validate_implementation_bindings,
     validate_capability_result,
 )
+from asterion.capability_packages import (
+    BenchmarkTaskBinding,
+    CapabilityPackageRef,
+    InstalledCapabilityPackage,
+    open_portable_payload,
+)
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
+from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 
 
@@ -34,6 +52,7 @@ ASSEMBLY = (
     SOURCE
     / "applications/dci_agent_lite/assemblies/dci-local-research.json"
 )
+SCAFFOLD_PAYLOAD = PROJECT / "tests/fixtures/extensions/minimal/payload"
 
 
 class FixtureRuntime:
@@ -51,6 +70,13 @@ class FixtureRuntime:
         del request, signal
         if False:
             yield RunEvent("", 0, "", {})
+
+
+class ScaffoldRuntime(FixtureRuntime):
+    manifest = RuntimeManifest(
+        runtime_id="pi.reference",
+        capabilities=("filesystem.read", "pi.tool.grep"),
+    )
 
 
 class RecordingImplementation:
@@ -365,6 +391,135 @@ class CapabilityImplementationBindingTests(unittest.TestCase):
 
         with self.assertRaises(CapabilityExecutionError):
             validate_implementation_bindings(resolve_plan(), bindings)
+
+
+class ResearchInstalledExecutionTests(unittest.IsolatedAsyncioTestCase):
+    def _provider(
+        self,
+        root: Path,
+        implementation: CapabilityImplementation | None,
+    ) -> tuple[InstalledApplicationProvider, InstalledCapabilityPackage]:
+        root = root.resolve()
+        payload = root / "payload"
+        shutil.copytree(SCAFFOLD_PAYLOAD, payload)
+        assembly_root = root / "assemblies"
+        assembly_root.mkdir()
+        assembly_path = assembly_root / "research.json"
+        assembly_path.write_text(
+            json.dumps(
+                {
+                    "protocol": "asterion.application-assembly/v1",
+                    "application_id": "example.research",
+                    "version": "1.0.0",
+                    "runtime_id": "pi.reference",
+                    "capability_packages": [
+                        {"package_id": "example.package", "version": "1.0.0"}
+                    ],
+                    "capabilities": [
+                        {"capability_id": "example.research", "version": "1.0.0"}
+                    ],
+                    "host_capabilities": [],
+                    "host_policies": [],
+                    "host_events": [],
+                    "host_artifacts": [],
+                }
+            )
+        )
+        package_ref = CapabilityPackageRef("example.package", "1.0.0")
+        bindings = () if implementation is None else (
+            CapabilityImplementationBinding(
+                CapabilityRef("example.research", "1.0.0"), implementation
+            ),
+        )
+        package = InstalledCapabilityPackage(
+            package_ref=package_ref,
+            payload_sha256=open_portable_payload(payload).payload_sha256,
+            source_id="example.package.local-directory",
+            source_kind="local-directory",
+            catalog_roots=(payload / "capabilities",),
+            benchmark_suite_paths=(payload / "benchmark-suites",),
+            implementations=bindings,
+            benchmark_bindings=(
+                BenchmarkTaskBinding(
+                    owner_package=package_ref,
+                    binding_id="example.task",
+                    implementation=object(),
+                ),
+            ),
+        )
+        return (
+            InstalledApplicationProvider(
+                protocol=APPLICATION_PROVIDER_PROTOCOL,
+                provider_id="example-provider",
+                resource_root=root,
+                applications=(
+                    InstalledApplication(
+                        application_id="example.research",
+                        version="1.0.0",
+                        assembly_paths=(assembly_path,),
+                        capability_packages=(package_ref,),
+                        runtime_ids=("pi.reference",),
+                    ),
+                ),
+            ),
+            package,
+        )
+
+    async def test_provider_projected_research_binding_executes_and_validates_output(
+        self,
+    ) -> None:
+        implementation = ResultImplementation(
+            CapabilityExecutionResult(
+                events=({"type": "research.completed", "payload": {"ok": True}},),
+                artifacts=(
+                    {
+                        "artifact_id": "research-result",
+                        "media_type": "application/vnd.example.research+json",
+                        "value": {"ok": True},
+                    },
+                ),
+            )
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider_source, package = self._provider(Path(temp_dir), implementation)
+            provider = resolve_installed_provider(
+                provider_source,
+                runtime_factories=default_runtime_factory_registry(),
+                installed_packages=(package,),
+            )
+            application = provider.applications[0]
+            assembly = application.assemblies[0]
+
+            result = await run_composed_application(
+                assembly.plan,
+                implementations=application.implementations,
+                runtime=ScaffoldRuntime(),
+                run_id="research-installed-execution",
+                input_text="research",
+                host_services={},
+            )
+
+        self.assertEqual(len(implementation.invocations), 1)
+        self.assertEqual(
+            result.artifacts,
+            (
+                {
+                    "artifact_id": "research-result",
+                    "media_type": "application/vnd.example.research+json",
+                    "value": {"ok": True},
+                },
+            ),
+        )
+
+    def test_provider_rejects_missing_research_binding_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            provider, package = self._provider(Path(temp_dir), None)
+            with self.assertRaises(ApplicationProviderError):
+                resolve_installed_provider(
+                    provider,
+                    runtime_factories=default_runtime_factory_registry(),
+                    installed_packages=(package,),
+                )
 
 
 class CapabilityExecutionValueTests(unittest.TestCase):
