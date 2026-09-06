@@ -317,10 +317,11 @@ def _bytes_digest(value: bytes) -> str:
 
 
 def _prompt(stage: int, run_id: str, session_id: str) -> str:
+    canonical = "Serialize with json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(',', ':')).encode('utf-8') and Path(path).write_bytes(...)."
     instructions = {
-        1: "In one IPython cell import p7_client, call observe(), and write only canonical JSON {\"observation\": result} to /workspace/initial.json.",
-        2: "In one IPython cell import p7_client, call act(1) exactly four times, and write canonical JSON rows with action_id and observation to /workspace/actions.json.",
-        3: "In one IPython cell import p7_client, call status(), and write its canonical JSON result to /workspace/status.json.",
+        1: "In one IPython cell import json, Path from pathlib, and p7_client; call result = p7_client.observe(); set value = {\"observation\": result}; write only canonical JSON bytes to /workspace/initial.json. " + canonical,
+        2: "In one IPython cell import json, Path from pathlib, and p7_client; call p7_client.act(1) exactly four times; set value to a list of four {\"action_id\": 1, \"observation\": result} rows in call order; write only canonical JSON bytes to /workspace/actions.json. " + canonical,
+        3: "In one IPython cell import json, Path from pathlib, and p7_client; set value = p7_client.status(); write only canonical JSON bytes to /workspace/status.json. " + canonical,
     }
     try:
         return instructions[stage] + " Episode identity: " + _canonical({"run_id": run_id, "session_id": session_id}).decode("ascii")
