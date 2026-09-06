@@ -19,17 +19,28 @@ class TestP6DevelopmentReceipt(unittest.TestCase):
             "schema_sha256": workload.P6_DEVELOPMENT_SCHEMA_DIGEST,
             "model_sha256": workload.P6_DEVELOPMENT_MODEL_DIGEST,
             "oracle_sha256": workload.P6_DEVELOPMENT_ORACLE_DIGEST,
-            "baseline_snapshot_sha256": workload.P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256,
-            "candidate_snapshot_sha256": workload.P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
+            "baseline_source_sha256": workload.P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256,
+            "candidate_source_sha256": workload.P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
             "task_a_result_sha256": workload.P6_DEVELOPMENT_TASK_A_RESULT_SHA256,
             "holdout_result_sha256": branch["holdout_result_sha256"],
-            "active_snapshot_sha256": branch["active_snapshot_sha256"],
+            "final_source_sha256": branch["final_source_sha256"],
             "outcome_sha256": branch["outcome_sha256"],
             "run_sha256": "sha256:" + "1" * 64,
             "session_sha256": "sha256:" + "2" * 64,
             "container_sha256": "sha256:" + "3" * 64,
             "image_sha256": "sha256:" + "4" * 64,
             "usage_sha256": "sha256:" + "5" * 64,
+            "project_scope_sha256": "sha256:" + "6" * 64,
+            "baseline_harness_snapshot_sha256": "sha256:" + "7" * 64,
+            "candidate_harness_snapshot_sha256": "sha256:" + "8" * 64,
+            "final_harness_snapshot_sha256": (
+                "sha256:" + ("7" if outcome == "rolled-back" else "8") * 64
+            ),
+            "proposal_sha256": "sha256:" + "9" * 64,
+            "candidate_revision_sha256": "sha256:" + "a" * 64,
+            "rollback_revision_sha256": (
+                "sha256:" + "b" * 64 if outcome == "rolled-back" else None
+            ),
             "scope_kind": "project",
             "tool_names": ("ipython",),
             "prompt_count": 3,
@@ -66,6 +77,7 @@ class TestP6DevelopmentReceipt(unittest.TestCase):
         for receipt in (
             self._receipt(rollback_count=1),
             self._receipt(outcome="rolled-back", rollback_count=0),
+            self._receipt(final_harness_snapshot_sha256="sha256:" + "0" * 64),
             self._receipt(provider_callback_count=True),
         ):
             with self.subTest(receipt=receipt), self.assertRaises(P6DevelopmentReceiptError):

@@ -34,17 +34,24 @@ class P6DevelopmentReceipt:
     schema_sha256: str
     model_sha256: str
     oracle_sha256: str
-    baseline_snapshot_sha256: str
-    candidate_snapshot_sha256: str
+    baseline_source_sha256: str
+    candidate_source_sha256: str
     task_a_result_sha256: str
     holdout_result_sha256: str
-    active_snapshot_sha256: str
+    final_source_sha256: str
     outcome_sha256: str
     run_sha256: str
     session_sha256: str
     container_sha256: str
     image_sha256: str
     usage_sha256: str
+    project_scope_sha256: str
+    baseline_harness_snapshot_sha256: str
+    candidate_harness_snapshot_sha256: str
+    final_harness_snapshot_sha256: str
+    proposal_sha256: str
+    candidate_revision_sha256: str
+    rollback_revision_sha256: str | None
     scope_kind: Literal["project"]
     tool_names: tuple[str, ...]
     prompt_count: int
@@ -76,7 +83,11 @@ class P6DevelopmentReceipt:
 
 
 _FIELDS: Final = frozenset(P6DevelopmentReceipt.__dataclass_fields__)
-_DIGEST_FIELDS: Final = tuple(name for name in _FIELDS if name.endswith("_sha256"))
+_DIGEST_FIELDS: Final = tuple(
+    name
+    for name in _FIELDS
+    if name.endswith("_sha256") and name != "rollback_revision_sha256"
+)
 _COUNTS: Final = {
     "prompt_count": 3,
     "provider_callback_count": 6,
@@ -99,8 +110,8 @@ def validate_p6_development_receipt(receipt: object) -> None:
         or receipt.schema_sha256 != P6_DEVELOPMENT_SCHEMA_DIGEST
         or receipt.model_sha256 != P6_DEVELOPMENT_MODEL_DIGEST
         or receipt.oracle_sha256 != P6_DEVELOPMENT_ORACLE_DIGEST
-        or receipt.baseline_snapshot_sha256 != P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256
-        or receipt.candidate_snapshot_sha256 != P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256
+        or receipt.baseline_source_sha256 != P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256
+        or receipt.candidate_source_sha256 != P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256
         or receipt.task_a_result_sha256 != P6_DEVELOPMENT_TASK_A_RESULT_SHA256
         or receipt.scope_kind != "project"
         or receipt.tool_names != ("ipython",)
@@ -119,6 +130,24 @@ def validate_p6_development_receipt(receipt: object) -> None:
     except ValueError:
         raise P6DevelopmentReceiptError() from None
     if any(getattr(receipt, name) != expected for name, expected in branch.items()):
+        raise P6DevelopmentReceiptError()
+    if (
+        receipt.baseline_harness_snapshot_sha256
+        == receipt.candidate_harness_snapshot_sha256
+        or receipt.outcome == "preserved"
+        and (
+            receipt.final_harness_snapshot_sha256
+            != receipt.candidate_harness_snapshot_sha256
+            or receipt.rollback_revision_sha256 is not None
+        )
+        or receipt.outcome == "rolled-back"
+        and (
+            receipt.final_harness_snapshot_sha256
+            != receipt.baseline_harness_snapshot_sha256
+            or type(receipt.rollback_revision_sha256) is not str
+            or _DIGEST.fullmatch(receipt.rollback_revision_sha256) is None
+        )
+    ):
         raise P6DevelopmentReceiptError()
 
 

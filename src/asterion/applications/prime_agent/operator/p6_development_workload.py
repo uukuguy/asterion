@@ -44,7 +44,7 @@ P6_DEVELOPMENT_TASK_A_RESULT_SHA256: Final = _digest(
     {"fixture": "clamp-task-a/v1", "passed": True}
 )
 _PRESERVED_BRANCH: Final = {
-    "active_snapshot_sha256": P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
+    "final_source_sha256": P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
     "holdout_result_sha256": _digest(
         {"fixture": "clamp-task-b/v1", "passed": True}
     ),
@@ -52,7 +52,7 @@ _PRESERVED_BRANCH: Final = {
     "rollback_count": 0,
 }
 _ROLLED_BACK_BRANCH: Final = {
-    "active_snapshot_sha256": P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256,
+    "final_source_sha256": P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256,
     "holdout_result_sha256": _digest(
         {"fixture": "clamp-task-b/v1", "passed": False}
     ),
