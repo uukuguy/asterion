@@ -2068,3 +2068,5 @@
 - 17:05 Closed durable Prime status at 7/7 with final P7 executable evidence [025bc025]
 - 17:38 Executed public research bindings through the shared provider, assembly, and runner contract [7e87c3fc]
 - 17:46 Documented research as an executable v1 kind so author guidance matches runtime behavior [0b6ba73f]
+
+- 15:16 Established the framework-first worklist and public inventory to drive post-Prime integration [62b36bf0]
