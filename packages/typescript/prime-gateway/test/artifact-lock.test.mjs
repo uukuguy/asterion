@@ -37,6 +37,10 @@ const expectedFiles = Object.freeze({
     "5b2dcbd5b65697ccae5a80a6e491592afd8d60cde0f93d6ce0091b02eba03d1d",
   "packages/coding-agent/src/modes/daemon/daemon-protocol.ts":
     "55200bf1fb1b979ef1864391f1ba3b74737bfbaf89de6d0c64721a8faddbe989",
+  "packages/coding-agent/dist/modes/daemon/daemon-mode.js":
+    "b4624b7682c158a690fb1e1ab42b139b25184f893263bc2bfec2ca92776f0138",
+  "packages/coding-agent/dist/index.js":
+    "0555400963ce5c9fa3059c3ed571748715d3ddda3830085eb8f12da00708d49b",
   "prime-agent.sh":
     "0ceef94210da44aa2cb232fb18fd215c5a25caf7b652531856c5a90af01df09d",
 });

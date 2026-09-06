@@ -204,6 +204,13 @@ export {
 export { PrimeP2DevelopmentSession } from "./p2-development-session.js";
 export { PrimeP3DevelopmentSession } from "./p3-development-session.js";
 export { PrimeP4DevelopmentError, runPrimeP4DevelopmentSmoke } from "./p4-development-session.js";
+export {
+  inheritedP4DevelopmentSocket,
+  P4_DEVELOPMENT_GATEWAY_PROTOCOL,
+  P4_DEVELOPMENT_MAX_FRAME_BYTES,
+  P4DevelopmentBridge,
+  P4DevelopmentBridgeError,
+} from "./p4-development-bridge.js";
 export { PrimeP1BDevelopmentSession } from "./p1b-development-session.js";
 export {
   inheritedP1DevelopmentSocket,

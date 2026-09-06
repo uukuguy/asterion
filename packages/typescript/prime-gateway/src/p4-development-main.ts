@@ -3,6 +3,24 @@ import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
 import { writeSync } from "node:fs";
+import { inheritedP4DevelopmentSocket, P4DevelopmentBridge } from "./p4-development-bridge.js";
+
+// The production-development entrypoint is an inherited-FD callback bridge.
+// Keep the earlier three-argument smoke mode below for its provider-free
+// compatibility probe; it never shares the callback transport.
+if (process.argv.length === 3 && /^[1-9][0-9]*$/.test(process.argv[2] ?? "")) {
+  // macOS injects this locale key even for spawn({ env: {} }); it is not authority.
+  const macosLocale = process.env.__CF_USER_TEXT_ENCODING;
+  if (process.platform === "darwin" && macosLocale !== undefined) {
+    const uid = process.getuid?.();
+    if (uid === undefined || !new RegExp(`^0x${uid.toString(16).toUpperCase()}:0x[0-9A-F]+:0x[0-9A-F]+$`, "i").test(macosLocale)) process.exit(1);
+    delete process.env.__CF_USER_TEXT_ENCODING;
+  }
+  if (Object.keys(process.env).length !== 0) process.exit(1);
+  const fd = Number(process.argv[2]);
+  if (!Number.isSafeInteger(fd) || fd < 3) process.exit(1);
+  new P4DevelopmentBridge(inheritedP4DevelopmentSocket(fd)).run().catch(() => process.exit(1));
+} else {
 
 const fail = (): never => process.exit(1);
 async function fixed(root: string, path: string): Promise<string> { const target = join(root, path); const [base, actual, stat] = await Promise.all([realpath(root), realpath(target), lstat(target)]); if (!stat.isFile() || stat.isSymbolicLink() || !actual.startsWith(`${base}/`)) fail(); return actual; }
@@ -60,3 +78,4 @@ async function main(): Promise<void> {
   process.kill(process.pid, "SIGTERM");
 }
 main().catch(() => { report(`${stage}:error`); fail(); });
+}
