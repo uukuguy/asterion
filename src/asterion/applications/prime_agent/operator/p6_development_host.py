@@ -26,7 +26,8 @@ from .p6_development_receipt import P6DevelopmentReceipt, validate_p6_developmen
 from .p6_development_workload import (
     P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256, P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256,
     P6_DEVELOPMENT_MODEL_DIGEST, P6_DEVELOPMENT_ORACLE_DIGEST,
-    P6_DEVELOPMENT_SCHEMA_DIGEST, P6_DEVELOPMENT_WORKLOAD_DIGEST,
+    P6_DEVELOPMENT_SCHEMA_DIGEST, P6_DEVELOPMENT_TASK_A_RESULT_SHA256,
+    P6_DEVELOPMENT_WORKLOAD_DIGEST, p6_development_branch_facts,
 )
 
 _BASELINE_SOURCE = b"def clamp(value, lower, upper):\n    return min(upper, value)\n"
@@ -117,6 +118,7 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
         usage_sha256 = _digest(usage)
         rollback = None
         outcome = "preserved" if holdout_passed else "rolled-back"
+        branch = p6_development_branch_facts(outcome)
         if not holdout_passed:
             rollback = coordinator.rollback(proposal_id="p6-rollback", authority_id="p6-host", authority_revision=1, target_revision_id=candidate_revision.revision_id, rationale_ref="p6-rollback", rationale_digest=_bare(_digest({"task_b": holdout})), expected_outcome_digest=_bare(_digest({"outcome": outcome})))
             body_store.clear()
@@ -132,7 +134,7 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
         final_source = P6_DEVELOPMENT_CANDIDATE_SNAPSHOT_SHA256 if holdout_passed else P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256
         receipt = P6DevelopmentReceipt(
             P6_DEVELOPMENT_WORKLOAD_DIGEST, P6_DEVELOPMENT_SCHEMA_DIGEST, P6_DEVELOPMENT_MODEL_DIGEST, P6_DEVELOPMENT_ORACLE_DIGEST,
-            P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256, "sha256:" + sha256(selected).hexdigest(), _digest(task_a), _digest(holdout), final_source, _digest({"outcome": outcome}),
+            P6_DEVELOPMENT_BASELINE_SNAPSHOT_SHA256, "sha256:" + sha256(selected).hexdigest(), P6_DEVELOPMENT_TASK_A_RESULT_SHA256, branch["holdout_result_sha256"], final_source, branch["outcome_sha256"],
             _digest({"run": run_id}), _digest({"session": session_id}), container_sha256, image_sha256, usage_sha256,
             continual_improvement_scope_sha256(baseline.scope), continual_improvement_snapshot_sha256(baseline), continual_improvement_snapshot_sha256(candidate_harness), continual_improvement_snapshot_sha256(final_harness), "sha256:" + proposal.digest, continual_improvement_revision_sha256(candidate_revision), None if rollback is None else continual_improvement_revision_sha256(rollback),
             "project", ("ipython",), 3, 6, 3, 1, 1, 0 if holdout_passed else 1, outcome, True, True,

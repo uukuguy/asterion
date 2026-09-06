@@ -127,6 +127,9 @@ class TestP6DevelopmentHost(unittest.TestCase):
         receipt = self._run(worker)
         self.assertEqual(receipt.outcome, "preserved")
         self.assertEqual(receipt.rollback_count, 0)
+        from asterion.applications.prime_agent.operator import p6_development_workload as workload
+        self.assertEqual(receipt.task_a_result_sha256, workload.P6_DEVELOPMENT_TASK_A_RESULT_SHA256)
+        self.assertEqual(receipt.holdout_result_sha256, workload.p6_development_branch_facts("preserved")["holdout_result_sha256"])
         self.assertTrue(worker.cleaned)
 
     def test_prompts_bind_stage_identity_and_holdout_only_at_stage_three(self) -> None:

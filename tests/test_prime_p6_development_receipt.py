@@ -78,6 +78,9 @@ class TestP6DevelopmentReceipt(unittest.TestCase):
             self._receipt(rollback_count=1),
             self._receipt(outcome="rolled-back", rollback_count=0),
             self._receipt(final_harness_snapshot_sha256="sha256:" + "0" * 64),
+            self._receipt(task_a_result_sha256="sha256:" + "0" * 64),
+            self._receipt(holdout_result_sha256="sha256:" + "0" * 64),
+            self._receipt(outcome_sha256="sha256:" + "0" * 64),
             self._receipt(provider_callback_count=True),
         ):
             with self.subTest(receipt=receipt), self.assertRaises(P6DevelopmentReceiptError):
