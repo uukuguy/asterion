@@ -23,6 +23,7 @@ from asterion.runtime.host import parse_event_stream
 PACKAGE_REF = CapabilityPackageRef("prime-agent", "1.0.0")
 CAPABILITY_REF = CapabilityRef("prime.ipython-coding", "1.0.0")
 P5_CAPABILITY_REF = CapabilityRef("prime.bounded-autonomy", "1.0.0")
+P6_CAPABILITY_REF = CapabilityRef("prime.continual-improvement", "1.0.0")
 P4_CAPABILITY_REF = CapabilityRef("prime.long-session-continuity", "1.0.0")
 P2_CAPABILITY_REF = CapabilityRef("prime.programmatic-long-context", "1.0.0")
 P3_CAPABILITY_REF = CapabilityRef("prime.recursive-workflow", "1.0.0")
@@ -95,6 +96,19 @@ class PrimeBoundedAutonomyImplementation:
             kind="p5-development",
             media_type="application/vnd.asterion.prime.p5-development-trace+json",
             scope="p5-development",
+        )
+
+
+class PrimeContinualImprovementImplementation:
+    """Project only P6's public-safe development trace."""
+
+    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
+        return await _execute_fixed_verification(
+            invocation,
+            artifact_id="prime.p6-development.trace",
+            kind="p6-development",
+            media_type="application/vnd.asterion.prime.p6-development-trace+json",
+            scope="p6-development",
         )
 
 
@@ -188,6 +202,9 @@ def create_prime_agent_package() -> InstalledCapabilityPackage:
                 P5_CAPABILITY_REF, PrimeBoundedAutonomyImplementation()
             ),
             CapabilityImplementationBinding(
+                P6_CAPABILITY_REF, PrimeContinualImprovementImplementation()
+            ),
+            CapabilityImplementationBinding(
                 P4_CAPABILITY_REF, PrimeLongSessionContinuityImplementation()
             ),
             CapabilityImplementationBinding(
@@ -203,6 +220,7 @@ def create_prime_agent_package() -> InstalledCapabilityPackage:
 
 __all__ = (
     "PrimeBoundedAutonomyImplementation",
+    "PrimeContinualImprovementImplementation",
     "PrimeIpythonCodingImplementation",
     "PrimeLongSessionContinuityImplementation",
     "PrimeProgrammaticLongContextImplementation",

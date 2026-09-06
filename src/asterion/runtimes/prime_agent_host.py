@@ -17,6 +17,7 @@ _SCOPES = frozenset(
         "p3-development",
         "p4-development",
         "p5-development",
+        "p6-development",
     )
 )
 _PROMOTION = "unpromoted"

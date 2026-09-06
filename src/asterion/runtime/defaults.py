@@ -27,6 +27,7 @@ from asterion.runtimes.prime_agent import (
     PRIME_P3_PROFILE,
     PRIME_P4_PROFILE,
     PRIME_P5_PROFILE,
+    PRIME_P6_PROFILE,
     PRIME_RUNTIME_ID,
     PrimeAgentRuntimeClient,
 )
@@ -119,6 +120,10 @@ def _create_prime_agent_runtime(context: RuntimeFactoryContext) -> PrimeAgentRun
         "prime.bounded-autonomy": (
             "prime.bounded-autonomy-development",
             PRIME_P5_PROFILE,
+        ),
+        "prime.continual-improvement": (
+            "prime.continual-improvement-development",
+            PRIME_P6_PROFILE,
         ),
     }
     try:

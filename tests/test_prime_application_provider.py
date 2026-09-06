@@ -131,6 +131,7 @@ class TestPrimeApplicationProvider(unittest.TestCase):
             [
                 ("prime.capability-program", "1.0.0"),
                 ("prime.bounded-autonomy", "1.0.0"),
+                ("prime.continual-improvement", "1.0.0"),
                 ("prime.ipython-coding", "1.0.0"),
                 ("prime.long-session-continuity", "1.0.0"),
                 ("prime.programmatic-long-context", "1.0.0"),
@@ -174,6 +175,10 @@ class TestPrimeApplicationProvider(unittest.TestCase):
         )
         self.assertEqual(
             select_application_provider_id("prime.bounded-autonomy@1.0.0"),
+            "prime-agent",
+        )
+        self.assertEqual(
+            select_application_provider_id("prime.continual-improvement@1.0.0"),
             "prime-agent",
         )
         self.assertEqual(

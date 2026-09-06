@@ -179,6 +179,7 @@ class StandaloneRepositoryTests(unittest.TestCase):
             "prime-p3-run": "prime.recursive-workflow@1.0.0",
             "prime-p4-run": "prime.long-session-continuity@1.0.0",
             "prime-p5-run": "prime.bounded-autonomy@1.0.0",
+            "prime-p6-run": "prime.continual-improvement@1.0.0",
         }
         for target, application in expected.items():
             with self.subTest(target=target):

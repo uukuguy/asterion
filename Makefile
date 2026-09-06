@@ -25,7 +25,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: test-typescript test-rust check-rust
 .PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded prime-readme-rlm-smoke prime-smoke-core
 .PHONY: prime-parity-inventory prime-verify-system-parity
-.PHONY: prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run
+.PHONY: prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
 .PHONY: test.prime-long-running.provider-free test.prime-long-running.bounded
 .PHONY: test.prime-continual-harness.provider-free
@@ -53,7 +53,7 @@ help:
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-readme-rlm-smoke prime-smoke-core prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free test.prime-long-running.bounded"
-	@echo "Prime development execution (Orb Ubuntu): prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run"
+	@echo "Prime development execution (Orb Ubuntu): prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
 
@@ -210,6 +210,15 @@ prime-p5-run:
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
 			--provider prime-agent \
 			--application prime.bounded-autonomy@1.0.0 \
+			--runtime prime.agent \
+			--run-id "$$run_id" \
+			--input fixed-small-verification
+
+prime-p6-run:
+	@run_id="$${PRIME_RUN_ID:-prime-p6-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+			--provider prime-agent \
+			--application prime.continual-improvement@1.0.0 \
 			--runtime prime.agent \
 			--run-id "$$run_id" \
 			--input fixed-small-verification

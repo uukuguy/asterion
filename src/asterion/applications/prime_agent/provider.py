@@ -85,6 +85,16 @@ def create_provider() -> InstalledApplicationProvider:
                 runtime_ids=("prime.agent",),
             ),
             InstalledApplication(
+                application_id="prime.continual-improvement",
+                version="1.0.0",
+                assembly_paths=(
+                    root
+                    / "applications/prime_agent/assemblies/prime-continual-improvement.json",
+                ),
+                capability_packages=(CapabilityPackageRef("prime-agent", "1.0.0"),),
+                runtime_ids=("prime.agent",),
+            ),
+            InstalledApplication(
                 application_id="prime.ipython-coding",
                 version="1.0.0",
                 assembly_paths=(
