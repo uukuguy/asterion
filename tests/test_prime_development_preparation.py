@@ -1,5 +1,6 @@
 from __future__ import annotations
 from hashlib import sha256
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -21,11 +22,30 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
             subject.prepare_prime_development(Path.cwd(), ("p8",))
 
     def test_packaged_seccomp_has_locked_canonical_digest(self) -> None:
-        lock = subject._lock()
+        lock = subject._seccomp_lock()
         self.assertEqual(
             sha256(subject._bytes("prime-development-seccomp.json")).hexdigest(),
-            lock["seccomp"]["canonical_sha256"],
+            lock["canonical_sha256"],
         )
+
+    def test_development_seccomp_lock_is_separate_and_complete(self) -> None:
+        lock = subject._seccomp_lock()
+        self.assertEqual(lock["format"], "asterion.prime-development-seccomp-lock/v1")
+        self.assertEqual(lock["platforms"], ["linux/amd64", "linux/arm64"])
+        self.assertEqual(
+            set(lock["images"]), {"p1", "p2", "p3", "p4", "p5", "p6", "p7"}
+        )
+
+    def test_resolver_rejects_receipt_without_materialized_content(self) -> None:
+        with TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root = subject._root(repo)
+            (root / "receipt.json").write_text(
+                json.dumps({"context": {}, "scenarios": ["p1"], "identities": {}}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+                subject.resolve_prepared_prime_development(repo, "p1")
 
     def test_paths_are_private_and_canonical(self) -> None:
         with TemporaryDirectory() as temp:
