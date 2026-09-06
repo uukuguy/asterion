@@ -1,4 +1,6 @@
 from __future__ import annotations
+from hashlib import sha256
+import json
 import unittest
 from asterion.applications.prime_agent.operator.p7_development_broker import (
     P7DevelopmentBroker,
@@ -51,9 +53,14 @@ class TestP7DevelopmentBroker(unittest.TestCase):
         seal = broker.seal()
         self.assertEqual(seal.terminal_reason, "engine-terminal")
         self.assertRegex(seal.score_sha256, r"\Asha256:[0-9a-f]{64}\Z")
+        self.assertEqual(
+            seal.initial_sha256,
+            "sha256:" + sha256(json.dumps({"observation": broker._journal[0]["observation"]}, separators=(",", ":"), sort_keys=True).encode()).hexdigest(),
+        )
         replay = broker.replay(_Engine)
         self.assertEqual(replay["action_count"], 4)
         self.assertEqual(replay["score_sha256"], seal.score_sha256)
+        self.assertEqual(replay["actions_sha256"], seal.actions_sha256)
         with self.assertRaises(P7DevelopmentBrokerError):
             broker.request(
                 {"token": "t", "sequence": 7, "method": "status", "data": {}}

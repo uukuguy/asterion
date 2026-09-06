@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from hashlib import sha256
+import json
 import unittest
 
 
 def _digest(char: str) -> str:
     return "sha256:" + char * 64
+
+
+def _stage(value: object) -> bytes:
+    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+
+
+def _stage_digest(raw: bytes) -> str:
+    return "sha256:" + sha256(raw).hexdigest()
 
 
 def _witness() -> dict[str, object]:
@@ -67,14 +77,28 @@ class TestP7DevelopmentHost(unittest.TestCase):
     def test_broker_rejects_score_mismatch(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_host import _broker
 
-        terminal = {"terminal": True, "terminal_reason": "engine-terminal"}
-        seal = {"transcript_sha256": _digest("a"), "score_sha256": _digest("b"), "terminal_reason": "engine-terminal", "action_count": 4}
+        initial = _stage({"observation": {"state": "play"}})
+        actions = _stage([{"action_id": 1, "observation": {"state": "play"}}] * 4)
+        status = _stage({"terminal": True, "terminal_reason": "engine-terminal"})
+        seal = {"transcript_sha256": _digest("a"), "score_sha256": _digest("b"), "initial_sha256": _stage_digest(initial), "actions_sha256": _stage_digest(actions), "status_sha256": _stage_digest(status), "terminal_reason": "engine-terminal", "action_count": 4}
         _broker(
             seal,
-            {"replay_sha256": _digest("a"), "score_sha256": _digest("b"), "terminal_reason": "engine-terminal", "action_count": 4},
-            4,
-            terminal,
+            {"replay_sha256": _digest("a"), "score_sha256": _digest("b"), "initial_sha256": _stage_digest(initial), "actions_sha256": _stage_digest(actions), "status_sha256": _stage_digest(status), "terminal_reason": "engine-terminal", "action_count": 4},
+            initial, actions, status,
         )
-        replay = {"replay_sha256": _digest("a"), "score_sha256": _digest("c"), "terminal_reason": "engine-terminal", "action_count": 4}
+        replay = {"replay_sha256": _digest("a"), "score_sha256": _digest("c"), "initial_sha256": _stage_digest(initial), "actions_sha256": _stage_digest(actions), "status_sha256": _stage_digest(status), "terminal_reason": "engine-terminal", "action_count": 4}
         with self.assertRaises(ValueError):
-            _broker(seal, replay, 4, terminal)
+            _broker(seal, replay, initial, actions, status)
+
+    def test_broker_rejects_tampered_stage_bytes_and_terminal_contradiction(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_development_host import _broker, _status
+
+        initial = _stage({"observation": {"state": "play"}})
+        actions = _stage([{"action_id": 1, "observation": {"state": "play"}}] * 4)
+        status = _stage({"terminal": False, "terminal_reason": "action-limit"})
+        seal = {"transcript_sha256": _digest("a"), "score_sha256": _digest("b"), "initial_sha256": _stage_digest(initial), "actions_sha256": _stage_digest(actions), "status_sha256": _stage_digest(status), "terminal_reason": "action-limit", "action_count": 4}
+        replay = {"replay_sha256": _digest("a"), "score_sha256": _digest("b"), "initial_sha256": _stage_digest(initial), "actions_sha256": _stage_digest(actions), "status_sha256": _stage_digest(status), "terminal_reason": "action-limit", "action_count": 4}
+        with self.assertRaises(ValueError):
+            _broker(seal, replay, _stage({"observation": {"state": "tampered"}}), actions, status)
+        with self.assertRaises(ValueError):
+            _status(_stage({"terminal": False, "terminal_reason": "engine-terminal"}))

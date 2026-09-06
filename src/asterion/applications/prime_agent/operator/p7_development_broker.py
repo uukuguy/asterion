@@ -91,6 +91,9 @@ def _observation(value: object) -> dict[str, object]:
 class P7BrokerSeal:
     transcript_sha256: str
     score_sha256: str
+    initial_sha256: str
+    actions_sha256: str
+    status_sha256: str
     terminal_reason: str
     action_count: int
 
@@ -180,11 +183,26 @@ class P7DevelopmentBroker:
         if self._status is None:
             raise P7DevelopmentBrokerError()
         actions = sum("action_id" in row for row in self._journal)
+        initial, action_rows, status = self._artifacts()
         return P7BrokerSeal(
             _digest(self._journal),
             _score(self._journal[-1]["observation"], actions),
+            _digest(initial),
+            _digest(action_rows),
+            _digest(status),
             "engine-terminal" if self._status else "action-limit",
             actions,
+        )
+
+    def _artifacts(self) -> tuple[dict[str, object], list[object], dict[str, object]]:
+        """Project the only public stage files from the authenticated journal."""
+        if not self._sealed or self._status is None or not self._journal:
+            raise P7DevelopmentBrokerError()
+        reason = "engine-terminal" if self._status else "action-limit"
+        return (
+            {"observation": self._journal[0]["observation"]},
+            self._journal[1:],
+            {"terminal": self._status, "terminal_reason": reason},
         )
 
     def replay(self, factory: Callable[[], object]) -> dict[str, object]:
@@ -219,6 +237,9 @@ class P7DevelopmentBroker:
         return {
             "replay_sha256": _digest(self._journal),
             "score_sha256": sealed.score_sha256,
+            "initial_sha256": sealed.initial_sha256,
+            "actions_sha256": sealed.actions_sha256,
+            "status_sha256": sealed.status_sha256,
             "terminal_reason": sealed.terminal_reason,
             "action_count": sealed.action_count,
         }

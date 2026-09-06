@@ -165,7 +165,7 @@ async def run_p7_development_lifecycle(
         usage = _usage(provider.terminal_usage())
         _witness(gateway.terminal_witness(), run_id, session_id, usage)
         seal, replay = broker.seal(), broker.replay()
-        _broker(seal, replay, len(action_rows), terminal)
+        _broker(seal, replay, initial, actions, status)
         await gateway.close()
         opened = False
         await provider.close()
@@ -314,6 +314,7 @@ def _status(raw: bytes) -> dict[str, object]:
         or set(value) != {"terminal", "terminal_reason"}
         or type(value["terminal"]) is not bool
         or value["terminal_reason"] not in {"action-limit", "engine-terminal"}
+        or value["terminal"] != (value["terminal_reason"] == "engine-terminal")
     ):
         raise ValueError
     return value
@@ -360,24 +361,25 @@ def _witness(value: object, run_id: str, session_id: str, provider_usage: Mappin
         raise ValueError
 
 
-def _broker(
-    seal: object, replay: object, actions: int, terminal: Mapping[str, object]
-) -> None:
+def _broker(seal: object, replay: object, initial: bytes, actions: bytes, status: bytes) -> None:
     if (
         type(seal) is not dict
         or type(replay) is not dict
-        or set(seal) != {"transcript_sha256", "score_sha256", "terminal_reason", "action_count"}
-        or set(replay) != {"replay_sha256", "score_sha256", "terminal_reason", "action_count"}
+        or set(seal) != {"transcript_sha256", "score_sha256", "initial_sha256", "actions_sha256", "status_sha256", "terminal_reason", "action_count"}
+        or set(replay) != {"replay_sha256", "score_sha256", "initial_sha256", "actions_sha256", "status_sha256", "terminal_reason", "action_count"}
         or seal["transcript_sha256"] != replay["replay_sha256"]
         or seal["score_sha256"] != replay["score_sha256"]
+        or any(seal[key] != replay[key] for key in ("initial_sha256", "actions_sha256", "status_sha256"))
+        or (seal["initial_sha256"], seal["actions_sha256"], seal["status_sha256"]) != (_bytes_digest(initial), _bytes_digest(actions), _bytes_digest(status))
         or seal["terminal_reason"] != replay["terminal_reason"]
         or seal["action_count"] != replay["action_count"]
-        or seal["action_count"] != actions
-        or seal["terminal_reason"] != terminal["terminal_reason"]
+        or seal["action_count"] != len(_actions(actions))
+        or seal["terminal_reason"] != _status(status)["terminal_reason"]
         or type(seal["transcript_sha256"]) is not str
         or _DIGEST.fullmatch(seal["transcript_sha256"]) is None
         or type(seal["score_sha256"]) is not str
         or _DIGEST.fullmatch(seal["score_sha256"]) is None
+        or any(type(seal[key]) is not str or _DIGEST.fullmatch(seal[key]) is None for key in ("initial_sha256", "actions_sha256", "status_sha256"))
     ):
         raise ValueError
 
