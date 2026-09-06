@@ -18,6 +18,9 @@ from .docker_worker import _LifecycleCallControl
 _ID = re.compile(r"[0-9a-f]{64}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _CELL_CAP, _READ_CAP = 16 * 1024, 16 * 1024
+_PROVISIONAL_SETTLE_SECONDS = 30
+_PROVISIONAL_SETTLE_INTERVAL_SECONDS = 0.5
+_PROVISIONAL_FINAL_GRACE_SECONDS = 5
 _READ_PROGRAM = "import os,stat,sys\nroot,name=sys.argv[1:3];expected=set(sys.argv[3:])\ntry:\n names=set(os.listdir(root))\n if names!=expected or name not in expected: raise ValueError\n d=os.open(root,os.O_RDONLY|os.O_DIRECTORY)\n try:\n  before=os.stat(name,dir_fd=d,follow_symlinks=False)\n  if not stat.S_ISREG(before.st_mode): raise ValueError\n  fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=d)\n  try:\n   after=os.fstat(fd)\n   if not stat.S_ISREG(after.st_mode) or (before.st_dev,before.st_ino)!=(after.st_dev,after.st_ino): raise ValueError\n   data=os.read(fd,16385)\n   if not data or len(data)>16384: raise ValueError\n  finally: os.close(fd)\n finally: os.close(d)\nexcept BaseException: raise SystemExit(1)\nsys.stdout.buffer.write(data)\n"
 
 
@@ -229,12 +232,63 @@ class P5DevelopmentDockerTransport(DockerCliEngineTransport):
             raise PrimeP5DevelopmentDockerError()
 
     async def _uncertain(self, identity: str) -> None:
-        try:
-            await self._call_raw(
-                self._prefix + ("container", "rm", "--force", identity), _control()
+        deadline = monotonic() + _PROVISIONAL_SETTLE_SECONDS
+        missing = (b"", b"\n")
+        absent = {
+            ("Error: No such object: " + identity + "\n").encode(),
+            ("Error: No such container: " + identity + "\n").encode(),
+            (
+                "Error response from daemon: No such container: " + identity + "\n"
+            ).encode(),
+            ("No such container: " + identity).encode(),
+        }
+
+        async def remove_then_inspect(control: _LifecycleCallControl) -> bool:
+            removed = await self._call_raw(
+                self._prefix + ("container", "rm", "--force", identity), control
             )  # type: ignore[attr-defined]
-        except BaseException:
-            pass
+            if removed.returncode == 0:
+                if (
+                    removed.stdout not in (b"", (identity + "\n").encode())
+                    or removed.stderr
+                ):
+                    raise PrimeP5DevelopmentDockerError()
+            elif (
+                removed.returncode != 1
+                or removed.stdout not in missing
+                or removed.stderr not in absent
+            ):
+                raise PrimeP5DevelopmentDockerError()
+            inspected = await self._call_raw(
+                self._prefix
+                + ("container", "inspect", "--format", "{{.Id}}", identity),
+                control,
+            )  # type: ignore[attr-defined]
+            if (
+                inspected.returncode == 1
+                and inspected.stdout in missing
+                and inspected.stderr in absent
+            ):
+                return True
+            if inspected.returncode == 0 and not inspected.stderr:
+                self._parse_daemon_id(inspected.stdout)  # type: ignore[attr-defined]
+                return False
+            raise PrimeP5DevelopmentDockerError()
+
+        while monotonic() < deadline:
+            await remove_then_inspect(_LifecycleCallControl(deadline, None))
+            await asyncio.sleep(
+                min(
+                    _PROVISIONAL_SETTLE_INTERVAL_SECONDS, max(0, deadline - monotonic())
+                )
+            )
+        final = monotonic() + _PROVISIONAL_FINAL_GRACE_SECONDS
+        while not await remove_then_inspect(_LifecycleCallControl(final, None)):
+            if monotonic() >= final:
+                raise PrimeP5DevelopmentDockerError()
+            await asyncio.sleep(
+                min(_PROVISIONAL_SETTLE_INTERVAL_SECONDS, final - monotonic())
+            )
 
     async def _inspect_admission(
         self, daemon: str, image: str, workspace: str, control: _LifecycleCallControl
