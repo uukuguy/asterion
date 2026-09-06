@@ -132,6 +132,8 @@ class TestP6DevelopmentHost(unittest.TestCase):
         self.assertIn("compact sorted-key UTF-8 JSON", gateway.prompt_bodies[0])
         self.assertIn("inputs MUST equal exactly [[-4,-2,3]]", gateway.prompt_bodies[0])
         self.assertIn("one row only and no extra cases", gateway.prompt_bodies[0])
+        self.assertIn("expected outputs are exactly [-2]", gateway.prompt_bodies[0])
+        self.assertIn("passed MUST equal (outputs == [-2])", gateway.prompt_bodies[0])
         self.assertIn("built-in `open('/workspace/candidate.py','w').write(...)`", gateway.prompt_bodies[1])
         self.assertIn("do not use pathlib", gateway.prompt_bodies[1])
         self.assertNotIn("[[4,-2,3]]", gateway.prompt_bodies[0])
@@ -142,6 +144,8 @@ class TestP6DevelopmentHost(unittest.TestCase):
         self.assertIn("clamp(value, lower, upper)", gateway.prompt_bodies[2])
         self.assertIn("source_sha256 prefixed sha256:", gateway.prompt_bodies[2])
         self.assertIn("inputs MUST equal exactly [[4,-2,3]]", gateway.prompt_bodies[2])
+        self.assertIn("expected outputs are exactly [3]", gateway.prompt_bodies[2])
+        self.assertIn("passed MUST equal (outputs == [3])", gateway.prompt_bodies[2])
         self.assertIn("run_id run", gateway.prompt_bodies[2])
 
     def test_rolls_back_the_exact_candidate_after_failed_holdout(self) -> None:
