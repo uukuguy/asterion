@@ -125,6 +125,21 @@ class TestP5EvidenceBoundaries(unittest.TestCase):
         with self.assertRaises(host.PrimeP5DevelopmentHostError):
             asyncio.run(_run(WrongClamp()))
 
+    def test_non_callable_repaired_name_fails_before_success(self) -> None:
+        class NonCallableName(_Worker):
+            async def snapshot(self):
+                if self.cells == 2:
+                    return {
+                        "solution.py": (
+                            b"def clamp(value, lower, upper):\n"
+                            b"    return min(max(value(value, lower), lower), upper)\n"
+                        )
+                    }
+                return await super().snapshot()
+
+        with self.assertRaises(host.PrimeP5DevelopmentHostError):
+            asyncio.run(_run(NonCallableName()))
+
     def test_function_definition_effects_are_rejected(self) -> None:
         for source in (
             b"@arbitrary\ndef clamp(value, lower, upper):\n    return min(max(value, lower), upper)\n",

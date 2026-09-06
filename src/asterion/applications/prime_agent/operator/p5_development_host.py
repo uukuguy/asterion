@@ -268,6 +268,8 @@ async def run_p5_development_lifecycle(
 def validate_p5_development_snapshot(source: object, *, repaired: bool) -> None:
     if type(source) is not bytes:
         raise ValueError
+    if repaired and source != _REPAIRED_SOURCE:
+        raise ValueError
     try:
         tree = ast.parse(source.decode("utf-8", "strict"), mode="exec")
     except (SyntaxError, UnicodeError):
@@ -528,10 +530,14 @@ def _clamp_cases(source: bytes) -> tuple[bool, ...]:
 
     def eval_expr(node: ast.AST, env: dict[str, int]) -> int:
         if isinstance(node, ast.Name):
-            return env[node.id]
+            try:
+                return env[node.id]
+            except KeyError:
+                raise ValueError from None
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
+            and node.func.id in {"min", "max"}
             and len(node.args) == 2
         ):
             args = [eval_expr(arg, env) for arg in node.args]
