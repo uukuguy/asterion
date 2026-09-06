@@ -17,11 +17,14 @@ def _digest(value: object) -> str:
     return "sha256:" + sha256(_canonical(value)).hexdigest()
 
 
-P4_DEVELOPMENT_SCOPE: Final = "p4-development/unpromoted"
+P4_DEVELOPMENT_SCOPE: Final = "p4-development"
+P4_DEVELOPMENT_PROMOTION: Final = "unpromoted"
 P4_DEVELOPMENT_MODEL_DIGEST: Final = _digest(
     {
         "format": "asterion.prime-p4-development-model/v1",
         "model_state": "settled",
+        "promotion": P4_DEVELOPMENT_PROMOTION,
+        "scope": P4_DEVELOPMENT_SCOPE,
         "tool_names": ["ipython"],
     }
 )
@@ -29,12 +32,14 @@ P4_DEVELOPMENT_ORACLE_DIGEST: Final = _digest(
     {
         "format": "asterion.prime-p4-development-oracle/v1",
         "oracle_continuity": "same",
+        "promotion": P4_DEVELOPMENT_PROMOTION,
         "scope": P4_DEVELOPMENT_SCOPE,
     }
 )
 P4_DEVELOPMENT_SCHEMA_DIGEST: Final = _digest(
     {
         "format": "asterion.prime-p4-development-receipt-schema/v1",
+        "promotion": P4_DEVELOPMENT_PROMOTION,
         "receipt_kind": "native-direct-reattach",
         "scope": P4_DEVELOPMENT_SCOPE,
     }
@@ -56,6 +61,7 @@ _MANIFEST: Final = {
     "model_state": "settled",
     "oracle_continuity": "same",
     "oracle_sha256": P4_DEVELOPMENT_ORACLE_DIGEST,
+    "promotion": P4_DEVELOPMENT_PROMOTION,
     "prompt_count": 2,
     "provider_callback_count": 5,
     "reattach_count": 1,
@@ -89,6 +95,7 @@ def is_p4_development_workload(value: object) -> bool:
 __all__ = (
     "P4_DEVELOPMENT_MODEL_DIGEST",
     "P4_DEVELOPMENT_ORACLE_DIGEST",
+    "P4_DEVELOPMENT_PROMOTION",
     "P4_DEVELOPMENT_SCHEMA_DIGEST",
     "P4_DEVELOPMENT_SCOPE",
     "P4_DEVELOPMENT_WORKLOAD_DIGEST",

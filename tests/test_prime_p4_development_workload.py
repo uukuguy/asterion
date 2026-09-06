@@ -6,6 +6,7 @@ import unittest
 
 from asterion.applications.prime_agent.operator.p4_development_workload import (
     P4_DEVELOPMENT_ORACLE_DIGEST,
+    P4_DEVELOPMENT_PROMOTION,
     P4_DEVELOPMENT_SCHEMA_DIGEST,
     P4_DEVELOPMENT_SCOPE,
     P4_DEVELOPMENT_WORKLOAD_DIGEST,
@@ -20,6 +21,9 @@ class TestP4DevelopmentWorkload(unittest.TestCase):
         manifest = json.loads(payload)
 
         self.assertEqual(manifest["scope"], P4_DEVELOPMENT_SCOPE)
+        self.assertEqual(manifest["promotion"], P4_DEVELOPMENT_PROMOTION)
+        self.assertEqual(P4_DEVELOPMENT_SCOPE, "p4-development")
+        self.assertEqual(P4_DEVELOPMENT_PROMOTION, "unpromoted")
         self.assertEqual(manifest["recovery_mode"], "native-direct-reattach")
         self.assertEqual(manifest["supervisor_recovery_count"], 0)
         self.assertEqual(manifest["daemon_restart_count"], 0)
