@@ -341,7 +341,7 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
                 subject._prepare_gateway(repo, lock, runner=lambda *_args, **_kwargs: self.fail("must not build"))
 
     def test_selected_image_is_inspected_then_built_and_reinspected(self) -> None:
-        record = {"tag": "asterion-p1b-development:20260906", "digest": "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "dockerfile": "image/Dockerfile", "context": "src/asterion/applications/prime_agent/operator", "platforms": ["linux/amd64"]}
+        record = subject._locked_image_record("p1")
         calls: list[list[str]] = []
         responses = [SimpleNamespace(stdout=b"", stderr=b""), SimpleNamespace(stdout=b"", stderr=b""), SimpleNamespace(stdout=(record["digest"] + "\n").encode(), stderr=b"")]
         def runner(argv: list[str], **_: object) -> object:
@@ -353,19 +353,55 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
         self.assertEqual(calls[2], calls[0])
 
     def test_selected_image_is_not_built_when_inspection_matches(self) -> None:
-        record = {"tag": "asterion-p1b-development:20260906", "digest": "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "dockerfile": "image/Dockerfile", "context": "src/asterion/applications/prime_agent/operator", "platforms": ["linux/amd64"]}
+        record = subject._locked_image_record("p1")
         calls: list[list[str]] = []
         subject._prepare_image(Path.cwd(), "p1", record, "linux/amd64", runner=lambda argv, **_: calls.append(argv) or SimpleNamespace(stdout=(record["digest"] + "\n").encode(), stderr=b""))
         self.assertEqual(len(calls), 1)
 
     def test_selected_image_rejects_wrong_digest_after_build(self) -> None:
-        record = {"tag": "asterion-p1b-development:20260906", "digest": "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "dockerfile": "image/Dockerfile", "context": "src/asterion/applications/prime_agent/operator", "platforms": ["linux/amd64"]}
+        record = subject._locked_image_record("p1")
         responses = [SimpleNamespace(stdout=b"", stderr=b""), SimpleNamespace(stdout=b"", stderr=b""), SimpleNamespace(stdout=b"sha256:" + b"0" * 64 + b"\n", stderr=b"")]
         with self.assertRaises(subject.PrimeDevelopmentPreparationError):
             subject._prepare_image(Path.cwd(), "p1", record, "linux/amd64", runner=lambda *_args, **_kwargs: responses.pop(0))
+
+    def test_image_lock_mutations_are_rejected_before_runner_or_cache_mutation(self) -> None:
+        for field, value in (
+            ("tag", "other:1"),
+            ("digest", "sha256:" + "0" * 64),
+            ("dockerfile", "p2_development_image/Dockerfile"),
+            ("context", "elsewhere"),
+            ("platforms", ["linux/amd64", "linux/arm64", "linux/ppc64le"]),
+        ):
+            with self.subTest(field=field):
+                record = subject._locked_image_record("p1")
+                record[field] = value
+                with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+                    subject._prepare_image(
+                        Path.cwd(), "p1", record, "linux/amd64",
+                        runner=lambda *_args, **_kwargs: self.fail("must not invoke runner"),
+                    )
 
     def test_p7_resources_are_validated_only_for_p7(self) -> None:
         seen: list[Path] = []
         with patch.object(subject, "verify_p7_development_resources", side_effect=lambda root: seen.append(root) or SimpleNamespace(resource_sha256="sha256:" + "a" * 64)), patch.object(subject, "verify_p7_development_runtime", return_value=SimpleNamespace(runtime_sha256="sha256:" + "b" * 64)):
             self.assertEqual(subject._p7_identities(Path("/repo"), {"external_root": "external-prime/arc-agi-3", "resource_sha256": "sha256:" + "a" * 64, "runtime_wheels": {"arc_agi": subject.P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256, "arcengine": subject.P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256}}), {"p7_resource_sha256": "sha256:" + "a" * 64, "p7_runtime_sha256": "sha256:" + "b" * 64})
         self.assertEqual(seen, [Path("/external-prime/arc-agi-3/environment_files/ls20/9607627b")])
+
+    def test_p7_validator_exception_is_redacted_as_preparation_error(self) -> None:
+        record = {"external_root": "external-prime/arc-agi-3", "resource_sha256": "sha256:" + "a" * 64, "runtime_wheels": {"arc_agi": subject.P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256, "arcengine": subject.P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256}}
+        with patch.object(subject, "verify_p7_development_resources", side_effect=RuntimeError("private path")):
+            with self.assertRaises(subject.PrimeDevelopmentPreparationError) as raised:
+                subject._p7_identities(Path("/repo"), record)
+        self.assertEqual(str(raised.exception), "Prime development preparation is unavailable")
+
+    def test_resolver_failure_emits_source_failed_and_removes_receipt(self) -> None:
+        events: list[tuple[str, str]] = []
+        with TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            with patch.object(subject, "_prepare_gateway"), patch.object(subject, "_prepare_image"), patch.object(subject, "_node", return_value=repo / "node"), patch.object(subject, "_identities", return_value={}), patch.object(subject, "_context", return_value={}), patch.object(subject, "resolve_prepared_prime_development", side_effect=RuntimeError("private resolver detail")):
+                with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+                    subject.prepare_prime_development(
+                        repo, ("p1",), emit=lambda component, state: events.append((component, state))
+                    )
+            self.assertFalse((repo / ".asterion-private/prime-development/receipt.json").exists())
+        self.assertEqual(events, [("gateway", "started"), ("gateway", "succeeded"), ("image", "started"), ("image", "succeeded"), ("source", "started"), ("source", "failed")])

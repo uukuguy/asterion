@@ -63,6 +63,15 @@ _SECCOMP_LOCK_PROVENANCE = {
         "p7": ["asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"],
     },
 }
+_LOCKED_IMAGES = {
+    "p1": ("asterion-p1b-development:20260906", "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
+    "p2": ("asterion-p2-development:20260906", "sha256:7d97b51a21bfffe6caa574063294f72205c60b05d8650fab8c70fdf661921c33", "p2_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
+    "p3": ("asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243", "p3_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
+    "p4": ("asterion-p1b-development:20260906", "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
+    "p5": ("asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243", "p3_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
+    "p6": ("asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243", "p3_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
+    "p7": ("asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243", "p3_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
+}
 
 
 class PrimeDevelopmentPreparationError(ValueError):
@@ -559,10 +568,23 @@ def _image_record(record: object, scenario: str, platform: str) -> dict[str, obj
         or platform not in record["platforms"]
     ):
         raise PrimeDevelopmentPreparationError()
-    image = _SECCOMP_LOCK_PROVENANCE["images"].get(scenario)
-    if type(image) is not list or [record["tag"], record["digest"]] != image:
+    if record != _locked_image_record(scenario):
         raise PrimeDevelopmentPreparationError()
     return record
+
+
+def _locked_image_record(scenario: str) -> dict[str, object]:
+    try:
+        tag, digest, dockerfile, context, platforms = _LOCKED_IMAGES[scenario]
+    except (KeyError, ValueError):
+        raise PrimeDevelopmentPreparationError() from None
+    return {
+        "tag": tag,
+        "digest": digest,
+        "dockerfile": dockerfile,
+        "context": context,
+        "platforms": list(platforms),
+    }
 
 
 def _inspect_image(tag: str, *, runner: Callable[..., object]) -> str | None:
@@ -609,12 +631,15 @@ def _p7_identities(repo: Path, record: object) -> dict[str, str]:
         }
     ):
         raise PrimeDevelopmentPreparationError()
-    external = repo.parent / record["external_root"]
-    resources = verify_p7_development_resources(external / "environment_files/ls20/9607627b")
-    runtime = verify_p7_development_runtime(external)
-    if resources.resource_sha256 != record["resource_sha256"]:
-        raise PrimeDevelopmentPreparationError()
-    return {"p7_resource_sha256": resources.resource_sha256, "p7_runtime_sha256": runtime.runtime_sha256}
+    try:
+        external = repo.parent / record["external_root"]
+        resources = verify_p7_development_resources(external / "environment_files/ls20/9607627b")
+        runtime = verify_p7_development_runtime(external)
+        if resources.resource_sha256 != record["resource_sha256"]:
+            raise ValueError
+        return {"p7_resource_sha256": resources.resource_sha256, "p7_runtime_sha256": runtime.runtime_sha256}
+    except Exception:
+        raise PrimeDevelopmentPreparationError() from None
 
 
 def _identities(
@@ -690,6 +715,19 @@ def _receipt(
     }
 
 
+def _invalidate_receipt(root: Path) -> None:
+    """A failed final recheck cannot leave a receipt eligible for reuse."""
+    try:
+        receipt = root / "receipt.json"
+        details = receipt.lstat()
+        if receipt.is_symlink() or not stat.S_ISREG(details.st_mode):
+            return
+        receipt.unlink()
+        _fsync_directory(root)
+    except OSError:
+        return
+
+
 def prepare_prime_development(
     repo_root: Path,
     scenarios: tuple[str, ...],
@@ -700,7 +738,7 @@ def prepare_prime_development(
     platform_machine: Callable[[], str] = _platform.machine,
 ) -> Mapping[str, PrimeDevelopmentPaths]:
     if (
-        type(repo_root) is not Path
+        not isinstance(repo_root, Path)
         or not scenarios
         or any(type(s) is not str or s not in _SCENARIOS for s in scenarios)
     ):
@@ -750,21 +788,28 @@ def prepare_prime_development(
         identities = _identities(
             repo, root, lock, arch, scenarios, seccomp_lock, runner=runner
         )
-    except PrimeDevelopmentPreparationError:
+    except Exception:
         if emit:
             emit("source", "failed")
-        raise
-    _publish_bytes(
-        root,
-        "receipt.json",
-        json.dumps(
-            _receipt(_context(repo, arch, runner), lock, scenarios, identities),
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode(),
-    )
-    # Recheck the receipt and all selected identities before handing it back.
-    resolve_prepared_prime_development(repo, scenarios[0], runner=runner, platform_machine=platform_machine)
+        _invalidate_receipt(root)
+        raise PrimeDevelopmentPreparationError() from None
+    try:
+        _publish_bytes(
+            root,
+            "receipt.json",
+            json.dumps(
+                _receipt(_context(repo, arch, runner), lock, scenarios, identities),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode(),
+        )
+        # Recheck the receipt and all selected identities before handing it back.
+        resolve_prepared_prime_development(repo, scenarios[0], runner=runner, platform_machine=platform_machine)
+    except Exception:
+        _invalidate_receipt(root)
+        if emit:
+            emit("source", "failed")
+        raise PrimeDevelopmentPreparationError() from None
     if emit:
         emit("source", "succeeded")
     return {
@@ -787,7 +832,7 @@ def resolve_prepared_prime_development(
     platform_machine: Callable[[], str] = _platform.machine,
 ) -> PrimeDevelopmentPaths:
     if (
-        type(repo_root) is not Path
+        not isinstance(repo_root, Path)
         or type(scenario) is not str
         or scenario not in _SCENARIOS
     ):
