@@ -314,8 +314,8 @@ def _usage(value: object) -> dict[str, int]:
 
 def _prompt(stage: int, run_id: str, session_id: str, candidate_sha256: str | None = None) -> str:
     prompts = {
-        1: f"P6 stage 1: run_id {run_id}; session_id {session_id}; read baseline.py only; write canonical task-a.json fixture clamp-task-a/v1 stage task-a inputs [[-4,-2,3]] with fixture, stage, run_id, session_id, source_sha256, inputs, outputs, passed. Use one completion-only IPython call; no printing, inspection, subprocess, scope, authority, or rollback.",
-        2: f"P6 stage 2: run_id {run_id}; session_id {session_id}; read baseline.py and task-a.json; write candidate.py only. Use one completion-only IPython call; no printing, inspection, subprocess, task-b.json, scope, authority, or rollback.",
+        1: f"P6 stage 1: run_id {run_id}; session_id {session_id}; compute and write canonical task-a.json fixture clamp-task-a/v1 stage task-a inputs [[-4,-2,3]] with fixture, stage, run_id, session_id, source_sha256, inputs, outputs, passed. Use one completion-only IPython call that performs the write; no printing, inspection-only calls, subprocess, scope, authority, or rollback.",
+        2: f"P6 stage 2: run_id {run_id}; session_id {session_id}; task A observed baseline output -4 and expected -2. Write candidate.py with exactly `return min(max(value, lower), upper)` in one completion-only IPython call; do not spend the call inspecting. No printing, subprocess, task-b.json, scope, authority, or rollback.",
     }
     if stage == 3 and _DIGEST.fullmatch(candidate_sha256 or ""):
         return f"P6 stage 3: run_id {run_id}; session_id {session_id}; selected candidate digest is {candidate_sha256}; read candidate.py and write canonical task-b.json fixture clamp-task-b/v1 stage task-b inputs [[4,-2,3]] with fixture, stage, run_id, session_id, source_sha256, inputs, outputs, passed. Use one completion-only IPython call; no printing, inspection, subprocess, scope, authority, or rollback."
