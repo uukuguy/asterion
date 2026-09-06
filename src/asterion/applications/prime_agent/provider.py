@@ -85,6 +85,16 @@ def create_provider() -> InstalledApplicationProvider:
                 runtime_ids=("prime.agent",),
             ),
             InstalledApplication(
+                application_id="prime.long-session-continuity",
+                version="1.0.0",
+                assembly_paths=(
+                    root
+                    / "applications/prime_agent/assemblies/prime-long-session-continuity.json",
+                ),
+                capability_packages=(CapabilityPackageRef("prime-agent", "1.0.0"),),
+                runtime_ids=("prime.agent",),
+            ),
+            InstalledApplication(
                 application_id="prime.programmatic-long-context",
                 version="1.0.0",
                 assembly_paths=(

@@ -131,6 +131,7 @@ class TestPrimeApplicationProvider(unittest.TestCase):
             [
                 ("prime.capability-program", "1.0.0"),
                 ("prime.ipython-coding", "1.0.0"),
+                ("prime.long-session-continuity", "1.0.0"),
                 ("prime.programmatic-long-context", "1.0.0"),
                 ("prime.recursive-workflow", "1.0.0"),
             ],

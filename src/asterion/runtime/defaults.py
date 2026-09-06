@@ -25,6 +25,7 @@ from asterion.runtimes.prime_agent import (
     PRIME_P1_PROFILE,
     PRIME_P2_PROFILE,
     PRIME_P3_PROFILE,
+    PRIME_P4_PROFILE,
     PRIME_RUNTIME_ID,
     PrimeAgentRuntimeClient,
 )
@@ -109,6 +110,10 @@ def _create_prime_agent_runtime(context: RuntimeFactoryContext) -> PrimeAgentRun
         "prime.recursive-workflow": (
             "prime.recursive-workflow-development",
             PRIME_P3_PROFILE,
+        ),
+        "prime.long-session-continuity": (
+            "prime.long-session-continuity-development",
+            PRIME_P4_PROFILE,
         ),
     }
     try:
