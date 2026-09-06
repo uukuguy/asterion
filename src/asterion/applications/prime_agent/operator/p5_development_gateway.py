@@ -6,6 +6,7 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
+from types import MappingProxyType
 from .development_gateway_transport import DevelopmentGatewayTransport, Hook, _absolute
 
 _PROTOCOL: Final = "asterion.prime-p5-development-gateway/v1"
@@ -171,6 +172,24 @@ class PrimeP5DevelopmentGateway(DevelopmentGatewayTransport):
                 self._fail()
                 raise PrimeP5DevelopmentGatewayError() from None
 
+    def terminal_witness(self) -> Mapping[str, object]:
+        if self._prompts != 2 or self._terminal_witness is None or self._state not in {"open", "closed"}:
+            raise PrimeP5DevelopmentGatewayError()
+        identity = self._identity
+        if type(identity) is not dict or set(identity) != {"run_id", "session_id", "runtime_id", "generation"}:
+            raise PrimeP5DevelopmentGatewayError()
+        witness = self._terminal_witness
+        return MappingProxyType({
+            "identity": MappingProxyType(dict(identity)),
+            "result": MappingProxyType({
+                "lifecycle": witness["lifecycle"],
+                "usage": MappingProxyType(dict(witness["usage"])),
+                "assistant": MappingProxyType(dict(witness["assistant"])),
+                "observations": MappingProxyType(dict(witness["observations"])),
+            }),
+            "cumulative": MappingProxyType({"model_callback_count": 4, "tool_callback_count": 2}),
+        })
+
     def cancel_sync(self) -> Mapping[str, object]:
         with self._lock:
             try:
@@ -243,6 +262,6 @@ def _normalize_result(value: object, prompt_count: int) -> tuple[dict[str, objec
         raise ValueError()
     usage, assistant, observations = value["usage"], value["assistant"], value["observations"]
     expected = {"active_tool_names": ["ipython"], "compact_count": 0, "model_callback_count": prompt_count * 2, "rlm_child_count": 0, "tool_call_count": prompt_count}
-    if value["lifecycle"] != "completed" or assistant != {"completed": True, "stop_reason": "stop"} or observations != expected or type(usage) is not dict or set(usage) != {"input_tokens", "output_tokens", "total_tokens"} or any(type(usage[key]) is not int or usage[key] < 0 for key in usage) or usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]:
+    if value["lifecycle"] != "completed" or type(assistant) is not dict or assistant.get("completed") is not True or assistant.get("stop_reason") != "stop" or set(assistant) != {"completed", "stop_reason"} or type(observations) is not dict or observations.get("active_tool_names") != ["ipython"] or any(type(observations.get(key)) is not int or observations[key] != expected[key] for key in ("compact_count", "model_callback_count", "rlm_child_count", "tool_call_count")) or type(usage) is not dict or set(usage) != {"input_tokens", "output_tokens", "total_tokens"} or any(type(usage[key]) is not int or usage[key] < 0 for key in usage) or usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]:
         raise ValueError()
     return ({"lifecycle": "completed", "model_callback_count": prompt_count * 2, "tool_callback_count": prompt_count}, value)

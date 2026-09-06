@@ -33,4 +33,9 @@ class TestPrimeP5DevelopmentGateway(unittest.TestCase):
             self.assertEqual(gateway.prompt_sync("prompt-1"), {"lifecycle": "completed", "model_callback_count": 2, "tool_callback_count": 1})
             gateway.feedback_sync("exact-feedback")
             self.assertEqual(gateway.prompt_sync("prompt-2"), {"lifecycle": "completed", "model_callback_count": 4, "tool_callback_count": 2})
+            witness = gateway.terminal_witness()
+            self.assertEqual(dict(witness["identity"]), {"run_id": "run-1", "session_id": "session-1", "runtime_id": "prime.agent", "generation": 1})
+            self.assertEqual(dict(witness["cumulative"]), {"model_callback_count": 4, "tool_callback_count": 2})
+            with self.assertRaises(TypeError):
+                witness["identity"]["run_id"] = "other"  # type: ignore[index]
             gateway.close_sync()
