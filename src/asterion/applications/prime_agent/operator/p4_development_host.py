@@ -462,7 +462,7 @@ def _receipt(
 
 def _canonical(value: object) -> bytes:
     return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), allow_nan=False
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     ).encode("utf-8")
 
 

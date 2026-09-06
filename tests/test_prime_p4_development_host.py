@@ -163,6 +163,60 @@ class _Gateway:
 
 
 class TestPrimeP4DevelopmentHost(unittest.IsolatedAsyncioTestCase):
+    async def test_canonical_provider_body_preserves_non_ascii_utf8(self) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p1b_development_sdk_provider as provider_contract,
+        )
+        from asterion.applications.prime_agent.operator.p4_development_host import (
+            _canonical,
+        )
+
+        model = {
+            "api": "asterion-p4-development",
+            "baseUrl": "http://127.0.0.1:0",
+            "contextWindow": 16_384,
+            "cost": {"cacheRead": 0, "cacheWrite": 0, "input": 0, "output": 0},
+            "id": "p4-development",
+            "input": ["text"],
+            "maxTokens": 1_024,
+            "name": "p4-development",
+            "provider": "asterion-p4-development",
+            "reasoning": False,
+        }
+        payload = {
+            "context": {
+                "messages": [{"content": "你好", "role": "user"}],
+                "systemPrompt": "系统提示",
+                "tools": [
+                    {
+                        "description": "IPython bridge",
+                        "name": "ipython",
+                        "parameters": {
+                            "properties": {"code": {"type": "string"}},
+                            "required": ["code"],
+                            "type": "object",
+                        },
+                    }
+                ],
+            },
+            "model": model,
+            "options": {
+                "apiKey": "in-memory-development-provider",
+                "maxRetries": 0,
+                "maxRetryDelayMs": 60_000,
+                "model": model,
+                "serviceTier": "default",
+                "sessionId": "session-1",
+                "signal": {},
+                "toolExecution": "parallel",
+                "transport": "auto",
+            },
+        }
+
+        body = _canonical(payload)  # noqa: SLF001
+        self.assertIn("系统提示".encode("utf-8"), body)
+        provider_contract._decode_request(body, 0, [])  # noqa: SLF001
+
     async def test_runs_the_fixed_recover_compact_continuity_flow(self) -> None:
         from asterion.applications.prime_agent.operator.p4_development_host import (
             run_p4_development_lifecycle,
