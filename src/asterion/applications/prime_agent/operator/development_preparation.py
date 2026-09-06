@@ -364,6 +364,20 @@ def _run(argv: list[str], *, runner: Callable[..., object]) -> object:
         raise PrimeDevelopmentPreparationError() from None
 
 
+def _set_download_timeout(response: object, timeout: float) -> None:
+    candidates = [response]
+    for attribute in ("fp", "raw", "_sock"):
+        candidates.append(getattr(candidates[-1], attribute, None))
+    for candidate in candidates:
+        settimeout = getattr(candidate, "settimeout", None)
+        if callable(settimeout):
+            try:
+                settimeout(timeout)
+            except (OSError, ValueError):
+                pass
+            return
+
+
 def _arch(machine: str) -> str:
     value = {
         "x86_64": "amd64",
@@ -412,18 +426,27 @@ def _node(
     if not archive.exists() or _digest(archive) != record["archive_sha256"]:
         try:
             deadline = time.monotonic() + _DOWNLOAD_TIMEOUT
-            response = downloader(record["url"], timeout=_DOWNLOAD_IO_TIMEOUT)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            response = downloader(
+                record["url"], timeout=min(_DOWNLOAD_IO_TIMEOUT, remaining)
+            )
             data = bytearray()
             try:
                 while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError
+                    _set_download_timeout(response, min(_DOWNLOAD_IO_TIMEOUT, remaining))
+                    block = response.read(min(_DOWNLOAD_CHUNK, _MAX_ARCHIVE + 1 - len(data)))
                     if time.monotonic() >= deadline:
                         raise TimeoutError
-                    block = response.read(min(_DOWNLOAD_CHUNK, _MAX_ARCHIVE + 1 - len(data)))
                     if type(block) is not bytes:
                         raise ValueError
                     if not block:
                         break
-                    if time.monotonic() >= deadline or len(data) + len(block) > _MAX_ARCHIVE:
+                    if len(data) + len(block) > _MAX_ARCHIVE:
                         raise ValueError
                     data.extend(block)
             finally:

@@ -223,7 +223,7 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
 
         def monotonic() -> float:
             time_calls.append(None)
-            return (0.0, 0.0, 121.0)[len(time_calls) - 1]
+            return (0.0, 0.0, 0.0, 121.0)[len(time_calls) - 1]
 
         with TemporaryDirectory() as temp, patch.object(subject, "_DOWNLOAD_CHUNK", 1), patch.object(
             subject.time, "monotonic", monotonic
@@ -240,8 +240,44 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
                     runner=lambda *_args, **_kwargs: SimpleNamespace(stdout=b""),
                 )
         self.assertEqual(read_sizes, [1])
-        self.assertEqual(len(time_calls), 3)
+        self.assertEqual(len(time_calls), 4)
         self.assertEqual(downloader_timeouts, [10])
+
+    def test_node_download_rejects_eof_after_global_deadline(self) -> None:
+        read_sizes: list[int] = []
+        timeout_updates: list[float] = []
+        time_calls: list[object] = []
+
+        class Response:
+            def settimeout(self, value: float) -> None:
+                timeout_updates.append(value)
+
+            def read(self, size: int) -> bytes:
+                read_sizes.append(size)
+                return b""
+
+            def close(self) -> None:
+                return None
+
+        def monotonic() -> float:
+            time_calls.append(None)
+            return (0.0, 0.0, 0.0, 121.0)[len(time_calls) - 1]
+
+        with TemporaryDirectory() as temp, patch.object(subject.time, "monotonic", monotonic):
+            with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+                subject._node(
+                    Path(temp),
+                    {
+                        "url": "https://example.invalid/node.tar.xz",
+                        "archive_sha256": "0" * 64,
+                        "node_sha256": "0" * 64,
+                    },
+                    downloader=lambda *_args, **_kwargs: Response(),
+                    runner=lambda *_args, **_kwargs: SimpleNamespace(stdout=b""),
+                )
+        self.assertEqual(read_sizes, [1024 * 1024])
+        self.assertEqual(timeout_updates, [10])
+        self.assertEqual(len(time_calls), 4)
 
     def test_node_publication_retains_existing_versioned_tree(self) -> None:
         with TemporaryDirectory() as temp:
