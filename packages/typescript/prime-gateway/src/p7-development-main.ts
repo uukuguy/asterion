@@ -4,8 +4,9 @@ import {
   P7DevelopmentBridge,
 } from "./p7-development-bridge.js";
 
-function fail(): never {
-  process.stderr.write("p7 bridge failed\n");
+function fail(error?: unknown): never {
+  const kind = error instanceof Error ? error.name : typeof error;
+  process.stderr.write(`p7 bridge failed:${kind}\n`);
   process.exit(1);
 }
 
@@ -26,4 +27,4 @@ const fd = Number(process.argv[2]);
 if (!Number.isSafeInteger(fd) || fd < 3) fail();
 new P7DevelopmentBridge(inheritedP7DevelopmentSocket(fd))
   .run()
-  .catch(() => fail());
+  .catch((error: unknown) => fail(error));

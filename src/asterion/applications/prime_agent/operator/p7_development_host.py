@@ -22,6 +22,14 @@ from .p7_development_workload import (
     P7_DEVELOPMENT_SCHEMA_DIGEST,
     P7_DEVELOPMENT_WORKLOAD_DIGEST,
 )
+from .p7_development_sdk_provider import (
+    _canonical_json as _provider_canonical_json,
+    _decode_request,
+    _text as _provider_text,
+    _validate_model as _validate_provider_model,
+    _validate_normal_options as _validate_provider_options,
+    _validate_tool as _validate_provider_tool,
+)
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
@@ -117,8 +125,10 @@ async def run_p7_development_lifecycle(
             nonlocal calls
             if type(payload) is not dict or calls >= 6:
                 raise ValueError
+            body = _canonical(payload)
+            _diagnose_provider_request(body, calls)
             calls += 1
-            return _reply(await provider(_canonical(payload)))
+            return _reply(await provider(body))
 
         async def tool_hook(payload: object) -> dict[str, object]:
             nonlocal tools
@@ -212,8 +222,89 @@ async def run_p7_development_lifecycle(
 
 def _canonical(value: object) -> bytes:
     return json.dumps(
-        value, allow_nan=False, separators=(",", ":"), sort_keys=True
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
     ).encode()
+
+
+def _diagnose_provider_request(body: bytes, turn: int) -> None:
+    """Emit only structural diagnostics for the first SDK-provider boundary."""
+    category = "valid"
+    keys: tuple[str, ...] = ()
+    context_keys: tuple[str, ...] = ()
+    message_count: int | None = None
+    try:
+        value = json.loads(body.decode("utf-8", "strict"))
+        if type(value) is dict:
+            keys = tuple(sorted(value))
+            context = value.get("context")
+            if type(context) is dict:
+                context_keys = tuple(sorted(context))
+                messages = context.get("messages")
+                if type(messages) is list:
+                    message_count = len(messages)
+        _decode_request(body, turn, [])
+    except UnicodeDecodeError:
+        category = "utf8"
+    except json.JSONDecodeError:
+        category = "json"
+    except ValueError:
+        category = _provider_validation_category(body)
+    print(
+        "p7-sdk-request"
+        f" turn={turn} bytes={len(body)} category={category}"
+        f" keys={','.join(keys)} context_keys={','.join(context_keys)}"
+        f" message_count={message_count if message_count is not None else 'invalid'}",
+        flush=True,
+    )
+
+
+def _provider_validation_category(body: bytes) -> str:
+    """Classify a rejected request without serializing any private value."""
+    try:
+        value = json.loads(body.decode("utf-8", "strict"))
+        if type(value) is not dict or _provider_canonical_json(value).encode() != body:
+            return "canonical"
+        if (
+            set(value) != {"model", "context", "options"}
+            or type(value["model"]) is not dict
+            or type(value["context"]) is not dict
+            or type(value["options"]) is not dict
+        ):
+            return "envelope"
+        model, context, options = value["model"], value["context"], value["options"]
+        try:
+            _validate_provider_model(model)
+        except ValueError:
+            return "model"
+        if (
+            set(context) != {"messages", "systemPrompt", "tools"}
+            or type(context["systemPrompt"]) is not str
+            or not context["systemPrompt"]
+            or type(context["messages"]) is not list
+        ):
+            return "context"
+        try:
+            _validate_provider_options(options, model)
+        except ValueError:
+            return "options"
+        try:
+            _validate_provider_tool(context["tools"])
+        except ValueError:
+            return "tool"
+        if not context["messages"] or any(
+            type(item) is not dict
+            or item.get("role") != "user"
+            or not _provider_text(item.get("content"))
+            for item in context["messages"]
+        ):
+            return "messages"
+        return "continuity"
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
+        return "invalid"
 
 
 def _digest(value: object) -> str:

@@ -202,8 +202,15 @@ class PrimeP7DevelopmentSdkProvider:
             await self._reap_shielded()
             raise
         except BaseException as error:
+            category = "internal"
             if type(error) is _ProviderFailure:
                 self._failure = error
+                category = error.kind
+            elif isinstance(error, TimeoutError):
+                category = "deadline"
+            print(
+                f"p7-sdk-provider turn={turn} category={category}", flush=True
+            )
             self._terminal = None
             await self._reap_shielded()
             failed = True
