@@ -82,6 +82,40 @@ def _follow(previous: bytes, response: bytes, text: str) -> bytes:
 
 
 class TestPrimeP3DevelopmentSdkProvider(unittest.IsolatedAsyncioTestCase):
+    def test_tool_response_discards_nonempty_provider_preamble(self) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p3_development_sdk_provider as subject,
+        )
+
+        request = subject._decode_request(_body("root"), None, "root")
+        response, _ = subject._assistant_response(
+            request,
+            {
+                "choices": [
+                    {
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "content": "I will execute the requested fixed cell.",
+                            "tool_calls": [
+                                {
+                                    "function": {
+                                        "arguments": '{"code":"x = 1"}',
+                                        "name": "ipython",
+                                    },
+                                    "id": "tool-1",
+                                    "type": "function",
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {"completion_tokens": 1, "prompt_tokens": 1},
+            },
+        )
+        projected = json.loads(response)
+        self.assertEqual(projected["stopReason"], "toolUse")
+        self.assertEqual(len(projected["content"]), 1)
+
     def test_http_payload_uses_operator_model_and_redacts_terminal_child_notice(
         self,
     ) -> None:

@@ -566,7 +566,7 @@ def _assistant_response(
     calls = message.get("tool_calls")
     if (
         finish == "tool_calls"
-        and message.get("content") in (None, "")
+        and (message.get("content") is None or type(message.get("content")) is str)
         and type(calls) is list
         and len(calls) == 1
         and type(calls[0]) is dict
