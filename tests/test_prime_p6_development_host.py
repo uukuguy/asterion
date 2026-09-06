@@ -127,11 +127,16 @@ class TestP6DevelopmentHost(unittest.TestCase):
         self.assertIn("clamp-task-a/v1", gateway.prompt_bodies[0])
         self.assertIn("/workspace/baseline.py", gateway.prompt_bodies[0])
         self.assertIn("/workspace/task-a.json", gateway.prompt_bodies[0])
+        self.assertIn("clamp(value, lower, upper)", gateway.prompt_bodies[0])
+        self.assertIn("integer list", gateway.prompt_bodies[0])
+        self.assertIn("compact sorted-key UTF-8 JSON", gateway.prompt_bodies[0])
         self.assertNotIn("[[4,-2,3]]", gateway.prompt_bodies[0])
         self.assertNotIn("[[4,-2,3]]", gateway.prompt_bodies[1])
         self.assertIn("clamp-task-b/v1", gateway.prompt_bodies[2])
         self.assertIn("/workspace/candidate.py", gateway.prompt_bodies[2])
         self.assertIn("/workspace/task-b.json", gateway.prompt_bodies[2])
+        self.assertIn("clamp(value, lower, upper)", gateway.prompt_bodies[2])
+        self.assertIn("source_sha256 prefixed sha256:", gateway.prompt_bodies[2])
         self.assertIn("run_id run", gateway.prompt_bodies[2])
 
     def test_rolls_back_the_exact_candidate_after_failed_holdout(self) -> None:
