@@ -203,6 +203,7 @@ export {
 } from "./p1-development-session.js";
 export { PrimeP2DevelopmentSession } from "./p2-development-session.js";
 export { PrimeP3DevelopmentSession } from "./p3-development-session.js";
+export { PrimeP4DevelopmentError, runPrimeP4DevelopmentSmoke } from "./p4-development-session.js";
 export { PrimeP1BDevelopmentSession } from "./p1b-development-session.js";
 export {
   inheritedP1DevelopmentSocket,
