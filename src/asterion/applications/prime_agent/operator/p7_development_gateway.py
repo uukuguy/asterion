@@ -260,8 +260,11 @@ class PrimeP7DevelopmentGateway(DevelopmentGatewayTransport):
 
     def _fail(self) -> None:
         self._state = "failed"
-        print(f"p7-sdk-gateway category={_stderr_category(self._stderr)}", flush=True)
         self._fail_transport()
+        thread = self._stderr_thread
+        if thread is not None:
+            thread.join(timeout=0.1)
+        print(f"p7-sdk-gateway category={_stderr_category(self._stderr)}", flush=True)
 
     def _abort_active_prompt(self) -> None:
         self._fail()
