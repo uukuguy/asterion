@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -34,6 +36,34 @@ class _Transport:
 
 
 class TestP7DevelopmentDocker(unittest.TestCase):
+    def test_reader_admits_bounded_actions_larger_than_p5_cap(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_development_docker import (
+            _READ_PROGRAM,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            names = ("p7_client.py", "initial.json", "actions.json")
+            for name in names:
+                (workspace / name).write_bytes(
+                    b"x" * (20 * 1024) if name == "actions.json" else b"x"
+                )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-c",
+                    _READ_PROGRAM,
+                    str(workspace),
+                    "actions.json",
+                    *names,
+                ],
+                check=False,
+                capture_output=True,
+            )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(result.stdout), 20 * 1024)
+
     def test_stages_exact_inventory_and_preserves_broker_client(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_docker import (
             P7DevelopmentDockerWorkerService,

@@ -21,13 +21,14 @@ from .p5_development_docker import P5DevelopmentDockerTransport, _CELL_CAP, _REA
 
 _ID = re.compile(r"[0-9a-f]{64}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_P7_SNAPSHOT_CAP = 128 * 1024
 _NAMES = (
     ("p7_client.py",),
     ("p7_client.py", "initial.json"),
     ("p7_client.py", "initial.json", "actions.json"),
     ("p7_client.py", "initial.json", "actions.json", "status.json"),
 )
-_READ_PROGRAM = "import os,stat,sys\nroot,name=sys.argv[1:3];expected=set(sys.argv[3:])\ntry:\n names=set(os.listdir(root))\n if names!=expected or name not in expected: raise ValueError\n d=os.open(root,os.O_RDONLY|os.O_DIRECTORY)\n try:\n  before=os.stat(name,dir_fd=d,follow_symlinks=False)\n  if not stat.S_ISREG(before.st_mode): raise ValueError\n  fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=d)\n  try:\n   after=os.fstat(fd)\n   if not stat.S_ISREG(after.st_mode) or (before.st_dev,before.st_ino)!=(after.st_dev,after.st_ino): raise ValueError\n   data=os.read(fd,16385)\n   if not data or len(data)>16384: raise ValueError\n  finally: os.close(fd)\n finally: os.close(d)\nexcept BaseException: raise SystemExit(1)\nsys.stdout.buffer.write(data)\n"
+_READ_PROGRAM = "import os,stat,sys\nroot,name=sys.argv[1:3];expected=set(sys.argv[3:])\ntry:\n names=set(os.listdir(root))\n if names!=expected or name not in expected: raise ValueError\n d=os.open(root,os.O_RDONLY|os.O_DIRECTORY)\n try:\n  before=os.stat(name,dir_fd=d,follow_symlinks=False)\n  if not stat.S_ISREG(before.st_mode): raise ValueError\n  fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=d)\n  try:\n   after=os.fstat(fd)\n   if not stat.S_ISREG(after.st_mode) or (before.st_dev,before.st_ino)!=(after.st_dev,after.st_ino): raise ValueError\n   data=os.read(fd,131073)\n   if not data or len(data)>131072: raise ValueError\n  finally: os.close(fd)\n finally: os.close(d)\nexcept BaseException: raise SystemExit(1)\nsys.stdout.buffer.write(data)\n"
 
 
 class PrimeP7DevelopmentDockerError(ValueError):
@@ -306,13 +307,13 @@ class P7DevelopmentDockerTransport(P5DevelopmentDockerTransport):
                     *expected,
                 ),
                 control,
-                max_output_bytes=_READ_CAP,
+                max_output_bytes=_P7_SNAPSHOT_CAP,
             )
             if (
                 result.stderr
                 or type(result.stdout) is not bytes
                 or not result.stdout
-                or len(result.stdout) > _READ_CAP
+                or len(result.stdout) > _P7_SNAPSHOT_CAP
             ):
                 raise ValueError
             return result.stdout
@@ -497,7 +498,8 @@ class P7DevelopmentDockerWorkerService:
         if not callable(read):
             raise PrimeP7DevelopmentDockerError()
         value = await read(self.daemon_id, name, expected, _control())
-        if type(value) is not bytes or not value or len(value) > _READ_CAP:
+        cap = _READ_CAP if name == "p7_client.py" else _P7_SNAPSHOT_CAP
+        if type(value) is not bytes or not value or len(value) > cap:
             raise PrimeP7DevelopmentDockerError()
         return value
 
