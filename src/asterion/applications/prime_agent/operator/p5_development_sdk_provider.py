@@ -686,6 +686,7 @@ def _deepseek_payload(
         "messages": payload_messages,
         "model": model_id,
         "stream": False,
+        "temperature": 0,
         "thinking": {"type": "disabled"},
     }
     tool = context["tools"][0]

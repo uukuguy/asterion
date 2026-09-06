@@ -4,6 +4,15 @@ import unittest
 
 
 class TestP5DevelopmentSdkProvider(unittest.TestCase):
+    def test_all_turns_use_zero_temperature(self) -> None:
+        from asterion.applications.prime_agent.operator.p5_development_sdk_provider import _deepseek_payload
+
+        request = {"context": {"systemPrompt": "system", "messages": [{"role": "user", "content": [{"type": "text", "text": "repair"}]}], "tools": [{"description": "ipython", "parameters": {"type": "object"}}]}}
+        for turn in range(4):
+            with self.subTest(turn=turn):
+                payload = _deepseek_payload(request, "model", 1024, turn=turn)
+                self.assertEqual(payload["temperature"], 0)
+
     def test_turn_two_keeps_ipython_tools_and_forces_the_function(self) -> None:
         from asterion.applications.prime_agent.operator.p5_development_sdk_provider import _deepseek_payload
 
