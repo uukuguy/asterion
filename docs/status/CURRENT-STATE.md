@@ -10,8 +10,8 @@
   capability-package framework
 - Project route: managed
 - Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
-- Active work package: P1 through P5 development reproductions and exact-selector
-  CLI routes are closed; P6 continual improvement is active, followed by P7.
+- Active work package: P1 through P6 development reproductions and exact-selector
+  CLI routes are closed (6/7); P7 ARC-AGI-3 is active and next.
   Existing provider-free acceptance implementations are retained. Native
   parity and broad framework restructuring are not prerequisites for Prime
   closure.
@@ -136,9 +136,13 @@
   `p5-development/unpromoted` trace
   `sha256:64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`;
   residue inspection found zero P5 containers, gateways and workspaces.
-- P6 `prime.continual-improvement/v1` has the fixed task-A/candidate/task-B
-  preserve-or-exact-rollback chain over `HarnessCoordinator`, scoped evidence,
-  and a global-approval-aware live reducer. It is provider-free verified only.
+- P6 `prime.continual-improvement/v1` is development closure / CLI verified. The
+  exact `PRIME_RUN_ID=prime-p6-20260906-ninth make prime-p6-run` command exited 0
+  with scope `p6-development/unpromoted` and trace
+  `sha256:be059a0b43da810cfa530adc23f550c52f904f475c44d9062b71c873e525596d`.
+  Nineteen Python tests, two TypeScript tests, and Ruff passed; residue
+  inspection found zero Prime P6 containers. Production promotion remains
+  separate and is not claimed.
 - P7 `prime.arc-agi-3/v1` has a single-game IPython broker trace, host score
   replay, provider-free acceptance, and distinct subset/full authorization
   reducers. No real game, model, or full-suite claim has been promoted.
@@ -153,8 +157,8 @@
   only declared generated build products. The pinned `a18809e...` checkout
   reproduces cleanly, and the historical H-036/H-038 closure passed promotion. Those
   historical results do not verify the current uncommitted changes.
-- Obtain separately authorized real restricted-worker evidence for the seven
-  Prime products; do not infer it from local fake-chain tests or Smoke Core.
+- Obtain separately authorized real restricted-worker evidence for P7; do not
+  infer it from local fake-chain tests or Smoke Core.
 - Run final provider-free repository verification and keep any real ARC-AGI-3
   full-suite reproduction behind an exact finite operator authorization.
 
@@ -209,7 +213,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Resume P6 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
+4. Resume P7 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
    parallel runtime track; do not substitute it or broad framework refactoring
    for Prime end-to-end closure.
 5. Keep credentials, private configuration, and execution authority external.

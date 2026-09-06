@@ -27,14 +27,14 @@ or merge contracts.
 | P3 `prime.recursive-workflow/v1` | Real installed CLI run completed two RLM children, retained review follow-up, ten model callbacks, four Docker-backed IPython cells, host oracle and cleanup | Production promotion remains a separate release task | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P4 `prime.long-session-continuity/v1` | Installed CLI completed direct native daemon checkpoint, exact zero-gap reattach, compact, five model callbacks, two Docker IPython cells, same oracle and cleanup | Production promotion and crash/restart replay remain separate work | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P5 `prime.bounded-autonomy/v1` | Installed CLI completed one Prime session, two completion-only Docker IPython actions, failed quality feedback, exact source repair, host result/quality gates and cleanup | Production promotion and broader autonomous task classes remain separate work | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
-| P6 `prime.continual-improvement/v1` | HarnessCoordinator task-A/candidate/task-B, scoped approval and rollback tests pass | Real task/holdout execution, exact activation or rollback, worker evidence and public route | Depends on P1/P5; use local/project scope first, global activation remains explicitly governed |
-| P7 `prime.arc-agi-3/v1` | Game broker/score replay/worker/subset-full reducer tests pass | Real isolated game broker and IPython launcher with bounded public-subset functional evidence | Depends on P1–P6; full multi-game reproduction remains a separate explicitly authorized finite scope |
+| P6 `prime.continual-improvement/v1` | Installed CLI completed task-A/candidate/task-B execution, exact activation-or-rollback, worker evidence and cleanup; 19 Python tests, 2 TypeScript tests and Ruff passed | Production promotion remains a separate release task | **Development closure / CLI verified**. `PRIME_RUN_ID=prime-p6-20260906-ninth make prime-p6-run` exited 0 with scope `p6-development/unpromoted`, trace `sha256:be059a0b43da810cfa530adc23f550c52f904f475c44d9062b71c873e525596d`, and zero Prime P6 containers |
+| P7 `prime.arc-agi-3/v1` | Game broker/score replay/worker/subset-full reducer tests pass | Real isolated game broker and IPython launcher with bounded public-subset functional evidence | **Active / next**. Depends on P1–P6; full multi-game reproduction remains a separate explicitly authorized finite scope |
 
-All seven complete only after their named real scenario succeeds. Public
+Six of seven scenarios now have named development CLI closure; P7 remains active. Public
 metadata, fixed fixtures, fake workers and compatibility probes are distinct
-evidence layers, not alternate ways to close a scenario. P6–P7 currently lack
-complete installed execution routes; source-level test suites do not mean
-publicly runnable scenarios.
+evidence layers, not alternate ways to close a scenario. P7 still lacks a
+complete installed execution route; source-level test suites do not mean
+production promotion.
 
 ## P1 closure record
 
@@ -161,6 +161,19 @@ promotion `unpromoted`, and trace
 Post-run inspection found zero P5 containers, gateway processes and temporary
 workspaces. This closes the fixed development reproduction; production
 promotion and broader autonomous task classes remain separate.
+
+## P6 closure record
+
+P6 now runs through the installed application
+`prime.continual-improvement@1.0.0`. The bounded route executed task A, a
+candidate change, and holdout task B, then applied the exact activation-or-
+rollback decision with worker evidence and cleanup. The exact command
+`PRIME_RUN_ID=prime-p6-20260906-ninth make prime-p6-run` exited 0 with scope
+`p6-development/unpromoted` and trace
+`sha256:be059a0b43da810cfa530adc23f550c52f904f475c44d9062b71c873e525596d`.
+Nineteen Python tests, two TypeScript tests, and Ruff passed; residue
+inspection found zero Prime P6 containers. This closes the development
+reproduction; production promotion remains a separate release task.
 
 ## Current development execution evidence
 

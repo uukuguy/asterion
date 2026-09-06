@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-06 12:20. **Session remains active — not a final handoff.**
+> Updated: 2026-09-06. **Session remains active — not a final handoff.**
 
 ## Direction
 
@@ -15,8 +15,9 @@ Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`.
 - P3 `make prime-p3-run`: two recursive children, ten model callbacks, four Docker IPython cells, host oracle and cleanup; trace `sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`.
 - P4 `make prime-p4-run`: direct native daemon checkpoint, exact zero-gap detach/reattach, one compact, five model callbacks, two Docker IPython cells, same AST oracle and cleanup; trace `sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
 - P5 `make prime-p5-run`: one Prime session, two completion-only IPython actions, failed quality feedback, exact repair, host result/quality gates and cleanup; trace `sha256:64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`.
+- P6 `PRIME_RUN_ID=prime-p6-20260906-ninth make prime-p6-run`: task-A/candidate/task-B execution, exact activation-or-rollback, worker evidence and cleanup; scope `p6-development/unpromoted`, trace `sha256:be059a0b43da810cfa530adc23f550c52f904f475c44d9062b71c873e525596d`.
 
-All five results are development-only and `unpromoted`. P4 closure uses Prime 0.7.1 direct-daemon zero-gap reattach; crash/restart replay and production promotion remain separate work.
+All six results are development-only and `unpromoted`; 19 Python tests, 2 TypeScript tests and Ruff passed for P6, with zero Prime P6 containers. P4 closure uses Prime 0.7.1 direct-daemon zero-gap reattach; crash/restart replay and production promotion remain separate work.
 
 ## P4 implementation boundary
 
@@ -26,7 +27,7 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 
 ## Next concrete action
 
-P6 `prime.continual-improvement/v1` is active. Its provider-free coordinator already models task A, a candidate change, holdout task B, scoped activation and exact rollback. The missing closure is an installed `make prime-p6-run` route with real restricted task/holdout execution, worker evidence, and public-safe activation-or-rollback trace.
+P7 `prime.arc-agi-3/v1` is active and next. Its remaining closure is a real isolated game broker and IPython launcher with bounded public-subset functional evidence; full multi-game reproduction remains separately authorized.
 
 Reuse the closed Prime runtime/provider/worker spine where contracts match. Keep activation local/project-scoped during development; global activation remains separately governed.
 
