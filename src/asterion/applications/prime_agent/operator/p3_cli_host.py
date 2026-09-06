@@ -23,7 +23,7 @@ from asterion.services.registry import HostServiceFactoryBinding, HostServiceFac
 
 _CAPABILITY = "prime.recursive-workflow-development"
 _TAG = "asterion-p3-development:20260906"
-_DIGEST = "sha256:a89a88151d870acffe0f52e2aa0bfc5d4be8f02d54c8482f92caff8013bc358e"
+_DIGEST = "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"
 _RUN_ID = re.compile(r"[a-z][a-z0-9.-]*\Z")
 
 
