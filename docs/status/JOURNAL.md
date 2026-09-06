@@ -2033,3 +2033,4 @@
 - 13:13 Added P7 installed route skeleton for exact package/runtime/host wiring [6e6050fc]
 - 13:16 Added isolated P7 Prime SDK gateway/provider with exact 6/3 terminal witness; focused gateway, provider, built-main, and TypeScript tests pass [pending]
 - 13:15 P7 SDK gateway/provider enforces isolated six-model/three-ipython terminal witness [bb6244dd]
+- 13:22 Added P7 standalone broker sockets and replay because model execution must stay isolated [0e4a74f6]

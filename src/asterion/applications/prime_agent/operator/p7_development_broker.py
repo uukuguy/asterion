@@ -178,8 +178,9 @@ class P7DevelopmentBroker:
 
     def replay(self, factory: Callable[[], object]) -> dict[str, object]:
         sealed = self.seal()
-        engine = factory()
+        engine = None
         try:
+            engine = factory()
             first = _observation(engine.observe())
             if not self._journal or first != self._journal[0]["observation"]:
                 raise ValueError
@@ -191,6 +192,13 @@ class P7DevelopmentBroker:
                 raise ValueError
         except BaseException:
             raise P7DevelopmentBrokerError() from None
+        finally:
+            try:
+                close = getattr(engine, "close", None)
+                if callable(close):
+                    close()
+            except BaseException:
+                pass
         return {
             "replay_sha256": _digest(self._journal),
             "terminal_reason": sealed.terminal_reason,
