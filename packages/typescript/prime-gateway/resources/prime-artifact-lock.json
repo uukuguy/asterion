@@ -9,8 +9,10 @@
   "files": {
     "package-lock.json": "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8",
     "packages/ai/dist/mcp/oauth.js": "9a75bc079ca4debff24ac2c7c06e9af6877955386a2de9da2ed31c05f45213d4",
+    "packages/ai/dist/utils/event-stream.js": "adbad06bccc10c7a472ac202133754486318a2c557ffe6a198485f122504522d",
     "packages/ai/src/mcp/oauth.ts": "f760a29bdc6852df3245e9ac0cfabfeb6feba14a5322c728f639025d091beed2",
     "packages/coding-agent/dist/core/diagnostics.js": "b84fc4bac1fa2a4554cbc33b8b20f56908a2de8c302e63178c2981bfd185dc08",
+    "packages/coding-agent/dist/core/auth-storage.js": "fa45c9ed883363475bbca80839ec42d518597c3671d2cda9d320f083f1393c76",
     "packages/coding-agent/dist/core/extensions/loader.js": "fe94b82a452ac14d812e26e82dd54820f6c26324c99a4a75405e3acd8a586729",
     "packages/coding-agent/dist/core/extensions/runner.js": "42d26396fcf0cb5dd856eef712cafef20c50d85153238561dfcacab35a1a0682",
     "packages/coding-agent/dist/core/mcp/mcp-manager.js": "31e59ce6eaba5aaf3c9e8485dd6dda6f3101d30d674554aa7e6e3e58ddcac6d1",
@@ -20,6 +22,7 @@
     "packages/coding-agent/dist/core/refinement/index.js": "e065c88f049fd19e55f5973a69a80f33190a65560fd54f2e33370e827699eab8",
     "packages/coding-agent/dist/core/refinement/refinement.js": "e8bb31024293143b891b9263bad76726620dac6cb17c2cb47260e075159d2e81",
     "packages/coding-agent/dist/core/resource-loader.js": "48517fd47b99a1554b53f1c7ed3a38502304d0e82c29ce39b3c3eb3e9ab64f48",
+    "packages/coding-agent/dist/core/settings-manager.js": "867be3ac28592431d772f9ffdbd3d5a2e24dc2f9932c2de1baa41a4d2d8cfe64",
     "packages/coding-agent/dist/core/skills.js": "c20ad7c3088cdd37e2352d3d15d1252502979323fef8c53de862036910799fb6",
     "packages/coding-agent/dist/index.js": "0555400963ce5c9fa3059c3ed571748715d3ddda3830085eb8f12da00708d49b",
     "packages/coding-agent/dist/modes/daemon/daemon-client.js": "bf2cf815b11cc41560584e6b169a0ac2e154377bab69aa9bbfd0d73a55075ec6",

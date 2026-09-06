@@ -41,6 +41,12 @@ const expectedFiles = Object.freeze({
     "b4624b7682c158a690fb1e1ab42b139b25184f893263bc2bfec2ca92776f0138",
   "packages/coding-agent/dist/index.js":
     "0555400963ce5c9fa3059c3ed571748715d3ddda3830085eb8f12da00708d49b",
+  "packages/coding-agent/dist/core/auth-storage.js":
+    "fa45c9ed883363475bbca80839ec42d518597c3671d2cda9d320f083f1393c76",
+  "packages/coding-agent/dist/core/settings-manager.js":
+    "867be3ac28592431d772f9ffdbd3d5a2e24dc2f9932c2de1baa41a4d2d8cfe64",
+  "packages/ai/dist/utils/event-stream.js":
+    "adbad06bccc10c7a472ac202133754486318a2c557ffe6a198485f122504522d",
   "prime-agent.sh":
     "0ceef94210da44aa2cb232fb18fd215c5a25caf7b652531856c5a90af01df09d",
 });
