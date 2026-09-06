@@ -45,8 +45,46 @@ def _path(value: object) -> bool:
     )
 
 
+def _normalized_bind_mounts(value: object) -> tuple[tuple[object, ...], ...]:
+    """Canonicalize Docker's unordered bind projection before exact admission."""
+    if type(value) is not list:
+        raise PrimeP7DevelopmentDockerError()
+    try:
+        mounts = tuple(sorted(value))
+    except TypeError:
+        raise PrimeP7DevelopmentDockerError() from None
+    if any(type(item) is not str for item in mounts):
+        raise PrimeP7DevelopmentDockerError()
+    return tuple((item,) for item in mounts)
+
+
+def _normalized_mounts(value: object) -> tuple[tuple[object, ...], ...]:
+    if type(value) is not list:
+        raise PrimeP7DevelopmentDockerError()
+    normalized = []
+    for item in value:
+        if type(item) is not dict:
+            raise PrimeP7DevelopmentDockerError()
+        normalized.append(
+            tuple(item.get(key) for key in ("Type", "Source", "Destination", "RW", "Propagation"))
+        )
+    try:
+        return tuple(sorted(normalized))
+    except TypeError:
+        raise PrimeP7DevelopmentDockerError() from None
+
+
 class P7DevelopmentDockerTransport(P5DevelopmentDockerTransport):
     """P7-only Docker calls, with the model socket as the sole broker mount."""
+
+    async def _uncertain(self, identity: str) -> None:
+        """Keep P7 create compensation inside the P7 error boundary."""
+        try:
+            await super()._uncertain(identity)
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            raise PrimeP7DevelopmentDockerError() from None
 
     async def create_p7(
         self,
@@ -164,19 +202,13 @@ class P7DevelopmentDockerTransport(P5DevelopmentDockerTransport):
         )
         try:
             values = json.loads(result.stdout)[0]
-            environment, ports, security, mounts = (
+            environment, ports, security, mounts, binds = (
                 values.pop("Env"),
                 values.pop("PortBindings"),
                 values.pop("SecurityOpt"),
                 values.pop("Mounts"),
+                values.pop("Binds"),
             )
-            normalized = [
-                {
-                    key: item.get(key)
-                    for key in ("Type", "Source", "Destination", "RW", "Propagation")
-                }
-                for item in mounts
-            ]
             exact = {
                 "Id": daemon,
                 "Image": image,
@@ -189,10 +221,6 @@ class P7DevelopmentDockerTransport(P5DevelopmentDockerTransport):
                 "Privileged": False,
                 "CapAdd": None,
                 "CapDrop": ["ALL"],
-                "Binds": [
-                    workspace + ":/workspace:rw,rprivate",
-                    socket_path + ":/broker/model.sock:ro,rprivate",
-                ],
                 "VolumesFrom": None,
                 "Tmpfs": {
                     "/tmp": "rw,nodev,noexec,nosuid,size=16777216,uid=65534,gid=65534,mode=0700"
@@ -210,23 +238,10 @@ class P7DevelopmentDockerTransport(P5DevelopmentDockerTransport):
             if (
                 type(values) is not dict
                 or values != exact
-                or normalized
-                != [
-                    {
-                        "Type": "bind",
-                        "Source": workspace,
-                        "Destination": "/workspace",
-                        "RW": True,
-                        "Propagation": "rprivate",
-                    },
-                    {
-                        "Type": "bind",
-                        "Source": socket_path,
-                        "Destination": "/broker/model.sock",
-                        "RW": False,
-                        "Propagation": "rprivate",
-                    },
-                ]
+                or _normalized_bind_mounts(binds)
+                != tuple(sorted(((workspace + ":/workspace:rw,rprivate",), (socket_path + ":/broker/model.sock:ro,rprivate",))))
+                or _normalized_mounts(mounts)
+                != tuple(sorted((("bind", workspace, "/workspace", True, "rprivate"), ("bind", socket_path, "/broker/model.sock", False, "rprivate"))))
                 or not self._valid_environment(environment)
                 or ports not in (None, {})
                 or security

@@ -36,6 +36,77 @@ class _Transport:
 
 
 class TestP7DevelopmentDocker(unittest.TestCase):
+    def test_admission_normalizes_docker_bind_mount_order(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_development_docker import (
+            _normalized_bind_mounts,
+            _normalized_mounts,
+        )
+
+        workspace = "/tmp/workspace"
+        socket_path = "/tmp/broker/model.sock"
+        expected_binds = tuple(
+            sorted(
+                (
+                    (workspace + ":/workspace:rw,rprivate",),
+                    (socket_path + ":/broker/model.sock:ro,rprivate",),
+                )
+            )
+        )
+        expected_mounts = tuple(
+            sorted(
+                (
+                    ("bind", workspace, "/workspace", True, "rprivate"),
+                    ("bind", socket_path, "/broker/model.sock", False, "rprivate"),
+                )
+            )
+        )
+        actual_mounts = [
+            {
+                "Type": "bind",
+                "Source": socket_path,
+                "Destination": "/broker/model.sock",
+                "RW": False,
+                "Propagation": "rprivate",
+            },
+            {
+                "Type": "bind",
+                "Source": workspace,
+                "Destination": "/workspace",
+                "RW": True,
+                "Propagation": "rprivate",
+            },
+        ]
+
+        self.assertEqual(
+            _normalized_bind_mounts(
+                [
+                    socket_path + ":/broker/model.sock:ro,rprivate",
+                    workspace + ":/workspace:rw,rprivate",
+                ]
+            ),
+            expected_binds,
+        )
+        self.assertEqual(_normalized_mounts(actual_mounts), expected_mounts)
+
+    def test_uncertain_create_cleanup_does_not_leak_p5_error(self) -> None:
+        from asterion.applications.prime_agent.operator.p5_development_docker import (
+            P5DevelopmentDockerTransport,
+            PrimeP5DevelopmentDockerError,
+        )
+        from asterion.applications.prime_agent.operator.p7_development_docker import (
+            P7DevelopmentDockerTransport,
+            PrimeP7DevelopmentDockerError,
+        )
+
+        transport = object.__new__(P7DevelopmentDockerTransport)
+
+        async def broken_cleanup(_: object, __: str) -> None:
+            raise PrimeP5DevelopmentDockerError()
+
+        with patch.object(P5DevelopmentDockerTransport, "_uncertain", broken_cleanup):
+            with self.assertRaises(PrimeP7DevelopmentDockerError):
+                asyncio.run(transport._uncertain("prime-p7-test"))
+
     def test_reader_admits_bounded_actions_larger_than_p5_cap(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_docker import (
             _READ_PROGRAM,
