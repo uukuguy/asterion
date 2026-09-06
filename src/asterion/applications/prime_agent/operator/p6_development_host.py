@@ -97,17 +97,17 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
         gateway.bind(model_hook=model_hook, tool_hook=tool_hook)
         opened = True  # Own cleanup even when open reports after allocating resources.
         await gateway.open(run_id=run_id, session_id=session_id, generation=1)
-        _completed(await gateway.prompt(_prompt(1)), 2, 1)
+        _completed(await gateway.prompt(_prompt(1, run_id, session_id)), 2, 1)
         task_a = _task_a_snapshot(await worker.snapshot(), run_id, session_id)
-        _completed(await gateway.prompt(_prompt(2)), 4, 2)
-        candidate = _candidate_snapshot(await worker.snapshot())
+        _completed(await gateway.prompt(_prompt(2, run_id, session_id)), 4, 2)
+        candidate = _candidate_snapshot(await worker.snapshot(), run_id, session_id)
         coordinator, baseline, proposal, body_store = _coordinator(run_id, candidate, task_a)
         candidate_revision = coordinator.apply(proposal)
         candidate_harness = coordinator.snapshot()
         selected = _selected_candidate(candidate_harness, body_store)
         if selected != candidate:
             raise ValueError
-        _completed(await gateway.prompt(_prompt(3, "sha256:" + sha256(selected).hexdigest())), 6, 3)
+        _completed(await gateway.prompt(_prompt(3, run_id, session_id, "sha256:" + sha256(selected).hexdigest())), 6, 3)
         holdout_passed, holdout = _task_b_snapshot(await worker.snapshot(), run_id, session_id, selected)
         if (model_calls, tool_calls) != (6, 3):
             raise ValueError
@@ -188,14 +188,14 @@ def _task_a_snapshot(value: object, run_id: str, session_id: str) -> dict[str, o
     return _artifact(value["task-a.json"], "clamp-task-a/v1", "task-a", run_id, session_id, _BASELINE_SOURCE)
 
 
-def _candidate_snapshot(value: object) -> bytes:
-    if type(value) is not dict or set(value) != {"baseline.py", "task-a.json", "candidate.py"} or value["baseline.py"] != _BASELINE_SOURCE or not _admitted_candidate(value["candidate.py"]):
+def _candidate_snapshot(value: object, run_id: str, session_id: str) -> bytes:
+    if type(value) is not dict or set(value) != {"baseline.py", "task-a.json", "candidate.py"} or value["baseline.py"] != _BASELINE_SOURCE or value["task-a.json"] != _task_a_artifact(run_id, session_id) or not _admitted_candidate(value["candidate.py"]):
         raise ValueError
     return value["candidate.py"]
 
 
 def _task_b_snapshot(value: object, run_id: str, session_id: str, candidate: bytes) -> tuple[bool, dict[str, object]]:
-    if type(value) is not dict or set(value) != {"baseline.py", "task-a.json", "candidate.py", "task-b.json"} or value["candidate.py"] != candidate:
+    if type(value) is not dict or set(value) != {"baseline.py", "task-a.json", "candidate.py", "task-b.json"} or value["baseline.py"] != _BASELINE_SOURCE or value["task-a.json"] != _task_a_artifact(run_id, session_id) or value["candidate.py"] != candidate:
         raise ValueError
     artifact = _artifact(value["task-b.json"], "clamp-task-b/v1", "task-b", run_id, session_id, candidate)
     return artifact["passed"], artifact
@@ -312,13 +312,13 @@ def _usage(value: object) -> dict[str, int]:
     return {field: getattr(value, field) for field in fields}
 
 
-def _prompt(stage: int, candidate_sha256: str | None = None) -> str:
+def _prompt(stage: int, run_id: str, session_id: str, candidate_sha256: str | None = None) -> str:
     prompts = {
-        1: "P6 stage 1: read baseline.py only; write canonical task-a.json with fixture, stage, run_id, session_id, source_sha256, inputs, outputs, passed. Use one completion-only IPython call; no printing, inspection, subprocess, scope, authority, or rollback.",
-        2: "P6 stage 2: read baseline.py and task-a.json; write candidate.py only. Use one completion-only IPython call; no printing, inspection, subprocess, task-b.json, scope, authority, or rollback.",
+        1: f"P6 stage 1: run_id {run_id}; session_id {session_id}; read baseline.py only; write canonical task-a.json fixture clamp-task-a/v1 stage task-a inputs [[-4,-2,3]] with fixture, stage, run_id, session_id, source_sha256, inputs, outputs, passed. Use one completion-only IPython call; no printing, inspection, subprocess, scope, authority, or rollback.",
+        2: f"P6 stage 2: run_id {run_id}; session_id {session_id}; read baseline.py and task-a.json; write candidate.py only. Use one completion-only IPython call; no printing, inspection, subprocess, task-b.json, scope, authority, or rollback.",
     }
     if stage == 3 and _DIGEST.fullmatch(candidate_sha256 or ""):
-        return f"P6 stage 3: selected candidate digest is {candidate_sha256}; read candidate.py and write canonical task-b.json with fixture, stage, run_id, session_id, source_sha256, inputs [[4,-2,3]], outputs, passed. Use one completion-only IPython call; no printing, inspection, subprocess, scope, authority, or rollback."
+        return f"P6 stage 3: run_id {run_id}; session_id {session_id}; selected candidate digest is {candidate_sha256}; read candidate.py and write canonical task-b.json fixture clamp-task-b/v1 stage task-b inputs [[4,-2,3]] with fixture, stage, run_id, session_id, source_sha256, inputs, outputs, passed. Use one completion-only IPython call; no printing, inspection, subprocess, scope, authority, or rollback."
     if stage in prompts:
         return prompts[stage]
     raise ValueError

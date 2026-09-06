@@ -67,6 +67,7 @@ class _Worker:
 class _Gateway:
     def __init__(self) -> None:
         self.prompts = 0
+        self.prompt_bodies: list[str] = []
         self.closed = False
 
     def bind(self, *, model_hook: object, tool_hook: object) -> None:
@@ -75,8 +76,9 @@ class _Gateway:
     async def open(self, **_: object) -> None:
         return None
 
-    async def prompt(self, _: str) -> dict[str, object]:
+    async def prompt(self, prompt: str) -> dict[str, object]:
         self.prompts += 1
+        self.prompt_bodies.append(prompt)
         self.assert_reply(await self.model({"turn": self.prompts * 2 - 1}))
         self.assert_reply(await self.model({"turn": self.prompts * 2}))
         await self.tool({"tool_call_id": str(self.prompts), "code": "complete"})
@@ -109,6 +111,17 @@ class TestP6DevelopmentHost(unittest.TestCase):
         self.assertEqual(receipt.outcome, "preserved")
         self.assertEqual(receipt.rollback_count, 0)
         self.assertTrue(worker.cleaned)
+
+    def test_prompts_bind_stage_identity_and_holdout_only_at_stage_three(self) -> None:
+        gateway = _Gateway()
+        from asterion.applications.prime_agent.operator.p6_development_host import run_p6_development_lifecycle
+
+        asyncio.run(run_p6_development_lifecycle(gateway=gateway, provider=_Provider(), worker=_Worker(), run_id="run", session_id="session"))
+        self.assertIn("clamp-task-a/v1", gateway.prompt_bodies[0])
+        self.assertNotIn("[[4,-2,3]]", gateway.prompt_bodies[0])
+        self.assertNotIn("[[4,-2,3]]", gateway.prompt_bodies[1])
+        self.assertIn("clamp-task-b/v1", gateway.prompt_bodies[2])
+        self.assertIn("run_id run", gateway.prompt_bodies[2])
 
     def test_rolls_back_the_exact_candidate_after_failed_holdout(self) -> None:
         from asterion.applications.prime_agent.operator import p6_development_host as host
