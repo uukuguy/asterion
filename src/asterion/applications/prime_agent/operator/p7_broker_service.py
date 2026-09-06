@@ -47,6 +47,7 @@ class P7BrokerService:
         self._process: subprocess.Popen[bytes] | None = None
         self._model_socket = self._private / "model.sock"
         self._control_socket = self._private / "control.sock"
+        self._pycache = self._private / "pycache"
         self._model_token = secrets.token_hex(32)
         self._control_token = secrets.token_hex(32)
         self._control_sequence = 0
@@ -77,8 +78,10 @@ class P7BrokerService:
                 os.chmod(self._private, 0o711)
             else:
                 self._private.mkdir(mode=0o711, parents=True, exist_ok=False)
+            if self._pycache.exists() or self._pycache.is_symlink():
+                raise ValueError
             entrypoint = self._source / "asterion/applications/prime_agent/operator/p7_broker_process.py"
-            command = (str(self._interpreter), str(entrypoint), "--asterion-src", str(self._source), "--resource-root", str(self._resource), "--private-dir", str(self._private), "--model-socket", str(self._model_socket), "--control-socket", str(self._control_socket), "--model-token", self._model_token, "--control-token", self._control_token, "--game-id", P7_DEVELOPMENT_GAME_ID)
+            command = (str(self._interpreter), "-I", "-X", f"pycache_prefix={self._pycache}", str(entrypoint), "--asterion-src", str(self._source), "--resource-root", str(self._resource), "--private-dir", str(self._private), "--model-socket", str(self._model_socket), "--control-socket", str(self._control_socket), "--model-token", self._model_token, "--control-token", self._control_token, "--game-id", P7_DEVELOPMENT_GAME_ID)
             self._process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline:
@@ -152,6 +155,8 @@ class P7BrokerService:
                         pass
         if self._temporary:
             shutil.rmtree(self._private, ignore_errors=True)
+        else:
+            shutil.rmtree(self._pycache, ignore_errors=True)
 
 
 __all__ = ("P7BrokerService", "P7BrokerServiceError")

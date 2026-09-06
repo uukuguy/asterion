@@ -85,10 +85,13 @@ class TestP7DevelopmentRuntimeLock(unittest.TestCase):
         from asterion.applications.prime_agent.operator import p7_runtime_lock as lock
 
         temporary, root, wheels = self._root()
-        with temporary, patch.object(lock, "_WHEELS", wheels), patch.object(lock.subprocess, "run", return_value=self._probe(root)):
+        with temporary, patch.object(lock, "_WHEELS", wheels), patch.object(lock.subprocess, "run", return_value=self._probe(root)) as run:
             verified = lock.verify_p7_development_runtime(root)
         self.assertRegex(verified.runtime_sha256, r"\Asha256:[0-9a-f]{64}\Z")
         self.assertEqual(repr(verified), "P7DevelopmentRuntimeSet(redacted)")
+        command = run.call_args.args[0]
+        self.assertEqual(command[1:3], ["-I", "-X"])
+        self.assertRegex(command[3], r"\Apycache_prefix=/")
 
     def test_rejects_tampered_installed_package_file(self) -> None:
         from asterion.applications.prime_agent.operator import p7_runtime_lock as lock
@@ -113,5 +116,17 @@ class TestP7DevelopmentRuntimeLock(unittest.TestCase):
                     target = package / "module.py"
                     target.rename(package / "saved.py")
                     target.symlink_to("saved.py")
+                with self.assertRaises(lock.P7DevelopmentRuntimeLockError):
+                    lock.verify_p7_development_runtime(root)
+
+    def test_rejects_installed_bytecode_even_when_source_matches(self) -> None:
+        from asterion.applications.prime_agent.operator import p7_runtime_lock as lock
+
+        for relative in ("arc_agi/__pycache__/module.cpython-313.pyc", "arcengine/injected.pyc"):
+            temporary, root, wheels = self._root()
+            with temporary, self.subTest(relative=relative), patch.object(lock, "_WHEELS", wheels), patch.object(lock.subprocess, "run", return_value=self._probe(root)):
+                bytecode = root / "venv/lib/python/site-packages" / relative
+                bytecode.parent.mkdir(parents=True, exist_ok=True)
+                bytecode.write_bytes(b"not trusted")
                 with self.assertRaises(lock.P7DevelopmentRuntimeLockError):
                     lock.verify_p7_development_runtime(root)

@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import tempfile
 import zipfile
 
 from .p7_development_workload import P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256, P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256
@@ -149,13 +150,12 @@ def _verify_installed_wheel(site_packages: Path, members: dict[str, bytes], dist
         for child in directory.iterdir():
             name = child.name
             relative = f"{top}/{name}"
-            if name == "__pycache__" and top != dist_info:
-                cache = _direct_directory(directory, name)
-                for bytecode in cache.iterdir():
-                    if bytecode.is_dir() or bytecode.is_symlink() or not bytecode.name.endswith(".pyc"):
-                        raise P7DevelopmentRuntimeLockError()
-                    _read_direct_regular(cache, bytecode.name)
-                continue
+            # A bytecode cache is executable material which is not represented
+            # by the signed wheel RECORD.  Do not merely validate its shape:
+            # Python may prefer it over source in some timestamp/hash modes.
+            # The probe and broker each use their own empty pycache prefix.
+            if name == "__pycache__":
+                raise P7DevelopmentRuntimeLockError()
             if top == dist_info and name in _INSTALLER_GENERATED:
                 if child.is_dir() or child.is_symlink():
                     raise P7DevelopmentRuntimeLockError()
@@ -211,10 +211,14 @@ def verify_p7_development_runtime(root: object) -> P7DevelopmentRuntimeSet:
             if digest != expected_sha256:
                 raise ValueError
             wheel_facts[key] = {"files": _wheel_members(data, distribution, version), "sha256": digest}
-        result = subprocess.run([str(interpreter), "-I", "-c", _PROBE], check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15, env={"PATH": "/usr/bin:/bin"})
-        if len(result.stdout) > 8192:
-            raise ValueError
-        probe = json.loads(result.stdout.decode("utf-8", "strict"))
+        # -I ignores environment-controlled import configuration.  Use -X
+        # directly so this one probe neither consumes installed pyc files nor
+        # writes cache material into the locked venv.
+        with tempfile.TemporaryDirectory(prefix="asterion-p7-runtime-") as cache:
+            result = subprocess.run([str(interpreter), "-I", "-X", f"pycache_prefix={cache}", "-c", _PROBE], check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=15, env={"PATH": "/usr/bin:/bin"})
+            if len(result.stdout) > 8192:
+                raise ValueError
+            probe = json.loads(result.stdout.decode("utf-8", "strict"))
         venv_root = venv.resolve(strict=True)
         if type(probe) is not dict or set(probe) != {"prefix", "site_packages", "arc_agi", "arcengine"} or probe["prefix"] != str(venv_root):
             raise ValueError

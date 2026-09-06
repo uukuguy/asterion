@@ -21,6 +21,7 @@ class TestP7BrokerProcess(unittest.TestCase):
             resource.mkdir(parents=True)
             private = root / "private"
             requests: list[dict[str, object]] = []
+            commands: list[tuple[object, ...]] = []
             listener: socket.socket | None = None
             server: threading.Thread | None = None
 
@@ -28,8 +29,9 @@ class TestP7BrokerProcess(unittest.TestCase):
                 def poll(self) -> None:
                     return None
 
-            def launch(*_: object, **__: object) -> Process:
+            def launch(command: tuple[object, ...], **_: object) -> Process:
                 nonlocal listener, server
+                commands.append(command)
                 listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 listener.bind(str(private / "control.sock"))
                 os.chmod(private / "control.sock", 0o600)
@@ -59,6 +61,8 @@ class TestP7BrokerProcess(unittest.TestCase):
                 client = service.start()
             self.assertTrue(client)
             self.assertEqual([request["sequence"] for request in requests], [1])
+            self.assertEqual(commands[0][1:3], ("-I", "-X"))
+            self.assertEqual(commands[0][3], f"pycache_prefix={private / 'pycache'}")
             assert server is not None
             server.join(2)
             assert listener is not None
