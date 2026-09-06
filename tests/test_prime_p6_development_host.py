@@ -103,7 +103,7 @@ class TestP6DevelopmentHost(unittest.TestCase):
     def _run(self, worker: object) -> object:
         from asterion.applications.prime_agent.operator.p6_development_host import run_p6_development_lifecycle
 
-        return asyncio.run(run_p6_development_lifecycle(gateway=_Gateway(), provider=_Provider(), worker=worker, run_id="run", session_id="session"))
+        return asyncio.run(run_p6_development_lifecycle(gateway=_Gateway(), provider=_Provider(), worker=worker, run_id="run", session_id="session", prime_source_root="/prime", workspace="/workspace"))
 
     def test_runs_staged_preserve_chain_and_cleans_up(self) -> None:
         worker = _Worker()
@@ -116,7 +116,7 @@ class TestP6DevelopmentHost(unittest.TestCase):
         gateway = _Gateway()
         from asterion.applications.prime_agent.operator.p6_development_host import run_p6_development_lifecycle
 
-        asyncio.run(run_p6_development_lifecycle(gateway=gateway, provider=_Provider(), worker=_Worker(), run_id="run", session_id="session"))
+        asyncio.run(run_p6_development_lifecycle(gateway=gateway, provider=_Provider(), worker=_Worker(), run_id="run", session_id="session", prime_source_root="/prime", workspace="/workspace"))
         self.assertIn("clamp-task-a/v1", gateway.prompt_bodies[0])
         self.assertNotIn("[[4,-2,3]]", gateway.prompt_bodies[0])
         self.assertNotIn("[[4,-2,3]]", gateway.prompt_bodies[1])

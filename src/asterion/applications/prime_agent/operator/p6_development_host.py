@@ -7,6 +7,7 @@ import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from hashlib import sha256
 import json
+import os
 import re
 from typing import Protocol
 
@@ -64,8 +65,8 @@ class P6DevelopmentWorker(Protocol):
     async def cleanup(self) -> None: ...
 
 
-async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provider: P6DevelopmentProvider, worker: P6DevelopmentWorker, run_id: str, session_id: str) -> P6DevelopmentReceipt:
-    if not _inputs(gateway, provider, worker, run_id, session_id):
+async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provider: P6DevelopmentProvider, worker: P6DevelopmentWorker, run_id: str, session_id: str, prime_source_root: str, workspace: str) -> P6DevelopmentReceipt:
+    if not _inputs(gateway, provider, worker, run_id, session_id, prime_source_root, workspace):
         raise PrimeP6DevelopmentHostError()
     opened = provider_closed = cleaned = False
     cancelled = False
@@ -96,7 +97,7 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
 
         gateway.bind(model_hook=model_hook, tool_hook=tool_hook)
         opened = True  # Own cleanup even when open reports after allocating resources.
-        await gateway.open(run_id=run_id, session_id=session_id, generation=1)
+        await gateway.open(run_id=run_id, session_id=session_id, generation=1, prime_source_root=prime_source_root, workspace=workspace)
         _completed(await gateway.prompt(_prompt(1, run_id, session_id)), 2, 1)
         task_a = _task_a_snapshot(await worker.snapshot(), run_id, session_id)
         _completed(await gateway.prompt(_prompt(2, run_id, session_id)), 4, 2)
@@ -336,8 +337,8 @@ def _bare(value: str) -> str:
     return value.removeprefix("sha256:")
 
 
-def _inputs(gateway: object, provider: object, worker: object, run_id: object, session_id: object) -> bool:
-    return all(type(value) is str and value for value in (run_id, session_id)) and all(callable(getattr(gateway, name, None)) for name in ("bind", "open", "prompt", "terminal_witness", "close", "cancel")) and all(callable(getattr(provider, name, None)) for name in ("__call__", "terminal_usage", "close")) and all(callable(getattr(worker, name, None)) for name in ("acquire", "snapshot", "execute_cell", "restore_baseline", "cleanup"))
+def _inputs(gateway: object, provider: object, worker: object, run_id: object, session_id: object, prime_source_root: object, workspace: object) -> bool:
+    return all(type(value) is str and value for value in (run_id, session_id)) and all(type(value) is str and os.path.isabs(value) for value in (prime_source_root, workspace)) and all(callable(getattr(gateway, name, None)) for name in ("bind", "open", "prompt", "terminal_witness", "close", "cancel")) and all(callable(getattr(provider, name, None)) for name in ("__call__", "terminal_usage", "close")) and all(callable(getattr(worker, name, None)) for name in ("acquire", "snapshot", "execute_cell", "restore_baseline", "cleanup"))
 
 
 async def _cleanup(gateway: object, provider: object, worker: object, opened: bool, provider_closed: bool) -> None:

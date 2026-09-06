@@ -270,6 +270,8 @@ async def _run_p6_development_lifecycle(
                 worker=worker,
                 run_id=run_id,
                 session_id=session_id,
+                prime_source_root=resources.prime_source_root,
+                workspace=workspace,
             )
     except asyncio.CancelledError:
         raise
