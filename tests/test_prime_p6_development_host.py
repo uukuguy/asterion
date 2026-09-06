@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from types import MappingProxyType
 
 
 def _canonical(value: object) -> bytes:
@@ -90,7 +91,7 @@ class _Gateway:
             raise ValueError("model reply was discarded")
 
     def terminal_witness(self) -> dict[str, object]:
-        return {"identity": {"run_id": "run", "session_id": "session", "runtime_id": "prime.agent", "generation": 1}, "cumulative": {"model_callback_count": 6, "tool_callback_count": 3}}
+        return {"identity": {"run_id": "run", "session_id": "session", "runtime_id": "prime.agent", "generation": 1}, "result": {"lifecycle": "completed", "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}, "assistant": {"completed": True, "stop_reason": "stop"}, "observations": {"active_tool_names": ["ipython"], "compact_count": 0, "model_callback_count": 6, "rlm_child_count": 0, "tool_call_count": 3}}, "cumulative": {"model_callback_count": 6, "tool_callback_count": 3}}
 
     async def close(self) -> None:
         self.closed = True
@@ -100,6 +101,15 @@ class _Gateway:
 
 
 class TestP6DevelopmentHost(unittest.TestCase):
+    def test_terminal_witness_requires_complete_token_bound_proof(self) -> None:
+        from asterion.applications.prime_agent.operator.p6_development_host import _terminal_witness
+
+        witness = _Gateway().terminal_witness()
+        _terminal_witness(MappingProxyType(witness), "run", "session", {"input_tokens": 1, "output_tokens": 1, "cost_microunits": 1})
+        for invalid in ({"identity": witness["identity"], "cumulative": witness["cumulative"]}, {**witness, "result": {**witness["result"], "usage": {"input_tokens": 2, "output_tokens": 1, "total_tokens": 3}}}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                _terminal_witness(invalid, "run", "session", {"input_tokens": 1, "output_tokens": 1, "cost_microunits": 1})
+
     def test_canonical_provider_body_preserves_utf8_prompt_text(self) -> None:
         from asterion.applications.prime_agent.operator.p6_development_host import _canonical
 

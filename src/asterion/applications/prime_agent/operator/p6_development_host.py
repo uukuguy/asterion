@@ -112,8 +112,9 @@ async def run_p6_development_lifecycle(*, gateway: P6DevelopmentGateway, provide
         holdout_passed, holdout = _task_b_snapshot(await worker.snapshot(), run_id, session_id, selected)
         if (model_calls, tool_calls) != (6, 3):
             raise ValueError
-        _terminal_witness(gateway.terminal_witness(), run_id, session_id)
-        usage_sha256 = _digest(_usage(provider.terminal_usage()))
+        usage = _usage(provider.terminal_usage())
+        _terminal_witness(gateway.terminal_witness(), run_id, session_id, usage)
+        usage_sha256 = _digest(usage)
         rollback = None
         outcome = "preserved" if holdout_passed else "rolled-back"
         if not holdout_passed:
@@ -287,8 +288,22 @@ def _completed(value: object, models: int, tools: int) -> None:
         raise ValueError
 
 
-def _terminal_witness(value: object, run_id: str, session_id: str) -> None:
-    if not isinstance(value, Mapping) or value != {"identity": {"run_id": run_id, "session_id": session_id, "runtime_id": "prime.agent", "generation": 1}, "cumulative": {"model_callback_count": 6, "tool_callback_count": 3}}:
+def _terminal_witness(value: object, run_id: str, session_id: str, provider_usage: Mapping[str, int]) -> None:
+    if not isinstance(value, Mapping) or set(value) != {"identity", "result", "cumulative"}:
+        raise ValueError
+    identity, result, cumulative = value["identity"], value["result"], value["cumulative"]
+    if not isinstance(identity, Mapping) or dict(identity) != {"run_id": run_id, "session_id": session_id, "runtime_id": "prime.agent", "generation": 1} or type(identity["generation"]) is not int:
+        raise ValueError
+    if not isinstance(cumulative, Mapping) or dict(cumulative) != {"model_callback_count": 6, "tool_callback_count": 3} or any(type(cumulative[key]) is not int for key in cumulative):
+        raise ValueError
+    if not isinstance(result, Mapping) or set(result) != {"lifecycle", "usage", "assistant", "observations"} or result["lifecycle"] != "completed":
+        raise ValueError
+    usage, assistant, observations = result["usage"], result["assistant"], result["observations"]
+    if not isinstance(usage, Mapping) or set(usage) != {"input_tokens", "output_tokens", "total_tokens"} or any(type(usage[key]) is not int or usage[key] < 0 for key in usage) or usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"] or usage["input_tokens"] != provider_usage["input_tokens"] or usage["output_tokens"] != provider_usage["output_tokens"]:
+        raise ValueError
+    if not isinstance(assistant, Mapping) or dict(assistant) != {"completed": True, "stop_reason": "stop"} or type(assistant["completed"]) is not bool:
+        raise ValueError
+    if not isinstance(observations, Mapping) or dict(observations) != {"active_tool_names": ["ipython"], "compact_count": 0, "model_callback_count": 6, "rlm_child_count": 0, "tool_call_count": 3} or any(type(observations[key]) is not int for key in ("compact_count", "model_callback_count", "rlm_child_count", "tool_call_count")):
         raise ValueError
 
 
