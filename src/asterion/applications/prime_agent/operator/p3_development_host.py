@@ -367,7 +367,13 @@ def _run_oracle(source: bytes, tests: bytes) -> None:
 
 
 def _canonical(value: object) -> bytes:
-    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
 
 
 async def _open_rlm_server(

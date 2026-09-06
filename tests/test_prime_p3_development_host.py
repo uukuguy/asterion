@@ -9,6 +9,13 @@ import unittest
 
 
 class TestPrimeP3DevelopmentHost(unittest.IsolatedAsyncioTestCase):
+    def test_model_payload_uses_provider_canonical_utf8(self) -> None:
+        from asterion.applications.prime_agent.operator.p3_development_host import _canonical
+        from asterion.applications.prime_agent.operator.p3_development_sdk_provider import _p2
+
+        value = {"system": "递归验证"}
+        self.assertEqual(_canonical(value), _p2._canonical_json(value).encode())
+
     async def test_rlm_socket_returns_without_client_eof_and_rejects_extra_fields(self) -> None:
         from asterion.applications.prime_agent.operator.p3_development_host import _open_rlm_server
 
