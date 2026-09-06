@@ -137,9 +137,9 @@
   `sha256:64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`;
   residue inspection found zero P5 containers, gateways and workspaces.
 - P6 `prime.continual-improvement/v1` is development closure / CLI verified. The
-  exact `PRIME_RUN_ID=prime-p6-20260906-ninth make prime-p6-run` command exited 0
+  exact `PRIME_RUN_ID=prime-p6-20260906-final make prime-p6-run` command exited 0
   with scope `p6-development/unpromoted` and trace
-  `sha256:be059a0b43da810cfa530adc23f550c52f904f475c44d9062b71c873e525596d`.
+  `sha256:51f6454e90a2286dfd0fabaa3f3cf7f7870cd57abf95890845b4efd01048b335`.
   Nineteen Python tests, two TypeScript tests, and Ruff passed; residue
   inspection found zero Prime P6 containers. Production promotion remains
   separate and is not claimed.
