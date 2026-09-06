@@ -38,6 +38,7 @@ class RecordingSource:
         self.payload = payload
         self.discoveries = self.opens = self.loads = 0
         self.installed_digest = payload.payload_sha256
+        self.raw_package: InstalledCapabilityPackage | None = None
 
     def discover_metadata(self) -> tuple[CapabilityPackageCandidate, ...]:
         self.discoveries += 1
@@ -65,7 +66,7 @@ class RecordingSource:
         self.loads += 1
         if candidate is not self.candidate:
             raise RuntimeError("SECRET-CANDIDATE")
-        return InstalledCapabilityPackage(
+        self.raw_package = InstalledCapabilityPackage(
             package_ref=PACKAGE,
             payload_sha256=self.installed_digest,
             source_id=candidate.source_id,
@@ -75,6 +76,7 @@ class RecordingSource:
             implementations=(),
             benchmark_bindings=(),
         )
+        return self.raw_package
 
 
 def payload() -> PortableCapabilityPayload:
@@ -178,6 +180,21 @@ class CapabilitySourcePreparationTests(unittest.TestCase):
             load_prepared_capability_source(prepared)
 
         self.assertEqual(str(raised.exception), "capability source preparation failed")
+
+    def test_load_returns_fresh_authoritative_package_snapshot(self) -> None:
+        source = RecordingSource("selected", payload())
+        prepared = prepare_capability_source(PACKAGE, (source,), None)
+
+        loaded = load_prepared_capability_source(prepared)
+
+        self.assertIsNotNone(source.raw_package)
+        assert source.raw_package is not None
+        self.assertIsNot(loaded, source.raw_package)
+        self.assertIsNone(source.raw_package._owned_capability_refs)
+        self.assertEqual(
+            loaded._owned_capability_refs,
+            frozenset(prepared.payload.manifest.capabilities),
+        )
 
     def test_adapter_errors_are_redacted(self) -> None:
         source = RecordingSource("selected", payload())

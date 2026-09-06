@@ -35,7 +35,10 @@ from asterion.capability_packages import (
     prepare_capability_source,
     validate_capability_source_lock,
 )
-from asterion.capability_packages.model import PortableCapabilityPayload
+from asterion.capability_packages.model import (
+    PortableCapabilityPayload,
+    bind_prepared_package_authority,
+)
 from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.capability_packages.sources.distribution import (
     DistributionCapabilityPackageSource,
@@ -276,19 +279,22 @@ def _metadata_packages(
             materialization_root / f"package-{len(packages) + 1}",
         )
         packages.append(
-            InstalledCapabilityPackage(
-                package_ref=package_ref,
-                payload_sha256=payload.payload_sha256,
-                source_id=selected.source_id,
-                source_kind=selected.source_kind,
-                catalog_roots=(root / "capabilities",),
-                benchmark_suite_paths=(
-                    (root / "benchmark-suites",)
-                    if payload.manifest.benchmark_suites
-                    else ()
+            bind_prepared_package_authority(
+                InstalledCapabilityPackage(
+                    package_ref=package_ref,
+                    payload_sha256=payload.payload_sha256,
+                    source_id=selected.source_id,
+                    source_kind=selected.source_kind,
+                    catalog_roots=(root / "capabilities",),
+                    benchmark_suite_paths=(
+                        (root / "benchmark-suites",)
+                        if payload.manifest.benchmark_suites
+                        else ()
+                    ),
+                    implementations=(),
+                    benchmark_bindings=(),
                 ),
-                implementations=(),
-                benchmark_bindings=(),
+                payload,
             )
         )
         prepared_packages.append(prepared)

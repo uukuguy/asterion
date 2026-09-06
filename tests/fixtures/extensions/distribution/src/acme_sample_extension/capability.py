@@ -28,7 +28,9 @@ if os.environ.get("ASTERION_TEST_FORBID_CAPABILITY_IMPORT") == "1":
 
 
 class _ResearchImplementation:
-    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
+    async def execute(
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
         request = RunRequest(
             invocation.run_id,
             invocation.input_text,
@@ -44,12 +46,15 @@ class _ResearchImplementation:
             or tuple(event.type for event in parsed)
             != ("run.started", "text.delta", "run.completed")
             or parsed[0].payload != {"capabilities": []}
-            or parsed[1].payload != {"text": "acme reference"}
+            or not isinstance(parsed[1].payload.get("text"), str)
+            or not parsed[1].payload["text"]
             or parsed[2].payload != {"status": "completed"}
         ):
             raise CapabilityExecutionError("acme runtime event stream is invalid")
         return CapabilityExecutionResult(
-            events=({"type": "acme.research.completed", "payload": {"status": "completed"}},),
+            events=(
+                {"type": "acme.research.completed", "payload": {"status": "completed"}},
+            ),
             artifacts=(
                 {
                     "artifact_id": "acme-research-result",

@@ -38,6 +38,7 @@ from asterion.capability_packages import (
     PreparedCapabilityPackage,
     load_prepared_capability_source,
 )
+from asterion.capability_packages.model import bind_prepared_package_authority
 from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.applications.first_party_packages import builtin_capability_registrations
@@ -480,17 +481,18 @@ class DciBenchmarkHost:
             or installed.source_kind != prepared.candidate.source_kind
         ):
             _fail()
-        return InstalledCapabilityPackage(
-            package_ref=installed.package_ref,
-            payload_sha256=installed.payload_sha256,
-            source_id=installed.source_id,
-            source_kind=installed.source_kind,
-            catalog_roots=installed.catalog_roots,
-            benchmark_suite_paths=installed.benchmark_suite_paths,
-            implementations=installed.implementations,
-            benchmark_bindings=create_benchmark_bindings(
-                operator_inputs=inputs,
+        return bind_prepared_package_authority(
+            InstalledCapabilityPackage(
+                package_ref=installed.package_ref,
+                payload_sha256=installed.payload_sha256,
+                source_id=installed.source_id,
+                source_kind=installed.source_kind,
+                catalog_roots=installed.catalog_roots,
+                benchmark_suite_paths=installed.benchmark_suite_paths,
+                implementations=installed.implementations,
+                benchmark_bindings=create_benchmark_bindings(operator_inputs=inputs),
             ),
+            prepared.payload,
         )
 
     def _sources(self) -> tuple[CapabilityPackageSource, ...]:

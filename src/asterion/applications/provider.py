@@ -309,15 +309,40 @@ def _compose_application(
 ) -> InstalledApplication:
     try:
         packages = _packages_for_application(application, installed_packages)
-        catalog_roots = tuple(
-            root for package in packages for root in package.catalog_roots
-        )
-        implementations = tuple(
-            (binding.capability_ref, binding.implementation)
+        if len(packages) > 1 and any(
+            package._owned_capability_refs is None for package in packages
+        ):
+            raise ApplicationProviderError(
+                "installed application package authority is invalid"
+            )
+        package_catalog_roots = tuple(
+            tuple(
+                _canonical_resource(root, kind="directory")
+                for root in package.catalog_roots
+            )
             for package in packages
-            for binding in package.implementations
         )
+        catalog_roots = tuple(root for roots in package_catalog_roots for root in roots)
         catalog = discover_capabilities(catalog_roots)
+        package_capability_refs = tuple(
+            _catalog_capability_refs(catalog, roots) for roots in package_catalog_roots
+        )
+        for package, owned_refs in zip(packages, package_capability_refs, strict=True):
+            if (
+                package._owned_capability_refs is not None
+                and package._owned_capability_refs != owned_refs
+            ):
+                raise ApplicationProviderError(
+                    "installed application package authority is invalid"
+                )
+            if any(
+                binding.capability_ref not in owned_refs
+                for binding in package.implementations
+            ):
+                raise ApplicationProviderError(
+                    "installed application binding is unavailable"
+                )
+        available_capability_refs = set().union(*package_capability_refs)
         assemblies: list[InstalledAssembly] = []
         for assembly_path in application.assembly_paths:
             assembly = _read_assembly_snapshot(assembly_path, application=application)
@@ -329,20 +354,9 @@ def _compose_application(
                 catalog=catalog,
                 runtime_manifest=runtime_binding.manifest.to_mapping(),
             )
-            package_capabilities = set().union(
-                *(
-                    _package_capabilities(package, catalog=catalog)
-                    for package in packages
-                )
-            )
-            if not set(plan.capability_refs).issubset(package_capabilities):
+            if not set(plan.capability_refs).issubset(available_capability_refs):
                 raise ApplicationProviderError(
                     "installed application package closure is invalid"
-                )
-            bound_refs = {binding[0] for binding in implementations}
-            if not bound_refs.issubset(package_capabilities):
-                raise ApplicationProviderError(
-                    "installed application binding is unavailable"
                 )
             assemblies.append(
                 InstalledAssembly(
@@ -477,17 +491,15 @@ def _packages_for_application(
     return packages
 
 
-def _package_capabilities(
-    package: InstalledCapabilityPackage,
-    *,
+def _catalog_capability_refs(
     catalog,
-) -> set[CapabilityRef]:
-    roots = tuple(Path(root).resolve(strict=True) for root in package.catalog_roots)
-    return {
+    roots: tuple[Path, ...],
+) -> frozenset[CapabilityRef]:
+    return frozenset(
         entry.ref
         for entry in catalog.entries
         if any(entry.source.is_relative_to(root) for root in roots)
-    }
+    )
 
 
 def _canonical_resource(value: Path, *, kind: str) -> Path:

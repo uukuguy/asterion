@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from asterion.capabilities.protocol import CAPABILITY_ID, SEMANTIC_VERSION
 from asterion.capability_packages.model import (
+    bind_prepared_package_authority,
     CapabilityPackageCandidate,
     InstalledCapabilityPackage,
     PortableCapabilityPayload,
@@ -121,7 +122,12 @@ def load_prepared_capability_source(
         failed = True
     if failed or installed is None:
         raise CapabilitySourcePreparationError("capability source preparation failed")
-    return installed
+    try:
+        return bind_prepared_package_authority(installed, prepared.payload)
+    except Exception:
+        raise CapabilitySourcePreparationError(
+            "capability source preparation failed"
+        ) from None
 
 
 def _discovered_records(

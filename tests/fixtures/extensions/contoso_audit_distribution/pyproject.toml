@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "asterion-contoso-audit-extension"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = ["asterion>=0.1.0,<0.2", "asterion-acme-sample-extension==1.0.0"]
+
+[project.entry-points."asterion.capability_packages"]
+"contoso.audit@1.0.0" = "contoso_audit_extension.capability:create_package"
+[project.entry-points."asterion.applications"]
+"contoso-audit" = "contoso_audit_extension.application:create_application_provider"
+[project.entry-points."asterion.application_index"]
+"contoso.audited-research__1.0.0" = "contoso_audit_extension.application:create_application_provider"
+[tool.hatch.build.targets.wheel]
+packages = ["src/contoso_audit_extension"]
+[tool.hatch.build.targets.wheel.force-include]
+"payload" = "asterion_capability_packages/contoso.audit/1.0.0/payload"
+"application" = "asterion_applications/contoso.audit/1.0.0"

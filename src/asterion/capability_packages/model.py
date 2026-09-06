@@ -88,6 +88,9 @@ class InstalledCapabilityPackage:
     benchmark_suite_paths: tuple[Path, ...] = field(repr=False)
     implementations: tuple[CapabilityImplementationBinding, ...] = field(repr=False)
     benchmark_bindings: tuple[BenchmarkTaskBinding, ...] = field(repr=False)
+    _owned_capability_refs: frozenset[CapabilityRef] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         _validate_package_ref(self.package_ref)
@@ -112,7 +115,37 @@ class InstalledCapabilityPackage:
         )
 
 
-def _snapshot_manifest(manifest: CapabilityPackageManifest) -> CapabilityPackageManifest:
+def bind_prepared_package_authority(
+    package: InstalledCapabilityPackage, payload: PortableCapabilityPayload
+) -> InstalledCapabilityPackage:
+    """Attach host-derived process-local capability ownership."""
+
+    if (
+        type(package) is not InstalledCapabilityPackage
+        or type(payload) is not PortableCapabilityPayload
+        or package.package_ref != payload.manifest.package_ref
+        or package.payload_sha256 != payload.payload_sha256
+    ):
+        raise CapabilityPackageModelError("capability package authority is invalid")
+    snapshot = InstalledCapabilityPackage(
+        package_ref=package.package_ref,
+        payload_sha256=package.payload_sha256,
+        source_id=package.source_id,
+        source_kind=package.source_kind,
+        catalog_roots=package.catalog_roots,
+        benchmark_suite_paths=package.benchmark_suite_paths,
+        implementations=package.implementations,
+        benchmark_bindings=package.benchmark_bindings,
+    )
+    object.__setattr__(
+        snapshot, "_owned_capability_refs", frozenset(payload.manifest.capabilities)
+    )
+    return snapshot
+
+
+def _snapshot_manifest(
+    manifest: CapabilityPackageManifest,
+) -> CapabilityPackageManifest:
     if not isinstance(manifest, CapabilityPackageManifest):
         raise CapabilityPackageModelError("capability package manifest is invalid")
     snapshot: CapabilityPackageManifest | None = None
@@ -185,7 +218,9 @@ def _path_tuple(paths: Iterable[Path]) -> tuple[Path, ...]:
     try:
         return tuple(Path(path) for path in paths)
     except TypeError:
-        raise CapabilityPackageModelError("capability package paths are invalid") from None
+        raise CapabilityPackageModelError(
+            "capability package paths are invalid"
+        ) from None
 
 
 def _implementation_binding_tuple(
@@ -245,7 +280,9 @@ def _benchmark_binding_tuple(
     try:
         values = tuple(bindings)
     except TypeError:
-        raise CapabilityPackageModelError("benchmark task bindings are invalid") from None
+        raise CapabilityPackageModelError(
+            "benchmark task bindings are invalid"
+        ) from None
     if not all(isinstance(binding, BenchmarkTaskBinding) for binding in values):
         raise CapabilityPackageModelError("benchmark task bindings are invalid")
     return values

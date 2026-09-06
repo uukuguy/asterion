@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +21,8 @@ from asterion.capability_packages import (
     CapabilityPackageRef,
     InstalledCapabilityPackage,
 )
+from asterion.capability_packages.model import bind_prepared_package_authority
+from asterion.capability_packages.payload import open_portable_payload
 from asterion.capabilities.catalog import CapabilityRef, discover_capabilities
 from asterion.capabilities.execution import (
     CapabilityExecutionResult,
@@ -550,15 +553,15 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 provider_id=valid.provider_id,
                 resource_root=valid.resource_root,
                 applications=(
-                        InstalledApplication(
-                            application_id=application.application_id,
-                            version=application.version,
-                            assembly_paths=(assembly_path,),
-                            capability_packages=application.capability_packages,
-                            runtime_ids=application.runtime_ids,
-                        ),
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=(assembly_path,),
+                        capability_packages=application.capability_packages,
+                        runtime_ids=application.runtime_ids,
                     ),
-                )
+                ),
+            )
 
             with self.assertRaises(ApplicationProviderError) as raised:
                 resolve_installed_provider(
@@ -601,6 +604,83 @@ class InstalledApplicationProviderTests(unittest.TestCase):
         self.assertIs(type(raised.exception), ApplicationProviderError)
         self.assertNotIn(sentinel, str(raised.exception))
 
+    def test_authoritative_package_uses_one_aggregate_catalog_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            raw = provider(root)
+            payload_root = root / "payload"
+            shutil.copytree(
+                Path(__file__).parent / "fixtures/extensions/minimal/payload",
+                payload_root,
+            )
+            payload = open_portable_payload(payload_root)
+            raw = InstalledApplicationProvider(
+                protocol=raw.protocol,
+                provider_id=raw.provider_id,
+                resource_root=raw.resource_root,
+                applications=(
+                    InstalledApplication(
+                        application_id="example.research",
+                        version="1.0.0",
+                        assembly_paths=(
+                            write_assembly(
+                                root,
+                                filename="authoritative.json",
+                                capability_packages=(
+                                    {
+                                        "package_id": payload.manifest.package_ref.package_id,
+                                        "version": payload.manifest.package_ref.version,
+                                    },
+                                ),
+                            ),
+                        ),
+                        capability_packages=(payload.manifest.package_ref,),
+                        runtime_ids=("pi.reference",),
+                    ),
+                ),
+            )
+            package = bind_prepared_package_authority(
+                InstalledCapabilityPackage(
+                    package_ref=payload.manifest.package_ref,
+                    payload_sha256=payload.payload_sha256,
+                    source_id="example.fixture",
+                    source_kind="local-directory",
+                    catalog_roots=(payload_root / "capabilities",),
+                    benchmark_suite_paths=(),
+                    implementations=(
+                        CapabilityImplementationBinding(
+                            CapabilityRef("example.research", "1.0.0"),
+                            FixtureImplementation(),
+                        ),
+                    ),
+                    benchmark_bindings=(),
+                ),
+                payload,
+            )
+            discoveries = 0
+
+            def discover_once(roots):
+                nonlocal discoveries
+                discoveries += 1
+                if discoveries != 1:
+                    raise AssertionError("catalog discovery repeated")
+                catalog = discover_capabilities(roots)
+                (payload_root / "capabilities/research.json").unlink()
+                return catalog
+
+            with patch(
+                "asterion.applications.provider.discover_capabilities",
+                side_effect=discover_once,
+            ):
+                resolved = resolve_installed_provider(
+                    raw,
+                    runtime_factories=runtime_factories("pi.reference"),
+                    installed_packages=(package,),
+                )
+
+        self.assertEqual(discoveries, 1)
+        self.assertEqual(resolved.applications[0].application_id, "example.research")
+
     def test_hostile_numeric_json_is_normalized_and_redacted(self) -> None:
         sentinel = "SECRET-HOSTILE-NUMERIC"
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -614,14 +694,14 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 provider_id=valid.provider_id,
                 resource_root=valid.resource_root,
                 applications=(
-                        InstalledApplication(
-                            application_id=application.application_id,
-                            version=application.version,
-                            assembly_paths=(hostile_path,),
-                            capability_packages=application.capability_packages,
-                            runtime_ids=application.runtime_ids,
-                        ),
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=(hostile_path,),
+                        capability_packages=application.capability_packages,
+                        runtime_ids=application.runtime_ids,
                     ),
+                ),
             )
 
             with self.assertRaises(ApplicationProviderError) as raised:
@@ -723,15 +803,15 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 provider_id=valid.provider_id,
                 resource_root=valid.resource_root,
                 applications=(
-                        InstalledApplication(
-                            application_id=application.application_id,
-                            version=application.version,
-                            assembly_paths=application.assembly_paths,
-                            capability_packages=application.capability_packages,
-                            runtime_ids=application.runtime_ids,
-                        ),
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=application.assembly_paths,
+                        capability_packages=application.capability_packages,
+                        runtime_ids=application.runtime_ids,
                     ),
-                )
+                ),
+            )
 
             with self.assertRaises(ApplicationProviderError) as raised:
                 resolve_installed_provider(
