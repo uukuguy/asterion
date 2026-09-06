@@ -41,6 +41,8 @@ class TestPrimeP4DevelopmentGateway(unittest.IsolatedAsyncioTestCase):
             gateway = PrimeP4DevelopmentGateway(
                 node_bin="node",
                 entrypoint=entry,
+            )
+            gateway.bind(
                 model_hook=lambda _: callbacks.append("model") or {"role": "assistant"},
                 tool_hook=lambda _: callbacks.append("tool") or {"ok": True},
             )
@@ -52,6 +54,7 @@ class TestPrimeP4DevelopmentGateway(unittest.IsolatedAsyncioTestCase):
                 workspace=temporary,
             )
             first = await gateway.prompt("private-first")
+            self.assertEqual(first["lifecycle"], "completed")
             self.assertEqual(first["checkpoint_candidate"]["cursor"]["sequence"], 7)
             recovered = await gateway.recover()
             self.assertEqual(recovered["to_cursor"]["sequence"], 7)

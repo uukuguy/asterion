@@ -181,7 +181,10 @@ class PrimeP4DevelopmentGateway(DevelopmentGatewayTransport):
                         raise ValueError()
                     self._persist_checkpoint(candidate)
                     self._state = "recover"
-                    return {"checkpoint_candidate": candidate}
+                    return {
+                        "lifecycle": "completed",
+                        "checkpoint_candidate": _public_candidate(candidate),
+                    }
                 _second_prompt(result)
                 if self._model_count != 5 or self._tool_count != 2:
                     raise ValueError()
@@ -340,6 +343,19 @@ class PrimeP4DevelopmentGateway(DevelopmentGatewayTransport):
     async def aclose(self) -> None:
         await self.close()
 
+    def bind(self, *, model_hook: Hook, tool_hook: Hook) -> None:
+        """Inject the two operator-owned callback ports before opening."""
+        if (
+            self._state != "new"
+            or not callable(model_hook)
+            or not callable(tool_hook)
+            or self._model_hook is not None
+            or self._tool_hook is not None
+        ):
+            raise PrimeP4DevelopmentGatewayError()
+        self._model_hook = model_hook
+        self._tool_hook = tool_hook
+
     def _dispatch_callback(
         self,
         response_kind: str,
@@ -478,6 +494,20 @@ def _candidate(value: object) -> dict[str, object]:
     return {
         key: (_cursor(candidate[key]) if key == "cursor" else candidate[key])
         for key in sorted(_CANDIDATE_KEYS)
+    }
+
+
+def _public_candidate(candidate: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: candidate[key]
+        for key in (
+            "active_session_id",
+            "session_id",
+            "cursor",
+            "transcript_sha256",
+            "tree_sha256",
+            "artifact_sha256",
+        )
     }
 
 
