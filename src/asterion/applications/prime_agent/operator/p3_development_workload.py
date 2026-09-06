@@ -19,6 +19,14 @@ def _json(value: object) -> bytes:
 
 P3_INITIAL_SOURCE_BYTES: Final = b"def in_range(value: int, low: int, high: int) -> bool:\n    return low <= value <= high\n"
 P3_INITIAL_TEST_BYTES: Final = b"from solution import in_range\n\n\ndef test_interior_value() -> None:\n    assert in_range(3, 1, 5) is True\n"
+P3_SEED_FILENAMES: Final = ("solution.py", "test_solution.py")
+P3_ARTIFACT_FILENAMES: Final = (
+    "implementation.json", "review.json", "review-follow-up.json", "aggregate.json",
+)
+P3_ROOT_PROMPT: Final = "Use one IPython cell: spawn and wait implementation; spawn and wait review; follow up review; delete implementation and review; list empty; write aggregate.json; reply completed."
+P3_IMPLEMENTATION_PROMPT: Final = "Use one IPython cell: change solution.py so the upper bound is exclusive; write implementation.json; reply completed."
+P3_REVIEW_PROMPT: Final = "Use one IPython cell: identify the missing upper-exclusive test; write review.json; reply completed."
+P3_FOLLOW_UP_PROMPT: Final = "Use one IPython cell: write the exact upper-exclusive test and review-follow-up.json; reply completed."
 P3_EXPECTED_SOURCE_BYTES: Final = b"def in_range(value: int, low: int, high: int) -> bool:\n    return low <= value < high\n"
 P3_EXPECTED_TEST_BYTES: Final = b"from solution import in_range\n\n\ndef test_interior_value() -> None:\n    assert in_range(3, 1, 5) is True\n\n\ndef test_upper_bound_is_exclusive() -> None:\n    assert in_range(5, 1, 5) is False\n"
 P3_ORACLE_CASES: Final = ((5, 1, 5, False), (3, 1, 5, True))
@@ -41,7 +49,8 @@ P3_FOLLOW_UP_BYTES: Final = _json(_FOLLOW_UP_ARTIFACT)
 P3_AGGREGATE_BYTES: Final = _json(_AGGREGATE)
 
 P3_DEVELOPMENT_SCHEMA_BYTES: Final = _json({"format": "asterion.prime-p3-development/v1", "roles": ["implementation", "review", "root"]})
-P3_DEVELOPMENT_WORKLOAD_BYTES: Final = _json({"aggregate_sha256": sha256(P3_AGGREGATE_BYTES).hexdigest(), "expected_source_sha256": sha256(P3_EXPECTED_SOURCE_BYTES).hexdigest(), "expected_test_sha256": sha256(P3_EXPECTED_TEST_BYTES).hexdigest(), "follow_up_artifact_sha256": sha256(P3_FOLLOW_UP_BYTES).hexdigest(), "format": "asterion.prime-p3-development-workload/v1", "implementation_artifact_sha256": sha256(P3_IMPLEMENTATION_BYTES).hexdigest(), "initial_source_sha256": sha256(P3_INITIAL_SOURCE_BYTES).hexdigest(), "initial_test_sha256": sha256(P3_INITIAL_TEST_BYTES).hexdigest(), "oracle_cases": [[5, 1, 5, False], [3, 1, 5, True]], "role_model_callbacks": {"implementation": 2, "review": 4, "root": 4}, "role_tool_calls": {"implementation": 1, "review": 2, "root": 1}, "review_artifact_sha256": sha256(P3_REVIEW_BYTES).hexdigest(), "schema_sha256": sha256(P3_DEVELOPMENT_SCHEMA_BYTES).hexdigest()})
+P3_ARTIFACT_SCHEMA_BYTES: Final = _json({"filenames": list(P3_ARTIFACT_FILENAMES), "format": "asterion.prime-p3-artifacts/v1"})
+P3_DEVELOPMENT_WORKLOAD_BYTES: Final = _json({"aggregate_sha256": sha256(P3_AGGREGATE_BYTES).hexdigest(), "artifact_schema_sha256": sha256(P3_ARTIFACT_SCHEMA_BYTES).hexdigest(), "expected_source_sha256": sha256(P3_EXPECTED_SOURCE_BYTES).hexdigest(), "expected_test_sha256": sha256(P3_EXPECTED_TEST_BYTES).hexdigest(), "follow_up_artifact_sha256": sha256(P3_FOLLOW_UP_BYTES).hexdigest(), "format": "asterion.prime-p3-development-workload/v1", "implementation_artifact_sha256": sha256(P3_IMPLEMENTATION_BYTES).hexdigest(), "initial_source_sha256": sha256(P3_INITIAL_SOURCE_BYTES).hexdigest(), "initial_test_sha256": sha256(P3_INITIAL_TEST_BYTES).hexdigest(), "oracle_cases": [[5, 1, 5, False], [3, 1, 5, True]], "prompts_sha256": {"follow_up": sha256(P3_FOLLOW_UP_PROMPT.encode()).hexdigest(), "implementation": sha256(P3_IMPLEMENTATION_PROMPT.encode()).hexdigest(), "review": sha256(P3_REVIEW_PROMPT.encode()).hexdigest(), "root": sha256(P3_ROOT_PROMPT.encode()).hexdigest()}, "role_model_callbacks": {"implementation": 2, "review": 4, "root": 4}, "role_tool_calls": {"implementation": 1, "review": 2, "root": 1}, "seed_sha256": {"solution.py": sha256(P3_INITIAL_SOURCE_BYTES).hexdigest(), "test_solution.py": sha256(P3_INITIAL_TEST_BYTES).hexdigest()}, "review_artifact_sha256": sha256(P3_REVIEW_BYTES).hexdigest(), "schema_sha256": sha256(P3_DEVELOPMENT_SCHEMA_BYTES).hexdigest()})
 
 P3_DEVELOPMENT_WORKLOAD_DIGEST: Final = "sha256:" + sha256(P3_DEVELOPMENT_WORKLOAD_BYTES).hexdigest()
 P3_DEVELOPMENT_SCHEMA_DIGEST: Final = "sha256:" + sha256(P3_DEVELOPMENT_SCHEMA_BYTES).hexdigest()
