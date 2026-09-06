@@ -180,13 +180,18 @@ class StandaloneRepositoryTests(unittest.TestCase):
             "prime-p4-run": "prime.long-session-continuity@1.0.0",
             "prime-p5-run": "prime.bounded-autonomy@1.0.0",
             "prime-p6-run": "prime.continual-improvement@1.0.0",
+            "prime-p7-run": "prime.arc-agi-3@1.0.0",
         }
         for target, application in expected.items():
             with self.subTest(target=target):
                 self.assertRegex(text, rf"(?m)^\.PHONY:.*\b{target}\b")
                 recipe = text.split(f"\n{target}:\n", 1)[1].split("\n\n", 1)[0]
                 self.assertIn("orb -m \"$(PRIME_ORB_MACHINE)\" -u root", recipe)
-                self.assertIn("/root/.local/bin/uv run --isolated asterion run", recipe)
+                self.assertIn(
+                    "/root/.local/bin/uv run --extra prime --python "
+                    "/usr/bin/python3 --isolated asterion run",
+                    recipe,
+                )
                 self.assertIn("--provider prime-agent", recipe)
                 self.assertIn(f"--application {application}", recipe)
                 self.assertIn("--runtime prime.agent", recipe)

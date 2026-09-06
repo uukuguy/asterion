@@ -67,6 +67,7 @@ from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
+from asterion.services.registry import HostServiceRegistryError
 from asterion.workflow_evidence import write_workflow_observation_bundle
 from tests.test_application_discovery import FakeEntryPoint
 from tests.test_installed_application_provider import (
@@ -324,6 +325,42 @@ def provider(root: Path) -> InstalledApplicationProvider:
 
 
 class AsterionCliTests(unittest.TestCase):
+    def test_run_reports_only_allowlisted_host_service_failure_stages(self) -> None:
+        cases = (
+            (
+                HostServiceRegistryError("host service factory failed to load"),
+                "asterion: host-service-factory-load failed\n",
+            ),
+            (
+                HostServiceRegistryError("host service is unavailable"),
+                "asterion: host-service unavailable\n",
+            ),
+            (
+                HostServiceRegistryError("SECRET-HOST-FAILURE-/private/path"),
+                "asterion: command failed\n",
+            ),
+        )
+        for error, expected in cases:
+            with self.subTest(error=error.args[0]):
+                stderr = io.StringIO()
+                with patch("asterion.cli._run", side_effect=error):
+                    code = main(
+                        [
+                            "run",
+                            "--provider",
+                            "fixture-provider",
+                            "--application",
+                            "fixture.application@1.0.0",
+                            "--input",
+                            "fixed",
+                        ],
+                        stdout=io.StringIO(),
+                        stderr=stderr,
+                    )
+                self.assertEqual(code, 2)
+                self.assertEqual(stderr.getvalue(), expected)
+                self.assertNotIn("SECRET-HOST-FAILURE", stderr.getvalue())
+
     def test_first_party_benchmark_redacts_hostile_package_source_iterator(self) -> None:
         sentinel = "SECRET-PACKAGE-SOURCE-ITERATOR-/private/sources"
 

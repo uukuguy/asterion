@@ -239,13 +239,15 @@ def main(
                 package_sources=_capability_package_sources(package_sources),
             )
         )
+    except HostServiceRegistryError as error:
+        stderr.write(_host_service_failure_message(error))
+        return 2
     except (
         ApplicationProviderError,
         ApplicationRunError,
         AssemblyError,
         CapabilityExecutionError,
         RuntimeFactoryError,
-        HostServiceRegistryError,
         ClientCliError,
         OSError,
         TypeError,
@@ -253,6 +255,25 @@ def main(
     ):
         stderr.write("asterion: command failed\n")
         return 2
+
+
+def _host_service_failure_message(error: HostServiceRegistryError) -> str:
+    """Return one fixed public stage without rendering exception details."""
+
+    args = error.args
+    message = args[0] if len(args) == 1 and type(args[0]) is str else None
+    if message in {
+        "host service factory is unavailable",
+        "host service factory failed to load",
+        "host service factory binding is invalid",
+    }:
+        return "asterion: host-service-factory-load failed\n"
+    if message in {
+        "host service is unavailable",
+        "managed host service is unavailable",
+    }:
+        return "asterion: host-service unavailable\n"
+    return "asterion: command failed\n"
 
 
 async def _run(
