@@ -44,24 +44,33 @@ from asterion.runtime.protocol import ProtocolError
 
 _EXPECTED_PACKAGED_ASSEMBLIES = (
     "applications/controlled_code/assemblies/controlled-code-validation.json",
-    "applications/dci_agent_lite/assemblies/"
-    "dci-complete-application-claude.json",
+    "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
     "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
     "applications/dci_agent_lite/assemblies/"
     "dci-local-benchmark-application-claude.json",
-    "applications/dci_agent_lite/assemblies/"
-    "dci-local-benchmark-application-pi.json",
+    "applications/dci_agent_lite/assemblies/dci-local-benchmark-application-pi.json",
     "applications/dci_agent_lite/assemblies/dci-local-research.json",
-    "applications/dci_agent_lite/assemblies/"
-    "dci-research-capability-claude.json",
+    "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
     "applications/dci_agent_lite/assemblies/dci-research-capability.json",
+    "applications/prime_agent/assemblies/prime-arc-agi-3.json",
+    "applications/prime_agent/assemblies/prime-bounded-autonomy.json",
     "applications/prime_agent/assemblies/prime-capability-program.json",
+    "applications/prime_agent/assemblies/prime-continual-improvement.json",
     "applications/prime_agent/assemblies/prime-ipython-coding.json",
+    "applications/prime_agent/assemblies/prime-long-session-continuity.json",
+    "applications/prime_agent/assemblies/prime-programmatic-long-context.json",
+    "applications/prime_agent/assemblies/prime-recursive-workflow.json",
 )
 _EXPECTED_UNBOUND_ASSEMBLIES = (
     "applications/dci_agent_lite/assemblies/dci-local-research.json",
+    "applications/prime_agent/assemblies/prime-arc-agi-3.json",
+    "applications/prime_agent/assemblies/prime-bounded-autonomy.json",
     "applications/prime_agent/assemblies/prime-capability-program.json",
+    "applications/prime_agent/assemblies/prime-continual-improvement.json",
     "applications/prime_agent/assemblies/prime-ipython-coding.json",
+    "applications/prime_agent/assemblies/prime-long-session-continuity.json",
+    "applications/prime_agent/assemblies/prime-programmatic-long-context.json",
+    "applications/prime_agent/assemblies/prime-recursive-workflow.json",
 )
 _EXPECTED_BOUND_ASSEMBLIES = tuple(
     identity
@@ -156,9 +165,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
     }
     installed_packages = (controlled_package, dci_package)
     applications = tuple(
-        application
-        for provider in providers
-        for application in provider.applications
+        application for provider in providers for application in provider.applications
     )
     package_root = Path(str(resources.files("asterion"))).resolve()
 
@@ -233,11 +240,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
 
     catalog_roots = tuple(
         sorted(
-            {
-                root
-                for package in installed_packages
-                for root in package.catalog_roots
-            }
+            {root for package in installed_packages for root in package.catalog_roots}
         )
     )
     try:
@@ -248,17 +251,13 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         packaged_assemblies = tuple(
             sorted(
                 identity
-                for path in (package_root / "applications").glob(
-                    "*/assemblies/*.json"
-                )
+                for path in (package_root / "applications").glob("*/assemblies/*.json")
                 if (identity := package_identity(path)) is not None
             )
         )
     except OSError:
         packaged_assemblies = ()
-    unbound_resources = tuple(
-        sorted(set(packaged_assemblies) - set(bound_assemblies))
-    )
+    unbound_resources = tuple(sorted(set(packaged_assemblies) - set(bound_assemblies)))
 
     try:
         profiles = tuple(context_profile_names())
@@ -296,8 +295,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
     except (KeyError, OSError, RuntimeError, TypeError, ValueError):
         benchmark_sha256 = None
     datasets_exact = (
-        datasets_exact
-        and benchmark_sha256 == _EXPECTED_PAPER_BENCHMARK_SHA256
+        datasets_exact and benchmark_sha256 == _EXPECTED_PAPER_BENCHMARK_SHA256
     )
 
     try:
@@ -319,9 +317,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         scopes_sha256 = paper_experiment_scopes_sha256()
     except (KeyError, OSError, RuntimeError, TypeError, ValueError):
         scopes_sha256 = None
-    scopes_exact = (
-        scopes_exact and scopes_sha256 == _EXPECTED_PAPER_SCOPES_SHA256
-    )
+    scopes_exact = scopes_exact and scopes_sha256 == _EXPECTED_PAPER_SCOPES_SHA256
 
     return tuple(
         sorted(
@@ -352,8 +348,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "Resolved assembly composition closure is valid",
                     actual=len(composed_assemblies),
                     expected=len(_EXPECTED_BOUND_ASSEMBLIES),
-                    exact=composed_assemblies
-                    == _EXPECTED_BOUND_ASSEMBLIES,
+                    exact=composed_assemblies == _EXPECTED_BOUND_ASSEMBLIES,
                 ),
                 _acceptance_check(
                     "context-profiles",
@@ -367,16 +362,14 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "Executable binding closure is valid",
                     actual=len(executable_assemblies),
                     expected=len(_EXPECTED_BOUND_ASSEMBLIES),
-                    exact=executable_assemblies
-                    == _EXPECTED_BOUND_ASSEMBLIES,
+                    exact=executable_assemblies == _EXPECTED_BOUND_ASSEMBLIES,
                 ),
                 _acceptance_check(
                     "packaged-assemblies",
                     "Capabilityd assembly inventory is valid",
                     actual=len(packaged_assemblies),
                     expected=len(_EXPECTED_PACKAGED_ASSEMBLIES),
-                    exact=packaged_assemblies
-                    == _EXPECTED_PACKAGED_ASSEMBLIES,
+                    exact=packaged_assemblies == _EXPECTED_PACKAGED_ASSEMBLIES,
                     unbound_resources=unbound_resources,
                 ),
                 _acceptance_check(

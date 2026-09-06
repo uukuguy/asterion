@@ -34,8 +34,12 @@ from asterion.applications.product import (
     VerificationProfile,
     VerificationResult,
 )
-from asterion.capabilities.dci.implementation.reproduction.verification import create_dci_product
-from asterion.capabilities.dci.implementation.services import create_local_corpus_service_factory
+from asterion.capabilities.dci.implementation.reproduction.verification import (
+    create_dci_product,
+)
+from asterion.capabilities.dci.implementation.services import (
+    create_local_corpus_service_factory,
+)
 from asterion.capability_packages import (
     CapabilityPackageRef,
     CapabilitySourceDeclaration,
@@ -48,7 +52,9 @@ from asterion.capabilities.execution import (
     InProcessArtifactPayload,
     CapabilityExecutionResult,
 )
-from asterion.capability_packages.sources.local import LocalDirectoryCapabilityPackageSource
+from asterion.capability_packages.sources.local import (
+    LocalDirectoryCapabilityPackageSource,
+)
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
@@ -269,8 +275,7 @@ def dci_host_entry() -> FakeEntryPoint:
 def dci_host_arguments() -> tuple[str, str]:
     return (
         "--host-option",
-        "corpus.local-root:root="
-        + str(Path(__file__).resolve().parents[1]),
+        "corpus.local-root:root=" + str(Path(__file__).resolve().parents[1]),
     )
 
 
@@ -381,9 +386,7 @@ class AsterionCliTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(
-            args.host_option, ["corpus.local-root:root=/private/corpus"]
-        )
+        self.assertEqual(args.host_option, ["corpus.local-root:root=/private/corpus"])
 
     def test_dci_host_service_is_resolved_before_runtime_and_adjacent_is_not_loaded(
         self,
@@ -444,9 +447,7 @@ class AsterionCliTests(unittest.TestCase):
                     "research",
                 ],
                 entry_points=(
-                    FakeEntryPoint(
-                        name="dci-agent-lite", factory=create_dci_provider
-                    ),
+                    FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
                 ),
                 host_service_entry_points=(adjacent, selected),
                 runtime_factories=registry,
@@ -460,7 +461,9 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(selected.loads, 1)
         self.assertEqual(adjacent.loads, 0)
 
-    def test_dci_list_provider_and_describe_do_not_require_package_resolution(self) -> None:
+    def test_dci_list_provider_and_describe_do_not_require_package_resolution(
+        self,
+    ) -> None:
         entry = FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider)
         for command in (
             ["list", "--provider", "dci-agent-lite"],
@@ -479,7 +482,9 @@ class AsterionCliTests(unittest.TestCase):
                 self.assertEqual(code, 0, stderr.getvalue())
                 self.assertIn("dci", stdout.getvalue())
 
-    def test_dci_run_resolves_builtin_package_without_transitional_injection(self) -> None:
+    def test_dci_run_resolves_builtin_package_without_transitional_injection(
+        self,
+    ) -> None:
         contexts: list[object] = []
         registry = RuntimeFactoryRegistry(
             (
@@ -513,7 +518,9 @@ class AsterionCliTests(unittest.TestCase):
                 "--input",
                 "research",
             ],
-            entry_points=(FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),),
+            entry_points=(
+                FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
+            ),
             host_service_entry_points=(dci_host_entry(),),
             runtime_factories=registry,
             stdout=stdout,
@@ -559,7 +566,9 @@ class AsterionCliTests(unittest.TestCase):
                 "--input",
                 "SECRET-INPUT",
             ],
-            entry_points=(FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),),
+            entry_points=(
+                FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
+            ),
             host_service_entry_points=(dci_host_entry(),),
             runtime_factories=registry,
             capability_packages=(transitional_dci_package(),),
@@ -1049,11 +1058,17 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(
             packaged["unbound_resources"],
             [
-                "applications/dci_agent_lite/assemblies/"
-                "dci-local-research.json",
-                "applications/prime_agent/assemblies/"
-                "prime-capability-program.json",
+                "applications/dci_agent_lite/assemblies/dci-local-research.json",
+                "applications/prime_agent/assemblies/prime-arc-agi-3.json",
+                "applications/prime_agent/assemblies/prime-bounded-autonomy.json",
+                "applications/prime_agent/assemblies/prime-capability-program.json",
+                "applications/prime_agent/assemblies/prime-continual-improvement.json",
                 "applications/prime_agent/assemblies/prime-ipython-coding.json",
+                "applications/prime_agent/assemblies/"
+                "prime-long-session-continuity.json",
+                "applications/prime_agent/assemblies/"
+                "prime-programmatic-long-context.json",
+                "applications/prime_agent/assemblies/prime-recursive-workflow.json",
             ],
         )
 
@@ -1106,8 +1121,12 @@ class AsterionCliTests(unittest.TestCase):
             json.loads(isolated.getvalue()), json.loads(baseline.getvalue())
         )
 
-    def test_prime_product_verification_is_provider_free_and_basic_is_unavailable(self) -> None:
-        from asterion.applications.prime_agent.provider import create_provider as create_prime_provider
+    def test_prime_product_verification_is_provider_free_and_basic_is_unavailable(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.provider import (
+            create_provider as create_prime_provider,
+        )
 
         entry = FakeEntryPoint(name="prime-agent", factory=create_prime_provider)
         for level, expected_status, expected_check in (
@@ -1839,9 +1858,7 @@ class AsterionCliTests(unittest.TestCase):
             if event["kind"] == "runtime" and event["status"] == "started"
         )
         self.assertIn("runtime_sha256", runtime_start["attributes"])
-        self.assertTrue(
-            any(event["kind"] == "host-service" for event in trace_events)
-        )
+        self.assertTrue(any(event["kind"] == "host-service" for event in trace_events))
         starts = {
             event["span_id"]: event
             for event in trace_events
@@ -1853,8 +1870,7 @@ class AsterionCliTests(unittest.TestCase):
                 self.assertGreater(event["attributes"]["duration_ns"], 0)
                 self.assertEqual(
                     event["attributes"]["duration_ns"],
-                    event["timestamp_ns"]
-                    - starts[event["span_id"]]["timestamp_ns"],
+                    event["timestamp_ns"] - starts[event["span_id"]]["timestamp_ns"],
                 )
         trace_rendered = json.dumps(bundle["pathlight_traces"][0], sort_keys=True)
         for identity_source in (
@@ -1911,9 +1927,7 @@ class AsterionCliTests(unittest.TestCase):
                     "SECRET-INPUT",
                 ],
                 entry_points=(
-                    FakeEntryPoint(
-                        name="dci-agent-lite", factory=create_dci_provider
-                    ),
+                    FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
                 ),
                 host_service_entry_points=(dci_host_entry(),),
                 runtime_factories=registry,
@@ -2311,6 +2325,7 @@ class AsterionCliTests(unittest.TestCase):
         for output in (stdout.getvalue(), stderr.getvalue()):
             self.assertNotIn("SECRET-NON-CALLABLE-IMPLEMENTATION", output)
 
+
 class _InteractiveCliEndpoint:
     private_values = None
 
@@ -2323,9 +2338,13 @@ class _InteractiveCliEndpoint:
 
         async def iterate() -> AsyncIterator[ClientEvent]:
             yield ClientEvent(
-                protocol="asterion.agent-client/v1", event_id="client-event-1",
-                session_id="client-session-1", generation=1, sequence=1,
-                emitted_at="2026-08-28T12:00:00Z", type="session.terminal",
+                protocol="asterion.agent-client/v1",
+                event_id="client-event-1",
+                session_id="client-session-1",
+                generation=1,
+                sequence=1,
+                emitted_at="2026-08-28T12:00:00Z",
+                type="session.terminal",
                 payload={"reason_code": "completed", "status": "completed"},
             )
 
@@ -2347,8 +2366,12 @@ class ClientCommandCliTests(unittest.TestCase):
         endpoint = _InteractiveCliEndpoint()
         self.assertEqual(
             main(
-                ["client", "--mode", "json"], stdout=output, stderr=io.StringIO(),
-                client_factory=lambda: AgentClient(cast(ClientSessionEndpoint, endpoint), client_id="client-1"),
+                ["client", "--mode", "json"],
+                stdout=output,
+                stderr=io.StringIO(),
+                client_factory=lambda: AgentClient(
+                    cast(ClientSessionEndpoint, endpoint), client_id="client-1"
+                ),
             ),
             0,
         )
