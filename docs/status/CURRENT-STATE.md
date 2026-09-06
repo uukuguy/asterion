@@ -17,15 +17,18 @@
   parity and broad framework restructuring are not prerequisites for Prime
   closure.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
-  preparation, W1c runtime-provider separation, and W1d core-only isolation are
-  complete.
+  preparation, W1c runtime-provider separation, W1d core-only isolation, and
+  W2 public extension reference are complete.
   The public SDK's `research` kind now reaches its exact implementation through
   provider, assembly, and runner. Package sources now share one prepare/load
   lifecycle with exact lock and authorization binding. Prime now owns its exact
   runtime binding and P1-P7 routes; the domain-neutral default registry contains
   no Prime routing. The dependency-free wheel gate imports the complete core
-  allowlist without product modules. Active framework slice: W2 copyable public
-  extension through isolated installed CLI execution.
+  allowlist without product modules. The external Acme reference wheel now uses
+  only `asterion.capability_sdk` and `asterion.application_sdk`, owns its exact
+  application resources and runtime binding, and executes through the installed
+  CLI outside the source tree. Active framework slice: W3a two different-domain
+  extension wheels composed through exact deterministic bindings.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -54,6 +57,13 @@
   generated evidence remain external and operator-owned.
 
 ## Verified Boundary
+
+- W2 is complete. `make test.public-extension` built the core and reference
+  extension wheels, installed both without dependencies into a clean external
+  virtual environment, proved metadata-only and selected-only provider loading,
+  and executed `acme.research-application@1.0.0` through `acme.inline`. Eight W2
+  tests and 95 related runtime, provider, Prime, DCI, and core boundary tests
+  passed; Sol approved the implementation with no remaining material findings.
 
 - Prime Gateway `ecosystem.capabilities` remains PASS at 10/10 provider-free.
 - H-035 is PASS exactly once: its four provider-free client receipts cover nine

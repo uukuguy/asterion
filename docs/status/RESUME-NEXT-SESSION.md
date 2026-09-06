@@ -4,7 +4,7 @@
 
 ## Direction
 
-按评估后的主线持续推进直至完成。Asterion 的核心是统一智能体框架与能力包集成协议；Prime 和 Native 是并行 runtime。当前先收口七项 Prime 端到端复现。研发验证只保留正常链路和关键边界断言，不运行 promotion 或极端矩阵。
+按评估后的主线持续推进直至完成。Asterion 的核心是统一智能体框架与能力包集成协议；Prime 和 Native 是并行 runtime。七项 Prime 端到端复现已收口，当前推进跨包与跨 runtime 框架证据。研发验证只保留正常链路和关键边界断言，不运行 promotion 或极端矩阵。
 
 Canonical worklist: `docs/status/FRAMEWORK-INTEGRATION-WORKLIST.md`.
 
@@ -29,10 +29,12 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 ## Next concrete action
 
 W0 inventory alignment, W1a executable-kind consistency, W1b exact source
-preparation, W1c runtime-provider separation, and W1d core-only isolation are
-complete. Continue W2: turn the minimal external distribution fixture into a
-copyable public extension with an application provider, exact assembly and
-runtime binding, then execute its documented command from isolated wheels.
+preparation, W1c runtime-provider separation, W1d core-only isolation, and W2
+public extension reference are complete. `make test.public-extension` is the
+isolated installed-wheel acceptance command. Continue W3a: add a second
+independently packaged, different-domain extension and prove that both wheels
+compose and execute outside the source tree with deterministic order and exact
+implementation ownership.
 
 The seven Prime development scenarios are closed at their named boundaries.
 Native Phase 3.2 remains a parallel track. Full multi-game ARC-AGI-3 work and

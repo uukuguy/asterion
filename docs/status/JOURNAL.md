@@ -2081,3 +2081,4 @@
 - 16:27 Isolated the dependency-free core while preserving explicit first-party integration [a179bb05]
 - 16:29 Advanced the framework mainline to the public extension reference [f46ce8ef]
 - 16:56 Defined the reviewed public extension contract for independent installed CLI execution [32b320a1]
+- 16:57 Proved a public-SDK-only extension through isolated installed CLI execution [598f01f8]
