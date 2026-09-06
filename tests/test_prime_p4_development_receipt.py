@@ -32,9 +32,18 @@ def _receipt(**changes: object) -> P4DevelopmentReceipt:
         "transcript_identity_sha256": _digest("3"),
         "kernel_identity_sha256": _digest("4"),
         "initial_attach_cursor_sha256": _digest("5"),
-        "detach_cursor_sha256": _digest("5"),
-        "reattach_cursor_sha256": _digest("5"),
-        "checkpoint_readback_cursor_sha256": _digest("5"),
+        "checkpoint_cursor_sha256": _digest("6"),
+        "detach_cursor_sha256": _digest("6"),
+        "reattach_cursor_sha256": _digest("6"),
+        "checkpoint_sha256": _digest("7"),
+        "compaction_witness_sha256": _digest("8"),
+        "provider_usage_sha256": _digest("9"),
+        "diagnostic_result_sha256": _digest("a"),
+        "initial_attach_sequence": 1,
+        "checkpoint_sequence": 2,
+        "reattach_sequence": 2,
+        "zero_gap_from_sequence": 2,
+        "zero_gap_to_sequence": 2,
         "supervisor_recovery_count": 0,
         "daemon_restart_count": 0,
         "initial_attach_count": 1,
@@ -54,6 +63,13 @@ def _receipt(**changes: object) -> P4DevelopmentReceipt:
         "checkpoint_readback": True,
         "model_settled": True,
         "tool_settled": True,
+        "compaction_on_active_path": True,
+        "same_runtime_identity": True,
+        "same_session_identity": True,
+        "same_transcript_identity": True,
+        "same_kernel_identity": True,
+        "same_oracle": True,
+        "uncertain_effect_fenced": True,
         "full_cleanup": True,
     }
     values.update(changes)
@@ -69,10 +85,15 @@ class TestP4DevelopmentReceipt(unittest.TestCase):
             {"runtime_identity_count": 2},
             {"kernel_restart_count": 1},
             {"recovery_oracle_sha256": _digest("a")},
-            {"reattach_cursor_sha256": _digest("6")},
-            {"checkpoint_readback_cursor_sha256": _digest("7")},
+            {"reattach_cursor_sha256": _digest("7")},
+            {"checkpoint_cursor_sha256": _digest("7")},
+            {"initial_attach_sequence": 2},
+            {"reattach_sequence": 3},
+            {"zero_gap_to_sequence": 3},
             {"zero_gap_replay_exact": False},
             {"checkpoint_readback": False},
+            {"same_session_identity": False},
+            {"uncertain_effect_fenced": False},
             {"full_cleanup": False},
         )
         for changes in cases:
@@ -81,7 +102,12 @@ class TestP4DevelopmentReceipt(unittest.TestCase):
                     validate_p4_development_receipt(_receipt(**changes))
 
     def test_rejects_bool_as_int_hidden_fields_and_exposes_no_private_values(self) -> None:
-        for field in ("supervisor_recovery_count", "prompt_count", "child_count"):
+        for field in (
+            "supervisor_recovery_count",
+            "prompt_count",
+            "child_count",
+            "checkpoint_sequence",
+        ):
             with self.subTest(field=field):
                 with self.assertRaises(P4DevelopmentReceiptError):
                     validate_p4_development_receipt(_receipt(**{field: True}))

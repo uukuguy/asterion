@@ -38,9 +38,18 @@ class P4DevelopmentReceipt:
     transcript_identity_sha256: str
     kernel_identity_sha256: str
     initial_attach_cursor_sha256: str
+    checkpoint_cursor_sha256: str
     detach_cursor_sha256: str
     reattach_cursor_sha256: str
-    checkpoint_readback_cursor_sha256: str
+    checkpoint_sha256: str
+    compaction_witness_sha256: str
+    provider_usage_sha256: str
+    diagnostic_result_sha256: str
+    initial_attach_sequence: int
+    checkpoint_sequence: int
+    reattach_sequence: int
+    zero_gap_from_sequence: int
+    zero_gap_to_sequence: int
     supervisor_recovery_count: int
     daemon_restart_count: int
     initial_attach_count: int
@@ -60,6 +69,13 @@ class P4DevelopmentReceipt:
     checkpoint_readback: bool
     model_settled: bool
     tool_settled: bool
+    compaction_on_active_path: bool
+    same_runtime_identity: bool
+    same_session_identity: bool
+    same_transcript_identity: bool
+    same_kernel_identity: bool
+    same_oracle: bool
+    uncertain_effect_fenced: bool
     full_cleanup: bool
 
     def __repr__(self) -> str:
@@ -75,6 +91,10 @@ def _is_digest(value: object) -> bool:
 
 def _is_exact_int(value: object, expected: int) -> bool:
     return type(value) is int and value == expected
+
+
+def _is_sequence(value: object) -> bool:
+    return type(value) is int and value >= 0
 
 
 def validate_p4_development_receipt(receipt: object) -> None:
@@ -96,9 +116,13 @@ def validate_p4_development_receipt(receipt: object) -> None:
                 receipt.transcript_identity_sha256,
                 receipt.kernel_identity_sha256,
                 receipt.initial_attach_cursor_sha256,
+                receipt.checkpoint_cursor_sha256,
                 receipt.detach_cursor_sha256,
                 receipt.reattach_cursor_sha256,
-                receipt.checkpoint_readback_cursor_sha256,
+                receipt.checkpoint_sha256,
+                receipt.compaction_witness_sha256,
+                receipt.provider_usage_sha256,
+                receipt.diagnostic_result_sha256,
             )
         )
         or not all(
@@ -121,9 +145,22 @@ def validate_p4_development_receipt(receipt: object) -> None:
                 (receipt.child_count, 0),
             )
         )
-        or receipt.initial_attach_cursor_sha256 != receipt.detach_cursor_sha256
+        or any(
+            not _is_sequence(value)
+            for value in (
+                receipt.initial_attach_sequence,
+                receipt.checkpoint_sequence,
+                receipt.reattach_sequence,
+                receipt.zero_gap_from_sequence,
+                receipt.zero_gap_to_sequence,
+            )
+        )
+        or receipt.initial_attach_sequence >= receipt.checkpoint_sequence
+        or receipt.reattach_sequence != receipt.checkpoint_sequence
+        or receipt.zero_gap_from_sequence != receipt.checkpoint_sequence
+        or receipt.zero_gap_to_sequence != receipt.reattach_sequence
+        or receipt.checkpoint_cursor_sha256 != receipt.detach_cursor_sha256
         or receipt.detach_cursor_sha256 != receipt.reattach_cursor_sha256
-        or receipt.reattach_cursor_sha256 != receipt.checkpoint_readback_cursor_sha256
         or any(
             value is not True
             for value in (
@@ -131,6 +168,13 @@ def validate_p4_development_receipt(receipt: object) -> None:
                 receipt.checkpoint_readback,
                 receipt.model_settled,
                 receipt.tool_settled,
+                receipt.compaction_on_active_path,
+                receipt.same_runtime_identity,
+                receipt.same_session_identity,
+                receipt.same_transcript_identity,
+                receipt.same_kernel_identity,
+                receipt.same_oracle,
+                receipt.uncertain_effect_fenced,
                 receipt.full_cleanup,
             )
         )
