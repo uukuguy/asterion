@@ -26,6 +26,10 @@ _DAEMON_ID = re.compile(r"[0-9a-f]{64}\Z")
 _COUNTS = (2, 4, 2)
 _GOAL_ID = "prime.bounded-autonomy/v1"
 _INITIAL_SOURCE = b"def clamp(value, lower, upper):\n    return min(upper, value)\n"
+_REPAIRED_SOURCE = (
+    b"def clamp(value, lower, upper):\n"
+    b"    return min(max(value, lower), upper)\n"
+)
 
 
 class PrimeP5DevelopmentHostError(ValueError):
@@ -473,13 +477,20 @@ def _feedback(value: Mapping[str, object], run_id: str, goal_id: str) -> str:
 
 
 def _prompt(phase: str, run_id: str, goal_id: str, stage: int) -> str:
+    source = _INITIAL_SOURCE if stage == 1 else _REPAIRED_SOURCE
     return (
-        phase
-        + " clamp defect. Use exactly one ipython call. Source is /workspace/solution.py; result is /workspace/result.json. "
-        "Write canonical JSON (sort_keys=True, separators=(',',':')) keys goal_id,goal_sha256,marker,run_id,source_sha256,stage; marker clamp-result; "
-        "goal_sha256="
+        "P5 "
+        + phase
+        + " stage. You must make exactly one ipython call; that sole call must complete the required filesystem mutation before it returns. "
+        "Do not inspect, read, print, execute, or subprocess /workspace/solution.py. Its exact bytes and defect are already known. "
+        "Do not use the call for diagnosis, validation, or explanation. "
+        "You must atomically write /workspace/result.json with a same-directory temporary file and os.replace, with no trailing newline. "
+        "The result bytes must be canonical JSON from json.dumps(..., sort_keys=True, separators=(',', ':')).encode('utf-8') with keys goal_id,goal_sha256,marker,run_id,source_sha256,stage; marker=clamp-result; "
+        "source_sha256="
+        + _bytes_digest(source)
+        + "; goal_sha256="
         + _goal_digest(goal_id)
-        + "; source_sha256='sha256:'+sha256(actual solution.py bytes).hexdigest(); run_id="
+        + "; run_id="
         + run_id
         + "; goal_id="
         + goal_id
@@ -487,9 +498,9 @@ def _prompt(phase: str, run_id: str, goal_id: str, stage: int) -> str:
         + str(stage)
         + ". "
         + (
-            "Known defect is expected: complete diagnosis and write result.json with no trailing newline; do not raise, assert failure, or edit source."
+            "This is the diagnosis artifact stage: atomically write result.json only. Do not edit /workspace/solution.py."
             if stage == 1
-            else "Repair exactly to return min(max(value, lower), upper), replace result.json with no trailing newline, then stop briefly."
+            else "This is the repair stage: repair /workspace/solution.py exactly to def clamp(value, lower, upper):\\n    return min(max(value, lower), upper)\\n, then atomically replace result.json."
         )
     )
 

@@ -15,10 +15,12 @@ test("keeps one P5 SDK session for two bounded repair prompts", async () => {
   )).href);
   const workspace = await mkdtemp(join(tmpdir(), "asterion-p5-sdk-"));
   let models = 0, tools = 0;
+  const contexts = [];
   const session = await PrimeP5DevelopmentSession.open({
     primeSourceRoot, workspace,
-    model: () => {
+    model: (_model, context) => {
       models += 1;
+      contexts.push(JSON.stringify(context));
       const stream = createAssistantMessageEventStream();
       const tool = models === 1 || models === 3;
       const message = {
@@ -36,6 +38,9 @@ test("keeps one P5 SDK session for two bounded repair prompts", async () => {
     await session.prompt("prompt-1");
     const result = await session.prompt("prompt-2");
     assert.deepEqual({ models, tools }, { models: 4, tools: 2 });
+    assert.ok(contexts.some((context) => context.includes(
+      "complete the required P5 filesystem mutation",
+    )));
     assert.deepEqual(result.observations, { active_tool_names: ["ipython"], compact_count: 0, model_callback_count: 4, rlm_child_count: 0, tool_call_count: 2 });
   } finally { await session.close(); }
 });

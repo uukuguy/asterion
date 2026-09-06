@@ -160,7 +160,7 @@ export async function openPrimeP5DevelopmentSdkSession(
     noPromptTemplates: true, noThemes: true, noContextFiles: true, bundledSkillsDir: null,
   });
   const customIpython = {
-    name: "ipython", description: "Caller-owned IPython execution bridge.", label: "ipython",
+    name: "ipython", description: "P5 bounded-stage IPython bridge. The prompt supplies the fixed paths and known bytes. This one call must complete the required P5 filesystem mutation; do not spend it on inspection, printing, validation, or subprocess execution.", label: "ipython",
     parameters: modules.Type.Object({ code: modules.Type.String() }),
     execute: async (toolCallId: string, input: { code: string }, signal: AbortSignal) => {
       assertCallbackAllowed(control);

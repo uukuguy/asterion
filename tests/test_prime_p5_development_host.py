@@ -135,6 +135,27 @@ class _Gateway:
 
 
 class TestP5DevelopmentHost(unittest.TestCase):
+    def test_stage_prompts_require_the_sole_ipython_call_to_complete_the_artifact(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator.p5_development_host import (
+            _prompt,
+        )
+
+        stage_one = _prompt("diagnose", "run", "prime.bounded-autonomy/v1", 1)
+        stage_two = _prompt("repair", "run", "prime.bounded-autonomy/v1", 2)
+
+        for prompt in (stage_one, stage_two):
+            with self.subTest(prompt=prompt):
+                self.assertIn("exactly one ipython call", prompt)
+                self.assertIn("must complete", prompt)
+                self.assertIn("atomically write", prompt)
+                self.assertIn("Do not inspect", prompt)
+                self.assertIn("print", prompt)
+                self.assertIn("subprocess", prompt)
+        self.assertIn("Do not edit /workspace/solution.py", stage_one)
+        self.assertIn("repair /workspace/solution.py", stage_two)
+
     def test_runs_the_fixed_fail_then_repair_chain(self) -> None:
         from asterion.applications.prime_agent.operator.p5_development_host import (
             run_p5_development_lifecycle,
