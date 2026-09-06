@@ -100,6 +100,13 @@ class _Gateway:
 
 
 class TestP6DevelopmentHost(unittest.TestCase):
+    def test_canonical_provider_body_preserves_utf8_prompt_text(self) -> None:
+        from asterion.applications.prime_agent.operator.p6_development_host import _canonical
+
+        body = _canonical({"prompt": "修复 clamp"})
+        self.assertIn("修复 clamp".encode(), body)
+        self.assertNotIn(b"\\u", body)
+
     def _run(self, worker: object) -> object:
         from asterion.applications.prime_agent.operator.p6_development_host import run_p6_development_lifecycle
 

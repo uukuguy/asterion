@@ -326,7 +326,7 @@ def _prompt(stage: int, run_id: str, session_id: str, candidate_sha256: str | No
 
 
 def _canonical(value: object) -> bytes:
-    return json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True).encode()
+    return json.dumps(value, allow_nan=False, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
 
 
 def _digest(value: object) -> str:
