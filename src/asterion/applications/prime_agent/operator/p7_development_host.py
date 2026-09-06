@@ -52,7 +52,7 @@ class P7DevelopmentProvider(Protocol):
 
 
 class P7DevelopmentWorker(Protocol):
-    async def acquire(self) -> None: ...
+    async def acquire(self, client: bytes, broker_mount: str = "/broker") -> None: ...
     async def snapshot(self) -> object: ...
     async def execute_cell(self, cell: str) -> Mapping[str, object]: ...
     async def cleanup(self) -> None: ...
@@ -109,7 +109,7 @@ async def run_p7_development_lifecycle(
         client = broker.start(client_socket_path="/broker/model.sock")
         if type(client) is not bytes or not client:
             raise ValueError
-        await worker.acquire()
+        await worker.acquire(client, "/broker")
         _worker_identity(worker)
         calls = tools = 0
 
