@@ -29,6 +29,54 @@ async def _run(
 
 
 class TestP5EvidenceBoundaries(unittest.TestCase):
+    def test_uncertain_create_removes_late_object_and_rejects_ambiguous_inspect(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p5_development_docker as docker,
+        )
+        from asterion.applications.prime_agent.operator.docker_cli import (
+            DockerCliResult,
+        )
+
+        async def exercise(ambiguous: bool) -> list[str]:
+            transport = object.__new__(docker.P5DevelopmentDockerTransport)
+            transport._prefix = ("docker",)
+            operations: list[str] = []
+            name = "prime-p5-test"
+            absent = DockerCliResult(
+                1, b"", ("Error: No such container: " + name + "\n").encode()
+            )
+            responses = iter(
+                (
+                    absent,
+                    DockerCliResult(1, b"", b"unclassified failure")
+                    if ambiguous
+                    else DockerCliResult(0, ("a" * 64 + "\n").encode(), b""),
+                    DockerCliResult(0, (name + "\n").encode(), b""),
+                    absent,
+                )
+            )
+
+            async def call(argv, control):
+                del control
+                operations.append(argv[2])
+                return next(responses)
+
+            transport._call_raw = call
+            with (
+                patch.object(docker, "_PROVISIONAL_SETTLE_SECONDS", 0),
+                patch.object(docker, "_PROVISIONAL_SETTLE_INTERVAL_SECONDS", 0),
+            ):
+                await transport._uncertain(name)
+            return operations
+
+        self.assertEqual(
+            asyncio.run(exercise(False)), ["rm", "inspect", "rm", "inspect"]
+        )
+        with self.assertRaises(docker.PrimeP5DevelopmentDockerError):
+            asyncio.run(exercise(True))
+
     def test_cleanup_finishes_absence_audit_then_propagates_cancellation(self) -> None:
         from asterion.applications.prime_agent.operator.p5_development_docker import (
             P5DevelopmentDockerWorkerService,

@@ -336,7 +336,7 @@ class P5DevelopmentDockerTransport(DockerCliEngineTransport):
                 "MemorySwap": 268435456,
                 "NanoCpus": 1000000000,
                 "PidMode": "",
-                "IpcMode": "",
+                "IpcMode": "private",
                 "UTSMode": "",
                 "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
                 "Running": False,
