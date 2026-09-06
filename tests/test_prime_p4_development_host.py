@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from hashlib import sha256
 import unittest
+from unittest.mock import patch
 
 
 _INITIAL = b"def answer() -> int:\n    return 0\n"
@@ -163,6 +164,34 @@ class _Gateway:
 
 
 class TestPrimeP4DevelopmentHost(unittest.IsolatedAsyncioTestCase):
+    async def test_receipt_failure_precedes_cleanup_success_in_progress(self) -> None:
+        from asterion.applications.prime_agent.operator import p4_development_host as subject
+
+        class Reporter:
+            def __init__(self) -> None:
+                self.events: list[tuple[str, str]] = []
+
+            def emit(self, event: object) -> None:
+                self.events.append((event.component, event.state))  # type: ignore[attr-defined]
+
+        reporter = Reporter()
+        with patch.object(subject, "validate_p4_development_receipt", side_effect=ValueError):
+            with self.assertRaises(subject.PrimeP4DevelopmentHostError):
+                await subject.run_p4_development_lifecycle(
+                    gateway=_Gateway([]),
+                    provider=_Provider([]),
+                    worker=_Worker([]),
+                    run_id="run",
+                    session_id="session",
+                    prime_source_root="/prime",
+                    workspace="/work",
+                    progress=reporter,  # type: ignore[arg-type]
+                )
+        self.assertLess(
+            reporter.events.index(("validation", "failed")),
+            reporter.events.index(("cleanup", "succeeded")),
+        )
+
     async def test_canonical_provider_body_preserves_non_ascii_utf8(self) -> None:
         from asterion.applications.prime_agent.operator import (
             p1b_development_sdk_provider as provider_contract,

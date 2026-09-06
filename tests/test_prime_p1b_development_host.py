@@ -117,6 +117,49 @@ class _Gateway:
 
 
 class TestPrimeP1BDevelopmentHost(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_close_after_validation_never_rewrites_validation_verdict(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p1b_development_host as subject,
+        )
+
+        class Reporter:
+            def __init__(self) -> None:
+                self.events: list[tuple[str, str]] = []
+
+            def emit(self, event: object) -> None:
+                self.events.append((event.component, event.state))  # type: ignore[attr-defined]
+
+        provider = _Provider()
+
+        async def fail_close() -> None:
+            raise RuntimeError("SENTINEL_CLOSE_FAILURE")
+
+        provider.close = fail_close  # type: ignore[method-assign]
+        reporter = Reporter()
+        with (
+            patch.object(subject, "P1BDockerPersistentWorkerService", _Service),
+            patch.object(subject, "PrimeP1BDevelopmentGateway", _Gateway),
+            patch.object(
+                subject,
+                "create_prime_p1b_development_sdk_provider",
+                return_value=provider,
+            ),
+        ):
+            with self.assertRaises(subject.PrimeP1BDevelopmentHostError):
+                await subject.run_prime_p1b_development(
+                    image_digest="sha256:" + "a" * 64,
+                    transport=object(),
+                    operator_config={"DEEPSEEK_API_KEY": "secret"},
+                    node_bin="/operator/node",
+                    entrypoint="/operator/bridge.js",
+                    prime_source_root="/operator/prime",
+                    progress=reporter,  # type: ignore[arg-type]
+                )
+        self.assertIn(("validation", "succeeded"), reporter.events)
+        self.assertNotIn(("validation", "failed"), reporter.events)
+
     async def test_fake_closure_runs_fixed_flow_and_returns_body_free_trace(
         self,
     ) -> None:

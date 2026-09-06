@@ -101,6 +101,7 @@ async def run_prime_p1b_development(
     gateway_closed = False
     provider_closed = False
     cleanup_complete = False
+    validation_complete = False
     active_work: tuple[str, int | None] | None = None
     failed = False
     try:
@@ -305,6 +306,7 @@ async def run_prime_p1b_development(
         )
         _record(_observation, "trace", state="succeeded")
         _emit(progress, "validation", "succeeded")
+        validation_complete = True
         active_work = ("provider.close", None)
         _record(_observation, "provider.close")
         await _close_provider(provider)
@@ -321,7 +323,7 @@ async def run_prime_p1b_development(
     except asyncio.CancelledError:
         raise
     except BaseException:
-        if active_work is not None:
+        if active_work is not None and not validation_complete:
             _emit(progress, "validation", "failed")
         if active_work is not None:
             _record(_observation, active_work[0], index=active_work[1], state="failed")

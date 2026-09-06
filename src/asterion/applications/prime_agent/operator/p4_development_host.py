@@ -242,10 +242,6 @@ async def run_p4_development_lifecycle(
             raise ValueError
         await provider.close()
         provider_closed = True
-        _emit(progress, "cleanup", "started")
-        await worker.cleanup()
-        cleaned = True
-        _emit(progress, "cleanup", "succeeded")
         receipt = _receipt(
             candidate=candidate,
             compact=compact,
@@ -256,7 +252,12 @@ async def run_p4_development_lifecycle(
         validate_p4_development_receipt(receipt)
         _emit(progress, "validation", "succeeded")
         validation_complete = True
-        return trace_p4_development_receipt(receipt)
+        trace = trace_p4_development_receipt(receipt)
+        _emit(progress, "cleanup", "started")
+        await worker.cleanup()
+        cleaned = True
+        _emit(progress, "cleanup", "succeeded")
+        return trace
     except asyncio.CancelledError:
         cancelled = True
     except BaseException:
