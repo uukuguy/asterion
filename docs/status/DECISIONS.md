@@ -11,6 +11,8 @@
 | D-2026-09-02-05 | 🟢 active | Keep Prime Smoke Core and Smoke Full evidence as distinct closed claims |
 | D-2026-09-02-06 | 🟢 active | Make Prime a full RLM-harness capability program, not a Smoke Full roadmap |
 | D-2026-09-05-01 | 🟢 active | Prime and Native remain parallel runtimes; close Prime's seven end-to-end scenarios first |
+| D-2026-09-06-01 | 🟢 active | Resume the framework-first integration sequence after Prime closure |
+| D-2026-09-06-02 | 🟢 active | Retain closed v1 contracts after W2/W3 integration evidence |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -137,3 +139,20 @@
   Prime and Native evidence remains valid at its named boundary.
 - Evidence: Prime 7/7 closure `025bc025`, framework assessment, public inventory,
   and independent Sol contract review on 2026-09-06.
+
+## D-2026-09-06-02 — Retain closed v1 after integration evidence
+
+- Status: 🟢 active
+- Decision: W2 and W3 require no new portable protocol version. Retain the four
+  closed v1 contracts unchanged and keep source authority, implementation
+  binding, runtime construction, and private services in host/provider APIs.
+- Rationale: Independent installed extension, cross-package ownership, and
+  cross-runtime lifecycle evidence all compose through existing exact refs,
+  event/artifact edges, runtime events, and host preflight boundaries.
+- Consequence: No v2 artifacts or compatibility paths are added. A future
+  version requires a concrete case that v1 cannot express and complete schema,
+  Python, TypeScript, fixture, authority, and migration parity.
+- Evidence: `docs/architecture/protocol-evolution-decision.md`;
+  `make test.public-extension`; `make test.cross-package-extension`;
+  `make test.cross-runtime-extension`; commits `598f01f8`, `aa6730ff`, and
+  `ad8db896`.
