@@ -11,7 +11,10 @@ Plan: docs/superpowers/plans/2026-09-05-prime-authority-bundle-and-linux-launch.
 
 ## Current implementation and evidence
 
-P3 live checkpoint：`67d321ea`/`6e971c46`完成可重入 gateway 且保持 P1/P2 同步回调；`6f549035`固定真实 SDK 拓扑为 root4/implementation2/review4、总计10次模型回调和4次工具调用；`ac99738a`完成真实 RLM child/follow-up/cleanup，`32ddbbd5`补齐 review follow-up 错误终态拒绝，Sol 最终复审 APPROVE。`74f98d50`已接通 Python 五种 closed nested command。当前并行实现具体 Docker 生命周期、角色 provider/host 和 P3 installed route；`aecb8444`仅为 scaffolding，不构成真实 E2E 证据。
+P3 已完成 exact installed CLI verification：`make prime-p3-run` 退出 0，14 个聚焦测试通过，trace 为
+`sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`，且零 P3 process/temp dir 残留。P4 当前提交为
+`adb2fe17`、`13213f95`、`8c7cfdbb`、`a0e63239`、`2ae69a0d`；exact `make prime-p4-run` 已在 Orb/Node 22 于 2026-09-06 退出 0，scope 为 `p4-development/unpromoted`，trace 为
+`sha256:d5d04a52243e7cb52985497cd5bdb7a82b8237cb9d69cbd539162af81ca41115`，且零 P4 process/temp dir 残留。当前 real native daemon smoke 仅覆盖 create→attach exact cursor→detach→reattach，不构成完整 P4 closure。
 
 本地实现已推进至6f496311及后续P1-B清理修复；未push。主要状态：
 - d103447 qualification IPC/bootstrap；真实Linux四个focused checks通过（normal/cancel/identity/handoff ownership）。不发production receipt。
@@ -28,10 +31,9 @@ P1-A与P1-B开发链路均已真实完成。P1-B使用一个Prime SDK session、
 
 ## Next concrete action
 
-1. 以已验证的 P1/P3 runtime、provider、gateway、Docker 和 host-service 脊柱实现 P4 长会话连续性。
-2. 接通实际 detach/attach、一次 compact、恢复后同一 oracle，禁止盲目重放外部效果。
-3. 增加 exact installed application 与 `make prime-p4-run`，执行一次真实 CLI 并检查零残留。
-4. 研发验证只覆盖正常流程和身份、恢复边界、取消清理、公开脱敏；不运行 promotion 或极端矩阵。
+1. 在已验证的 P4 native daemon smoke 上补 checkpoint、一次 compact 和第二 diagnostic。
+2. 接通 same oracle 的真实模型/IPython chain，保持恢复路径禁止盲目重放外部效果。
+3. 研发验证只覆盖正常流程和身份、恢复边界、取消清理、公开脱敏；不运行 promotion 或极端矩阵。
 
 P2精确命令`prime.programmatic-long-context@1.0.0`已退出0：一个Prime SDK session、两次model callback、一次Docker IPython cell、固定八记录corpus oracle和cleanup均完成。安全结果为`p2-development/unpromoted`与trace `4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`。最终guest中P2 Node进程与容器均为0；Sol最终复审APPROVE。
 
@@ -50,6 +52,7 @@ P2精确命令`prime.programmatic-long-context@1.0.0`已退出0：一个Prime SD
 
 P1/P2/P3 开发实现均已结束。P3 的干净 Make 入口退出 0，trace 为
 `sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`；
-14 个聚焦测试通过，容器、网关进程和临时目录均为零。下一项是 P4。
+14 个聚焦测试通过，容器、网关进程和临时目录均为零。P4 exact Make 入口也已退出 0，
+但当前仅证明 native daemon create→attach exact cursor→detach→reattach smoke；下一项是补 checkpoint、compact、第二 diagnostic 和 same-oracle 真实模型/IPython 链。
 
 保留既有`.superpowers/sdd/task-1-report.md`、JOURNAL/RESUME未提交修改、未跟踪旧计划和tmp目录。不要整体暂存、重置、删除或push。完整ARC/global harness activation/发布不在本轮范围。

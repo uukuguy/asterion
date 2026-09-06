@@ -10,8 +10,9 @@
   capability-package framework
 - Project route: managed
 - Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
-- Active work package: P1 and P2 development reproductions and exact-selector
-  CLI routes are closed; P3 recursive workflow is next, followed by P4–P7.
+- Active work package: P1, P2, and P3 development reproductions and exact-selector
+  CLI routes are closed; P4 long-session continuity is the active package,
+  followed by P5–P7.
   Existing provider-free acceptance implementations are retained. Native
   parity and broad framework restructuring are not prerequisites for Prime
   closure.
@@ -117,16 +118,20 @@
   only `p2-development/unpromoted` trace
   `4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`;
   post-run inspection found zero P2 containers and zero P2 Node processes.
-- P3 `prime.recursive-workflow/v1` has a fixed depth-one two-child IPython
-  review workload, causal aggregation trace, sealed worker/launcher facades,
-  provider-free acceptance, and a live authorization reducer. Real local Prime daemon/sidecar child messaging, aggregation and cleanup
-  compatibility is verified without model work; real recursive-worker evidence remains
-  External-limited.
-- P4 `prime.long-session-continuity/v1` has a fixed IPython diagnostic
-  workload, canonical redacted completion parser, replay-free recovery adapter,
-  provider-free acceptance, and authorization-gated live reducer. Its 26-test
-  local chain is provider-free only; real session/IPython evidence remains
-  External-limited and cannot be promoted to bounded PASS.
+- P3 `prime.recursive-workflow/v1` is CLI verified through the exact installed
+  route: `make prime-p3-run` passed with trace
+  `sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`,
+  14 focused tests passed, and zero Prime processes or temporary directories
+  remained.
+- P4 `prime.long-session-continuity/v1` is implemented across commits
+  `adb2fe17`, `13213f95`, `8c7cfdbb`, `a0e63239`, and `2ae69a0d`. The exact
+  `make prime-p4-run` Orb/Node 22 development run exited 0 on 2026-09-06,
+  with scope `p4-development/unpromoted` and trace
+  `sha256:d5d04a52243e7cb52985497cd5bdb7a82b8237cb9d69cbd539162af81ca41115`;
+  zero P4 processes and temporary directories remained. The current real
+  smoke covers native daemon create → attach with an exact cursor → detach →
+  reattach only; P4 is not fully closed. Checkpoint, one compact, a second
+  diagnostic, and the same-oracle real-model/IPython chain remain.
 - P5 `prime.bounded-autonomy/v1` has a fixed IPython-only diagnostic-repair
   workload, identity- and ceiling-bound two-gate trace, replay-fenced
   host-gate adapter, provider-free acceptance, and a revalidating live reducer.
@@ -205,7 +210,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Resume P3 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
+4. Resume P4 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
    parallel runtime track; do not substitute it or broad framework refactoring
    for Prime end-to-end closure.
 5. Keep credentials, private configuration, and execution authority external.
