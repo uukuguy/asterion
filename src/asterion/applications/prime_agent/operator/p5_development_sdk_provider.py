@@ -642,7 +642,7 @@ def _deepseek_payload(
     if type(turn) is not int or turn not in range(4):
         raise ValueError
     context = request.get("context")
-    if type(context) is not dict or ("tools" in context) != (turn != 2):
+    if type(context) is not dict or "tools" not in context:
         raise ValueError
     payload_messages: list[dict[str, object]] = [
         {"role": "system", "content": context["systemPrompt"]}
@@ -688,27 +688,17 @@ def _deepseek_payload(
         "stream": False,
         "thinking": {"type": "disabled"},
     }
-    if turn != 2:
-        tool = context["tools"][0]
-        payload.update(
-            {
-                "tool_choice": (
-                    {"type": "function", "function": {"name": "ipython"}}
-                    if turn in (0, 2)
-                    else "none"
-                ),
-                "tools": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "ipython",
-                            "description": tool["description"],
-                            "parameters": tool["parameters"],
-                        },
-                    }
-                ],
-            }
-        )
+    tool = context["tools"][0]
+    payload.update(
+        {
+            "tool_choice": (
+                {"type": "function", "function": {"name": "ipython"}}
+                if turn in (0, 2)
+                else "none"
+            ),
+            "tools": [{"type": "function", "function": {"name": "ipython", "description": tool["description"], "parameters": tool["parameters"]}}],
+        }
+    )
     return payload
 
 
