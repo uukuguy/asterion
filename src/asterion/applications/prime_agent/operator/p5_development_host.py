@@ -86,9 +86,19 @@ async def run_p5_development_lifecycle(
     session_id: str,
     container_id: str,
     goal_id: str,
+    prime_source_root: str = "/prime",
+    workspace: str = "/workspace",
 ) -> PrimeP5DevelopmentTrace:
     if not _inputs(
-        gateway, provider, worker, run_id, session_id, container_id, goal_id
+        gateway,
+        provider,
+        worker,
+        run_id,
+        session_id,
+        container_id,
+        goal_id,
+        prime_source_root,
+        workspace,
     ):
         raise PrimeP5DevelopmentHostError()
     opened = provider_closed = cleaned = False
@@ -133,8 +143,9 @@ async def run_p5_development_lifecycle(
         await gateway.open(
             run_id=run_id,
             session_id=session_id,
-            container_id=container_id,
-            goal_id=goal_id,
+            generation=1,
+            prime_source_root=prime_source_root,
+            workspace=workspace,
         )
         opened = True
         first = await gateway.prompt("diagnose clamp defect")

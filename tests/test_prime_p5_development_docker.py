@@ -11,5 +11,5 @@ class TestP5DevelopmentDocker(unittest.TestCase):
 
         self.assertEqual(
             P5DevelopmentDockerWorkerService.__name__,
-            "P1BDockerPersistentWorkerService",
+        "P5DevelopmentDockerWorkerService",
         )
