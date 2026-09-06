@@ -65,6 +65,15 @@ def create_provider() -> InstalledApplicationProvider:
         resource_root=root,
         applications=(
             InstalledApplication(
+                application_id="prime.arc-agi-3",
+                version="1.0.0",
+                assembly_paths=(
+                    root / "applications/prime_agent/assemblies/prime-arc-agi-3.json",
+                ),
+                capability_packages=(CapabilityPackageRef("prime-agent", "1.0.0"),),
+                runtime_ids=("prime.agent",),
+            ),
+            InstalledApplication(
                 application_id="prime.capability-program",
                 version="1.0.0",
                 assembly_paths=(

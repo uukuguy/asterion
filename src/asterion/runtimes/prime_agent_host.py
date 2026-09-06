@@ -18,6 +18,7 @@ _SCOPES = frozenset(
         "p4-development",
         "p5-development",
         "p6-development",
+        "p7-development",
     )
 )
 _PROMOTION = "unpromoted"
@@ -74,10 +75,23 @@ class PrimeSmallVerificationService(Protocol):
     ) -> PrimeSmallVerificationResult: ...
 
 
+@runtime_checkable
+class PrimeP7DevelopmentHostService(Protocol):
+    """Narrow host seam for P7's fixed development verification."""
+
+    async def verify(
+        self,
+        request: PrimeSmallVerificationRequest,
+        *,
+        signal: CancellationSignal | None = None,
+    ) -> PrimeSmallVerificationResult: ...
+
+
 __all__ = (
     "PrimeSmallVerificationContractError",
     "PrimeSmallVerificationCancelled",
     "PrimeSmallVerificationRequest",
     "PrimeSmallVerificationResult",
     "PrimeSmallVerificationService",
+    "PrimeP7DevelopmentHostService",
 )

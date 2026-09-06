@@ -80,6 +80,12 @@ class PrimeVerificationProfile:
                 "p6-development",
                 "application/vnd.asterion.prime.p6-development-trace+json",
             ),
+            (
+                "p7-development",
+                "prime.p7-development.trace",
+                "p7-development",
+                "application/vnd.asterion.prime.p7-development-trace+json",
+            ),
         }:
             raise PrimeAgentRuntimeError("Prime runtime profile is invalid")
 
@@ -120,6 +126,12 @@ PRIME_P6_PROFILE = PrimeVerificationProfile(
     kind="p6-development",
     media_type="application/vnd.asterion.prime.p6-development-trace+json",
 )
+PRIME_P7_PROFILE = PrimeVerificationProfile(
+    scope="p7-development",
+    artifact_id="prime.p7-development.trace",
+    kind="p7-development",
+    media_type="application/vnd.asterion.prime.p7-development-trace+json",
+)
 
 class PrimeAgentRuntimeClient(AgentRuntimeClient):
     """Project one host-owned fixed verification into runtime protocol frames."""
@@ -138,6 +150,7 @@ class PrimeAgentRuntimeClient(AgentRuntimeClient):
             PRIME_P4_PROFILE,
             PRIME_P5_PROFILE,
             PRIME_P6_PROFILE,
+            PRIME_P7_PROFILE,
         ):
             raise PrimeAgentRuntimeError("Prime runtime profile is invalid")
         self._profile = profile
@@ -259,6 +272,7 @@ __all__ = (
     "PRIME_P4_PROFILE",
     "PRIME_P5_PROFILE",
     "PRIME_P6_PROFILE",
+    "PRIME_P7_PROFILE",
     "PRIME_RUNTIME_ID",
     "PrimeAgentRuntimeClient",
     "PrimeVerificationProfile",
