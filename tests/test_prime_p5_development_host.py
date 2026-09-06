@@ -111,7 +111,7 @@ class _Gateway:
 
     async def feedback(self, value: str) -> dict[str, object]:
         assert value.startswith(
-            "quality gate failed for run=run goal=prime.bounded-autonomy/v1"
+            "quality gate failed for run=run goal=prime.bounded-autonomy/v1 gate=sha256:"
         )
         return {}
 
@@ -123,7 +123,7 @@ class _Gateway:
             "identity": {
                 "run_id": "run",
                 "session_id": "session",
-                "runtime_id": "runtime",
+                "runtime_id": "prime.agent",
                 "generation": 1,
             },
             "result": {},

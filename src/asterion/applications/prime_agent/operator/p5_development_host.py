@@ -171,6 +171,10 @@ async def run_p5_development_lifecycle(
         validate_p5_development_artifact(
             first_artifact, run_id=run_id, goal_id=goal_id, source=diagnosed, stage=1
         )
+        seen_sources: set[str] = set()
+        if _bytes_digest(diagnosed) in seen_sources:
+            raise ValueError
+        seen_sources.add(_bytes_digest(diagnosed))
         first_result, first_quality = _gates(
             diagnosed, first_artifact, run_id, goal_id, 1
         )
@@ -185,7 +189,7 @@ async def run_p5_development_lifecycle(
             raise ValueError
         repaired = _source_from_snapshot(await worker.snapshot())
         validate_p5_development_snapshot(repaired, repaired=True)
-        if sha256(diagnosed).digest() == sha256(repaired).digest():
+        if _bytes_digest(repaired) in seen_sources:
             raise ValueError
         artifact = await worker.artifact()
         validate_p5_development_artifact(
@@ -402,8 +406,7 @@ def _terminal_witness(
         or identity["run_id"] != run_id
         or identity["session_id"] != session_id
         or identity["generation"] != 1
-        or type(identity["runtime_id"]) is not str
-        or not identity["runtime_id"]
+        or identity["runtime_id"] != "prime.agent"
         or dict(cumulative) != {"model_callback_count": 4, "tool_callback_count": 2}
     ):
         raise ValueError
@@ -431,7 +434,7 @@ def _gates(
     # A diagnosis is a valid result only if it is the exact fixed defect; quality
     # gates it until the repair replaces the observed workspace bytes.
     quality = {
-        "passed": stage == 2 and all(outcomes),
+        "passed": all(outcomes),
         "result_sha256": _digest(
             {
                 "gate": "quality",
@@ -455,6 +458,10 @@ def _feedback(value: Mapping[str, object], run_id: str, goal_id: str) -> str:
         + run_id
         + " goal="
         + goal_id
+        + " gate="
+        + str(value["result_sha256"])
+        + "; source="
+        + _bytes_digest(_INITIAL_SOURCE)
         + "; repair /workspace/solution.py and replace /workspace/result.json"
     )
 
@@ -474,9 +481,9 @@ def _prompt(phase: str, run_id: str, goal_id: str, stage: int) -> str:
         + str(stage)
         + ". "
         + (
-            "Inspect and test only; do not edit source."
+            "Known defect is expected: complete diagnosis and write result.json; do not raise, assert failure, or edit source."
             if stage == 1
-            else "Repair clamp, replace result, then stop briefly."
+            else "Repair exactly to return min(max(value, lower), upper), replace result.json with no trailing newline, then stop briefly."
         )
     )
 

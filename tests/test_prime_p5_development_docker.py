@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 import asyncio
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 class _Transport:
@@ -15,7 +17,7 @@ class _Transport:
     async def execute_p5(self, *_: object) -> None:
         return None
 
-    async def read_p5(self, _: str, name: str, __: object) -> bytes:
+    async def read_p5(self, _: str, name: str, __: bool, ___: object) -> bytes:
         self.reads.append(name)
         return b'{"actual":"worker-bytes"}' if name == "result.json" else b"source"
 
@@ -65,3 +67,25 @@ class TestP5DevelopmentDocker(unittest.TestCase):
         self.assertEqual(asyncio.run(exercise()), b'{"actual":"worker-bytes"}')
         self.assertEqual(transport.reads, ["result.json", "result.json"])
         self.assertTrue(transport.removed and transport.absent)
+
+    def test_trusted_read_rejects_unexpected_files_and_symlinks(self) -> None:
+        from asterion.applications.prime_agent.operator.p5_development_docker import (
+            PrimeP5DevelopmentDockerError,
+            _trusted_workspace_read,
+        )
+
+        with TemporaryDirectory() as root:
+            path = Path(root)
+            (path / "solution.py").write_bytes(b"source")
+            self.assertEqual(
+                _trusted_workspace_read(root, "solution.py", ("solution.py",)),
+                b"source",
+            )
+            (path / "extra").write_text("x")
+            with self.assertRaises(PrimeP5DevelopmentDockerError):
+                _trusted_workspace_read(root, "solution.py", ("solution.py",))
+            (path / "extra").unlink()
+            (path / "solution.py").unlink()
+            (path / "solution.py").symlink_to("/etc/passwd")
+            with self.assertRaises(PrimeP5DevelopmentDockerError):
+                _trusted_workspace_read(root, "solution.py", ("solution.py",))

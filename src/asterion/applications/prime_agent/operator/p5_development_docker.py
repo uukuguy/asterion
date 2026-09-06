@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 import asyncio
+import os
 import re
 import secrets
+import stat
 from time import monotonic
 from .docker_cli import (
     DockerCliEngineTransport,
@@ -15,6 +17,7 @@ from .docker_worker import _LifecycleCallControl
 _ID = re.compile(r"[0-9a-f]{64}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _CELL_CAP, _READ_CAP = 16 * 1024, 16 * 1024
+_READ_PROGRAM = "import os,stat,sys\nroot='/workspace';name=sys.argv[1];expected=set(sys.argv[2:])\ntry:\n names=set(os.listdir(root))\n if names!=expected or name not in expected: raise ValueError\n d=os.open(root,os.O_RDONLY|os.O_DIRECTORY)\n try:\n  before=os.stat(name,dir_fd=d,follow_symlinks=False)\n  if not stat.S_ISREG(before.st_mode): raise ValueError\n  fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=d)\n  try:\n   after=os.fstat(fd)\n   if not stat.S_ISREG(after.st_mode) or (before.st_dev,before.st_ino)!=(after.st_dev,after.st_ino): raise ValueError\n   data=os.read(fd,16385)\n   if not data or len(data)>16384: raise ValueError\n  finally: os.close(fd)\n finally: os.close(d)\nexcept BaseException: raise SystemExit(1)\nsys.stdout.buffer.write(data)\n"
 
 
 class PrimeP5DevelopmentDockerError(ValueError):
@@ -144,7 +147,11 @@ class P5DevelopmentDockerTransport(DockerCliEngineTransport):
             raise PrimeP5DevelopmentDockerError() from None
 
     async def read_p5(
-        self, container_id: str, name: str, control: _LifecycleCallControl
+        self,
+        container_id: str,
+        name: str,
+        result_required: bool,
+        control: _LifecycleCallControl,
     ) -> bytes:
         if _ID.fullmatch(container_id) is None or name not in {
             "solution.py",
@@ -152,6 +159,9 @@ class P5DevelopmentDockerTransport(DockerCliEngineTransport):
         }:
             raise PrimeP5DevelopmentDockerError()
         try:
+            expected = (
+                ("solution.py", "result.json") if result_required else ("solution.py",)
+            )
             result = await self._call(
                 self._prefix
                 + (
@@ -160,8 +170,12 @@ class P5DevelopmentDockerTransport(DockerCliEngineTransport):
                     "--user",
                     "65534:65534",
                     container_id,
-                    "cat",
-                    "/workspace/" + name,
+                    "/usr/local/bin/python3",
+                    "-I",
+                    "-c",
+                    _READ_PROGRAM,
+                    name,
+                    *expected,
                 ),
                 control,
                 max_output_bytes=_READ_CAP,
@@ -307,15 +321,15 @@ class P5DevelopmentDockerWorkerService:
         )
         if not callable(remove) or not callable(absent):
             raise PrimeP5DevelopmentDockerError()
-        await remove(self._container, _control())
-        await absent(self._container, _control())
+        await _shield_cleanup(remove(self._container, _control()))
+        await _shield_cleanup(absent(self._container, _control()))
         self._stage = 4
 
     async def _read(self, name: str) -> bytes:
         read = getattr(self._transport, "read_p5", None)
         if not callable(read):
             raise PrimeP5DevelopmentDockerError()
-        value = await read(self.daemon_id, name, _control())
+        value = await read(self.daemon_id, name, self._stage >= 2, _control())
         if type(value) is not bytes or not value or len(value) > _READ_CAP:
             raise PrimeP5DevelopmentDockerError()
         return value
@@ -325,6 +339,18 @@ def _control() -> _LifecycleCallControl:
     return _LifecycleCallControl(monotonic() + 30, None)
 
 
+async def _shield_cleanup(awaitable: object) -> None:
+    if not hasattr(awaitable, "__await__"):
+        raise PrimeP5DevelopmentDockerError()
+    task = asyncio.ensure_future(awaitable)  # type: ignore[arg-type]
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+    task.result()
+
+
 def _path(value: object) -> bool:
     return (
         type(value) is str
@@ -332,6 +358,33 @@ def _path(value: object) -> bool:
         and not value.startswith("//")
         and "\x00" not in value
     )
+
+
+def _trusted_workspace_read(root: str, name: str, expected: tuple[str, ...]) -> bytes:
+    """Provider-free equivalent of the fixed in-container read program."""
+    if name not in expected or set(os.listdir(root)) != set(expected):
+        raise PrimeP5DevelopmentDockerError()
+    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        before = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode):
+            raise PrimeP5DevelopmentDockerError()
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+        try:
+            after = os.fstat(descriptor)
+            if not stat.S_ISREG(after.st_mode) or (before.st_dev, before.st_ino) != (
+                after.st_dev,
+                after.st_ino,
+            ):
+                raise PrimeP5DevelopmentDockerError()
+            value = os.read(descriptor, _READ_CAP + 1)
+            if not value or len(value) > _READ_CAP:
+                raise PrimeP5DevelopmentDockerError()
+            return value
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(directory)
 
 
 __all__ = (
