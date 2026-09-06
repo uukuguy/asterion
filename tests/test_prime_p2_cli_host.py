@@ -76,6 +76,37 @@ class TestPrimeP2CliHost(unittest.IsolatedAsyncioTestCase):
         seal.assert_called_once_with(paths.seccomp)
         self.assertNotIn("/tmp", repr(files.call_args_list))
 
+    def test_preflight_closes_seccomp_descriptor_when_source_stage_fails(self) -> None:
+        from asterion.applications.prime_agent.operator import p2_cli_host as subject
+
+        paths = SimpleNamespace(
+            node=Path("/prepared/node"),
+            seccomp=Path("/prepared/seccomp.json"),
+            gateway_root=Path("/prepared/gateway"),
+            source_root=Path("/prepared/prime"),
+        )
+        with (
+            patch.object(subject.sys, "platform", "linux"),
+            patch.object(subject.os, "geteuid", return_value=0),
+            patch.object(subject, "resolve_prepared_prime_development", return_value=paths, create=True),
+            patch.object(subject, "_regular_executable", side_effect=(Path("/docker"), paths.node)),
+            patch.object(subject.os, "lstat", return_value=SimpleNamespace(st_mode=0)),
+            patch.object(subject.stat, "S_ISSOCK", return_value=True),
+            patch.object(subject, "_regular_file", side_effect=(
+                paths.gateway_root / "dist/src/p2-development-main.js",
+                paths.source_root / "packages/coding-agent/dist/core/sdk.js",
+                paths.source_root / "node_modules/typebox/build/index.mjs",
+            )),
+            patch.object(subject, "_regular_directory", return_value=paths.source_root),
+            patch.object(subject, "_sealed_seccomp", return_value=73),
+            patch.object(subject, "_inspect_image", return_value="sha256:" + "a" * 64),
+            patch.object(subject, "_operator_config", side_effect=ValueError("private")),
+            patch.object(subject.os, "close") as close,
+        ):
+            with self.assertRaises(subject.PrimeP2CliHostError):
+                subject._preflight(Path("/repo"))
+        close.assert_called_once_with(73)
+
     def test_image_inspection_uses_the_exact_docker_argv(self) -> None:
         from asterion.applications.prime_agent.operator import p2_cli_host as subject
 

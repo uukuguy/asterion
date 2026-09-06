@@ -220,6 +220,7 @@ def _preflight(
     except BaseException:
         _emit(reporter, "image", "failed")
         raise PrimeP2CliHostError() from None
+    seccomp_fd: int | None = None
     try:
         _emit(reporter, "source", "started")
         node = _regular_executable(paths.node)
@@ -233,8 +234,15 @@ def _preflight(
         operator_config = _operator_config(repo_root / ".env")
         _emit(reporter, "source", "succeeded")
     except BaseException:
+        if seccomp_fd is not None:
+            try:
+                os.close(seccomp_fd)
+            except OSError:
+                pass
         _emit(reporter, "source", "failed")
         raise PrimeP2CliHostError() from None
+    if seccomp_fd is None:
+        raise PrimeP2CliHostError()
     try:
         transport: object | None = None
         transport = PrimeP2DevelopmentDockerTransport(

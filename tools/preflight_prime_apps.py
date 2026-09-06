@@ -55,6 +55,7 @@ def preflight_prime_apps(
     """Prepare then open/close the seven exact host contexts without execution."""
 
     prepared = _prepare_rows(repo_root, prepare)
+    prepared = _publish_union_receipt(repo_root, prepared, prepare)
     try:
         provider = load_provider("prime-agent")
     except Exception:
@@ -85,6 +86,24 @@ def _prepare_rows(repo_root: Path, prepare: _Preparation) -> dict[str, bool]:
         else:
             results[scenario] = True
     return results
+
+
+def _publish_union_receipt(
+    repo_root: Path, prepared: dict[str, bool], prepare: _Preparation
+) -> dict[str, bool]:
+    """Publish one receipt covering every successful per-scenario preparation."""
+
+    successful = tuple(
+        scenario for scenario, _, _ in _SCENARIOS if prepared.get(scenario, False)
+    )
+    if not successful:
+        return prepared
+    try:
+        prepare(repo_root, successful)
+    except Exception:
+        for scenario in successful:
+            prepared[scenario] = False
+    return prepared
 
 
 async def _open_prepared_rows(

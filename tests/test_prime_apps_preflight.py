@@ -39,19 +39,23 @@ class _HostEntryPoint:
 class TestPrimeAppsPreflight(unittest.TestCase):
     def test_prepares_all_rows_then_opens_and_closes_exact_contexts(self) -> None:
         prepared: list[tuple[str, ...]] = []
+        receipt: tuple[str, ...] = ()
         opened = []
         closed = []
         runtime_factory_calls = []
 
         def prepare(root: Path, scenarios: tuple[str, ...]):
+            nonlocal receipt
             self.assertIsInstance(root, Path)
             prepared.append(scenarios)
+            receipt = scenarios
             return {scenario: object() for scenario in scenarios}
 
         def binding_for(capability_id: str):
             def create_binding():
                 @asynccontextmanager
                 async def factory(context):
+                    self.assertEqual(receipt, tuple(scenario for scenario, _ in _SCENARIOS))
                     opened.append(context)
                     try:
                         yield object()
@@ -79,7 +83,11 @@ class TestPrimeAppsPreflight(unittest.TestCase):
         )
 
         self.assertEqual(result, 0)
-        self.assertEqual(prepared, [(scenario,) for scenario, _ in _SCENARIOS])
+        self.assertEqual(
+            prepared,
+            [(scenario,) for scenario, _ in _SCENARIOS]
+            + [tuple(scenario for scenario, _ in _SCENARIOS)],
+        )
         self.assertEqual([item.capability_id for item in opened], [item[1] for item in _SCENARIOS])
         self.assertEqual(closed, [item[1] for item in _SCENARIOS])
         self.assertTrue(all(dict(item.options) == {} for item in opened))
@@ -92,8 +100,10 @@ class TestPrimeAppsPreflight(unittest.TestCase):
 
     def test_prepare_failure_skips_its_context_and_later_rows_continue(self) -> None:
         opened: list[str] = []
+        prepared: list[tuple[str, ...]] = []
 
         def prepare(_: Path, scenarios: tuple[str, ...]):
+            prepared.append(scenarios)
             if scenarios == ("p2",):
                 raise ValueError("SENTINEL_SECRET /private/preparation")
             return {scenarios[0]: object()}
@@ -120,6 +130,11 @@ class TestPrimeAppsPreflight(unittest.TestCase):
         )
 
         self.assertEqual(result, 1)
+        self.assertEqual(
+            prepared,
+            [(scenario,) for scenario, _ in _SCENARIOS]
+            + [("p1", "p3", "p4", "p5", "p6", "p7")],
+        )
         self.assertNotIn("prime.programmatic-long-context-development", opened)
         self.assertIn("prime.arc-agi-3-development", opened)
         self.assertEqual(
@@ -131,6 +146,43 @@ class TestPrimeAppsPreflight(unittest.TestCase):
         )
         self.assertNotIn("SENTINEL_SECRET", stdout.getvalue() + stderr.getvalue())
         self.assertNotIn("/private/preparation", stdout.getvalue() + stderr.getvalue())
+
+    def test_union_receipt_failure_marks_successful_candidates_failed_without_opening(self) -> None:
+        opened: list[str] = []
+
+        def prepare(_: Path, scenarios: tuple[str, ...]):
+            if len(scenarios) > 1:
+                raise ValueError("SENTINEL_SECRET /private/union")
+            return {scenarios[0]: object()}
+
+        def entry(capability_id: str):
+            def create_binding():
+                @asynccontextmanager
+                async def factory(context):
+                    opened.append(context.capability_id)
+                    yield object()
+
+                return HostServiceFactoryBinding(capability_id, (), factory)
+
+            return _HostEntryPoint(capability_id, create_binding)
+
+        stdout, stderr = StringIO(), StringIO()
+        result = preflight_prime_apps(
+            Path.cwd(),
+            stdout=stdout,
+            stderr=stderr,
+            prepare=prepare,
+            load_provider=lambda _: create_provider(),
+            registry=HostServiceFactoryRegistry(tuple(entry(capability) for _, capability in _SCENARIOS)),
+        )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(opened, [])
+        self.assertEqual(
+            stdout.getvalue(),
+            "".join(f"prime-{scenario} FAIL\n" for scenario, _ in _SCENARIOS),
+        )
+        self.assertNotIn("SENTINEL_SECRET", stdout.getvalue() + stderr.getvalue())
 
     def test_invalid_assembly_fails_only_its_row_without_opening_it(self) -> None:
         provider = create_provider()
