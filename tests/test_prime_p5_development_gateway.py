@@ -18,6 +18,16 @@ function c(v){if(v===null||typeof v!=="object")return JSON.stringify(v);if(Array
 
 
 class TestPrimeP5DevelopmentGateway(unittest.TestCase):
+    def test_bind_is_one_shot_and_must_precede_open(self) -> None:
+        gateway = PrimeP5DevelopmentGateway(node_bin="node", entrypoint=__file__)
+        hook = lambda _: {}  # noqa: E731
+        gateway.bind(model_hook=hook, tool_hook=hook)
+        with self.assertRaises(Exception):
+            gateway.bind(model_hook=hook, tool_hook=hook)
+        gateway._state = "open"  # type: ignore[attr-defined]
+        with self.assertRaises(Exception):
+            gateway.bind(model_hook=lambda _: {}, tool_hook=lambda _: {})
+
     def test_forwards_python_feedback_between_same_session_prompts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             entrypoint = Path(temporary) / "bridge.js"

@@ -52,6 +52,17 @@ class PrimeP5DevelopmentGateway(DevelopmentGatewayTransport):
     def __repr__(self) -> str:
         return "PrimeP5DevelopmentGateway(redacted)"
 
+    def bind(self, *, model_hook: Hook, tool_hook: Hook) -> None:
+        if (
+            self._state != "new"
+            or not callable(model_hook)
+            or not callable(tool_hook)
+            or self._model_hook is not None
+            or self._tool_hook is not None
+        ):
+            raise PrimeP5DevelopmentGatewayError()
+        self._model_hook, self._tool_hook = model_hook, tool_hook
+
     async def open(
         self,
         *,
