@@ -2097,3 +2097,4 @@
 - 01:57 Recorded the completed framework milestone for reliable recovery [76af2d3e]
 - 02:00 Restored Prime preset extras and safe host-stage diagnostics after core isolation [b495dd63]
 - 02:00 Verified P1 CLI exit zero with trace `9672ba00` and zero residue [b495dd63]
+- 02:18 Recorded the restored P1 command and recovery checkpoint [dd5827ff]
