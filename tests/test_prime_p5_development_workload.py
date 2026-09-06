@@ -16,7 +16,10 @@ class TestP5DevelopmentWorkload(unittest.TestCase):
 
         payload = p5_development_workload_manifest_bytes()
         manifest = json.loads(payload)
-        self.assertEqual((P5_DEVELOPMENT_SCOPE, P5_DEVELOPMENT_PROMOTION), ("p5-development", "unpromoted"))
+        self.assertEqual(
+            (P5_DEVELOPMENT_SCOPE, P5_DEVELOPMENT_PROMOTION),
+            ("p5-development", "unpromoted"),
+        )
         self.assertEqual(manifest["repair"], "clamp-defect")
         self.assertEqual(manifest["prompt_count"], 2)
         self.assertEqual(manifest["provider_callback_count"], 4)
@@ -28,5 +31,8 @@ class TestP5DevelopmentWorkload(unittest.TestCase):
         self.assertEqual(manifest["retry_count"], 0)
         self.assertEqual(manifest["child_count"], 0)
         self.assertEqual(manifest["compact_count"], 0)
-        self.assertEqual(P5_DEVELOPMENT_WORKLOAD_DIGEST, "sha256:" + hashlib.sha256(payload).hexdigest())
+        self.assertEqual(
+            P5_DEVELOPMENT_WORKLOAD_DIGEST,
+            "sha256:" + hashlib.sha256(payload).hexdigest(),
+        )
         self.assertFalse({"prompt", "provider", "workspace", "source"} & set(manifest))
