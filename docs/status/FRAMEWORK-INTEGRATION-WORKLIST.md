@@ -45,8 +45,8 @@ evidence proves all of the following:
 | W1d | Core-only boundary | Core import/install gate identifies and removes mandatory product dependencies and core-to-product imports without breaking provider entry points | Complete | W1c |
 | W2 | Public extension reference | A copyable external extension uses only public SDK/API from manifest through installed CLI execution; its documentation command runs in an isolated environment | Complete | W1 |
 | W3a | Cross-package evidence | Two different-domain extension wheels install, compose, and execute outside the source tree with deterministic ordering and exact bindings | Complete | W2 |
-| W3b | Cross-runtime evidence | One neutral capability passes the same lifecycle/output suite through two compatible adapters, including cancellation and missing-service rejection | Active | W3a |
-| W4 | Evidence-led protocol evolution | Record whether real W2/W3 cases require a new protocol. If required, introduce a separate version with schema, Python, TypeScript, fixture, and migration parity; otherwise retain v1 unchanged | Planned | W3 |
+| W3b | Cross-runtime evidence | One neutral capability passes the same lifecycle/output suite through two compatible adapters, including cancellation and missing-service rejection | Complete | W3a |
+| W4 | Evidence-led protocol evolution | Record whether real W2/W3 cases require a new protocol. If required, introduce a separate version with schema, Python, TypeScript, fixture, and migration parity; otherwise retain v1 unchanged | Active | W3 |
 | W5 | Layered release gates | Separate core, cross-language contracts, extension wheel, provider integration, and bounded end-to-end commands; retain full release regression separately | Planned | W4 |
 
 ## Parallel tracks and exclusions

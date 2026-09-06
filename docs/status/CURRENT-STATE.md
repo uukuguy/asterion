@@ -18,7 +18,8 @@
   closure.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
-  W2 public extension reference, and W3a cross-package evidence are complete.
+  W2 public extension reference, W3a cross-package evidence, and W3b
+  cross-runtime evidence are complete.
   The public SDK's `research` kind now reaches its exact implementation through
   provider, assembly, and runner. Package sources now share one prepare/load
   lifecycle with exact lock and authorization binding. Prime now owns its exact
@@ -29,8 +30,11 @@
   application resources and runtime binding, and executes through the installed
   CLI outside the source tree. Two independently built Acme and Contoso wheels
   now compose and execute in either installation order with exact per-package
-  ownership derived from one prepared catalog snapshot. Active framework slice:
-  W3b cross-runtime lifecycle and output equivalence.
+  ownership derived from one prepared catalog snapshot. The same installed
+  Acme capability now preserves exact public outputs through Acme and Contoso
+  runtime adapters, including two cancellation timings and shared preflight
+  rejection boundaries. Active framework slice: W4 evidence-led protocol
+  evolution decision.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -59,6 +63,13 @@
   generated evidence remain external and operator-owned.
 
 ## Verified Boundary
+
+- W3b is complete. `make test.cross-runtime-extension` builds and installs the
+  core, Acme, and Contoso wheels, executes the same Acme capability through
+  `acme.inline` and `contoso.inline`, and compares its exact public events and
+  artifacts. Its isolated installed probe verifies normal lifecycle shape,
+  cancellation before and after `run.started`, missing-service rejection, and
+  crossed-runtime rejection. Sol approved the closed-v1 boundary.
 
 - W3a is complete. `make test.cross-package-extension` builds the core, Acme,
   and Contoso wheels, installs them in both extension orders, and executes the

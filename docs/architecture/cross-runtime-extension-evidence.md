@@ -1,6 +1,6 @@
 # Cross-Runtime Extension Evidence
 
-> Status: proposed for W3b implementation. Protocol impact: none.
+> Status: implemented and verified for W3b. Protocol impact: none.
 
 ## Purpose
 
