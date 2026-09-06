@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from pathlib import Path
 import re
 
@@ -175,7 +176,7 @@ async def _execute_fixed_verification(
     ):
         raise CapabilityExecutionError("Prime runtime did not complete")
     artifact = parsed[1].payload.get("artifact")
-    if not isinstance(artifact, dict) or artifact != {
+    if not isinstance(artifact, Mapping) or artifact != {
         "artifact_id": artifact_id,
         "kind": kind,
         "media_type": media_type,

@@ -45,6 +45,7 @@ CORE_MODULES = (
     "asterion.capability_sdk.conformance",
     "asterion.capability_sdk.provider",
     "asterion.capability_sdk.templates.minimal.provider",
+    "asterion.application_sdk",
     "asterion.cli",
     "asterion.cli_capability",
     "asterion.cli_pathlight",

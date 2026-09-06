@@ -7,6 +7,7 @@ import json
 import re
 import stat
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol
 
@@ -41,7 +42,7 @@ def project_dci_run(result: DciRunResult) -> CapabilityExecutionResult:
         ),
         None,
     )
-    if not isinstance(final_artifact, dict) or final_artifact.get("uri") != "final.txt":
+    if not isinstance(final_artifact, Mapping) or final_artifact.get("uri") != "final.txt":
         raise ValueError("native DCI final artifact is invalid")
     value = {
         "answer_artifact_uri": "final.txt",

@@ -11,7 +11,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 
 .DEFAULT_GOAL := help
 
-.PHONY: help sync build test lint docs-check check promotion-check first-run-check test.core-only
+.PHONY: help sync build test lint docs-check check promotion-check first-run-check test.core-only test.public-extension
 .PHONY: setup-pi check-pi
 .PHONY: setup-resources-basic check-resources-basic
 .PHONY: setup-resources-benchmark check-resources-benchmark
@@ -47,6 +47,7 @@ help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
 	@echo "provider-free checks: check-pi check-resources-basic check-resources-benchmark doctor first-run-check"
 	@echo "provider-free lifecycle: sync build test lint docs-check check promotion-check"
+	@echo "public extension acceptance: test.public-extension"
 	@echo "provider-free framework: asterion-list asterion-describe asterion-verify-preflight asterion-verify-acceptance"
 	@echo "bounded provider-backed: asterion-verify-basic asterion-verify-complete asterion-run"
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
@@ -68,6 +69,9 @@ test:
 
 test.core-only:
 	$(UV_BIN) run python -m unittest -v tests.test_core_only_install tests.test_project_boundary
+
+test.public-extension:
+	$(UV_BIN) run python -m unittest -v tests.test_public_extension
 
 lint:
 	$(UV_BIN) run python -m compileall -q src tests tools

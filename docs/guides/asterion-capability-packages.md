@@ -28,6 +28,43 @@ asterion capability test \
   --payload-sha256 <validated-payload-sha256>
 ```
 
+## Installed Application Extensions
+
+An independently installed Python wheel may publish capability packages,
+applications, and provider-owned runtime bindings. Extension Python code imports
+only `asterion.capability_sdk` and `asterion.application_sdk` (besides the
+standard library and its own package). The two SDKs provide the immutable
+capability values and the application, runtime, and event contracts; they do
+not expose discovery, composers, registries, runners, or host-service setup.
+
+1. Put each portable capability payload under
+   `asterion_capability_packages/<package-id>/<version>/payload/` in the wheel.
+   Keep its manifests portable and free of commands, configuration, credentials,
+   paths, and mutable state.
+2. Publish an exact `asterion.capability_packages` entry point named
+   `<package-id>@<version>`. Its selected factory opens that payload through
+   `open_portable_payload` and returns an `InstalledCapabilityPackage` with
+   exact capability implementation bindings.
+3. Put every application assembly under a provider-owned resource root and
+   publish an `asterion.applications` entry point. Its factory returns an
+   `InstalledApplicationProvider` with exact application, package, and runtime
+   identities. Provider-owned runtime factories use `RuntimeFactoryBinding`.
+4. Publish `asterion.application_index` entries as
+   `<application-id>__<version>` when the application should be selectable by
+   its exact identity. Declare the Asterion API compatibility range in the
+   wheel metadata, for example `asterion>=0.1.0,<0.2`.
+
+Entry-point metadata discovery does not import provider modules. Provider code
+is loaded only after exact selection, and installed extension code runs only
+after the framework has composed the selected assembly and bound its declared
+runtime. The copyable reference is
+`tests/fixtures/extensions/distribution/` and is exercised by
+`make test.public-extension`.
+
+```bash
+make test.public-extension
+```
+
 `validate` opens the portable payload and reports only public identity,
 counts, and the payload digest. `inspect` uses an explicit local-directory
 source declaration and does not import the provider module. `test` loads only

@@ -45,8 +45,9 @@ an external provider:
 
 The facade does not expose composers, discovery functions, registries, runners,
 host-service construction, product verification, or protocol validators.
-It exposes the canonical complete-stream parser, but not the lower-level JSON
-schema or mapping validators. Those remain framework responsibilities.
+It exposes the canonical complete-stream parser. That parser does not expose
+lower-level JSON schema or mapping validators; those remain framework
+responsibilities.
 Re-exporting the existing values introduces no parallel composer or runtime
 implementation.
 

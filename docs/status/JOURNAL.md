@@ -2080,3 +2080,4 @@
 - 16:03 Defined the core-only import and dependency boundary before W1d implementation [1b5e2a41]
 - 16:27 Isolated the dependency-free core while preserving explicit first-party integration [a179bb05]
 - 16:29 Advanced the framework mainline to the public extension reference [f46ce8ef]
+- 16:56 Defined the reviewed public extension contract for independent installed CLI execution [32b320a1]
