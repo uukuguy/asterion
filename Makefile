@@ -7,6 +7,7 @@ ASTERION_PRIME_AUTHORITY ?=
 ASTERION_PRIME_MAX_COST_MICROS ?=
 ASTERION_PRIME_NODE ?= $(shell npm exec --offline --yes --package=node@22 -- node -p 'process.execPath' 2>/dev/null)
 ASTERION_PROMOTION_NPM_CACHE ?=
+PRIME_ORB_MACHINE ?= ubuntu
 
 .DEFAULT_GOAL := help
 
@@ -24,6 +25,7 @@ ASTERION_PROMOTION_NPM_CACHE ?=
 .PHONY: test-typescript test-rust check-rust
 .PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded prime-readme-rlm-smoke prime-smoke-core
 .PHONY: prime-parity-inventory prime-verify-system-parity
+.PHONY: prime-p1-run prime-p2-run prime-p3-run
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
 .PHONY: test.prime-long-running.provider-free test.prime-long-running.bounded
 .PHONY: test.prime-continual-harness.provider-free
@@ -51,6 +53,7 @@ help:
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-readme-rlm-smoke prime-smoke-core prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free test.prime-long-running.bounded"
+	@echo "Prime development execution (Orb Ubuntu): prime-p1-run prime-p2-run prime-p3-run"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
 
@@ -165,6 +168,33 @@ prime-setup:
 
 prime-verify-provider-free:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level provider-free
+
+prime-p1-run:
+	@run_id="$${PRIME_RUN_ID:-prime-p1-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+			--provider prime-agent \
+			--application prime.ipython-coding@1.0.0 \
+			--runtime prime.agent \
+			--run-id "$$run_id" \
+			--input fixed-small-verification
+
+prime-p2-run:
+	@run_id="$${PRIME_RUN_ID:-prime-p2-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+			--provider prime-agent \
+			--application prime.programmatic-long-context@1.0.0 \
+			--runtime prime.agent \
+			--run-id "$$run_id" \
+			--input fixed-small-verification
+
+prime-p3-run:
+	@run_id="$${PRIME_RUN_ID:-prime-p3-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+			--provider prime-agent \
+			--application prime.recursive-workflow@1.0.0 \
+			--runtime prime.agent \
+			--run-id "$$run_id" \
+			--input fixed-small-verification
 
 test.prime-session-context-parity.provider-free:
 	$(UV_BIN) run python -m unittest -v \

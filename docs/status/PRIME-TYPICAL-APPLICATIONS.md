@@ -149,6 +149,27 @@ asterion run \
 The earlier commands that omitted `@1.0.0` failed during exact application
 selection and never entered the host. They are not backend execution failures.
 
+## Development execution entrypoints
+
+From the macOS checkout, the following commands execute the fixed development
+presets inside the shared Orb Ubuntu machine as root. They use the guest's
+isolated `uv` environment and select the exact provider, application version,
+runtime, and fixed small-verification input; they do not run promotion or the
+full test suite.
+
+```bash
+make prime-p1-run
+make prime-p2-run
+make prime-p3-run
+```
+
+Each command generates a legal unique run ID. To correlate a run with external
+operator evidence, supply only `PRIME_RUN_ID`, for example:
+
+```bash
+PRIME_RUN_ID=prime-p3-investigation-20260906 make prime-p3-run
+```
+
 The local proc snapshot is an operator development operation. A reduced-
 privilege authority cannot assume it has that root capability; later integration
 must inject a narrow manager-owned operation. Prime session, compaction and RLM
