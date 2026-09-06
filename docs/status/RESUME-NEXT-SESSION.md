@@ -1,53 +1,43 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-06. **Session remains active — not a final handoff.**
+> Updated: 2026-09-07. **Prime command closure is complete at the development boundary.**
 
 ## Direction
 
-按评估后的主线持续推进直至完成。Asterion 的核心是统一智能体框架与能力包集成协议；Prime 和 Native 是并行 runtime。七项 Prime 端到端复现和 W0-W5 框架集成主线均已收口。研发验证只保留正常链路和关键边界断言，不运行 promotion 或极端矩阵。
+Asterion 的核心是统一智能体框架与能力包集成协议；Prime 和 Native 是并行 runtime。Prime P1-P7 的端到端实现已全部保留，当前 Make 入口已完成可重复准备、用途说明、安全进度和重启后恢复收口。
 
-Canonical worklist: `docs/status/FRAMEWORK-INTEGRATION-WORKLIST.md`.
+研发验证覆盖正常链路和关键边界断言。不要把当前证据提升为发布、promotion、完整 benchmark 或论文复现实验结论。
 
-## Closed Prime applications
+## Verified state
 
-- P1 `PRIME_RUN_ID=prime-p1-20260907-fixed make prime-p1-run`: exact installed CLI with the explicit `prime` extra, five model callbacks, two Docker IPython cells, compact, oracle and cleanup; trace `sha256:9672ba00a1b439c39e319a7f6ae8607e7d00a14795047c7b42f9e56c7686dbcf`.
-- P2 `make prime-p2-run`: two model callbacks, one Docker IPython cell, fixed corpus oracle and cleanup; trace `sha256:4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`.
-- P3 `make prime-p3-run`: two recursive children, ten model callbacks, four Docker IPython cells, host oracle and cleanup; trace `sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`.
-- P4 `make prime-p4-run`: direct native daemon checkpoint, exact zero-gap detach/reattach, one compact, five model callbacks, two Docker IPython cells, same AST oracle and cleanup; trace `sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
-- P5 `make prime-p5-run`: one Prime session, two completion-only IPython actions, failed quality feedback, exact repair, host result/quality gates and cleanup; trace `sha256:64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`.
-- P6 `PRIME_RUN_ID=prime-p6-20260906-final make prime-p6-run`: task-A/candidate/task-B execution, exact activation-or-rollback, worker evidence and cleanup; scope `p6-development/unpromoted`, trace `sha256:51f6454e90a2286dfd0fabaa3f3cf7f7870cd57abf95890845b4efd01048b335`.
-- P7 `PRIME_RUN_ID=prime-p7-20260906-final-locked make prime-p7-run`: official offline game `ls20-9607627b`, seed 0, one episode capped at four actions; real Prime SDK session with three prompts, six model callbacks, three IPython actions, isolated broker/container, score replay and cleanup; scope `p7-development/unpromoted`, trace `sha256:a2c1fa78367c4eb4e5b424ca5a717c9cb83f5db8661f57cec22a58a9ff2f0ef1`.
+- `make prime-apps-preflight` 在所选 Orb/root/worktree 中完成 P1-P7 锁定资源准备和 host context 开关，固定七行全部 `PASS`，退出 0。它不执行 runtime、模型、工具、worker workload 或应用容器。
+- `PRIME_RUN_ID=prime-p2-20260907-final-b make prime-p2-run` 退出 0；stderr 显示用途和完整受控阶段，stdout 恰好一个最终 JSON，且没有 `file://` 私有路径。trace 为 `b32283e764e9d2192ab13bb5825b3e7d01b5e38491b9ae002c873f4c7cadda86`。
+- P2 最终运行后的容器、gateway/Node 进程、`/tmp`、仓库和 `.asterion-private` run-specific residue 为零。
+- `make test.framework-provider-free` 通过；聚焦 126 个 unittest、`make docs-check` 和 `git diff --check` 通过。P3-P7 的 host/progress 修复另有 40 个聚焦测试通过。
+- Sol 对 `739e207b^..8ce70a69` 的最终材料复审为 APPROVE，无剩余 Critical、Major 或 Minor finding。
 
-All seven results are development-only and `unpromoted`; P7 passed 33 focused Python tests (one operator opt-in skipped) and 2 TypeScript tests, with zero residue. P4 closure uses Prime 0.7.1 direct-daemon zero-gap reattach. The P7 result closes one bounded action-limit episode only and does not claim a game WIN; full multi-game benchmarking and production promotion remain separate work.
+## Prior bounded E2E evidence
 
-## P4 implementation boundary
+P1-P7 均有此前真实开发边界成功证据，trace 分别为：P1 `9672ba00a1b439c39e319a7f6ae8607e7d00a14795047c7b42f9e56c7686dbcf`、P2 `4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`、P3 `b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`、P4 `0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`、P5 `64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`、P6 `51f6454e90a2286dfd0fabaa3f3cf7f7870cd57abf95890845b4efd01048b335`、P7 `a2c1fa78367c4eb4e5b424ca5a717c9cb83f5db8661f57cec22a58a9ff2f0ef1`。这些结果均为 development-only、`unpromoted`；P7 只证明一个最多四步的离线 episode，不代表完整 game WIN 或 benchmark。
 
-The full P4 path is implemented by the independent workload/receipt, Python inherited-FD gateway and lifecycle host, TypeScript native-daemon callback bridge, installed provider/application/runtime route, and P1B controlled Docker/provider reuse. Key integration commits are `902ac76b`, `dab17330`, `50ec93fb`, `4d0f3d01`, `0866b122`, `ff4914f3`, `084333bd`, `dac12f57`, `44ce8727`, `25cb9755`, `cbfd4d9b`, `f59803b1`, `942fd6db`, and `e86dddf4`.
+## Command contract
 
-Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 TypeScript bridge/artifact-lock tests, plus the exact real Make command. The final run completed on Orb Ubuntu with Node 22 and P1B image `sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657`. Orb cleanup inspection found zero P4 processes, containers, sockets, checkpoints and workspaces.
+- `make prime-p1-run` … `make prime-p7-run` 各自先在 stderr 显示固定用途，再在同一 Orb 中准备所选场景并以 `asterion run --progress` 执行。
+- 长期 Node、seccomp、Gateway、source、image 与 P7 资源收据位于 ignored `.asterion-private/prime-development/`，不再依赖 Orb `/tmp`。
+- `uv` 使用 quiet 模式；准备和 host 进度仍在 stderr，应用结果保留在 stdout。
+- 开发 seccomp/image authority 与 promoted catalogs 分离；四个 closed v1 协议、manifests、runner authority、provider selection、budgets、prompts 和 result schemas 未改变。
+
+## Evidence boundary
+
+七项均为 **Implemented**，且聚合 provider-free host preflight 为 **Verified**。P1 与 P2 有真实命令成功证据；本轮没有逐个重跑 P3-P7 的模型执行，因此不要声称七项都在当前会话完成了真实付费端到端执行。
 
 ## Next concrete action
 
-W0 inventory alignment through W5 layered gates are complete. W4 retains all
-four closed v1 contracts because no W2/W3 requirement needs a new version.
-`make test.framework-provider-free` is the development gate; full `check` and
-`promotion-check` remain separate release regression. Select the next milestone
-from framework integration needs rather than reopening closed Prime parity.
+Prime 七项命令入口已收口。下一阶段回到框架主线：围绕统一能力包接入协议审查剩余计划，优先选择一个独立能力包做跨 provider/runtime 集成证明。若需要增加 runtime、capability/package、application、protocol 或 host service，严格按 `AGENTS.md` 的 intent 路由和依赖方向实施。
 
-The W1d core dependency split requires every isolated Prime development preset
-to pass `--extra prime`; commit `b495dd63` enforces this for P1-P7 and adds
-allowlisted host-service failure stages. The exact P1 command above passed after
-the fix and left no container, process, or temporary workspace residue.
+## Preservation
 
-The seven Prime development scenarios are closed at their named boundaries.
-Native Phase 3.2 remains a parallel track. Full multi-game ARC-AGI-3 work and
-production promotion remain separately authorized finite tasks.
-
-Reuse the closed Prime runtime/provider/worker spine where contracts match. Keep activation local/project-scoped during development; global activation remains separately governed.
-
-## Environment and preservation
-
-- Linux execution uses OrbStack `ubuntu` as root; Docker and the host process share that guest. Node 22 is `/tmp/asterion-node22/bin/node`; the sealed development seccomp profile is `/tmp/asterion-p1-development-seccomp.json`.
-- Operator LLM configuration remains in repository `.env` and is read only by application/operator integration.
-- Preserve unrelated `.superpowers/sdd/task-1-report.md`, untracked old plan/spec files and existing `tmp*` directories. Never broad-stage, reset, clean, push, or promote.
-- Native remains a parallel runtime track and does not block Prime P5–P7 closure.
+- Operator LLM 配置仍只由应用/operator integration 从仓库 `.env` 解析和注入。
+- 保留无关 `.superpowers/sdd/task-1-report.md`、未跟踪旧 plan/spec 和现有 `tmp*` 目录。
+- 不 broad-stage、reset、clean、push 或 promote。
+- Native 与 Prime 保持并行 runtime。
