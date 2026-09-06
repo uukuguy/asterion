@@ -312,6 +312,8 @@ class P5DevelopmentDockerWorkerService:
         return await self._read("result.json")
 
     async def cleanup(self) -> None:
+        if self._stage == 4:
+            return
         if self._container is None:
             raise PrimeP5DevelopmentDockerError()
         remove, absent = (
@@ -320,9 +322,13 @@ class P5DevelopmentDockerWorkerService:
         )
         if not callable(remove) or not callable(absent):
             raise PrimeP5DevelopmentDockerError()
-        await _shield_cleanup(remove(self._container, _control()))
-        await _shield_cleanup(absent(self._container, _control()))
-        self._stage = 4
+
+        async def destroy() -> None:
+            await remove(self._container, _control())
+            await absent(self._container, _control())
+            self._stage = 4
+
+        await _shield_cleanup(destroy())
 
     async def _read(self, name: str) -> bytes:
         read = getattr(self._transport, "read_p5", None)
@@ -342,12 +348,15 @@ async def _shield_cleanup(awaitable: object) -> None:
     if not hasattr(awaitable, "__await__"):
         raise PrimeP5DevelopmentDockerError()
     task = asyncio.ensure_future(awaitable)  # type: ignore[arg-type]
+    interrupted = False
     while not task.done():
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError:
-            continue
+            interrupted = True
     task.result()
+    if interrupted:
+        raise asyncio.CancelledError
 
 
 def _path(value: object) -> bool:
