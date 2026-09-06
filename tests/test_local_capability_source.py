@@ -13,7 +13,9 @@ from typing import cast
 from asterion.capability_packages import (
     CapabilityPackageRef,
     CapabilitySourceDeclaration,
+    load_prepared_capability_source,
     open_portable_payload,
+    prepare_capability_source,
 )
 from asterion.capability_packages.resolution import resolve_capability_source
 from asterion.capability_packages.sources.local import (
@@ -72,7 +74,9 @@ def declaration(root: Path, **overrides: object) -> CapabilitySourceDeclaration:
     return CapabilitySourceDeclaration(
         source_id=cast(str, overrides.pop("source_id", SOURCE_ID)),
         kind=cast(str, overrides.pop("kind", SOURCE_KIND)),
-        package_ref=cast(CapabilityPackageRef, overrides.pop("package_ref", PACKAGE_REF)),
+        package_ref=cast(
+            CapabilityPackageRef, overrides.pop("package_ref", PACKAGE_REF)
+        ),
         payload_sha256=payload_sha256,
         private_locator=locator,
     )
@@ -99,7 +103,9 @@ def scoped_module_name(root: Path) -> str:
 
 
 class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
-    def test_discover_and_open_payload_validate_metadata_without_provider_import(self) -> None:
+    def test_discover_and_open_payload_validate_metadata_without_provider_import(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = copy_fixture(Path(temp_dir))
             source = LocalDirectoryCapabilityPackageSource((declaration(root),))
@@ -124,20 +130,29 @@ class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
         self.assertEqual(candidate.metadata, {})
         self.assertEqual(payload.manifest.package_ref, PACKAGE_REF)
 
-    def test_load_provider_imports_only_exact_selected_module_after_identity_validation(self) -> None:
+    def test_load_provider_imports_only_exact_selected_module_after_identity_validation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = copy_fixture(Path(temp_dir))
             source = LocalDirectoryCapabilityPackageSource((declaration(root),))
-            candidate = source.discover_metadata()[0]
-            payload = source.open_payload(candidate)
+            previous = os.environ.get("ASTERION_TEST_FORBID_PROVIDER_IMPORT")
+            os.environ["ASTERION_TEST_FORBID_PROVIDER_IMPORT"] = "1"
+            try:
+                prepared = prepare_capability_source(PACKAGE_REF, (source,), None)
+            finally:
+                if previous is None:
+                    os.environ.pop("ASTERION_TEST_FORBID_PROVIDER_IMPORT", None)
+                else:
+                    os.environ["ASTERION_TEST_FORBID_PROVIDER_IMPORT"] = previous
             before_path = tuple(sys.path)
             before_modules = set(sys.modules)
 
-            installed = source.load_provider(candidate)
+            installed = load_prepared_capability_source(prepared)
 
         self.assertEqual(tuple(sys.path), before_path)
         self.assertEqual(installed.package_ref, PACKAGE_REF)
-        self.assertEqual(installed.payload_sha256, payload.payload_sha256)
+        self.assertEqual(installed.payload_sha256, prepared.payload.payload_sha256)
         self.assertEqual(installed.source_id, SOURCE_ID)
         self.assertEqual(installed.source_kind, SOURCE_KIND)
         self.assertFalse(
@@ -211,15 +226,22 @@ class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
                     source = LocalDirectoryCapabilityPackageSource(
                         (declaration(root, **overrides),)
                     )
-                    with self.assertRaises(LocalDirectoryCapabilitySourceError) as raised:
+                    with self.assertRaises(
+                        LocalDirectoryCapabilitySourceError
+                    ) as raised:
                         source.discover_metadata()
                     assert_stable_error(
                         self,
                         raised.exception,
-                        (str(base), "provider imported during local metadata discovery"),
+                        (
+                            str(base),
+                            "provider imported during local metadata discovery",
+                        ),
                     )
 
-    def test_rejects_relative_and_noncanonical_roots_without_cwd_rebinding(self) -> None:
+    def test_rejects_relative_and_noncanonical_roots_without_cwd_rebinding(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir).resolve()
             root = copy_fixture(base / "valid")
@@ -251,7 +273,9 @@ class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
                 )
             )
 
-            with self.assertRaises(LocalDirectoryCapabilitySourceError) as rebound_error:
+            with self.assertRaises(
+                LocalDirectoryCapabilitySourceError
+            ) as rebound_error:
                 rebound_source.discover_metadata()
 
             assert_stable_error(self, rebound_error.exception, (str(base), ".."))
@@ -292,9 +316,13 @@ class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
                     )
                     candidate = source.discover_metadata()[0]
                     before = set(sys.modules)
-                    with self.assertRaises(LocalDirectoryCapabilitySourceError) as raised:
+                    with self.assertRaises(
+                        LocalDirectoryCapabilitySourceError
+                    ) as raised:
                         source.load_provider(candidate)
-                    assert_stable_error(self, raised.exception, (str(base), "wrong.package"))
+                    assert_stable_error(
+                        self, raised.exception, (str(base), "wrong.package")
+                    )
                     self.assertEqual(
                         {
                             name
@@ -359,7 +387,9 @@ class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
                 else:
                     module_cache.pop(module_name, None)
 
-    def test_rejects_identity_digest_and_replacement_races_without_context_leaks(self) -> None:
+    def test_rejects_identity_digest_and_replacement_races_without_context_leaks(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = copy_fixture(Path(temp_dir))
             source = LocalDirectoryCapabilityPackageSource(
@@ -447,9 +477,12 @@ class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
                 ),
             ):
                 with self.subTest(source=repr(source)):
-                    with self.assertRaises(LocalDirectoryCapabilitySourceError) as raised:
+                    with self.assertRaises(
+                        LocalDirectoryCapabilitySourceError
+                    ) as raised:
                         source.discover_metadata()
                     assert_stable_error(self, raised.exception, (str(root), "SECRET"))
+
 
 if __name__ == "__main__":
     unittest.main()

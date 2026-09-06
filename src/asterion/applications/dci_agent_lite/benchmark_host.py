@@ -32,10 +32,11 @@ from asterion.benchmarks import (
 )
 from asterion.capability_packages import (
     BenchmarkSuiteRef,
-    CapabilityPackageCandidate,
     CapabilitySourceLock,
+    CapabilitySourceLockEntry,
     InstalledCapabilityPackage,
-    resolve_capability_source,
+    PreparedCapabilityPackage,
+    load_prepared_capability_source,
 )
 from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
@@ -188,14 +189,11 @@ class DciBenchmarkHost:
                 query_planning_prompt_file,
             )
         )
-        if (
-            self._query_planning_contract.contract_id == DECOMPOSED_QUERY_PLAN
-            and (
-                instance.executor_profile != _REAL_AGENT_EXECUTOR_PROFILE
-                or not instance.task_ids
-                or any(not task_id.startswith("bright.") for task_id in instance.task_ids)
-                or executor_factory is not None
-            )
+        if self._query_planning_contract.contract_id == DECOMPOSED_QUERY_PLAN and (
+            instance.executor_profile != _REAL_AGENT_EXECUTOR_PROFILE
+            or not instance.task_ids
+            or any(not task_id.startswith("bright.") for task_id in instance.task_ids)
+            or executor_factory is not None
         ):
             _fail()
         self._executor_factory = executor_factory
@@ -341,14 +339,16 @@ class DciBenchmarkHost:
             draft = self._draft_plan
             if draft is None:
                 _fail()
+            if _prepared_package_locks(payloads.resolution) != draft.package_locks:
+                _fail()
             inputs = self._operator_inputs(authorization)
             claim = self._authorizer.authorize_provider_loading(
                 authorization,
                 package_locks=draft.package_locks,
             )
             packages = tuple(
-                self._load_package(package, inputs=inputs)
-                for package in payloads.resolution.packages
+                self._load_package(prepared, inputs=inputs)
+                for prepared in payloads.resolution._prepared_packages
             )
             return DciLoadedBenchmarkProviders(
                 packages=packages,
@@ -466,58 +466,17 @@ class DciBenchmarkHost:
 
     def _load_package(
         self,
-        metadata_package: InstalledCapabilityPackage,
+        prepared: PreparedCapabilityPackage,
         *,
         inputs: DciBenchmarkOperatorInputs,
     ) -> InstalledCapabilityPackage:
-        records: list[
-            tuple[
-                CapabilityPackageSource,
-                CapabilityPackageCandidate,
-                CapabilityPackageCandidate,
-            ]
-        ] = []
-        for source in self._sources():
-            for original in source.discover_metadata():
-                if original.package_ref != metadata_package.package_ref:
-                    continue
-                payload = source.open_payload(original)
-                source.validate_source_identity(original, payload)
-                records.append(
-                    (
-                        source,
-                        original,
-                        CapabilityPackageCandidate(
-                            package_ref=original.package_ref,
-                            source_id=original.source_id,
-                            source_kind=original.source_kind,
-                            payload_sha256=payload.payload_sha256,
-                            metadata=original.metadata,
-                        ),
-                    )
-                )
-        selected = resolve_capability_source(
-            metadata_package.package_ref,
-            tuple(record[2] for record in records),
-            CapabilitySourceLock(entries=self._draft_plan.package_locks[0].entries)
-            if self._draft_plan is not None
-            else None,
-        )
-        matches = tuple(
-            (source, original)
-            for source, original, normalized in records
-            if normalized == selected
-        )
-        if len(matches) != 1:
-            _fail()
-        source, original = matches[0]
-        installed = source.load_provider(original)
+        installed = load_prepared_capability_source(prepared)
         if (
             not isinstance(installed, InstalledCapabilityPackage)
-            or installed.package_ref != metadata_package.package_ref
-            or installed.payload_sha256 != metadata_package.payload_sha256
-            or installed.source_id != metadata_package.source_id
-            or installed.source_kind != metadata_package.source_kind
+            or installed.package_ref != prepared.candidate.package_ref
+            or installed.payload_sha256 != prepared.candidate.payload_sha256
+            or installed.source_id != prepared.candidate.source_id
+            or installed.source_kind != prepared.candidate.source_kind
         ):
             _fail()
         return InstalledCapabilityPackage(
@@ -577,6 +536,26 @@ def _resolve_query_planning_binding(
         validate_materialized_query_planning_prompt(resolved.contract_id, prompt_file)
         return resolved, prompt_file
     except (QueryPlanningError, TypeError, ValueError):
+        _fail()
+
+
+def _prepared_package_locks(
+    resolution: InstalledBenchmarkResolution,
+) -> tuple[CapabilitySourceLock, ...]:
+    try:
+        return (
+            CapabilitySourceLock(
+                entries=tuple(
+                    CapabilitySourceLockEntry(
+                        package_ref=prepared.candidate.package_ref,
+                        payload_sha256=prepared.candidate.payload_sha256,
+                        source_id=prepared.candidate.source_id,
+                    )
+                    for prepared in resolution._prepared_packages
+                )
+            ),
+        )
+    except Exception:
         _fail()
 
 

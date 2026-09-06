@@ -12,11 +12,10 @@ from asterion.applications.dci_agent_lite.benchmark_instances import (
 )
 from asterion.capability_packages import (
     CAPABILITY_LOCK_PROTOCOL_VERSION,
-    CapabilityPackageCandidate,
     CapabilityPackageRef,
     CapabilitySourceLock,
     CapabilitySourceLockEntry,
-    resolve_capability_source,
+    prepare_capability_source,
 )
 from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
@@ -52,35 +51,8 @@ def resolve_benchmark_source_lock(
         )
         if not sources:
             _fail()
-        records: list[CapabilityPackageCandidate] = []
-        for source in sources:
-            if not all(
-                callable(getattr(source, method, None))
-                for method in (
-                    "discover_metadata",
-                    "open_payload",
-                    "validate_source_identity",
-                    "load_provider",
-                )
-            ):
-                _fail()
-            for candidate in source.discover_metadata():
-                if candidate.package_ref != _DCI_PACKAGE:
-                    continue
-                payload = source.open_payload(candidate)
-                source.validate_source_identity(candidate, payload)
-                if payload.manifest.package_ref != _DCI_PACKAGE:
-                    _fail()
-                records.append(
-                    CapabilityPackageCandidate(
-                        package_ref=_DCI_PACKAGE,
-                        source_id=candidate.source_id,
-                        source_kind=candidate.source_kind,
-                        payload_sha256=payload.payload_sha256,
-                        metadata={},
-                    )
-                )
-        selected = resolve_capability_source(_DCI_PACKAGE, tuple(records), None)
+        prepared = prepare_capability_source(_DCI_PACKAGE, sources, None)
+        selected = prepared.candidate
         if selected.payload_sha256 is None:
             _fail()
         return CapabilitySourceLock(

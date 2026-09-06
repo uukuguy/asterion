@@ -12,6 +12,10 @@ from pathlib import Path
 from collections.abc import Iterator
 from typing import Any, cast
 
+from asterion.capability_packages import (
+    load_prepared_capability_source,
+    prepare_capability_source,
+)
 from asterion.capability_packages.protocol import CapabilityPackageRef
 from asterion.capability_packages.resolution import resolve_capability_source
 from asterion.capability_packages.sources.distribution import (
@@ -21,9 +25,7 @@ from asterion.capability_packages.sources.distribution import (
 )
 
 
-FIXTURE_PROJECT = (
-    Path(__file__).parent / "fixtures" / "extensions" / "distribution"
-)
+FIXTURE_PROJECT = Path(__file__).parent / "fixtures" / "extensions" / "distribution"
 PACKAGE_REF = CapabilityPackageRef("acme.sample", "1.0.0")
 SOURCE_ID = "acme.sample.python-distribution"
 SOURCE_KIND = "python-distribution"
@@ -198,7 +200,9 @@ class HostileFilesDistribution(FakeDistribution):
 
 
 class DistributionCapabilitySourceTests(unittest.TestCase):
-    def test_discover_and_open_payload_are_metadata_only_for_installed_wheel(self) -> None:
+    def test_discover_and_open_payload_are_metadata_only_for_installed_wheel(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir) / "target"
             distributions = build_and_install_fixture(target)
@@ -227,21 +231,28 @@ class DistributionCapabilitySourceTests(unittest.TestCase):
         )
         self.assertEqual(payload.manifest.package_ref, PACKAGE_REF)
 
-    def test_load_provider_loads_only_selected_entry_after_identity_validation(self) -> None:
+    def test_load_provider_loads_only_selected_entry_after_identity_validation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir) / "target"
             distributions = build_and_install_fixture(target)
             source = DistributionCapabilityPackageSource(distributions)
-            candidate = resolve_capability_source(
-                PACKAGE_REF, source.discover_metadata(), None
-            )
-            payload = source.open_payload(candidate)
+            previous = os.environ.get("ASTERION_TEST_FORBID_PROVIDER_IMPORT")
+            os.environ["ASTERION_TEST_FORBID_PROVIDER_IMPORT"] = "1"
+            try:
+                prepared = prepare_capability_source(PACKAGE_REF, (source,), None)
+            finally:
+                if previous is None:
+                    os.environ.pop("ASTERION_TEST_FORBID_PROVIDER_IMPORT", None)
+                else:
+                    os.environ["ASTERION_TEST_FORBID_PROVIDER_IMPORT"] = previous
 
             with importable_target(target):
-                installed = source.load_provider(candidate)
+                installed = load_prepared_capability_source(prepared)
 
         self.assertEqual(installed.package_ref, PACKAGE_REF)
-        self.assertEqual(installed.payload_sha256, payload.payload_sha256)
+        self.assertEqual(installed.payload_sha256, prepared.payload.payload_sha256)
         self.assertEqual(installed.source_id, SOURCE_ID)
         self.assertEqual(installed.source_kind, SOURCE_KIND)
 
@@ -263,7 +274,9 @@ class DistributionCapabilitySourceTests(unittest.TestCase):
         self.assertFalse(first.loaded)
         self.assertFalse(second.loaded)
 
-    def test_duplicate_entry_points_are_rejected_before_payload_file_access(self) -> None:
+    def test_duplicate_entry_points_are_rejected_before_payload_file_access(
+        self,
+    ) -> None:
         first = FakeEntryPoint(name="acme.sample@1.0.0", distribution=cast(Any, None))
         second = FakeEntryPoint(name="acme.sample@1.0.0", distribution=cast(Any, None))
         distribution = HostileFilesDistribution((first, second))
@@ -312,7 +325,9 @@ class DistributionCapabilitySourceTests(unittest.TestCase):
             "installed capability distribution source is invalid",
             (str(rebound_root), str(declared_root), "SECRET-ENTRY-POINT-LOAD"),
         )
-        self.assertNotIn(PAYLOAD_RELATIVE, tuple(str(path) for path in distribution.locate_requests))
+        self.assertNotIn(
+            PAYLOAD_RELATIVE, tuple(str(path) for path in distribution.locate_requests)
+        )
         self.assertFalse(entry.loaded)
 
     def test_symlinked_distribution_payload_root_is_rejected_before_provider_load(
@@ -322,7 +337,10 @@ class DistributionCapabilitySourceTests(unittest.TestCase):
             root = Path(temp_dir).resolve()
             distribution_base = root / "declared"
             standard_parent = (
-                distribution_base / "asterion_capability_packages" / "acme.sample" / "1.0.0"
+                distribution_base
+                / "asterion_capability_packages"
+                / "acme.sample"
+                / "1.0.0"
             )
             external_root = root / "external" / "payload"
             shutil.copytree(FIXTURE_PROJECT / "payload", external_root)
@@ -397,7 +415,9 @@ class DistributionCapabilitySourceTests(unittest.TestCase):
 
         self.assertIs(raised.exception, error)
 
-    def test_selected_load_rejects_digest_mismatch_without_leaking_context(self) -> None:
+    def test_selected_load_rejects_digest_mismatch_without_leaking_context(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir) / "target"
             source = DistributionCapabilityPackageSource(

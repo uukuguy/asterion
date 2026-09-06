@@ -29,10 +29,10 @@ from asterion.benchmarks.planning import (
 )
 from asterion.capability_packages import (
     BenchmarkSuiteRef,
-    CapabilityPackageCandidate,
     CapabilitySourceLock,
     InstalledCapabilityPackage,
-    resolve_capability_source,
+    PreparedCapabilityPackage,
+    prepare_capability_source,
     validate_capability_source_lock,
 )
 from asterion.capability_packages.model import PortableCapabilityPayload
@@ -78,10 +78,17 @@ class InstalledBenchmarkResolution:
 
     application: InstalledApplication
     packages: tuple[InstalledCapabilityPackage, ...]
+    _prepared_packages: tuple[PreparedCapabilityPackage, ...] = field(
+        repr=False, compare=False
+    )
     _materialization: object = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         packages = tuple(self.packages)
+        try:
+            prepared_packages = tuple(self._prepared_packages)
+        except Exception:
+            _fail()
         if (
             not isinstance(self.application, InstalledApplication)
             or not packages
@@ -91,9 +98,19 @@ class InstalledBenchmarkResolution:
                 and not package.benchmark_bindings
                 for package in packages
             )
+            or len(prepared_packages) != len(packages)
+            or not all(
+                type(prepared) is PreparedCapabilityPackage
+                and prepared.candidate.package_ref == package.package_ref
+                and prepared.candidate.source_id == package.source_id
+                and prepared.candidate.source_kind == package.source_kind
+                and prepared.candidate.payload_sha256 == package.payload_sha256
+                for package, prepared in zip(packages, prepared_packages, strict=True)
+            )
         ):
             _fail()
         object.__setattr__(self, "packages", packages)
+        object.__setattr__(self, "_prepared_packages", prepared_packages)
 
 
 def resolve_installed_benchmark(
@@ -131,7 +148,7 @@ def resolve_installed_benchmark(
         sources = _package_sources(package_sources)
         materialization = _MaterializedBenchmarkRoot()
         assert materialization.path is not None
-        packages = _metadata_packages(
+        packages, prepared_packages = _metadata_packages(
             metadata_application,
             sources=sources,
             source_lock=source_lock,
@@ -156,6 +173,7 @@ def resolve_installed_benchmark(
         resolution = InstalledBenchmarkResolution(
             application=application,
             packages=packages,
+            _prepared_packages=prepared_packages,
             _materialization=materialization,
         )
         materialization = None
@@ -245,48 +263,18 @@ def _metadata_packages(
     sources: tuple[CapabilityPackageSource, ...],
     source_lock: CapabilitySourceLock | None,
     materialization_root: Path,
-) -> tuple[InstalledCapabilityPackage, ...]:
+) -> tuple[
+    tuple[InstalledCapabilityPackage, ...], tuple[PreparedCapabilityPackage, ...]
+]:
     if source_lock is not None and {
         entry.package_ref for entry in source_lock.entries
     } != set(application.capability_packages):
         _fail()
-    records: list[
-        tuple[CapabilityPackageSource, CapabilityPackageCandidate, PortableCapabilityPayload]
-    ] = []
-    for source in sources:
-        candidates = source.discover_metadata()
-        for candidate in candidates:
-            if candidate.package_ref not in application.capability_packages:
-                continue
-            payload = source.open_payload(candidate)
-            source.validate_source_identity(candidate, payload)
-            records.append(
-                (
-                    source,
-                    CapabilityPackageCandidate(
-                        package_ref=candidate.package_ref,
-                        source_id=candidate.source_id,
-                        source_kind=candidate.source_kind,
-                        payload_sha256=payload.payload_sha256,
-                        metadata=candidate.metadata,
-                    ),
-                    payload,
-                )
-            )
     packages: list[InstalledCapabilityPackage] = []
+    prepared_packages: list[PreparedCapabilityPackage] = []
     for package_ref in application.capability_packages:
-        candidates = tuple(
-            candidate for _, candidate, _ in records if candidate.package_ref == package_ref
-        )
-        selected = resolve_capability_source(package_ref, candidates, source_lock)
-        matches = tuple(
-            (source, payload)
-            for source, candidate, payload in records
-            if candidate == selected
-        )
-        if len(matches) != 1:
-            _fail()
-        _, payload = matches[0]
+        prepared = prepare_capability_source(package_ref, sources, source_lock)
+        selected, payload = prepared.candidate, prepared.payload
         root = _materialize_payload(
             payload,
             materialization_root / f"package-{len(packages) + 1}",
@@ -307,7 +295,8 @@ def _metadata_packages(
                 benchmark_bindings=(),
             )
         )
-    return tuple(packages)
+        prepared_packages.append(prepared)
+    return tuple(packages), tuple(prepared_packages)
 
 
 def _materialize_payload(payload: PortableCapabilityPayload, root: Path) -> Path:

@@ -26,7 +26,10 @@ from asterion.benchmarks import (
     BenchmarkTaskImplementation,
     BenchmarkTaskRequest,
 )
-from asterion.capability_packages import BenchmarkTaskBinding
+from asterion.capability_packages import (
+    BenchmarkTaskBinding,
+    CapabilityPackageCandidate,
+)
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.capabilities.dci.implementation.research.query_planning import (
     BASELINE_QUERY_PLAN,
@@ -53,6 +56,48 @@ class RecordingBuiltinSource:
     def load_provider(self, candidate):
         self.provider_loads += 1
         return self.delegate.load_provider(candidate)
+
+
+class AlternateBuiltinSource:
+    def __init__(self) -> None:
+        self.delegate = BuiltinCapabilitySource()
+        self.provider_loads = 0
+
+    def discover_metadata(self):
+        candidate = next(
+            candidate
+            for candidate in self.delegate.discover_metadata()
+            if candidate.package_ref.package_id == "dci"
+        )
+        return (
+            CapabilityPackageCandidate(
+                package_ref=candidate.package_ref,
+                source_id="dci.alternate-builtin",
+                source_kind=candidate.source_kind,
+                payload_sha256=candidate.payload_sha256,
+                metadata=candidate.metadata,
+            ),
+        )
+
+    def open_payload(self, candidate):
+        original = next(
+            candidate
+            for candidate in self.delegate.discover_metadata()
+            if candidate.package_ref.package_id == "dci"
+        )
+        return self.delegate.open_payload(original)
+
+    def validate_source_identity(self, candidate, payload):
+        if (
+            candidate.source_id != "dci.alternate-builtin"
+            or candidate.source_kind != "builtin"
+            or payload.manifest.package_ref != candidate.package_ref
+        ):
+            raise ValueError("alternate source is invalid")
+
+    def load_provider(self, candidate):
+        self.provider_loads += 1
+        raise AssertionError("alternate provider must not load")
 
 
 def _resolved(host, instance, lock_path: Path):
@@ -121,7 +166,9 @@ class DciBenchmarkHostTests(unittest.TestCase):
                     ),
                 )
 
-    def test_optimization_config_digest_changes_only_with_query_plan_contract(self) -> None:
+    def test_optimization_config_digest_changes_only_with_query_plan_contract(
+        self,
+    ) -> None:
         environment = {"DEEPSEEK_API_KEY": "SENTINEL-PRIVATE-KEY"}
         baseline = optimization_execution_config_sha256(
             environment,
@@ -205,9 +252,7 @@ class DciBenchmarkHostTests(unittest.TestCase):
             self.assertNotIn(str(root), repr(invocation))
 
     def test_real_host_requires_private_config_before_provider_loading(self) -> None:
-        instance = select_benchmark_instance(
-            "dci.qa.bamboogle@1.0.0"
-        )
+        instance = select_benchmark_instance("dci.qa.bamboogle@1.0.0")
         source = RecordingBuiltinSource()
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
@@ -255,10 +300,63 @@ class DciBenchmarkHostTests(unittest.TestCase):
 
         self.assertEqual(source.provider_loads, 0)
 
+    def test_rejects_selection_not_bound_to_draft_before_provider_load(self) -> None:
+        instance = select_benchmark_instance("dci.local-fixture@1.0.0")
+        source_a = RecordingBuiltinSource()
+        source_b = AlternateBuiltinSource()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            lock_a_path = root / "lock-a.json"
+            lock_b_path = root / "lock-b.json"
+            write_benchmark_source_lock(
+                resolve_benchmark_source_lock(instance, package_sources=(source_a,)),
+                lock_a_path,
+            )
+            write_benchmark_source_lock(
+                resolve_benchmark_source_lock(instance, package_sources=(source_b,)),
+                lock_b_path,
+            )
+            host = DciBenchmarkHost(
+                instance=instance,
+                operator_config=None,
+                package_sources=(source_a, source_b),
+            )
+            _, resolved_a = _resolved(host, instance, lock_a_path)
+            host.create_plan(
+                resolved_a,
+                application_ref=instance.application_ref,
+                suite_ref=instance.suite_ref,
+                case_limit=1,
+                execute=False,
+                authorization=None,
+                resume_run_id=None,
+            )
+            authorization = host.authorize_execution(
+                application_ref=instance.application_ref,
+                suite_ref=instance.suite_ref,
+                case_limit=1,
+                evidence_root=root / "evidence",
+                resume_run_id=None,
+            )
+            metadata = host.discover_metadata(
+                application_ref=instance.application_ref,
+                suite_ref=instance.suite_ref,
+            )
+            payloads_b = host.open_selected_payloads(
+                metadata,
+                host.resolve_source_lock(lock_b_path),
+            )
+            with self.assertRaises(DciBenchmarkHostError) as raised:
+                host.load_selected_providers(payloads_b, authorization)
+
+        self.assertEqual(str(raised.exception), "DCI benchmark host is invalid")
+        self.assertIsNone(raised.exception.__context__)
+        self.assertEqual(source_a.provider_loads, 0)
+        self.assertEqual(source_b.provider_loads, 0)
+        self.assertNotIn("delegate", repr(payloads_b.resolution._prepared_packages[0]))
+
     def test_real_host_selects_runnable_asterion_safe_agent_and_judge(self) -> None:
-        instance = select_benchmark_instance(
-            "dci.qa.bamboogle@1.0.0"
-        )
+        instance = select_benchmark_instance("dci.qa.bamboogle@1.0.0")
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             config = load_operator_config(

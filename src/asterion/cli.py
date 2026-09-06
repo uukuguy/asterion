@@ -43,7 +43,8 @@ from asterion.capabilities.execution import (
 from asterion.capability_packages import (
     CapabilityPackageRef,
     InstalledCapabilityPackage,
-    resolve_capability_source,
+    load_prepared_capability_source,
+    prepare_capability_source,
 )
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.runner.application import ApplicationRunError
@@ -403,12 +404,9 @@ def _load_available_capability_packages(
     )
     if missing_refs:
         source = BuiltinCapabilitySource()
-        candidates = source.discover_metadata()
         for package_ref in missing_refs:
-            candidate = resolve_capability_source(package_ref, candidates, None)
-            payload = source.open_payload(candidate)
-            source.validate_source_identity(candidate, payload)
-            installed[package_ref] = source.load_provider(candidate)
+            prepared = prepare_capability_source(package_ref, (source,), None)
+            installed[package_ref] = load_prepared_capability_source(prepared)
     return tuple(installed[package_ref] for package_ref in package_refs)
 
 

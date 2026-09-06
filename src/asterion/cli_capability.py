@@ -14,16 +14,17 @@ from typing import TextIO
 
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.protocol import CAPABILITY_ID, SEMANTIC_VERSION
-from asterion.capability_packages.model import (
-    CapabilityPackageCandidate,
-    PortableCapabilityPayload,
-)
+from asterion.capability_packages.model import PortableCapabilityPayload
 from asterion.capability_packages.payload import open_portable_payload
 from asterion.capability_packages.protocol import (
     CapabilityPackageRef,
     CapabilitySourceDeclaration,
 )
-from asterion.capability_packages.resolution import resolve_capability_source
+from asterion.capability_packages.preparation import (
+    PreparedCapabilityPackage,
+    load_prepared_capability_source,
+    prepare_capability_source,
+)
 from asterion.capability_packages.sources.local import (
     LocalDirectoryCapabilityPackageSource,
 )
@@ -210,9 +211,8 @@ def _validate(args: argparse.Namespace, stdout: TextIO) -> int:
 
 
 def _inspect(args: argparse.Namespace, stdout: TextIO) -> int:
-    package_ref, source, candidate = _selected_local_source(args)
-    payload = source.open_payload(candidate)
-    source.validate_source_identity(candidate, payload)
+    package_ref, prepared = _selected_local_source(args)
+    candidate, payload = prepared.candidate, prepared.payload
     summary = _payload_summary(payload)
     summary.update(
         {
@@ -234,10 +234,8 @@ def _inspect(args: argparse.Namespace, stdout: TextIO) -> int:
 
 
 def _test(args: argparse.Namespace, stdout: TextIO) -> int:
-    _, source, candidate = _selected_local_source(args)
-    payload = source.open_payload(candidate)
-    source.validate_source_identity(candidate, payload)
-    installed = source.load_provider(candidate)
+    _, prepared = _selected_local_source(args)
+    installed = load_prepared_capability_source(prepared)
     result = run_capability_conformance(installed)
     stdout.write(
         json.dumps(
@@ -270,8 +268,7 @@ def _selected_local_source(
     args: argparse.Namespace,
 ) -> tuple[
     CapabilityPackageRef,
-    LocalDirectoryCapabilityPackageSource,
-    CapabilityPackageCandidate,
+    PreparedCapabilityPackage,
 ]:
     package_ref = _parse_package_selector(args.package)
     root = _local_root(args.root)
@@ -288,12 +285,7 @@ def _selected_local_source(
         },
     )
     source = LocalDirectoryCapabilityPackageSource((declaration,))
-    candidate = resolve_capability_source(
-        package_ref,
-        source.discover_metadata(),
-        None,
-    )
-    return package_ref, source, candidate
+    return package_ref, prepare_capability_source(package_ref, (source,), None)
 
 
 def _payload_summary(payload: PortableCapabilityPayload) -> dict[str, object]:
