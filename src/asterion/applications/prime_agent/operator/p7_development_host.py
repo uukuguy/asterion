@@ -164,7 +164,7 @@ async def run_p7_development_lifecycle(
             raise ValueError
         witness = _witness(gateway.terminal_witness(), run_id, session_id)
         usage = _usage(provider.terminal_usage())
-        if witness["usage"] != usage:
+        if any(witness["usage"][key] != usage[key] for key in ("input_tokens", "output_tokens")):
             raise ValueError
         seal, replay = broker.seal(), broker.replay()
         _broker(seal, replay, len(action_rows), terminal)
@@ -317,18 +317,14 @@ def _status(raw: bytes) -> dict[str, object]:
 
 
 def _usage(value: object) -> dict[str, int]:
-    if (
-        type(value) is not dict
-        or set(value) != {"input_tokens", "output_tokens", "total_tokens"}
-        or any(type(value[k]) is not int or value[k] < 0 for k in value)
-        or value["total_tokens"] != value["input_tokens"] + value["output_tokens"]
-    ):
+    fields = ("input_tokens", "output_tokens", "cost_microunits")
+    if any(type(getattr(value, key, None)) is not int or getattr(value, key) < 0 for key in fields):
         raise ValueError
-    return dict(value)
+    return {key: getattr(value, key) for key in fields}
 
 
 def _witness(value: object, run_id: str, session_id: str) -> dict[str, object]:
-    if type(value) is not Mapping or value.get("cumulative") != {
+    if not isinstance(value, Mapping) or value.get("cumulative") != {
         "model_callback_count": 6,
         "tool_callback_count": 3,
     }:
@@ -339,10 +335,14 @@ def _witness(value: object, run_id: str, session_id: str) -> dict[str, object]:
         or identity.get("run_id") != run_id
         or identity.get("session_id") != session_id
         or not isinstance(result, Mapping)
-        or type(result.get("usage")) is not Mapping
+        or not isinstance(result.get("usage"), Mapping)
     ):
         raise ValueError
-    return {"usage": dict(result["usage"])}
+    usage = result["usage"]
+    assert isinstance(usage, Mapping)
+    if set(usage) != {"input_tokens", "output_tokens", "total_tokens"} or any(type(usage[key]) is not int or usage[key] < 0 for key in usage) or usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]:
+        raise ValueError
+    return {"usage": dict(usage)}
 
 
 def _broker(
