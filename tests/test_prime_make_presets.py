@@ -95,6 +95,10 @@ class TestPrimeMakePresets(unittest.TestCase):
             with self.subTest(scenario=scenario):
                 recipe = makefile.split(f"prime-{scenario}-run:\n", 1)[1].split("\n" + next_target, 1)[0]
                 self.assertIn(f"[prime-{scenario}] {purpose}", recipe)
+                self.assertIn(
+                    f"'[prime-{scenario}] {purpose}' >&2",
+                    recipe,
+                )
                 self.assertEqual(recipe.count('orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)"'), 1)
                 self.assertLess(recipe.index(f"tools/prepare_prime_development.py --scenario {scenario}"), recipe.index("asterion run --progress"))
                 self.assertIn("--status-stream stderr", recipe)
