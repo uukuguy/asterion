@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import asyncio
+import json
 import re
 import secrets
 from time import monotonic
@@ -9,6 +10,8 @@ from .docker_cli import (
     DockerCliEngineTransport,
     _CLEARED_BASE_IMAGE_ENVIRONMENT,
     _ENVIRONMENT,
+    _INSPECT_OUTPUT_CAP,
+    _INSPECT_PROJECTION,
 )
 from .docker_worker import _LifecycleCallControl
 
@@ -96,6 +99,7 @@ class P5DevelopmentDockerTransport(DockerCliEngineTransport):
             await self._preflight(control)  # type: ignore[attr-defined]
             result = await self._call(argv, control, pass_fds=(fd,))  # type: ignore[attr-defined]
             daemon = self._parse_daemon_id(result.stdout)  # type: ignore[attr-defined]
+            await self._inspect_admission(daemon, image_digest, workspace, control)
             await self._call(self._prefix + ("container", "start", daemon), control)  # type: ignore[attr-defined]
             return daemon
         except asyncio.CancelledError:
@@ -231,6 +235,80 @@ class P5DevelopmentDockerTransport(DockerCliEngineTransport):
             )  # type: ignore[attr-defined]
         except BaseException:
             pass
+
+    async def _inspect_admission(
+        self, daemon: str, image: str, workspace: str, control: _LifecycleCallControl
+    ) -> None:
+        result = await self._call(
+            self._prefix
+            + ("container", "inspect", "--format", _INSPECT_PROJECTION, daemon),
+            control,
+            max_output_bytes=_INSPECT_OUTPUT_CAP,
+        )  # type: ignore[attr-defined]
+        try:
+            values = json.loads(result.stdout)[0]
+            environment, ports, security = (
+                values.pop("Env"),
+                values.pop("PortBindings"),
+                values.pop("SecurityOpt"),
+            )
+            mounts = values.pop("Mounts")
+            normalized = [
+                {
+                    key: item.get(key)
+                    for key in ("Type", "Source", "Destination", "RW", "Propagation")
+                }
+                for item in mounts
+            ]
+            exact = {
+                "Id": daemon,
+                "Image": image,
+                "User": "65534:65534",
+                "Entrypoint": ["python", "-c", "import time; time.sleep(300)"],
+                "Labels": {},
+                "OpenStdin": False,
+                "NetworkMode": "none",
+                "ReadonlyRootfs": True,
+                "Privileged": False,
+                "CapAdd": None,
+                "CapDrop": ["ALL"],
+                "Binds": [workspace + ":/workspace:rw,rprivate"],
+                "VolumesFrom": None,
+                "Tmpfs": {
+                    "/tmp": "rw,nodev,noexec,nosuid,size=16777216,uid=65534,gid=65534,mode=0700"
+                },
+                "PidsLimit": 64,
+                "Memory": 268435456,
+                "MemorySwap": 268435456,
+                "NanoCpus": 1000000000,
+                "PidMode": "",
+                "IpcMode": "",
+                "UTSMode": "",
+                "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
+                "Running": False,
+            }
+            if (
+                type(values) is not dict
+                or values != exact
+                or normalized
+                != [
+                    {
+                        "Type": "bind",
+                        "Source": workspace,
+                        "Destination": "/workspace",
+                        "RW": True,
+                        "Propagation": "rprivate",
+                    }
+                ]
+                or not self._valid_environment(environment)
+                or ports not in (None, {})
+                or security
+                != ["no-new-privileges:true", "seccomp=" + self._seccomp_profile]
+                or result.stderr
+            ):
+                raise ValueError  # type: ignore[attr-defined]
+        except (ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
+            raise PrimeP5DevelopmentDockerError() from None
 
 
 class P5DevelopmentDockerWorkerService:
