@@ -7,9 +7,14 @@ from dataclasses import FrozenInstanceError
 
 from asterion.services.registry import (
     HostServiceFactoryBinding,
+    HostServiceFactoryContext,
     HostServiceFactoryRegistry,
     HostServiceRegistryError,
     parse_host_service_options,
+)
+from asterion.services.progress import (
+    NOOP_HOST_PROGRESS_REPORTER,
+    HostProgressEvent,
 )
 
 
@@ -89,6 +94,95 @@ class HostServiceOptionTests(unittest.TestCase):
 
 
 class HostServiceFactoryRegistryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_context_progress_defaults_without_affecting_identity_or_repr(self) -> None:
+        default = HostServiceFactoryContext(
+            provider_id="provider",
+            application_id="application",
+            application_version="1.0.0",
+            capability_id="service.selected",
+            options={},
+        )
+        explicit = HostServiceFactoryContext(
+            provider_id="provider",
+            application_id="application",
+            application_version="1.0.0",
+            capability_id="service.selected",
+            options={},
+            progress=object(),
+        )
+
+        self.assertIs(default.progress, NOOP_HOST_PROGRESS_REPORTER)
+        self.assertEqual(default, explicit)
+        with self.assertRaises(TypeError):
+            hash(default)
+        with self.assertRaises(TypeError):
+            hash(explicit)
+        self.assertNotIn("progress", repr(default))
+
+    async def test_open_injects_one_distinct_contained_reporter_per_call(self) -> None:
+        reporters: list[object] = []
+
+        @asynccontextmanager
+        async def service(context):
+            reporters.append(context.progress)
+            yield object()
+
+        entry = _EntryPoint(
+            "service.selected",
+            lambda: HostServiceFactoryBinding(
+                capability_id="service.selected", option_names=(), factory=service
+            ),
+        )
+        registry = HostServiceFactoryRegistry((entry,))
+        received: list[HostProgressEvent] = []
+
+        class Reporter:
+            def emit(self, event: HostProgressEvent) -> None:
+                received.append(event)
+
+        for _ in range(2):
+            async with registry.open(
+                provider_id="provider",
+                application_id="application",
+                application_version="1.0.0",
+                capability_ids=("service.selected",),
+                options={},
+                progress=Reporter(),
+            ):
+                pass
+
+        self.assertEqual(len(reporters), 2)
+        self.assertIsNot(reporters[0], reporters[1])
+        reporters[0].emit(HostProgressEvent("worker", "started"))
+        self.assertEqual(received, [HostProgressEvent("worker", "started")])
+
+    async def test_hostile_progress_reporter_cannot_break_host_service_lifetime(self) -> None:
+        events: list[str] = []
+        entry = _EntryPoint(
+            "service.selected",
+            lambda: _binding("service.selected", events=events),
+        )
+
+        class HostileReporter:
+            def emit(self, event: HostProgressEvent) -> None:
+                del event
+                raise RuntimeError("SECRET-PROGRESS-REPORTER-FAILURE")
+
+        async with HostServiceFactoryRegistry((entry,)).open(
+            provider_id="provider",
+            application_id="application",
+            application_version="1.0.0",
+            capability_ids=("service.selected",),
+            options={},
+            progress=HostileReporter(),
+        ) as services:
+            context = services["service.selected"]
+            context.progress.emit(HostProgressEvent("worker", "started"))
+            context.progress.emit(HostProgressEvent("cleanup", "succeeded"))
+
+        self.assertEqual(
+            events, ["enter:service.selected", "exit:service.selected"]
+        )
     async def test_selected_factories_receive_frozen_exact_contexts(self) -> None:
         events: list[str] = []
         selected = _EntryPoint(

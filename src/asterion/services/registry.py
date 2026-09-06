@@ -6,10 +6,15 @@ import re
 import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import metadata
 
 from asterion.immutable import RedactedImmutableMapping
+from asterion.services.progress import (
+    NOOP_HOST_PROGRESS_REPORTER,
+    ContainedHostProgressReporter,
+    HostProgressReporter,
+)
 
 
 HOST_SERVICE_ENTRY_POINT_GROUP = "asterion.host_services"
@@ -31,6 +36,12 @@ class HostServiceFactoryContext:
     application_version: str
     capability_id: str
     options: Mapping[str, str]
+    progress: HostProgressReporter = field(
+        default=NOOP_HOST_PROGRESS_REPORTER,
+        repr=False,
+        compare=False,
+        hash=False,
+    )
 
     def __post_init__(self) -> None:
         if (
@@ -143,6 +154,7 @@ class HostServiceFactoryRegistry:
         capability_ids: tuple[str, ...],
         options: Mapping[str, Mapping[str, str]],
         managed: Mapping[str, AbstractAsyncContextManager[object]] | None = None,
+        progress: HostProgressReporter = NOOP_HOST_PROGRESS_REPORTER,
     ):
         """Enter one immutable exact service map for a selected assembly."""
 
@@ -155,6 +167,7 @@ class HostServiceFactoryRegistry:
         ):
             raise HostServiceRegistryError("host service selection is invalid")
         selected: dict[str, object] = {}
+        contained_progress = ContainedHostProgressReporter(progress)
         async with AsyncExitStack() as stack:
             for capability_id in capability_ids:
                 if capability_id in managed_values:
@@ -186,6 +199,7 @@ class HostServiceFactoryRegistry:
                     application_version=application_version,
                     capability_id=capability_id,
                     options=capability_options,
+                    progress=contained_progress,
                 )
                 try:
                     manager = binding.factory(context)

@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -67,7 +68,11 @@ from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
-from asterion.services.registry import HostServiceRegistryError
+from asterion.services.registry import (
+    HostServiceFactoryBinding,
+    HostServiceRegistryError,
+)
+from asterion.services.progress import HostProgressEvent
 from asterion.workflow_evidence import write_workflow_observation_bundle
 from tests.test_application_discovery import FakeEntryPoint
 from tests.test_installed_application_provider import (
@@ -325,6 +330,66 @@ def provider(root: Path) -> InstalledApplicationProvider:
 
 
 class AsterionCliTests(unittest.TestCase):
+    def test_run_progress_writes_safe_host_updates_only_to_stderr(self) -> None:
+        @asynccontextmanager
+        async def service(context):
+            context.progress.emit(HostProgressEvent("preflight", "started"))
+            context.progress.emit(HostProgressEvent("preflight", "succeeded"))
+            yield object()
+
+        host_entry = FakeEntryPoint(
+            name="service.selected",
+            group="asterion.host_services",
+            factory=lambda: HostServiceFactoryBinding(
+                capability_id="service.selected",
+                option_names=(),
+                factory=service,
+            ),
+        )
+        registry = RuntimeFactoryRegistry(
+            (
+                RuntimeFactoryBinding(
+                    runtime_id="pi.reference",
+                    capabilities=(),
+                    factory=lambda context: FixtureRuntime(),
+                ),
+            )
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            value = provider(Path(temp_dir))
+            assembly_path = value.applications[0].assembly_paths[0]
+            assembly = json.loads(assembly_path.read_text(encoding="utf-8"))
+            assembly["host_capabilities"] = ["service.selected"]
+            assembly_path.write_text(json.dumps(assembly), encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            code = main(
+                [
+                    "run",
+                    "--provider",
+                    "example-app",
+                    "--application",
+                    "example.research@1.0.0",
+                    "--input",
+                    "fixed",
+                    "--progress",
+                ],
+                entry_points=(FakeEntryPoint(name="example-app", factory=lambda: value),),
+                host_service_entry_points=(host_entry,),
+                runtime_factories=registry,
+                capability_packages=package_set(value.applications[0]),
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(
+            stderr.getvalue(),
+            "[host] preflight: started\n[host] preflight: succeeded\n",
+        )
+        self.assertEqual(json.loads(stdout.getvalue())["run_id"], "asterion-run")
+        self.assertNotIn("[host]", stdout.getvalue())
+
     def test_run_reports_only_allowlisted_host_service_failure_stages(self) -> None:
         cases = (
             (

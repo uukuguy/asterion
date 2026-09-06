@@ -73,6 +73,10 @@ from asterion.services.registry import (
     HostServiceRegistryError,
     parse_host_service_options,
 )
+from asterion.services.progress import (
+    NOOP_HOST_PROGRESS_REPORTER,
+    TextHostProgressReporter,
+)
 from asterion.client.cli import ClientCliError
 
 if TYPE_CHECKING:
@@ -235,6 +239,7 @@ def main(
                 managed_executor_factory=executor_factory,
                 stdin=stdin,
                 stdout=stdout,
+                stderr=stderr,
                 capability_packages=tuple(capability_packages or ()),
                 package_sources=_capability_package_sources(package_sources),
             )
@@ -285,6 +290,7 @@ async def _run(
     managed_executor_factory: Callable[[OperatorExecutorConfig], object],
     stdin: TextIO,
     stdout: TextIO,
+    stderr: TextIO,
     capability_packages: tuple[InstalledCapabilityPackage, ...] = (),
     package_sources: tuple[CapabilityPackageSource, ...] = (),
 ) -> int:
@@ -349,6 +355,11 @@ async def _run(
         capability_ids=plan.host_capabilities,
         options=host_options,
         managed=managed_services,
+        progress=(
+            TextHostProgressReporter(stderr)
+            if args.progress
+            else NOOP_HOST_PROGRESS_REPORTER
+        ),
     ) as host_services:
         pathlight = (
             MemoryPathlightRecorder(str(uuid4()))
@@ -563,6 +574,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--run-id", default="asterion-run")
     run.add_argument("--input")
+    run.add_argument("--progress", action="store_true")
     run.add_argument("--workflow-evidence-file")
     run.add_argument("--application")
     run.add_argument("--assembly")
