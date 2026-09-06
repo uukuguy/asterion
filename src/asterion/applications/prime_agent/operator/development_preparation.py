@@ -38,6 +38,8 @@ _MESSAGE = "Prime development preparation is unavailable"
 _SCENARIOS = frozenset({"p1", "p2", "p3", "p4", "p5", "p6", "p7"})
 _MAX_ARCHIVE = 128 * 1024 * 1024
 _MAX_EXTRACTED = 512 * 1024 * 1024
+# Official locked Node archives contain 5,866 entries; retain a finite cap above it.
+_MAX_NODE_ARCHIVE_MEMBERS = 16_384
 _MAX_COMMAND_OUTPUT = 4096
 _COMMAND_TIMEOUT = 120
 _COMMAND_READ_CHUNK = 1024
@@ -296,7 +298,7 @@ def _extract_node(archive: Path, stage: Path, expected: str, node_sha256: str) -
             members = tar.getmembers()
             found = []
             names: set[str] = set()
-            if not members or len(members) > 4096:
+            if not members or len(members) > _MAX_NODE_ARCHIVE_MEMBERS:
                 raise ValueError
             for member in members:
                 parts = Path(member.name).parts

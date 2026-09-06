@@ -1,9 +1,11 @@
 from __future__ import annotations
 from hashlib import sha256
+import io
 import json
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -12,6 +14,28 @@ from unittest.mock import patch
 from asterion.applications.prime_agent.operator import (
     development_preparation as subject,
 )
+
+
+def _tar_member(
+    name: str,
+    data: bytes = b"",
+    member_type: bytes = tarfile.REGTYPE,
+    linkname: str = "",
+) -> tuple[tarfile.TarInfo, bytes]:
+    member = tarfile.TarInfo(name)
+    member.type = member_type
+    member.mode = 0o644
+    member.size = len(data) if member_type == tarfile.REGTYPE else 0
+    member.linkname = linkname
+    return member, data
+
+
+def _write_node_archive(
+    path: Path, members: list[tuple[tarfile.TarInfo, bytes]]
+) -> None:
+    with tarfile.open(path, "w:xz") as archive:
+        for member, data in members:
+            archive.addfile(member, io.BytesIO(data) if member.isreg() else None)
 
 
 class TestPrimeDevelopmentPreparation(unittest.TestCase):
@@ -289,6 +313,87 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
             node.write_bytes(b"last verified node")
             self.assertEqual(subject._publish_node(root, archive), node)
             self.assertEqual(node.read_bytes(), b"last verified node")
+
+    def test_node_extraction_accepts_locked_archive_layout_without_materializing_links(self) -> None:
+        expected = "node-v22.23.2-linux-arm64/bin/node"
+        payload = b"locked node executable"
+        members = [
+            _tar_member(
+                f"node-v22.23.2-linux-arm64/share/doc/link-{index}",
+                member_type=tarfile.SYMTYPE,
+                linkname="README.md",
+            )
+            for index in range(4097)
+        ]
+        members.append(_tar_member(expected, payload))
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "node.tar.xz"
+            stage = root / "stage"
+            stage.mkdir()
+            _write_node_archive(archive, members)
+            self.assertEqual(
+                subject._extract_node(
+                    archive, stage, expected, sha256(payload).hexdigest()
+                ),
+                stage,
+            )
+            node = stage / "bin/node"
+            self.assertEqual(node.read_bytes(), payload)
+            self.assertEqual(node.stat().st_mode & 0o777, 0o555)
+            self.assertFalse((stage / "node-v22.23.2-linux-arm64").exists())
+
+    def test_node_extraction_rejects_unsafe_or_nonmatching_members(self) -> None:
+        expected = "node-v22.23.2-linux-arm64/bin/node"
+        payload = b"locked node executable"
+        cases = {
+            "target symlink": [
+                _tar_member(
+                    expected, member_type=tarfile.SYMTYPE, linkname="elsewhere"
+                )
+            ],
+            "target hardlink": [
+                _tar_member(
+                    expected, member_type=tarfile.LNKTYPE, linkname="elsewhere"
+                )
+            ],
+            "target device": [_tar_member(expected, member_type=tarfile.CHRTYPE)],
+            "duplicate target": [
+                _tar_member(expected, payload),
+                _tar_member(expected, payload),
+            ],
+            "missing target": [_tar_member("node-v22.23.2-linux-arm64/README.md")],
+            "wrong target name": [
+                _tar_member("node-v22.23.2-linux-arm64/bin/not-node", payload)
+            ],
+            "traversal": [
+                _tar_member("../escape"),
+                _tar_member(expected, payload),
+            ],
+        }
+        for name, members in cases.items():
+            with self.subTest(name=name), TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                archive = root / "node.tar.xz"
+                stage = root / "stage"
+                stage.mkdir()
+                _write_node_archive(archive, members)
+                with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+                    subject._extract_node(
+                        archive, stage, expected, sha256(payload).hexdigest()
+                    )
+                self.assertFalse((stage / "bin/node").exists())
+
+    def test_node_extraction_rejects_a_target_with_the_wrong_digest(self) -> None:
+        expected = "node-v22.23.2-linux-arm64/bin/node"
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = root / "node.tar.xz"
+            stage = root / "stage"
+            stage.mkdir()
+            _write_node_archive(archive, [_tar_member(expected, b"unexpected node")])
+            with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+                subject._extract_node(archive, stage, expected, "0" * 64)
 
     def test_paths_are_private_and_canonical(self) -> None:
         with TemporaryDirectory() as temp:
