@@ -33,6 +33,13 @@ def create_application_provider() -> InstalledApplicationProvider:
                 ),
                 ("contoso.inline",),
             ),
+            InstalledApplication(
+                "contoso.research-compat",
+                "1.0.0",
+                (r / "compat/assembly.json",),
+                (CapabilityPackageRef("acme.sample", "1.0.0"),),
+                ("contoso.inline",),
+            ),
         ),
         runtime_factory_bindings=(
             RuntimeFactoryBinding("contoso.inline", (), create_runtime),

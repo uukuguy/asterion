@@ -213,7 +213,8 @@ class CrossPackageExtensionTests(unittest.TestCase):
                 {"asterion<0.2,>=0.1.0", "asterion-acme-sample-extension==1.0.0"},
                 {
                     "asterion.application_index": {
-                        "contoso.audited-research__1.0.0": "contoso_audit_extension.application:create_application_provider"
+                        "contoso.audited-research__1.0.0": "contoso_audit_extension.application:create_application_provider",
+                        "contoso.research-compat__1.0.0": "contoso_audit_extension.application:create_application_provider",
                     },
                     "asterion.applications": {
                         "contoso-audit": "contoso_audit_extension.application:create_application_provider"

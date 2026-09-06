@@ -11,7 +11,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 
 .DEFAULT_GOAL := help
 
-.PHONY: help sync build test lint docs-check check promotion-check first-run-check test.core-only test.public-extension test.cross-package-extension
+.PHONY: help sync build test lint docs-check check promotion-check first-run-check test.core-only test.public-extension test.cross-package-extension test.cross-runtime-extension
 .PHONY: setup-pi check-pi
 .PHONY: setup-resources-basic check-resources-basic
 .PHONY: setup-resources-benchmark check-resources-benchmark
@@ -47,7 +47,7 @@ help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
 	@echo "provider-free checks: check-pi check-resources-basic check-resources-benchmark doctor first-run-check"
 	@echo "provider-free lifecycle: sync build test lint docs-check check promotion-check"
-	@echo "framework acceptance: test.core-only test.public-extension test.cross-package-extension"
+	@echo "framework acceptance: test.core-only test.public-extension test.cross-package-extension test.cross-runtime-extension"
 	@echo "provider-free framework: asterion-list asterion-describe asterion-verify-preflight asterion-verify-acceptance"
 	@echo "bounded provider-backed: asterion-verify-basic asterion-verify-complete asterion-run"
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
@@ -75,6 +75,9 @@ test.public-extension:
 
 test.cross-package-extension:
 	$(UV_BIN) run python -m unittest -v tests.test_cross_package_extension
+
+test.cross-runtime-extension:
+	$(UV_BIN) run python -m unittest -v tests.test_cross_runtime_extension
 
 lint:
 	$(UV_BIN) run python -m compileall -q src tests tools

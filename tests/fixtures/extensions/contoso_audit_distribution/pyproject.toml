@@ -14,6 +14,7 @@ dependencies = ["asterion>=0.1.0,<0.2", "asterion-acme-sample-extension==1.0.0"]
 "contoso-audit" = "contoso_audit_extension.application:create_application_provider"
 [project.entry-points."asterion.application_index"]
 "contoso.audited-research__1.0.0" = "contoso_audit_extension.application:create_application_provider"
+"contoso.research-compat__1.0.0" = "contoso_audit_extension.application:create_application_provider"
 [tool.hatch.build.targets.wheel]
 packages = ["src/contoso_audit_extension"]
 [tool.hatch.build.targets.wheel.force-include]

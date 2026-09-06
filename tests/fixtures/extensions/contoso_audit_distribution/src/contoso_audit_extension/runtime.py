@@ -22,8 +22,10 @@ class Runtime:
         self, request: RunRequest, *, signal: CancellationSignal | None = None
     ) -> AsyncIterator[RunEvent]:
         _count("run")
-        del signal
         yield RunEvent(request.run_id, 1, "run.started", {"capabilities": []})
+        if signal is not None and signal.cancelled:
+            yield RunEvent(request.run_id, 2, "run.completed", {"status": "cancelled"})
+            return
         yield RunEvent(request.run_id, 2, "text.delta", {"text": "contoso"})
         yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
 
@@ -32,7 +34,8 @@ def create_runtime(context: RuntimeFactoryContext) -> AgentRuntimeClient:
     _count("factory")
     if (
         context.provider_id != "contoso-audit"
-        or context.application_id != "contoso.audited-research"
+        or context.application_id
+        not in {"contoso.audited-research", "contoso.research-compat"}
         or context.application_version != "1.0.0"
         or context.runtime_id != "contoso.inline"
         or context.options
@@ -45,4 +48,5 @@ def create_runtime(context: RuntimeFactoryContext) -> AgentRuntimeClient:
 def _count(name: str) -> None:
     path = os.environ.get("CONTOSO_COUNT_FILE")
     if path:
-        Path(path).write_text(name, encoding="utf-8")
+        with Path(path).open("a", encoding="utf-8") as output:
+            output.write(name + "\n")

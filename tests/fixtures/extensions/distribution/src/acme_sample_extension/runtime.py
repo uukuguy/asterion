@@ -21,11 +21,13 @@ class _InlineRuntime:
     async def run(
         self,
         request: RunRequest,
-    *,
-    signal: CancellationSignal | None = None,
-) -> AsyncIterator[RunEvent]:
-        del signal
+        *,
+        signal: CancellationSignal | None = None,
+    ) -> AsyncIterator[RunEvent]:
         yield RunEvent(request.run_id, 1, "run.started", {"capabilities": []})
+        if signal is not None and signal.cancelled:
+            yield RunEvent(request.run_id, 2, "run.completed", {"status": "cancelled"})
+            return
         yield RunEvent(request.run_id, 2, "text.delta", {"text": "acme reference"})
         yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
 

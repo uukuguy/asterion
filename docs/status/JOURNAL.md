@@ -2086,3 +2086,4 @@
 - 18:10 Proved deterministic cross-package wheel composition with package-owned bindings [aa6730ff]
 - 18:20 Advanced the framework mainline to cross-runtime evidence [f3f05a4a]
 - 17:44 Reviewed the cross-package extension ownership design [2059dfd7]
+- 17:58 Defined the reviewed cross-runtime extension evidence [c070c2b1]

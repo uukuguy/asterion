@@ -38,5 +38,7 @@ def create_application_provider() -> InstalledApplicationProvider:
                 runtime_ids=("acme.inline",),
             ),
         ),
-        runtime_factory_bindings=(RuntimeFactoryBinding("acme.inline", (), create_runtime),),
+        runtime_factory_bindings=(
+            RuntimeFactoryBinding("acme.inline", (), create_runtime),
+        ),
     )
