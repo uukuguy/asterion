@@ -2,6 +2,7 @@
 # ruff: noqa: E701, E702
 from __future__ import annotations
 import asyncio
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ import sys
 from tempfile import TemporaryDirectory
 from dotenv import dotenv_values
 from asterion.runtime.host import CancellationSignal
-from asterion.runtimes.prime_agent_host import PrimeP7DevelopmentHostService, PrimeSmallVerificationRequest, PrimeSmallVerificationResult
+from asterion.runtimes.prime_agent_host import PrimeP7DevelopmentHostService, PrimeSmallVerificationCancelled, PrimeSmallVerificationRequest, PrimeSmallVerificationResult
 from asterion.services.registry import HostServiceFactoryBinding, HostServiceFactoryContext
 from .p5_cli_host import _host_platform, _inspect_image, _sealed_seccomp
 from .p7_broker_service import P7BrokerService
@@ -20,18 +21,27 @@ from .p7_development_host import run_p7_development_lifecycle
 from .p7_development_sdk_provider import create_prime_p7_development_sdk_provider
 from .p7_resource_lock import verify_p7_development_resources
 _CAPABILITY_ID="prime.arc-agi-3-development"; _PROVIDER_ID="prime-agent"; _APPLICATION_ID="prime.arc-agi-3"; _APPLICATION_VERSION="1.0.0"; _RUN=re.compile(r"[a-z][a-z0-9.-]*\Z")
+_DEADLINE_SECONDS = 300
+_LifecycleRunner = Callable[[Path, str], Awaitable[object]]
 class PrimeP7CliHostError(ValueError):
  def __init__(self,*_:object)->None: super().__init__("prime P7 CLI host is unavailable")
 class PrimeP7DevelopmentService(PrimeP7DevelopmentHostService):
- def __init__(self,root:Path)->None:self.root=root;self.used=False
+ def __init__(self,root:Path,*,lifecycle_runner:_LifecycleRunner|None=None)->None:
+  self.root=root;self.used=False;self._lifecycle_runner=_run if lifecycle_runner is None else lifecycle_runner
  async def verify(self,request:PrimeSmallVerificationRequest,*,signal:CancellationSignal|None=None)->PrimeSmallVerificationResult:
   if self.used or type(request) is not PrimeSmallVerificationRequest or _RUN.fullmatch(request.run_id) is None:raise PrimeP7CliHostError()
   self.used=True
+  if _cancelled(signal):raise PrimeSmallVerificationCancelled()
+  task=asyncio.create_task(self._lifecycle_runner(self.root,request.run_id))
   try:
-   async with asyncio.timeout(300): trace=await _run(self.root,request.run_id)
+   async with asyncio.timeout(_DEADLINE_SECONDS): trace=await _await_with_cancellation(task,signal)
    return PrimeSmallVerificationResult(request.run_id,trace.trace_sha256,scope="p7-development")
-  except asyncio.CancelledError:raise
-  except BaseException:raise PrimeP7CliHostError() from None
+  except PrimeSmallVerificationCancelled:
+   task.cancel();await _shielded_wait(task);raise
+  except asyncio.CancelledError:
+   task.cancel();await _shielded_wait(task);raise
+  except BaseException:
+   task.cancel();await _shielded_wait(task);raise PrimeP7CliHostError() from None
 def create_prime_p7_cli_factory(*,repo_root:Path)->HostServiceFactoryBinding:
  root=Path(repo_root).resolve()
  @asynccontextmanager
@@ -69,4 +79,21 @@ async def _run(root:Path,run_id:str):
  finally:
   if broker:broker.close()
   if transport:transport.close()
+def _cancelled(signal:CancellationSignal|None)->bool:
+ if signal is None:return False
+ try:return signal.cancelled is True
+ except BaseException:raise PrimeP7CliHostError() from None
+async def _await_with_cancellation(task:asyncio.Task[object],signal:CancellationSignal|None)->object:
+ while not task.done():
+  if _cancelled(signal):raise PrimeSmallVerificationCancelled()
+  try:await asyncio.wait_for(asyncio.shield(task),timeout=0.05)
+  except TimeoutError:continue
+ return task.result()
+async def _shielded_wait(task:asyncio.Task[object])->None:
+ while not task.done():
+  try:await asyncio.shield(task)
+  except asyncio.CancelledError:continue
+  except BaseException:break
+ try:task.result()
+ except BaseException:pass
 __all__=("PrimeP7CliHostError","PrimeP7DevelopmentService","create_host_service_factory","create_prime_p7_cli_factory")
