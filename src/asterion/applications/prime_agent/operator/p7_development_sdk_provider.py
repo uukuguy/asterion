@@ -201,6 +201,7 @@ class PrimeP7DevelopmentSdkProvider:
                 self._uncertain = False
             return response
         except asyncio.CancelledError:
+            print(f"p7-sdk-provider turn={turn} category=cancelled", flush=True)
             self._cancelled = True
             self._terminal = None
             await self._reap_shielded()

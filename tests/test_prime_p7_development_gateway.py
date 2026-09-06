@@ -11,6 +11,14 @@ _CHILD = _P5_CHILD.replace("p5-development", "p7-development")
 
 
 class TestPrimeP7DevelopmentGateway(unittest.TestCase):
+    def test_child_stderr_diagnostic_exposes_only_error_type(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_development_gateway import _stderr_category
+
+        self.assertEqual(
+            _stderr_category(b"p7 bridge failed:P7DevelopmentBridgeError\\nSENTINEL"),
+            "P7DevelopmentBridgeError",
+        )
+
     def test_three_prompts_have_one_terminal_six_by_three_witness(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_gateway import PrimeP7DevelopmentGateway
 
@@ -25,4 +33,3 @@ class TestPrimeP7DevelopmentGateway(unittest.TestCase):
             witness = gateway.terminal_witness()
             self.assertEqual(dict(witness["cumulative"]), {"model_callback_count": 6, "tool_callback_count": 3})
             gateway.close_sync()
-
