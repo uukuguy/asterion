@@ -12,6 +12,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .DEFAULT_GOAL := help
 
 .PHONY: help sync build test lint docs-check check promotion-check first-run-check test.core-only test.public-extension test.cross-package-extension test.cross-runtime-extension
+.PHONY: test.framework-core test.cross-language-contracts test.extension-wheels test.provider-integration test.framework-provider-free
 .PHONY: setup-pi check-pi
 .PHONY: setup-resources-basic check-resources-basic
 .PHONY: setup-resources-benchmark check-resources-benchmark
@@ -46,10 +47,14 @@ PRIME_ORB_MACHINE ?= ubuntu
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
 	@echo "provider-free checks: check-pi check-resources-basic check-resources-benchmark doctor first-run-check"
-	@echo "provider-free lifecycle: sync build test lint docs-check check promotion-check"
+	@echo "layered provider-free: test.framework-core test.cross-language-contracts test.extension-wheels test.provider-integration test.framework-provider-free"
+	@echo "bounded presets: asterion-verify-basic asterion-verify-complete dci-basic dci-complete prime-verify-bounded prime-p1-run ... prime-p7-run"
+	@echo "operator-authorized run/benchmark: asterion-run dci-run dci-benchmark"
+	@echo "full regression: check promotion-check"
+	@echo "provider-free lifecycle: sync build test lint docs-check"
 	@echo "framework acceptance: test.core-only test.public-extension test.cross-package-extension test.cross-runtime-extension"
 	@echo "provider-free framework: asterion-list asterion-describe asterion-verify-preflight asterion-verify-acceptance"
-	@echo "bounded provider-backed: asterion-verify-basic asterion-verify-complete asterion-run"
+	@echo "bounded provider-backed presets: asterion-verify-basic asterion-verify-complete"
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
@@ -78,6 +83,21 @@ test.cross-package-extension:
 
 test.cross-runtime-extension:
 	$(UV_BIN) run python -m unittest -v tests.test_cross_runtime_extension
+
+test.framework-core:
+	$(UV_BIN) run python -m unittest -v tests.test_core_only_install
+
+test.cross-language-contracts:
+	$(UV_BIN) run python -m unittest -v tests.test_runtime_protocol tests.test_capability_catalog tests.test_capability_package_protocol tests.test_protocol_canonical_ordering
+	npm ci --prefix packages/typescript/asterion-runtime
+	npm test --prefix packages/typescript/asterion-runtime
+
+test.extension-wheels: test.public-extension test.cross-package-extension test.cross-runtime-extension
+
+test.provider-integration:
+	$(UV_BIN) run asterion verify --provider dci-agent-lite --level acceptance
+
+test.framework-provider-free: test.framework-core test.cross-language-contracts test.extension-wheels test.provider-integration
 
 lint:
 	$(UV_BIN) run python -m compileall -q src tests tools
