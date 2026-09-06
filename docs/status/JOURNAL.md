@@ -2037,3 +2037,4 @@
 - 13:28 Added P7 restricted Docker/IPython worker with exact staged artifacts, immutable broker client bytes, single-file model-socket mount, and cancellation-safe removal [pending]
 - 13:52 Bound P7 receipt score to sealed replayed episode facts; tightened terminal witness and provider-token proof [pending]
 - 13:53 P7 replay score and closed witness verification committed [c0e68620]
+- 2026-09-06 Fixed P7 broker ready startup race: retry only refused/missing control-listener connections until the existing deadline, retain the control sequence until a valid response, and preserve fail-closed protocol errors. Focused race test and Orb broker observe→4 act→status→seal→replay passed. The full `prime-p7-run` now clears broker startup, worker acquire, and gateway open; its first SDK provider callback exits through the provider's internal child-failure path before a response [pending]

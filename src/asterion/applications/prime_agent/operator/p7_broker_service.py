@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import errno
 import os
 from pathlib import Path
 import secrets
@@ -20,6 +21,10 @@ from .p7_development_workload import P7_DEVELOPMENT_GAME_ID
 class P7BrokerServiceError(ValueError):
     def __init__(self, *_: object) -> None:
         super().__init__("P7 broker service is unavailable")
+
+
+class _P7BrokerServiceStartupTransientError(Exception):
+    """A control listener is not yet accepting connections."""
 
 
 def _canonical(value: object) -> bytes:
@@ -82,7 +87,12 @@ class P7BrokerService:
                 if self._control_socket.exists():
                     if stat.S_IMODE(self._private.stat().st_mode) != 0o711 or stat.S_IMODE(self._control_socket.stat().st_mode) != 0o600:
                         raise ValueError
-                    if self._control("ready") == {"ready": True}:
+                    try:
+                        ready = self._control("ready")
+                    except _P7BrokerServiceStartupTransientError:
+                        time.sleep(.02)
+                        continue
+                    if ready == {"ready": True}:
                         # The model runs in a container: never disclose the host-private
                         # socket pathname in the generated module.
                         return p7_model_client_module_bytes(client_socket_path, self._model_token)
@@ -93,8 +103,8 @@ class P7BrokerService:
             raise P7BrokerServiceError() from None
 
     def _control(self, method: str) -> dict[str, object]:
-        self._control_sequence += 1
-        request = {"token": self._control_token, "sequence": self._control_sequence, "method": method, "data": {}}
+        sequence = self._control_sequence + 1
+        request = {"token": self._control_token, "sequence": sequence, "method": method, "data": {}}
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.settimeout(10)
@@ -104,8 +114,13 @@ class P7BrokerService:
             value = json.loads(raw)
             if type(value) is not dict or set(value) != {"ok", "result"} or value["ok"] is not True or type(value["result"]) is not dict:
                 raise ValueError
+            self._control_sequence = sequence
             return value["result"]
-        except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
+        except OSError as error:
+            if error.errno in (errno.ECONNREFUSED, errno.ENOENT):
+                raise _P7BrokerServiceStartupTransientError() from None
+            raise P7BrokerServiceError() from None
+        except (UnicodeError, ValueError, json.JSONDecodeError):
             raise P7BrokerServiceError() from None
 
     def seal(self) -> dict[str, object]: return self._control("seal")

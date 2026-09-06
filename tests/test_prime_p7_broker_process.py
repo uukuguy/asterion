@@ -6,9 +6,64 @@ import threading
 import unittest
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 
 class TestP7BrokerProcess(unittest.TestCase):
+    def test_service_retries_ready_when_control_socket_exists_before_listening(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_broker_service import P7BrokerService
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src"
+            resource = root / "normal-env/ls20/9607627b"
+            source.mkdir(parents=True)
+            resource.mkdir(parents=True)
+            private = root / "private"
+            requests: list[dict[str, object]] = []
+            listener: socket.socket | None = None
+            server: threading.Thread | None = None
+
+            class Process:
+                def poll(self) -> None:
+                    return None
+
+            def launch(*_: object, **__: object) -> Process:
+                nonlocal listener, server
+                listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                listener.bind(str(private / "control.sock"))
+                os.chmod(private / "control.sock", 0o600)
+
+                def serve() -> None:
+                    assert listener is not None
+                    threading.Event().wait(.05)
+                    listener.listen(2)
+                    connection, _ = listener.accept()
+                    with connection:
+                        import json
+                        request = json.loads(connection.makefile("rb").readline())
+                        requests.append(request)
+                        connection.sendall(b'{"ok":true,"result":{"ready":true}}\n')
+
+                server = threading.Thread(target=serve)
+                server.start()
+                return Process()
+
+            service = P7BrokerService(
+                interpreter=Path("/bin/sh"),
+                asterion_src=source,
+                resource_root=resource,
+                private_dir=private,
+            )
+            with patch("asterion.applications.prime_agent.operator.p7_broker_service.subprocess.Popen", side_effect=launch):
+                client = service.start()
+            self.assertTrue(client)
+            self.assertEqual([request["sequence"] for request in requests], [1])
+            assert server is not None
+            server.join(2)
+            assert listener is not None
+            listener.close()
+
     @unittest.skipUnless(os.environ.get("ASTERION_P7_REAL_BROKER_TEST") == "1", "operator opt-in")
     def test_external_process_completes_and_replays_four_actions(self) -> None:
         from asterion.applications.prime_agent.operator.p7_broker_service import P7BrokerService
