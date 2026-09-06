@@ -16,8 +16,9 @@ Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`.
 - P4 `make prime-p4-run`: direct native daemon checkpoint, exact zero-gap detach/reattach, one compact, five model callbacks, two Docker IPython cells, same AST oracle and cleanup; trace `sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
 - P5 `make prime-p5-run`: one Prime session, two completion-only IPython actions, failed quality feedback, exact repair, host result/quality gates and cleanup; trace `sha256:64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`.
 - P6 `PRIME_RUN_ID=prime-p6-20260906-final make prime-p6-run`: task-A/candidate/task-B execution, exact activation-or-rollback, worker evidence and cleanup; scope `p6-development/unpromoted`, trace `sha256:51f6454e90a2286dfd0fabaa3f3cf7f7870cd57abf95890845b4efd01048b335`.
+- P7 `PRIME_RUN_ID=prime-p7-20260906-final-locked make prime-p7-run`: official offline game `ls20-9607627b`, seed 0, one episode capped at four actions; real Prime SDK session with three prompts, six model callbacks, three IPython actions, isolated broker/container, score replay and cleanup; scope `p7-development/unpromoted`, trace `sha256:a2c1fa78367c4eb4e5b424ca5a717c9cb83f5db8661f57cec22a58a9ff2f0ef1`.
 
-All six results are development-only and `unpromoted`; 19 Python tests, 2 TypeScript tests and Ruff passed for P6, with zero Prime P6 containers. P4 closure uses Prime 0.7.1 direct-daemon zero-gap reattach; crash/restart replay and production promotion remain separate work.
+All seven results are development-only and `unpromoted`; P7 passed 33 focused Python tests (one operator opt-in skipped) and 2 TypeScript tests, with zero residue. P4 closure uses Prime 0.7.1 direct-daemon zero-gap reattach. The P7 result closes one bounded action-limit episode only and does not claim a game WIN; full multi-game benchmarking and production promotion remain separate work.
 
 ## P4 implementation boundary
 
@@ -27,7 +28,9 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 
 ## Next concrete action
 
-P7 `prime.arc-agi-3/v1` is active and next. Its remaining closure is a real isolated game broker and IPython launcher with bounded public-subset functional evidence; full multi-game reproduction remains separately authorized.
+The seven Prime development scenarios are closed at their named boundaries.
+Any full multi-game ARC-AGI-3 reproduction or production promotion remains a
+separately authorized finite task.
 
 Reuse the closed Prime runtime/provider/worker spine where contracts match. Keep activation local/project-scoped during development; global activation remains separately governed.
 

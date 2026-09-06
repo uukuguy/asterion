@@ -10,8 +10,9 @@
   capability-package framework
 - Project route: managed
 - Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
-- Active work package: P1 through P6 development reproductions and exact-selector
-  CLI routes are closed (6/7); P7 ARC-AGI-3 is active and next.
+- Active work package: all seven Prime development reproductions and exact-selector
+  CLI routes are closed (7/7). Full multi-game benchmarking and production
+  promotion remain separately authorized work.
   Existing provider-free acceptance implementations are retained. Native
   parity and broad framework restructuring are not prerequisites for Prime
   closure.
@@ -143,9 +144,18 @@
   Nineteen Python tests, two TypeScript tests, and Ruff passed; residue
   inspection found zero Prime P6 containers. Production promotion remains
   separate and is not claimed.
-- P7 `prime.arc-agi-3/v1` has a single-game IPython broker trace, host score
-  replay, provider-free acceptance, and distinct subset/full authorization
-  reducers. No real game, model, or full-suite claim has been promoted.
+- P7 `prime.arc-agi-3/v1` is development closure / CLI verified. The exact
+  `PRIME_RUN_ID=prime-p7-20260906-final-locked make prime-p7-run` command exited 0
+  with scope `p7-development/unpromoted` and trace
+  `sha256:a2c1fa78367c4eb4e5b424ca5a717c9cb83f5db8661f57cec22a58a9ff2f0ef1`.
+  The run used the official offline game `ls20-9607627b`, seed 0, one episode
+  capped at four actions, a real Prime SDK session with three prompts, six
+  model callbacks and three IPython actions, isolated broker/container
+  execution, host score replay and cleanup. Thirty-three focused Python tests
+  passed (one operator opt-in test skipped) and two P7 TypeScript tests passed;
+  residue inspection found zero remaining resources. This closes the bounded
+  action-limit episode reproduction only; it does not claim a game WIN, full
+  multi-game benchmark, or production promotion.
 
 ## Open Problems
 
@@ -157,10 +167,8 @@
   only declared generated build products. The pinned `a18809e...` checkout
   reproduces cleanly, and the historical H-036/H-038 closure passed promotion. Those
   historical results do not verify the current uncommitted changes.
-- Obtain separately authorized real restricted-worker evidence for P7; do not
-  infer it from local fake-chain tests or Smoke Core.
-- Run final provider-free repository verification and keep any real ARC-AGI-3
-  full-suite reproduction behind an exact finite operator authorization.
+- Keep any real ARC-AGI-3 full-suite or multi-game reproduction behind an exact
+  finite operator authorization; production promotion remains separate.
 
 ## Key Files
 
@@ -213,8 +221,8 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Resume P7 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
-   parallel runtime track; do not substitute it or broad framework refactoring
-   for Prime end-to-end closure.
+4. Treat the seven Prime development scenarios as closed at their named
+   boundaries. Native Phase 3.2 remains a parallel runtime track; any
+   multi-game/full-suite Prime benchmark or production promotion is separate.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

@@ -20,7 +20,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `DCI-BENCHMARK-INSTANCES.md` | 🟢 active | DCI benchmark implementation and verification backlog. |
 | `PATHLIGHT-DCI-DIAGNOSIS.md` | 🟢 active | Provider-free six-run DCI Pathlight diagnosis; safe numeric observations and unapproved follow-up proposals. |
 | `PRIME-PARITY-LEDGER.md` | 🟢 active | Pinned Prime baseline, stable parity domains, evidence levels and provider gap status. |
-| `PRIME-TYPICAL-APPLICATIONS.md` | 🟢 active | Canonical Prime seven-scenario worklist; P1–P6 development closures are CLI verified and P7 is the active next scenario; production promotion remains separate. |
+| `PRIME-TYPICAL-APPLICATIONS.md` | 🟢 active | Canonical Prime seven-scenario worklist; P1–P7 development closures are CLI verified at named bounded scopes; full benchmarking and production promotion remain separate. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `DECISIONS.md` | 🟢 active | Indexed active architecture, trust-boundary, cleanup, and Prime-first seven-scenario closure decisions. |
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |

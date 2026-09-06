@@ -28,13 +28,13 @@ or merge contracts.
 | P4 `prime.long-session-continuity/v1` | Installed CLI completed direct native daemon checkpoint, exact zero-gap reattach, compact, five model callbacks, two Docker IPython cells, same oracle and cleanup | Production promotion and crash/restart replay remain separate work | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P5 `prime.bounded-autonomy/v1` | Installed CLI completed one Prime session, two completion-only Docker IPython actions, failed quality feedback, exact source repair, host result/quality gates and cleanup | Production promotion and broader autonomous task classes remain separate work | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P6 `prime.continual-improvement/v1` | Installed CLI completed task-A/candidate/task-B execution, exact activation-or-rollback, worker evidence and cleanup; 19 Python tests, 2 TypeScript tests and Ruff passed | Production promotion remains a separate release task | **Development closure / CLI verified**. `PRIME_RUN_ID=prime-p6-20260906-final make prime-p6-run` exited 0 with scope `p6-development/unpromoted`, trace `sha256:51f6454e90a2286dfd0fabaa3f3cf7f7870cd57abf95890845b4efd01048b335`, and zero Prime P6 containers |
-| P7 `prime.arc-agi-3/v1` | Game broker/score replay/worker/subset-full reducer tests pass | Real isolated game broker and IPython launcher with bounded public-subset functional evidence | **Active / next**. Depends on P1–P6; full multi-game reproduction remains a separate explicitly authorized finite scope |
+| P7 `prime.arc-agi-3/v1` | Real isolated broker/container run completed official offline game `ls20-9607627b`, seed 0, one episode capped at four actions; three prompts, six model callbacks, three IPython actions, score replay and cleanup passed; 33 focused Python tests passed (one operator opt-in skipped) and 2 P7 TypeScript tests passed | Full multi-game benchmark and production promotion remain separate explicitly authorized finite scopes | **Development closure / CLI verified**. `PRIME_RUN_ID=prime-p7-20260906-final-locked make prime-p7-run` exited 0 with scope `p7-development/unpromoted`, trace `sha256:a2c1fa78367c4eb4e5b424ca5a717c9cb83f5db8661f57cec22a58a9ff2f0ef1`, and zero residue |
 
-Six of seven scenarios now have named development CLI closure; P7 remains active. Public
-metadata, fixed fixtures, fake workers and compatibility probes are distinct
-evidence layers, not alternate ways to close a scenario. P7 still lacks a
-complete installed execution route; source-level test suites do not mean
-production promotion.
+All seven scenarios now have named development CLI closure. Public metadata,
+fixed fixtures, fake workers and compatibility probes are distinct evidence
+layers, not alternate ways to close a scenario. P7 closure covers one bounded
+action-limit episode and does not claim a game WIN, full multi-game benchmark,
+or production promotion.
 
 ## P1 closure record
 
@@ -175,6 +175,22 @@ Nineteen Python tests, two TypeScript tests, and Ruff passed; residue
 inspection found zero Prime P6 containers. This closes the development
 reproduction; production promotion remains a separate release task.
 
+## P7 closure record
+
+P7 now runs through the installed application `prime.arc-agi-3@1.0.0`. The
+exact `PRIME_RUN_ID=prime-p7-20260906-final-locked make prime-p7-run` command exited
+0 with scope `p7-development/unpromoted` and trace
+`sha256:a2c1fa78367c4eb4e5b424ca5a717c9cb83f5db8661f57cec22a58a9ff2f0ef1`.
+The real Prime SDK session used three prompts, six model callbacks and three
+IPython actions through an isolated broker/container. The official offline
+game `ls20-9607627b` ran with seed 0 for one episode capped at four actions;
+the host replayed the score and cleanup completed with zero residue. Thirty-three focused Python tests passed (one operator opt-in test skipped), along
+with two P7 TypeScript tests. Independent Sol review approved the broker-artifact,
+installed-runtime, bytecode, cancellation, and cleanup boundaries with no
+remaining material finding. This closes the bounded action-limit episode
+reproduction only; it does not claim a game WIN. Full multi-game benchmarking
+and production promotion remain separate explicitly authorized work.
+
 ## Current development execution evidence
 
 The development path now constructs real Linux/arm64 P1-A and P1-B images,
@@ -287,7 +303,8 @@ External-limited outcomes. These counts overlap no claim of model execution.
   Full promotion is tracked separately and has no current PASS claim.
 - Root read-only Docker inspection confirmed an available Linux aarch64 daemon
   through the current OrbStack context. No container was launched or promoted.
-- P5–P7 real launcher/host gaps are code-inventory findings, not failed real runs.
+- P5–P7 real launcher/host paths have bounded development evidence; full
+  benchmark and production promotion remain separate.
 
 ## Closure rules
 
