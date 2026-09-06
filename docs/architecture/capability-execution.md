@@ -11,7 +11,7 @@ it selects exact capability versions, one runtime, host
 services, and operator input.
 
 Policy packages remain declarative in the first execution slice. Capability,
-workflow, memory, observability, and evaluation packages require an exact
+workflow, memory, observability, evaluation, and research packages require an exact
 implementation binding before execution. Missing, duplicate, unknown, or
 partial bindings fail before a runtime or implementation is invoked.
 

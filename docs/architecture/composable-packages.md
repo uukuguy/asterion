@@ -100,7 +100,7 @@ selection authority.
 ## Adding a package
 
 1. Choose one portable kind: `capability`, `workflow`, `policy`, `memory`,
-   `observability`, or `evaluation`.
+   `observability`, `evaluation`, or `research`.
 2. Add a closed manifest with a stable ID and semantic version.
 3. Declare only portable capability, policy, event, and artifact edges.
 4. Add positive/negative fixtures or composition tests for any new edge pattern.

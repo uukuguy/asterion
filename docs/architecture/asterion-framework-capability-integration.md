@@ -102,7 +102,7 @@ Capability manifest 使用封闭的 `asterion.capability/v1` 协议。每个 JSO
 }
 ```
 
-数组必须排序、去重；ID 和版本必须符合约束。`kind=policy` 可以参与组合但不执行；`capability`、`workflow`、`memory`、`observability`、`evaluation` 必须有精确 implementation binding。
+数组必须排序、去重；ID 和版本必须符合约束。`kind=policy` 可以参与组合但不执行；`capability`、`workflow`、`memory`、`observability`、`evaluation`、`research` 必须有精确 implementation binding。
 
 Capability 是“声明 + 实现”，不是一个任意 Python 目录。实现遵守 `CapabilityImplementation.execute(invocation)`，接收冻结后的 `CapabilityInvocation`，返回 `CapabilityExecutionResult`。结果只能产生 manifest 已声明的事件和 artifact media type；未声明输出、重复 artifact ID、缺失或多余 binding 都会失败。
 
