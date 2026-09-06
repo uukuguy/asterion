@@ -116,6 +116,7 @@ async def run_p5_development_lifecycle(
         ):
             raise ValueError
         container_id = observed_daemon
+        image_digest = _worker_image(worker)
         initial = _source_from_snapshot(await worker.snapshot())
         if initial != _INITIAL_SOURCE:
             raise ValueError
@@ -191,6 +192,7 @@ async def run_p5_development_lifecycle(
         validate_p5_development_snapshot(repaired, repaired=True)
         if _bytes_digest(repaired) in seen_sources:
             raise ValueError
+        seen_sources.add(_bytes_digest(repaired))
         artifact = await worker.artifact()
         validate_p5_development_artifact(
             artifact, run_id=run_id, goal_id=goal_id, source=repaired, stage=2
@@ -205,7 +207,8 @@ async def run_p5_development_lifecycle(
         provider_closed = True
         if getattr(worker, "daemon_id", None) != container_id:
             raise ValueError
-        _worker_image(worker)
+        if _worker_image(worker) != image_digest:
+            raise ValueError
         await worker.cleanup()
         cleaned = True
         receipt = P5DevelopmentReceipt(
@@ -216,7 +219,7 @@ async def run_p5_development_lifecycle(
             _digest({"goal": goal_id}),
             _digest(dict(witness["identity"])),
             _digest({"container": container_id}),
-            _digest({"image": _worker_image(worker)}),
+            _digest({"image": image_digest}),
             _bytes_digest(diagnosed),
             _bytes_digest(repaired),
             _digest(first_result),
@@ -405,8 +408,11 @@ def _terminal_witness(
         or set(identity) != {"run_id", "session_id", "runtime_id", "generation"}
         or identity["run_id"] != run_id
         or identity["session_id"] != session_id
+        or type(identity["generation"]) is not int
         or identity["generation"] != 1
         or identity["runtime_id"] != "prime.agent"
+        or set(cumulative) != {"model_callback_count", "tool_callback_count"}
+        or any(type(cumulative[name]) is not int for name in cumulative)
         or dict(cumulative) != {"model_callback_count": 4, "tool_callback_count": 2}
     ):
         raise ValueError
@@ -481,7 +487,7 @@ def _prompt(phase: str, run_id: str, goal_id: str, stage: int) -> str:
         + str(stage)
         + ". "
         + (
-            "Known defect is expected: complete diagnosis and write result.json; do not raise, assert failure, or edit source."
+            "Known defect is expected: complete diagnosis and write result.json with no trailing newline; do not raise, assert failure, or edit source."
             if stage == 1
             else "Repair exactly to return min(max(value, lower), upper), replace result.json with no trailing newline, then stop briefly."
         )

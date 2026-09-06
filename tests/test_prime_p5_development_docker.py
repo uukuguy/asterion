@@ -3,6 +3,8 @@ from __future__ import annotations
 import unittest
 import asyncio
 from pathlib import Path
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 
 
@@ -68,24 +70,34 @@ class TestP5DevelopmentDocker(unittest.TestCase):
         self.assertEqual(transport.reads, ["result.json", "result.json"])
         self.assertTrue(transport.removed and transport.absent)
 
-    def test_trusted_read_rejects_unexpected_files_and_symlinks(self) -> None:
+    def test_deployed_read_program_rejects_unexpected_files_and_symlinks(self) -> None:
         from asterion.applications.prime_agent.operator.p5_development_docker import (
-            PrimeP5DevelopmentDockerError,
-            _trusted_workspace_read,
+            _READ_PROGRAM,
         )
+
+        def run(root: str) -> subprocess.CompletedProcess[bytes]:
+            return subprocess.run(
+                (
+                    sys.executable,
+                    "-I",
+                    "-c",
+                    _READ_PROGRAM,
+                    root,
+                    "solution.py",
+                    "solution.py",
+                ),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
 
         with TemporaryDirectory() as root:
             path = Path(root)
             (path / "solution.py").write_bytes(b"source")
-            self.assertEqual(
-                _trusted_workspace_read(root, "solution.py", ("solution.py",)),
-                b"source",
-            )
+            self.assertEqual(run(root).stdout, b"source")
             (path / "extra").write_text("x")
-            with self.assertRaises(PrimeP5DevelopmentDockerError):
-                _trusted_workspace_read(root, "solution.py", ("solution.py",))
+            self.assertNotEqual(run(root).returncode, 0)
             (path / "extra").unlink()
             (path / "solution.py").unlink()
             (path / "solution.py").symlink_to("/etc/passwd")
-            with self.assertRaises(PrimeP5DevelopmentDockerError):
-                _trusted_workspace_read(root, "solution.py", ("solution.py",))
+            self.assertNotEqual(run(root).returncode, 0)
