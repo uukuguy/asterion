@@ -46,11 +46,13 @@ class TestP7DevelopmentBroker(unittest.TestCase):
                     "data": {"action_id": 1, "data": {}},
                 }
             )
-        self.assertEqual(broker.seal().terminal_reason, "action-limit")
+        status = broker.request({"token": "t", "sequence": 6, "method": "status", "data": {}})
+        self.assertEqual(status["terminal_reason"], "engine-terminal")
+        self.assertEqual(broker.seal().terminal_reason, "engine-terminal")
         self.assertEqual(broker.replay(_Engine)["action_count"], 4)
         with self.assertRaises(P7DevelopmentBrokerError):
             broker.request(
-                {"token": "t", "sequence": 6, "method": "status", "data": {}}
+                {"token": "t", "sequence": 7, "method": "status", "data": {}}
             )
 
     def test_rejects_auth_sequence_reset_and_extra_fields(self):

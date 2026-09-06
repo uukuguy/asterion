@@ -101,6 +101,7 @@ class P7DevelopmentBroker:
             False,
         )
         self._journal: list[dict[str, object]] = []
+        self._status: bool | None = None
 
     @property
     def token(self) -> str:
@@ -132,6 +133,7 @@ class P7DevelopmentBroker:
                     or type(data["action_id"]) is not int
                     or data["action_id"] not in range(1, 8)
                     or data["data"] != {}
+                    or self._status is not None
                     or len(self._journal) >= 5
                 ):
                     raise ValueError
@@ -143,17 +145,18 @@ class P7DevelopmentBroker:
                     {"action_id": data["action_id"], "observation": observation}
                 )
                 result = {"observation": observation}
-                if len(self._journal) == 5:
-                    self._sealed = True
             else:
-                if data != {}:
+                if data != {} or self._status is not None or len(self._journal) < 2:
                     raise ValueError
                 terminal = self._engine.status()
                 if type(terminal) is not bool:
                     raise ValueError
-                result = {"terminal": terminal}
-                if terminal or len(self._journal) == 5:
-                    self._sealed = True
+                actions = len(self._journal) - 1
+                if not terminal and actions != 4:
+                    raise ValueError
+                self._status = terminal
+                self._sealed = True
+                result = {"terminal": terminal, "terminal_reason": "engine-terminal" if terminal else "action-limit"}
             self._sequence += 1
             return result
         except P7DevelopmentBrokerError:
@@ -164,10 +167,12 @@ class P7DevelopmentBroker:
     def seal(self) -> P7BrokerSeal:
         if not self._sealed:
             raise P7DevelopmentBrokerError()
+        if self._status is None:
+            raise P7DevelopmentBrokerError()
         actions = sum("action_id" in row for row in self._journal)
         return P7BrokerSeal(
             _digest(self._journal),
-            "action-limit" if actions == 4 else "engine-terminal",
+            "engine-terminal" if self._status else "action-limit",
             actions,
         )
 
