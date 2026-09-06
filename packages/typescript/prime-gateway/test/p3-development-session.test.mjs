@@ -40,6 +40,8 @@ test("waits for a delayed SDK-owned child and retains review for follow-up", asy
       if (role === "root") {
         const implementation = await session.spawn("implementation", "implement");
         const review = await session.spawn("review", "review");
+        assert.deepEqual(implementation, { rlm_child_id: implementation.rlm_child_id });
+        assert.deepEqual(review, { rlm_child_id: review.rlm_child_id });
         await session.wait(implementation.rlm_child_id);
         await session.wait(review.rlm_child_id);
         await session.followUp(review.rlm_child_id, "verify");

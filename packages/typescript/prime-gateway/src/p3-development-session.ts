@@ -107,7 +107,10 @@ export interface PrimeSdkSession {
   abort(): Promise<void>;
   disposeAsync(): Promise<void>;
   subscribe(listener: (event: unknown) => void): () => void;
-  runRlmChild(prompt: string, kwargs?: Record<string, unknown>): Promise<{ rlm_child_id: string }>;
+  runRlmChild(
+    prompt: string,
+    kwargs?: Record<string, unknown>,
+  ): Promise<{ readonly rlm_child_id: string; readonly [key: string]: unknown }>;
   getRlmChildSession(id: string): PrimeSdkSession | undefined;
   listRlmSubagents(): Promise<{ subagents: readonly unknown[] }>;
   deleteRlmSubagent(id: string): Promise<unknown>;
@@ -373,7 +376,8 @@ export class PrimeP3DevelopmentSession {
   async spawn(role: "implementation" | "review", prompt: string): Promise<{ rlm_child_id: string }> {
     this.assertDispatchable();
     if ([...this.#childRoles.values()].includes(role)) throw new Error("P3 child role already exists");
-    return this.#session.runRlmChild(prompt, { name: role, model: this.#childSelectors[role] });
+    const child = await this.#session.runRlmChild(prompt, { name: role, model: this.#childSelectors[role] });
+    return Object.freeze({ rlm_child_id: child.rlm_child_id });
   }
 
   async wait(childId: string): Promise<void> {
