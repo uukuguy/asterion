@@ -5,17 +5,21 @@
 - Project: Asterion
 - Active branch: local `main`; implementation verification is scoped to its
   named boundaries, and `origin/main` remains unchanged
-- Theme-level focus: close the existing seven Prime end-to-end capability
-  scenarios; Prime and Native remain parallel runtimes within the unified
-  capability-package framework
+- Theme-level focus: close framework and capability-package integration gaps,
+  then prove independent cross-package and cross-runtime execution. Prime and
+  Native remain parallel runtime integrations.
 - Project route: managed
-- Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
+- Canonical worklist: `docs/status/FRAMEWORK-INTEGRATION-WORKLIST.md`
 - Active work package: all seven Prime development reproductions and exact-selector
   CLI routes are closed (7/7). Full multi-game benchmarking and production
   promotion remain separately authorized work.
   Existing provider-free acceptance implementations are retained. Native
   parity and broad framework restructuring are not prerequisites for Prime
   closure.
+- W0 inventory alignment and W1a executable-kind consistency are complete.
+  The public SDK's `research` kind now reaches its exact implementation through
+  provider, assembly, and runner. Active framework slice: W1b source-neutral
+  preparation of digest-bearing candidates before exact lock resolution.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -221,8 +225,8 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Treat the seven Prime development scenarios as closed at their named
-   boundaries. Native Phase 3.2 remains a parallel runtime track; any
-   multi-game/full-suite Prime benchmark or production promotion is separate.
+4. Continue `FRAMEWORK-INTEGRATION-WORKLIST.md` from W1b. Treat the seven Prime
+   development scenarios as closed at their named boundaries. Native Phase 3.2
+   remains a parallel track; product promotion is separate.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.

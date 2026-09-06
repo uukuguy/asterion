@@ -6,7 +6,7 @@
 
 按评估后的主线持续推进直至完成。Asterion 的核心是统一智能体框架与能力包集成协议；Prime 和 Native 是并行 runtime。当前先收口七项 Prime 端到端复现。研发验证只保留正常链路和关键边界断言，不运行 promotion 或极端矩阵。
 
-Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`.
+Canonical worklist: `docs/status/FRAMEWORK-INTEGRATION-WORKLIST.md`.
 
 ## Closed Prime applications
 
@@ -28,9 +28,14 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 
 ## Next concrete action
 
+W0 inventory alignment and W1a executable-kind consistency are complete.
+Continue W1b: add a source-neutral preparation step that produces an immutable
+digest-bearing candidate before exact lock resolution, without loading an
+unselected provider.
+
 The seven Prime development scenarios are closed at their named boundaries.
-Any full multi-game ARC-AGI-3 reproduction or production promotion remains a
-separately authorized finite task.
+Native Phase 3.2 remains a parallel track. Full multi-game ARC-AGI-3 work and
+production promotion remain separately authorized finite tasks.
 
 Reuse the closed Prime runtime/provider/worker spine where contracts match. Keep activation local/project-scoped during development; global activation remains separately governed.
 

@@ -2065,3 +2065,6 @@
 - 16:28 Superseded P7 installed-file lock with actual matched-file hashes [a156aa73]
 - 16:45 Rejected P7 package bytecode and isolated probe/broker caches so locked source is executed [0bddacad]
 - 17:02 Sol approved P7 artifact, runtime, bytecode, cancellation, and cleanup closure with no remaining material findings [0bddacad]
+- 17:05 Closed durable Prime status at 7/7 with final P7 executable evidence [025bc025]
+- 17:38 Executed public research bindings through the shared provider, assembly, and runner contract [7e87c3fc]
+- 17:46 Documented research as an executable v1 kind so author guidance matches runtime behavior [0b6ba73f]

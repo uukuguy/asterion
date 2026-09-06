@@ -118,3 +118,22 @@
 - Evidence: explicit user correction and model-routing instruction on
   2026-09-05. This does not promote fake/compatibility evidence or authorize
   ARC full-suite reproduction, global activation or publication.
+
+## D-2026-09-06-01 — Resume the framework-first integration sequence after Prime closure
+
+- Status: 🟢 active
+- Decision: Use `FRAMEWORK-INTEGRATION-WORKLIST.md` as the canonical mainline.
+  Repair existing v1 cross-layer inconsistencies before adding protocol
+  versions, product parity features, registries, or execution engines.
+- Rationale: Prime P1–P7 now provide bounded development evidence for one
+  product spine, but do not prove independent package composition or runtime
+  substitution. The framework requires separate public integration evidence.
+- Consequence: W1 fixes executable kinds, source preparation, and
+  framework/product ownership; W2/W3 then prove an external extension,
+  cross-package composition, and shared semantics across runtime adapters.
+  Native continues in parallel and its existing control provider is not
+  presented as an AgentRuntime until that contract is implemented.
+- Supersedes: the post-Prime execution order in D-2026-09-05-01. Historical
+  Prime and Native evidence remains valid at its named boundary.
+- Evidence: Prime 7/7 closure `025bc025`, framework assessment, public inventory,
+  and independent Sol contract review on 2026-09-06.
