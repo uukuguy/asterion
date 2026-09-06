@@ -29,6 +29,7 @@ from .p2_development_gateway import PrimeP2DevelopmentGateway
 from .p2_development_sdk_provider import create_prime_p2_development_sdk_provider
 from .docker_worker import _LifecycleCallControl
 from asterion.runtime.host import CancellationSignal
+from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 _MAX_CELL_BYTES = 16 * 1024
 _CALLBACKS = 2
@@ -95,6 +96,7 @@ async def run_p2_development_lifecycle(
     cleanup: Callable[[], Awaitable[None]],
     usage_certain: Callable[[], bool],
     terminal_usage: Callable[[], object],
+    progress: HostProgressReporter | None = None,
 ) -> PrimeP2DevelopmentEvidence:
     """Bind one SDK prompt, one cell, host oracle and verified cleanup.
 
@@ -103,6 +105,7 @@ async def run_p2_development_lifecycle(
     """
     opened = False
     cleaned = False
+    validation_started = False
     try:
         if (
             type(run_id) is not str
@@ -137,6 +140,8 @@ async def run_p2_development_lifecycle(
         await gateway.open(**dict(open_arguments))
         opened = True
         result = await gateway.prompt(prompt)
+        _emit(progress, "validation", "started")
+        validation_started = True
         observed_usage, observations = _validate_gateway_result(
             result, terminal_usage()
         )
@@ -147,6 +152,7 @@ async def run_p2_development_lifecycle(
             raise ValueError
         aggregate_bytes = await read_result()
         aggregate = _validate_p2_result(aggregate_bytes)
+        _emit(progress, "validation", "succeeded")
         await gateway.close()
         opened = False
         await cleanup()
@@ -177,6 +183,8 @@ async def run_p2_development_lifecycle(
             )
         )
     except BaseException as error:
+        if validation_started:
+            _emit(progress, "validation", "failed")
         if opened:
             try:
                 await gateway.cancel()
@@ -200,38 +208,76 @@ async def run_prime_p2_development(
     *, image_digest: str, transport: PrimeP2DevelopmentDockerTransport,
     operator_config: Mapping[str, object], node_bin: str, entrypoint: str,
     prime_source_root: str, run_id: str, signal: CancellationSignal | None = None,
+    progress: HostProgressReporter | None = None,
 ) -> PrimeP2DevelopmentTrace:
     """Concrete local P2 Docker + SDK execution entry point."""
     if not isinstance(transport, PrimeP2DevelopmentDockerTransport) or not isinstance(run_id, str) or not run_id:
         raise PrimeP2DevelopmentHostError()
     provider = create_prime_p2_development_sdk_provider(operator_config)
     control = _LifecycleCallControl(monotonic() + 300, signal)
-    container = await transport.create(image_digest=image_digest, run_id=run_id, session_id="p2-" + run_id, control=control)
+    _emit(progress, "worker", "started")
+    try:
+        container = await transport.create(image_digest=image_digest, run_id=run_id, session_id="p2-" + run_id, control=control)
+    except BaseException:
+        _emit(progress, "worker", "failed")
+        raise PrimeP2DevelopmentHostError() from None
     callbacks = 0
     cells: list[bytes] = []
+    cleanup_attempted = False
+    worker_started = False
+
+    async def cleanup() -> None:
+        nonlocal cleanup_attempted
+        if cleanup_attempted:
+            return
+        cleanup_attempted = True
+        cleanup_control = _LifecycleCallControl(monotonic() + 5.0, None)
+        _emit(progress, "cleanup", "started")
+        try:
+            await transport.remove(container, cleanup_control)
+            await transport.assert_absent(container, cleanup_control)
+        except BaseException:
+            _emit(progress, "cleanup", "failed")
+            raise
+        _emit(progress, "cleanup", "succeeded")
+
     try:
         await transport.start(container, control)
+        worker_started = True
+        _emit(progress, "worker", "succeeded")
 
         async def model(payload: object) -> object:
             nonlocal callbacks
-            callbacks += 1
-            return json.loads(await provider(_canonical(payload)))
+            current = callbacks + 1
+            try:
+                if current > _CALLBACKS:
+                    raise ValueError
+                _emit(progress, "model", "started", current, _CALLBACKS)
+                result = json.loads(await provider(_canonical(payload)))
+                callbacks = current
+                _emit(progress, "model", "succeeded", current, _CALLBACKS)
+                return result
+            except BaseException:
+                _emit(progress, "model", "failed", min(current, _CALLBACKS), _CALLBACKS)
+                raise
 
         async def tool(payload: object) -> object:
-            if type(payload) is not dict or set(payload) != {"tool_call_id", "code"} or type(payload["code"]) is not str:
-                raise PrimeP2DevelopmentHostError()
-            cell = payload["code"].encode("utf-8", "strict")
-            cells.append(cell)
-            await transport.execute_cell(container, payload["code"], control)
-            return {"content": [{"type": "text", "text": "cell completed"}], "details": {}, "isError": False}
+            try:
+                _emit(progress, "tool", "started", 1, 1)
+                if type(payload) is not dict or set(payload) != {"tool_call_id", "code"} or type(payload["code"]) is not str:
+                    raise PrimeP2DevelopmentHostError()
+                cell = payload["code"].encode("utf-8", "strict")
+                cells.append(cell)
+                await transport.execute_cell(container, payload["code"], control)
+                _emit(progress, "tool", "succeeded", 1, 1)
+                return {"content": [{"type": "text", "text": "cell completed"}], "details": {}, "isError": False}
+            except BaseException:
+                _emit(progress, "tool", "failed", 1, 1)
+                raise
 
         gateway = PrimeP2DevelopmentGateway(node_bin=node_bin, entrypoint=entrypoint, deadline_seconds=60, model_hook=model, tool_hook=tool)
         async def read() -> bytes:
             return await transport.read_result(container, control)
-        async def cleanup() -> None:
-            cleanup_control = _LifecycleCallControl(monotonic() + 5.0, None)
-            await transport.remove(container, cleanup_control)
-            await transport.assert_absent(container, cleanup_control)
         def certain() -> bool:
             try:
                 provider.terminal_usage()
@@ -240,18 +286,33 @@ async def run_prime_p2_development(
                 return False
         session_id = "p2-" + run_id
         with TemporaryDirectory(prefix="asterion-prime-p2-") as workspace:
-            evidence = await run_p2_development_lifecycle(gateway=gateway, open_arguments={"run_id": run_id, "session_id": session_id, "generation": 1, "prime_source_root": prime_source_root, "workspace": workspace}, prompt=_P2_PROMPT, run_id=run_id, session_id=session_id, image_digest=image_digest, callback_count=lambda: callbacks, tool_count=lambda: len(cells), cell_bytes=lambda: cells[0] if len(cells) == 1 else b"", read_result=read, cleanup=cleanup, usage_certain=certain, terminal_usage=provider.terminal_usage)
+            evidence = await run_p2_development_lifecycle(gateway=gateway, open_arguments={"run_id": run_id, "session_id": session_id, "generation": 1, "prime_source_root": prime_source_root, "workspace": workspace}, prompt=_P2_PROMPT, run_id=run_id, session_id=session_id, image_digest=image_digest, callback_count=lambda: callbacks, tool_count=lambda: len(cells), cell_bytes=lambda: cells[0] if len(cells) == 1 else b"", read_result=read, cleanup=cleanup, usage_certain=certain, terminal_usage=provider.terminal_usage, progress=progress)
         return evidence.trace
     except BaseException as error:
+        if not worker_started:
+            _emit(progress, "worker", "failed")
         try:
-            cleanup_control = _LifecycleCallControl(monotonic() + 5.0, None)
-            await transport.remove(container, cleanup_control)
-            await transport.assert_absent(container, cleanup_control)
+            await cleanup()
         except BaseException:
             pass
         if isinstance(error, asyncio.CancelledError):
             raise
         raise PrimeP2DevelopmentHostError() from None
+
+
+def _emit(
+    reporter: HostProgressReporter | None,
+    component: str,
+    state: str,
+    current: int | None = None,
+    total: int | None = None,
+) -> None:
+    if reporter is None:
+        return
+    try:
+        reporter.emit(HostProgressEvent(component, state, current, total))
+    except BaseException:
+        pass
 
 
 def _validate_p2_result(value: object) -> dict[str, int]:
