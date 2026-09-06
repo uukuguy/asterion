@@ -26,13 +26,13 @@ or merge contracts.
 | P2 `prime.programmatic-long-context/v1` | One real installed CLI run completed two model callbacks, one Docker-backed IPython cell, fixed corpus oracle and cleanup | Production authority promotion and long-context scale remain separate release tasks | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P3 `prime.recursive-workflow/v1` | Real installed CLI run completed two RLM children, retained review follow-up, ten model callbacks, four Docker-backed IPython cells, host oracle and cleanup | Production promotion remains a separate release task | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P4 `prime.long-session-continuity/v1` | Installed CLI completed direct native daemon checkpoint, exact zero-gap reattach, compact, five model callbacks, two Docker IPython cells, same oracle and cleanup | Production promotion and crash/restart replay remain separate work | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
-| P5 `prime.bounded-autonomy/v1` | Fixed repair workload, two-gate/digest fencing, worker and reducer tests pass | Actual finite Prime worker/gate loop with result and quality-gate proof | Depends on P1/P4; real launcher/host absent |
+| P5 `prime.bounded-autonomy/v1` | Installed CLI completed one Prime session, two completion-only Docker IPython actions, failed quality feedback, exact source repair, host result/quality gates and cleanup | Production promotion and broader autonomous task classes remain separate work | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P6 `prime.continual-improvement/v1` | HarnessCoordinator task-A/candidate/task-B, scoped approval and rollback tests pass | Real task/holdout execution, exact activation or rollback, worker evidence and public route | Depends on P1/P5; use local/project scope first, global activation remains explicitly governed |
 | P7 `prime.arc-agi-3/v1` | Game broker/score replay/worker/subset-full reducer tests pass | Real isolated game broker and IPython launcher with bounded public-subset functional evidence | Depends on P1–P6; full multi-game reproduction remains a separate explicitly authorized finite scope |
 
 All seven complete only after their named real scenario succeeds. Public
 metadata, fixed fixtures, fake workers and compatibility probes are distinct
-evidence layers, not alternate ways to close a scenario. P5–P7 currently lack
+evidence layers, not alternate ways to close a scenario. P6–P7 currently lack
 complete installed execution routes; source-level test suites do not mean
 publicly runnable scenarios.
 
@@ -145,6 +145,22 @@ promotion `unpromoted`, and trace
 Post-run inspection found zero related processes, containers, sockets,
 checkpoints and temporary workspaces. This closes the fixed development
 reproduction. Crash/restart replay and production promotion remain separate.
+
+## P5 closure record
+
+P5 now runs through the installed application
+`prime.bounded-autonomy@1.0.0`. One real Prime session used exactly two prompts,
+four model callbacks and two completion-only Docker IPython actions. The first
+action preserved the known-defective source and wrote bound evidence; the host
+result gate passed and quality gate failed. Exact feedback then drove the second
+action to repair the source. The host independently validated actual source and
+artifact bytes, the AST oracle, both result gates and both quality outcomes.
+The public `make prime-p5-run` command exited 0 with scope `p5-development`,
+promotion `unpromoted`, and trace
+`sha256:866420d60d698890d1114f054dbb7753dabc4551401f1e120d5af671ff2e8894`.
+Post-run inspection found zero P5 containers, gateway processes and temporary
+workspaces. This closes the fixed development reproduction; production
+promotion and broader autonomous task classes remain separate.
 
 ## Current development execution evidence
 

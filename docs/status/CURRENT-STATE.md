@@ -10,8 +10,8 @@
   capability-package framework
 - Project route: managed
 - Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
-- Active work package: P1 through P4 development reproductions and exact-selector
-  CLI routes are closed; P5 bounded autonomy is active, followed by P6–P7.
+- Active work package: P1 through P5 development reproductions and exact-selector
+  CLI routes are closed; P6 continual improvement is active, followed by P7.
   Existing provider-free acceptance implementations are retained. Native
   parity and broad framework restructuring are not prerequisites for Prime
   closure.
@@ -129,11 +129,13 @@
   exited 0 with `p4-development/unpromoted` trace
   `sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
   Crash/restart replay and production promotion remain separate work.
-- P5 `prime.bounded-autonomy/v1` has a fixed IPython-only diagnostic-repair
-  workload, identity- and ceiling-bound two-gate trace, replay-fenced
-  host-gate adapter, provider-free acceptance, and a revalidating live reducer.
-  Its local fake chain is verified only; real Prime/IPython worker evidence is
-  External-limited and cannot be promoted to bounded PASS.
+- P5 `prime.bounded-autonomy/v1` is CLI verified in development. Its installed
+  route completed one real Prime session, four model callbacks, two Docker
+  IPython actions, failed-quality feedback, exact repair, independent host gates
+  and cleanup. `make prime-p5-run` exited 0 with
+  `p5-development/unpromoted` trace
+  `sha256:866420d60d698890d1114f054dbb7753dabc4551401f1e120d5af671ff2e8894`;
+  residue inspection found zero P5 containers, gateways and workspaces.
 - P6 `prime.continual-improvement/v1` has the fixed task-A/candidate/task-B
   preserve-or-exact-rollback chain over `HarnessCoordinator`, scoped evidence,
   and a global-approval-aware live reducer. It is provider-free verified only.
@@ -207,7 +209,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Resume P5 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
+4. Resume P6 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
    parallel runtime track; do not substitute it or broad framework refactoring
    for Prime end-to-end closure.
 5. Keep credentials, private configuration, and execution authority external.

@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-06 10:36. **Session remains active — not a final handoff.**
+> Updated: 2026-09-06 12:20. **Session remains active — not a final handoff.**
 
 ## Direction
 
@@ -14,8 +14,9 @@ Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`.
 - P2 `make prime-p2-run`: two model callbacks, one Docker IPython cell, fixed corpus oracle and cleanup; trace `sha256:4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`.
 - P3 `make prime-p3-run`: two recursive children, ten model callbacks, four Docker IPython cells, host oracle and cleanup; trace `sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`.
 - P4 `make prime-p4-run`: direct native daemon checkpoint, exact zero-gap detach/reattach, one compact, five model callbacks, two Docker IPython cells, same AST oracle and cleanup; trace `sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
+- P5 `make prime-p5-run`: one Prime session, two completion-only IPython actions, failed quality feedback, exact repair, host result/quality gates and cleanup; trace `sha256:866420d60d698890d1114f054dbb7753dabc4551401f1e120d5af671ff2e8894`.
 
-All four results are development-only and `unpromoted`. P4 closure uses Prime 0.7.1 direct-daemon zero-gap reattach; crash/restart replay and production promotion remain separate work.
+All five results are development-only and `unpromoted`. P4 closure uses Prime 0.7.1 direct-daemon zero-gap reattach; crash/restart replay and production promotion remain separate work.
 
 ## P4 implementation boundary
 
@@ -25,9 +26,9 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 
 ## Next concrete action
 
-P5 `prime.bounded-autonomy/v1` is active. Existing code provides a fixed repair workload, exact ceiling/digest fencing, restricted-worker adapter, two-gate reducer and provider-free acceptance. The missing closure is an installed `make prime-p5-run` route that performs a finite real Prime/IPython diagnostic-repair loop, proves both result and quality gates, emits only a safe unpromoted trace, and cleans up.
+P6 `prime.continual-improvement/v1` is active. Its provider-free coordinator already models task A, a candidate change, holdout task B, scoped activation and exact rollback. The missing closure is an installed `make prime-p6-run` route with real restricted task/holdout execution, worker evidence, and public-safe activation-or-rollback trace.
 
-Keep P5 within its existing ceilings: at most three actions, bounded usage, fixed IPython-only capability, no retries of uncertain external effects, and fail-closed gate identity. Reuse the P1/P4 runtime, provider, Docker and host-service spine where contracts match; do not introduce a second composer or runner.
+Reuse the closed Prime runtime/provider/worker spine where contracts match. Keep activation local/project-scoped during development; global activation remains separately governed.
 
 ## Environment and preservation
 
