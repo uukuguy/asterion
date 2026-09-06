@@ -384,33 +384,17 @@ def _validate_request(
         raise ValueError
     model, context, options = value["model"], value["context"], value["options"]
     _validate_model(model)
-    compact = False
     if (
-        set(context)
-        != (
-            {"messages", "systemPrompt"}
-            if compact
-            else {"messages", "systemPrompt", "tools"}
-        )
+        set(context) != {"messages", "systemPrompt", "tools"}
         or type(context["systemPrompt"]) is not str
         or not context["systemPrompt"]
         or type(context["messages"]) is not list
     ):
         raise ValueError
-    if compact:
-        if options != {
-            "apiKey": "in-memory-development-provider",
-            "maxTokens": 768,
-            "signal": {},
-        }:
-            raise ValueError
-    else:
-        _validate_normal_options(options, model)
-        _validate_tool(context["tools"])
-        if turn and _canonical_json(options) != _canonical_json(
-            issued[0][0]["options"]
-        ):
-            raise ValueError
+    _validate_normal_options(options, model)
+    _validate_tool(context["tools"])
+    if turn and _canonical_json(options) != _canonical_json(issued[0][0]["options"]):
+        raise ValueError
     messages = context["messages"]
     if turn == 0:
         if not messages or any(
@@ -425,16 +409,7 @@ def _validate_request(
         issued[0][0]["model"]
     ):
         raise ValueError
-    if compact:
-        if (
-            len(messages) != 1
-            or type(messages[0]) is not dict
-            or messages[0].get("role") != "user"
-            or _canonical_json(messages[0].get("content"))
-            != _canonical_json(_compaction_source(issued))
-        ):
-            raise ValueError
-    elif turn == 1:
+    if turn == 1:
         previous, answer = issued[0]
         if (
             _canonical_json(context["systemPrompt"])
@@ -447,25 +422,23 @@ def _validate_request(
         ):
             raise ValueError
         _validate_tool_pair(answer, messages[-1])
-    elif turn == 3:
-        summary = issued[2][1]
+    elif turn == 2:
         initial_context = issued[0][0]["context"]
         if (
             _canonical_json(context["systemPrompt"])
             != _canonical_json(initial_context["systemPrompt"])
             or _canonical_json(context["tools"])
             != _canonical_json(initial_context["tools"])
-            or len(messages) != 3
-            or [item.get("role") if type(item) is dict else None for item in messages]
-            != ["user", "assistant", "user"]
-            or _canonical_json(messages[0].get("content"))
-            != _canonical_json(_compaction_wrapper(issued[2][0], summary))
-            or _canonical_json(messages[1]) != _canonical_json(issued[1][1])
-            or not _text(messages[2].get("content"))
+            or not messages
+            or type(messages[-1]) is not dict
+            or messages[-1].get("role") != "user"
+            or not _text(messages[-1].get("content"))
+            or _canonical_json(issued[0][1]) not in _canonical_json(messages)
+            or _canonical_json(issued[1][1]) not in _canonical_json(messages)
         ):
             raise ValueError
     else:
-        previous, answer = issued[3]
+        previous, answer = issued[2]
         prior_context = previous["context"]
         if (
             _canonical_json(context["systemPrompt"])
