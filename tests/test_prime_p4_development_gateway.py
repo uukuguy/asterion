@@ -29,6 +29,67 @@ _BAD_CURSOR_CHILD = _CHILD.replace(
 
 
 class TestPrimeP4DevelopmentGateway(unittest.IsolatedAsyncioTestCase):
+    async def test_first_native_callback_matches_p1b_provider_contract(self) -> None:
+        from asterion.applications.prime_agent.operator import (
+            p1b_development_sdk_provider as provider_contract,
+        )
+        from asterion.applications.prime_agent.operator.p4_development_gateway import (
+            PrimeP4DevelopmentGateway,
+            PrimeP4DevelopmentGatewayError,
+        )
+
+        validated = False
+
+        async def model(payload: object) -> dict[str, object]:
+            nonlocal validated
+            self.assertIsInstance(payload, dict)
+            provider_contract._decode_request(  # noqa: SLF001
+                provider_contract._canonical_json(payload).encode("utf-8"),  # noqa: SLF001
+                0,
+                [],
+            )
+            validated = True
+            return {
+                "api": "anthropic-messages",
+                "content": [],
+                "model": "p4-development",
+                "provider": "asterion-p4-development",
+                "role": "assistant",
+                "stopReason": "stop",
+                "timestamp": 0,
+                "usage": {
+                    "cacheRead": 0,
+                    "cacheWrite": 0,
+                    "cost": {
+                        "cacheRead": 0,
+                        "cacheWrite": 0,
+                        "input": 0,
+                        "output": 0,
+                        "total": 0,
+                    },
+                    "input": 0,
+                    "output": 0,
+                    "totalTokens": 0,
+                },
+            }
+
+        root = Path(__file__).resolve().parents[1] / "3th-party/prime-agent"
+        with tempfile.TemporaryDirectory() as workspace:
+            gateway = PrimeP4DevelopmentGateway(
+                model_hook=model,
+                deadline_seconds=20,
+            )
+            await gateway.open(
+                run_id="run-1",
+                session_id="session-1",
+                generation=1,
+                prime_source_root=str(root),
+                workspace=workspace,
+            )
+            with self.assertRaises(PrimeP4DevelopmentGatewayError):
+                await gateway.prompt("private-first")
+        self.assertTrue(validated)
+
     async def test_runs_fixed_p4_flow_with_private_checkpoint_readback(self) -> None:
         from asterion.applications.prime_agent.operator.p4_development_gateway import (
             PrimeP4DevelopmentGateway,
