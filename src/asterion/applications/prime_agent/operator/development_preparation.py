@@ -54,23 +54,86 @@ _SECCOMP_LOCK_PROVENANCE = {
     "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "platforms": ["linux/amd64", "linux/arm64"],
     "images": {
-        "p1": ["asterion-p1b-development:20260906", "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657"],
-        "p2": ["asterion-p2-development:20260906", "sha256:7d97b51a21bfffe6caa574063294f72205c60b05d8650fab8c70fdf661921c33"],
-        "p3": ["asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"],
-        "p4": ["asterion-p1b-development:20260906", "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657"],
-        "p5": ["asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"],
-        "p6": ["asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"],
-        "p7": ["asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"],
+        "p1": [
+            "asterion-p1b-development:20260906",
+            "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657",
+        ],
+        "p2": [
+            "asterion-p2-development:20260906",
+            "sha256:7d97b51a21bfffe6caa574063294f72205c60b05d8650fab8c70fdf661921c33",
+        ],
+        "p3": [
+            "asterion-p3-development:20260906",
+            "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243",
+        ],
+        "p4": [
+            "asterion-p1b-development:20260906",
+            "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657",
+        ],
+        "p5": [
+            "asterion-p3-development:20260906",
+            "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243",
+        ],
+        "p6": [
+            "asterion-p3-development:20260906",
+            "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243",
+        ],
+        "p7": [
+            "asterion-p3-development:20260906",
+            "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243",
+        ],
     },
 }
 _LOCKED_IMAGES = {
-    "p1": ("asterion-p1b-development:20260906", "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
-    "p2": ("asterion-p2-development:20260906", "sha256:7d97b51a21bfffe6caa574063294f72205c60b05d8650fab8c70fdf661921c33", "p2_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
-    "p3": ("asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243", "p3_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
-    "p4": ("asterion-p1b-development:20260906", "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657", "image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
-    "p5": ("asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243", "p3_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
-    "p6": ("asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243", "p3_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
-    "p7": ("asterion-p3-development:20260906", "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243", "p3_development_image/Dockerfile", "src/asterion/applications/prime_agent/operator", ("linux/amd64", "linux/arm64")),
+    "p1": (
+        "asterion-p1b-development:20260906",
+        "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657",
+        "image/Dockerfile",
+        "src/asterion/applications/prime_agent/operator",
+        ("linux/amd64", "linux/arm64"),
+    ),
+    "p2": (
+        "asterion-p2-development:20260906",
+        "sha256:7d97b51a21bfffe6caa574063294f72205c60b05d8650fab8c70fdf661921c33",
+        "p2_development_image/Dockerfile",
+        "src/asterion/applications/prime_agent/operator",
+        ("linux/amd64", "linux/arm64"),
+    ),
+    "p3": (
+        "asterion-p3-development:20260906",
+        "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243",
+        "p3_development_image/Dockerfile",
+        "src/asterion/applications/prime_agent/operator",
+        ("linux/amd64", "linux/arm64"),
+    ),
+    "p4": (
+        "asterion-p1b-development:20260906",
+        "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657",
+        "image/Dockerfile",
+        "src/asterion/applications/prime_agent/operator",
+        ("linux/amd64", "linux/arm64"),
+    ),
+    "p5": (
+        "asterion-p3-development:20260906",
+        "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243",
+        "p3_development_image/Dockerfile",
+        "src/asterion/applications/prime_agent/operator",
+        ("linux/amd64", "linux/arm64"),
+    ),
+    "p6": (
+        "asterion-p3-development:20260906",
+        "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243",
+        "p3_development_image/Dockerfile",
+        "src/asterion/applications/prime_agent/operator",
+        ("linux/amd64", "linux/arm64"),
+    ),
+    "p7": (
+        "asterion-p3-development:20260906",
+        "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243",
+        "p3_development_image/Dockerfile",
+        "src/asterion/applications/prime_agent/operator",
+        ("linux/amd64", "linux/arm64"),
+    ),
 }
 
 
@@ -115,7 +178,9 @@ def _lock() -> dict[str, object]:
 
 def _seccomp_lock(raw: bytes | None = None) -> dict[str, object]:
     try:
-        value = json.loads(_bytes("prime-development-seccomp-lock.json") if raw is None else raw)
+        value = json.loads(
+            _bytes("prime-development-seccomp-lock.json") if raw is None else raw
+        )
         if type(value) is not dict or value != _SECCOMP_LOCK_PROVENANCE:
             raise ValueError
     except (UnicodeError, json.JSONDecodeError, ValueError, OSError):
@@ -225,12 +290,12 @@ def _remove_tree(path: Path) -> None:
         raise PrimeDevelopmentPreparationError() from None
 
 
-def _extract_node(archive: Path, stage: Path) -> Path:
+def _extract_node(archive: Path, stage: Path, expected: str, node_sha256: str) -> Path:
     try:
         with tarfile.open(archive, "r:xz") as tar:
             members = tar.getmembers()
-            total = 0
-            top: str | None = None
+            found = []
+            names: set[str] = set()
             if not members or len(members) > 4096:
                 raise ValueError
             for member in members:
@@ -238,54 +303,69 @@ def _extract_node(archive: Path, stage: Path) -> Path:
                 if (
                     Path(member.name).is_absolute()
                     or ".." in parts
-                    or len(parts) < 2
-                    or member.issym()
-                    or member.islnk()
-                    or member.isdev()
-                    or not (member.isdir() or member.isreg())
-                    or member.size < 0
+                    or member.name in names
                 ):
                     raise ValueError
-                top = top or parts[0]
-                if parts[0] != top:
-                    raise ValueError
-                total += member.size
-                if total > _MAX_EXTRACTED:
-                    raise ValueError
-            if top is None or not top.startswith("node-v22.23.2-linux-"):
+                names.add(member.name)
+                if member.name == expected:
+                    found.append(member)
+            if len(found) != 1:
                 raise ValueError
-            for member in members:
-                out = stage.joinpath(*Path(member.name).parts)
-                if member.isdir():
-                    out.mkdir(parents=True, exist_ok=False)
-                else:
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    source = tar.extractfile(member)
-                    if source is None:
-                        raise ValueError
-                    with source, out.open("xb") as output:
-                        remaining = member.size
-                        while remaining:
-                            block = source.read(min(1024 * 1024, remaining))
-                            if not block:
-                                raise ValueError
-                            output.write(block)
-                            remaining -= len(block)
-            node = stage / top / "bin" / "node"
-            if not node.is_file() or node.is_symlink():
+            member = found[0]
+            if (
+                not member.isreg()
+                or member.issym()
+                or member.islnk()
+                or member.isdev()
+                or member.size < 0
+                or member.size > _MAX_EXTRACTED
+            ):
                 raise ValueError
-            return stage / top
+            output = stage / "bin" / "node"
+            output.parent.mkdir(mode=0o700)
+            fd = os.open(
+                output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o555
+            )
+            try:
+                source = tar.extractfile(member)
+                if source is None:
+                    raise ValueError
+                with source, os.fdopen(fd, "wb", closefd=False) as stream:
+                    remaining = member.size
+                    while remaining:
+                        block = source.read(min(1024 * 1024, remaining))
+                        if not block:
+                            raise ValueError
+                        stream.write(block)
+                        remaining -= len(block)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            finally:
+                os.close(fd)
+            os.chmod(output, 0o555)
+            if _digest(output) != node_sha256:
+                raise ValueError
+            _fsync_directory(output.parent)
+            _fsync_directory(stage)
+            return stage
     except (OSError, ValueError, tarfile.TarError):
         raise PrimeDevelopmentPreparationError() from None
 
 
-def _publish_node(root: Path, archive: Path) -> Path:
+def _publish_node(
+    root: Path,
+    archive: Path,
+    expected: str | None = None,
+    node_sha256: str | None = None,
+) -> Path:
     target = root / ("node-" + _digest(archive)[:16])
     if target.exists():
         return target / "bin" / "node"
+    if expected is None or node_sha256 is None:
+        raise PrimeDevelopmentPreparationError()
     stage = Path(tempfile.mkdtemp(prefix=".node.", suffix=".stage", dir=root))
     try:
-        extracted = _extract_node(archive, stage)
+        extracted = _extract_node(archive, stage, expected, node_sha256)
         os.replace(extracted, target)
         _fsync_directory(root)
         _remove_tree(stage)
@@ -328,7 +408,8 @@ def _streaming_run(argv: list[str]) -> subprocess.CompletedProcess[bytes]:
                 streams[stream].extend(chunk)
                 if (
                     len(streams[stream]) > _MAX_COMMAND_OUTPUT
-                    or sum(len(value) for value in streams.values()) > _MAX_COMMAND_OUTPUT
+                    or sum(len(value) for value in streams.values())
+                    > _MAX_COMMAND_OUTPUT
                 ):
                     raise ValueError
         remaining = deadline - time.monotonic()
@@ -457,8 +538,12 @@ def _node(
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise TimeoutError
-                    _set_download_timeout(response, min(_DOWNLOAD_IO_TIMEOUT, remaining))
-                    block = response.read(min(_DOWNLOAD_CHUNK, _MAX_ARCHIVE + 1 - len(data)))
+                    _set_download_timeout(
+                        response, min(_DOWNLOAD_IO_TIMEOUT, remaining)
+                    )
+                    block = response.read(
+                        min(_DOWNLOAD_CHUNK, _MAX_ARCHIVE + 1 - len(data))
+                    )
                     if time.monotonic() >= deadline:
                         raise TimeoutError
                     if type(block) is not bytes:
@@ -472,16 +557,26 @@ def _node(
                 close = getattr(response, "close", None)
                 if callable(close):
                     close()
-            if (
-                sha256(data).hexdigest() != record["archive_sha256"]
-            ):
+            if sha256(data).hexdigest() != record["archive_sha256"]:
                 raise ValueError
         except Exception:
             raise PrimeDevelopmentPreparationError() from None
         archive = _publish_bytes(root, "node.tar.xz", bytes(data))
     node = root / ("node-" + _digest(archive)[:16]) / "bin" / "node"
     if not node.exists() or _digest(node) != record["node_sha256"]:
-        node = _publish_node(root, archive)
+        suffix = {"linux-x64.tar.xz": "x64", "linux-arm64.tar.xz": "arm64"}
+        selected = next(
+            (value for key, value in suffix.items() if record["url"].endswith(key)),
+            None,
+        )
+        if selected is None:
+            raise PrimeDevelopmentPreparationError()
+        node = _publish_node(
+            root,
+            archive,
+            "node-v22.23.2-linux-" + selected + "/bin/node",
+            record["node_sha256"],
+        )
     if (
         _digest(node) != record["node_sha256"]
         or getattr(_run([str(node), "--version"], runner=runner), "stdout", b"")
@@ -502,7 +597,10 @@ def _gateway_identity(repo: Path, gateway: object) -> dict[str, str]:
 
 def _gateway_record(gateway: object) -> dict[str, object]:
     if type(gateway) is not dict or set(gateway) != {
-        "inputs", "inputs_sha256", "outputs", "outputs_sha256",
+        "inputs",
+        "inputs_sha256",
+        "outputs",
+        "outputs_sha256",
     }:
         raise PrimeDevelopmentPreparationError()
     for kind in ("inputs", "outputs"):
@@ -513,7 +611,12 @@ def _gateway_record(gateway: object) -> dict[str, object]:
             or type(digest) is not str
             or len(digest) != 64
             or any(char not in "0123456789abcdef" for char in digest)
-            or not all(type(name) is str and not Path(name).is_absolute() and ".." not in Path(name).parts for name in names)
+            or not all(
+                type(name) is str
+                and not Path(name).is_absolute()
+                and ".." not in Path(name).parts
+                for name in names
+            )
         ):
             raise PrimeDevelopmentPreparationError()
     return gateway
@@ -537,7 +640,9 @@ def _gateway_aggregate(repo: Path, gateway: object, kind: str) -> str:
     return digest
 
 
-def _prepare_gateway(repo: Path, gateway: object, *, runner: Callable[..., object]) -> None:
+def _prepare_gateway(
+    repo: Path, gateway: object, *, runner: Callable[..., object]
+) -> None:
     """Build only reviewed inputs; a changed input is never a build authority."""
     _gateway_record(gateway)
     _gateway_aggregate(repo, gateway, "inputs")
@@ -562,7 +667,12 @@ def _image_record(record: object, scenario: str, platform: str) -> dict[str, obj
         or len(record["digest"]) != 71
         or not record["digest"].startswith("sha256:")
         or any(char not in "0123456789abcdef" for char in record["digest"][7:])
-        or any(type(record[name]) is not str or Path(record[name]).is_absolute() or ".." in Path(record[name]).parts for name in ("dockerfile", "context"))
+        or any(
+            type(record[name]) is not str
+            or Path(record[name]).is_absolute()
+            or ".." in Path(record[name]).parts
+            for name in ("dockerfile", "context")
+        )
         or type(record["platforms"]) is not list
         or record["platforms"] != sorted(set(record["platforms"]))
         or platform not in record["platforms"]
@@ -588,11 +698,32 @@ def _locked_image_record(scenario: str) -> dict[str, object]:
 
 
 def _inspect_image(tag: str, *, runner: Callable[..., object]) -> str | None:
-    argv = ["/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "image", "inspect", "--format", "{{.Id}}", tag]
+    argv = [
+        "/usr/bin/docker",
+        "--host",
+        "unix:///var/run/docker.sock",
+        "image",
+        "inspect",
+        "--format",
+        "{{.Id}}",
+        tag,
+    ]
     try:
-        result = runner(argv, check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=_COMMAND_TIMEOUT, env={"PATH": "/usr/bin:/bin"})
+        result = runner(
+            argv,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=_COMMAND_TIMEOUT,
+            env={"PATH": "/usr/bin:/bin"},
+        )
         stdout, stderr = getattr(result, "stdout", b""), getattr(result, "stderr", b"")
-        if type(stdout) is not bytes or type(stderr) is not bytes or len(stdout) + len(stderr) > _MAX_COMMAND_OUTPUT:
+        if (
+            type(stdout) is not bytes
+            or type(stderr) is not bytes
+            or len(stdout) + len(stderr) > _MAX_COMMAND_OUTPUT
+        ):
             raise ValueError
         if getattr(result, "returncode", 0) != 0:
             return None
@@ -602,16 +733,35 @@ def _inspect_image(tag: str, *, runner: Callable[..., object]) -> str | None:
         raise PrimeDevelopmentPreparationError() from None
 
 
-def _prepare_image(repo: Path, scenario: str, record: object, platform: str, *, runner: Callable[..., object]) -> None:
+def _prepare_image(
+    repo: Path,
+    scenario: str,
+    record: object,
+    platform: str,
+    *,
+    runner: Callable[..., object],
+) -> None:
     image = _image_record(record, scenario, platform)
     tag, digest = image["tag"], image["digest"]
     if _inspect_image(tag, runner=runner) == digest:
         return
-    _run([
-        "/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "build",
-        "--pull=false", "--platform", platform, "--file", str(repo / image["dockerfile"]),
-        "--tag", tag, str(repo / image["context"]),
-    ], runner=runner)
+    _run(
+        [
+            "/usr/bin/docker",
+            "--host",
+            "unix:///var/run/docker.sock",
+            "build",
+            "--pull=false",
+            "--platform",
+            platform,
+            "--file",
+            str(repo / image["dockerfile"]),
+            "--tag",
+            tag,
+            str(repo / image["context"]),
+        ],
+        runner=runner,
+    )
     if _inspect_image(tag, runner=runner) != digest:
         raise PrimeDevelopmentPreparationError()
 
@@ -624,8 +774,14 @@ def _p7_identities(repo: Path, record: object) -> dict[str, str]:
         or type(record["resource_sha256"]) is not str
         or type(record["runtime_wheels"]) is not dict
         or set(record["runtime_wheels"]) != {"arc_agi", "arcengine"}
-        or any(type(value) is not str or len(value) != 71 or not value.startswith("sha256:") for value in record["runtime_wheels"].values())
-        or record["runtime_wheels"] != {
+        or any(
+            type(value) is not str
+            or len(value) != 71
+            or not value.startswith("sha256:")
+            for value in record["runtime_wheels"].values()
+        )
+        or record["runtime_wheels"]
+        != {
             "arc_agi": P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256,
             "arcengine": P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256,
         }
@@ -633,11 +789,16 @@ def _p7_identities(repo: Path, record: object) -> dict[str, str]:
         raise PrimeDevelopmentPreparationError()
     try:
         external = repo.parent / record["external_root"]
-        resources = verify_p7_development_resources(external / "environment_files/ls20/9607627b")
+        resources = verify_p7_development_resources(
+            external / "environment_files/ls20/9607627b"
+        )
         runtime = verify_p7_development_runtime(external)
         if resources.resource_sha256 != record["resource_sha256"]:
             raise ValueError
-        return {"p7_resource_sha256": resources.resource_sha256, "p7_runtime_sha256": runtime.runtime_sha256}
+        return {
+            "p7_resource_sha256": resources.resource_sha256,
+            "p7_runtime_sha256": runtime.runtime_sha256,
+        }
     except Exception:
         raise PrimeDevelopmentPreparationError() from None
 
@@ -766,7 +927,9 @@ def prepare_prime_development(
         if type(images) is not dict:
             raise PrimeDevelopmentPreparationError()
         for scenario in sorted(set(scenarios)):
-            _prepare_image(repo, scenario, images.get(scenario), "linux/" + arch, runner=runner)
+            _prepare_image(
+                repo, scenario, images.get(scenario), "linux/" + arch, runner=runner
+            )
         if emit:
             emit("image", "succeeded")
     except PrimeDevelopmentPreparationError:
@@ -804,7 +967,9 @@ def prepare_prime_development(
             ).encode(),
         )
         # Recheck the receipt and all selected identities before handing it back.
-        resolve_prepared_prime_development(repo, scenarios[0], runner=runner, platform_machine=platform_machine)
+        resolve_prepared_prime_development(
+            repo, scenarios[0], runner=runner, platform_machine=platform_machine
+        )
     except Exception:
         _invalidate_receipt(root)
         if emit:
