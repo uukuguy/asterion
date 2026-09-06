@@ -23,6 +23,7 @@ from asterion.applications.prime_agent.restricted_worker import (
 from asterion.applications.prime_agent.preflight import prime_preflight
 from asterion.applications.prime_agent.product import create_prime_product
 from asterion.applications.prime_agent.source_lock import PrimeSourceLock
+from asterion.applications.prime_agent.runtime_binding import prime_runtime_binding
 
 
 class ArcAgi3WorkerFactory(Protocol):
@@ -137,11 +138,13 @@ def create_provider() -> InstalledApplicationProvider:
                 application_id="prime.recursive-workflow",
                 version="1.0.0",
                 assembly_paths=(
-                    root / "applications/prime_agent/assemblies/prime-recursive-workflow.json",
+                    root
+                    / "applications/prime_agent/assemblies/prime-recursive-workflow.json",
                 ),
                 capability_packages=(CapabilityPackageRef("prime-agent", "1.0.0"),),
                 runtime_ids=("prime.agent",),
             ),
         ),
         product=create_prime_product(),
+        runtime_factory_bindings=(prime_runtime_binding(),),
     )

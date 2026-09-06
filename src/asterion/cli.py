@@ -135,9 +135,7 @@ def main(
             from asterion.client.cli import run_client_command
 
             return asyncio.run(
-                run_client_command(
-                    args, client_factory=client_factory, stdout=stdout
-                )
+                run_client_command(args, client_factory=client_factory, stdout=stdout)
             )
         if args.command == "list":
             if args.provider is not None:
@@ -263,7 +261,9 @@ async def _run(
     stdout: TextIO,
     capability_packages: tuple[InstalledCapabilityPackage, ...] = (),
 ) -> int:
-    metadata_provider = load_application_provider(args.provider, entry_points=entry_points)
+    metadata_provider = load_application_provider(
+        args.provider, entry_points=entry_points
+    )
     provider = resolve_installed_provider(
         metadata_provider,
         runtime_factories=registry,
@@ -303,7 +303,7 @@ async def _run(
     assembly_path = assembly.path
     runtime_options = _runtime_options(args.runtime_option)
     host_options = parse_host_service_options(args.host_option)
-    runtime_binding = registry.select(runtime_id)
+    runtime_binding = assembly.runtime_binding
     plan = assembly.plan
     operator_config = _operator_executor_config(args, plan.host_capabilities)
     managed_services: Mapping[str, AbstractAsyncContextManager[object]] = (
@@ -368,7 +368,9 @@ async def _run(
                 observed_runtime.records + observed_runtime.failed_attempts,
                 pathlight_traces=() if trace is None else (trace,),
             )
-    stdout.write(json.dumps(project_public_value(result.__dict__), sort_keys=True) + "\n")
+    stdout.write(
+        json.dumps(project_public_value(result.__dict__), sort_keys=True) + "\n"
+    )
     return 0
 
 
@@ -615,9 +617,7 @@ def _render_verification(result: VerificationResult, stdout: TextIO) -> None:
             stdout.write("  artifacts: " + ", ".join(check.artifact_refs) + "\n")
         if check.unbound_resources:
             stdout.write(
-                "  unbound resources: "
-                + ", ".join(check.unbound_resources)
-                + "\n"
+                "  unbound resources: " + ", ".join(check.unbound_resources) + "\n"
             )
     stdout.write(f"Overall: {result.status}\n")
     stdout.write(

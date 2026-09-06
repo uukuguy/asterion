@@ -108,7 +108,7 @@ class ApplicationActionExecutor:
         self._plan = plan
         self._providers = _index_providers(providers)
         self._runtime_bindings = _snapshot_runtime_bindings(
-            plan, runtime_factories
+            plan, runtime_factories, self._providers
         )
         self._runtime_options = _freeze_runtime_options(plan, runtime_options)
         self._content = content
@@ -151,7 +151,9 @@ class ApplicationActionExecutor:
                     "uncertain", "child-progress-unknown", None
                 ) from None
             if type(receipt) is not ActionExecutionReceipt:
-                raise ActionExecutionFailure("uncertain", "child-progress-unknown", None)
+                raise ActionExecutionFailure(
+                    "uncertain", "child-progress-unknown", None
+                )
             return receipt
         _raise_if_cancelled(proposal, signal)
         target, identity, entry = self._resolve_entry(proposal)
@@ -245,7 +247,9 @@ class ApplicationActionExecutor:
 
     def _resolve_entry(
         self, proposal: ControlEvent
-    ) -> tuple[Mapping[str, object], ApplicationIdentity, ApplicationPortfolioEntry | None]:
+    ) -> tuple[
+        Mapping[str, object], ApplicationIdentity, ApplicationPortfolioEntry | None
+    ]:
         try:
             if not isinstance(proposal, ControlEvent):
                 raise TypeError
@@ -352,8 +356,7 @@ def _provider_contains_entry(
     for application in provider.applications:
         if application is entry.application:
             return any(
-                assembly is entry.assembly
-                for assembly in application.assemblies
+                assembly is entry.assembly for assembly in application.assemblies
             )
     return False
 
@@ -361,19 +364,56 @@ def _provider_contains_entry(
 def _snapshot_runtime_bindings(
     plan: AgentSystemPlan,
     runtime_factories: RuntimeFactoryRegistry,
+    providers: Mapping[str, InstalledApplicationProvider],
 ) -> Mapping[ApplicationIdentity, RuntimeFactoryBinding]:
+    try:
+        runtime_factories.extend(
+            binding
+            for provider in providers.values()
+            for binding in provider.runtime_factory_bindings
+        )
+    except RuntimeFactoryError:
+        raise ValueError("application runtime factories are invalid") from None
     values: dict[ApplicationIdentity, RuntimeFactoryBinding] = {}
     for identity, entry in plan.portfolio_by_identity.items():
+        provider = providers.get(entry.provider_id)
+        if provider is None:
+            raise ValueError("application runtime factories are invalid")
         try:
-            binding = runtime_factories.select(entry.runtime_id)
+            provider_bindings = RuntimeFactoryRegistry(
+                provider.runtime_factory_bindings
+            )
         except RuntimeFactoryError:
             raise ValueError("application runtime factories are invalid") from None
-        if (
-            binding.runtime_id != entry.runtime_id
-            or any(
-                capability not in binding.capabilities
-                for capability in entry.assembly.plan.runtime_capabilities
-            )
+        try:
+            provider_binding = provider_bindings.select(entry.runtime_id)
+        except RuntimeFactoryError:
+            provider_binding = None
+
+        retained_binding = entry.assembly.runtime_binding
+        if retained_binding is None:
+            if provider_binding is not None:
+                raise ValueError("application runtime factories are invalid")
+            try:
+                binding = runtime_factories.select(entry.runtime_id)
+            except RuntimeFactoryError:
+                raise ValueError("application runtime factories are invalid") from None
+        elif provider_binding is not None:
+            if provider_binding != retained_binding:
+                raise ValueError("application runtime factories are invalid")
+            binding = retained_binding
+        else:
+            try:
+                base_binding = runtime_factories.select(entry.runtime_id)
+            except RuntimeFactoryError:
+                raise ValueError("application runtime factories are invalid") from None
+            if base_binding != retained_binding:
+                raise ValueError("application runtime factories are invalid")
+            binding = retained_binding
+
+        if binding.runtime_id != entry.runtime_id or any(
+            capability not in binding.capabilities
+            for capability in entry.assembly.plan.runtime_capabilities
         ):
             raise ValueError("application runtime factories are invalid")
         values[identity] = binding
@@ -434,7 +474,9 @@ def _budget(proposal: ControlEvent) -> BudgetRequest:
 def _missing_host_service(
     assembly: InstalledAssembly, host_services: Mapping[str, object]
 ) -> bool:
-    return any(service not in host_services for service in assembly.plan.host_capabilities)
+    return any(
+        service not in host_services for service in assembly.plan.host_capabilities
+    )
 
 
 def _resolve_input(content: PrivateContentResolver, proposal: ControlEvent) -> str:
@@ -474,10 +516,10 @@ def _usage_from_events(
             if set(event) != {"type", "payload"}:
                 raise TypeError
             payload = event["payload"]
-            if (
-                not isinstance(payload, Mapping)
-                or set(payload) != {"input_tokens", "output_tokens"}
-            ):
+            if not isinstance(payload, Mapping) or set(payload) != {
+                "input_tokens",
+                "output_tokens",
+            }:
                 raise TypeError
             input_tokens = _nonnegative_int(payload["input_tokens"])
             output_tokens = _nonnegative_int(payload["output_tokens"])
@@ -498,9 +540,7 @@ def _usage_from_events(
         or usage.aggregate_tokens > reservation.aggregate_tokens
         or usage.cost_micros > reservation.cost_micros
     ):
-        raise ActionExecutionFailure(
-            "uncertain", "usage-reservation-exceeded", None
-        )
+        raise ActionExecutionFailure("uncertain", "usage-reservation-exceeded", None)
     return usage
 
 
@@ -524,9 +564,7 @@ def _artifact_projection(
             "uncertain", "artifact-publication-invalid", None
         ) from None
     if not is_sorted_unique_scalar_strings(list(artifact_id_projection)):
-        raise ActionExecutionFailure(
-            "uncertain", "artifact-publication-invalid", None
-        )
+        raise ActionExecutionFailure("uncertain", "artifact-publication-invalid", None)
     return artifact_id_projection, media_type_projection
 
 

@@ -12,6 +12,7 @@ from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.prime_agent.provider import create_prime_agent_package
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
+from asterion.applications.prime_agent.runtime_binding import prime_runtime_binding
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 from asterion.runtimes.prime_agent_host import (
     PrimeSmallVerificationRequest,
@@ -110,7 +111,7 @@ class TestPrimeP5InstalledRoute(unittest.TestCase):
                 scope="p5-development",
             )
         )
-        runtime = default_runtime_factory_registry().select("prime.agent").factory(
+        runtime = prime_runtime_binding().factory(
             RuntimeFactoryContext(
                 provider_id="prime-agent",
                 application_id="prime.bounded-autonomy",
@@ -149,7 +150,7 @@ class TestPrimeP5InstalledRoute(unittest.TestCase):
         )
 
     def test_p5_runtime_rejects_wrong_scope_and_host(self) -> None:
-        binding = default_runtime_factory_registry().select("prime.agent")
+        binding = prime_runtime_binding()
         service = _VerificationService(
             PrimeSmallVerificationResult(
                 run_id="prime-p5-scope-mismatch",
@@ -198,7 +199,9 @@ class TestPrimeP5InstalledRoute(unittest.TestCase):
                     runtime_id="prime.agent",
                     assembly_path=__file__,
                     options={},
-                    host_services={"prime.long-session-continuity-development": service},
+                    host_services={
+                        "prime.long-session-continuity-development": service
+                    },
                 )
             )
 

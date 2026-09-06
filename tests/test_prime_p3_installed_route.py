@@ -12,6 +12,7 @@ from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.prime_agent.provider import create_prime_agent_package
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
+from asterion.applications.prime_agent.runtime_binding import prime_runtime_binding
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 from asterion.runtimes.prime_agent_host import (
     PrimeSmallVerificationRequest,
@@ -68,9 +69,7 @@ class TestPrimeP3InstalledRoute(unittest.TestCase):
             )
 
         async def open_service() -> None:
-            registry = HostServiceFactoryRegistry(
-                (_HostEntryPoint(create_binding),)
-            )
+            registry = HostServiceFactoryRegistry((_HostEntryPoint(create_binding),))
             async with registry.open(
                 provider_id="prime-agent",
                 application_id="prime.recursive-workflow",
@@ -78,7 +77,9 @@ class TestPrimeP3InstalledRoute(unittest.TestCase):
                 capability_ids=("prime.recursive-workflow-development",),
                 options={},
             ) as services:
-                self.assertEqual(set(services), {"prime.recursive-workflow-development"})
+                self.assertEqual(
+                    set(services), {"prime.recursive-workflow-development"}
+                )
 
         asyncio.run(open_service())
         self.assertEqual(len(observed), 1)
@@ -118,7 +119,7 @@ class TestPrimeP3InstalledRoute(unittest.TestCase):
                 scope="p3-development",
             )
         )
-        runtime = default_runtime_factory_registry().select("prime.agent").factory(
+        runtime = prime_runtime_binding().factory(
             RuntimeFactoryContext(
                 provider_id="prime-agent",
                 application_id="prime.recursive-workflow",
@@ -157,7 +158,7 @@ class TestPrimeP3InstalledRoute(unittest.TestCase):
         )
 
     def test_p3_runtime_rejects_wrong_scope_and_host(self) -> None:
-        binding = default_runtime_factory_registry().select("prime.agent")
+        binding = prime_runtime_binding()
         service = _VerificationService(
             PrimeSmallVerificationResult(
                 run_id="prime-p3-scope-mismatch",
@@ -206,7 +207,9 @@ class TestPrimeP3InstalledRoute(unittest.TestCase):
                     runtime_id="prime.agent",
                     assembly_path=__file__,
                     options={},
-                    host_services={"prime.programmatic-long-context-development": service},
+                    host_services={
+                        "prime.programmatic-long-context-development": service
+                    },
                 )
             )
 

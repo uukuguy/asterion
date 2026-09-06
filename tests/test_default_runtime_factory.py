@@ -15,7 +15,9 @@ from asterion.pathlight import NoopPathlightRecorder
 from asterion.runtime.defaults import _claude_provider_environment
 from asterion.runtime.host import RunRequest
 from asterion.runtime.working_directory import ProcessWorkingDirectory
-from asterion.capabilities.dci.implementation.services import create_local_corpus_service_factory
+from asterion.capabilities.dci.implementation.services import (
+    create_local_corpus_service_factory,
+)
 from asterion.services.registry import HostServiceFactoryContext
 
 
@@ -33,6 +35,18 @@ class DirectoryAuthority:
 
 
 class DefaultRuntimeFactoryTests(unittest.TestCase):
+    def test_default_registry_excludes_prime_and_its_source_has_no_prime_import(
+        self,
+    ) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+
+        with self.assertRaises(RuntimeFactoryError):
+            default_runtime_factory_registry().select("prime.agent")
+        source = (
+            Path(__file__).parents[1] / "src/asterion/runtime/defaults.py"
+        ).read_text()
+        self.assertNotIn("prime_agent", source)
+
     def test_factory_context_defaults_to_noop_pathlight(self) -> None:
         context = RuntimeFactoryContext(
             provider_id="provider",
@@ -91,11 +105,15 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     },
                     clear=True,
                 ),
-                patch("asterion.runtime.defaults.shutil.which", return_value="/tool/claude"),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
             ):
-                runtime = default_runtime_factory_registry().select(
-                    "claude-code.reference"
-                ).factory(
+                runtime = (
+                    default_runtime_factory_registry()
+                    .select("claude-code.reference")
+                    .factory(
                     self._context(
                         root,
                         model="claude-sonnet-4-6",
@@ -103,6 +121,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                         thinking_level="medium",
                         context_profile="level3",
                     )
+                )
                 )
         self.assertEqual(runtime._agent_model, "claude-sonnet-4-6")
         self.assertEqual(runtime._tools, ("Read", "Grep"))
@@ -126,7 +145,9 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                 model="MiniMax-M3",
             )
 
-    def test_claude_factory_is_exact_and_constructs_without_starting_a_process(self) -> None:
+    def test_claude_factory_is_exact_and_constructs_without_starting_a_process(
+        self,
+    ) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -145,14 +166,15 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     },
                     clear=True,
                 ),
-                patch("asterion.runtime.defaults.shutil.which", return_value="/tool/claude"),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
             ):
                 binding = default_runtime_factory_registry().select(
                     "claude-code.reference"
                 )
-                runtime = binding.factory(
-                    self._context(root)
-                )
+                runtime = binding.factory(self._context(root))
 
         self.assertEqual(
             binding.capabilities,
@@ -163,7 +185,9 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
         self.assertEqual(runtime._default_timeout_seconds, 3600.0)
         self.assertEqual(runtime._max_turns, 100)
 
-    def test_claude_factory_derives_minimax_environment_from_shared_config(self) -> None:
+    def test_claude_factory_derives_minimax_environment_from_shared_config(
+        self,
+    ) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
 
         cases = (
@@ -181,7 +205,10 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
             ),
         )
         for provider, key_name, secret, expected_base_url in cases:
-            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                self.subTest(provider=provider),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
                 root = Path(temp_dir)
                 environment = {
                     "ASTERION_CLAUDE_EXECUTABLE": "claude",
@@ -250,7 +277,10 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
             }
             with (
                 patch.dict(os.environ, environment, clear=True),
-                patch("asterion.runtime.defaults.shutil.which", return_value="/tool/claude"),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
             ):
                 binding = default_runtime_factory_registry().select(
                     "claude-code.reference"
@@ -278,7 +308,10 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
             }
             with (
                 patch.dict(os.environ, environment, clear=True),
-                patch("asterion.runtime.defaults.shutil.which", return_value="/tool/claude"),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
                 patch("asterion.runtime.defaults.ClaudeCodeRuntimeClient") as client,
             ):
                 binding = default_runtime_factory_registry().select(
@@ -307,7 +340,10 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
             }
             with (
                 patch.dict(os.environ, environment, clear=True),
-                patch("asterion.runtime.defaults.shutil.which", return_value="/tool/claude"),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
             ):
                 binding = default_runtime_factory_registry().select(
                     "claude-code.reference"
@@ -315,7 +351,9 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeFactoryError, "unsupported"):
                     binding.factory(self._context(root))
 
-    def test_claude_factory_rejects_invalid_shared_timeout_without_secret_echo(self) -> None:
+    def test_claude_factory_rejects_invalid_shared_timeout_without_secret_echo(
+        self,
+    ) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
         from asterion.runtime.factory import RuntimeFactoryError
 
@@ -331,7 +369,10 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
             }
             with (
                 patch.dict(os.environ, environment, clear=True),
-                patch("asterion.runtime.defaults.shutil.which", return_value="/tool/claude"),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
             ):
                 binding = default_runtime_factory_registry().select(
                     "claude-code.reference"
@@ -357,7 +398,10 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
             }
             with (
                 patch.dict(os.environ, environment, clear=True),
-                patch("asterion.runtime.defaults.shutil.which", return_value="/tool/claude"),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
             ):
                 binding = default_runtime_factory_registry().select(
                     "claude-code.reference"
@@ -444,9 +488,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     )
                 )
 
-        self.assertEqual(
-            binding.capabilities, ("filesystem.read", "pi.tool.grep")
-        )
+        self.assertEqual(binding.capabilities, ("filesystem.read", "pi.tool.grep"))
         self.assertEqual(runtime.manifest.runtime_id, "pi.reference")
         self.assertEqual(runtime.manifest.capabilities, binding.capabilities)
         self.assertEqual(runtime._cwd, corpus.resolve())
@@ -485,13 +527,13 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     "max_turns": "4",
                     "tools": "read,grep",
                 },
-                host_services={
-                    "corpus.local-root": DirectoryAuthority(corpus)
-                },
+                host_services={"corpus.local-root": DirectoryAuthority(corpus)},
             )
-            runtime = default_runtime_factory_registry().select(
-                "pi.reference"
-            ).factory(context)
+            runtime = (
+                default_runtime_factory_registry()
+                .select("pi.reference")
+                .factory(context)
+            )
 
         self.assertIsNone(runtime._cwd)
         self.assertIs(
@@ -660,9 +702,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     return_value="/tool/claude",
                 ),
             ):
-                direct_claude = registry.select(
-                    "claude-code.reference"
-                ).factory(
+                direct_claude = registry.select("claude-code.reference").factory(
                     RuntimeFactoryContext(
                         provider_id="provider",
                         application_id="application",
@@ -858,11 +898,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                         separators=(",", ":"),
                     )
                 },
-                {
-                    "command": json.dumps(
-                        [str(executable), "-c", "pass"]
-                    )
-                },
+                {"command": json.dumps([str(executable), "-c", "pass"])},
                 {"environment": '{"A":"1","A":"2"}'},
                 {"environment": '{"B":"2", "A":"1"}'},
             )
@@ -939,9 +975,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
         )
 
 
-class DefaultRuntimeFactoryProcessAuthorityTests(
-    unittest.IsolatedAsyncioTestCase
-):
+class DefaultRuntimeFactoryProcessAuthorityTests(unittest.IsolatedAsyncioTestCase):
     async def test_pi_rejects_direct_cwd_when_real_corpus_is_injected(
         self,
     ) -> None:
@@ -964,14 +998,10 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
                 service_context
             ) as service:
                 with (
-                    patch(
-                        "asterion.runtime.defaults.PiRuntimeClient"
-                    ) as client,
+                    patch("asterion.runtime.defaults.PiRuntimeClient") as client,
                     self.assertRaises(RuntimeFactoryError),
                 ):
-                    default_runtime_factory_registry().select(
-                        "pi.reference"
-                    ).factory(
+                    default_runtime_factory_registry().select("pi.reference").factory(
                         RuntimeFactoryContext(
                             provider_id="dci-agent-lite",
                             application_id="dci.research-capability",
@@ -1041,9 +1071,10 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
             async with create_local_corpus_service_factory().factory(
                 context
             ) as service:
-                runtime = default_runtime_factory_registry().select(
-                    "pi.reference"
-                ).factory(
+                runtime = (
+                    default_runtime_factory_registry()
+                    .select("pi.reference")
+                    .factory(
                     RuntimeFactoryContext(
                         provider_id="dci-agent-lite",
                         application_id="dci.research-capability",
@@ -1068,6 +1099,7 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
                         },
                         host_services={"corpus.local-root": service},
                     )
+                )
                 )
                 original_start = pi_runtime.asyncio.create_subprocess_exec
                 swapped = False
@@ -1156,9 +1188,10 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
                     {"ASTERION_CLAUDE_EXECUTABLE": str(executable)},
                     clear=True,
                 ):
-                    runtime = default_runtime_factory_registry().select(
-                        "claude-code.reference"
-                    ).factory(
+                    runtime = (
+                        default_runtime_factory_registry()
+                        .select("claude-code.reference")
+                        .factory(
                         RuntimeFactoryContext(
                             provider_id="dci-agent-lite",
                             application_id="dci.research-capability",
@@ -1176,6 +1209,7 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
                             },
                             host_services={"corpus.local-root": service},
                         )
+                    )
                     )
                 original_popen = claude_runtime.subprocess.Popen
                 swapped = False

@@ -12,6 +12,7 @@ from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.prime_agent.provider import create_prime_agent_package
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
+from asterion.applications.prime_agent.runtime_binding import prime_runtime_binding
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 from asterion.runtimes.prime_agent_host import (
     PrimeSmallVerificationRequest,
@@ -70,7 +71,9 @@ class TestPrimeP6InstalledRoute(unittest.TestCase):
                 capability_ids=("prime.continual-improvement-development",),
                 options={},
             ) as services:
-                self.assertEqual(set(services), {"prime.continual-improvement-development"})
+                self.assertEqual(
+                    set(services), {"prime.continual-improvement-development"}
+                )
 
         asyncio.run(open_service())
         self.assertEqual(len(observed), 1)
@@ -78,7 +81,9 @@ class TestPrimeP6InstalledRoute(unittest.TestCase):
         self.assertEqual(context.provider_id, "prime-agent")
         self.assertEqual(context.application_id, "prime.continual-improvement")
         self.assertEqual(context.application_version, "1.0.0")
-        self.assertEqual(context.capability_id, "prime.continual-improvement-development")
+        self.assertEqual(
+            context.capability_id, "prime.continual-improvement-development"
+        )
 
     def test_p6_resolves_and_projects_its_safe_trace(self) -> None:
         package = create_prime_agent_package()
@@ -110,7 +115,7 @@ class TestPrimeP6InstalledRoute(unittest.TestCase):
                 scope="p6-development",
             )
         )
-        runtime = default_runtime_factory_registry().select("prime.agent").factory(
+        runtime = prime_runtime_binding().factory(
             RuntimeFactoryContext(
                 provider_id="prime-agent",
                 application_id="prime.continual-improvement",
@@ -149,7 +154,7 @@ class TestPrimeP6InstalledRoute(unittest.TestCase):
         )
 
     def test_p6_runtime_rejects_wrong_scope_and_host(self) -> None:
-        binding = default_runtime_factory_registry().select("prime.agent")
+        binding = prime_runtime_binding()
         service = _VerificationService(
             PrimeSmallVerificationResult(
                 run_id="prime-p6-scope-mismatch",

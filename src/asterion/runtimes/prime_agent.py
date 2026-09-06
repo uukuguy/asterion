@@ -38,100 +38,12 @@ class PrimeVerificationProfile:
     media_type: str
 
     def __post_init__(self) -> None:
-        if (
-            self.scope,
-            self.artifact_id,
-            self.kind,
-            self.media_type,
-        ) not in {
-            (
-                "p1-b-development",
-                "prime.p1-b-development.trace",
-                "p1-b-development",
-                "application/vnd.asterion.prime.p1-development-trace+json",
-            ),
-            (
-                "p2-development",
-                "prime.p2-development.trace",
-                "p2-development",
-                "application/vnd.asterion.prime.p2-development-trace+json",
-            ),
-            (
-                "p3-development",
-                "prime.p3-development.trace",
-                "p3-development",
-                "application/vnd.asterion.prime.p3-development-trace+json",
-            ),
-            (
-                "p4-development",
-                "prime.p4-development.trace",
-                "p4-development",
-                "application/vnd.asterion.prime.p4-development-trace+json",
-            ),
-            (
-                "p5-development",
-                "prime.p5-development.trace",
-                "p5-development",
-                "application/vnd.asterion.prime.p5-development-trace+json",
-            ),
-            (
-                "p6-development",
-                "prime.p6-development.trace",
-                "p6-development",
-                "application/vnd.asterion.prime.p6-development-trace+json",
-            ),
-            (
-                "p7-development",
-                "prime.p7-development.trace",
-                "p7-development",
-                "application/vnd.asterion.prime.p7-development-trace+json",
-            ),
-        }:
+        if not all(
+            isinstance(value, str) and value
+            for value in (self.scope, self.artifact_id, self.kind, self.media_type)
+        ):
             raise PrimeAgentRuntimeError("Prime runtime profile is invalid")
 
-
-PRIME_P1_PROFILE = PrimeVerificationProfile(
-    scope="p1-b-development",
-    artifact_id="prime.p1-b-development.trace",
-    kind="p1-b-development",
-    media_type="application/vnd.asterion.prime.p1-development-trace+json",
-)
-PRIME_P2_PROFILE = PrimeVerificationProfile(
-    scope="p2-development",
-    artifact_id="prime.p2-development.trace",
-    kind="p2-development",
-    media_type="application/vnd.asterion.prime.p2-development-trace+json",
-)
-PRIME_P3_PROFILE = PrimeVerificationProfile(
-    scope="p3-development",
-    artifact_id="prime.p3-development.trace",
-    kind="p3-development",
-    media_type="application/vnd.asterion.prime.p3-development-trace+json",
-)
-PRIME_P4_PROFILE = PrimeVerificationProfile(
-    scope="p4-development",
-    artifact_id="prime.p4-development.trace",
-    kind="p4-development",
-    media_type="application/vnd.asterion.prime.p4-development-trace+json",
-)
-PRIME_P5_PROFILE = PrimeVerificationProfile(
-    scope="p5-development",
-    artifact_id="prime.p5-development.trace",
-    kind="p5-development",
-    media_type="application/vnd.asterion.prime.p5-development-trace+json",
-)
-PRIME_P6_PROFILE = PrimeVerificationProfile(
-    scope="p6-development",
-    artifact_id="prime.p6-development.trace",
-    kind="p6-development",
-    media_type="application/vnd.asterion.prime.p6-development-trace+json",
-)
-PRIME_P7_PROFILE = PrimeVerificationProfile(
-    scope="p7-development",
-    artifact_id="prime.p7-development.trace",
-    kind="p7-development",
-    media_type="application/vnd.asterion.prime.p7-development-trace+json",
-)
 
 class PrimeAgentRuntimeClient(AgentRuntimeClient):
     """Project one host-owned fixed verification into runtime protocol frames."""
@@ -140,18 +52,10 @@ class PrimeAgentRuntimeClient(AgentRuntimeClient):
         self,
         service: PrimeSmallVerificationService,
         *,
-        profile: PrimeVerificationProfile = PRIME_P1_PROFILE,
+        profile: PrimeVerificationProfile,
     ) -> None:
         self._service = service
-        if profile not in (
-            PRIME_P1_PROFILE,
-            PRIME_P2_PROFILE,
-            PRIME_P3_PROFILE,
-            PRIME_P4_PROFILE,
-            PRIME_P5_PROFILE,
-            PRIME_P6_PROFILE,
-            PRIME_P7_PROFILE,
-        ):
+        if type(profile) is not PrimeVerificationProfile:
             raise PrimeAgentRuntimeError("Prime runtime profile is invalid")
         self._profile = profile
 
@@ -199,7 +103,10 @@ class PrimeAgentRuntimeClient(AgentRuntimeClient):
                 run_id=request.run_id,
                 sequence=2,
                 type="run.failed",
-                payload={"code": "verification-failed", "message": "Prime verification failed"},
+                payload={
+                    "code": "verification-failed",
+                    "message": "Prime verification failed",
+                },
             )
             return
         if (
@@ -217,7 +124,10 @@ class PrimeAgentRuntimeClient(AgentRuntimeClient):
                 run_id=request.run_id,
                 sequence=2,
                 type="run.failed",
-                payload={"code": "verification-failed", "message": "Prime verification failed"},
+                payload={
+                    "code": "verification-failed",
+                    "message": "Prime verification failed",
+                },
             )
             return
         yield RunEvent(
@@ -266,13 +176,6 @@ def _cancelled_events(run_id: str) -> tuple[RunEvent, RunEvent]:
 
 __all__ = (
     "PRIME_IPYTHON_CAPABILITY",
-    "PRIME_P1_PROFILE",
-    "PRIME_P2_PROFILE",
-    "PRIME_P3_PROFILE",
-    "PRIME_P4_PROFILE",
-    "PRIME_P5_PROFILE",
-    "PRIME_P6_PROFILE",
-    "PRIME_P7_PROFILE",
     "PRIME_RUNTIME_ID",
     "PrimeAgentRuntimeClient",
     "PrimeVerificationProfile",

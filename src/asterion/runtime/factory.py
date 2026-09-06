@@ -28,9 +28,7 @@ class RuntimeFactoryContext:
     pathlight: PathlightRecorder = NOOP_PATHLIGHT_RECORDER
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "options", RedactedImmutableMapping(self.options)
-        )
+        object.__setattr__(self, "options", RedactedImmutableMapping(self.options))
         object.__setattr__(
             self,
             "host_services",
@@ -85,3 +83,16 @@ class RuntimeFactoryRegistry:
             return self._bindings[runtime_id]
         except KeyError:
             raise RuntimeFactoryError("runtime factory is unavailable") from None
+
+    def extend(
+        self, bindings: Iterable[RuntimeFactoryBinding]
+    ) -> RuntimeFactoryRegistry:
+        """Return an immutable registry with non-overriding extra bindings."""
+
+        values = tuple(bindings)
+        extension = RuntimeFactoryRegistry(values)
+        if any(runtime_id in self._bindings for runtime_id in extension._bindings):
+            raise RuntimeFactoryError("runtime factory binding is invalid")
+        return RuntimeFactoryRegistry(
+            (*self._bindings.values(), *extension._bindings.values())
+        )

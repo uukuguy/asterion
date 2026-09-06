@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from asterion.assembly.protocol import (
@@ -33,7 +33,11 @@ from asterion.applications.product import (
     InstalledCapabilityProduct,
     validate_capability_product,
 )
-from asterion.runtime.factory import RuntimeFactoryError, RuntimeFactoryRegistry
+from asterion.runtime.factory import (
+    RuntimeFactoryBinding,
+    RuntimeFactoryError,
+    RuntimeFactoryRegistry,
+)
 
 
 APPLICATION_PROVIDER_PROTOCOL = "asterion.application-provider/v1"
@@ -52,6 +56,7 @@ class InstalledAssembly:
     runtime_id: str
     path: Path
     plan: AssemblyPlan
+    runtime_binding: RuntimeFactoryBinding | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -99,6 +104,9 @@ class InstalledApplicationProvider:
     resource_root: Path
     applications: tuple[InstalledApplication, ...]
     product: InstalledCapabilityProduct | None = None
+    runtime_factory_bindings: tuple[RuntimeFactoryBinding, ...] = field(
+        default=(), repr=False
+    )
 
 
 def validate_installed_provider(
@@ -142,6 +150,7 @@ def validate_installed_provider_metadata(
             raise ApplicationProviderError("installed application identity is invalid")
         identities.add(identity)
         applications.append(_validate_application_metadata(application, root=root))
+    bindings = _runtime_factory_bindings(value.runtime_factory_bindings, applications)
     product = None
     if value.product is not None:
         try:
@@ -156,6 +165,7 @@ def validate_installed_provider_metadata(
         resource_root=root,
         applications=tuple(applications),
         product=product,
+        runtime_factory_bindings=bindings,
     )
 
 
@@ -200,11 +210,19 @@ def compose_installed_provider(
     metadata = validate_installed_provider_metadata(
         provider, selected_id=provider.provider_id
     )
+    try:
+        effective_factories = runtime_factories.extend(
+            metadata.runtime_factory_bindings
+        )
+    except RuntimeFactoryError:
+        raise ApplicationProviderError(
+            "installed application runtime bindings are invalid"
+        ) from None
     package_map = _installed_package_map(installed_packages)
     applications = tuple(
         _compose_application(
             application,
-            runtime_factories=runtime_factories,
+            runtime_factories=effective_factories,
             installed_packages=package_map,
         )
         for application in metadata.applications
@@ -215,6 +233,7 @@ def compose_installed_provider(
         resource_root=metadata.resource_root,
         applications=applications,
         product=metadata.product,
+        runtime_factory_bindings=metadata.runtime_factory_bindings,
     )
 
 
@@ -301,9 +320,7 @@ def _compose_application(
         catalog = discover_capabilities(catalog_roots)
         assemblies: list[InstalledAssembly] = []
         for assembly_path in application.assembly_paths:
-            assembly = _read_assembly_snapshot(
-                assembly_path, application=application
-            )
+            assembly = _read_assembly_snapshot(assembly_path, application=application)
             runtime_id = assembly["runtime_id"]
             assert isinstance(runtime_id, str)
             runtime_binding = runtime_factories.select(runtime_id)
@@ -313,7 +330,10 @@ def _compose_application(
                 runtime_manifest=runtime_binding.manifest.to_mapping(),
             )
             package_capabilities = set().union(
-                *(_package_capabilities(package, catalog=catalog) for package in packages)
+                *(
+                    _package_capabilities(package, catalog=catalog)
+                    for package in packages
+                )
             )
             if not set(plan.capability_refs).issubset(package_capabilities):
                 raise ApplicationProviderError(
@@ -329,6 +349,7 @@ def _compose_application(
                     runtime_id=runtime_id,
                     path=assembly_path,
                     plan=plan,
+                    runtime_binding=runtime_binding,
                 )
             )
     except (
@@ -393,7 +414,9 @@ def _package_ref_tuple(
             "installed application capability packages are invalid"
         ) from None
     if (
-        not all(type(package_ref) is CapabilityPackageRef for package_ref in package_refs)
+        not all(
+            type(package_ref) is CapabilityPackageRef for package_ref in package_refs
+        )
         or tuple(sorted(package_refs)) != package_refs
         or len(set(package_refs)) != len(package_refs)
     ):
@@ -498,3 +521,30 @@ def _resource_beneath(value: Path, *, root: Path, kind: str) -> Path:
 
 def _identifier(value: object) -> bool:
     return isinstance(value, str) and IDENTIFIER.fullmatch(value) is not None
+
+
+def _runtime_factory_bindings(
+    values: object,
+    applications: list[InstalledApplication],
+) -> tuple[RuntimeFactoryBinding, ...]:
+    if not isinstance(values, tuple):
+        raise ApplicationProviderError(
+            "installed application runtime bindings are invalid"
+        )
+    try:
+        bindings = tuple(values)
+        RuntimeFactoryRegistry(bindings)
+    except (TypeError, ValueError):
+        raise ApplicationProviderError(
+            "installed application runtime bindings are invalid"
+        ) from None
+    declared = {
+        runtime_id
+        for application in applications
+        for runtime_id in application.runtime_ids
+    }
+    if any(binding.runtime_id not in declared for binding in bindings):
+        raise ApplicationProviderError(
+            "installed application runtime bindings are invalid"
+        )
+    return bindings

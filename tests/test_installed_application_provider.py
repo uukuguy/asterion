@@ -16,7 +16,10 @@ from asterion.applications.provider import (
     validate_installed_provider,
 )
 from asterion.applications.product import InstalledCapabilityProduct
-from asterion.capability_packages import CapabilityPackageRef, InstalledCapabilityPackage
+from asterion.capability_packages import (
+    CapabilityPackageRef,
+    InstalledCapabilityPackage,
+)
 from asterion.capabilities.catalog import CapabilityRef, discover_capabilities
 from asterion.capabilities.execution import (
     CapabilityExecutionResult,
@@ -27,7 +30,9 @@ from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegist
 
 
 class FixtureImplementation:
-    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
+    async def execute(
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
         del invocation
         return CapabilityExecutionResult(events=(), artifacts=())
 
@@ -153,7 +158,9 @@ def example_package(
     catalog: Path,
     *,
     implementations: tuple[
-        tuple[CapabilityRef, FixtureImplementation | NonCallableImplementation | object],
+        tuple[
+            CapabilityRef, FixtureImplementation | NonCallableImplementation | object
+        ],
         ...,
     ] = (
         (
@@ -184,6 +191,67 @@ def package_set(
 
 
 class InstalledApplicationProviderTests(unittest.TestCase):
+    def test_provider_binding_extends_selected_provider_and_is_retained(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            value = provider(Path(temp_dir))
+            binding = RuntimeFactoryBinding(
+                "example.provider", (), lambda context: None
+            )
+            application = value.applications[0]
+            assembly = write_assembly(Path(temp_dir), runtime_id="example.provider")
+            selected = InstalledApplicationProvider(
+                protocol=value.protocol,
+                provider_id=value.provider_id,
+                resource_root=value.resource_root,
+                applications=(
+                    InstalledApplication(
+                        application.application_id,
+                        application.version,
+                        (assembly,),
+                        application.capability_packages,
+                        ("example.provider",),
+                    ),
+                ),
+                runtime_factory_bindings=(binding,),
+            )
+            composed = compose_installed_provider(
+                selected,
+                runtime_factories=runtime_factories("pi.reference"),
+                installed_packages=package_set(application),
+            )
+            retained = composed.applications[0].assemblies[0].runtime_binding
+            self.assertIs(retained, binding)
+            self.assertNotIn("<function", repr(composed))
+
+    def test_provider_runtime_binding_rejects_unused_and_registry_duplicates(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            value = provider(Path(temp_dir))
+            unused = RuntimeFactoryBinding("unused.runtime", (), lambda context: None)
+            invalid = InstalledApplicationProvider(
+                value.protocol,
+                value.provider_id,
+                value.resource_root,
+                value.applications,
+                runtime_factory_bindings=(unused,),
+            )
+            with self.assertRaises(ApplicationProviderError):
+                validate_installed_provider(invalid, selected_id=value.provider_id)
+            duplicate = RuntimeFactoryBinding("pi.reference", (), lambda context: None)
+            with self.assertRaises(ApplicationProviderError):
+                compose_installed_provider(
+                    InstalledApplicationProvider(
+                        value.protocol,
+                        value.provider_id,
+                        value.resource_root,
+                        value.applications,
+                        runtime_factory_bindings=(duplicate,),
+                    ),
+                    runtime_factories=runtime_factories("pi.reference"),
+                    installed_packages=package_set(value.applications[0]),
+                )
+
     def test_composition_is_independent_from_executable_bindings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             valid = provider(Path(temp_dir))
@@ -224,7 +292,9 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                     missing_binding,
                     runtime_factories=registry,
                     installed_packages=(
-                        example_package(application.catalog_roots[0], implementations=()),
+                        example_package(
+                            application.catalog_roots[0], implementations=()
+                        ),
                     ),
                 )
 
@@ -305,7 +375,10 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                         InstalledApplication(
                             application_id=application.application_id,
                             version=application.version,
-                            assembly_paths=(*application.assembly_paths, duplicate_path),
+                            assembly_paths=(
+                                *application.assembly_paths,
+                                duplicate_path,
+                            ),
                             capability_packages=application.capability_packages,
                             runtime_ids=("pi.reference",),
                         )
@@ -502,9 +575,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
             root = Path(temp_dir)
             raw = provider(root)
             packages = package_set(raw.applications[0])
-            metadata = validate_installed_provider(
-                raw, selected_id="example-app"
-            )
+            metadata = validate_installed_provider(raw, selected_id="example-app")
             assembly_path = metadata.applications[0].assembly_paths[0]
 
             def mutate_during_discovery(roots):
@@ -536,9 +607,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
             root = Path(temp_dir)
             valid = provider(root)
             application = valid.applications[0]
-            hostile_path = application.assembly_paths[0].with_name(
-                f"{sentinel}.json"
-            )
+            hostile_path = application.assembly_paths[0].with_name(f"{sentinel}.json")
             hostile_path.write_text('{"value":' + ("9" * 10000) + "}")
             invalid = InstalledApplicationProvider(
                 protocol=valid.protocol,

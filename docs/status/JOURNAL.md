@@ -2073,3 +2073,4 @@
 - 15:23 Defined the reviewed source preparation lifecycle to remove host-specific selection logic [04ca9d31]
 - 15:37 Unified exact source preparation and provider loading across hosts with authorization binding [96d046e8]
 - 15:38 Advanced the durable worklist to W1c after verified source lifecycle closure [f865cf59]
+- 15:45 Defined provider-owned runtime binding and separate control-plane boundaries for W1c [49a53212]

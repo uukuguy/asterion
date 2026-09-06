@@ -20,19 +20,6 @@ from asterion.runtime.factory import (
 from asterion.runtime.working_directory import ProcessDirectoryAuthority
 from asterion.runtimes.claude_code import ClaudeCodeRuntimeClient
 from asterion.runtimes.pi import PiRuntimeClient, prepare_pi_evidence_root
-from asterion.runtimes.prime_agent import (
-    PRIME_IPYTHON_CAPABILITY,
-    PRIME_P1_PROFILE,
-    PRIME_P2_PROFILE,
-    PRIME_P3_PROFILE,
-    PRIME_P4_PROFILE,
-    PRIME_P5_PROFILE,
-    PRIME_P6_PROFILE,
-    PRIME_P7_PROFILE,
-    PRIME_RUNTIME_ID,
-    PrimeAgentRuntimeClient,
-)
-from asterion.runtimes.prime_agent_host import PrimeSmallVerificationService
 
 
 PI_CAPABILITIES = ("filesystem.read", "pi.tool.grep")
@@ -87,60 +74,8 @@ def default_runtime_factory_registry() -> RuntimeFactoryRegistry:
                 capabilities=CLAUDE_CAPABILITIES,
                 factory=_create_claude_code_runtime,
             ),
-            RuntimeFactoryBinding(
-                runtime_id=PRIME_RUNTIME_ID,
-                capabilities=(PRIME_IPYTHON_CAPABILITY,),
-                factory=_create_prime_agent_runtime,
-            ),
         )
     )
-
-
-def _create_prime_agent_runtime(context: RuntimeFactoryContext) -> PrimeAgentRuntimeClient:
-    if (
-        context.provider_id != "prime-agent"
-        or context.application_version != "1.0.0"
-        or context.runtime_id != PRIME_RUNTIME_ID
-        or context.options
-    ):
-        raise RuntimeFactoryError("Prime runtime configuration is invalid")
-    routes = {
-        "prime.ipython-coding": ("prime.ipython-production", PRIME_P1_PROFILE),
-        "prime.programmatic-long-context": (
-            "prime.programmatic-long-context-development",
-            PRIME_P2_PROFILE,
-        ),
-        "prime.recursive-workflow": (
-            "prime.recursive-workflow-development",
-            PRIME_P3_PROFILE,
-        ),
-        "prime.long-session-continuity": (
-            "prime.long-session-continuity-development",
-            PRIME_P4_PROFILE,
-        ),
-        "prime.bounded-autonomy": (
-            "prime.bounded-autonomy-development",
-            PRIME_P5_PROFILE,
-        ),
-        "prime.continual-improvement": (
-            "prime.continual-improvement-development",
-            PRIME_P6_PROFILE,
-        ),
-        "prime.arc-agi-3": (
-            "prime.arc-agi-3-development",
-            PRIME_P7_PROFILE,
-        ),
-    }
-    try:
-        host_key, profile = routes[context.application_id]
-    except KeyError:
-        raise RuntimeFactoryError("Prime runtime configuration is invalid") from None
-    if set(context.host_services) != {host_key}:
-        raise RuntimeFactoryError("Prime runtime configuration is invalid")
-    service = context.host_services[host_key]
-    if not isinstance(service, PrimeSmallVerificationService):
-        raise RuntimeFactoryError("Prime runtime configuration is invalid")
-    return PrimeAgentRuntimeClient(service, profile=profile)
 
 
 def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
@@ -177,11 +112,7 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     command = list(_pi_command(context.options["command"]))
-    cwd_authority = (
-        _host_directory_authority(context)
-        if has_host_cwd
-        else None
-    )
+    cwd_authority = _host_directory_authority(context) if has_host_cwd else None
     if cwd_authority is None:
         runtime_cwd: Path | None = _pi_exact_path(
             context.options["cwd"], require_directory=True
@@ -209,7 +140,9 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     try:
         max_turns = int(raw_max_turns)
     except ValueError:
-        raise RuntimeFactoryError("Pi reference runtime configuration is invalid") from None
+        raise RuntimeFactoryError(
+            "Pi reference runtime configuration is invalid"
+        ) from None
     if max_turns <= 0 or str(max_turns) != raw_max_turns:
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     try:
@@ -247,8 +180,7 @@ def _host_directory_authority(
     capability_id = context.options["cwd_host_capability"]
     if (
         type(capability_id) is not str
-        or re.fullmatch(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*", capability_id)
-        is None
+        or re.fullmatch(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*", capability_id) is None
     ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     try:
@@ -346,9 +278,7 @@ def _pi_exact_path(value: str, *, require_directory: bool) -> Path:
 def _pi_environment(value: str) -> dict[str, str]:
     parsed = _pi_exact_json(value, sort_keys=True)
     if not isinstance(parsed, dict) or any(
-        type(key) is not str
-        or not key
-        or type(item) is not str
+        type(key) is not str or not key or type(item) is not str
         for key, item in parsed.items()
     ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
@@ -370,7 +300,9 @@ def _pi_exact_json(value: str, *, sort_keys: bool) -> object:
     try:
         parsed = json.loads(value, object_pairs_hook=unique_object)
     except (TypeError, ValueError):
-        raise RuntimeFactoryError("Pi reference runtime configuration is invalid") from None
+        raise RuntimeFactoryError(
+            "Pi reference runtime configuration is invalid"
+        ) from None
     canonical = json.dumps(
         parsed,
         ensure_ascii=False,
@@ -416,23 +348,16 @@ def _create_claude_code_runtime(
     has_host_cwd = "cwd_host_capability" in context.options
     directory_authorities = _directory_authorities(context)
     has_direct_cwd = "cwd" in context.options
-    has_ambient_cwd = bool(
-        os.environ.get("ASTERION_RUNTIME_CWD", "").strip()
-    )
-    if (
-        (directory_authorities and not has_host_cwd)
-        or (directory_authorities and (has_direct_cwd or has_ambient_cwd))
+    has_ambient_cwd = bool(os.environ.get("ASTERION_RUNTIME_CWD", "").strip())
+    if (directory_authorities and not has_host_cwd) or (
+        directory_authorities and (has_direct_cwd or has_ambient_cwd)
     ):
         raise RuntimeFactoryError("Claude Code runtime configuration is invalid")
     if has_host_cwd:
-        if (
-            has_direct_cwd
-            or has_ambient_cwd
-            or "evidence_root" not in context.options
-        ):
+        if has_direct_cwd or has_ambient_cwd or "evidence_root" not in context.options:
             raise RuntimeFactoryError("Claude Code runtime configuration is invalid")
-        cwd_authority: ProcessDirectoryAuthority | None = (
-            _host_directory_authority(context)
+        cwd_authority: ProcessDirectoryAuthority | None = _host_directory_authority(
+            context
         )
         runtime_cwd: Path | None = None
         evidence_root = _pi_exact_path(
@@ -443,9 +368,7 @@ def _create_claude_code_runtime(
             raise RuntimeFactoryError("Claude Code runtime configuration is invalid")
         current = Path.cwd()
         if "cwd" in context.options:
-            runtime_cwd = _pi_exact_path(
-                context.options["cwd"], require_directory=True
-            )
+            runtime_cwd = _pi_exact_path(context.options["cwd"], require_directory=True)
         else:
             runtime_cwd = _configured_path(
                 "ASTERION_RUNTIME_CWD", current, root=current
@@ -461,9 +384,7 @@ def _create_claude_code_runtime(
                 current / "outputs/asterion-claude-runs",
                 root=current,
             )
-    if executable is None or (
-        runtime_cwd is not None and not runtime_cwd.is_dir()
-    ):
+    if executable is None or (runtime_cwd is not None and not runtime_cwd.is_dir()):
         raise RuntimeFactoryError("Claude Code runtime is unavailable")
     provider = _option_text(context, "provider")
     model = _option_text(context, "model")
@@ -480,7 +401,9 @@ def _create_claude_code_runtime(
     try:
         max_turns = int(raw_max_turns)
     except ValueError:
-        raise RuntimeFactoryError("Claude Code max turns configuration is invalid") from None
+        raise RuntimeFactoryError(
+            "Claude Code max turns configuration is invalid"
+        ) from None
     if max_turns <= 0 or str(max_turns) != raw_max_turns:
         raise RuntimeFactoryError("Claude Code max turns configuration is invalid")
     tools = _claude_tools(_option_text(context, "tools"))
@@ -504,13 +427,17 @@ def _create_claude_code_runtime(
         reasoning=reasoning,
         context_profile=context_profile,
     )
+
+
 def _coerce_timeout_seconds(value: object) -> float | None:
     if value is None:
         return None
     try:
         timeout_seconds = float(value)
     except (TypeError, ValueError) as error:
-        raise RuntimeFactoryError("Claude Code timeout configuration is invalid") from error
+        raise RuntimeFactoryError(
+            "Claude Code timeout configuration is invalid"
+        ) from error
     if not math.isfinite(timeout_seconds) or timeout_seconds < 0:
         raise RuntimeFactoryError("Claude Code timeout configuration is invalid")
     return timeout_seconds or None
@@ -541,12 +468,16 @@ def _claude_provider_environment(
                 "ANTHROPIC_BASE_URL",
             )
         ):
-            raise RuntimeFactoryError("Claude Code authentication configuration is ambiguous")
+            raise RuntimeFactoryError(
+                "Claude Code authentication configuration is ambiguous"
+            )
         return native_environment, "subscription"
     if provider is None or model is None:
         raise RuntimeFactoryError("Claude Code provider configuration is unavailable")
     if environment.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip():
-        raise RuntimeFactoryError("Claude Code authentication configuration is ambiguous")
+        raise RuntimeFactoryError(
+            "Claude Code authentication configuration is ambiguous"
+        )
     provider_config = _CLAUDE_PROVIDER_CONFIG.get(provider)
     if provider_config is None:
         raise RuntimeFactoryError("Claude Code provider configuration is unsupported")
@@ -573,11 +504,7 @@ def _claude_provider_environment(
         native_environment.pop(name, None)
     native_environment["API_TIMEOUT_MS"] = "3000000"
     native_environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-    mode = (
-        "minimax-coding-plan"
-        if provider == "minimax"
-        else "minimax-cn-coding-plan"
-    )
+    mode = "minimax-coding-plan" if provider == "minimax" else "minimax-cn-coding-plan"
     return native_environment, mode
 
 
@@ -596,7 +523,9 @@ def _claude_tools(value: str | None) -> tuple[str, ...]:
     if not normalized or any(not part for part in normalized):
         raise RuntimeFactoryError("Claude Code tools configuration is invalid")
     mapping = {"read": "Read", "grep": "Grep", "glob": "Glob"}
-    if any(part not in mapping for part in normalized) or len(set(normalized)) != len(normalized):
+    if any(part not in mapping for part in normalized) or len(set(normalized)) != len(
+        normalized
+    ):
         raise RuntimeFactoryError("Claude Code tools configuration is invalid")
     return tuple(mapping[part] for part in normalized)
 
@@ -612,7 +541,9 @@ def _configured_timeout_seconds(environment: Mapping[str, str]) -> float | None:
     try:
         timeout_seconds = float(value)
     except ValueError:
-        raise RuntimeFactoryError("Claude Code timeout configuration is invalid") from None
+        raise RuntimeFactoryError(
+            "Claude Code timeout configuration is invalid"
+        ) from None
     if not math.isfinite(timeout_seconds) or timeout_seconds < 0:
         raise RuntimeFactoryError("Claude Code timeout configuration is invalid")
     return timeout_seconds or None

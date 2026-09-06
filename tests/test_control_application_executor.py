@@ -23,7 +23,10 @@ from asterion.capabilities.execution import (
     CapabilityExecutionResult,
     CapabilityInvocation,
 )
-from asterion.capability_packages import CapabilityPackageRef, InstalledCapabilityPackage
+from asterion.capability_packages import (
+    CapabilityPackageRef,
+    InstalledCapabilityPackage,
+)
 from asterion.control.application_executor import (
     ApplicationActionExecutor,
     ChildActionService,
@@ -424,12 +427,15 @@ def _executor(
     result_store: RecordingResultStore | None = None,
     host_services: Mapping[str, object] | None = None,
     runtime_factories: RuntimeFactoryRegistry | None = None,
-    runtime_options: Mapping[tuple[str, str, str, str], Mapping[str, str]] | None = None,
+    runtime_options: Mapping[tuple[str, str, str, str], Mapping[str, str]]
+    | None = None,
     provider_override: InstalledApplicationProvider | None = None,
     runtime_id: str = "fake.runtime",
     runtime_manifest: Mapping[str, object] | None = None,
     child_service: object | None = None,
     system_service: object | None = None,
+    provider_bindings: tuple[RuntimeFactoryBinding, ...] = (),
+    retained_binding: RuntimeFactoryBinding | None = None,
 ):
     audit = [] if audit is None else audit
     implementation = implementation or UsageImplementation(audit)
@@ -439,6 +445,14 @@ def _executor(
         runtime_id=runtime_id,
         runtime_manifest=runtime_manifest,
     )
+    if retained_binding is not None or provider_bindings:
+        assembly = replace(assembly, runtime_binding=retained_binding)
+        application = replace(application, assemblies=(assembly,))
+        provider = replace(
+            provider,
+            applications=(application,),
+            runtime_factory_bindings=provider_bindings,
+        )
     plan = AgentSystemPlan(
         system_id="research.system",
         version="1.0.0",
@@ -470,7 +484,9 @@ def _executor(
             ),
         )
     )
-    resolver = content or RecordingResolver({"content-ref-1": f"private {SENTINEL}"}, audit)
+    resolver = content or RecordingResolver(
+        {"content-ref-1": f"private {SENTINEL}"}, audit
+    )
     results = result_store or RecordingResultStore(audit)
     executor = ApplicationActionExecutor(
         plan=plan,
@@ -499,6 +515,121 @@ def _executor(
 
 
 class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
+    async def test_rejects_other_provider_binding_for_unretained_assembly(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            audit: list[str] = []
+            factory_calls = 0
+
+            def other_provider_factory(context: object) -> RecordingRuntime:
+                nonlocal factory_calls
+                del context
+                factory_calls += 1
+                return RecordingRuntime(audit)
+
+            provider, application, assembly = _assembly(
+                Path(directory), UsageImplementation(audit)
+            )
+            provider_a = replace(provider, provider_id="provider-a")
+            provider_b = replace(
+                provider,
+                provider_id="provider-b",
+                applications=(),
+                runtime_factory_bindings=(
+                    RuntimeFactoryBinding(
+                        "fake.runtime",
+                        (),
+                        other_provider_factory,
+                    ),
+                ),
+            )
+            plan = AgentSystemPlan(
+                system_id="research.system",
+                version="1.0.0",
+                control_binding=_control_binding(),
+                portfolio=(
+                    ApplicationPortfolioEntry(
+                        provider_id=provider_a.provider_id,
+                        application=application,
+                        assembly=assembly,
+                    ),
+                ),
+                policies=(),
+                host_capabilities=("secret.service",),
+                control_capabilities=("action-proposals",),
+            )
+            with self.assertRaises(ValueError):
+                ApplicationActionExecutor(
+                    plan=plan,
+                    providers=(provider_a, provider_b),
+                    runtime_factories=RuntimeFactoryRegistry(()),
+                    runtime_options={
+                        (
+                            provider_a.provider_id,
+                            application.application_id,
+                            application.version,
+                            assembly.runtime_id,
+                        ): {},
+                    },
+                    content=RecordingResolver({}, audit),
+                    results=RecordingResultStore(audit),
+                    host_services={"secret.service": object()},
+                )
+            self.assertEqual(audit, [])
+            self.assertEqual(factory_calls, 0)
+
+    async def test_selected_provider_binding_not_in_base_is_snapshotted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            binding = RuntimeFactoryBinding(
+                "fake.runtime", (), lambda context: RecordingRuntime([])
+            )
+            executor, _, _, _ = _executor(
+                Path(directory),
+                runtime_factories=RuntimeFactoryRegistry(()),
+                provider_bindings=(binding,),
+                retained_binding=binding,
+            )
+        self.assertEqual(tuple(executor._runtime_bindings.values()), (binding,))
+
+    async def test_selected_provider_binding_conflict_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            binding = RuntimeFactoryBinding("fake.runtime", (), lambda context: None)
+            first, _, _, _ = _executor(
+                Path(directory),
+                runtime_factories=RuntimeFactoryRegistry(()),
+                provider_bindings=(binding,),
+                retained_binding=binding,
+            )
+            provider = next(iter(first._providers.values()))
+            conflicting = replace(
+                provider,
+                provider_id="other.provider",
+                runtime_factory_bindings=(binding,),
+            )
+            with self.assertRaises(ValueError):
+                ApplicationActionExecutor(
+                    plan=first._plan,
+                    providers=(provider, conflicting),
+                    runtime_factories=RuntimeFactoryRegistry(()),
+                    runtime_options=first._runtime_options,
+                    content=first._content,
+                    results=first._results,
+                    host_services=first._host_services,
+                )
+
+    async def test_retained_binding_mismatch_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            effective = RuntimeFactoryBinding("fake.runtime", (), lambda context: None)
+            retained = RuntimeFactoryBinding("fake.runtime", (), lambda context: None)
+            with self.assertRaises(ValueError):
+                _executor(
+                    Path(directory),
+                    runtime_factories=RuntimeFactoryRegistry(()),
+                    provider_bindings=(effective,),
+                    retained_binding=retained,
+                )
+
     async def test_system_actions_are_forwarded_to_the_injected_service(self) -> None:
         class SystemActions:
             def __init__(self) -> None:
@@ -511,9 +642,7 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             service = SystemActions()
-            executor, _, _, _ = _executor(
-                Path(directory), system_service=service
-            )
+            executor, _, _, _ = _executor(Path(directory), system_service=service)
             for kind in ("checkpoint.create", "goal.complete", "goal.fail"):
                 proposal = _system_proposal(kind)
                 receipt = await executor.execute(proposal, MutableSignal())
@@ -548,12 +677,12 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
                     _system_proposal("checkpoint.create"), MutableSignal()
                 )
             self.assertEqual(faulting.exception.status, "uncertain")
-            self.assertEqual(
-                faulting.exception.reason_code, "system-progress-unknown"
-            )
+            self.assertEqual(faulting.exception.reason_code, "system-progress-unknown")
             self.assertNotIn(SENTINEL, str(faulting.exception))
 
-    async def test_child_service_transport_fault_is_uncertain_and_redacted(self) -> None:
+    async def test_child_service_transport_fault_is_uncertain_and_redacted(
+        self,
+    ) -> None:
         class FaultingChildren:
             async def spawn(self, proposal: ControlEvent, signal: MutableSignal):
                 del proposal, signal
@@ -621,7 +750,9 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(receipt.usage, BudgetUsage(0, 155, 0, 155, 0))
             self.assertEqual(receipt.artifact_ids, ("artifact-1",))
             self.assertEqual(receipt.media_types, ("application/json",))
-            self.assertEqual(resolver.requests, [("content-ref-1", MAX_PRIVATE_TEXT_BYTES)])
+            self.assertEqual(
+                resolver.requests, [("content-ref-1", MAX_PRIVATE_TEXT_BYTES)]
+            )
             self.assertEqual(len(implementation.calls), 1)
             self.assertEqual(
                 audit,
@@ -747,9 +878,11 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
             cwd = root / "cwd"
             cwd.mkdir()
             audit: list[str] = []
-            pi_manifest = default_runtime_factory_registry().select(
-                "pi.reference"
-            ).manifest.to_mapping()
+            pi_manifest = (
+                default_runtime_factory_registry()
+                .select("pi.reference")
+                .manifest.to_mapping()
+            )
             executor, _, _, _ = _executor(
                 root,
                 audit=audit,
@@ -826,10 +959,14 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(field=field):
                     audit: list[str] = []
                     executor, _, _, _ = _executor(Path(directory), audit=audit)
-                    target = dict(cast(Mapping[str, object], _proposal().payload["target"]))
+                    target = dict(
+                        cast(Mapping[str, object], _proposal().payload["target"])
+                    )
                     target[field] = value
                     with self.assertRaises(ActionExecutionFailure) as raised:
-                        await executor.execute(_proposal(target=target), MutableSignal())
+                        await executor.execute(
+                            _proposal(target=target), MutableSignal()
+                        )
                     self.assertEqual(raised.exception.status, "failed")
                     self.assertEqual(raised.exception.reason_code, "target-mismatch")
                     self.assertEqual(audit, [])
@@ -851,7 +988,9 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(malformed.exception.reason_code, "invalid-proposal")
 
             with self.assertRaises(ActionExecutionFailure) as hostile:
-                await executor.execute(_proposal(), cast(MutableSignal, HostileSignal()))
+                await executor.execute(
+                    _proposal(), cast(MutableSignal, HostileSignal())
+                )
             self.assertEqual(hostile.exception.status, "failed")
             self.assertEqual(
                 hostile.exception.reason_code, "cancellation-state-unavailable"
@@ -873,7 +1012,9 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaises(ActionExecutionFailure) as raised:
                         await executor.execute(_proposal(), MutableSignal())
                     self.assertEqual(raised.exception.status, "failed")
-                    self.assertEqual(raised.exception.reason_code, "private-input-unavailable")
+                    self.assertEqual(
+                        raised.exception.reason_code, "private-input-unavailable"
+                    )
                     self.assertEqual(audit, ["content.resolve"])
                     self.assertNotIn(SENTINEL, str(raised.exception))
 
@@ -959,7 +1100,9 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
             executor, _, _, _ = _executor(
                 Path(directory),
                 audit=audit,
-                implementation=cast(UsageImplementation, TaskCancelledImplementation(audit)),
+                implementation=cast(
+                    UsageImplementation, TaskCancelledImplementation(audit)
+                ),
             )
             with self.assertRaises(ActionExecutionFailure) as task_cancelled:
                 await executor.execute(_proposal(), MutableSignal())
@@ -1007,7 +1150,9 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
                 await executor.execute(_proposal(), MutableSignal())
 
             self.assertEqual(raised.exception.status, "uncertain")
-            self.assertEqual(raised.exception.reason_code, "application-progress-unknown")
+            self.assertEqual(
+                raised.exception.reason_code, "application-progress-unknown"
+            )
             self.assertIsNone(raised.exception.receipt_ref)
             self.assertIn("implementation.execute", audit)
             self.assertNotIn(SENTINEL, str(raised.exception))
