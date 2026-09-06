@@ -15,7 +15,7 @@ async function streamFactory() {
 const usage = () => ({ input: 3, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 5,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
 
-test("runs SDK-owned depth-one children and retains the review session for follow-up", async () => {
+test("waits for a delayed SDK-owned child and retains review for follow-up", async () => {
   const { PrimeP3DevelopmentSession } = await import("../dist/src/index.js");
   const { createAssistantMessageEventStream } = await streamFactory();
   const workspace = await mkdtemp(join(tmpdir(), "asterion-p3-sdk-"));
@@ -30,7 +30,9 @@ test("runs SDK-owned depth-one children and retains the review session for follo
       calls[role] += 1;
       const stream = createAssistantMessageEventStream();
       const message = makeMessage(role, calls[role] === 1 || (role === "review" && calls[role] === 3));
-      queueMicrotask(() => { stream.push({ type: "start", partial: { ...message, content: [] } }); stream.push({ type: "done", reason: message.stopReason, message }); });
+      const finish = () => { stream.push({ type: "start", partial: { ...message, content: [] } }); stream.push({ type: "done", reason: message.stopReason, message }); };
+      if (role === "implementation" && calls.implementation === 1) setTimeout(finish, 30);
+      else queueMicrotask(finish);
       return stream;
     },
     ipython: async (role) => {

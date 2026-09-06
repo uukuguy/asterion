@@ -289,13 +289,15 @@ export class P3DevelopmentBridge {
       );
     void (async () => {
       try {
-        this.emit("model.request", id, { role, model, context, options });
+        this.emit("model.request", id, { role, model, context: projectP3Context(context), options });
         const message = await r;
         if (!rec(message) || message.role !== "assistant")
           throw Error("invalid assistant response");
+        const usage = snapshotAssistantUsage(message);
+        const projected = { ...message, usage };
         queueMicrotask(() => {
-          s.push({ type: "start", partial: { ...message, content: [] } });
-          s.push({ type: "done", reason: message.stopReason, message });
+          s.push({ type: "start", partial: { ...projected, content: [] } });
+          s.push({ type: "done", reason: message.stopReason, message: projected });
         });
       } catch (e) {
         const aborted = e instanceof Error && e.message === "cancelled";
@@ -484,4 +486,34 @@ function abs(v: unknown) {
   if (typeof v !== "string" || !isAbsolute(v))
     throw Error("private path must be absolute");
   return v;
+}
+
+function snapshotAssistantUsage(message: Record<string, unknown>): Record<string, unknown> {
+  if (!rec(message.usage)) throw Error("invalid assistant response usage");
+  return json(message.usage) as Record<string, unknown>;
+}
+
+function projectP3Context(context: unknown): unknown {
+  if (!rec(context) || !Array.isArray(context.messages)) return context;
+  return {
+    ...context,
+    messages: context.messages.map((message) => projectP3Message(message)),
+  };
+}
+
+function projectP3Message(message: unknown): unknown {
+  if (!rec(message) || !isP3TerminalNotice(message)) return message;
+  const role = (message.details as Record<string, unknown>).from as Record<string, unknown>;
+  const name = role.sessionName;
+  return { ...message, content: name === "implementation" ? "P3 implementation child completed." : "P3 review child completed." };
+}
+
+function isP3TerminalNotice(message: Record<string, unknown>): boolean {
+  if (message.role !== "user" || message.customType !== "agent_message" || !rec(message.details)) return false;
+  const details = message.details;
+  if (details.id !== "agentmsg-terminal-completion" || details.fromRelationship !== "child" || !rec(details.from)) return false;
+  const from = details.from;
+  return (from.sessionName === "implementation" || from.sessionName === "review") &&
+    typeof from.sessionId === "string" && typeof message.content === "string" &&
+    message.content.startsWith(`[from child:${from.sessionName}]`);
 }

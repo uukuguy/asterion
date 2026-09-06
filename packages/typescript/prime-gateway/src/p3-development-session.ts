@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { inspect } from "node:util";
 
 const MAX_MODEL_CALLS = 10;
 const MAX_TOOL_CALLS = 4;
+const CHILD_WAIT_DEADLINE_MS = 60_000;
+const CHILD_WAIT_POLL_MS = 20;
 
 export type PrimeP3DevelopmentRole = "root" | "implementation" | "review";
 
@@ -172,6 +174,7 @@ export async function openPrimeP3DevelopmentSdkSession(
   const childRoles = new Map<string, Exclude<PrimeP3DevelopmentRole, "root">>();
   const childSessions = new Map<string, PrimeSdkSession>();
   const deleted = new Set<string>();
+  let rootSession: PrimeSdkSession | undefined;
   const register = (role: PrimeP3DevelopmentRole) => {
     const provider = providers[role], modelId = modelIds[role];
     shared.auth.setRuntimeApiKey(provider, "in-memory-development-provider");
@@ -206,7 +209,8 @@ export async function openPrimeP3DevelopmentSdkSession(
     parameters: modules.Type.Object({ code: modules.Type.String() }),
     execute: async (toolCallId: string, input: { code: string }, signal: AbortSignal) => {
       assertCallbackAllowed(control);
-      if (++toolCalls > limits.tool) throw new Error("Prime P3 development ipython callback limit exceeded");
+      if (toolCalls >= limits.tool) throw new Error("Prime P3 development ipython callback limit exceeded");
+      toolCalls += 1;
       return options.ipython("root", toolCallId, Object.freeze({ code: input.code }), signal);
     },
   };
@@ -214,19 +218,23 @@ export async function openPrimeP3DevelopmentSdkSession(
     cwd: options.workspace, agentDir, authStorage: shared.auth, modelRegistry: registry, model,
     sessionManager: modules.SessionManager.inMemory(options.workspace), settingsManager, resourceLoader,
     tools: ["ipython"], allowedToolNames: ["ipython"], initialActiveToolNames: ["ipython"], customTools: [customIpython],
+    rlmDepth: 0, rlmMaxDepth: 1, rlmSessionDir: agentDir,
     subagentRuntimeHost: {
       createRlmSubagentRuntime: async (child: Record<string, unknown>) => {
         const id = child.id;
         const depth = child.rlmDepth;
         const name = child.sessionName;
-        if (typeof id !== "string" || depth !== 1 || (name !== "implementation" && name !== "review"))
+        const role = name as Exclude<PrimeP3DevelopmentRole, "root">;
+        if (typeof id !== "string" || depth !== 1 || (name !== "implementation" && name !== "review") ||
+          child.parentSession !== rootSession || child.rlmParentNodeId !== id ||
+          !exactRoleModel(child.model, modelIds[role]) ||
+          !privateChildSessionDir(child.sessionDir, agentDir) ||
+          !onlyIpython(child.activeToolNames) || !onlyIpython(child.allowedToolNames) ||
+          !Array.isArray(child.customTools) || child.customTools.length !== 1 ||
+          (child.customTools[0] as { name?: unknown }).name !== "ipython")
           throw new Error("invalid P3 RLM child runtime");
         if (childRoles.has(id) || [...childRoles.values()].includes(name as Exclude<PrimeP3DevelopmentRole, "root">) || childRoles.size >= 2) throw new Error("invalid P3 RLM child publication");
-        const role = name as Exclude<PrimeP3DevelopmentRole, "root">;
         childRoles.set(id, role);
-        if (!Array.isArray(child.customTools) || child.customTools.length !== 1 ||
-          (child.customTools[0] as { name?: unknown }).name !== "ipython")
-          throw new Error("invalid P3 RLM child tools");
         const inherited = child.customTools[0] as Record<string, unknown>;
         const childTool = Object.freeze({
           ...inherited,
@@ -263,6 +271,7 @@ export async function openPrimeP3DevelopmentSdkSession(
     },
     includeGoals: false, includeCompactSkill: false, prewarmIpythonKernel: false, serializedRefine: true, telemetryDisabled: true,
   });
+  rootSession = created.session;
   const unsubscribe = created.session.subscribe(() => {});
   return Object.freeze({
     session: created.session,
@@ -369,19 +378,26 @@ export class PrimeP3DevelopmentSession {
 
   async wait(childId: string): Promise<void> {
     this.assertDispatchable();
-    let child = this.#session.getRlmChildSession(childId);
-    for (let attempts = 0; attempts < 1_000; attempts += 1) {
+    const role = this.#childRoles.get(childId);
+    if (!role) throw new Error("P3 RLM child identity is unavailable");
+    const deadline = Date.now() + CHILD_WAIT_DEADLINE_MS;
+    while (Date.now() < deadline) {
+      this.assertDispatchable();
+      const child = this.#session.getRlmChildSession(childId);
+      if (!child || child !== this.#childSessions.get(childId) || this.#childRoles.get(childId) !== role)
+        throw new Error("P3 RLM child identity is unavailable");
       const roster = await this.#session.listRlmSubagents();
-      const entry = roster.subagents.find((value) =>
+      const entries = roster.subagents.filter((value) =>
         (value as { rlm_child_id?: unknown }).rlm_child_id === childId,
-      ) as { status?: unknown } | undefined;
-      if (child && entry?.status === "completed") {
+      ) as { status?: unknown }[];
+      if (entries.length !== 1) throw new Error("P3 RLM child identity is unavailable");
+      if (entries[0]?.status === "completed") {
         await child.waitForIdle();
         return;
       }
-      if (entry?.status === "error") throw new Error("P3 RLM child failed");
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      child = this.#session.getRlmChildSession(childId);
+      if (entries[0]?.status === "error" || entries[0]?.status === "cancelled")
+        throw new Error("P3 RLM child failed");
+      await delay(CHILD_WAIT_POLL_MS);
     }
     throw new Error("P3 RLM child did not complete");
   }
@@ -641,6 +657,26 @@ function assertCallbackAllowed(control: {
 }): void {
   if (control.state !== "open")
     throw new Error("Prime P3 development session is cancelled");
+}
+
+function onlyIpython(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length === 1 && value[0] === "ipython";
+}
+
+function privateChildSessionDir(value: unknown, root: string): value is string {
+  if (typeof value !== "string" || !isAbsolute(value)) return false;
+  const path = relative(root, value);
+  return path.length > 0 && !path.startsWith("..") && !isAbsolute(path);
+}
+
+function exactRoleModel(value: unknown, modelId: string): boolean {
+  return !!value && typeof value === "object" &&
+    (value as { id?: unknown }).id === modelId &&
+    (value as { name?: unknown }).name === modelId;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function safeStopReason(
