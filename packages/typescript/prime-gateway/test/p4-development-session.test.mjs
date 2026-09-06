@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
-test("projects only the private daemon stage when native startup fails", async () => {
-  const { PrimeP4DevelopmentError, runPrimeP4DevelopmentSmoke } = await import("../dist/src/index.js");
-  await assert.rejects(
-    runPrimeP4DevelopmentSmoke(join(process.cwd(), "../../../3th-party/prime-agent")),
-    (error) => error instanceof PrimeP4DevelopmentError && error.stage === "daemon-start:error",
-  );
+test("runs private P4 create detach attach with its exact native cursor", async () => {
+  const { runPrimeP4DevelopmentSmoke } = await import("../dist/src/index.js");
+  const value = await runPrimeP4DevelopmentSmoke(join(process.cwd(), "../../../3th-party/prime-agent"));
+  assert.match(value.activeSessionId, /.+/);
+  assert.match(value.cursor.generation, /.+/);
+  assert.equal(value.cursor.sequence, 0);
 });
