@@ -229,7 +229,7 @@ async def _open_rlm_server(directory: Path, gateway: P3Gateway) -> asyncio.Abstr
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             raw = await reader.readuntil(b"\n")
-            if not raw or len(raw) > 4096 or await reader.read(1):
+            if not raw or len(raw) > 4096:
                 raise ValueError
             request = json.loads(raw)
             if type(request) is not dict or type(request.get("kind")) is not str:

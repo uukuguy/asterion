@@ -1,9 +1,35 @@
 from __future__ import annotations
+import asyncio
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 import unittest
 
 
 class TestPrimeP3DevelopmentHost(unittest.IsolatedAsyncioTestCase):
+    async def test_rlm_socket_returns_without_client_eof_and_rejects_extra_fields(self) -> None:
+        from asterion.applications.prime_agent.operator.p3_development_host import _open_rlm_server
+
+        class Gateway:
+            async def request_nested(self, kind: str, payload: object) -> dict[str, str]:
+                self.assertEqual(kind, "rlm.list")
+                self.assertEqual(payload, {})
+                return {"status": "ok"}
+
+            def assertEqual(self, left: object, right: object) -> None:
+                TestPrimeP3DevelopmentHost().assertEqual(left, right)
+
+        with TemporaryDirectory() as directory:
+            server = await _open_rlm_server(Path(directory), Gateway())
+            reader, writer = await asyncio.open_unix_connection(str(Path(directory) / "rlm.sock"))
+            writer.write(b'{"kind":"list"}\n')
+            await writer.drain()
+            self.assertEqual(json.loads(await reader.readline()), {"ok": True, "result": {"status": "ok"}})
+            writer.close()
+            await writer.wait_closed()
+            server.close()
+            await server.wait_closed()
     async def test_concrete_route_uses_role_provider_workers_and_gateway_hooks(self) -> None:
         from asterion.applications.prime_agent.operator import (
             p3_development_host as subject,
