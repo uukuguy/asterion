@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import re
+import secrets
 from time import monotonic
 
+from .docker_cli import _CLEARED_BASE_IMAGE_ENVIRONMENT, _ENVIRONMENT
 from .docker_worker import _LifecycleCallControl
 from .p5_development_docker import (
     P5DevelopmentDockerTransport,
@@ -15,6 +17,7 @@ from .p5_development_docker import (
 
 _ID = re.compile(r"[0-9a-f]{64}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_RESTORE_PROGRAM = "import os,stat,sys\nroot=sys.argv[1]\ntry:\n d=os.open(root,os.O_RDONLY|os.O_DIRECTORY)\n try:\n  if set(os.listdir(root))!=set(['baseline.py','task-a.json','candidate.py','task-b.json']): raise ValueError\n  for n in ['baseline.py','task-a.json','candidate.py','task-b.json']:\n   s=os.stat(n,dir_fd=d,follow_symlinks=False)\n   if not stat.S_ISREG(s.st_mode): raise ValueError\n  for n in ['task-a.json','candidate.py','task-b.json']: os.unlink(n,dir_fd=d)\n  if set(os.listdir(root))!=set(['baseline.py']): raise ValueError\n finally: os.close(d)\nexcept BaseException: raise SystemExit(1)\n"
 
 
 class PrimeP6DevelopmentDockerError(ValueError):
@@ -31,10 +34,29 @@ class P6DevelopmentDockerTransport(P5DevelopmentDockerTransport):
     """
 
     async def create_p6(self, *, image_digest: str, workspace: str, control: _LifecycleCallControl) -> str:
+        if _DIGEST.fullmatch(image_digest) is None or not workspace.startswith("/") or workspace.startswith("//") or "\x00" in workspace:
+            raise PrimeP6DevelopmentDockerError()
+        name, fd = "prime-p6-" + secrets.token_hex(16), self._seccomp_profile_fd
+        self._seccomp_profile_fd = None
+        if type(fd) is not int:
+            raise PrimeP6DevelopmentDockerError()
+        platform = "/".join(item for item in (self._platform.os, self._platform.architecture, self._platform.variant) if item is not None)
+        argv = self._prefix + ("create", "--name", name, "--pull=never", "--platform", platform, "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--security-opt", "seccomp=/proc/self/fd/" + str(fd), "--tmpfs", "/tmp:rw,nodev,noexec,nosuid,size=16777216,uid=65534,gid=65534,mode=0700", "--volume", workspace + ":/workspace:rw,rprivate", "--env", _ENVIRONMENT[0], "--env", _ENVIRONMENT[1], "--env", _ENVIRONMENT[2], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[0], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[1], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[2], "--env", _CLEARED_BASE_IMAGE_ENVIRONMENT[3], "--pids-limit", "64", "--memory", "268435456", "--memory-swap", "268435456", "--cpus", "1", "--restart", "no", image_digest)
         try:
-            return await self.create_p5(image_digest=image_digest, workspace=workspace, control=control)
-        except PrimeP5DevelopmentDockerError as error:
-            raise PrimeP6DevelopmentDockerError() from error
+            await self._preflight(control)
+            result = await self._call(argv, control, pass_fds=(fd,))
+            daemon = self._parse_daemon_id(result.stdout)
+            await self._inspect_admission(daemon, image_digest, workspace, control)
+            await self._call(self._prefix + ("container", "start", daemon), control)
+            return daemon
+        except asyncio.CancelledError:
+            await self._uncertain(name)
+            raise
+        except BaseException:
+            await self._uncertain(name)
+            raise PrimeP6DevelopmentDockerError() from None
+        finally:
+            self._close_fd(fd)
 
     async def execute_p6(self, container_id: str, cell: str, control: _LifecycleCallControl) -> None:
         try:
@@ -62,6 +84,22 @@ class P6DevelopmentDockerTransport(P5DevelopmentDockerTransport):
 
     async def assert_p6_absent(self, container_id: str, control: _LifecycleCallControl) -> None:
         await self.assert_p5_absent(container_id, control)
+
+    async def restore_p6_baseline(self, container_id: str, control: _LifecycleCallControl) -> None:
+        if _ID.fullmatch(container_id) is None:
+            raise PrimeP6DevelopmentDockerError()
+        try:
+            result = await self._call(self._prefix + ("container", "exec", "--user", "65534:65534", container_id, "/usr/local/bin/python3", "-I", "-c", _RESTORE_PROGRAM, "/workspace"), control, max_output_bytes=4096)
+            if result.stdout or result.stderr:
+                raise ValueError
+            baseline = await self.read_p6(container_id, "baseline.py", ("baseline.py",), control)
+            from .p6_development_host import _BASELINE_SOURCE
+            if baseline != _BASELINE_SOURCE:
+                raise ValueError
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            raise PrimeP6DevelopmentDockerError() from None
 
 
 class P6DevelopmentDockerWorkerService:
