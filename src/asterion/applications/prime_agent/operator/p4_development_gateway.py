@@ -28,6 +28,7 @@ _CANDIDATE_KEYS: Final = frozenset(
         "active_session_id",
         "artifact_sha256",
         "cursor",
+        "initial_attach_cursor",
         "session_id",
         "settled_model_callback_count",
         "settled_tool_callback_count",
@@ -36,7 +37,14 @@ _CANDIDATE_KEYS: Final = frozenset(
     )
 )
 _RECOVERY_KEYS: Final = frozenset(
-    ("active_session_id", "from_cursor", "session_id", "snapshot_cursor", "to_cursor")
+    (
+        "active_session_id",
+        "from_cursor",
+        "replay_status",
+        "session_id",
+        "snapshot_cursor",
+        "to_cursor",
+    )
 )
 _COMPACTION_KEYS: Final = frozenset(
     (
@@ -479,6 +487,8 @@ def _candidate(value: object) -> dict[str, object]:
     ):
         raise ValueError()
     candidate = value["checkpoint_candidate"]
+    initial = _cursor(candidate.get("initial_attach_cursor"))
+    cursor = _cursor(candidate.get("cursor"))
     if (
         set(candidate) != _CANDIDATE_KEYS
         or not _valid_id(candidate.get("active_session_id"))
@@ -489,10 +499,16 @@ def _candidate(value: object) -> dict[str, object]:
         )
         or candidate.get("settled_model_callback_count") != 2
         or candidate.get("settled_tool_callback_count") != 1
+        or initial["generation"] != cursor["generation"]
+        or initial["sequence"] >= cursor["sequence"]
     ):
         raise ValueError()
     return {
-        key: (_cursor(candidate[key]) if key == "cursor" else candidate[key])
+        key: (
+            _cursor(candidate[key])
+            if key in {"cursor", "initial_attach_cursor"}
+            else candidate[key]
+        )
         for key in sorted(_CANDIDATE_KEYS)
     }
 
@@ -503,6 +519,7 @@ def _public_candidate(candidate: Mapping[str, object]) -> dict[str, object]:
         for key in (
             "active_session_id",
             "session_id",
+            "initial_attach_cursor",
             "cursor",
             "transcript_sha256",
             "tree_sha256",
@@ -515,6 +532,7 @@ def _recovery(value: object, candidate: Mapping[str, object]) -> dict[str, objec
     if (
         type(value) is not dict
         or set(value) != _RECOVERY_KEYS
+        or value.get("replay_status") != "complete"
         or value.get("active_session_id") != candidate["active_session_id"]
         or value.get("session_id") != candidate["session_id"]
     ):
@@ -529,6 +547,7 @@ def _recovery(value: object, candidate: Mapping[str, object]) -> dict[str, objec
     return {
         "active_session_id": candidate["active_session_id"],
         "session_id": candidate["session_id"],
+        "replay_status": "complete",
         **values,
     }
 
