@@ -134,7 +134,7 @@ The canonical preparation lock must include format `asterion.prime-development-p
 
 - [ ] **Step 4: Implement preparation with atomic cache publication**
 
-Use `importlib.resources` to load the packaged lock. Derive `repo_root/.asterion-private/prime-development`; reject symlinked roots and files. Bind the receipt to `PRIME_ORB_MACHINE`, effective uid, resolved worktree identity, `linux/<arch>`, and Docker daemon identity. For each selected scenario:
+Use `importlib.resources` to load the packaged lock. Derive `repo_root/.asterion-private/prime-development`; reject symlinked roots and files. Bind the receipt to `PRIME_ORB_MACHINE`, effective uid, resolved worktree identity, `linux/<arch>`, and Docker daemon identity. The official Node archive contains npm/npx/corepack symlink members that are not runtime inputs. After validating the complete archive digest, scan all member names only for absolute paths, `..`, and duplicates; stream-read exactly one `node-v22.23.2-linux-{arch}/bin/node` member and require it to be a bounded regular non-link. Write only that member with `O_EXCL|O_NOFOLLOW`, verify its locked SHA-256, set mode `0555`, fsync, and atomically publish its versioned directory. Never call `extract`/`extractall` or materialize any other archive member. For each selected scenario:
 
 1. rehash every referenced cached artifact;
 2. download the exact Node archive only when the cache is invalid, cap bytes/time, verify archive SHA-256 before extraction, verify `bin/node` SHA-256 and `--version == v22.23.2`;
