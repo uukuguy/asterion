@@ -4,18 +4,25 @@ import hashlib
 import json
 import shutil
 import tempfile
+import traceback
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
+from asterion.applications.first_party_packages import (
+    builtin_capability_registrations as builtin_capability_sources,
+)
 from asterion.capabilities.builtin import (
-    BuiltinCapabilityRegistration,
-    builtin_capability_sources,
+    CONTROLLED_CODE_PACKAGE,
+    CONTROLLED_CODE_SOURCE_ID,
+    DCI_PACKAGE,
+    PRIME_AGENT_PACKAGE,
 )
 from asterion.capability_packages.model import InstalledCapabilityPackage
 from asterion.capability_packages.protocol import CapabilityPackageRef
 from asterion.capability_packages.resolution import resolve_capability_source
 from asterion.capability_packages.sources.builtin import (
+    BuiltinCapabilityRegistration,
     BuiltinCapabilitySource,
     BuiltinCapabilitySourceError,
 )
@@ -69,6 +76,31 @@ def _installed_package(
 
 
 class BuiltinCapabilitySourceTests(unittest.TestCase):
+    def test_legacy_builtin_registration_constants_remain_importable(self) -> None:
+        self.assertEqual(CONTROLLED_CODE_PACKAGE, CONTROLLED_CODE)
+        self.assertEqual(CONTROLLED_CODE_SOURCE_ID, "controlled-code.builtin")
+        self.assertEqual(DCI_PACKAGE, DCI)
+        self.assertEqual(PRIME_AGENT_PACKAGE, PRIME_AGENT)
+
+    def test_registration_snapshot_failure_is_redacted(self) -> None:
+        sentinel = "SECRET-REGISTRATION-ITERATOR-/private/registrations"
+
+        def registrations():
+            raise ValueError(sentinel)
+            yield None
+
+        with self.assertRaises(BuiltinCapabilitySourceError) as raised:
+            BuiltinCapabilitySource(registrations())
+
+        self.assertEqual(str(raised.exception), "built-in capability source is invalid")
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertTrue(raised.exception.__suppress_context__)
+        self.assertNotIn(sentinel, repr(raised.exception))
+        self.assertNotIn(
+            sentinel,
+            "".join(traceback.format_exception(raised.exception)),
+        )
+
     def test_builtin_registration_table_is_explicit(self) -> None:
         registrations = builtin_capability_sources()
 
@@ -186,7 +218,9 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
         self.assertEqual(installed.package_ref, package_ref)
         good_factory.assert_called_once_with()
 
-    def test_duplicate_builtin_registrations_fail_closed_without_private_context(self) -> None:
+    def test_duplicate_builtin_registrations_fail_closed_without_private_context(
+        self,
+    ) -> None:
         registration = builtin_capability_sources()[0]
         with self.assertRaises(BuiltinCapabilitySourceError) as raised:
             BuiltinCapabilitySource((registration, registration)).discover_metadata()
@@ -213,7 +247,7 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
             source.validate_source_identity(mismatched, payload)
 
     def test_every_builtin_has_portable_externalization_and_conformance(self) -> None:
-        source = BuiltinCapabilitySource()
+        source = BuiltinCapabilitySource(builtin_capability_sources())
 
         for candidate in source.discover_metadata():
             with self.subTest(package=candidate.package_ref.package_id):

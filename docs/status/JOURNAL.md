@@ -2077,3 +2077,4 @@
 - 15:57 Bound runtimes through selected providers to remove framework-to-Prime routing [3e89d7b1]
 - 15:58 Aligned packaged assembly acceptance with the closed Prime inventory [5ef11e53]
 - 16:02 Advanced the framework mainline to the core-only boundary after W1c closure [c22c0182]
+- 16:03 Defined the core-only import and dependency boundary before W1d implementation [1b5e2a41]

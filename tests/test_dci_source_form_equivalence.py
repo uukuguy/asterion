@@ -32,6 +32,7 @@ from asterion.capability_packages import (
 )
 from asterion.capability_packages.resolution import CapabilitySourceResolutionError
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
+from asterion.applications.first_party_packages import builtin_capability_registrations
 from asterion.capability_packages.sources.distribution import (
     DistributionCapabilityPackageSource,
 )
@@ -140,8 +141,7 @@ def _snapshot(package) -> dict[str, object]:
         "suite_refs": payload.manifest.benchmark_suites,
         "suite_bytes": suites,
         "resource_digests": tuple(
-            (item.resource_id, item.sha256)
-            for item in payload.manifest.resources
+            (item.resource_id, item.sha256) for item in payload.manifest.resources
         ),
         "implementation_refs": tuple(
             binding.capability_ref for binding in package.implementations
@@ -201,7 +201,7 @@ class DciSourceFormEquivalenceTests(unittest.TestCase):
                 text=True,
             )
 
-            builtin_source = BuiltinCapabilitySource()
+            builtin_source = BuiltinCapabilitySource(builtin_capability_registrations())
             builtin_candidate = _with_digest(
                 builtin_source,
                 next(

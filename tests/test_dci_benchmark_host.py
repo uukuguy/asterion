@@ -31,6 +31,7 @@ from asterion.capability_packages import (
     CapabilityPackageCandidate,
 )
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
+from asterion.applications.first_party_packages import builtin_capability_registrations
 from asterion.capabilities.dci.implementation.research.query_planning import (
     BASELINE_QUERY_PLAN,
     DECOMPOSED_QUERY_PLAN,
@@ -41,7 +42,7 @@ from asterion.capabilities.dci.implementation.research.query_planning import (
 
 class RecordingBuiltinSource:
     def __init__(self) -> None:
-        self.delegate = BuiltinCapabilitySource()
+        self.delegate = BuiltinCapabilitySource(builtin_capability_registrations())
         self.provider_loads = 0
 
     def discover_metadata(self):
@@ -60,7 +61,7 @@ class RecordingBuiltinSource:
 
 class AlternateBuiltinSource:
     def __init__(self) -> None:
-        self.delegate = BuiltinCapabilitySource()
+        self.delegate = BuiltinCapabilitySource(builtin_capability_registrations())
         self.provider_loads = 0
 
     def discover_metadata(self):

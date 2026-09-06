@@ -40,6 +40,7 @@ from asterion.capability_packages import (
 )
 from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
+from asterion.applications.first_party_packages import builtin_capability_registrations
 from asterion.capability_packages.sources.distribution import (
     DistributionCapabilityPackageSource,
 )
@@ -495,7 +496,10 @@ class DciBenchmarkHost:
     def _sources(self) -> tuple[CapabilityPackageSource, ...]:
         values = self._package_sources
         sources = (
-            (BuiltinCapabilitySource(), DistributionCapabilityPackageSource())
+            (
+                BuiltinCapabilitySource(builtin_capability_registrations()),
+                DistributionCapabilityPackageSource(),
+            )
             if values is None
             else values
         )

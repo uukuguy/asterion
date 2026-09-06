@@ -11,7 +11,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 
 .DEFAULT_GOAL := help
 
-.PHONY: help sync build test lint docs-check check promotion-check first-run-check
+.PHONY: help sync build test lint docs-check check promotion-check first-run-check test.core-only
 .PHONY: setup-pi check-pi
 .PHONY: setup-resources-basic check-resources-basic
 .PHONY: setup-resources-benchmark check-resources-benchmark
@@ -65,6 +65,9 @@ build:
 
 test:
 	$(UV_BIN) run python -m unittest discover -s tests -v
+
+test.core-only:
+	$(UV_BIN) run python -m unittest -v tests.test_core_only_install tests.test_project_boundary
 
 lint:
 	$(UV_BIN) run python -m compileall -q src tests tools

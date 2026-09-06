@@ -13,6 +13,7 @@ from asterion.capability_packages import (
     prepare_capability_source,
 )
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
+from asterion.applications.first_party_packages import builtin_capability_registrations
 
 
 PACKAGE = CapabilityPackageRef("dci", "1.0.0")
@@ -77,7 +78,7 @@ class RecordingSource:
 
 
 def payload() -> PortableCapabilityPayload:
-    source = BuiltinCapabilitySource()
+    source = BuiltinCapabilitySource(builtin_capability_registrations())
     candidate = next(
         value for value in source.discover_metadata() if value.package_ref == PACKAGE
     )
@@ -106,7 +107,7 @@ class CapabilitySourcePreparationTests(unittest.TestCase):
     def test_builtin_source_prepares_none_digest_as_payload_digest_without_loading(
         self,
     ) -> None:
-        source = BuiltinCapabilitySource()
+        source = BuiltinCapabilitySource(builtin_capability_registrations())
 
         prepared = prepare_capability_source(PACKAGE, (source,), None)
 

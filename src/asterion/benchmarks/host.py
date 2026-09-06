@@ -37,7 +37,6 @@ from asterion.capability_packages import (
 )
 from asterion.capability_packages.model import PortableCapabilityPayload
 from asterion.capability_packages.sources.base import CapabilityPackageSource
-from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.capability_packages.sources.distribution import (
     DistributionCapabilityPackageSource,
 )
@@ -233,10 +232,7 @@ def _package_sources(
     values: Sequence[CapabilityPackageSource] | None,
 ) -> tuple[CapabilityPackageSource, ...]:
     if values is None:
-        return (
-            BuiltinCapabilitySource(),
-            DistributionCapabilityPackageSource(),
-        )
+        return (DistributionCapabilityPackageSource(),)
     try:
         sources = tuple(values)
     except Exception:

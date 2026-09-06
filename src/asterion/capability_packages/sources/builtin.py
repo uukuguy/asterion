@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from asterion.capabilities.builtin import (
-    BuiltinCapabilityRegistration,
-    builtin_capability_sources,
-)
 from asterion.capability_packages.model import (
     CapabilityPackageCandidate,
     InstalledCapabilityPackage,
@@ -22,6 +19,22 @@ from asterion.capability_packages.protocol import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class BuiltinCapabilityRegistration:
+    """One explicit, host-owned built-in capability-package binding."""
+
+    package_ref: CapabilityPackageRef
+    payload_root: Path = field(repr=False)
+    provider_factory: Callable[[], InstalledCapabilityPackage] = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if type(self.package_ref) is not CapabilityPackageRef:
+            raise ValueError("built-in capability registration is invalid")
+        object.__setattr__(self, "payload_root", Path(self.payload_root))
+        if not callable(self.provider_factory):
+            raise ValueError("built-in capability registration is invalid")
+
+
 class BuiltinCapabilitySourceError(ValueError):
     """Raised when built-in capability-package source handling fails closed."""
 
@@ -29,11 +42,14 @@ class BuiltinCapabilitySourceError(ValueError):
 class BuiltinCapabilitySource:
     def __init__(
         self,
-        registrations: Iterable[BuiltinCapabilityRegistration] | None = None,
+        registrations: Iterable[BuiltinCapabilityRegistration],
     ) -> None:
-        self._registrations = tuple(
-            builtin_capability_sources() if registrations is None else registrations
-        )
+        try:
+            self._registrations = tuple(registrations)
+        except Exception:
+            raise BuiltinCapabilitySourceError(
+                "built-in capability source is invalid"
+            ) from None
 
     def discover_metadata(self) -> tuple[CapabilityPackageCandidate, ...]:
         try:
@@ -69,7 +85,9 @@ class BuiltinCapabilitySource:
         failed = False
         try:
             registration = self._registration_for(candidate)
-            payload = open_portable_payload(_canonical_payload_root(registration.payload_root))
+            payload = open_portable_payload(
+                _canonical_payload_root(registration.payload_root)
+            )
             self.validate_source_identity(candidate, payload)
             return payload
         except BuiltinCapabilitySourceError:
@@ -210,4 +228,8 @@ def _source_id(package_ref: CapabilityPackageRef) -> str:
     return f"{package_ref.package_id}.builtin"
 
 
-__all__ = ("BuiltinCapabilitySource", "BuiltinCapabilitySourceError")
+__all__ = (
+    "BuiltinCapabilityRegistration",
+    "BuiltinCapabilitySource",
+    "BuiltinCapabilitySourceError",
+)

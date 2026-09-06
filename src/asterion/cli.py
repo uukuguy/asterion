@@ -46,7 +46,10 @@ from asterion.capability_packages import (
     load_prepared_capability_source,
     prepare_capability_source,
 )
-from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
+from asterion.capability_packages.sources.base import CapabilityPackageSource
+from asterion.capability_packages.sources.distribution import (
+    DistributionCapabilityPackageSource,
+)
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
 from asterion.pathlight import MemoryPathlightRecorder, NOOP_PATHLIGHT_RECORDER
@@ -88,6 +91,7 @@ def main(
     stderr: TextIO | None = None,
     managed_executor_factory: Callable[[OperatorExecutorConfig], object] | None = None,
     capability_packages: Iterable[InstalledCapabilityPackage] | None = None,
+    package_sources: Iterable[CapabilityPackageSource] | None = None,
     benchmark_host: BenchmarkCommandHost | None = None,
     client_factory: Callable[[], AgentClient] | None = None,
 ) -> int:
@@ -232,6 +236,7 @@ def main(
                 stdin=stdin,
                 stdout=stdout,
                 capability_packages=tuple(capability_packages or ()),
+                package_sources=_capability_package_sources(package_sources),
             )
         )
     except (
@@ -260,6 +265,7 @@ async def _run(
     stdin: TextIO,
     stdout: TextIO,
     capability_packages: tuple[InstalledCapabilityPackage, ...] = (),
+    package_sources: tuple[CapabilityPackageSource, ...] = (),
 ) -> int:
     metadata_provider = load_application_provider(
         args.provider, entry_points=entry_points
@@ -270,6 +276,7 @@ async def _run(
         installed_packages=_load_available_capability_packages(
             metadata_provider,
             capability_packages,
+            package_sources,
         ),
     )
     assembly_path: Path | None = None
@@ -387,6 +394,7 @@ def _runtime_options(values: list[str]) -> Mapping[str, str]:
 def _load_available_capability_packages(
     provider: InstalledApplicationProvider,
     injected_packages: tuple[InstalledCapabilityPackage, ...],
+    package_sources: tuple[CapabilityPackageSource, ...],
 ) -> tuple[InstalledCapabilityPackage, ...]:
     package_refs = tuple(
         sorted(
@@ -405,11 +413,41 @@ def _load_available_capability_packages(
         package_ref for package_ref in package_refs if package_ref not in installed
     )
     if missing_refs:
-        source = BuiltinCapabilitySource()
         for package_ref in missing_refs:
-            prepared = prepare_capability_source(package_ref, (source,), None)
+            prepared = prepare_capability_source(
+                package_ref,
+                package_sources,
+                None,
+            )
             installed[package_ref] = load_prepared_capability_source(prepared)
     return tuple(installed[package_ref] for package_ref in package_refs)
+
+
+def _capability_package_sources(
+    values: Iterable[CapabilityPackageSource] | None,
+) -> tuple[CapabilityPackageSource, ...]:
+    if values is None:
+        return (DistributionCapabilityPackageSource(),)
+    try:
+        sources = tuple(values)
+    except Exception:
+        raise ApplicationProviderError(
+            "capability package source injection is invalid"
+        ) from None
+    if not sources:
+        raise ApplicationProviderError("capability package source injection is invalid")
+    for source in sources:
+        if not all(
+            callable(getattr(source, method, None))
+            for method in (
+                "discover_metadata",
+                "open_payload",
+                "validate_source_identity",
+                "load_provider",
+            )
+        ):
+            raise ApplicationProviderError("capability package source injection is invalid")
+    return sources
 
 
 def _injected_capability_package_map(

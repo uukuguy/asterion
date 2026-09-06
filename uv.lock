@@ -25,14 +25,23 @@ wheels = [
 name = "asterion"
 version = "0.1.0"
 source = { editable = "." }
-dependencies = [
+
+[package.optional-dependencies]
+dci = [
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "matplotlib", version = "3.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pyarrow" },
     { name = "python-dotenv" },
 ]
-
-[package.optional-dependencies]
+prime = [
+    { name = "python-dotenv" },
+]
+products = [
+    { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "matplotlib", version = "3.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pyarrow" },
+    { name = "python-dotenv" },
+]
 setup = [
     { name = "huggingface-hub" },
 ]
@@ -45,11 +54,15 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "huggingface-hub", marker = "extra == 'setup'", specifier = ">=0.30.0" },
-    { name = "matplotlib", specifier = ">=3.8.0" },
-    { name = "pyarrow", specifier = ">=18.0.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "matplotlib", marker = "extra == 'dci'", specifier = ">=3.8.0" },
+    { name = "matplotlib", marker = "extra == 'products'", specifier = ">=3.8.0" },
+    { name = "pyarrow", marker = "extra == 'dci'", specifier = ">=18.0.0" },
+    { name = "pyarrow", marker = "extra == 'products'", specifier = ">=18.0.0" },
+    { name = "python-dotenv", marker = "extra == 'dci'", specifier = ">=1.0.0" },
+    { name = "python-dotenv", marker = "extra == 'prime'", specifier = ">=1.0.0" },
+    { name = "python-dotenv", marker = "extra == 'products'", specifier = ">=1.0.0" },
 ]
-provides-extras = ["setup"]
+provides-extras = ["dci", "prime", "products", "setup"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff", specifier = ">=0.12.0" }]

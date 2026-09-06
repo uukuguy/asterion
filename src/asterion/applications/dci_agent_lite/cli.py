@@ -84,7 +84,7 @@ def main(
         )
 
     from asterion.benchmarks.cli import main as default_benchmark_main
-    from asterion.cli import main as default_application_main
+    from asterion.applications.first_party_cli import main as default_application_main
 
     application_host = (
         default_application_main

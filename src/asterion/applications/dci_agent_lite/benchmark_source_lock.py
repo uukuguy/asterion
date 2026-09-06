@@ -19,6 +19,7 @@ from asterion.capability_packages import (
 )
 from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
+from asterion.applications.first_party_packages import builtin_capability_registrations
 from asterion.capability_packages.sources.distribution import (
     DistributionCapabilityPackageSource,
 )
@@ -45,7 +46,10 @@ def resolve_benchmark_source_lock(
         if not isinstance(instance, DciBenchmarkInstance):
             _fail()
         sources = (
-            (BuiltinCapabilitySource(), DistributionCapabilityPackageSource())
+            (
+                BuiltinCapabilitySource(builtin_capability_registrations()),
+                DistributionCapabilityPackageSource(),
+            )
             if package_sources is None
             else tuple(package_sources)
         )

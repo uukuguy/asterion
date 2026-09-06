@@ -9,9 +9,17 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from asterion.cli import _load_available_capability_packages, _parser, main
+from asterion.cli import (
+    _capability_package_sources,
+    _load_available_capability_packages,
+    _parser,
+    main,
+)
+from asterion.applications.first_party_cli import main as first_party_main
+from asterion.applications.first_party_packages import builtin_capability_registrations
+from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.client import AgentClient, ClientCursor, ClientEvent
 from asterion.client.session import ClientSessionEndpoint
 from asterion.applications.dci_agent_lite.provider import (
@@ -316,6 +324,42 @@ def provider(root: Path) -> InstalledApplicationProvider:
 
 
 class AsterionCliTests(unittest.TestCase):
+    def test_first_party_benchmark_redacts_hostile_package_source_iterator(self) -> None:
+        sentinel = "SECRET-PACKAGE-SOURCE-ITERATOR-/private/sources"
+
+        def package_sources():
+            raise ValueError(sentinel)
+            yield None
+
+        benchmark_host = Mock(side_effect=AssertionError("host must not be created"))
+        generic = Mock(side_effect=AssertionError("generic CLI must not be called"))
+        stderr = io.StringIO()
+        with (
+            patch(
+                "asterion.applications.first_party_cli.InstalledBenchmarkCommandHost",
+                benchmark_host,
+            ),
+            patch("asterion.applications.first_party_cli.generic_main", generic),
+        ):
+            code = first_party_main(
+                ["benchmark"],
+                package_sources=package_sources(),
+                stderr=stderr,
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stderr.getvalue(), "asterion: command failed\n")
+        self.assertNotIn(sentinel, stderr.getvalue())
+        benchmark_host.assert_not_called()
+        generic.assert_not_called()
+
+    def test_generic_package_sources_require_the_source_protocol(self) -> None:
+        with self.assertRaisesRegex(
+            ApplicationProviderError,
+            "^capability package source injection is invalid$",
+        ):
+            _capability_package_sources((object(),))  # type: ignore[arg-type]
+
     def test_generic_cli_has_no_dci_configuration_imports(self) -> None:
         source = (
             Path(__file__).resolve().parents[1] / "src/asterion/cli.py"
@@ -505,7 +549,7 @@ class AsterionCliTests(unittest.TestCase):
         stderr = io.StringIO()
         stdout = io.StringIO()
 
-        code = main(
+        code = first_party_main(
             [
                 "run",
                 "--provider",
@@ -594,6 +638,7 @@ class AsterionCliTests(unittest.TestCase):
             _load_available_capability_packages(
                 create_dci_provider(),
                 (transitional_dci_package(), extra),
+                (BuiltinCapabilitySource(builtin_capability_registrations()),),
             )
 
         self.assertNotIn("secret-extra-source", str(context.exception))
@@ -1247,7 +1292,7 @@ class AsterionCliTests(unittest.TestCase):
                 )
             )
             stdout = io.StringIO()
-            code = main(
+            code = first_party_main(
                 [
                     "run",
                     "--provider",
@@ -2141,7 +2186,7 @@ class AsterionCliTests(unittest.TestCase):
                 )
             )
             stdout = io.StringIO()
-            code = main(
+            code = first_party_main(
                 [
                     "run",
                     "--provider",

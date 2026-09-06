@@ -7,6 +7,8 @@ from pathlib import Path
 import unittest
 from unittest import mock
 
+from asterion.applications.first_party_cli import main as first_party_main
+from asterion.applications.first_party_packages import builtin_capability_registrations
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.benchmarks import (
     ApplicationRef,
@@ -21,6 +23,9 @@ class DefaultBenchmarkHostTests(unittest.TestCase):
     def test_resolution_owns_metadata_only_payload_snapshot(self) -> None:
         resolution = resolve_installed_benchmark(
             application_ref=ApplicationRef("code.quality", "1.0.0"),
+            package_sources=(
+                BuiltinCapabilitySource(builtin_capability_registrations()),
+            ),
         )
 
         self.assertIsInstance(resolution, InstalledBenchmarkResolution)
@@ -38,10 +43,7 @@ class DefaultBenchmarkHostTests(unittest.TestCase):
         self.assertTrue(package.catalog_roots[0].is_dir())
 
     def test_generic_resolution_module_has_no_dci_dependency(self) -> None:
-        source = (
-            Path(__file__).resolve().parents[1]
-            / "src/asterion/benchmarks/host.py"
-        )
+        source = Path(__file__).resolve().parents[1] / "src/asterion/benchmarks/host.py"
         tree = ast.parse(source.read_text(encoding="utf-8"))
         imports = {
             node.module or ""
@@ -56,7 +58,9 @@ class DefaultBenchmarkHostTests(unittest.TestCase):
             )
         )
 
-    def test_installed_cli_plans_builtin_suite_without_execution_authority(self) -> None:
+    def test_installed_cli_plans_builtin_suite_without_execution_authority(
+        self,
+    ) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
 
@@ -65,7 +69,7 @@ class DefaultBenchmarkHostTests(unittest.TestCase):
             "load_provider",
             side_effect=AssertionError("implementation provider loaded"),
         ):
-            code = asterion_main(
+            code = first_party_main(
                 [
                     "benchmark",
                     "plan",

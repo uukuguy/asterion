@@ -11,7 +11,7 @@ from asterion.applications.provider import (
     ApplicationProviderError,
     compose_installed_provider,
 )
-from asterion.capabilities.builtin import (
+from asterion.applications.first_party_packages import (
     create_controlled_code_package,
 )
 from asterion.capabilities.dci.provider import (
