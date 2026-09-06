@@ -247,7 +247,8 @@ def _diagnose_provider_request(body: bytes, turn: int) -> None:
                 messages = context.get("messages")
                 if type(messages) is list:
                     message_count = len(messages)
-        _decode_request(body, turn, [])
+        if turn == 0:
+            _decode_request(body, turn, [])
     except UnicodeDecodeError:
         category = "utf8"
     except json.JSONDecodeError:

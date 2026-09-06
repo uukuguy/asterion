@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
+from unittest.mock import patch
 
 
 class TestP7DevelopmentSdkProvider(unittest.TestCase):
@@ -40,6 +41,26 @@ class TestP7DevelopmentSdkProvider(unittest.TestCase):
             "p7-sdk-request turn=0 bytes=95 category=model keys=context,model,options "
             "context_keys=messages,systemPrompt,tools message_count=0\n",
         )
+        self.assertNotIn("SENTINEL_PROMPT", output.getvalue())
+
+    def test_boundary_diagnostic_never_applies_empty_history_to_later_turns(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_development_host import (
+            _canonical,
+            _diagnose_provider_request,
+        )
+
+        body = _canonical({"context": {"systemPrompt": "SENTINEL_PROMPT"}})
+        output = StringIO()
+        with (
+            patch(
+                "asterion.applications.prime_agent.operator.p7_development_host._decode_request",
+                side_effect=AssertionError,
+            ) as decode,
+            redirect_stdout(output),
+        ):
+            _diagnose_provider_request(body, 1)
+        decode.assert_not_called()
+        self.assertIn("turn=1", output.getvalue())
         self.assertNotIn("SENTINEL_PROMPT", output.getvalue())
 
     def test_six_turn_deterministic_tool_policy(self) -> None:
