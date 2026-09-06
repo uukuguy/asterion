@@ -1,15 +1,20 @@
-"""P5's one-container worker ownership boundary.
-
-The concrete transport remains P1-B's daemon-admitted persistent worker; P5
-adds no image, mount, or executable selection surface.
-"""
+"""One direct restricted P3-image container for P5 repair evidence."""
 
 from __future__ import annotations
+import asyncio
+import re
+import secrets
+from time import monotonic
+from .docker_cli import (
+    DockerCliEngineTransport,
+    _CLEARED_BASE_IMAGE_ENVIRONMENT,
+    _ENVIRONMENT,
+)
+from .docker_worker import _LifecycleCallControl
 
-from hashlib import sha256
-import json
-
-from .p1b_development_docker import P1BDockerPersistentWorkerService
+_ID = re.compile(r"[0-9a-f]{64}\Z")
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_CELL_CAP, _READ_CAP = 16 * 1024, 16 * 1024
 
 
 class PrimeP5DevelopmentDockerError(ValueError):
@@ -17,10 +22,214 @@ class PrimeP5DevelopmentDockerError(ValueError):
         super().__init__("prime P5 development docker worker is unavailable")
 
 
-class P5DevelopmentDockerWorkerService:
-    """One P5-owned state machine over one admitted P1-B container."""
+class P5DevelopmentDockerTransport(DockerCliEngineTransport):
+    """Fixed direct Docker operations; there is deliberately no RLM mount."""
 
-    __slots__ = ("_inner", "_goal", "_run", "_source", "_stage")
+    async def create_p5(
+        self, *, image_digest: str, workspace: str, control: _LifecycleCallControl
+    ) -> str:
+        if _DIGEST.fullmatch(image_digest) is None or not _path(workspace):
+            raise PrimeP5DevelopmentDockerError()
+        name, fd = "prime-p5-" + secrets.token_hex(16), self._seccomp_profile_fd  # type: ignore[attr-defined]
+        self._seccomp_profile_fd = None  # type: ignore[attr-defined]
+        if type(fd) is not int:
+            raise PrimeP5DevelopmentDockerError()
+        platform = "/".join(
+            x
+            for x in (
+                self._platform.os,
+                self._platform.architecture,
+                self._platform.variant,
+            )
+            if x is not None
+        )  # type: ignore[attr-defined]
+        argv = self._prefix + (
+            "create",
+            "--name",
+            name,
+            "--pull=never",
+            "--platform",
+            platform,
+            "--network",
+            "none",
+            "--read-only",
+            "--user",
+            "65534:65534",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--security-opt",
+            "seccomp=/proc/self/fd/" + str(fd),
+            "--tmpfs",
+            "/tmp:rw,nodev,noexec,nosuid,size=16777216,uid=65534,gid=65534,mode=0700",
+            "--volume",
+            workspace + ":/workspace:rw,rprivate",
+            "--env",
+            _ENVIRONMENT[0],
+            "--env",
+            _ENVIRONMENT[1],
+            "--env",
+            _ENVIRONMENT[2],
+            "--env",
+            _CLEARED_BASE_IMAGE_ENVIRONMENT[0],
+            "--env",
+            _CLEARED_BASE_IMAGE_ENVIRONMENT[1],
+            "--env",
+            _CLEARED_BASE_IMAGE_ENVIRONMENT[2],
+            "--env",
+            _CLEARED_BASE_IMAGE_ENVIRONMENT[3],
+            "--pids-limit",
+            "64",
+            "--memory",
+            "268435456",
+            "--memory-swap",
+            "268435456",
+            "--cpus",
+            "1",
+            "--restart",
+            "no",
+            image_digest,
+        )
+        try:
+            await self._preflight(control)  # type: ignore[attr-defined]
+            result = await self._call(argv, control, pass_fds=(fd,))  # type: ignore[attr-defined]
+            daemon = self._parse_daemon_id(result.stdout)  # type: ignore[attr-defined]
+            await self._call(self._prefix + ("container", "start", daemon), control)  # type: ignore[attr-defined]
+            return daemon
+        except asyncio.CancelledError:
+            await self._uncertain(name)
+            raise
+        except BaseException:
+            await self._uncertain(name)
+            raise PrimeP5DevelopmentDockerError() from None
+        finally:
+            self._close_fd(fd)  # type: ignore[attr-defined]
+
+    async def execute_p5(
+        self, container_id: str, cell: str, control: _LifecycleCallControl
+    ) -> None:
+        if (
+            _ID.fullmatch(container_id) is None
+            or type(cell) is not str
+            or not cell
+            or len(cell.encode()) > _CELL_CAP
+        ):
+            raise PrimeP5DevelopmentDockerError()
+        try:
+            await self._call(
+                self._prefix
+                + (
+                    "container",
+                    "exec",
+                    "--user",
+                    "65534:65534",
+                    "--env",
+                    "HOME=/tmp",
+                    "--env",
+                    "IPYTHONDIR=/tmp/ipython",
+                    container_id,
+                    "/usr/local/bin/ipython",
+                    "--no-banner",
+                    "--no-confirm-exit",
+                    "-c",
+                    cell,
+                ),
+                control,
+                max_output_bytes=4096,
+            )  # type: ignore[attr-defined]
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            raise PrimeP5DevelopmentDockerError() from None
+
+    async def read_p5(
+        self, container_id: str, name: str, control: _LifecycleCallControl
+    ) -> bytes:
+        if _ID.fullmatch(container_id) is None or name not in {
+            "solution.py",
+            "result.json",
+        }:
+            raise PrimeP5DevelopmentDockerError()
+        try:
+            result = await self._call(
+                self._prefix
+                + (
+                    "container",
+                    "exec",
+                    "--user",
+                    "65534:65534",
+                    container_id,
+                    "cat",
+                    "/workspace/" + name,
+                ),
+                control,
+                max_output_bytes=_READ_CAP,
+            )  # type: ignore[attr-defined]
+            if (
+                result.stderr
+                or type(result.stdout) is not bytes
+                or not result.stdout
+                or len(result.stdout) > _READ_CAP
+            ):
+                raise ValueError
+            return result.stdout
+        except asyncio.CancelledError:
+            raise
+        except BaseException:
+            raise PrimeP5DevelopmentDockerError() from None
+
+    async def remove_p5(
+        self, container_id: str, control: _LifecycleCallControl
+    ) -> None:
+        result = await self._call(
+            self._prefix + ("container", "rm", "--force", container_id), control
+        )  # type: ignore[attr-defined]
+        if result.stderr or result.stdout not in (b"", (container_id + "\n").encode()):
+            raise PrimeP5DevelopmentDockerError()
+
+    async def assert_p5_absent(
+        self, container_id: str, control: _LifecycleCallControl
+    ) -> None:
+        result = await self._call_raw(
+            self._prefix
+            + ("container", "inspect", "--format", "{{.Id}}", container_id),
+            control,
+        )  # type: ignore[attr-defined]
+        absent = {
+            ("Error: No such object: " + container_id + "\n").encode(),
+            ("Error: No such container: " + container_id + "\n").encode(),
+            (
+                "Error response from daemon: No such container: " + container_id + "\n"
+            ).encode(),
+            ("No such container: " + container_id).encode(),
+        }
+        if (
+            result.returncode != 1
+            or result.stdout not in (b"", b"\n")
+            or result.stderr not in absent
+        ):
+            raise PrimeP5DevelopmentDockerError()
+
+    async def _uncertain(self, identity: str) -> None:
+        try:
+            await self._call_raw(
+                self._prefix + ("container", "rm", "--force", identity), _control()
+            )  # type: ignore[attr-defined]
+        except BaseException:
+            pass
+
+
+class P5DevelopmentDockerWorkerService:
+    __slots__ = (
+        "_container",
+        "_goal",
+        "_image",
+        "_run",
+        "_stage",
+        "_transport",
+        "_workspace",
+    )
 
     def __init__(
         self,
@@ -30,79 +239,103 @@ class P5DevelopmentDockerWorkerService:
         run_id: str,
         session_id: str,
         goal_id: str,
+        workspace: str = "/workspace",
     ) -> None:
-        if type(goal_id) is not str or not goal_id:
+        if (
+            _DIGEST.fullmatch(image_digest) is None
+            or not all(type(x) is str and x for x in (run_id, session_id, goal_id))
+            or not _path(workspace)
+        ):
             raise PrimeP5DevelopmentDockerError()
-        try:
-            self._inner = P1BDockerPersistentWorkerService(
-                image_digest=image_digest,
-                transport=transport,
-                run_id=run_id,
-                session_id=session_id,
-            )
-        except BaseException:
-            raise PrimeP5DevelopmentDockerError() from None
-        self._goal, self._run, self._source, self._stage = goal_id, run_id, None, "new"
+        (
+            self._transport,
+            self._image,
+            self._run,
+            self._goal,
+            self._workspace,
+            self._container,
+            self._stage,
+        ) = transport, image_digest, run_id, goal_id, workspace, None, 0
+
+    @property
+    def daemon_id(self) -> str:
+        if self._container is None:
+            raise PrimeP5DevelopmentDockerError()
+        return self._container
+
+    @property
+    def image_digest(self) -> str:
+        return self._image
 
     async def acquire(self) -> None:
-        await self._inner.acquire()
-        self._stage = "initial"
+        create = getattr(self._transport, "create_p5", None)
+        if not callable(create) or self._stage:
+            raise PrimeP5DevelopmentDockerError()
+        value = await create(
+            image_digest=self._image, workspace=self._workspace, control=_control()
+        )
+        if type(value) is not str or _ID.fullmatch(value) is None:
+            raise PrimeP5DevelopmentDockerError()
+        self._container, self._stage = value, 1
 
     async def snapshot(self) -> dict[str, bytes]:
-        if self._stage == "initial":
-            self._source, self._stage = await self._inner.initial_snapshot(), "cell-1"
-        elif self._stage == "cell-2":
-            await self._inner.finish()
-            self._source, self._stage = await self._inner.snapshot(), "final"
-        else:
+        if self._stage not in {1, 2, 3}:
             raise PrimeP5DevelopmentDockerError()
-        if type(self._source) is not bytes or not self._source:
-            raise PrimeP5DevelopmentDockerError()
-        return {"solution.py": self._source}
+        return {"solution.py": await self._read("solution.py")}
 
     async def execute_cell(self, cell: str) -> dict[str, object]:
-        if self._stage not in {"cell-1", "cell-2"}:
+        if self._stage not in {1, 2}:
             raise PrimeP5DevelopmentDockerError()
-        observed = await self._inner.execute_cell(cell)
-        count = observed.get("cell_count") if type(observed) is dict else None
-        if type(count) is not int or isinstance(count, bool) or count not in {1, 2}:
+        execute = getattr(self._transport, "execute_p5", None)
+        if not callable(execute):
             raise PrimeP5DevelopmentDockerError()
-        self._stage = "cell-2"
-        return {"cell_count": count}
-
-    async def result_gate(self) -> dict[str, object]:
-        return self._gate("result", True)
-
-    async def quality_gate(self) -> dict[str, object]:
-        return self._gate("quality", self._stage == "final")
+        await execute(self.daemon_id, cell, _control())
+        self._stage += 1
+        return {"cell_count": self._stage - 1}
 
     async def artifact(self) -> bytes:
-        if self._stage != "final":
+        if self._stage not in {2, 3}:
             raise PrimeP5DevelopmentDockerError()
-        return b'{"passed":true,"result":"clamp"}'
+        return await self._read("result.json")
 
     async def cleanup(self) -> None:
-        await self._inner.cleanup()
-        self._stage = "closed"
-
-    def _gate(self, kind: str, passed: bool) -> dict[str, object]:
-        if self._stage not in {"cell-2", "final"} or type(self._source) is not bytes:
+        if self._container is None:
             raise PrimeP5DevelopmentDockerError()
-        material = json.dumps(
-            {
-                "goal": self._goal,
-                "kind": kind,
-                "run": self._run,
-                "source": sha256(self._source).hexdigest(),
-                "stage": self._stage,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
-        return {
-            "passed": passed,
-            "result_sha256": "sha256:" + sha256(material).hexdigest(),
-        }
+        remove, absent = (
+            getattr(self._transport, "remove_p5", None),
+            getattr(self._transport, "assert_p5_absent", None),
+        )
+        if not callable(remove) or not callable(absent):
+            raise PrimeP5DevelopmentDockerError()
+        await remove(self._container, _control())
+        await absent(self._container, _control())
+        self._stage = 4
+
+    async def _read(self, name: str) -> bytes:
+        read = getattr(self._transport, "read_p5", None)
+        if not callable(read):
+            raise PrimeP5DevelopmentDockerError()
+        value = await read(self.daemon_id, name, _control())
+        if type(value) is not bytes or not value or len(value) > _READ_CAP:
+            raise PrimeP5DevelopmentDockerError()
+        return value
 
 
-__all__ = ("P5DevelopmentDockerWorkerService", "PrimeP5DevelopmentDockerError")
+def _control() -> _LifecycleCallControl:
+    return _LifecycleCallControl(monotonic() + 30, None)
+
+
+def _path(value: object) -> bool:
+    return (
+        type(value) is str
+        and value.startswith("/")
+        and not value.startswith("//")
+        and "\x00" not in value
+    )
+
+
+__all__ = (
+    "P5DevelopmentDockerTransport",
+    "P5DevelopmentDockerWorkerService",
+    "PrimeP5DevelopmentDockerError",
+)

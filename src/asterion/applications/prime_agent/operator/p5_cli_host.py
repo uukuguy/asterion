@@ -21,10 +21,8 @@ from dotenv import dotenv_values
 from asterion.applications.prime_agent.operator.image_input_lock import (
     ImagePlatformDescriptor,
 )
-from asterion.applications.prime_agent.operator.p1b_development_docker import (
-    P1BDevelopmentSnapshotTransport,
-)
 from asterion.applications.prime_agent.operator.p5_development_docker import (
+    P5DevelopmentDockerTransport,
     P5DevelopmentDockerWorkerService,
 )
 from asterion.applications.prime_agent.operator.p5_development_sdk_provider import (
@@ -55,9 +53,9 @@ _APPLICATION_ID = "prime.bounded-autonomy"
 _APPLICATION_VERSION = "1.0.0"
 _DEADLINE_SECONDS = 300
 P5_CLI_DEADLINE_SECONDS = _DEADLINE_SECONDS
-_IMAGE_TAG = "asterion-p1b-development:20260906"
+_IMAGE_TAG = "asterion-p3-development:20260906"
 _CONFIRMED_IMAGE_DIGEST = (
-    "sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657"
+    "sha256:68ffbf922d6dae7ca7c79294c7dceb680bceda599d3cfd0bc8bb0323a9d5a243"
 )
 _DOCKER = "/usr/bin/docker"
 _SOCKET = "/var/run/docker.sock"
@@ -218,12 +216,11 @@ def _preflight(repo_root: Path) -> _P5CliResources:
     seccomp_fd = _sealed_seccomp(Path(_SECCOMP))
     transport: object | None = None
     try:
-        transport = P1BDevelopmentSnapshotTransport(
+        transport = P5DevelopmentDockerTransport(
             docker_executable=str(docker),
             socket_path=str(socket),
             seccomp_profile_fd=seccomp_fd,
             platform=_host_platform(),
-            operator_confirmed_same_guest=True,
         )
         return _P5CliResources(
             image_digest=_inspect_image(docker, socket),
@@ -250,13 +247,6 @@ async def _run_p5_development_lifecycle(
     session_id = "prime-p5-session-" + sha256(run_id.encode("ascii")).hexdigest()
     try:
         provider = create_prime_p5_development_sdk_provider(resources.operator_config)
-        worker = P5DevelopmentDockerWorkerService(
-            image_digest=resources.image_digest,
-            transport=resources.transport,  # type: ignore[arg-type]
-            run_id=run_id,
-            session_id=session_id,
-            goal_id="prime.bounded-autonomy/v1",
-        )
         gateway = PrimeP5DevelopmentGateway(
             node_bin=resources.node_bin,
             entrypoint=resources.entrypoint,
@@ -264,13 +254,21 @@ async def _run_p5_development_lifecycle(
         )
         with TemporaryDirectory(prefix="asterion-prime-p5-") as workspace:
             _prepare_workspace(Path(workspace))
+            worker = P5DevelopmentDockerWorkerService(
+                image_digest=resources.image_digest,
+                transport=resources.transport,
+                run_id=run_id,
+                session_id=session_id,
+                goal_id="prime.bounded-autonomy/v1",
+                workspace=workspace,
+            )
             return await run_p5_development_lifecycle(
                 gateway=gateway,
                 provider=provider,
                 worker=worker,
                 run_id=run_id,
                 session_id=session_id,
-                container_id="sha256:" + sha256(run_id.encode("ascii")).hexdigest(),
+                container_id="pending",
                 goal_id="prime.bounded-autonomy/v1",
                 prime_source_root=resources.prime_source_root,
                 workspace=workspace,
@@ -285,6 +283,12 @@ def _prepare_workspace(workspace: Path) -> None:
     try:
         os.chown(workspace, 65534, 65534)
         os.chmod(workspace, 0o700)
+        source = workspace / "solution.py"
+        source.write_bytes(
+            b"def clamp(value, lower, upper):\n    return min(upper, value)\n"
+        )
+        os.chown(source, 65534, 65534)
+        os.chmod(source, 0o600)
     except OSError:
         raise PrimeP5CliHostError() from None
 

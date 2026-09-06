@@ -30,6 +30,7 @@ class P5DevelopmentReceipt:
     goal_sha256: str
     session_sha256: str
     container_sha256: str
+    image_sha256: str
     initial_snapshot_sha256: str
     repaired_snapshot_sha256: str
     first_result_sha256: str

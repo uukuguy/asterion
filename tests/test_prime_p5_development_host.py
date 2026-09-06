@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 import asyncio
+import hashlib
+import json
 
 
 def _digest(char: str) -> str:
@@ -25,6 +27,14 @@ class _Worker:
     def __init__(self) -> None:
         self.cells = self.results = self.qualities = 0
 
+    @property
+    def image_digest(self) -> str:
+        return "sha256:" + "f" * 64
+
+    @property
+    def daemon_id(self) -> str:
+        return "a" * 64
+
     async def acquire(self) -> None:
         return None
 
@@ -32,7 +42,7 @@ class _Worker:
         source = (
             b"def clamp(value, lower, upper):\n    return min(max(value, lower), upper)\n"
             if self.cells == 2
-            else b"def clamp(value, lower, upper):\n    return min(max(value, lower), lower)\n"
+            else b"def clamp(value, lower, upper):\n    return min(upper, value)\n"
         )
         return {"solution.py": source}
 
@@ -40,19 +50,40 @@ class _Worker:
         self.cells += 1
         return {"cell_count": self.cells}
 
-    async def result_gate(self) -> dict[str, object]:
-        self.results += 1
-        return {"passed": True, "result_sha256": _digest(str(self.results))}
-
-    async def quality_gate(self) -> dict[str, object]:
-        self.qualities += 1
-        return {
-            "passed": self.qualities == 2,
-            "result_sha256": _digest(str(self.qualities + 2)),
-        }
-
     async def artifact(self) -> bytes:
-        return b'{"passed":true,"result":"clamp"}'
+        source = await self.snapshot()
+        raw = source["solution.py"]
+        goal = "prime.bounded-autonomy/v1"
+        goal_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "format": "asterion.prime-p5-goal/v1",
+                    "goal_id": goal,
+                    "workload_sha256": __import__(
+                        "asterion.applications.prime_agent.operator.p5_development_workload",
+                        fromlist=["P5_DEVELOPMENT_WORKLOAD_DIGEST"],
+                    ).P5_DEVELOPMENT_WORKLOAD_DIGEST,
+                    "oracle_sha256": __import__(
+                        "asterion.applications.prime_agent.operator.p5_development_workload",
+                        fromlist=["P5_DEVELOPMENT_ORACLE_DIGEST"],
+                    ).P5_DEVELOPMENT_ORACLE_DIGEST,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        return json.dumps(
+            {
+                "goal_id": goal,
+                "goal_sha256": "sha256:" + goal_digest,
+                "marker": "clamp-result",
+                "run_id": "run",
+                "source_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+                "stage": 1 if self.cells == 1 else 2,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
 
     async def cleanup(self) -> None:
         return None
@@ -79,11 +110,25 @@ class _Gateway:
         }
 
     async def feedback(self, value: str) -> dict[str, object]:
-        assert value == "quality gate failed; repair clamp defect"
+        assert value.startswith(
+            "quality gate failed for run=run goal=prime.bounded-autonomy/v1"
+        )
         return {}
 
     async def close(self) -> None:
         return None
+
+    def terminal_witness(self) -> dict[str, object]:
+        return {
+            "identity": {
+                "run_id": "run",
+                "session_id": "session",
+                "runtime_id": "runtime",
+                "generation": 1,
+            },
+            "result": {},
+            "cumulative": {"model_callback_count": 4, "tool_callback_count": 2},
+        }
 
     async def cancel(self) -> object:
         return {"lifecycle": "cancelled"}
@@ -103,7 +148,7 @@ class TestP5DevelopmentHost(unittest.TestCase):
                 run_id="run",
                 session_id="session",
                 container_id="container",
-                goal_id="goal",
+                goal_id="prime.bounded-autonomy/v1",
             )
         )
         self.assertRegex(trace.trace_sha256, r"\Asha256:[0-9a-f]{64}\Z")
@@ -132,6 +177,19 @@ class TestP5DevelopmentHost(unittest.TestCase):
             validate_p5_development_artifact,
         )
 
-        validate_p5_development_artifact(b'{"passed":true,"result":"clamp"}')
+        source = b"def clamp(value, lower, upper):\n    return min(max(value, lower), upper)\n"
+        artifact = json.dumps(
+            {
+                "goal_id": "goal",
+                "goal_sha256": "sha256:" + "0" * 64,
+                "marker": "clamp-result",
+                "run_id": "run",
+                "source_sha256": "sha256:" + hashlib.sha256(source).hexdigest(),
+                "stage": 2,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+        validate_p5_development_artifact(artifact)
         with self.assertRaises(ValueError):
             validate_p5_development_artifact(b'{"passed":false}')

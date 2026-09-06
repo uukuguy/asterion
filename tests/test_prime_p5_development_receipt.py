@@ -28,6 +28,7 @@ class TestP5DevelopmentReceipt(unittest.TestCase):
             "goal_sha256": _digest("1"),
             "session_sha256": _digest("2"),
             "container_sha256": _digest("3"),
+            "image_sha256": _digest("d"),
             "initial_snapshot_sha256": _digest("4"),
             "repaired_snapshot_sha256": _digest("5"),
             "first_result_sha256": _digest("6"),

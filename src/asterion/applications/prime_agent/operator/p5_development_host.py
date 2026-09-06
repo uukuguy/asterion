@@ -22,7 +22,10 @@ from .p5_development_workload import (
 )
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_DAEMON_ID = re.compile(r"[0-9a-f]{64}\Z")
 _COUNTS = (2, 4, 2)
+_GOAL_ID = "prime.bounded-autonomy/v1"
+_INITIAL_SOURCE = b"def clamp(value, lower, upper):\n    return min(upper, value)\n"
 
 
 class PrimeP5DevelopmentHostError(ValueError):
@@ -41,6 +44,7 @@ class P5DevelopmentGateway(Protocol):
     async def open(self, **kwargs: object) -> None: ...
     async def prompt(self, prompt: str) -> Mapping[str, object]: ...
     async def feedback(self, feedback: str) -> Mapping[str, object]: ...
+    def terminal_witness(self) -> Mapping[str, object]: ...
     async def close(self) -> None: ...
     async def cancel(self) -> object: ...
 
@@ -55,8 +59,6 @@ class P5DevelopmentWorker(Protocol):
     async def acquire(self) -> None: ...
     async def snapshot(self) -> object: ...
     async def execute_cell(self, cell: str) -> Mapping[str, object]: ...
-    async def result_gate(self) -> object: ...
-    async def quality_gate(self) -> object: ...
     async def artifact(self) -> bytes: ...
     async def cleanup(self) -> None: ...
 
@@ -101,11 +103,22 @@ async def run_p5_development_lifecycle(
         workspace,
     ):
         raise PrimeP5DevelopmentHostError()
+    if goal_id != _GOAL_ID:
+        raise PrimeP5DevelopmentHostError()
     opened = provider_closed = cleaned = False
     cancelled = False
     try:
         await worker.acquire()
+        observed_daemon = getattr(worker, "daemon_id", None)
+        if (
+            type(observed_daemon) is not str
+            or _DAEMON_ID.fullmatch(observed_daemon) is None
+        ):
+            raise ValueError
+        container_id = observed_daemon
         initial = _source_from_snapshot(await worker.snapshot())
+        if initial != _INITIAL_SOURCE:
+            raise ValueError
         validate_p5_development_snapshot(initial, repaired=False)
         model_calls = tool_calls = 0
 
@@ -148,29 +161,47 @@ async def run_p5_development_lifecycle(
             workspace=workspace,
         )
         opened = True
-        first = await gateway.prompt("diagnose clamp defect")
+        first = await gateway.prompt(_prompt("diagnose", run_id, goal_id, 1))
         _completed(first, 2, 1)
-        first_result = _gate(await worker.result_gate(), True)
-        first_quality = _gate(await worker.quality_gate(), False)
-        feedback = _feedback(first_quality)
+        diagnosed = _source_from_snapshot(await worker.snapshot())
+        validate_p5_development_snapshot(diagnosed, repaired=False)
+        if diagnosed != initial:
+            raise ValueError
+        first_artifact = await worker.artifact()
+        validate_p5_development_artifact(
+            first_artifact, run_id=run_id, goal_id=goal_id, source=diagnosed, stage=1
+        )
+        first_result, first_quality = _gates(
+            diagnosed, first_artifact, run_id, goal_id, 1
+        )
+        if first_result["passed"] is not True or first_quality["passed"] is not False:
+            raise ValueError
+        feedback = _feedback(first_quality, run_id, goal_id)
         await gateway.feedback(feedback)
-        second = await gateway.prompt("repair clamp defect")
+        second = await gateway.prompt(_prompt("repair", run_id, goal_id, 2))
         _completed(second, 4, 2)
+        witness = _terminal_witness(gateway.terminal_witness(), run_id, session_id)
         if (model_calls, tool_calls) != (4, 2):
             raise ValueError
-        second_result = _gate(await worker.result_gate(), True)
-        second_quality = _gate(await worker.quality_gate(), True)
         repaired = _source_from_snapshot(await worker.snapshot())
         validate_p5_development_snapshot(repaired, repaired=True)
-        if sha256(initial).digest() == sha256(repaired).digest():
+        if sha256(diagnosed).digest() == sha256(repaired).digest():
             raise ValueError
         artifact = await worker.artifact()
-        validate_p5_development_artifact(artifact)
+        validate_p5_development_artifact(
+            artifact, run_id=run_id, goal_id=goal_id, source=repaired, stage=2
+        )
+        second_result, second_quality = _gates(repaired, artifact, run_id, goal_id, 2)
+        if second_result["passed"] is not True or second_quality["passed"] is not True:
+            raise ValueError
         await gateway.close()
         opened = False
         usage = _usage(provider.terminal_usage())
         await provider.close()
         provider_closed = True
+        if getattr(worker, "daemon_id", None) != container_id:
+            raise ValueError
+        _worker_image(worker)
         await worker.cleanup()
         cleaned = True
         receipt = P5DevelopmentReceipt(
@@ -179,9 +210,10 @@ async def run_p5_development_lifecycle(
             P5_DEVELOPMENT_MODEL_DIGEST,
             P5_DEVELOPMENT_ORACLE_DIGEST,
             _digest({"goal": goal_id}),
-            _digest({"session": session_id}),
+            _digest(dict(witness["identity"])),
             _digest({"container": container_id}),
-            _bytes_digest(initial),
+            _digest({"image": _worker_image(worker)}),
+            _bytes_digest(diagnosed),
             _bytes_digest(repaired),
             _digest(first_result),
             _digest(second_result),
@@ -234,13 +266,22 @@ def validate_p5_development_snapshot(source: object, *, repaired: bool) -> None:
     function = tree.body[0]
     if (
         function.name != "clamp"
+        or function.decorator_list
+        or function.returns is not None
+        or getattr(function, "type_params", ())
+        or function.args.posonlyargs
         or len(function.args.args) != 3
         or [arg.arg for arg in function.args.args] != ["value", "lower", "upper"]
+        or any(arg.annotation is not None for arg in function.args.args)
+        or function.args.defaults
+        or function.args.kw_defaults
+        or function.args.vararg is not None
+        or function.args.kwarg is not None
         or len(function.body) != 1
         or not isinstance(function.body[0], ast.Return)
     ):
         raise ValueError
-    allowed = (ast.Expression, ast.Return, ast.Call, ast.Name, ast.Load)
+    allowed = (ast.Return, ast.Call, ast.Name, ast.Load)
     if any(not isinstance(node, allowed) for node in ast.walk(function.body[0])):
         raise ValueError
     names = {
@@ -264,7 +305,14 @@ def validate_p5_development_snapshot(source: object, *, repaired: bool) -> None:
         raise ValueError
 
 
-def validate_p5_development_artifact(value: object) -> None:
+def validate_p5_development_artifact(
+    value: object,
+    *,
+    run_id: str | None = None,
+    goal_id: str | None = None,
+    source: bytes | None = None,
+    stage: int | None = None,
+) -> None:
     if type(value) is not bytes:
         raise ValueError
     try:
@@ -273,8 +321,23 @@ def validate_p5_development_artifact(value: object) -> None:
         raise ValueError from None
     if (
         type(parsed) is not dict
-        or parsed != {"passed": True, "result": "clamp"}
+        or set(parsed)
+        != {"goal_id", "goal_sha256", "marker", "run_id", "source_sha256", "stage"}
+        or parsed.get("marker") != "clamp-result"
+        or type(parsed.get("stage")) is not int
+        or parsed["stage"] not in {1, 2}
+        or not _is_digest(parsed.get("goal_sha256"))
+        or not _is_digest(parsed.get("source_sha256"))
         or _canonical(parsed) != value
+    ):
+        raise ValueError
+    if run_id is not None and (
+        parsed["run_id"] != run_id
+        or parsed["goal_id"] != goal_id
+        or parsed["stage"] != stage
+        or source is None
+        or parsed["source_sha256"] != _bytes_digest(source)
+        or parsed["goal_sha256"] != _goal_digest(goal_id)
     ):
         raise ValueError
 
@@ -306,6 +369,13 @@ def _source_from_snapshot(value: object) -> bytes:
     return value["solution.py"]
 
 
+def _worker_image(worker: object) -> str:
+    value = getattr(worker, "image_digest", None)
+    if type(value) is not str or not _is_digest(value):
+        raise ValueError
+    return value
+
+
 def _completed(value: object, callbacks: int, tools: int) -> None:
     if type(value) is not dict or value != {
         "lifecycle": "completed",
@@ -315,21 +385,148 @@ def _completed(value: object, callbacks: int, tools: int) -> None:
         raise ValueError
 
 
-def _gate(value: object, passed: bool) -> dict[str, object]:
+def _terminal_witness(
+    value: object, run_id: str, session_id: str
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping) or set(value) != {
+        "identity",
+        "result",
+        "cumulative",
+    }:
+        raise ValueError
+    identity, cumulative = value["identity"], value["cumulative"]
     if (
-        type(value) is not dict
-        or set(value) != {"passed", "result_sha256"}
-        or value["passed"] is not passed
-        or not _is_digest(value["result_sha256"])
+        not isinstance(identity, Mapping)
+        or not isinstance(cumulative, Mapping)
+        or set(identity) != {"run_id", "session_id", "runtime_id", "generation"}
+        or identity["run_id"] != run_id
+        or identity["session_id"] != session_id
+        or identity["generation"] != 1
+        or type(identity["runtime_id"]) is not str
+        or not identity["runtime_id"]
+        or dict(cumulative) != {"model_callback_count": 4, "tool_callback_count": 2}
     ):
         raise ValueError
     return value
 
 
-def _feedback(value: Mapping[str, object]) -> str:
+def _gates(
+    source: bytes, artifact: bytes, run_id: str, goal_id: str, stage: int
+) -> tuple[dict[str, object], dict[str, object]]:
+    outcomes = _clamp_cases(source)
+    result = {
+        "passed": True,
+        "result_sha256": _digest(
+            {
+                "gate": "result",
+                "run_id": run_id,
+                "goal_id": goal_id,
+                "stage": stage,
+                "source_sha256": _bytes_digest(source),
+                "artifact_sha256": _bytes_digest(artifact),
+                "outcomes": outcomes,
+            }
+        ),
+    }
+    # A diagnosis is a valid result only if it is the exact fixed defect; quality
+    # gates it until the repair replaces the observed workspace bytes.
+    quality = {
+        "passed": stage == 2 and all(outcomes),
+        "result_sha256": _digest(
+            {
+                "gate": "quality",
+                "run_id": run_id,
+                "goal_id": goal_id,
+                "stage": stage,
+                "source_sha256": _bytes_digest(source),
+                "artifact_sha256": _bytes_digest(artifact),
+                "outcomes": outcomes,
+            }
+        ),
+    }
+    return result, quality
+
+
+def _feedback(value: Mapping[str, object], run_id: str, goal_id: str) -> str:
     if value["passed"] is not False:
         raise ValueError
-    return "quality gate failed; repair clamp defect"
+    return (
+        "quality gate failed for run="
+        + run_id
+        + " goal="
+        + goal_id
+        + "; repair /workspace/solution.py and replace /workspace/result.json"
+    )
+
+
+def _prompt(phase: str, run_id: str, goal_id: str, stage: int) -> str:
+    return (
+        phase
+        + " clamp defect. Use exactly one ipython call. Source is /workspace/solution.py; result is /workspace/result.json. "
+        "Write canonical JSON (sort_keys=True, separators=(',',':')) keys goal_id,goal_sha256,marker,run_id,source_sha256,stage; marker clamp-result; "
+        "goal_sha256="
+        + _goal_digest(goal_id)
+        + "; source_sha256='sha256:'+sha256(actual solution.py bytes).hexdigest(); run_id="
+        + run_id
+        + "; goal_id="
+        + goal_id
+        + "; stage="
+        + str(stage)
+        + ". "
+        + (
+            "Inspect and test only; do not edit source."
+            if stage == 1
+            else "Repair clamp, replace result, then stop briefly."
+        )
+    )
+
+
+def _goal_digest(goal_id: object) -> str:
+    if type(goal_id) is not str or not goal_id:
+        raise ValueError
+    return _digest(
+        {
+            "format": "asterion.prime-p5-goal/v1",
+            "goal_id": goal_id,
+            "workload_sha256": P5_DEVELOPMENT_WORKLOAD_DIGEST,
+            "oracle_sha256": P5_DEVELOPMENT_ORACLE_DIGEST,
+        }
+    )
+
+
+def _clamp_cases(source: bytes) -> tuple[bool, ...]:
+    # The AST is recognized first; host never evaluates model bytes.
+    try:
+        tree = ast.parse(source.decode("utf-8", "strict"), mode="exec")
+    except (SyntaxError, UnicodeError):
+        raise ValueError from None
+    expr = tree.body[0].body[0].value  # validated by validate_p5_development_snapshot
+
+    def eval_expr(node: ast.AST, env: dict[str, int]) -> int:
+        if isinstance(node, ast.Name):
+            return env[node.id]
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and len(node.args) == 2
+        ):
+            args = [eval_expr(arg, env) for arg in node.args]
+            return min(args) if node.func.id == "min" else max(args)
+        raise ValueError
+
+    return tuple(
+        eval_expr(expr, {"value": value, "lower": lower, "upper": upper})
+        == min(max(value, lower), upper)
+        for value, lower, upper in (
+            (-4, -2, 3),
+            (-1, -2, 3),
+            (1, -2, 3),
+            (4, -2, 3),
+            (-9, -7, -3),
+            (-5, -7, -3),
+            (0, -7, -3),
+        )
+    )
 
 
 def _canonical(value: object) -> bytes:
@@ -378,7 +575,15 @@ def _inputs(g: object, p: object, w: object, *ids: object) -> bool:
         all(type(value) is str and value for value in ids)
         and all(
             callable(getattr(g, name, None))
-            for name in ("bind", "open", "prompt", "feedback", "close", "cancel")
+            for name in (
+                "bind",
+                "open",
+                "prompt",
+                "feedback",
+                "terminal_witness",
+                "close",
+                "cancel",
+            )
         )
         and all(
             callable(getattr(p, name, None))
@@ -390,8 +595,6 @@ def _inputs(g: object, p: object, w: object, *ids: object) -> bool:
                 "acquire",
                 "snapshot",
                 "execute_cell",
-                "result_gate",
-                "quality_gate",
                 "artifact",
                 "cleanup",
             )
