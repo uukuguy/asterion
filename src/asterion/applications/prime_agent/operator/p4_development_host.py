@@ -195,8 +195,7 @@ async def run_p4_development_lifecycle(
         recovered = await gateway.recover()
         _validate_recovery(candidate, recovered)
         compact = await gateway.compact()
-        if type(compact) is not dict or compact.get("succeeded") is not True:
-            raise ValueError
+        compact = _compaction_witness(compact)
         second = await gateway.prompt(_PROMPT_TWO)
         if (
             type(second) is not dict
@@ -315,6 +314,7 @@ def _checkpoint_candidate(first: object) -> dict[str, object]:
     if type(candidate) is not dict or set(candidate) != {
         "active_session_id",
         "session_id",
+        "initial_attach_cursor",
         "cursor",
         "transcript_sha256",
         "tree_sha256",
@@ -326,7 +326,13 @@ def _checkpoint_candidate(first: object) -> dict[str, object]:
         for key in ("transcript_sha256", "tree_sha256", "artifact_sha256")
     ):
         raise ValueError
-    _cursor(candidate["cursor"])
+    initial_attach_cursor = _cursor(candidate["initial_attach_cursor"])
+    checkpoint_cursor = _cursor(candidate["cursor"])
+    if (
+        initial_attach_cursor["generation"] != checkpoint_cursor["generation"]
+        or initial_attach_cursor["sequence"] >= checkpoint_cursor["sequence"]
+    ):
+        raise ValueError
     if not all(
         type(candidate[key]) is str and candidate[key]
         for key in ("active_session_id", "session_id")
@@ -342,6 +348,7 @@ def _validate_recovery(candidate: Mapping[str, object], recovered: object) -> No
         "from_cursor",
         "to_cursor",
         "snapshot_cursor",
+        "replay_status",
     }:
         raise ValueError
     if (
@@ -350,9 +357,40 @@ def _validate_recovery(candidate: Mapping[str, object], recovered: object) -> No
         or recovered["from_cursor"] != candidate["cursor"]
         or recovered["to_cursor"] != candidate["cursor"]
         or recovered["snapshot_cursor"] != candidate["cursor"]
+        or recovered["replay_status"] != "complete"
     ):
         raise ValueError
     _cursor(recovered["to_cursor"])
+
+
+def _compaction_witness(value: object) -> dict[str, object]:
+    if type(value) is not dict or set(value) != {
+        "compact_called",
+        "succeeded",
+        "start_count",
+        "end_count",
+        "new_entry_count",
+        "active_path_sha256",
+        "first_kept_entry_id_sha256",
+        "tokens_before",
+    }:
+        raise ValueError
+    if (
+        value["compact_called"] is not True
+        or value["succeeded"] is not True
+        or type(value["start_count"]) is not int
+        or value["start_count"] != 1
+        or type(value["end_count"]) is not int
+        or value["end_count"] != 1
+        or type(value["new_entry_count"]) is not int
+        or value["new_entry_count"] != 1
+        or not _is_digest(value["active_path_sha256"])
+        or not _is_digest(value["first_kept_entry_id_sha256"])
+        or type(value["tokens_before"]) is not int
+        or value["tokens_before"] < 0
+    ):
+        raise ValueError
+    return value
 
 
 def _receipt(
@@ -363,8 +401,10 @@ def _receipt(
     initial: bytes,
     post: bytes,
 ) -> P4DevelopmentReceipt:
-    cursor = candidate["cursor"]
-    cursor_digest = _digest(cursor)
+    initial_cursor = candidate["initial_attach_cursor"]
+    checkpoint_cursor = candidate["cursor"]
+    initial_cursor_digest = _digest(initial_cursor)
+    checkpoint_cursor_digest = _digest(checkpoint_cursor)
     return P4DevelopmentReceipt(
         P4_DEVELOPMENT_WORKLOAD_DIGEST,
         P4_DEVELOPMENT_SCHEMA_DIGEST,
@@ -375,21 +415,21 @@ def _receipt(
         _digest({"session": candidate["session_id"]}),
         candidate["transcript_sha256"],
         _digest({"kernel": candidate["artifact_sha256"]}),
-        cursor_digest,
-        cursor_digest,
-        cursor_digest,
-        cursor_digest,
+        initial_cursor_digest,
+        checkpoint_cursor_digest,
+        checkpoint_cursor_digest,
+        checkpoint_cursor_digest,
         _digest(
             {"initial": sha256(initial).hexdigest(), "post": sha256(post).hexdigest()}
         ),
         _digest(compact),
         _digest(usage),
         _digest({"post": sha256(post).hexdigest()}),
-        0,
-        cursor["sequence"],
-        cursor["sequence"],
-        cursor["sequence"],
-        cursor["sequence"],
+        initial_cursor["sequence"],
+        checkpoint_cursor["sequence"],
+        checkpoint_cursor["sequence"],
+        checkpoint_cursor["sequence"],
+        checkpoint_cursor["sequence"],
         0,
         0,
         1,
@@ -439,7 +479,7 @@ def _is_digest(value: object) -> bool:
     )
 
 
-def _cursor(value: object) -> None:
+def _cursor(value: object) -> dict[str, object]:
     if (
         type(value) is not dict
         or set(value) != {"generation", "sequence"}
@@ -450,6 +490,7 @@ def _cursor(value: object) -> None:
         or value["sequence"] < 0
     ):
         raise ValueError
+    return value
 
 
 def _strict_json_object(value: object) -> dict[str, object]:

@@ -78,13 +78,22 @@ class _Worker:
 
 
 class _Gateway:
-    def __init__(self, events: list[str], *, recover_ok: bool = True) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        recover_ok: bool = True,
+        replay_complete: bool = True,
+        compact_ok: bool = True,
+    ) -> None:
         self.events, self.recover_ok = events, recover_ok
+        self.replay_complete, self.compact_ok = replay_complete, compact_ok
         self.model = self.tool = None
         self.compacts = self.prompts = 0
         self.candidate = {
             "active_session_id": "active",
             "session_id": "native",
+            "initial_attach_cursor": {"generation": "g", "sequence": 3},
             "cursor": {"generation": "g", "sequence": 7},
             "transcript_sha256": _digest("transcript"),
             "tree_sha256": _digest("tree"),
@@ -120,6 +129,7 @@ class _Gateway:
                 "from_cursor": self.candidate["cursor"],
                 "to_cursor": self.candidate["cursor"],
                 "snapshot_cursor": self.candidate["cursor"],
+                "replay_status": "complete" if self.replay_complete else "partial",
             }
         return {
             "active_session_id": "active",
@@ -127,12 +137,22 @@ class _Gateway:
             "from_cursor": self.candidate["cursor"],
             "to_cursor": self.candidate["cursor"],
             "snapshot_cursor": self.candidate["cursor"],
+            "replay_status": "complete" if self.replay_complete else "partial",
         }
 
     async def compact(self) -> dict[str, object]:
         self.compacts += 1
         self.events.append("compact")
-        return {"succeeded": True}
+        return {
+            "compact_called": True,
+            "succeeded": True,
+            "start_count": 1,
+            "end_count": 1,
+            "new_entry_count": 1 if self.compact_ok else 2,
+            "active_path_sha256": _digest("active-path"),
+            "first_kept_entry_id_sha256": _digest("first-kept"),
+            "tokens_before": 3,
+        }
 
     async def close(self) -> None:
         self.events.append("gateway.close")
@@ -209,6 +229,31 @@ class TestPrimeP4DevelopmentHost(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(gateway.compacts, 0)
         self.assertEqual(gateway.prompts, 1)
         self.assertIn("cleanup", events)
+
+    async def test_incomplete_replay_or_nonexact_compaction_never_reaches_prompt_two(
+        self,
+    ) -> None:
+        from asterion.applications.prime_agent.operator.p4_development_host import (
+            PrimeP4DevelopmentHostError,
+            run_p4_development_lifecycle,
+        )
+
+        for gateway in (
+            _Gateway([], replay_complete=False),
+            _Gateway([], compact_ok=False),
+        ):
+            with self.subTest(gateway=gateway):
+                with self.assertRaises(PrimeP4DevelopmentHostError):
+                    await run_p4_development_lifecycle(
+                        gateway=gateway,
+                        provider=_Provider(gateway.events),
+                        worker=_Worker(gateway.events),
+                        run_id="run",
+                        session_id="session",
+                        prime_source_root="/prime",
+                        workspace="/work",
+                    )
+                self.assertEqual(gateway.prompts, 1)
 
     async def test_cancellation_waits_for_cleanup_and_does_not_return_a_trace(
         self,
