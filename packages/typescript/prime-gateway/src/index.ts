@@ -203,6 +203,7 @@ export {
 } from "./p1-development-session.js";
 export { PrimeP2DevelopmentSession } from "./p2-development-session.js";
 export { PrimeP5DevelopmentSession } from "./p5-development-session.js";
+export { PrimeP6DevelopmentSession } from "./p6-development-session.js";
 export { PrimeP3DevelopmentSession } from "./p3-development-session.js";
 export { PrimeP4DevelopmentError, runPrimeP4DevelopmentSmoke } from "./p4-development-session.js";
 export {
@@ -240,6 +241,13 @@ export {
   P5DevelopmentBridgeError,
 } from "./p5-development-bridge.js";
 export {
+  inheritedP6DevelopmentSocket,
+  P6_DEVELOPMENT_GATEWAY_PROTOCOL,
+  P6_DEVELOPMENT_MAX_FRAME_BYTES,
+  P6DevelopmentBridge,
+  P6DevelopmentBridgeError,
+} from "./p6-development-bridge.js";
+export {
   inheritedP1BDevelopmentSocket,
   P1B_DEVELOPMENT_GATEWAY_PROTOCOL,
   P1B_DEVELOPMENT_MAX_FRAME_BYTES,
@@ -263,6 +271,11 @@ export type {
   PrimeP5DevelopmentSessionOptions,
   PrimeP5DevelopmentUsage,
 } from "./p5-development-session.js";
+export type {
+  PrimeP6DevelopmentResult,
+  PrimeP6DevelopmentSessionOptions,
+  PrimeP6DevelopmentUsage,
+} from "./p6-development-session.js";
 export type {
   PrimeP3DevelopmentResult,
   PrimeP3DevelopmentRole,
