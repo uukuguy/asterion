@@ -14,7 +14,7 @@ class _Provider:
         self.closed = False
 
     async def __call__(self, _: bytes) -> bytes:
-        return b"{}"
+        return b'{"accepted":true}'
 
     def terminal_usage(self) -> object:
         return type("Usage", (), {"input_tokens": 1, "output_tokens": 1, "cost_microunits": 1})()
@@ -44,16 +44,21 @@ class _Worker:
         return None
 
     async def snapshot(self) -> object:
-        if self.cells < 2:
-            return {"baseline.py": self._host._BASELINE_SOURCE, "task-a.json": self._host._TASK_A_BYTES}
-        return {
-            "candidate.py": self._host._CANDIDATE_SOURCE,
-            "task-b.json": _canonical({"passed": self.holdout_passed}),
-        }
+        values = {"baseline.py": self._host._BASELINE_SOURCE}
+        if self.cells >= 1:
+            values["task-a.json"] = self._host._task_a_artifact("run", "session")
+        if self.cells >= 2:
+            values["candidate.py"] = self._host._CANDIDATE_SOURCE
+        if self.cells >= 3:
+            values["task-b.json"] = self._host._task_b_artifact("run", "session", self.holdout_passed)
+        return values
 
     async def execute_cell(self, _: str) -> dict[str, int]:
         self.cells += 1
         return {"cell_count": self.cells}
+
+    async def restore_baseline(self) -> None:
+        self.cells = 0
 
     async def cleanup(self) -> None:
         self.cleaned = True
@@ -72,10 +77,15 @@ class _Gateway:
 
     async def prompt(self, _: str) -> dict[str, object]:
         self.prompts += 1
-        await self.model({"turn": self.prompts * 2 - 1})  # type: ignore[misc]
-        await self.model({"turn": self.prompts * 2})  # type: ignore[misc]
-        await self.tool({"tool_call_id": str(self.prompts), "code": "complete"})  # type: ignore[misc]
+        self.assert_reply(await self.model({"turn": self.prompts * 2 - 1}))
+        self.assert_reply(await self.model({"turn": self.prompts * 2}))
+        await self.tool({"tool_call_id": str(self.prompts), "code": "complete"})
         return {"lifecycle": "completed", "model_callback_count": self.prompts * 2, "tool_callback_count": self.prompts}
+
+    @staticmethod
+    def assert_reply(reply: object) -> None:
+        if reply != {"accepted": True}:
+            raise ValueError("model reply was discarded")
 
     def terminal_witness(self) -> dict[str, object]:
         return {"identity": {"run_id": "run", "session_id": "session", "runtime_id": "prime.agent", "generation": 1}, "cumulative": {"model_callback_count": 6, "tool_callback_count": 3}}
@@ -93,7 +103,7 @@ class TestP6DevelopmentHost(unittest.TestCase):
 
         return asyncio.run(run_p6_development_lifecycle(gateway=_Gateway(), provider=_Provider(), worker=worker, run_id="run", session_id="session"))
 
-    def test_runs_fixed_preserve_chain_and_cleans_up(self) -> None:
+    def test_runs_staged_preserve_chain_and_cleans_up(self) -> None:
         worker = _Worker()
         receipt = self._run(worker)
         self.assertEqual(receipt.outcome, "preserved")
@@ -106,7 +116,7 @@ class TestP6DevelopmentHost(unittest.TestCase):
         self.assertEqual(receipt.rollback_count, 1)
         self.assertIsNotNone(receipt.rollback_revision_sha256)
 
-    def test_rejects_mutated_stage_bytes_before_receipt(self) -> None:
+    def test_rejects_mutated_candidate_before_receipt(self) -> None:
         class Mutated(_Worker):
             async def snapshot(self):
                 value = await super().snapshot()
