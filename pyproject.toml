@@ -58,6 +58,8 @@ prime-agent = "asterion.applications.prime_agent.provider:create_provider"
 [tool.hatch.build.targets.wheel]
 packages = ["src/asterion"]
 artifacts = [
+    "src/asterion/applications/prime_agent/operator/resources/*.json",
+    "src/asterion/applications/prime_agent/operator/resources/*.txt",
     "src/asterion/capabilities/dci/resources/pi/*.ts",
     "src/asterion/capabilities/dci/resources/pi/*.mjs",
     "src/asterion/control/providers/native/resources/control-plane.json",
