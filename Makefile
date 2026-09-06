@@ -207,8 +207,8 @@ prime-p1-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p1-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
 		printf '%s\n' '[prime-p1] IPython coding: preserve state across two cells and validate the generated solution' >&2; \
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p1 --status-stream stderr; \
-			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p1 --status-stream stderr; \
+			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
 				--provider prime-agent \
 				--application prime.ipython-coding@1.0.0 \
 				--runtime prime.agent \
@@ -219,8 +219,8 @@ prime-p2-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p2-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
 		printf '%s\n' '[prime-p2] Programmatic long context: use the fixed corpus, execute one cell, and validate the answer' >&2; \
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p2 --status-stream stderr; \
-			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p2 --status-stream stderr; \
+			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
 				--provider prime-agent \
 				--application prime.programmatic-long-context@1.0.0 \
 				--runtime prime.agent \
@@ -231,8 +231,8 @@ prime-p3-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p3-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
 		printf '%s\n' '[prime-p3] Recursive workflow: coordinate two child roles and validate the combined result' >&2; \
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p3 --status-stream stderr; \
-			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p3 --status-stream stderr; \
+			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
 				--provider prime-agent \
 				--application prime.recursive-workflow@1.0.0 \
 				--runtime prime.agent \
@@ -243,8 +243,8 @@ prime-p4-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p4-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
 		printf '%s\n' '[prime-p4] Long session continuity: detach, reattach, and validate the preserved session' >&2; \
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p4 --status-stream stderr; \
-			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p4 --status-stream stderr; \
+			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
 				--provider prime-agent \
 				--application prime.long-session-continuity@1.0.0 \
 				--runtime prime.agent \
@@ -255,8 +255,8 @@ prime-p5-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p5-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
 		printf '%s\n' '[prime-p5] Bounded autonomy: diagnose, repair, and validate the fixed clamp task' >&2; \
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p5 --status-stream stderr; \
-			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p5 --status-stream stderr; \
+			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
 			--provider prime-agent \
 			--application prime.bounded-autonomy@1.0.0 \
 			--runtime prime.agent \
@@ -267,8 +267,8 @@ prime-p6-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p6-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
 		printf '%s\n' '[prime-p6] Continual improvement: evaluate, refine, holdout-test, then activate or roll back' >&2; \
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p6 --status-stream stderr; \
-			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p6 --status-stream stderr; \
+			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
 			--provider prime-agent \
 			--application prime.continual-improvement@1.0.0 \
 			--runtime prime.agent \
@@ -279,8 +279,8 @@ prime-p7-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p7-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
 		printf '%s\n' '[prime-p7] ARC-AGI-3: run one offline episode capped at four actions and replay its score' >&2; \
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p7 --status-stream stderr; \
-			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p7 --status-stream stderr; \
+			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
 			--provider prime-agent \
 			--application prime.arc-agi-3@1.0.0 \
 			--runtime prime.agent \
@@ -288,7 +288,7 @@ prime-p7-run:
 			--input fixed-small-verification' prime-p7-run "$$run_id"
 
 prime-apps-preflight:
-	@exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/preflight_prime_apps.py'
+	@exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/preflight_prime_apps.py'
 
 test.prime-session-context-parity.provider-free:
 	$(UV_BIN) run python -m unittest -v \

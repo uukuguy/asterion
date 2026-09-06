@@ -7,6 +7,34 @@ from pathlib import Path
 
 
 class TestPrimeMakePresets(unittest.TestCase):
+    def test_public_presets_contain_uv_output_and_bind_the_orb_machine(self) -> None:
+        makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
+        targets = (
+            ("p1", "prime-p2-run:"),
+            ("p2", "prime-p3-run:"),
+            ("p3", "prime-p4-run:"),
+            ("p4", "prime-p5-run:"),
+            ("p5", "prime-p6-run:"),
+            ("p6", "prime-p7-run:"),
+            ("p7", "prime-apps-preflight:"),
+        )
+        for scenario, next_target in targets:
+            with self.subTest(scenario=scenario):
+                recipe = makefile.split(f"prime-{scenario}-run:\n", 1)[1].split(
+                    "\n" + next_target, 1
+                )[0]
+                self.assertIn('export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"', recipe)
+                invocations = recipe.split("/root/.local/bin/uv run ")[1:]
+                self.assertEqual(len(invocations), 2)
+                for invocation in invocations:
+                    self.assertTrue(invocation.startswith("--quiet "))
+
+        preflight = makefile.split("prime-apps-preflight:\n", 1)[1].split(
+            "\ntest.prime-session-context-parity.provider-free:", 1
+        )[0]
+        self.assertIn('export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"', preflight)
+        self.assertIn("exec /root/.local/bin/uv run --quiet ", preflight)
+
     def test_p1_p3_and_p4_self_prepare_with_a_safe_progress_stream(self) -> None:
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
         cases = (
