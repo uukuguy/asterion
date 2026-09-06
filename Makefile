@@ -171,7 +171,7 @@ prime-verify-provider-free:
 
 prime-p1-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p1-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --python /usr/bin/python3 --isolated asterion run \
 			--provider prime-agent \
 			--application prime.ipython-coding@1.0.0 \
 			--runtime prime.agent \
@@ -180,7 +180,7 @@ prime-p1-run:
 
 prime-p2-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p2-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --python /usr/bin/python3 --isolated asterion run \
 			--provider prime-agent \
 			--application prime.programmatic-long-context@1.0.0 \
 			--runtime prime.agent \
@@ -189,7 +189,7 @@ prime-p2-run:
 
 prime-p3-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p3-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --python /usr/bin/python3 --isolated asterion run \
 			--provider prime-agent \
 			--application prime.recursive-workflow@1.0.0 \
 			--runtime prime.agent \
@@ -198,7 +198,7 @@ prime-p3-run:
 
 prime-p4-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p4-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --python /usr/bin/python3 --isolated asterion run \
 			--provider prime-agent \
 			--application prime.long-session-continuity@1.0.0 \
 			--runtime prime.agent \
@@ -207,7 +207,7 @@ prime-p4-run:
 
 prime-p5-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p5-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --python /usr/bin/python3 --isolated asterion run \
 			--provider prime-agent \
 			--application prime.bounded-autonomy@1.0.0 \
 			--runtime prime.agent \
@@ -216,7 +216,7 @@ prime-p5-run:
 
 prime-p6-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p6-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --python /usr/bin/python3 --isolated asterion run \
 			--provider prime-agent \
 			--application prime.continual-improvement@1.0.0 \
 			--runtime prime.agent \
@@ -225,7 +225,7 @@ prime-p6-run:
 
 prime-p7-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p7-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --isolated asterion run \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /root/.local/bin/uv run --python /usr/bin/python3 --isolated asterion run \
 			--provider prime-agent \
 			--application prime.arc-agi-3@1.0.0 \
 			--runtime prime.agent \
