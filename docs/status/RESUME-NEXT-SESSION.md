@@ -28,11 +28,11 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 
 ## Next concrete action
 
-W0 inventory alignment, W1a executable-kind consistency, and W1b exact source
-preparation are complete. Continue W1c: remove Prime application routing from
-the domain-neutral runtime default registry, move exact runtime bindings behind
-provider-owned integration, and keep AgentRuntime separate from control-plane
-providers.
+W0 inventory alignment, W1a executable-kind consistency, W1b exact source
+preparation, and W1c runtime-provider separation are complete. Continue W1d:
+establish a core-only import/install gate, remove mandatory core-to-product
+imports and product-only dependencies, and preserve selected provider entry
+points as explicit integrations.
 
 The seven Prime development scenarios are closed at their named boundaries.
 Native Phase 3.2 remains a parallel track. Full multi-game ARC-AGI-3 work and

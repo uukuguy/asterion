@@ -2075,3 +2075,4 @@
 - 15:38 Advanced the durable worklist to W1c after verified source lifecycle closure [f865cf59]
 - 15:45 Defined provider-owned runtime binding and separate control-plane boundaries for W1c [49a53212]
 - 15:57 Bound runtimes through selected providers to remove framework-to-Prime routing [3e89d7b1]
+- 15:58 Aligned packaged assembly acceptance with the closed Prime inventory [5ef11e53]
