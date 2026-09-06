@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from hashlib import sha256
+import asyncio
 import json
 import unittest
 
@@ -42,6 +43,28 @@ def _witness() -> dict[str, object]:
 
 
 class TestP7DevelopmentHost(unittest.TestCase):
+    def test_cleanup_reports_failure_when_broker_close_fails(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_development_host import _cleanup
+
+        class Reporter:
+            events: list[tuple[str, str]] = []
+
+            def emit(self, event: object) -> None:
+                self.events.append((event.component, event.state))  # type: ignore[attr-defined]
+
+        class Worker:
+            async def cleanup(self) -> None:
+                return None
+
+        class Broker:
+            def close(self) -> None:
+                raise ValueError
+
+        reporter = Reporter()
+        asyncio.run(_cleanup(object(), object(), Worker(), Broker(), False, True, False, False, reporter))
+        self.assertIn(("cleanup", "failed"), reporter.events)
+        self.assertNotIn(("cleanup", "succeeded"), reporter.events)
+
     def test_receipt_uses_the_sealed_score_digest(self) -> None:
         from asterion.applications.prime_agent.operator.p7_development_host import _receipt
         from asterion.applications.prime_agent.operator.p7_runtime_lock import P7DevelopmentRuntimeSet

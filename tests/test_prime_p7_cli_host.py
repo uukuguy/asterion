@@ -9,6 +9,21 @@ from asterion.runtimes.prime_agent_host import PrimeSmallVerificationRequest
 
 
 class TestPrimeP7CliHost(unittest.IsolatedAsyncioTestCase):
+    async def test_preflight_verifies_external_locks_before_reading_config(self) -> None:
+        from asterion.applications.prime_agent.operator import p7_cli_host as subject
+
+        order: list[str] = []
+        paths = type("Paths", (), {"node": Path("/node"), "gateway_root": Path("/gateway"), "source_root": Path("/source")})()
+        with (
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(Path, "is_dir", return_value=True),
+            patch.object(subject, "verify_p7_development_resources", side_effect=lambda _: order.append("resource")),
+            patch.object(subject, "verify_p7_development_runtime", side_effect=lambda _: order.append("runtime")),
+            patch.object(subject, "dotenv_values", side_effect=lambda _: order.append("config") or {"A": "B"}),
+        ):
+            subject._preflight(Path("/repo"), paths)
+        self.assertEqual(order, ["resource", "runtime", "config"])
+
     async def test_resolves_the_rehashed_prepared_p7_paths(self) -> None:
         from asterion.applications.prime_agent.operator import p7_cli_host as subject
 

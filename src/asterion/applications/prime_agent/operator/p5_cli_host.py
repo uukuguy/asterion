@@ -284,7 +284,6 @@ async def _run_p5_development_lifecycle(
                 session_id=session_id,
                 goal_id="prime.bounded-autonomy/v1",
                 workspace=workspace,
-                progress=progress,
             )
             return await run_p5_development_lifecycle(
                 gateway=gateway,

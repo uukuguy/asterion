@@ -186,10 +186,10 @@ async def run_p7_development_lifecycle(
         provider_closed = True
         _emit(progress, "cleanup", "started")
         await worker.cleanup()
-        _emit(progress, "cleanup", "succeeded")
         worker_cleaned = True
         broker.close()
         broker_closed = True
+        _emit(progress, "cleanup", "succeeded")
         _emit(progress, "validation", "started")
         validation_started = True
         receipt = _receipt(
@@ -486,6 +486,10 @@ async def _cleanup(
     broker_closed: bool,
     progress: HostProgressReporter | None = None,
 ) -> None:
+    cleanup_attempted = not worker_cleaned or not broker_closed
+    cleanup_failed = False
+    if cleanup_attempted:
+        _emit(progress, "cleanup", "started")
     if opened:
         try:
             await gateway.close()
@@ -497,17 +501,17 @@ async def _cleanup(
         except BaseException:
             pass
     if not worker_cleaned:
-        _emit(progress, "cleanup", "started")
         try:
             await worker.cleanup()
-            _emit(progress, "cleanup", "succeeded")
         except BaseException:
-            _emit(progress, "cleanup", "failed")
+            cleanup_failed = True
     if not broker_closed:
         try:
             broker.close()
         except BaseException:
-            pass
+            cleanup_failed = True
+    if cleanup_attempted:
+        _emit(progress, "cleanup", "failed" if cleanup_failed else "succeeded")
 
 
 def _emit(reporter: HostProgressReporter | None, component: str, state: str, current: int | None = None, total: int | None = None) -> None:

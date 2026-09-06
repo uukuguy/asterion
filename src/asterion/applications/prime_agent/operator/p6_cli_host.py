@@ -286,7 +286,6 @@ async def _run_p6_development_lifecycle(
                 session_id=session_id,
                 goal_id="prime.continual-improvement/v1",
                 workspace=workspace,
-                progress=progress,
             )
             return await run_p6_development_lifecycle(
                 gateway=gateway,

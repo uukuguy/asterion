@@ -71,8 +71,9 @@ def _preflight(root:Path,paths:PrimeDevelopmentPaths,progress:HostProgressReport
  external=Path(os.environ.get("ASTERION_P7_EXTERNAL_ROOT",root.parent/"external-prime/arc-agi-3")).resolve(); game=external/"environment_files/ls20/9607627b"
  try:
   _emit(progress,"source","started")
-  if not all(p.is_file() for p in (Path("/usr/bin/docker"),paths.node,paths.gateway_root/"dist/src/p7-development-main.js",external/"venv/bin/python3")) or not paths.source_root.is_dir() or not dotenv_values(root/".env"):raise ValueError
+  if not all(p.is_file() for p in (Path("/usr/bin/docker"),paths.node,paths.gateway_root/"dist/src/p7-development-main.js",external/"venv/bin/python3")) or not paths.source_root.is_dir():raise ValueError
   verify_p7_development_resources(game);verify_p7_development_runtime(external)
+  if not dotenv_values(root/".env"):raise ValueError
   _emit(progress,"source","succeeded")
  except BaseException:
   _emit(progress,"source","failed");raise PrimeP7CliHostError() from None
