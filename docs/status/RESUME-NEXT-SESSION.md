@@ -1,58 +1,37 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-06. **Session remains active — not a final handoff.**
+> Updated: 2026-09-06 10:36. **Session remains active — not a final handoff.**
 
 ## Direction
 
-按评估后的主线持续推进直至完成。Asterion核心为统一框架与能力包集成协议；Prime和Native并行，先收口Prime七项。用户纠偏：研发验证只保留正常链路与关键边界断言；不追加极端矩阵、native测试helper或反复promotion。根Sol协调整合，Terra明确实现，Astra复杂契约；机械任务可用Luna，但旧Luna thread额度耗尽。
+按评估后的主线持续推进直至完成。Asterion 的核心是统一智能体框架与能力包集成协议；Prime 和 Native 是并行 runtime。当前先收口七项 Prime 端到端复现。研发验证只保留正常链路和关键边界断言，不运行 promotion 或极端矩阵。
 
-Canonical: docs/status/PRIME-TYPICAL-APPLICATIONS.md
-Plan: docs/superpowers/plans/2026-09-05-prime-authority-bundle-and-linux-launch.md
+Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`.
 
-## Current implementation and evidence
+## Closed Prime applications
 
-P3 已完成 exact installed CLI verification：`make prime-p3-run` 退出 0，14 个聚焦测试通过，trace 为
-`sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`，且零 P3 process/temp dir 残留。P4 当前提交为
-`adb2fe17`、`13213f95`、`8c7cfdbb`、`a0e63239`、`2ae69a0d`；exact `make prime-p4-run` 已在 Orb/Node 22 于 2026-09-06 退出 0，scope 为 `p4-development/unpromoted`，trace 为
-`sha256:d5d04a52243e7cb52985497cd5bdb7a82b8237cb9d69cbd539162af81ca41115`，且零 P4 process/temp dir 残留。当前 real native daemon smoke 仅覆盖 create→attach exact cursor→detach→reattach，不构成完整 P4 closure。
+- P1 `make prime-p1-run`: exact installed CLI, five model callbacks, two Docker IPython cells, compact, oracle and cleanup; trace `sha256:a8be640bdcee9c93ea3e382729db561e4c29e071d3ff776335daac4ff572c703`.
+- P2 `make prime-p2-run`: two model callbacks, one Docker IPython cell, fixed corpus oracle and cleanup; trace `sha256:4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`.
+- P3 `make prime-p3-run`: two recursive children, ten model callbacks, four Docker IPython cells, host oracle and cleanup; trace `sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`.
+- P4 `make prime-p4-run`: direct native daemon checkpoint, exact zero-gap detach/reattach, one compact, five model callbacks, two Docker IPython cells, same AST oracle and cleanup; trace `sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
 
-本地实现已推进至6f496311及后续P1-B清理修复；未push。主要状态：
-- d103447 qualification IPC/bootstrap；真实Linux四个focused checks通过（normal/cancel/identity/handoff ownership）。不发production receipt。
-- 6408ab9等待cell completion并保持可snapshot；c4a7969可cancel/reap模型子进程；9a6c789接development host/broker/oracle。
-- 1a12fda Dockerfile对齐canonical context；f371e1a修真实CLI参数、interactive start握手、env/namespace/absence投影。
-- f689b69修canonical worker ID与daemon ID分离、workspace tmpfs UID/GID65534 mode0700、标准kernel mount/sentinel适配。
-- d3f9c92新增development-only local-root proc snapshot；真实initial snapshot已成功。不能声称降权authority有此能力。
-- 850365c固定P1请求thinking disabled，并仅解包单个完整Markdown code fence；两项provider-free检查通过（0.006s）。随后一次有限真实模型调用仍安全失败且完成清理，未盲重试。
-- 15efffd7/46cfc62e新增并收紧SDK结构化两轮DeepSeek provider：P1-A专用8192 input/1024 output/10000 cost/60秒预算；首轮768 output、次轮保留至少256；第二轮只能追加首轮签发的原样assistant tool call和相关toolResult。terminal usage仅在两轮完整成功后可见。固定bridge options只校验不转发；HTTP禁ambient proxy；fork child只保留私有pipe descriptors。六项focused unittest与ruff通过。
-- 4f3c88be/c8ae1e8c新增Python继承FD gateway并修active prompt取消回收；0362c161区分worker外层一次exchange与SDK内部两次provider callback。
-- c309abd1/1082d9e8完成P1-A host接线、隔离SDK workspace并固定一次IPython验证prompt；764c6f3b兼容后端tool-call的空字符串content。
+All four results are development-only and `unpromoted`. P4 closure uses Prime 0.7.1 direct-daemon zero-gap reattach; crash/restart replay and production promotion remain separate work.
 
-P1-A与P1-B开发链路均已真实完成。P1-B使用一个Prime SDK session、两次prompt、一次真实compact、五次provider callback、两次Docker IPython cell、同一kernel及十二项连续性probe；双snapshot、AST oracle、provider/Node/container cleanup均完成。安全结果为`p1-b-development/unpromoted`与`sha256:21ba3699ff291d98349bf2895b3453adacd1a48dd0b6f9fdfd6803321f403d46`。Prime SDK会话仍属于host-side TypeScript Gateway；Python保留授权、预算、模型进程、Docker、snapshot与最终oracle。
+## P4 implementation boundary
+
+The full P4 path is implemented by the independent workload/receipt, Python inherited-FD gateway and lifecycle host, TypeScript native-daemon callback bridge, installed provider/application/runtime route, and P1B controlled Docker/provider reuse. Key integration commits are `902ac76b`, `dab17330`, `50ec93fb`, `4d0f3d01`, `0866b122`, `ff4914f3`, `084333bd`, `dac12f57`, `44ce8727`, `25cb9755`, `cbfd4d9b`, `f59803b1`, `942fd6db`, and `e86dddf4`.
+
+Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 TypeScript bridge/artifact-lock tests, plus the exact real Make command. The final run completed on Orb Ubuntu with Node 22 and P1B image `sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657`. Orb cleanup inspection found zero P4 processes, containers, sockets, checkpoints and workspaces.
 
 ## Next concrete action
 
-1. 在已验证的 P4 native daemon smoke 上补 checkpoint、一次 compact 和第二 diagnostic。
-2. 接通 same oracle 的真实模型/IPython chain，保持恢复路径禁止盲目重放外部效果。
-3. 研发验证只覆盖正常流程和身份、恢复边界、取消清理、公开脱敏；不运行 promotion 或极端矩阵。
+P5 `prime.bounded-autonomy/v1` is active. Existing code provides a fixed repair workload, exact ceiling/digest fencing, restricted-worker adapter, two-gate reducer and provider-free acceptance. The missing closure is an installed `make prime-p5-run` route that performs a finite real Prime/IPython diagnostic-repair loop, proves both result and quality gates, emits only a safe unpromoted trace, and cleans up.
 
-P2精确命令`prime.programmatic-long-context@1.0.0`已退出0：一个Prime SDK session、两次model callback、一次Docker IPython cell、固定八记录corpus oracle和cleanup均完成。安全结果为`p2-development/unpromoted`与trace `4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`。最终guest中P2 Node进程与容器均为0；Sol最终复审APPROVE。
+Keep P5 within its existing ceilings: at most three actions, bounded usage, fixed IPython-only capability, no retries of uncertain external effects, and fail-closed gate identity. Reuse the P1/P4 runtime, provider, Docker and host-service spine where contracts match; do not introduce a second composer or runner.
 
-最新进展：`6bd2a764`/`a1861acc`增加并收紧私有provider失败分类；`23c7faee`/`e45cacd0`增加经Sol复审的operator私有阶段观察器。一次观察运行完成5/5 callback与2/2 cell，无失败；随后精确命令`--application prime.ipython-coding@1.0.0`退出0并返回安全trace。先前省略版本的命令只在selector处失败，并未进入host。最终guest中Prime Node进程与P1-B容器均为0。
+## Environment and preservation
 
-## Actual environment
-
-- Linux为OrbStack `ubuntu`，使用`orb -m ubuntu -u root`；Docker29.2.1与host同一guest，/usr/bin/docker，/var/run/docker.sock，GID988。Mac /tmp不是guest /tmp。
-- Python live命令使用`/private/tmp/asterion-p1-sdk-run-20260906.py`；guest Node22.23.2位于`/tmp/asterion-node22/bin/node`并按官方SHA256校验。这是live-source开发边界，不是sealed bundle运行。
-- P1-A image `sha256:cdaa182cd3dfd3377aaf93757d8edfdd2c96025e2becf0be86f2fb9e6a053d5c`；P1-B image `sha256:acd139a02dbb80277d0a6c78575f1ddcbdd8042c8a7a82b28416a638cab58657`，均为linux/arm64且未promotion。
-- Context Mac `/private/tmp/asterion-p1-development-context-v3-20260906.tar`；build log同目录`asterion-p1-development-build-v3-20260906.log`。
-- 官方Moby docker-v29.2.1默认seccomp已保存guest `/tmp/asterion-p1-development-seccomp.json`；canonical hash7ce699efbba58df5691185a87189ecc0a47ff01c48ec8fc5708465954b672979。未promotion。
-- 原qualification bundle仍为guest `/tmp/asterion-authority-candidate-9hpk1mgz`与.release.json（CPython3.13.7/658files/5external libs）。不要混作development image/完整authority。
-
-## Agents and preservation
-
-P1/P2/P3 开发实现均已结束。P3 的干净 Make 入口退出 0，trace 为
-`sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`；
-14 个聚焦测试通过，容器、网关进程和临时目录均为零。P4 exact Make 入口也已退出 0，
-但当前仅证明 native daemon create→attach exact cursor→detach→reattach smoke；下一项是补 checkpoint、compact、第二 diagnostic 和 same-oracle 真实模型/IPython 链。
-
-保留既有`.superpowers/sdd/task-1-report.md`、JOURNAL/RESUME未提交修改、未跟踪旧计划和tmp目录。不要整体暂存、重置、删除或push。完整ARC/global harness activation/发布不在本轮范围。
+- Linux execution uses OrbStack `ubuntu` as root; Docker and the host process share that guest. Node 22 is `/tmp/asterion-node22/bin/node`; the sealed development seccomp profile is `/tmp/asterion-p1-development-seccomp.json`.
+- Operator LLM configuration remains in repository `.env` and is read only by application/operator integration.
+- Preserve unrelated `.superpowers/sdd/task-1-report.md`, untracked old plan/spec files and existing `tmp*` directories. Never broad-stage, reset, clean, push, or promote.
+- Native remains a parallel runtime track and does not block Prime P5–P7 closure.

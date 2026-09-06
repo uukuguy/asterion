@@ -25,14 +25,14 @@ or merge contracts.
 | P1 `prime.ipython-coding/v1` | P1-A and P1-B real Prime SDK/provider/Docker/IPython/oracle/cleanup runs pass; the exact installed CLI route also completed five callbacks, two cells and cleanup | Production authority promotion remains a separate release task | **Development closure / CLI verified**. Standard exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P2 `prime.programmatic-long-context/v1` | One real installed CLI run completed two model callbacks, one Docker-backed IPython cell, fixed corpus oracle and cleanup | Production authority promotion and long-context scale remain separate release tasks | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P3 `prime.recursive-workflow/v1` | Real installed CLI run completed two RLM children, retained review follow-up, ten model callbacks, four Docker-backed IPython cells, host oracle and cleanup | Production promotion remains a separate release task | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
-| P4 `prime.long-session-continuity/v1` | Diagnostic workload, completion, recovery adapter, worker and reducer tests pass | Actual detach/attach/compaction/recovery launcher/host, same oracle after recovery, no blind effect replay | Depends on P1/P3; real launcher/host absent |
+| P4 `prime.long-session-continuity/v1` | Installed CLI completed direct native daemon checkpoint, exact zero-gap reattach, compact, five model callbacks, two Docker IPython cells, same oracle and cleanup | Production promotion and crash/restart replay remain separate work | **Development closure / CLI verified**. Exact-selector command exited 0 with an unpromoted safe trace and zero residue |
 | P5 `prime.bounded-autonomy/v1` | Fixed repair workload, two-gate/digest fencing, worker and reducer tests pass | Actual finite Prime worker/gate loop with result and quality-gate proof | Depends on P1/P4; real launcher/host absent |
 | P6 `prime.continual-improvement/v1` | HarnessCoordinator task-A/candidate/task-B, scoped approval and rollback tests pass | Real task/holdout execution, exact activation or rollback, worker evidence and public route | Depends on P1/P5; use local/project scope first, global activation remains explicitly governed |
 | P7 `prime.arc-agi-3/v1` | Game broker/score replay/worker/subset-full reducer tests pass | Real isolated game broker and IPython launcher with bounded public-subset functional evidence | Depends on P1–P6; full multi-game reproduction remains a separate explicitly authorized finite scope |
 
 All seven complete only after their named real scenario succeeds. Public
 metadata, fixed fixtures, fake workers and compatibility probes are distinct
-evidence layers, not alternate ways to close a scenario. P4–P7 currently lack
+evidence layers, not alternate ways to close a scenario. P5–P7 currently lack
 complete installed execution routes; source-level test suites do not mean
 publicly runnable scenarios.
 
@@ -130,6 +130,21 @@ container absence. The clean public command exited 0 with scope
 Post-run inspection found zero P3 containers, gateway processes and temporary
 socket/workspace directories. This closes the fixed development reproduction;
 production promotion and general recursive orchestration remain separate.
+
+## P4 closure record
+
+P4 now runs through the installed application
+`prime.long-session-continuity@1.0.0`. One direct Prime native daemon retained
+the same runtime, native session, transcript and Docker IPython kernel across
+checkpoint persistence, detach and exact zero-gap reattach. The fixed flow then
+performed one observed compact and a second diagnostic, completing five model
+callbacks and two IPython cells before the host repeated the same AST oracle.
+The public `make prime-p4-run` command exited 0 with scope `p4-development`,
+promotion `unpromoted`, and trace
+`sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
+Post-run inspection found zero related processes, containers, sockets,
+checkpoints and temporary workspaces. This closes the fixed development
+reproduction. Crash/restart replay and production promotion remain separate.
 
 ## Current development execution evidence
 
@@ -243,7 +258,7 @@ External-limited outcomes. These counts overlap no claim of model execution.
   Full promotion is tracked separately and has no current PASS claim.
 - Root read-only Docker inspection confirmed an available Linux aarch64 daemon
   through the current OrbStack context. No container was launched or promoted.
-- P4–P7 real launcher/host gaps are code-inventory findings, not failed real runs.
+- P5–P7 real launcher/host gaps are code-inventory findings, not failed real runs.
 
 ## Closure rules
 

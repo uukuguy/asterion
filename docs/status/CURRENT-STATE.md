@@ -10,9 +10,8 @@
   capability-package framework
 - Project route: managed
 - Canonical worklist: `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
-- Active work package: P1, P2, and P3 development reproductions and exact-selector
-  CLI routes are closed; P4 long-session continuity is the active package,
-  followed by P5–P7.
+- Active work package: P1 through P4 development reproductions and exact-selector
+  CLI routes are closed; P5 bounded autonomy is active, followed by P6–P7.
   Existing provider-free acceptance implementations are retained. Native
   parity and broad framework restructuring are not prerequisites for Prime
   closure.
@@ -123,15 +122,13 @@
   `sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`,
   14 focused tests passed, and zero Prime processes or temporary directories
   remained.
-- P4 `prime.long-session-continuity/v1` is implemented across commits
-  `adb2fe17`, `13213f95`, `8c7cfdbb`, `a0e63239`, and `2ae69a0d`. The exact
-  `make prime-p4-run` Orb/Node 22 development run exited 0 on 2026-09-06,
-  with scope `p4-development/unpromoted` and trace
-  `sha256:d5d04a52243e7cb52985497cd5bdb7a82b8237cb9d69cbd539162af81ca41115`;
-  zero P4 processes and temporary directories remained. The current real
-  smoke covers native daemon create → attach with an exact cursor → detach →
-  reattach only; P4 is not fully closed. Checkpoint, one compact, a second
-  diagnostic, and the same-oracle real-model/IPython chain remain.
+- P4 `prime.long-session-continuity/v1` is CLI verified in development. The
+  installed route completed checkpoint persistence, direct native detach and
+  exact zero-gap reattach, one compact, five model callbacks, two Docker-backed
+  IPython cells, the repeated AST oracle and cleanup. `make prime-p4-run`
+  exited 0 with `p4-development/unpromoted` trace
+  `sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
+  Crash/restart replay and production promotion remain separate work.
 - P5 `prime.bounded-autonomy/v1` has a fixed IPython-only diagnostic-repair
   workload, identity- and ceiling-bound two-gate trace, replay-fenced
   host-gate adapter, provider-free acceptance, and a revalidating live reducer.
@@ -210,7 +207,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Resume P4 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
+4. Resume P5 of the active Prime seven-scenario worklist. Native Phase 3.2 remains a
    parallel runtime track; do not substitute it or broad framework refactoring
    for Prime end-to-end closure.
 5. Keep credentials, private configuration, and execution authority external.
