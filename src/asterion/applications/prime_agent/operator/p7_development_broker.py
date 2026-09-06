@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 import secrets
-from typing import Callable
+from typing import Callable, Mapping
 
 
 class P7DevelopmentBrokerError(ValueError):
@@ -21,6 +21,15 @@ def _canonical(value: object) -> bytes:
 
 def _digest(value: object) -> str:
     return "sha256:" + sha256(_canonical(value)).hexdigest()
+
+
+def _score(observation: Mapping[str, object], action_count: int) -> str:
+    return _digest({
+        "state": observation["state"],
+        "levels_completed": observation["levels_completed"],
+        "win_levels": observation["win_levels"],
+        "action_count": action_count,
+    })
 
 
 def _observation(value: object) -> dict[str, object]:
@@ -81,6 +90,7 @@ def _observation(value: object) -> dict[str, object]:
 @dataclass(frozen=True, repr=False)
 class P7BrokerSeal:
     transcript_sha256: str
+    score_sha256: str
     terminal_reason: str
     action_count: int
 
@@ -172,6 +182,7 @@ class P7DevelopmentBroker:
         actions = sum("action_id" in row for row in self._journal)
         return P7BrokerSeal(
             _digest(self._journal),
+            _score(self._journal[-1]["observation"], actions),
             "engine-terminal" if self._status else "action-limit",
             actions,
         )
@@ -181,14 +192,20 @@ class P7DevelopmentBroker:
         engine = None
         try:
             engine = factory()
-            first = _observation(engine.observe())
-            if not self._journal or first != self._journal[0]["observation"]:
+            final = _observation(engine.observe())
+            if not self._journal or final != self._journal[0]["observation"]:
                 raise ValueError
             for row in self._journal[1:]:
-                if _observation(engine.act(row["action_id"])) != row["observation"]:
+                final = _observation(engine.act(row["action_id"]))
+                if final != row["observation"]:
                     raise ValueError
             terminal = engine.status()
-            if type(terminal) is not bool or not (terminal or sealed.action_count == 4):
+            if (
+                type(terminal) is not bool
+                or ("engine-terminal" if terminal else "action-limit")
+                != sealed.terminal_reason
+                or _score(final, sealed.action_count) != sealed.score_sha256
+            ):
                 raise ValueError
         except BaseException:
             raise P7DevelopmentBrokerError() from None
@@ -201,6 +218,7 @@ class P7DevelopmentBroker:
                 pass
         return {
             "replay_sha256": _digest(self._journal),
+            "score_sha256": sealed.score_sha256,
             "terminal_reason": sealed.terminal_reason,
             "action_count": sealed.action_count,
         }

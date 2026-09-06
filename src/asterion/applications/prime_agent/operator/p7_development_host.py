@@ -162,10 +162,8 @@ async def run_p7_development_lifecycle(
         terminal = _status(status)
         if calls != 6 or tools != 3:
             raise ValueError
-        witness = _witness(gateway.terminal_witness(), run_id, session_id)
         usage = _usage(provider.terminal_usage())
-        if any(witness["usage"][key] != usage[key] for key in ("input_tokens", "output_tokens")):
-            raise ValueError
+        _witness(gateway.terminal_witness(), run_id, session_id, usage)
         seal, replay = broker.seal(), broker.replay()
         _broker(seal, replay, len(action_rows), terminal)
         await gateway.close()
@@ -323,26 +321,38 @@ def _usage(value: object) -> dict[str, int]:
     return {key: getattr(value, key) for key in fields}
 
 
-def _witness(value: object, run_id: str, session_id: str) -> dict[str, object]:
-    if not isinstance(value, Mapping) or value.get("cumulative") != {
-        "model_callback_count": 6,
-        "tool_callback_count": 3,
-    }:
+def _witness(value: object, run_id: str, session_id: str, provider_usage: Mapping[str, int]) -> None:
+    if not isinstance(value, Mapping) or set(value) != {"identity", "result", "cumulative"}:
         raise ValueError
-    identity, result = value.get("identity"), value.get("result")
+    identity, result, cumulative = value["identity"], value["result"], value["cumulative"]
     if (
         not isinstance(identity, Mapping)
-        or identity.get("run_id") != run_id
-        or identity.get("session_id") != session_id
+        or dict(identity) != {"run_id": run_id, "session_id": session_id, "runtime_id": "prime.agent", "generation": 1}
+        or type(identity["generation"]) is not int
+        or not isinstance(cumulative, Mapping)
+        or dict(cumulative) != {"model_callback_count": 6, "tool_callback_count": 3}
+        or any(type(cumulative[key]) is not int for key in cumulative)
         or not isinstance(result, Mapping)
-        or not isinstance(result.get("usage"), Mapping)
+        or set(result) != {"lifecycle", "usage", "assistant", "observations"}
+        or result["lifecycle"] != "completed"
     ):
         raise ValueError
-    usage = result["usage"]
-    assert isinstance(usage, Mapping)
-    if set(usage) != {"input_tokens", "output_tokens", "total_tokens"} or any(type(usage[key]) is not int or usage[key] < 0 for key in usage) or usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]:
+    usage, assistant, observations = result["usage"], result["assistant"], result["observations"]
+    if (
+        not isinstance(usage, Mapping)
+        or set(usage) != {"input_tokens", "output_tokens", "total_tokens"}
+        or any(type(usage[key]) is not int or usage[key] < 0 for key in usage)
+        or usage["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]
+        or usage["input_tokens"] != provider_usage["input_tokens"]
+        or usage["output_tokens"] != provider_usage["output_tokens"]
+        or not isinstance(assistant, Mapping)
+        or dict(assistant) != {"completed": True, "stop_reason": "stop"}
+        or type(assistant["completed"]) is not bool
+        or not isinstance(observations, Mapping)
+        or dict(observations) != {"active_tool_names": ["ipython"], "compact_count": 0, "model_callback_count": 6, "rlm_child_count": 0, "tool_call_count": 3}
+        or any(type(observations[key]) is not int for key in ("compact_count", "model_callback_count", "rlm_child_count", "tool_call_count"))
+    ):
         raise ValueError
-    return {"usage": dict(usage)}
 
 
 def _broker(
@@ -351,14 +361,18 @@ def _broker(
     if (
         type(seal) is not dict
         or type(replay) is not dict
-        or set(seal) != {"transcript_sha256", "terminal_reason", "action_count"}
-        or set(replay) != {"replay_sha256", "terminal_reason", "action_count"}
+        or set(seal) != {"transcript_sha256", "score_sha256", "terminal_reason", "action_count"}
+        or set(replay) != {"replay_sha256", "score_sha256", "terminal_reason", "action_count"}
         or seal["transcript_sha256"] != replay["replay_sha256"]
+        or seal["score_sha256"] != replay["score_sha256"]
         or seal["terminal_reason"] != replay["terminal_reason"]
         or seal["action_count"] != replay["action_count"]
         or seal["action_count"] != actions
         or seal["terminal_reason"] != terminal["terminal_reason"]
+        or type(seal["transcript_sha256"]) is not str
         or _DIGEST.fullmatch(seal["transcript_sha256"]) is None
+        or type(seal["score_sha256"]) is not str
+        or _DIGEST.fullmatch(seal["score_sha256"]) is None
     ):
         raise ValueError
 
@@ -399,7 +413,7 @@ def _receipt(
         _bytes_digest(initial),
         _bytes_digest(actions),
         _bytes_digest(status),
-        _digest(dict(terminal)),
+        seal["score_sha256"],
         replay["replay_sha256"],
         _digest(usage),
         transcript,

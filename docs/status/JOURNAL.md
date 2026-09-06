@@ -2035,3 +2035,4 @@
 - 13:15 P7 SDK gateway/provider enforces isolated six-model/three-ipython terminal witness [bb6244dd]
 - 13:22 Added P7 standalone broker sockets and replay because model execution must stay isolated [0e4a74f6]
 - 13:28 Added P7 restricted Docker/IPython worker with exact staged artifacts, immutable broker client bytes, single-file model-socket mount, and cancellation-safe removal [pending]
+- 13:52 Bound P7 receipt score to sealed replayed episode facts; tightened terminal witness and provider-token proof [pending]

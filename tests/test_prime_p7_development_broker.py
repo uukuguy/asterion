@@ -48,8 +48,12 @@ class TestP7DevelopmentBroker(unittest.TestCase):
             )
         status = broker.request({"token": "t", "sequence": 6, "method": "status", "data": {}})
         self.assertEqual(status["terminal_reason"], "engine-terminal")
-        self.assertEqual(broker.seal().terminal_reason, "engine-terminal")
-        self.assertEqual(broker.replay(_Engine)["action_count"], 4)
+        seal = broker.seal()
+        self.assertEqual(seal.terminal_reason, "engine-terminal")
+        self.assertRegex(seal.score_sha256, r"\Asha256:[0-9a-f]{64}\Z")
+        replay = broker.replay(_Engine)
+        self.assertEqual(replay["action_count"], 4)
+        self.assertEqual(replay["score_sha256"], seal.score_sha256)
         with self.assertRaises(P7DevelopmentBrokerError):
             broker.request(
                 {"token": "t", "sequence": 7, "method": "status", "data": {}}

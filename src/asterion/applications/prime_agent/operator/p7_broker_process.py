@@ -138,7 +138,7 @@ def _serve(args: argparse.Namespace) -> None:
         control_sequence += 1
         if raw["method"] == "ready": return {"ready": True}
         if raw["method"] == "seal":
-            seal = broker.seal(); return {"transcript_sha256": seal.transcript_sha256, "terminal_reason": seal.terminal_reason, "action_count": seal.action_count}
+            seal = broker.seal(); return {"transcript_sha256": seal.transcript_sha256, "score_sha256": seal.score_sha256, "terminal_reason": seal.terminal_reason, "action_count": seal.action_count}
         if raw["method"] == "replay": return broker.replay(lambda: _ArcadeEngine(resource, private))
         stop.set(); return {"closed": True}
     servers = (_SocketServer(Path(args.model_socket), model, stop, model=True), _SocketServer(Path(args.control_socket), control, stop))
