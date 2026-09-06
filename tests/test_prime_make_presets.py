@@ -16,6 +16,9 @@ class TestPrimeMakePresets(unittest.TestCase):
         )
         self.assertEqual(recipe.count("orb -m \"$(PRIME_ORB_MACHINE)\" -u root -w \"$(CURDIR)\""), 1)
         self.assertLess(recipe.index("tools/prepare_prime_development.py --scenario p2"), recipe.index("asterion run --progress"))
+        self.assertIn('--run-id "$$1"', recipe)
+        self.assertIn("' prime-p2-run \"$$run_id\"", recipe)
+        self.assertNotIn("export run_id", recipe)
         for required in (
             "--extra prime",
             "--python /usr/bin/python3",
