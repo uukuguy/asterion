@@ -2090,3 +2090,4 @@
 - 19:00 Retained closed v1 because W2 and W3 exposed no protocol gap [0bf1cd8d]
 - 17:44 Reviewed the cross-package extension ownership design [2059dfd7]
 - 17:58 Defined the reviewed cross-runtime extension evidence [c070c2b1]
+- 19:08 Advanced the framework mainline to layered release gates [5f73b9b3]
