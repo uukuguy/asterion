@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 from pathlib import Path
+import sys
 from asterion.applications.prime_agent.operator.development_preparation import (
     PrimeDevelopmentPreparationError,
     prepare_prime_development,
@@ -13,6 +14,7 @@ def main() -> int:
         "--scenario", choices=[f"p{i}" for i in range(1, 8)], action="append"
     )
     parser.add_argument("--all", action="store_true")
+    parser.add_argument("--status-stream", choices=("stdout", "stderr"), default="stdout")
     args = parser.parse_args()
     scenarios = (
         tuple(f"p{i}" for i in range(1, 8)) if args.all else tuple(args.scenario or ())
@@ -29,8 +31,9 @@ def main() -> int:
         )
     except PrimeDevelopmentPreparationError:
         return 1
+    stream = sys.stderr if args.status_stream == "stderr" else sys.stdout
     for scenario in prepared:
-        print(f"prime-{scenario} PASS")
+        print(f"prime-{scenario} PASS", file=stream)
     return 0
 
 

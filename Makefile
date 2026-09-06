@@ -215,7 +215,7 @@ prime-p2-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p2-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
 		printf '%s\n' '[prime-p2] Programmatic long context: use the fixed corpus, execute one cell, and validate the answer' >&2; \
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p2; \
+			/root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p2 --status-stream stderr; \
 			exec /root/.local/bin/uv run --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
 				--provider prime-agent \
 				--application prime.programmatic-long-context@1.0.0 \

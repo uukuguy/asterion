@@ -248,6 +248,59 @@ class TestPrimeP2DevelopmentHost(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(evidence.trace.evidence_digest, r"^sha256:[0-9a-f]{64}$")
         self.assertEqual(events, ["open", "prompt", "result", "close", "cleanup"])
 
+    async def test_post_validation_close_failure_does_not_retract_success(self) -> None:
+        from asterion.applications.prime_agent.operator import p2_development_host as subject
+
+        progress: list[HostProgressEvent] = []
+
+        class Reporter:
+            def emit(self, event: HostProgressEvent) -> None:
+                progress.append(event)
+
+        class Gateway:
+            async def open(self, **_: object) -> None:
+                return None
+
+            async def prompt(self, _: str) -> dict[str, object]:
+                return {
+                    "lifecycle": "completed",
+                    "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+                    "assistant": {"completed": True, "stop_reason": "stop"},
+                    "observations": {"active_tool_names": ["ipython"], "compact_count": 0, "model_callback_count": 2, "rlm_child_count": 0, "tool_call_count": 1},
+                }
+
+            async def cancel(self) -> dict[str, str]:
+                return {"lifecycle": "cancelled"}
+
+            async def close(self) -> None:
+                raise RuntimeError("private close failure")
+
+        terminal = SimpleNamespace(input_tokens=2, output_tokens=3, cost_microunits=7)
+        with self.assertRaises(subject.PrimeP2DevelopmentHostError):
+            await subject.run_p2_development_lifecycle(
+                gateway=Gateway(),
+                open_arguments={"run_id": "p2-close-failure", "session_id": "p2-session", "generation": 1, "prime_source_root": "/prime", "workspace": "/workspace"},
+                prompt="schema only",
+                run_id="p2-close-failure",
+                session_id="p2-session",
+                image_digest="sha256:" + "a" * 64,
+                callback_count=lambda: 2,
+                tool_count=lambda: 1,
+                cell_bytes=lambda: b"cell",
+                read_result=lambda: asyncio.sleep(0, result=b'{"count":3,"sum":23}\n'),
+                cleanup=lambda: asyncio.sleep(0),
+                usage_certain=lambda: True,
+                terminal_usage=lambda: terminal,
+                progress=Reporter(),
+            )
+        self.assertEqual(
+            progress,
+            [
+                HostProgressEvent("validation", "started"),
+                HostProgressEvent("validation", "succeeded"),
+            ],
+        )
+
     async def test_cancellation_cleans_up_and_remains_cancellation(self) -> None:
         from asterion.applications.prime_agent.operator.p2_development_host import (
             run_p2_development_lifecycle,

@@ -106,6 +106,7 @@ async def run_p2_development_lifecycle(
     opened = False
     cleaned = False
     validation_started = False
+    validation_complete = False
     try:
         if (
             type(run_id) is not str
@@ -153,6 +154,7 @@ async def run_p2_development_lifecycle(
         aggregate_bytes = await read_result()
         aggregate = _validate_p2_result(aggregate_bytes)
         _emit(progress, "validation", "succeeded")
+        validation_complete = True
         await gateway.close()
         opened = False
         await cleanup()
@@ -183,7 +185,7 @@ async def run_p2_development_lifecycle(
             )
         )
     except BaseException as error:
-        if validation_started:
+        if validation_started and not validation_complete:
             _emit(progress, "validation", "failed")
         if opened:
             try:

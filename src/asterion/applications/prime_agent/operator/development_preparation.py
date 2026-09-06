@@ -805,12 +805,11 @@ def _p7_identities(repo: Path, record: object) -> dict[str, str]:
         raise PrimeDevelopmentPreparationError() from None
 
 
-def _identities(
+def _resource_identities(
     repo: Path,
     root: Path,
     lock: dict[str, object],
     arch: str,
-    scenarios: tuple[str, ...],
     seccomp_lock: dict[str, object],
     *,
     runner: Callable[..., object],
@@ -839,15 +838,26 @@ def _identities(
         verify_prime_source_lock(repo / "3th-party" / "prime-agent", source_lock)
     except Exception:
         raise PrimeDevelopmentPreparationError() from None
-    images = lock.get("images")
-    if type(images) is not dict:
-        raise PrimeDevelopmentPreparationError()
-    result = {
+    return {
         "node_sha256": _digest(node),
         "seccomp_sha256": _digest(seccomp),
         "source_lock_sha256": prime_source_lock_sha256(source_lock),
         **_gateway_identity(repo, lock.get("gateway")),
     }
+
+
+def _image_identities(
+    repo: Path,
+    lock: dict[str, object],
+    arch: str,
+    scenarios: tuple[str, ...],
+    *,
+    runner: Callable[..., object],
+) -> dict[str, str]:
+    images = lock.get("images")
+    if type(images) is not dict:
+        raise PrimeDevelopmentPreparationError()
+    result: dict[str, str] = {}
     for selected in sorted(set(scenarios)):
         image = images.get(selected)
         image = _image_record(image, selected, "linux/" + arch)
@@ -859,6 +869,22 @@ def _identities(
     if "p7" in scenarios:
         result.update(_p7_identities(repo, lock.get("p7")))
     return result
+
+
+def _identities(
+    repo: Path,
+    root: Path,
+    lock: dict[str, object],
+    arch: str,
+    scenarios: tuple[str, ...],
+    seccomp_lock: dict[str, object],
+    *,
+    runner: Callable[..., object],
+) -> dict[str, str]:
+    return {
+        **_resource_identities(repo, root, lock, arch, seccomp_lock, runner=runner),
+        **_image_identities(repo, lock, arch, scenarios, runner=runner),
+    }
 
 
 def _receipt(
@@ -1019,13 +1045,19 @@ def resolve_prepared_prime_development(
             or any(type(s) is not str or s not in _SCENARIOS for s in scenarios)
         ):
             raise ValueError
+        resource_identities = _resource_identities(
+            repo, root, lock, arch, seccomp_lock, runner=runner
+        )
         expected = _receipt(
             _context(repo, arch, runner),
             lock,
             tuple(scenarios),
-            _identities(
-                repo, root, lock, arch, tuple(scenarios), seccomp_lock, runner=runner
-            ),
+            {
+                **resource_identities,
+                **_image_identities(
+                    repo, lock, arch, tuple(scenarios), runner=runner
+                ),
+            },
         )
         if receipt != expected or scenario not in scenarios:
             raise ValueError

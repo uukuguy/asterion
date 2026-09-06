@@ -19,6 +19,7 @@ class TestPrimeMakePresets(unittest.TestCase):
         self.assertIn('--run-id "$$1"', recipe)
         self.assertIn("' prime-p2-run \"$$run_id\"", recipe)
         self.assertNotIn("export run_id", recipe)
+        self.assertIn("--status-stream stderr", recipe)
         for required in (
             "--extra prime",
             "--python /usr/bin/python3",

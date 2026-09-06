@@ -181,6 +181,28 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
             with self.assertRaises(subject.PrimeDevelopmentPreparationError):
                 subject.resolve_prepared_prime_development(repo, "p1")
 
+    def test_resolver_rehashes_stable_resources_before_docker_bound_identities(self) -> None:
+        calls: list[str] = []
+        with TemporaryDirectory() as temporary:
+            repo = Path(temporary)
+            root = repo / ".asterion-private" / "prime-development"
+            root.mkdir(parents=True)
+            receipt = {"scenarios": ["p2"]}
+            (root / "receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
+            lock = {"node": {"amd64": {"archive_sha256": "a" * 64}}}
+            with (
+                patch.object(subject, "_lock", return_value=lock),
+                patch.object(subject, "_arch", return_value="amd64"),
+                patch.object(subject, "_validated_seccomp_lock", return_value={}),
+                patch.object(subject, "_root", return_value=root),
+                patch.object(subject, "_resource_identities", side_effect=lambda *_args, **_kwargs: calls.append("resources") or {}),
+                patch.object(subject, "_context", side_effect=lambda *_args, **_kwargs: calls.append("docker-context") or {}),
+                patch.object(subject, "_image_identities", side_effect=lambda *_args, **_kwargs: calls.append("docker-image") or {}),
+                patch.object(subject, "_receipt", return_value=receipt),
+            ):
+                subject.resolve_prepared_prime_development(repo, "p2")
+        self.assertEqual(calls, ["resources", "docker-context", "docker-image"])
+
     def test_node_downloader_has_a_finite_timeout(self) -> None:
         calls: list[object] = []
 
