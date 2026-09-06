@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from types import MappingProxyType
 import json
 import os
+import re
 import signal
 import struct
 import time
@@ -26,6 +27,16 @@ _DEADLINE_SECONDS = 60.0
 _REAP_GRACE_SECONDS = 2.0
 _POLL_SECONDS = 0.01
 _USAGE_SIZE = struct.calcsize("!QQQ")
+_SELECTOR = re.compile(
+    r"^(?P<role>root|implementation|review)-(?P<identity>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$"
+)
+_TERMINAL_NOTICE = {
+    "implementation": "P3 implementation child completed.",
+    "review": "P3 review child completed.",
+}
+_TERMINAL_NOTICE_PATTERN = re.compile(
+    r"^RLM child (implementation|review) \([A-Za-z0-9._:-]+\) completed(?: without sending a reply)?$"
+)
 
 
 class PrimeP3DevelopmentSdkProviderError(ValueError):
@@ -112,7 +123,7 @@ class PrimeP3DevelopmentSdkProvider:
         ):
             raise PrimeP3DevelopmentSdkProviderError()
         try:
-            request = _decode_request(body, self._issued[role])
+            request = _decode_request(body, self._issued[role], role)
         except BaseException:
             raise PrimeP3DevelopmentSdkProviderError() from None
         if self._deadline is None:
@@ -128,7 +139,7 @@ class PrimeP3DevelopmentSdkProvider:
         self._uncertain = True
         try:
             response, usage = await self._run_child(
-                request, self._calls[role], remaining
+                request, role, self._calls[role], remaining
             )
             value = json.loads(response.decode("utf-8", "strict"))
             if type(value) is not dict:
@@ -166,7 +177,7 @@ class PrimeP3DevelopmentSdkProvider:
         return self._terminal  # type: ignore[return-value]
 
     async def _run_child(
-        self, request: dict[str, object], call: int, timeout: float
+        self, request: dict[str, object], role: str, call: int, timeout: float
     ) -> tuple[bytes, PrimeModelBrokerTokenUsage]:
         left = right = result_left = result_right = None
         try:
@@ -177,6 +188,7 @@ class PrimeP3DevelopmentSdkProvider:
                 _child(
                     self._config,
                     request,
+                    role,
                     call,
                     timeout,
                     left,
@@ -275,10 +287,10 @@ def create_prime_p3_development_sdk_provider(
 
 
 def _decode_request(
-    body: bytes, prior: tuple[dict[str, object], dict[str, object]] | None
+    body: bytes, prior: tuple[dict[str, object], dict[str, object]] | None, role: str
 ) -> dict[str, object]:
     value = json.loads(body.decode("utf-8", "strict"))
-    if (
+    if role not in P3_ROLE_MODEL_CALLBACKS or (
         _p2._canonical_json(value).encode() != body
         or type(value) is not dict
         or set(value) != {"model", "context", "options"}
@@ -300,6 +312,7 @@ def _decode_request(
         or type(context.get("messages")) is not list
     ):
         raise ValueError
+    _validate_selector(model, role)
     _p2._validate_options(options, model)
     _p2._validate_ipython_tool(context.get("tools"))
     messages = context["messages"]
@@ -323,14 +336,13 @@ def _decode_request(
             != _p2._canonical_json(old_context.get("tools"))
         ):
             raise ValueError
-        if (
-            len(messages) <= len(old_messages)
-            or _p2._canonical_json(messages[: len(old_messages)])
-            != _p2._canonical_json(old_messages)
-            or _p2._canonical_json(messages[len(old_messages)])
-            != _p2._canonical_json(issued)
-        ):
+        if len(messages) <= len(old_messages) or _p2._canonical_json(
+            messages[: len(old_messages)]
+        ) != _p2._canonical_json(old_messages):
             raise ValueError
+        messages[len(old_messages)] = _normalize_issued(
+            issued, messages[len(old_messages)]
+        )
         tail = messages[len(old_messages) + 1 :]
         if issued.get("stopReason") == "toolUse":
             if len(tail) != 1:
@@ -346,9 +358,73 @@ def _decode_request(
     return value
 
 
+def _validate_selector(model: dict[str, object], role: str) -> None:
+    match = _SELECTOR.fullmatch(model["id"])
+    if match is None or match["role"] != role:
+        raise ValueError
+    identity = match["identity"]
+    if (
+        model["api"] != f"asterion-p3-{role}-{identity}"
+        or model["provider"] != f"asterion-p3-{role}-{identity}"
+    ):
+        raise ValueError
+
+
+def _normalize_issued(issued: dict[str, object], observed: object) -> dict[str, object]:
+    if type(observed) is not dict or not _valid_usage(observed.get("usage")):
+        raise ValueError
+    stable = dict(observed)
+    stable.pop("usage", None)
+    expected = dict(issued)
+    expected.pop("usage", None)
+    if _p2._canonical_json(stable) != _p2._canonical_json(expected):
+        raise ValueError
+    return issued
+
+
+def _valid_usage(value: object) -> bool:
+    if type(value) is not dict or set(value) != {
+        "input",
+        "output",
+        "cacheRead",
+        "cacheWrite",
+        "totalTokens",
+        "cost",
+    }:
+        return False
+    counts = (
+        value["input"],
+        value["output"],
+        value["cacheRead"],
+        value["cacheWrite"],
+        value["totalTokens"],
+    )
+    if any(type(item) is not int or item < 0 for item in counts) or value[
+        "totalTokens"
+    ] != sum(counts[:4]):
+        return False
+    cost = value["cost"]
+    return (
+        type(cost) is dict
+        and set(cost) == {"input", "output", "cacheRead", "cacheWrite", "total"}
+        and all(
+            type(item) in (int, float) and not isinstance(item, bool) and item >= 0
+            for item in cost.values()
+        )
+    )
+
+
+def _terminal_notice(text: str, callback_role: str) -> str:
+    match = _TERMINAL_NOTICE_PATTERN.fullmatch(text)
+    if match is None or callback_role != "root":
+        return text
+    return _TERMINAL_NOTICE[match[1]]
+
+
 def _child(
     config: _PrivatePrimeModelConfig,
     request: dict[str, object],
+    role: str,
     call: int,
     timeout: float,
     left: int,
@@ -362,7 +438,9 @@ def _child(
         _p2._close_unneeded_child_fds(left, result_right)
         _p2._read_exact(left, 1)
         _p2._close_quietly(left)
-        raw = _p2._post_chat_completion(config, _payload(request), timeout)
+        raw = _p2._post_chat_completion(
+            config, _payload(request, config.model_id, role), timeout
+        )
         response, usage = _assistant_response(request, raw)
         _p2._write_all(
             result_right,
@@ -385,18 +463,21 @@ def _child(
         _p2._close_quietly(result_right)
 
 
-def _payload(request: dict[str, object]) -> dict[str, object]:
+def _payload(
+    request: dict[str, object], model_id: str, callback_role: str
+) -> dict[str, object]:
     context = request["context"]
     messages: list[dict[str, object]] = []
     if "systemPrompt" in context:
         messages.append({"role": "system", "content": context["systemPrompt"]})
     for item in context["messages"]:
-        role = item["role"]
-        if role == "user":
+        message_role = item["role"]
+        if message_role == "user":
+            text = _p2._text_content(item["content"])
             messages.append(
-                {"role": "user", "content": _p2._text_content(item["content"])}
+                {"role": "user", "content": _terminal_notice(text, callback_role)}
             )
-        elif role == "toolResult":
+        elif message_role == "toolResult":
             messages.append(
                 {
                     "role": "tool",
@@ -404,7 +485,7 @@ def _payload(request: dict[str, object]) -> dict[str, object]:
                     "content": _p2._text_content(item["content"]),
                 }
             )
-        elif role == "assistant":
+        elif message_role == "assistant":
             block = item["content"][0]
             if block["type"] == "toolCall":
                 messages.append(
@@ -433,7 +514,7 @@ def _payload(request: dict[str, object]) -> dict[str, object]:
     return {
         "max_tokens": 1024,
         "messages": messages,
-        "model": request["model"]["id"],
+        "model": model_id,
         "stream": False,
         "thinking": {"type": "disabled"},
         "tool_choice": "auto",
