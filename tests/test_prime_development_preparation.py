@@ -2,6 +2,8 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
@@ -178,7 +180,7 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
                     downloader=downloader,
                     runner=lambda *_args, **_kwargs: SimpleNamespace(stdout=b""),
                 )
-        self.assertEqual(calls, [120])
+        self.assertEqual(calls, [10])
 
     def test_command_output_is_bounded(self) -> None:
         calls: list[object] = []
@@ -190,6 +192,56 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
         with self.assertRaises(subject.PrimeDevelopmentPreparationError):
             subject._run(["/usr/bin/true"], runner=runner)
         self.assertEqual(calls, [120])
+
+    def test_real_command_exceeding_output_cap_is_rejected_while_streaming(self) -> None:
+        with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+            subject._run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stderr.write('x' * 4097); sys.stderr.flush()",
+                ],
+                runner=subprocess.run,
+            )
+
+    def test_node_download_uses_one_deadline_across_incremental_reads(self) -> None:
+        read_sizes: list[int] = []
+        time_calls: list[object] = []
+        downloader_timeouts: list[object] = []
+
+        class Response:
+            def read(self, size: int) -> bytes:
+                read_sizes.append(size)
+                return b"x"
+
+            def close(self) -> None:
+                return None
+
+        def downloader(*_args: object, **kwargs: object) -> Response:
+            downloader_timeouts.append(kwargs["timeout"])
+            return Response()
+
+        def monotonic() -> float:
+            time_calls.append(None)
+            return (0.0, 0.0, 121.0)[len(time_calls) - 1]
+
+        with TemporaryDirectory() as temp, patch.object(subject, "_DOWNLOAD_CHUNK", 1), patch.object(
+            subject.time, "monotonic", monotonic
+        ):
+            with self.assertRaises(subject.PrimeDevelopmentPreparationError):
+                subject._node(
+                    Path(temp),
+                    {
+                        "url": "https://example.invalid/node.tar.xz",
+                        "archive_sha256": "0" * 64,
+                        "node_sha256": "0" * 64,
+                    },
+                    downloader=downloader,
+                    runner=lambda *_args, **_kwargs: SimpleNamespace(stdout=b""),
+                )
+        self.assertEqual(read_sizes, [1])
+        self.assertEqual(len(time_calls), 3)
+        self.assertEqual(downloader_timeouts, [10])
 
     def test_node_publication_retains_existing_versioned_tree(self) -> None:
         with TemporaryDirectory() as temp:

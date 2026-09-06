@@ -9,10 +9,12 @@ import json
 import os
 from pathlib import Path
 import platform as _platform
+import selectors
 import stat
 import subprocess
 import tarfile
 import tempfile
+import time
 from typing import Callable, Mapping
 from urllib.request import urlopen
 
@@ -27,6 +29,11 @@ _SCENARIOS = frozenset({"p1", "p2", "p3", "p4", "p5", "p6", "p7"})
 _MAX_ARCHIVE = 128 * 1024 * 1024
 _MAX_EXTRACTED = 512 * 1024 * 1024
 _MAX_COMMAND_OUTPUT = 4096
+_COMMAND_TIMEOUT = 120
+_COMMAND_READ_CHUNK = 1024
+_DOWNLOAD_TIMEOUT = 120
+_DOWNLOAD_IO_TIMEOUT = 10
+_DOWNLOAD_CHUNK = 1024 * 1024
 _SECCOMP_LOCK_FORMAT = "asterion.prime-development-seccomp-lock/v1"
 _SECCOMP_LOCK_PROVENANCE = {
     "format": _SECCOMP_LOCK_FORMAT,
@@ -270,18 +277,87 @@ def _publish_node(root: Path, archive: Path) -> Path:
         raise PrimeDevelopmentPreparationError() from None
 
 
+def _streaming_run(argv: list[str]) -> subprocess.CompletedProcess[bytes]:
+    process: subprocess.Popen[bytes] | None = None
+    selector = selectors.DefaultSelector()
+    streams: dict[object, bytearray] = {}
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        if process.stdout is None or process.stderr is None:
+            raise ValueError
+        for stream in (process.stdout, process.stderr):
+            os.set_blocking(stream.fileno(), False)
+            streams[stream] = bytearray()
+            selector.register(stream, selectors.EVENT_READ)
+        deadline = time.monotonic() + _COMMAND_TIMEOUT
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            events = selector.select(min(remaining, 0.1))
+            for key, _ in events:
+                stream = key.fileobj
+                chunk = os.read(stream.fileno(), _COMMAND_READ_CHUNK)
+                if not chunk:
+                    selector.unregister(stream)
+                    continue
+                streams[stream].extend(chunk)
+                if (
+                    len(streams[stream]) > _MAX_COMMAND_OUTPUT
+                    or sum(len(value) for value in streams.values()) > _MAX_COMMAND_OUTPUT
+                ):
+                    raise ValueError
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError
+        returncode = process.wait(timeout=remaining)
+        if returncode:
+            raise ValueError
+        return subprocess.CompletedProcess(
+            argv,
+            returncode,
+            stdout=bytes(streams[process.stdout]),
+            stderr=bytes(streams[process.stderr]),
+        )
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=1)
+        selector.close()
+        for stream in streams:
+            stream.close()
+
+
 def _run(argv: list[str], *, runner: Callable[..., object]) -> object:
     try:
+        if runner is subprocess.run:
+            return _streaming_run(argv)
         result = runner(
             argv,
             check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=120,
+            stderr=subprocess.PIPE,
+            timeout=_COMMAND_TIMEOUT,
             env={"PATH": "/usr/bin:/bin"},
         )
         output = getattr(result, "stdout", b"")
-        if type(output) is not bytes or len(output) > _MAX_COMMAND_OUTPUT:
+        errors = getattr(result, "stderr", b"")
+        if (
+            type(output) is not bytes
+            or type(errors) is not bytes
+            or len(output) > _MAX_COMMAND_OUTPUT
+            or len(errors) > _MAX_COMMAND_OUTPUT
+            or len(output) + len(errors) > _MAX_COMMAND_OUTPUT
+        ):
             raise ValueError
         return result
     except Exception:
@@ -335,16 +411,32 @@ def _node(
     archive = root / "node.tar.xz"
     if not archive.exists() or _digest(archive) != record["archive_sha256"]:
         try:
-            data = downloader(record["url"], timeout=120).read(_MAX_ARCHIVE + 1)
+            deadline = time.monotonic() + _DOWNLOAD_TIMEOUT
+            response = downloader(record["url"], timeout=_DOWNLOAD_IO_TIMEOUT)
+            data = bytearray()
+            try:
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError
+                    block = response.read(min(_DOWNLOAD_CHUNK, _MAX_ARCHIVE + 1 - len(data)))
+                    if type(block) is not bytes:
+                        raise ValueError
+                    if not block:
+                        break
+                    if time.monotonic() >= deadline or len(data) + len(block) > _MAX_ARCHIVE:
+                        raise ValueError
+                    data.extend(block)
+            finally:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
             if (
-                type(data) is not bytes
-                or len(data) > _MAX_ARCHIVE
-                or sha256(data).hexdigest() != record["archive_sha256"]
+                sha256(data).hexdigest() != record["archive_sha256"]
             ):
                 raise ValueError
         except Exception:
             raise PrimeDevelopmentPreparationError() from None
-        archive = _publish_bytes(root, "node.tar.xz", data)
+        archive = _publish_bytes(root, "node.tar.xz", bytes(data))
     node = root / ("node-" + _digest(archive)[:16]) / "bin" / "node"
     if not node.exists() or _digest(node) != record["node_sha256"]:
         node = _publish_node(root, archive)
