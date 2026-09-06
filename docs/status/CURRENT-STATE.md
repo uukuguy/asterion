@@ -18,7 +18,7 @@
   closure.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
-  W2 public extension reference are complete.
+  W2 public extension reference, and W3a cross-package evidence are complete.
   The public SDK's `research` kind now reaches its exact implementation through
   provider, assembly, and runner. Package sources now share one prepare/load
   lifecycle with exact lock and authorization binding. Prime now owns its exact
@@ -27,8 +27,10 @@
   allowlist without product modules. The external Acme reference wheel now uses
   only `asterion.capability_sdk` and `asterion.application_sdk`, owns its exact
   application resources and runtime binding, and executes through the installed
-  CLI outside the source tree. Active framework slice: W3a two different-domain
-  extension wheels composed through exact deterministic bindings.
+  CLI outside the source tree. Two independently built Acme and Contoso wheels
+  now compose and execute in either installation order with exact per-package
+  ownership derived from one prepared catalog snapshot. Active framework slice:
+  W3b cross-runtime lifecycle and output equivalence.
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
@@ -57,6 +59,13 @@
   generated evidence remain external and operator-owned.
 
 ## Verified Boundary
+
+- W3a is complete. `make test.cross-package-extension` builds the core, Acme,
+  and Contoso wheels, installs them in both extension orders, and executes the
+  exact Contoso application outside the source tree with byte-identical output.
+  Four tests also reject missing Acme, raw multi-package injection, swapped
+  bindings, and hostile catalog ownership before runtime or implementation
+  execution. Sol approved the single-snapshot ownership boundary.
 
 - W2 is complete. `make test.public-extension` built the core and reference
   extension wheels, installed both without dependencies into a clean external

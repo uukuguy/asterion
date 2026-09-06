@@ -1,6 +1,6 @@
 # Cross-Package Extension Evidence
 
-> Status: proposed for W3a implementation. Protocol impact: none.
+> Status: implemented and verified for W3a. Protocol impact: none.
 
 ## Purpose
 

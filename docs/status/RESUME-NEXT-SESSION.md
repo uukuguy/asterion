@@ -29,12 +29,12 @@ Focused verification passed: 19 Python P4 contract/gateway/host/CLI tests, 13 Ty
 ## Next concrete action
 
 W0 inventory alignment, W1a executable-kind consistency, W1b exact source
-preparation, W1c runtime-provider separation, W1d core-only isolation, and W2
-public extension reference are complete. `make test.public-extension` is the
-isolated installed-wheel acceptance command. Continue W3a: add a second
-independently packaged, different-domain extension and prove that both wheels
-compose and execute outside the source tree with deterministic order and exact
-implementation ownership.
+preparation, W1c runtime-provider separation, W1d core-only isolation, W2
+public extension reference, and W3a cross-package composition are complete.
+`make test.cross-package-extension` is the isolated two-wheel acceptance
+command. Continue W3b: execute one runtime-neutral capability through two
+declared-compatible provider-free adapters and prove lifecycle/output parity,
+cancellation, and missing-service rejection at their declared boundaries.
 
 The seven Prime development scenarios are closed at their named boundaries.
 Native Phase 3.2 remains a parallel track. Full multi-game ARC-AGI-3 work and
