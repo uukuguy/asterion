@@ -127,6 +127,7 @@ async def run_p7_development_lifecycle(
                 raise ValueError
             body = _canonical(payload)
             _diagnose_provider_request(body, calls)
+            print(f"p7-sdk-provider turn={calls} category=dispatch", flush=True)
             calls += 1
             return _reply(await provider(body))
 

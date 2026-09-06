@@ -133,7 +133,11 @@ class PrimeP7DevelopmentSdkProvider:
         try:
             request = _decode_request(body, self._calls, self._issued)
         except BaseException:
+            print(
+                f"p7-sdk-provider turn={self._calls} category=request", flush=True
+            )
             raise PrimeP7DevelopmentSdkProviderError() from None
+        print(f"p7-sdk-provider turn={self._calls} category=accepted", flush=True)
         if self._deadline is None:
             self._deadline = time.monotonic() + _DEADLINE_SECONDS
         remaining = self._deadline - time.monotonic()
