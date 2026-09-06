@@ -27,6 +27,7 @@ export class P4DevelopmentBridge {
   #phase: "new" | "opening" | "open" | "prompt1" | "recover" | "compact" | "prompt2" | "close_ready" | "cancelled" | "closed" | "failed" = "new";
   #requestIds = new Set<string>(); #model = new Map<string, Pending>(); #tool = new Map<string, Pending>(); #callback = 0;
   #native: any; #client: any; #activeSessionId = ""; #nativeSessionId = ""; #cursor: { generation: string; sequence: number } | undefined;
+  #initialCursor: { generation: string; sequence: number } | undefined;
   #candidate: Record<string, unknown> | undefined; #modelCount = 0; #toolCount = 0; #runtime: any; #compactionStarts = 0; #compactionEnds = 0;
   #makeStream: (() => Stream) | undefined;
   constructor(socket: Socket) { this.#socket = socket; }
@@ -79,7 +80,7 @@ export class P4DevelopmentBridge {
     const root = absolute(f.payload.prime_source_root), workspace = absolute(f.payload.workspace); await this.#startNative(root, workspace);
     const created = await this.#client.request({ type: "create", continueRecent: false, noSession: false, name: "p4-development", lifecycle: "resident", config: {} });
     this.#activeSessionId = created?.data?.id; if (!created?.success || !opaque(this.#activeSessionId)) throw Error("create");
-    const attached = await this.#attach();
+    const attached = await this.#attach(); this.#initialCursor = Object.freeze({ ...this.#cursor! });
     this.#nativeSessionId = readSessionId(attached?.data?.snapshot) || this.#activeSessionId;
   }
   async #prompt(f: Frame): Promise<void> {
@@ -94,15 +95,16 @@ export class P4DevelopmentBridge {
   }
   async #checkpointCandidate(): Promise<Record<string, unknown>> {
     const [header, tree, resources] = await Promise.all([this.#client.request({ type: "get_session_header", activeSessionId: this.#activeSessionId }), this.#client.request({ type: "get_context_tree", activeSessionId: this.#activeSessionId }), this.#client.request({ type: "get_resource_snapshot", activeSessionId: this.#activeSessionId })]);
-    const cursor = this.#cursor!;
-    return Object.freeze({ active_session_id: this.#activeSessionId, session_id: this.#nativeSessionId, cursor: Object.freeze({ ...cursor }), transcript_sha256: digest(header?.data), tree_sha256: digest(tree?.data), artifact_sha256: digest(resources?.data), settled_model_callback_count: 2, settled_tool_callback_count: 1 });
+    const cursor = this.#cursor!, initial = this.#initialCursor;
+    if (!initial || initial.generation !== cursor.generation || initial.sequence >= cursor.sequence) throw Error("checkpoint cursor order");
+    return Object.freeze({ active_session_id: this.#activeSessionId, session_id: this.#nativeSessionId, initial_attach_cursor: Object.freeze({ ...initial }), cursor: Object.freeze({ ...cursor }), transcript_sha256: digest(header?.data), tree_sha256: digest(tree?.data), artifact_sha256: digest(resources?.data), settled_model_callback_count: 2, settled_tool_callback_count: 1 });
   }
   async #recover(f: Frame): Promise<void> {
     if (!exact(f.payload, ["checkpoint_candidate", "checkpoint_sha256"]) || !record(f.payload.checkpoint_candidate) || typeof f.payload.checkpoint_sha256 !== "string" || !/^sha256:[a-f0-9]{64}$/.test(f.payload.checkpoint_sha256) || !this.#candidate || canonical(f.payload.checkpoint_candidate) !== canonical(this.#candidate)) throw Error("checkpoint readback mismatch");
     const candidate = this.#candidate as any; await this.#client.request({ type: "detach", activeSessionId: this.#activeSessionId });
     const attached = await this.#attach(candidate.cursor); const snapshotCursor = attached?.data?.lastEventCursor;
     if (!attached?.success || attached.data?.activeSessionId !== candidate.active_session_id || (readSessionId(attached.data?.snapshot) || attached.data?.activeSessionId) !== candidate.session_id || !sameCursor(snapshotCursor, candidate.cursor) || attached.data?.replay?.status !== "complete") throw Error("reattach mismatch");
-    this.#phase = "compact"; this.#emit("command.result", f.request_id, { result: { active_session_id: candidate.active_session_id, session_id: candidate.session_id, from_cursor: candidate.cursor, to_cursor: snapshotCursor, snapshot_cursor: snapshotCursor } });
+    this.#phase = "compact"; this.#emit("command.result", f.request_id, { result: { active_session_id: candidate.active_session_id, session_id: candidate.session_id, from_cursor: candidate.cursor, to_cursor: snapshotCursor, snapshot_cursor: snapshotCursor, replay_status: "complete" } });
   }
   async #compact(f: Frame): Promise<void> {
     if (!exact(f.payload, [])) throw Error("compact payload"); const before = new Set((this.#runtime?.session?.sessionManager?.getEntries?.() ?? []).filter((e: any) => e.type === "compaction").map((e: any) => e.id));
