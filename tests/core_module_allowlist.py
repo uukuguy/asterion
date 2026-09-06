@@ -136,6 +136,7 @@ CORE_MODULES = (
     "asterion.services.controlled_executor_jsonl",
     "asterion.services.executor_protocol",
     "asterion.services.managed_controlled_executor",
+    "asterion.services.progress",
     "asterion.services.registry",
     "asterion.services.restricted_worker",
     "asterion.workflow_evidence",
