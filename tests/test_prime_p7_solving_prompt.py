@@ -5,7 +5,7 @@ import unittest
 
 
 class TestPrimeP7SolvingPrompt(unittest.TestCase):
-    def test_guidance_is_source_locked_and_game_agnostic(self) -> None:
+    def test_guidance_is_source_locked_and_uses_the_public_protocol(self) -> None:
         from asterion.applications.prime_agent.operator.p7_solving_prompt import (
             P7_SOLVING_GUIDANCE_LOCK,
             P7_SOLVING_PROMPT,
@@ -16,22 +16,31 @@ class TestPrimeP7SolvingPrompt(unittest.TestCase):
         lowered = P7_SOLVING_PROMPT.lower()
         for required in (
             "import only p7_client",
-            "observe",
+            "p7_client.observe()",
+            "p7_client.status()",
+            "p7_client.act(actions)",
+            '{"name": "action1", "data": {}}',
+            "action1 up",
+            "action2 down",
+            "action3 left",
+            "action4 right",
             "programmatically",
             "objects",
             "colors",
             "components",
             "differences",
-            "short exploratory batches",
+            "one- or two-step exploratory batches",
             "world model",
-            "status",
+            "complete post-batch view",
+            "avoid repeating",
             'terminal == "level_solved"',
         ):
             with self.subTest(required=required):
                 self.assertIn(required, lowered)
         for forbidden in (
-            r"ACTION[1-7]",
             r"ls20|9607627b",
+            r"\(\s*\d{1,2}\s*,\s*\d{1,2}\s*\)",
+            r"3\s*,\s*3\s*,\s*3\s*,\s*1\s*,\s*1\s*,\s*1\s*,\s*1\s*,\s*4\s*,\s*4\s*,\s*4\s*,\s*1\s*,\s*1\s*,\s*1",
             r"(?:^|\s)/(?:workspace|prime|tmp|users)(?:/|\s|$)",
         ):
             with self.subTest(forbidden=forbidden):

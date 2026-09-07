@@ -10,11 +10,11 @@ from typing import Final, Mapping
 
 
 P7_SOLVING_PROMPT: Final = """Solve the first public visual grid level with the persistent IPython tool.
-In the first cell, import only p7_client and call observe() before acting.
-Analyze every frame programmatically. Track objects, colors, connected components, and differences between observations.
-Choose dynamically from the available actions. Act in short exploratory batches, inspect the resulting evidence, and revise your world model when observations disagree with it.
-Call status() after each batch and before deciding what to do next.
-Finish immediately when terminal == "LEVEL_SOLVED". Do not issue another tool call after the completed level."""
+In the first cell, import only p7_client and call p7_client.observe() before acting. Verify the returned view before choosing an action.
+Use the public API exactly: p7_client.observe() and p7_client.status() take no arguments; p7_client.act(actions) takes a list of action dictionaries, each in the form {"name": "ACTION1", "data": {}}. An act call returns the complete post-batch view, so inspect that return value after every batch instead of calling status() redundantly.
+The public directional mapping is ACTION1 up, ACTION2 down, ACTION3 left, and ACTION4 right. Analyze every view programmatically. Track objects, colors, connected components, and differences between views.
+Build and maintain a world model from the evidence. Use one- or two-step exploratory batches when needed, inspect the returned view, and revise the model when observations disagree. Avoid repeating an already-tested action or batch unless the new state makes it necessary.
+Choose dynamically from the available actions. Finish immediately when terminal == "LEVEL_SOLVED". Do not issue another tool call after the completed level."""
 
 _UPSTREAM_COMMIT: Final = "398d4dd63cf01d00adbea41c13437ba0b8ad40fc"
 _LICENSE_SHA256: Final = "sha256:bf446b52c755dc80e8661ad171edbdec85d2df1307349fbf2dd2e91405166fd9"
@@ -30,19 +30,27 @@ P7_SOLVING_GUIDANCE_LOCK: Final[Mapping[str, str]] = MappingProxyType(
 
 _REQUIRED: Final = (
     "import only p7_client",
-    "observe",
+    "p7_client.observe()",
+    "p7_client.status()",
+    "p7_client.act(actions)",
+    '{"name": "action1", "data": {}}',
+    "action1 up",
+    "action2 down",
+    "action3 left",
+    "action4 right",
     "programmatically",
     "objects",
     "colors",
     "components",
     "differences",
-    "short exploratory batches",
+    "one- or two-step exploratory batches",
     "world model",
-    "status",
+    "complete post-batch view",
+    "avoid repeating",
     'terminal == "level_solved"',
 )
 _FORBIDDEN: Final = re.compile(
-    r"ACTION[1-7]|ls20|9607627b|(?:^|\s)/(?:workspace|prime|tmp|users)(?:/|\s|$)",
+    r"ls20|9607627b|\(\s*\d{1,2}\s*,\s*\d{1,2}\s*\)|3\s*,\s*3\s*,\s*3\s*,\s*1\s*,\s*1\s*,\s*1\s*,\s*1\s*,\s*4\s*,\s*4\s*,\s*4\s*,\s*1\s*,\s*1\s*,\s*1|(?:^|\s)/(?:workspace|prime|tmp|users)(?:/|\s|$)",
     re.IGNORECASE,
 )
 
