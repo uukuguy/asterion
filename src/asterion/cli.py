@@ -77,6 +77,7 @@ from asterion.services.progress import (
     NOOP_HOST_PROGRESS_REPORTER,
     TextHostProgressReporter,
 )
+from asterion.services.presentation import TextHostPresentationSink
 from asterion.client.cli import ClientCliError
 
 if TYPE_CHECKING:
@@ -360,6 +361,7 @@ async def _run(
             if args.progress
             else NOOP_HOST_PROGRESS_REPORTER
         ),
+        presentation=TextHostPresentationSink(stderr),
     ) as host_services:
         pathlight = (
             MemoryPathlightRecorder(str(uuid4()))

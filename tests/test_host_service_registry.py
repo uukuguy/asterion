@@ -16,6 +16,7 @@ from asterion.services.progress import (
     NOOP_HOST_PROGRESS_REPORTER,
     HostProgressEvent,
 )
+from asterion.services.presentation import NOOP_HOST_PRESENTATION_SINK
 
 
 class _EntryPoint:
@@ -94,6 +95,61 @@ class HostServiceOptionTests(unittest.TestCase):
 
 
 class HostServiceFactoryRegistryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_context_presentation_defaults_without_affecting_identity_or_repr(self) -> None:
+        default = HostServiceFactoryContext(
+            provider_id="provider",
+            application_id="application",
+            application_version="1.0.0",
+            capability_id="service.selected",
+            options={},
+        )
+        explicit = HostServiceFactoryContext(
+            provider_id="provider",
+            application_id="application",
+            application_version="1.0.0",
+            capability_id="service.selected",
+            options={},
+            presentation=object(),
+        )
+
+        self.assertIs(default.presentation, NOOP_HOST_PRESENTATION_SINK)
+        self.assertEqual(default, explicit)
+        self.assertNotIn("presentation", repr(default))
+
+    async def test_open_injects_presentation_only_into_selected_factory(self) -> None:
+        received: list[object] = []
+
+        @asynccontextmanager
+        async def service(context):
+            received.append(context.presentation)
+            yield object()
+
+        selected = _EntryPoint(
+            "service.selected",
+            lambda: HostServiceFactoryBinding(
+                capability_id="service.selected", option_names=(), factory=service
+            ),
+        )
+        adjacent = _EntryPoint(
+            "service.adjacent",
+            lambda: (_ for _ in ()).throw(AssertionError("adjacent loaded")),
+        )
+        presentation = object()
+
+        async with HostServiceFactoryRegistry((adjacent, selected)).open(
+            provider_id="provider",
+            application_id="application",
+            application_version="1.0.0",
+            capability_ids=("service.selected",),
+            options={},
+            presentation=presentation,
+        ):
+            pass
+
+        self.assertEqual(received, [presentation])
+        self.assertEqual(selected.loads, 1)
+        self.assertEqual(adjacent.loads, 0)
+
     async def test_context_progress_defaults_without_affecting_identity_or_repr(self) -> None:
         default = HostServiceFactoryContext(
             provider_id="provider",

@@ -330,6 +330,61 @@ def provider(root: Path) -> InstalledApplicationProvider:
 
 
 class AsterionCliTests(unittest.TestCase):
+    def test_run_presentation_writes_to_stderr_while_stdout_is_one_json_line(self) -> None:
+        @asynccontextmanager
+        async def service(context):
+            context.presentation.write("Public verification: ready")
+            yield object()
+
+        host_entry = FakeEntryPoint(
+            name="service.selected",
+            group="asterion.host_services",
+            factory=lambda: HostServiceFactoryBinding(
+                capability_id="service.selected",
+                option_names=(),
+                factory=service,
+            ),
+        )
+        registry = RuntimeFactoryRegistry(
+            (
+                RuntimeFactoryBinding(
+                    runtime_id="pi.reference",
+                    capabilities=(),
+                    factory=lambda context: FixtureRuntime(),
+                ),
+            )
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            value = provider(Path(temp_dir))
+            assembly_path = value.applications[0].assembly_paths[0]
+            assembly = json.loads(assembly_path.read_text(encoding="utf-8"))
+            assembly["host_capabilities"] = ["service.selected"]
+            assembly_path.write_text(json.dumps(assembly), encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            code = main(
+                [
+                    "run",
+                    "--provider",
+                    "example-app",
+                    "--application",
+                    "example.research@1.0.0",
+                    "--input",
+                    "fixed",
+                ],
+                entry_points=(FakeEntryPoint(name="example-app", factory=lambda: value),),
+                host_service_entry_points=(host_entry,),
+                runtime_factories=registry,
+                capability_packages=package_set(value.applications[0]),
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(stderr.getvalue(), "Public verification: ready\n")
+        self.assertEqual(len(stdout.getvalue().splitlines()), 1)
+        self.assertEqual(json.loads(stdout.getvalue())["run_id"], "asterion-run")
+
     def test_run_progress_writes_safe_host_updates_only_to_stderr(self) -> None:
         @asynccontextmanager
         async def service(context):

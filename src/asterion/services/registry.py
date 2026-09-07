@@ -15,6 +15,10 @@ from asterion.services.progress import (
     ContainedHostProgressReporter,
     HostProgressReporter,
 )
+from asterion.services.presentation import (
+    NOOP_HOST_PRESENTATION_SINK,
+    HostPresentationSink,
+)
 
 
 HOST_SERVICE_ENTRY_POINT_GROUP = "asterion.host_services"
@@ -38,6 +42,12 @@ class HostServiceFactoryContext:
     options: Mapping[str, str]
     progress: HostProgressReporter = field(
         default=NOOP_HOST_PROGRESS_REPORTER,
+        repr=False,
+        compare=False,
+        hash=False,
+    )
+    presentation: HostPresentationSink = field(
+        default=NOOP_HOST_PRESENTATION_SINK,
         repr=False,
         compare=False,
         hash=False,
@@ -155,6 +165,7 @@ class HostServiceFactoryRegistry:
         options: Mapping[str, Mapping[str, str]],
         managed: Mapping[str, AbstractAsyncContextManager[object]] | None = None,
         progress: HostProgressReporter = NOOP_HOST_PROGRESS_REPORTER,
+        presentation: HostPresentationSink = NOOP_HOST_PRESENTATION_SINK,
     ):
         """Enter one immutable exact service map for a selected assembly."""
 
@@ -200,6 +211,7 @@ class HostServiceFactoryRegistry:
                     capability_id=capability_id,
                     options=capability_options,
                     progress=contained_progress,
+                    presentation=presentation,
                 )
                 try:
                     manager = binding.factory(context)
