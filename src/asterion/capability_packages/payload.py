@@ -367,8 +367,10 @@ def _validate_pinned_payload(
         }
     )
 
-    resource_dir = _open_child_directory(root, "resources", descriptors)
-    resource_contents = _validate_resource_children(resource_dir, manifest)
+    resource_contents = {}
+    if manifest.resources:
+        resource_dir = _open_child_directory(root, "resources", descriptors)
+        resource_contents = _validate_resource_children(resource_dir, manifest)
     contents.update(
         {
             f"resources/{name}": content
@@ -376,8 +378,10 @@ def _validate_pinned_payload(
         }
     )
 
-    conformance_dir = _open_child_directory(root, "conformance", descriptors)
-    conformance_contents = _validate_conformance_children(conformance_dir, manifest)
+    conformance_contents = {}
+    if manifest.conformance:
+        conformance_dir = _open_child_directory(root, "conformance", descriptors)
+        conformance_contents = _validate_conformance_children(conformance_dir, manifest)
     contents.update(
         {
             f"conformance/{name}": content
@@ -402,11 +406,14 @@ def _validate_root_children(
     manifest: CapabilityPackageManifest,
 ) -> None:
     children = set(_list_children(root))
+    expected = {"capability-package.json", "capabilities"}
     if manifest.benchmark_suites:
-        expected = _ROOT_CHILDREN
-    else:
-        expected = _ROOT_CHILDREN - {"benchmark-suites"}
-    if children not in (_ROOT_CHILDREN, expected):
+        expected.add("benchmark-suites")
+    if manifest.resources:
+        expected.add("resources")
+    if manifest.conformance:
+        expected.add("conformance")
+    if not expected.issubset(children) or children - _ROOT_CHILDREN:
         raise CapabilityPackagePayloadError("capability package payload is invalid")
 
 

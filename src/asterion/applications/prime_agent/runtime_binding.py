@@ -12,8 +12,13 @@ from asterion.runtimes.prime_agent import (
     PRIME_RUNTIME_ID,
     PrimeAgentRuntimeClient,
     PrimeVerificationProfile,
+    PrimePresetExecutionProfile,
+    PrimePresetRuntimeClient,
 )
-from asterion.runtimes.prime_agent_host import PrimeSmallVerificationService
+from asterion.runtimes.prime_agent_host import (
+    PrimePresetExecutionService,
+    PrimeSmallVerificationService,
+)
 
 
 _ROUTES = {
@@ -102,6 +107,23 @@ def _create(context: RuntimeFactoryContext) -> PrimeAgentRuntimeClient:
         or context.options
     ):
         raise RuntimeFactoryError("Prime runtime configuration is invalid")
+    if context.application_id == "prime.arc-agi-3-solving":
+        service = context.host_services.get("prime.arc-agi-3-solving")
+        if set(context.host_services) != {"prime.arc-agi-3-solving"} or not isinstance(
+            service, PrimePresetExecutionService
+        ):
+            raise RuntimeFactoryError("Prime runtime configuration is invalid")
+        return PrimePresetRuntimeClient(
+            service,
+            profile=PrimePresetExecutionProfile(
+                input_preset="solve-first-public-level",
+                scope="p7-solving",
+                promotion="unpromoted",
+                artifact_id="prime.p7-solving.receipt",
+                kind="p7-solving",
+                media_type="application/vnd.asterion.prime.p7-solving-receipt+json",
+            ),
+        )
     try:
         host_key, profile = _ROUTES[context.application_id]
     except KeyError:

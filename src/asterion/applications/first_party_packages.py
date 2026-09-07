@@ -19,6 +19,7 @@ CONTROLLED_CODE_PACKAGE = CapabilityPackageRef("controlled-code", "1.0.0")
 CONTROLLED_CODE_SOURCE_ID = "controlled-code.builtin"
 DCI_PACKAGE = CapabilityPackageRef("dci", "1.0.0")
 PRIME_AGENT_PACKAGE = CapabilityPackageRef("prime-agent", "1.0.0")
+PRIME_ARC_AGI_3_SOLVER_PACKAGE = CapabilityPackageRef("prime-arc-agi-3-solver", "1.0.0")
 
 
 def builtin_capability_registrations() -> tuple[BuiltinCapabilityRegistration, ...]:
@@ -40,6 +41,11 @@ def builtin_capability_registrations() -> tuple[BuiltinCapabilityRegistration, .
             PRIME_AGENT_PACKAGE,
             package_root / "prime_agent/payload",
             create_prime_agent_package,
+        ),
+        BuiltinCapabilityRegistration(
+            PRIME_ARC_AGI_3_SOLVER_PACKAGE,
+            package_root / "prime_arc_agi_3_solver/payload",
+            create_prime_arc_agi_3_solver_package,
         ),
     )
 
@@ -90,13 +96,25 @@ def create_prime_agent_package() -> InstalledCapabilityPackage:
     return create()
 
 
+def create_prime_arc_agi_3_solver_package() -> InstalledCapabilityPackage:
+    """Load the selected finite P7 solving package after source selection."""
+
+    from asterion.capabilities.prime_arc_agi_3_solver import (
+        create_prime_arc_agi_3_solver_package as create,
+    )
+
+    return create()
+
+
 __all__ = (
     "CONTROLLED_CODE_PACKAGE",
     "CONTROLLED_CODE_SOURCE_ID",
     "DCI_PACKAGE",
     "PRIME_AGENT_PACKAGE",
+    "PRIME_ARC_AGI_3_SOLVER_PACKAGE",
     "builtin_capability_registrations",
     "create_controlled_code_package",
     "create_dci_package",
     "create_prime_agent_package",
+    "create_prime_arc_agi_3_solver_package",
 )

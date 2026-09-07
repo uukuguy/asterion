@@ -1,0 +1,1 @@
+{"capability_id":"prime.arc-agi-3-solving","consumes_artifacts":[],"consumes_events":[],"emits_events":[],"kind":"capability","produces_artifacts":["application/vnd.asterion.prime.p7-solving-receipt+json"],"protocol":"asterion.capability/v1","provides_capabilities":["prime.arc-agi-3-solving"],"requires_capabilities":["prime.tool.ipython"],"requires_policies":[],"version":"1.0.0"}

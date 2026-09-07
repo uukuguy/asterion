@@ -11,6 +11,7 @@ from asterion.applications.prime_agent.provider import create_provider
 from asterion.applications.provider import resolve_installed_provider
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.prime_agent.provider import create_prime_agent_package
+from asterion.applications.first_party_packages import create_prime_arc_agi_3_solver_package
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.applications.prime_agent.runtime_binding import prime_runtime_binding
@@ -95,7 +96,9 @@ class TestPrimeP7InstalledRoute(unittest.TestCase):
         resolved = resolve_installed_provider(
             create_provider(),
             runtime_factories=default_runtime_factory_registry(),
-            installed_packages=(create_prime_agent_package(),),
+            installed_packages=(
+                create_prime_agent_package(), create_prime_arc_agi_3_solver_package(),
+            ),
         )
         application = next(
             item
