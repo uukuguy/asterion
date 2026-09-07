@@ -199,7 +199,6 @@ git commit -m "feat(prime): add generic preset runtime bridge"
 - Modify: `src/asterion/applications/prime_agent/provider.py`
 - Modify: `src/asterion/applications/prime_agent/runtime_binding.py`
 - Modify: `pyproject.toml`
-- Generate, do not commit: `packages/typescript/prime-gateway/dist/src/p7-solving-{session,bridge,main}.{js,d.ts}`
 - Create: `tests/test_prime_arc_agi_3_solver_package.py`
 - Create: `tests/test_prime_p7_solving_installed_route.py`
 - Modify: `tests/test_prime_p7_installed_route.py`
@@ -570,6 +569,7 @@ git commit -m "feat(prime): compose real P7 solve lifecycle"
 - Modify: `src/asterion/applications/prime_agent/operator/development_preparation.py`
 - Modify: `tools/prepare_prime_development.py`
 - Modify: `pyproject.toml`
+- Generate, do not commit: `packages/typescript/prime-gateway/dist/src/p7-solving-{session,bridge,main}.{js,d.ts}`
 - Create: `tests/test_prime_p7_solving_preparation.py`
 - Modify: `tests/test_prime_development_preparation.py`
 - Modify: `tests/test_prime_application_provider.py`
