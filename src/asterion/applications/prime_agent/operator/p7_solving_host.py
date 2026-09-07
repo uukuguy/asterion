@@ -343,7 +343,11 @@ def _validate_inputs(
 
 def _canonical(value: object) -> bytes:
     return json.dumps(
-        value, allow_nan=False, separators=(",", ":"), sort_keys=True
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
     ).encode("utf-8")
 
 
