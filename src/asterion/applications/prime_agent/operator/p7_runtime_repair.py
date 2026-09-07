@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import shutil
 import stat
 from typing import Callable, TypeVar
@@ -17,7 +18,19 @@ def verify_p7_runtime_after_cache_repair(root: Path, verify: Callable[[Path], T]
         return verify(root)
     except Exception as first:
         try:
-            site = root / "venv" / "lib" / "python3.11" / "site-packages"
+            lib = root / "venv" / "lib"
+            if lib.is_symlink() or not stat.S_ISDIR(lib.lstat().st_mode):
+                raise ValueError
+            sites = [
+                child / "site-packages" for child in lib.iterdir()
+                if re.fullmatch(r"python[0-9]+\.[0-9]+", child.name)
+                and not child.is_symlink() and stat.S_ISDIR(child.lstat().st_mode)
+                and not (child / "site-packages").is_symlink()
+                and (child / "site-packages").is_dir()
+            ]
+            if len(sites) != 1:
+                raise ValueError
+            site = sites[0]
             if site.is_symlink() or not stat.S_ISDIR(site.lstat().st_mode):
                 raise ValueError
             for package in ("arc_agi", "arcengine"):
