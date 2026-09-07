@@ -178,6 +178,7 @@ async def run_p7_solving_lifecycle(
         async def tool_hook(payload: object) -> dict[str, object]:
             nonlocal executed_cells, solved_latched, tool_calls
             _emit(progress, "tool", "started")
+            stage = "payload"
             try:
                 if (
                     type(payload) is not dict
@@ -196,10 +197,13 @@ async def run_p7_solving_lifecycle(
                         "details": {"broker_terminal": "LEVEL_SOLVED"},
                         "isError": False,
                     }
+                stage = "worker-execution"
                 result = await worker.execute_cell(payload["code"])
                 executed_cells += 1
+                stage = "worker-result"
                 normalized = _worker_result(result, executed_cells)
                 terminal = "ACTIVE"
+                stage = "broker-seal"
                 try:
                     current = _seal(broker.seal(), require_completed=False)
                 except P7SolvingBrokerServiceError:
@@ -217,6 +221,10 @@ async def run_p7_solving_lifecycle(
                 }
             except BaseException:
                 _emit(progress, "tool", "failed")
+                try:
+                    presentation.write(f"Tool callback failed at stage: {stage}")
+                except BaseException:
+                    pass
                 raise
 
         gateway.bind(model_hook=model_hook, tool_hook=tool_hook)

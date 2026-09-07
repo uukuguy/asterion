@@ -25,6 +25,7 @@ _ID = re.compile(r"[0-9a-f]{64}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _CELL_CAP = 16 * 1024
 _OUTPUT_CAP = 4096
+_FRAME_CAP = 65536
 _CELL_LIMIT = 128
 
 
@@ -104,7 +105,7 @@ class P7SolvingDockerTransport(DockerCliEngineTransport):
         if _ID.fullmatch(container_id) is None or type(code) is not str or not code or len(code.encode()) > _CELL_CAP:
             raise P7SolvingDockerError()
         try:
-            result = await self._call(self._prefix + ("container", "exec", "--user", "65534:65534", "--workdir", "/workspace", "--env", "HOME=/tmp", "--env", "IPYTHONDIR=/tmp/ipython", container_id, "/usr/local/bin/prime-p7-solving", "--client", base64.b64encode(code.encode()).decode("ascii")), control, max_output_bytes=_OUTPUT_CAP)
+            result = await self._call(self._prefix + ("container", "exec", "--user", "65534:65534", "--workdir", "/workspace", "--env", "HOME=/tmp", "--env", "IPYTHONDIR=/tmp/ipython", container_id, "/usr/local/bin/prime-p7-solving", "--client", base64.b64encode(code.encode()).decode("ascii")), control, max_output_bytes=_FRAME_CAP)
             value = json.loads(result.stdout)
             if result.stderr or type(value) is not dict or _canonical(value) != result.stdout or set(value) != {"cell_count", "output", "is_error"} or type(value["cell_count"]) is not int or type(value["output"]) is not str or type(value["is_error"]) is not bool or len(value["output"].encode()) > _OUTPUT_CAP:
                 raise ValueError
