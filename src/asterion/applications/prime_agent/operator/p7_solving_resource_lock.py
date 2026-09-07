@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .p7_resource_lock import verify_p7_development_resources
 from .p7_runtime_lock import verify_p7_development_runtime
+from .p7_runtime_repair import verify_p7_runtime_after_cache_repair
 from .p7_solving_workload import P7_SOLVING_GAME_ID, P7_SOLVING_RESOURCE_SHA256
 
 
@@ -23,7 +24,7 @@ def verify_p7_solving_resources(root: object) -> dict[str, str]:
         resource = verify_p7_development_resources(
             root / "environment_files" / "ls20" / "9607627b"
         )
-        runtime = verify_p7_development_runtime(root)
+        runtime = verify_p7_runtime_after_cache_repair(root, verify_p7_development_runtime)
         if (
             resource.game_id != P7_SOLVING_GAME_ID
             or resource.resource_sha256 != P7_SOLVING_RESOURCE_SHA256

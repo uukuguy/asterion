@@ -29,6 +29,9 @@ from asterion.applications.prime_agent.operator.p7_resource_lock import (
 from asterion.applications.prime_agent.operator.p7_runtime_lock import (
     verify_p7_development_runtime,
 )
+from asterion.applications.prime_agent.operator.p7_runtime_repair import (
+    verify_p7_runtime_after_cache_repair,
+)
 from asterion.applications.prime_agent.operator.p7_development_workload import (
     P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256,
     P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256,
@@ -798,7 +801,9 @@ def _p7_identities(repo: Path, record: object) -> dict[str, str]:
         resources = verify_p7_development_resources(
             external / "environment_files/ls20/9607627b"
         )
-        runtime = verify_p7_development_runtime(external)
+        runtime = verify_p7_runtime_after_cache_repair(
+            external, verify_p7_development_runtime
+        )
         if resources.resource_sha256 != record["resource_sha256"]:
             raise ValueError
         return {
@@ -950,7 +955,7 @@ def prepare_prime_development(
             prepare_p7_solving(repo, runner=runner)
         if emit:
             emit("gateway", "succeeded")
-    except PrimeDevelopmentPreparationError:
+    except (PrimeDevelopmentPreparationError, P7SolvingPreparationError):
         if emit:
             emit("gateway", "failed")
         raise

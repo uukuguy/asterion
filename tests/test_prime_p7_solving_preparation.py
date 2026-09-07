@@ -8,11 +8,27 @@ from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
+from types import SimpleNamespace
 
 from asterion.applications.prime_agent.operator import p7_solving_preparation
 
 
 class TestPrimeP7SolvingPreparation(unittest.TestCase):
+    def test_missing_locked_image_is_built_then_reinspected(self) -> None:
+        image = p7_solving_preparation.p7_solving_preparation_lock()["image"]
+        calls: list[list[str]] = []
+
+        def runner(argv, **_kwargs):
+            calls.append(argv)
+            if len(calls) == 1:
+                return SimpleNamespace(returncode=1, stdout=b"", stderr=b"missing")
+            return SimpleNamespace(returncode=0, stdout=(image["digest"] + "\n").encode(), stderr=b"")
+
+        self.assertIsInstance(
+            p7_solving_preparation._prepare_image(Path.cwd(), image, runner), str
+        )
+        self.assertEqual(calls[1][1:3], ["--host", "unix:///var/run/docker.sock"])
+        self.assertIn("build", calls[1])
     def test_packaged_lock_has_closed_sorted_resource_sets(self) -> None:
         lock = p7_solving_preparation.p7_solving_preparation_lock()
         self.assertEqual(lock["format"], "asterion.prime-p7-solving-preparation-lock/v1")

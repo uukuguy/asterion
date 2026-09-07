@@ -529,6 +529,24 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
                 subject._p7_identities(Path("/repo"), record)
         self.assertEqual(str(raised.exception), "Prime development preparation is unavailable")
 
+    def test_p7_runtime_cache_is_repaired_before_one_retry(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_runtime_repair import verify_p7_runtime_after_cache_repair
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for package in ("arc_agi", "arcengine"):
+                cache = root / "venv/lib/python3.11/site-packages" / package / "__pycache__"
+                cache.mkdir(parents=True)
+                (cache / "module.pyc").write_bytes(b"cache")
+            calls = 0
+            def verify(_root):
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise ValueError("pycache")
+                return "verified"
+            self.assertEqual(verify_p7_runtime_after_cache_repair(root, verify), "verified")
+            self.assertEqual(calls, 2)
+
     def test_resolver_failure_emits_source_failed_and_removes_receipt(self) -> None:
         events: list[tuple[str, str]] = []
         with TemporaryDirectory() as temporary:

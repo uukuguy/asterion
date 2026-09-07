@@ -6,6 +6,7 @@ from hashlib import sha256
 from importlib import resources
 import json
 from pathlib import Path
+import platform
 import stat
 import subprocess
 from typing import Callable
@@ -112,12 +113,17 @@ def _prepare_image(repo: Path, image: object, runner: Callable[..., object]) -> 
             or image.get("platforms") != ["linux/amd64", "linux/arm64"]
         ):
             raise ValueError
-        result = _run(
-            ["/usr/bin/docker", "image", "inspect", "--format", "{{.Id}}", image["tag"]],
-            runner,
-        )
-        if getattr(result, "stdout", b"").decode("ascii", "strict").strip() != image["digest"]:
-            raise ValueError
+        inspect = ["/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "image", "inspect", "--format", "{{.Id}}", image["tag"]]
+        result = runner(inspect, check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, timeout=_TIMEOUT, env={"PATH": "/usr/bin:/bin"})
+        if getattr(result, "returncode", 0) != 0 or getattr(result, "stdout", b"").decode("ascii", "strict").strip() != image["digest"]:
+            arch = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine())
+            if arch is None:
+                raise ValueError
+            _run(["/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "build", "--pull=false", "--platform", "linux/" + arch, "--file", str(repo / image["dockerfile"]), "--tag", image["tag"], str(repo / image["context"])], runner)
+            result = _run(inspect, runner)
+            if getattr(result, "stdout", b"").decode("ascii", "strict").strip() != image["digest"]:
+                raise ValueError
         return sha256(json.dumps(
             [image["tag"], image["digest"]], separators=(",", ":")
         ).encode()).hexdigest()
