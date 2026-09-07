@@ -59,6 +59,15 @@ test("one solving prompt alternates model and persistent IPython turns until the
     });
     assert.deepEqual(result.usage, { input_tokens: 5, output_tokens: 3, total_tokens: 8 });
     const context = JSON.stringify(seen.models[0].context);
+    const systemPrompt = seen.models[0].context.systemPrompt;
+    assert.equal(typeof systemPrompt, "string");
+    assert.match(systemPrompt, /visual.*interactive.*reasoning/i);
+    assert.match(systemPrompt, /world model.*player.*objects.*controls.*hypotheses.*rejected.*plan.*last_frame/is);
+    assert.match(systemPrompt, /only.*ipython.*p7_client/is);
+    assert.match(systemPrompt, /before batching actions.*first\s+1.{0,12}2\s+steps?/is);
+    assert.match(systemPrompt, /do not repeat.*no-op|no-op.*do not repeat/i);
+    assert.match(systemPrompt, /death path/i);
+    assert.doesNotMatch(systemPrompt, /LS20|\b13\s*steps?\b|\bcoordinates?\b/i);
     assert.match(context, /outputs and state persist/i);
     assert.doesNotMatch(context, /fixed (?:file|path|action)|staged artifact/i);
     await assert.rejects(() => session.prompt("second prompt"), /one prompt|completed/);

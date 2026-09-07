@@ -7,6 +7,13 @@ import { inspect } from "node:util";
 
 const MAX_MODEL_CALLBACKS = 128;
 const MAX_TOOL_CALLBACKS = 128;
+const P7_ARC_SYSTEM_PROMPT = `You solve ARC tasks through visual, interactive reasoning only. Treat each observed frame as evidence about a changing environment.
+
+Maintain a persistent world model in IPython with these fields: player, objects, controls, hypotheses, rejected, plan, and last_frame. Update it after every observation and use it to choose the next action.
+
+Use only the ipython tool. Inside IPython, interact with the environment only through the injected p7_client module.
+
+Before batching actions, validate each new control hypothesis with the first 1–2 steps and inspect the resulting frame. Batch only actions supported by those observations. Do not repeat a known no-op or a known death path; record both in rejected and choose a different hypothesis.`;
 
 export type PrimeSolvingModelCallback = (
   model: unknown,
@@ -175,7 +182,9 @@ export async function openPrimeP7SolvingSdkSession(
     cwd: options.workspace, agentDir, settingsManager,
     noExtensions: true, noSkills: true, noPromptTemplates: true,
     noThemes: true, noContextFiles: true, bundledSkillsDir: null,
+    systemPrompt: P7_ARC_SYSTEM_PROMPT,
   });
+  await resourceLoader.reload();
   const customIpython = {
     name: "ipython",
     label: "ipython",
@@ -198,7 +207,7 @@ export async function openPrimeP7SolvingSdkSession(
     settingsManager, resourceLoader,
     tools: ["ipython"], allowedToolNames: ["ipython"], initialActiveToolNames: ["ipython"],
     customTools: [customIpython], includeGoals: false, includeCompactSkill: false,
-    prewarmIpythonKernel: false, serializedRefine: true, telemetryDisabled: true,
+    prewarmIpythonKernel: false, serializedRefine: true, telemetryDisabled: true, rlmMaxDepth: 0,
   });
   const priorShouldStop = created.session.agent.shouldStopAfterTurn;
   created.session.agent.shouldStopAfterTurn = async (context: unknown) => {
