@@ -70,6 +70,12 @@ artifacts = [
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
+"packages/typescript/prime-gateway/dist/src/p7-solving-session.js" = "asterion/applications/prime_agent/operator/resources/p7-solving/p7-solving-session.js"
+"packages/typescript/prime-gateway/dist/src/p7-solving-session.d.ts" = "asterion/applications/prime_agent/operator/resources/p7-solving/p7-solving-session.d.ts"
+"packages/typescript/prime-gateway/dist/src/p7-solving-bridge.js" = "asterion/applications/prime_agent/operator/resources/p7-solving/p7-solving-bridge.js"
+"packages/typescript/prime-gateway/dist/src/p7-solving-bridge.d.ts" = "asterion/applications/prime_agent/operator/resources/p7-solving/p7-solving-bridge.d.ts"
+"packages/typescript/prime-gateway/dist/src/p7-solving-main.js" = "asterion/applications/prime_agent/operator/resources/p7-solving/p7-solving-main.js"
+"packages/typescript/prime-gateway/dist/src/p7-solving-main.d.ts" = "asterion/applications/prime_agent/operator/resources/p7-solving/p7-solving-main.d.ts"
 "packages/typescript/prime-gateway/resources/prime-artifact-lock.json" = "asterion/control/providers/prime/resources/prime-artifact-lock.json"
 "packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json" = "asterion/control/providers/prime/resources/prime-ecosystem-module-lock.json"
 "packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs" = "asterion/control/providers/prime/resources/prime-ecosystem-module.mjs"

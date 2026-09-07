@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from importlib import resources
 import json
 import os
 from pathlib import Path
@@ -51,8 +52,9 @@ class PrimeP7SolvingGateway(DevelopmentGatewayTransport):
         try:
             super().__init__(
                 protocol=P7_SOLVING_GATEWAY_PROTOCOL,
-                default_entrypoint=Path(__file__).resolve().parents[5]
-                / "packages/typescript/prime-gateway/dist/src/p7-solving-main.js",
+                default_entrypoint=Path(resources.files(
+                    "asterion.applications.prime_agent.operator.resources"
+                ).joinpath("p7-solving/p7-solving-main.js")),
                 model_hook=model_hook,
                 tool_hook=tool_hook,
                 node_bin=node_bin,

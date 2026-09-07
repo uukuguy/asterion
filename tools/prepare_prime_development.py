@@ -11,13 +11,13 @@ from asterion.applications.prime_agent.operator.development_preparation import (
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--scenario", choices=[f"p{i}" for i in range(1, 8)], action="append"
+        "--scenario", choices=[*[f"p{i}" for i in range(1, 8)], "p7-solving"], action="append"
     )
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--status-stream", choices=("stdout", "stderr"), default="stdout")
     args = parser.parse_args()
     scenarios = (
-        tuple(f"p{i}" for i in range(1, 8)) if args.all else tuple(args.scenario or ())
+        (*tuple(f"p{i}" for i in range(1, 8)), "p7-solving") if args.all else tuple(args.scenario or ())
     )
     if not scenarios:
         parser.error("one --scenario or --all is required")
