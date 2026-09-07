@@ -26,7 +26,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: test-typescript test-rust check-rust
 .PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded prime-readme-rlm-smoke prime-smoke-core
 .PHONY: prime-parity-inventory prime-verify-system-parity
-.PHONY: prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run prime-apps-preflight
+.PHONY: prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run prime-p7-solve prime-apps-preflight
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
 .PHONY: test.prime-long-running.provider-free test.prime-long-running.bounded
 .PHONY: test.prime-continual-harness.provider-free
@@ -59,7 +59,7 @@ help:
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-readme-rlm-smoke prime-smoke-core prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free test.prime-long-running.bounded"
-	@echo "Prime development execution (Orb Ubuntu): prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run"
+	@echo "Prime development execution (Orb Ubuntu): prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run prime-p7-solve"
 	@echo "Prime development host preflight (Orb Ubuntu): prime-apps-preflight"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
@@ -286,6 +286,18 @@ prime-p7-run:
 			--runtime prime.agent \
 			--run-id "$$1" \
 			--input fixed-small-verification' prime-p7-run "$$run_id"
+
+prime-p7-solve:
+	@run_id="$${PRIME_RUN_ID:-prime-p7-solve-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
+		printf '%s\n' '[prime-p7-solve] ARC-AGI-3: solve the first public level once with fixed model and bounded resources' >&2; \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
+			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p7-solving --status-stream stderr; \
+			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
+				--provider prime-agent \
+				--application prime.arc-agi-3-solving \
+				--application-version 1.0.0 \
+				--run-id "$$1" \
+				--input solve-first-public-level' prime-p7-solve "$$run_id"
 
 prime-apps-preflight:
 	@exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/preflight_prime_apps.py'

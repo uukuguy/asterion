@@ -20,14 +20,15 @@ from asterion.services.progress import TextHostProgressReporter
 from asterion.services.registry import HostServiceFactoryRegistry
 
 
-_SCENARIOS = (
-    ("p1", "prime.ipython-coding", "prime.ipython-production"),
-    ("p2", "prime.programmatic-long-context", "prime.programmatic-long-context-development"),
-    ("p3", "prime.recursive-workflow", "prime.recursive-workflow-development"),
-    ("p4", "prime.long-session-continuity", "prime.long-session-continuity-development"),
-    ("p5", "prime.bounded-autonomy", "prime.bounded-autonomy-development"),
-    ("p6", "prime.continual-improvement", "prime.continual-improvement-development"),
-    ("p7", "prime.arc-agi-3", "prime.arc-agi-3-development"),
+_ROWS = (
+    ("prime-p1", "p1", "prime.ipython-coding", "prime.ipython-production"),
+    ("prime-p2", "p2", "prime.programmatic-long-context", "prime.programmatic-long-context-development"),
+    ("prime-p3", "p3", "prime.recursive-workflow", "prime.recursive-workflow-development"),
+    ("prime-p4", "p4", "prime.long-session-continuity", "prime.long-session-continuity-development"),
+    ("prime-p5", "p5", "prime.bounded-autonomy", "prime.bounded-autonomy-development"),
+    ("prime-p6", "p6", "prime.continual-improvement", "prime.continual-improvement-development"),
+    ("prime-p7", "p7", "prime.arc-agi-3", "prime.arc-agi-3-development"),
+    ("prime-p7-solve", "p7-solving", "prime.arc-agi-3-solving", "prime.arc-agi-3-solving"),
 )
 _VERSION = "1.0.0"
 _RUNTIME_ID = "prime.agent"
@@ -69,14 +70,14 @@ def preflight_prime_apps(
             TextHostProgressReporter(stderr),
         )
     )
-    for scenario, passed in results:
-        stdout.write(f"prime-{scenario} {'PASS' if passed else 'FAIL'}\n")
+    for display_name, passed in results:
+        stdout.write(f"{display_name} {'PASS' if passed else 'FAIL'}\n")
     return 0 if all(passed for _, passed in results) else 1
 
 
 def _prepare_rows(repo_root: Path, prepare: _Preparation) -> dict[str, bool]:
     results: dict[str, bool] = {}
-    for scenario, _, _ in _SCENARIOS:
+    for _, scenario, _, _ in _ROWS:
         try:
             prepare(repo_root, (scenario,))
         except (PrimeDevelopmentPreparationError, OSError, TypeError, ValueError):
@@ -94,7 +95,7 @@ def _publish_union_receipt(
     """Publish one receipt covering every successful per-scenario preparation."""
 
     successful = tuple(
-        scenario for scenario, _, _ in _SCENARIOS if prepared.get(scenario, False)
+        scenario for _, scenario, _, _ in _ROWS if prepared.get(scenario, False)
     )
     if not successful:
         return prepared
@@ -113,11 +114,11 @@ async def _open_prepared_rows(
     progress: TextHostProgressReporter,
 ) -> tuple[tuple[str, bool], ...]:
     results: list[tuple[str, bool]] = []
-    for scenario, application_id, capability_id in _SCENARIOS:
+    for display_name, scenario, application_id, capability_id in _ROWS:
         passed = prepared.get(scenario, False) and await _open_one(
             provider, application_id, capability_id, registry, progress
         )
-        results.append((scenario, passed))
+        results.append((display_name, passed))
     return tuple(results)
 
 
