@@ -41,6 +41,13 @@ class PrimePresetExecutionContractError(ValueError):
     """Raised when a generic Prime preset execution value is malformed."""
 
 
+class PrimePresetExecutionCancelled(RuntimeError):
+    """Public-safe result of cancellation requested through the host signal."""
+
+    def __init__(self) -> None:
+        super().__init__("Prime preset execution was cancelled")
+
+
 @dataclass(frozen=True)
 class PrimePresetExecutionRequest:
     run_id: str
@@ -136,6 +143,7 @@ class PrimeP7DevelopmentHostService(Protocol):
 
 __all__ = (
     "PrimePresetExecutionContractError",
+    "PrimePresetExecutionCancelled",
     "PrimePresetExecutionRequest",
     "PrimePresetExecutionResult",
     "PrimePresetExecutionService",

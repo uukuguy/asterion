@@ -15,6 +15,8 @@ from asterion.runtime.host import (
 )
 from asterion.runtime.protocol import ProtocolError
 from asterion.runtimes.prime_agent_host import (
+    PrimePresetExecutionCancelled,
+    PrimePresetExecutionContractError,
     PrimePresetExecutionRequest,
     PrimePresetExecutionResult,
     PrimePresetExecutionService,
@@ -228,15 +230,31 @@ class PrimePresetRuntimeClient(AgentRuntimeClient):
         execution = PrimePresetExecutionRequest(request.run_id, self._profile.input_preset)
         try:
             result = await self._service.execute(execution, signal=signal)
+        except PrimePresetExecutionCancelled:
+            for event in _cancelled_events(request.run_id):
+                yield event
+            return
         except asyncio.CancelledError:
             raise
         except BaseException:
             for event in _failed_events(request.run_id):
                 yield event
             return
+        try:
+            if type(result) is not PrimePresetExecutionResult:
+                raise PrimePresetExecutionContractError("Prime preset result is invalid")
+            result = PrimePresetExecutionResult(
+                run_id=result.run_id,
+                receipt_sha256=result.receipt_sha256,
+                scope=result.scope,
+                promotion=result.promotion,
+            )
+        except (AttributeError, PrimePresetExecutionContractError, TypeError):
+            for event in _failed_events(request.run_id):
+                yield event
+            return
         if (
-            type(result) is not PrimePresetExecutionResult
-            or result.run_id != request.run_id
+            result.run_id != request.run_id
             or result.scope != self._profile.scope
             or result.promotion != self._profile.promotion
         ):

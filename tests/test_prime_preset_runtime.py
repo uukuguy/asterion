@@ -13,6 +13,7 @@ from asterion.runtimes.prime_agent import (
     PrimePresetRuntimeClient,
 )
 from asterion.runtimes.prime_agent_host import (
+    PrimePresetExecutionCancelled,
     PrimePresetExecutionContractError,
     PrimePresetExecutionRequest,
     PrimePresetExecutionResult,
@@ -203,6 +204,62 @@ class TestPrimePresetRuntime(unittest.TestCase):
         self.assertEqual(tuple(event.type for event in events), ("run.started", "run.completed"))
         self.assertEqual(events[-1].payload, {"status": "cancelled"})
         self.assertEqual(service.requests, [])
+
+    def test_service_cancellation_projects_the_cancelled_two_event_stream(self) -> None:
+        events = asyncio.run(
+            self._collect(_PresetService(PrimePresetExecutionCancelled()), self._request())
+        )
+
+        self.assertEqual(
+            events,
+            (
+                RunEvent(
+                    run_id="runtime/v1 run",
+                    sequence=1,
+                    type="run.started",
+                    payload={"capabilities": [PRIME_IPYTHON_CAPABILITY]},
+                ),
+                RunEvent(
+                    run_id="runtime/v1 run",
+                    sequence=2,
+                    type="run.completed",
+                    payload={"status": "cancelled"},
+                ),
+            ),
+        )
+
+    def test_projects_a_forged_malformed_result_as_safe_failure(self) -> None:
+        forged = object.__new__(PrimePresetExecutionResult)
+        for field, value in {
+            "run_id": "runtime/v1 run",
+            "receipt_sha256": "not-a-digest",
+            "scope": "p7-solving",
+            "promotion": "unpromoted",
+        }.items():
+            object.__setattr__(forged, field, value)
+
+        events = asyncio.run(self._collect(_PresetService(forged), self._request()))
+
+        self.assertEqual(
+            events,
+            (
+                RunEvent(
+                    run_id="runtime/v1 run",
+                    sequence=1,
+                    type="run.started",
+                    payload={"capabilities": [PRIME_IPYTHON_CAPABILITY]},
+                ),
+                RunEvent(
+                    run_id="runtime/v1 run",
+                    sequence=2,
+                    type="run.failed",
+                    payload={
+                        "code": "verification-failed",
+                        "message": "Prime verification failed",
+                    },
+                ),
+            ),
+        )
 
     def test_service_exception_projects_the_safe_failed_stream(self) -> None:
         sentinel = "SENTINEL-PRESET-HOST-SECRET"
