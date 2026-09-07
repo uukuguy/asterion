@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import cast
 import unittest
 from unittest import mock
 
@@ -28,6 +29,28 @@ def _summary(text: str, max_tokens: int = 4096) -> bytes:
                             "options": {"apiKey": "in-memory-solving-provider", "maxTokens": max_tokens, "signal": {}}}).encode()
 
 
+def _summary_prompt(messages: list[dict[str, object]], *, turn_prefix: bool) -> str:
+    rendered: list[str] = []
+    for message in messages:
+        content = cast(list[dict[str, object]], message["content"])
+        if message["role"] == "user":
+            rendered.append("[User]: " + "".join(cast(str, part["text"]) for part in content))
+        elif message["role"] == "assistant":
+            calls = [part for part in content if part["type"] == "toolCall"]
+            rendered.append("[Assistant tool calls]: " + "; ".join(
+                f'{call["name"]}(code={json.dumps(cast(dict[str, object], call["arguments"])["code"])})' for call in calls
+            ))
+        else:
+            rendered.append("[Tool result]: " + "".join(cast(str, part["text"]) for part in content))
+    suffix = "This is the PREFIX of a turn that was too large to keep." if turn_prefix else "Summarize the conversation above."
+    return "<conversation>\n" + "\n\n".join(rendered) + f"\n</conversation>\n\n{suffix}"
+
+
+def _compaction_replacement(history: str, turn_prefix: str) -> list[dict[str, object]]:
+    merged = f"{history}\n\n---\n\n**Turn Context (split turn):**\n\n{turn_prefix}"
+    return [{"role": "user", "content": [{"type": "text", "text": "The conversation history before this point was compacted into the following summary:\n\n<summary>\n" + merged + "\n</summary>"}]}]
+
+
 def _tool_reply(call_id: str, code: str) -> dict[str, object]:
     return {"choices": [{"finish_reason": "tool_calls", "message": {"content": None, "tool_calls": [{"id": call_id, "type": "function", "function": {"name": "ipython", "arguments": json.dumps({"code": code}, separators=(",", ":"))}}]}}], "usage": {"prompt_tokens": 11, "completion_tokens": 7}}
 
@@ -49,7 +72,7 @@ class TestP7SolvingSdkProvider(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("tool_choice", payload)
                 import time
                 time.sleep(0.1)
-                return _text_reply("summary-one" if "PREFIX_ONE" in json.dumps(payload) else "summary-two")
+                return _text_reply("summary-one" if "[User]: solve" in json.dumps(payload) else "summary-two")
             self.assertEqual(payload["tool_choice"], "auto")
             self.assertEqual(payload["temperature"], 0)
             return _tool_reply(f"call-{calls}", f"step_{calls}()")
@@ -58,8 +81,8 @@ class TestP7SolvingSdkProvider(unittest.IsolatedAsyncioTestCase):
                 answer = json.loads(await provider(_normal(messages)))
                 call = answer["content"][-1]
                 messages += [answer, {"role": "toolResult", "toolCallId": call["id"], "toolName": "ipython", "content": [{"type": "text", "text": f"result-{index}"}], "isError": False}]
-            one = asyncio.create_task(provider(_summary("<conversation>\nresult-2 PREFIX_ONE\n</conversation>")))
-            two = asyncio.create_task(provider(_summary("<conversation>\nresult-2 PREFIX_TWO\n</conversation>")))
+            one = asyncio.create_task(provider(_summary(_summary_prompt(messages[:3], turn_prefix=False))))
+            two = asyncio.create_task(provider(_summary(_summary_prompt(messages[3:5], turn_prefix=True))))
             for _ in range(100):
                 if provider._inflight == 2:
                     break
@@ -67,9 +90,15 @@ class TestP7SolvingSdkProvider(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(subject.PrimeP7SolvingSdkProviderError):
                 provider.finalize()
             summaries = [json.loads(value) for value in await asyncio.gather(one, two)]
-            replacement = [{"role": "user", "content": [{"type": "text", "text": f"compacted summary-one summary-two {summaries[0]['content'][0]['text']} {summaries[1]['content'][0]['text']}"}]}]
+            replacement = _compaction_replacement(
+                summaries[0]["content"][0]["text"], summaries[1]["content"][0]["text"]
+            )
             provider.accept_compaction(replaced_messages=messages, replacement_messages=replacement)
-            final = json.loads(await provider(_normal(replacement)))
+            retained = messages[5:]
+            tampered = replacement + [*retained[:-1], {**retained[-1], "isError": True}]
+            with self.assertRaises(subject.PrimeP7SolvingSdkProviderError):
+                await provider(_normal(tampered))
+            final = json.loads(await provider(_normal(replacement + retained)))
             self.assertEqual(final["stopReason"], "toolUse")
         usage = provider.finalize()
         self.assertEqual(provider.callback_counts(), {"normal": 5, "summary": 2})

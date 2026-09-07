@@ -46,6 +46,9 @@ _MODEL_KEYS = frozenset(
     {"api", "baseUrl", "contextWindow", "cost", "id", "input", "maxTokens", "name", "provider", "reasoning"}
 )
 _SUMMARY_OPTION_KEYS = frozenset({"apiKey", "maxTokens", "signal"})
+_COMPACTION_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
+_COMPACTION_SUFFIX = "\n</summary>"
+_TURN_PREFIX_MARKER = "This is the PREFIX of a turn that was too large to keep."
 
 
 class PrimeP7SolvingSdkProviderError(ValueError):
@@ -62,7 +65,7 @@ class PrimeP7SolvingSdkProvider:
         "_calls", "_normal_calls", "_summary_calls", "_inflight", "_lock",
         "_cancelled", "_child_pid", "_closed", "_cleanup_task", "_config",
         "_deadline", "_failure", "_issued", "_last_normal", "_pending_summaries",
-        "_provisional", "_terminal", "_finalized", "_uncertain",
+        "_accepted_compaction", "_provisional", "_terminal", "_finalized", "_uncertain",
     )
 
     def __init__(self, config: _PrivatePrimeModelConfig) -> None:
@@ -78,7 +81,8 @@ class PrimeP7SolvingSdkProvider:
         self._failure: _ProviderFailure | None = None
         self._issued: list[tuple[dict[str, object], dict[str, object], str]] = []
         self._last_normal: tuple[dict[str, object], dict[str, object]] | None = None
-        self._pending_summaries: list[tuple[dict[str, object], dict[str, object]]] = []
+        self._pending_summaries: list[tuple[dict[str, object], dict[str, object], str, str, str | None]] = []
+        self._accepted_compaction: tuple[str, str] | None = None
         self._provisional = PrimeModelBrokerTokenUsage(0, 0, 0)
         self._terminal: PrimeModelBrokerTokenUsage | None = None
 
@@ -108,7 +112,8 @@ class PrimeP7SolvingSdkProvider:
             raise PrimeP7SolvingSdkProviderError()
         try:
             request, callback_kind = _decode_request(
-                body, self._last_normal, self._pending_summaries
+                body, self._last_normal, self._pending_summaries,
+                self._accepted_compaction,
             )
         except BaseException:
             raise PrimeP7SolvingSdkProviderError() from None
@@ -168,8 +173,12 @@ class PrimeP7SolvingSdkProvider:
             if callback_kind == "normal":
                 self._last_normal = (request, reply)
                 self._pending_summaries.clear()
+                self._accepted_compaction = None
             else:
-                self._pending_summaries.append((request, reply))
+                summary_kind, transcript, previous_summary = _summary_span(request)
+                self._pending_summaries.append(
+                    (request, reply, summary_kind, transcript, previous_summary)
+                )
             self._provisional = next_usage
             self._uncertain = False
             return response
@@ -198,13 +207,20 @@ class PrimeP7SolvingSdkProvider:
     ) -> None:
         """Validate an explicit SDK compaction transition before the next callback."""
         try:
-            if self._inflight or self._finalized or not self._pending_summaries:
+            if (
+                self._inflight or self._finalized or not self._pending_summaries
+                or self._accepted_compaction is not None
+            ):
                 raise ValueError
-            last = self._last_normal
-            if last is None or type(replaced_messages) is not list or type(replacement_messages) is not list:
+            if type(replaced_messages) is not list or type(replacement_messages) is not list:
                 raise ValueError
-            _validate_normal_history(replaced_messages, last, [])
-            _validate_summary_replacement(replacement_messages, self._pending_summaries)
+            _validate_normal_history(replaced_messages, self._last_normal, [], None)
+            expected = _compaction_transition(
+                replaced_messages, replacement_messages, self._pending_summaries
+            )
+            self._accepted_compaction = (
+                _canonical_json(replaced_messages), _canonical_json(expected)
+            )
         except BaseException:
             raise PrimeP7SolvingSdkProviderError() from None
 
@@ -361,19 +377,21 @@ def _provider_child(
 def _decode_request(
     body: bytes,
     last_normal: tuple[dict[str, object], dict[str, object]] | None,
-    summaries: list[tuple[dict[str, object], dict[str, object]]],
+    summaries: list[tuple[dict[str, object], dict[str, object], str, str, str | None]],
+    accepted_compaction: tuple[str, str] | None,
 ) -> tuple[dict[str, object], str]:
     value = json.loads(body.decode("utf-8", "strict"))
     if type(value) is not dict or _canonical_json(value).encode() != body:
         raise ValueError
-    kind = _validate_request(value, last_normal, summaries)
+    kind = _validate_request(value, last_normal, summaries, accepted_compaction)
     return value, kind
 
 
 def _validate_request(
     value: dict[str, object],
     last_normal: tuple[dict[str, object], dict[str, object]] | None,
-    summaries: list[tuple[dict[str, object], dict[str, object]]],
+    summaries: list[tuple[dict[str, object], dict[str, object], str, str, str | None]],
+    accepted_compaction: tuple[str, str] | None,
 ) -> str:
     if set(value) != {"model", "context", "options"} or type(value["model"]) is not dict or type(value["context"]) is not dict or type(value["options"]) is not dict:
         raise ValueError
@@ -382,15 +400,17 @@ def _validate_request(
     if type(context.get("systemPrompt")) is not str or not context["systemPrompt"] or type(context.get("messages")) is not list:
         raise ValueError
     if "tools" not in context:
-        if set(context) != {"messages", "systemPrompt"} or set(options) != _SUMMARY_OPTION_KEYS or options.get("apiKey") != "in-memory-solving-provider" or options.get("signal") != {} or type(options.get("maxTokens")) is not int or not 0 < options["maxTokens"] <= P7_SOLVING_PROVIDER_CALLBACK_OUTPUT_LIMIT:
+        if accepted_compaction is not None or set(context) != {"messages", "systemPrompt"} or set(options) != _SUMMARY_OPTION_KEYS or options.get("apiKey") != "in-memory-solving-provider" or options.get("signal") != {} or type(options.get("maxTokens")) is not int or not 0 < options["maxTokens"] <= P7_SOLVING_PROVIDER_CALLBACK_OUTPUT_LIMIT:
             raise ValueError
-        _validate_summary_source(context["messages"], last_normal)
+        _validate_summary_source(context["messages"])
         return "summary"
     if set(context) != {"messages", "systemPrompt", "tools"}:
         raise ValueError
     _validate_normal_options(options, model)
     _validate_tool(context["tools"])
-    _validate_normal_history(context["messages"], last_normal, summaries)
+    _validate_normal_history(
+        context["messages"], last_normal, summaries, accepted_compaction
+    )
     return "normal"
 
 
@@ -436,10 +456,15 @@ def _validate_tool(value: object) -> None:
 def _validate_normal_history(
     messages: object,
     last_normal: tuple[dict[str, object], dict[str, object]] | None,
-    summaries: list[tuple[dict[str, object], dict[str, object]]],
+    summaries: list[tuple[dict[str, object], dict[str, object], str, str, str | None]],
+    accepted_compaction: tuple[str, str] | None,
 ) -> None:
     if type(messages) is not list or not messages or any(type(item) is not dict for item in messages):
         raise ValueError
+    if accepted_compaction is not None:
+        if _canonical_json(messages) != accepted_compaction[1]:
+            raise ValueError
+        return
     if last_normal is None:
         if any(item.get("role") != "user" or not _text(item.get("content")) for item in messages):
             raise ValueError
@@ -454,8 +479,7 @@ def _validate_normal_history(
         _validate_tool_results(answer, results)
         return
     if summaries:
-        _validate_summary_replacement(messages, summaries)
-        return
+        raise ValueError
     raise ValueError
 
 
@@ -471,35 +495,157 @@ def _validate_tool_results(answer: dict[str, object], results: list[object]) -> 
             raise ValueError
 
 
-def _validate_summary_source(
-    messages: object,
-    last_normal: tuple[dict[str, object], dict[str, object]] | None,
-) -> None:
+def _validate_summary_source(messages: object) -> None:
     if type(messages) is not list or len(messages) != 1 or type(messages[0]) is not dict or messages[0].get("role") != "user":
         raise ValueError
     source = _text(messages[0].get("content"))
-    if "<conversation>\n" not in source or "\n</conversation>" not in source:
+    if not source:
         raise ValueError
-    if last_normal is not None:
-        context = last_normal[0]["context"]
-        known = [] if type(context) is not dict else context.get("messages")
-        candidates = [_text(item.get("content")) for item in known if type(item) is dict] if type(known) is list else []
-        candidates += [_text(last_normal[1].get("content"))]
-        if not any(candidate and candidate in source for candidate in candidates):
-            raise ValueError
+    _parse_summary_source(source)
 
 
-def _validate_summary_replacement(
-    messages: object,
-    summaries: list[tuple[dict[str, object], dict[str, object]]],
-) -> None:
-    if type(messages) is not list or not messages:
+def _summary_span(
+    request: dict[str, object],
+) -> tuple[str, str, str | None]:
+    context = request.get("context")
+    if type(context) is not dict or type(context.get("messages")) is not list:
         raise ValueError
-    rendered = _canonical_json(messages)
-    for _, reply in summaries:
-        summary = _text(reply.get("content"))
-        if not summary or summary not in rendered:
+    messages = context["messages"]
+    if len(messages) != 1 or type(messages[0]) is not dict:
+        raise ValueError
+    return _parse_summary_source(_text(messages[0].get("content")))
+
+
+def _parse_summary_source(source: str) -> tuple[str, str, str | None]:
+    opening = "<conversation>\n"
+    closing = "\n</conversation>\n\n"
+    if not source.startswith(opening):
+        raise ValueError
+    close_at = source.rfind(closing)
+    if close_at <= len(opening):
+        raise ValueError
+    transcript = source[len(opening):close_at]
+    instructions = source[close_at + len(closing):]
+    previous_summary: str | None = None
+    previous_open = "<previous-summary>\n"
+    previous_close = "\n</previous-summary>\n\n"
+    if instructions.startswith(previous_open):
+        previous_end = instructions.find(previous_close, len(previous_open))
+        if previous_end <= len(previous_open):
             raise ValueError
+        previous_summary = instructions[len(previous_open):previous_end]
+        instructions = instructions[previous_end + len(previous_close):]
+    if not instructions:
+        raise ValueError
+    kind = "turn-prefix" if instructions.startswith(_TURN_PREFIX_MARKER) else "history"
+    if kind == "turn-prefix" and previous_summary is not None:
+        raise ValueError
+    return kind, transcript, previous_summary
+
+
+def _compaction_transition(
+    replaced_messages: list[object],
+    replacement_messages: list[object],
+    summaries: list[tuple[dict[str, object], dict[str, object], str, str, str | None]],
+) -> list[object]:
+    if not 0 < len(summaries) <= 2:
+        raise ValueError
+    by_kind = {summary[2]: summary for summary in summaries}
+    if len(by_kind) != len(summaries) or any(kind not in {"history", "turn-prefix"} for kind in by_kind):
+        raise ValueError
+    ordered = [by_kind[kind] for kind in ("history", "turn-prefix") if kind in by_kind]
+    cursor = 0
+    history = by_kind.get("history")
+    if history is not None and history[4] is not None:
+        previous_wrapper = _compaction_wrapper(history[4])
+        if not replaced_messages or _canonical_json(replaced_messages[0]) != _canonical_json(previous_wrapper):
+            raise ValueError
+        cursor = 1
+    for _, _, _, transcript, _ in ordered:
+        matches = [
+            end for end in range(cursor + 1, len(replaced_messages) + 1)
+            if _serialize_compaction_messages(replaced_messages[cursor:end]) == transcript
+        ]
+        if len(matches) != 1:
+            raise ValueError
+        cursor = matches[0]
+    history_text = _text(history[1].get("content")) if history is not None else "No prior history."
+    turn = by_kind.get("turn-prefix")
+    if turn is None:
+        merged = history_text
+    else:
+        turn_text = _text(turn[1].get("content"))
+        if not history_text or not turn_text:
+            raise ValueError
+        merged = f"{history_text}\n\n---\n\n**Turn Context (split turn):**\n\n{turn_text}"
+    expected_replacement: list[object] = [_compaction_wrapper(merged)]
+    if _canonical_json(replacement_messages) != _canonical_json(expected_replacement):
+        raise ValueError
+    return [*expected_replacement, *replaced_messages[cursor:]]
+
+
+def _compaction_wrapper(summary: str) -> dict[str, object]:
+    if not summary:
+        raise ValueError
+    return {
+        "role": "user",
+        "content": [{"type": "text", "text": _COMPACTION_PREFIX + summary + _COMPACTION_SUFFIX}],
+    }
+
+
+def _serialize_compaction_messages(messages: list[object]) -> str:
+    if not messages:
+        raise ValueError
+    rendered: list[str] = []
+    for message in messages:
+        if type(message) is not dict:
+            raise ValueError
+        role = message.get("role")
+        content = message.get("content")
+        if role == "user":
+            text = _text(content)
+            if not text:
+                raise ValueError
+            rendered.append(f"[User]: {text}")
+        elif role == "assistant":
+            if type(content) is not list:
+                raise ValueError
+            texts: list[str] = []
+            thinking: list[str] = []
+            calls: list[str] = []
+            for block in content:
+                if type(block) is not dict:
+                    raise ValueError
+                if block.get("type") == "text" and type(block.get("text")) is str:
+                    texts.append(block["text"])
+                elif block.get("type") == "thinking" and type(block.get("thinking")) is str:
+                    thinking.append(block["thinking"])
+                elif block.get("type") == "toolCall" and type(block.get("name")) is str and type(block.get("arguments")) is dict:
+                    arguments = ", ".join(
+                        f"{key}={json.dumps(value, ensure_ascii=False, separators=(',', ':'))}"
+                        for key, value in block["arguments"].items()
+                    )
+                    calls.append(f"{block['name']}({arguments})")
+                else:
+                    raise ValueError
+            if thinking:
+                rendered.append("[Assistant thinking]: " + "\n".join(thinking))
+            if texts:
+                rendered.append("[Assistant]: " + "\n".join(texts))
+            if calls:
+                rendered.append(f"[Assistant tool calls]: {'; '.join(calls)}")
+            if not thinking and not texts and not calls:
+                raise ValueError
+        elif role == "toolResult":
+            text = _text(content)
+            if not text:
+                raise ValueError
+            if len(text) > 2_000:
+                text = f"{text[:2_000]}\n\n[... {len(text) - 2_000} more characters truncated]"
+            rendered.append(f"[Tool result]: {text}")
+        else:
+            raise ValueError
+    return "\n\n".join(rendered)
 
 
 def _deepseek_payload(
