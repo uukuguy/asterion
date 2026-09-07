@@ -252,7 +252,11 @@ async def _run_lifecycle(
                     broker_model_socket=str(broker.model_socket),
                 )
                 return await run_p7_solving_lifecycle(
-                    gateway=cast(Any, PrimeP7SolvingGateway(node_bin=resources.paths.node)),
+                    gateway=cast(Any, PrimeP7SolvingGateway(
+                        node_bin=resources.paths.node,
+                        entrypoint=resources.paths.gateway_root
+                        / "dist/src/p7-solving-main.js",
+                    )),
                     provider=provider, worker=worker, broker=broker,
                     receipt_store=receipt_store, run_id=run_id,
                     session_id="p7-solving-" + run_id,
