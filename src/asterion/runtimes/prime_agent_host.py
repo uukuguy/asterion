@@ -23,6 +23,7 @@ _SCOPES = frozenset(
 )
 _PROMOTION = "unpromoted"
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 
 
 class PrimeSmallVerificationContractError(ValueError):
@@ -34,6 +35,52 @@ class PrimeSmallVerificationCancelled(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__("Prime verification was cancelled")
+
+
+class PrimePresetExecutionContractError(ValueError):
+    """Raised when a generic Prime preset execution value is malformed."""
+
+
+@dataclass(frozen=True)
+class PrimePresetExecutionRequest:
+    run_id: str
+    preset: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.run_id) is not str
+            or not self.run_id
+            or _IDENTIFIER.fullmatch(self.preset) is None
+        ):
+            raise PrimePresetExecutionContractError("Prime preset request is invalid")
+
+
+@dataclass(frozen=True)
+class PrimePresetExecutionResult:
+    run_id: str
+    receipt_sha256: str
+    scope: str
+    promotion: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.run_id) is not str
+            or not self.run_id
+            or _SHA256.fullmatch(self.receipt_sha256) is None
+            or _IDENTIFIER.fullmatch(self.scope) is None
+            or self.promotion != _PROMOTION
+        ):
+            raise PrimePresetExecutionContractError("Prime preset result is invalid")
+
+
+@runtime_checkable
+class PrimePresetExecutionService(Protocol):
+    async def execute(
+        self,
+        request: PrimePresetExecutionRequest,
+        *,
+        signal: CancellationSignal | None = None,
+    ) -> PrimePresetExecutionResult: ...
 
 
 @dataclass(frozen=True)
@@ -88,6 +135,10 @@ class PrimeP7DevelopmentHostService(Protocol):
 
 
 __all__ = (
+    "PrimePresetExecutionContractError",
+    "PrimePresetExecutionRequest",
+    "PrimePresetExecutionResult",
+    "PrimePresetExecutionService",
     "PrimeSmallVerificationContractError",
     "PrimeSmallVerificationCancelled",
     "PrimeSmallVerificationRequest",
