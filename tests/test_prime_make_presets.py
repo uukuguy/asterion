@@ -152,7 +152,7 @@ class TestPrimeMakePresets(unittest.TestCase):
         for required in (
             "[prime-p7-solve] ARC-AGI-3: solve the first public level once with fixed model and bounded resources",
             "--scenario p7-solving", "--provider prime-agent",
-            "--application prime.arc-agi-3-solving", "--application-version 1.0.0",
+            "--application prime.arc-agi-3-solving@1.0.0", "--runtime prime.agent",
             "--input solve-first-public-level", "asterion run --progress",
         ):
             self.assertIn(required, solve)

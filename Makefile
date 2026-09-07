@@ -294,8 +294,8 @@ prime-p7-solve:
 			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p7-solving --status-stream stderr; \
 			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
 				--provider prime-agent \
-				--application prime.arc-agi-3-solving \
-				--application-version 1.0.0 \
+				--application prime.arc-agi-3-solving@1.0.0 \
+				--runtime prime.agent \
 				--run-id "$$1" \
 				--input solve-first-public-level' prime-p7-solve "$$run_id"
 
