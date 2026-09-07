@@ -102,10 +102,13 @@ and an application-owned `PrimeArcAgi3SolveReceiptAccessor`.  The accessor
 returns an immutable, public-safe receipt only for an exact run ID and digest
 after successful completion; retrieval performs no execution and cannot start
 another session.  The receipt admits only the `p7-solving` scope, locked digest,
-completed-level count, action count, numeric partial-game score projection, and
-`unpromoted` promotion state.  P7a can establish functional solving while
-remaining development-only.  Detailed private replay is not part of this
-receipt.
+completed-level count, action count, partial-game score projection, and
+`unpromoted` promotion state.  `partial_game_score` is a decimal string in the
+closed `0.000000` through `100.000000` form, rounded to six fractional digits
+with decimal `ROUND_HALF_EVEN`.  This avoids cross-language float ambiguity
+while remaining directly renderable as a numeric score.  P7a can establish
+functional solving while remaining development-only.  Detailed private replay
+is not part of this receipt.
 
 Runtime events carry only the declared artifact ID, kind, media type, and
 receipt digest.  After runtime completion, the exact capability implementation
@@ -182,12 +185,13 @@ transition frames; the renderer must not label the next level's initial frame
 as the solved frame for the previous level.
 
 The broker records enough private evidence to replay the episode and calculate
-the first-level/partial-game numeric score.  The implementation pins the
+the first-level/partial-game score.  The implementation pins the
 official calculator supplied by the locked `arc_agi` wheel and its baseline
 inputs.  A score digest is only an integrity value and is never presented as a
 numeric score.  P7a makes no full-game, corpus, or scorecard-reproduction claim.
 Public application evidence contains only canonical identities, counters,
-terminal classification, numeric score projection, digests, and cleanup facts.
+terminal classification, fixed-decimal score projection, digests, and cleanup
+facts.
 
 ### Model host and persistent session
 
@@ -225,7 +229,7 @@ The replay view shows:
 - level transitions and terminal reason;
 - the action sequence plus the solved-level frame as the interactive answer;
   and
-- completed levels, primitive action count, and numeric partial-game score.
+- completed levels, primitive action count, and fixed-decimal partial-game score.
 
 The operator renderer consumes in-memory/private lifecycle evidence and does
 not add frames, prompts, model reasoning, provider bodies, credentials, raw
@@ -276,7 +280,8 @@ and its evidence proves all of the following:
 - action selection was dynamic and no expected/fixed action sequence was used;
 - the agent used the admitted persistent IPython/broker interaction surface;
 - at least one real level transition completed;
-- replayed actions reproduce the completed level and numeric partial-game score;
+- replayed actions reproduce the completed level and fixed-decimal partial-game
+  score;
 - the operator display contains the initial question, action answer, solved
   frame, progress, and score;
 - the public JSON result and logs satisfy redaction rules; and
