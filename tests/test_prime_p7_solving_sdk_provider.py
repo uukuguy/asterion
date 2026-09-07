@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
+import tempfile
 from typing import cast
 import unittest
 from unittest import mock
@@ -46,6 +48,10 @@ def _summary_prompt(messages: list[dict[str, object]], *, turn_prefix: bool) -> 
     return "<conversation>\n" + "\n\n".join(rendered) + f"\n</conversation>\n\n{suffix}"
 
 
+def _summary_transcript(source: str) -> str:
+    return source.split("<conversation>\n", 1)[1].split("\n</conversation>", 1)[0]
+
+
 def _compaction_replacement(history: str, turn_prefix: str) -> list[dict[str, object]]:
     merged = f"{history}\n\n---\n\n**Turn Context (split turn):**\n\n{turn_prefix}"
     return [{"role": "user", "content": [{"type": "text", "text": "The conversation history before this point was compacted into the following summary:\n\n<summary>\n" + merged + "\n</summary>"}]}]
@@ -57,6 +63,43 @@ def _tool_reply(call_id: str, code: str) -> dict[str, object]:
 
 def _text_reply(text: str) -> dict[str, object]:
     return {"choices": [{"finish_reason": "stop", "message": {"content": text, "tool_calls": None}}], "usage": {"prompt_tokens": 5, "completion_tokens": 3}}
+
+
+async def _accept_compaction_through_gateway(
+    provider: object,
+    *,
+    replaced_messages: list[dict[str, object]],
+    replacement_messages: list[dict[str, object]],
+    summary_spans: list[dict[str, object]],
+) -> None:
+    from asterion.applications.prime_agent.operator.p7_solving_gateway import PrimeP7SolvingGateway
+
+    payload = json.dumps(
+        {
+            "replaced_messages": replaced_messages,
+            "replacement_messages": replacement_messages,
+            "summary_spans": summary_spans,
+        },
+        separators=(",", ":"),
+    )
+    child = f'''const net=require("node:net"),fd=Number(process.argv[2]),s=new net.Socket({{fd,readable:true,writable:true}});let b=Buffer.alloc(0),out=0,id,p={payload};
+function c(v){{if(v===null||typeof v!=="object")return JSON.stringify(v);if(Array.isArray(v))return`[${{v.map(c).join(",")}}]`;return`{{${{Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+c(v[k])).join(",")}}}}`}}
+function send(k,r,p){{let x=Buffer.from(c({{protocol:"asterion.prime-p7-solving-gateway/v1",...id,sequence:++out,request_id:r,kind:k,payload:p}})),h=Buffer.alloc(4);h.writeUInt32BE(x.length);s.write(Buffer.concat([h,x]))}}
+s.on("data",x=>{{b=Buffer.concat([b,x]);while(b.length>=4){{let n=b.readUInt32BE();if(b.length<n+4)return;let f=JSON.parse(b.subarray(4,n+4));b=b.subarray(n+4);id={{run_id:f.run_id,session_id:f.session_id,runtime_id:f.runtime_id,generation:f.generation}};if(f.kind==="open")send("ready",f.request_id,{{}});else if(f.kind==="prompt"){{send("compaction.accepted","compact-1",p);send("command.result",f.request_id,{{result:{{lifecycle:"completed",usage:{{input_tokens:1,output_tokens:0,total_tokens:1}},assistant:{{completed:true,stop_reason:"toolUse"}},observations:{{active_tool_names:["ipython"],compact_count:1,normal_model_callback_count:1,summary_model_callback_count:1,rlm_child_count:0,tool_call_count:1,solved_latched:true}}}}}})}}else if(f.kind==="close"){{send("command.result",f.request_id,{{result:{{lifecycle:"closed"}}}});s.end()}}}}}});'''
+    with tempfile.TemporaryDirectory() as temporary:
+        entrypoint = Path(temporary) / "bridge.js"
+        entrypoint.write_text(child, encoding="utf-8")
+        gateway = PrimeP7SolvingGateway(node_bin="node", entrypoint=entrypoint, deadline_seconds=5)
+        gateway.bind(model_hook=provider, tool_hook=lambda _: {})
+        await gateway.open(
+            run_id="run",
+            session_id="session",
+            generation=1,
+            prime_source_root="/tmp/prime",
+            workspace="/tmp/workspace",
+        )
+        await gateway.prompt("accept compaction")
+        await gateway.close()
 
 
 class TestP7SolvingSdkProvider(unittest.IsolatedAsyncioTestCase):
@@ -93,8 +136,18 @@ class TestP7SolvingSdkProvider(unittest.IsolatedAsyncioTestCase):
             replacement = _compaction_replacement(
                 summaries[0]["content"][0]["text"], summaries[1]["content"][0]["text"]
             )
-            provider.accept_compaction(replaced_messages=messages, replacement_messages=replacement)
             retained = messages[5:]
+            history_source = _summary_prompt(messages[:3], turn_prefix=False)
+            turn_source = _summary_prompt(messages[3:5], turn_prefix=True)
+            await _accept_compaction_through_gateway(
+                provider,
+                replaced_messages=messages,
+                replacement_messages=replacement + retained,
+                summary_spans=[
+                    {"kind": "history", "transcript": _summary_transcript(history_source), "previous_summary": None},
+                    {"kind": "turn-prefix", "transcript": _summary_transcript(turn_source), "previous_summary": None},
+                ],
+            )
             tampered = replacement + [*retained[:-1], {**retained[-1], "isError": True}]
             with self.assertRaises(subject.PrimeP7SolvingSdkProviderError):
                 await provider(_normal(tampered))

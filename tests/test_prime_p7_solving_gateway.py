@@ -12,7 +12,7 @@ from unittest import mock
 _CHILD = r'''const net=require("node:net"),fd=Number(process.argv[2]),s=new net.Socket({fd,readable:true,writable:true});let b=Buffer.alloc(0),out=0,id;
 function c(v){if(v===null||typeof v!=="object")return JSON.stringify(v);if(Array.isArray(v))return`[${v.map(c).join(",")}]`;return`{${Object.keys(v).sort().map(k=>JSON.stringify(k)+":"+c(v[k])).join(",")}}`}
 function send(k,r,p){let x=Buffer.from(c({protocol:"asterion.prime-p7-solving-gateway/v1",...id,sequence:++out,request_id:r,kind:k,payload:p})),h=Buffer.alloc(4);h.writeUInt32BE(x.length);s.write(Buffer.concat([h,x]))}
-s.on("data",x=>{b=Buffer.concat([b,x]);while(b.length>=4){let n=b.readUInt32BE();if(b.length<n+4)return;let f=JSON.parse(b.subarray(4,n+4));b=b.subarray(n+4);id={run_id:f.run_id,session_id:f.session_id,runtime_id:f.runtime_id,generation:f.generation};if(f.kind==="open")send("ready",f.request_id,{});else if(f.kind==="prompt")send("command.result",f.request_id,{result:{lifecycle:"completed",usage:{input_tokens:9,output_tokens:4,total_tokens:13},assistant:{completed:true,stop_reason:"toolUse"},observations:{active_tool_names:["ipython"],compact_count:1,normal_model_callback_count:3,summary_model_callback_count:2,rlm_child_count:0,tool_call_count:4,solved_latched:true}}});else if(f.kind==="cancel")send("command.result",f.request_id,{result:{lifecycle:"cancelled"}});else if(f.kind==="close"){send("command.result",f.request_id,{result:{lifecycle:"closed"}});s.end()}}});'''
+s.on("data",x=>{b=Buffer.concat([b,x]);while(b.length>=4){let n=b.readUInt32BE();if(b.length<n+4)return;let f=JSON.parse(b.subarray(4,n+4));b=b.subarray(n+4);id={run_id:f.run_id,session_id:f.session_id,runtime_id:f.runtime_id,generation:f.generation};if(f.kind==="open")send("ready",f.request_id,{});else if(f.kind==="prompt"){send("compaction.accepted","compact-1",{replaced_messages:[{role:"user",content:[{type:"text",text:"solve"}]}],replacement_messages:[{role:"user",content:[{type:"text",text:"summary"}]}],summary_spans:[{kind:"history",transcript:"[User]: solve",previous_summary:null}]});send("command.result",f.request_id,{result:{lifecycle:"completed",usage:{input_tokens:9,output_tokens:4,total_tokens:13},assistant:{completed:true,stop_reason:"toolUse"},observations:{active_tool_names:["ipython"],compact_count:1,normal_model_callback_count:3,summary_model_callback_count:2,rlm_child_count:0,tool_call_count:4,solved_latched:true}}})}else if(f.kind==="cancel")send("command.result",f.request_id,{result:{lifecycle:"cancelled"}});else if(f.kind==="close"){send("command.result",f.request_id,{result:{lifecycle:"closed"}});s.end()}}});'''
 
 
 class TestPrimeP7SolvingGateway(unittest.IsolatedAsyncioTestCase):
@@ -22,11 +22,27 @@ class TestPrimeP7SolvingGateway(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temporary:
             entrypoint = Path(temporary) / "bridge.js"
             entrypoint.write_text(_CHILD, encoding="utf-8")
+            class Provider:
+                def __init__(self) -> None:
+                    self.transitions = []
+
+                def __call__(self, _: object) -> object:
+                    return {}
+
+                def accept_compaction(self, **transition: object) -> None:
+                    self.transitions.append(transition)
+
+            provider = Provider()
             gateway = PrimeP7SolvingGateway(node_bin="node", entrypoint=entrypoint, deadline_seconds=5)
-            gateway.bind(model_hook=lambda _: {}, tool_hook=lambda _: {})
+            gateway.bind(model_hook=provider, tool_hook=lambda _: {})
             await gateway.open(run_id="run", session_id="session", generation=1, prime_source_root="/tmp/prime", workspace="/tmp/workspace")
             result = await gateway.prompt("solve")
             self.assertEqual(result, {"lifecycle": "completed", "normal_model_callback_count": 3, "summary_model_callback_count": 2, "tool_callback_count": 4})
+            self.assertEqual(provider.transitions, [{
+                "replaced_messages": [{"role": "user", "content": [{"type": "text", "text": "solve"}]}],
+                "replacement_messages": [{"role": "user", "content": [{"type": "text", "text": "summary"}]}],
+                "summary_spans": [{"kind": "history", "transcript": "[User]: solve", "previous_summary": None}],
+            }])
             witness = gateway.terminal_witness()
             self.assertEqual(dict(witness["cumulative"]), {"normal_model_callback_count": 3, "summary_model_callback_count": 2, "tool_callback_count": 4})
             await gateway.close()

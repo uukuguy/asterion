@@ -24,11 +24,28 @@ export type PrimeSolvingIpythonCallback = (
   signal: AbortSignal | undefined,
 ) => Promise<unknown>;
 
+export type PrimeSolvingCompactionCallback = (
+  transition: PrimeSolvingCompactionTransition,
+) => void;
+
+export interface PrimeSolvingCompactionTransition {
+  readonly replaced_messages: readonly unknown[];
+  readonly replacement_messages: readonly unknown[];
+  readonly summary_spans: readonly PrimeSolvingCompactionSummarySpan[];
+}
+
+export interface PrimeSolvingCompactionSummarySpan {
+  readonly kind: "history" | "turn-prefix";
+  readonly transcript: string;
+  readonly previous_summary: string | null;
+}
+
 export interface PrimeP7SolvingSessionOptions {
   readonly primeSourceRoot: string;
   readonly workspace: string;
   readonly model: PrimeSolvingModelCallback;
   readonly ipython: PrimeSolvingIpythonCallback;
+  readonly compaction?: PrimeSolvingCompactionCallback;
 }
 
 export interface PrimeP7SolvingResult {
@@ -122,6 +139,8 @@ export async function openPrimeP7SolvingSdkSession(
   let compactCount = 0;
   let solved = false;
   const childIds = new Set<string>();
+  let preCompactionMessages: readonly unknown[] | undefined;
+  let compactionSummarySpans: PrimeSolvingCompactionSummarySpan[] = [];
   registry.registerProvider(provider, {
     api: `asterion-p7-solving-${identity}`,
     baseUrl: "http://127.0.0.1:0",
@@ -133,6 +152,7 @@ export async function openPrimeP7SolvingSdkSession(
         throw new Error("Prime P7 solving model callback limit exceeded");
       if (summary) summaryModelCalls += 1;
       else normalModelCalls += 1;
+      if (summary) compactionSummarySpans.push(parseSummarySpan(context));
       const stream = options.model(model, context, streamOptions);
       assertAssistantEventStream(stream);
       return stream;
@@ -188,7 +208,23 @@ export async function openPrimeP7SolvingSdkSession(
   const unsubscribe = created.session.subscribe((event: unknown) => {
     if (!event || typeof event !== "object") return;
     const value = event as { type?: unknown; child?: { id?: unknown } };
-    if (value.type === "compaction_start") compactCount += 1;
+    if (value.type === "compaction_start") {
+      compactCount += 1;
+      preCompactionMessages = snapshotMessages(created.session.agent.state.messages);
+      compactionSummarySpans = [];
+    }
+    if (value.type === "compaction_end") {
+      const eventValue = value as { aborted?: unknown; result?: unknown };
+      if (eventValue.aborted === false && eventValue.result && preCompactionMessages) {
+        options.compaction?.(Object.freeze({
+          replaced_messages: preCompactionMessages,
+          replacement_messages: snapshotMessages(created.session.agent.state.messages),
+          summary_spans: Object.freeze([...compactionSummarySpans]),
+        }));
+      }
+      preCompactionMessages = undefined;
+      compactionSummarySpans = [];
+    }
     if (value.type === "rlm_child_update" && typeof value.child?.id === "string")
       childIds.add(value.child.id);
   });
@@ -302,4 +338,51 @@ function count(value: unknown): number {
 }
 function safeStopReason(value: unknown): PrimeP7SolvingResult["assistant"]["stop_reason"] {
   return value === "stop" || value === "length" || value === "toolUse" || value === "error" || value === "aborted" ? value : "error";
+}
+function snapshotMessages(messages: readonly unknown[]): readonly unknown[] {
+  const value = jsonValue(messages);
+  if (!Array.isArray(value)) throw new Error("Prime P7 solving compaction messages are invalid");
+  return Object.freeze(value);
+}
+function parseSummarySpan(context: unknown): PrimeSolvingCompactionSummarySpan {
+  if (!context || typeof context !== "object" || Array.isArray(context)) throw new Error("invalid compaction context");
+  const messages = (context as { messages?: unknown }).messages;
+  if (!Array.isArray(messages) || messages.length !== 1 || !messages[0] || typeof messages[0] !== "object")
+    throw new Error("invalid compaction summary source");
+  const source = readText((messages[0] as { content?: unknown }).content);
+  const opening = "<conversation>\n";
+  const closing = "\n</conversation>\n\n";
+  if (!source.startsWith(opening)) throw new Error("invalid compaction summary source");
+  const closeAt = source.lastIndexOf(closing);
+  if (closeAt <= opening.length) throw new Error("invalid compaction summary source");
+  let instructions = source.slice(closeAt + closing.length);
+  let previous_summary: string | null = null;
+  const previousOpen = "<previous-summary>\n";
+  const previousClose = "\n</previous-summary>\n\n";
+  if (instructions.startsWith(previousOpen)) {
+    const previousEnd = instructions.indexOf(previousClose, previousOpen.length);
+    if (previousEnd <= previousOpen.length) throw new Error("invalid compaction summary source");
+    previous_summary = instructions.slice(previousOpen.length, previousEnd);
+    instructions = instructions.slice(previousEnd + previousClose.length);
+  }
+  if (!instructions) throw new Error("invalid compaction summary source");
+  const kind = instructions.startsWith("This is the PREFIX of a turn that was too large to keep.") ? "turn-prefix" : "history";
+  return Object.freeze({ kind, transcript: source.slice(opening.length, closeAt), previous_summary });
+}
+function readText(value: unknown): string {
+  if (typeof value === "string" && value) return value;
+  if (!Array.isArray(value) || !value.length) throw new Error("invalid compaction summary content");
+  let text = "";
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item) || (item as { type?: unknown }).type !== "text" || typeof (item as { text?: unknown }).text !== "string")
+      throw new Error("invalid compaction summary content");
+    text += (item as { text: string }).text;
+  }
+  if (!text) throw new Error("invalid compaction summary content");
+  return text;
+}
+function jsonValue(value: unknown): unknown {
+  const encoded = JSON.stringify(value);
+  if (typeof encoded !== "string") throw new Error("non-JSON compaction value");
+  return JSON.parse(encoded);
 }

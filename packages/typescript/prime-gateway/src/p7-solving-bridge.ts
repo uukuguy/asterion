@@ -2,7 +2,7 @@ import { Socket } from "node:net";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { PrimeP7SolvingSession } from "./p7-solving-session.js";
-import type { PrimeSolvingAssistantMessageEventStream } from "./p7-solving-session.js";
+import type { PrimeSolvingAssistantMessageEventStream, PrimeSolvingCompactionTransition } from "./p7-solving-session.js";
 
 export const P7_SOLVING_GATEWAY_PROTOCOL = "asterion.prime-p7-solving-gateway/v1";
 export const P7_SOLVING_MAX_FRAME_BYTES = 16_777_216;
@@ -120,6 +120,7 @@ export class P7SolvingBridge {
         primeSourceRoot: root, workspace,
         model: (model, context, options) => this.model(model, context, options, make),
         ipython: (id, input) => this.tool(id, input.code),
+        compaction: (transition) => this.compaction(transition),
       });
       this.#phase = "open"; this.emit("ready", frame.request_id, {}); return;
     }
@@ -177,6 +178,14 @@ export class P7SolvingBridge {
       catch (error) { this.#tools.delete(id); reject(error instanceof Error ? error : Error("tool request failed")); }
     });
   }
+  private compaction(transition: PrimeSolvingCompactionTransition): void {
+    const id = this.callback("compaction");
+    this.emit("compaction.accepted", id, {
+      replaced_messages: transition.replaced_messages,
+      replacement_messages: transition.replacement_messages,
+      summary_spans: transition.summary_spans,
+    });
+  }
   private resolve(map: Map<string, Pending>, frame: Frame, key: string): void {
     const pending = map.get(frame.request_id);
     if (!pending || !only(frame.payload, [key])) throw Error("unexpected bridge response");
@@ -187,7 +196,7 @@ export class P7SolvingBridge {
     for (const pending of this.#tools.values()) pending.reject(error);
     this.#models.clear(); this.#tools.clear();
   }
-  private callback(kind: "model" | "tool"): string {
+  private callback(kind: "model" | "tool" | "compaction"): string {
     let id: string;
     do id = `bridge-${kind}-${++this.#callbackCounter}`;
     while (this.#requestIds.has(id) || this.#models.has(id) || this.#tools.has(id));
@@ -196,7 +205,7 @@ export class P7SolvingBridge {
   private current(): PrimeP7SolvingSession {
     if (!this.#session) throw Error("bridge session unavailable"); return this.#session;
   }
-  private emit(kind: "ready" | "model.request" | "tool.request" | "command.result" | "error", request_id: string, payload: Record<string, unknown>): void {
+  private emit(kind: "ready" | "model.request" | "tool.request" | "compaction.accepted" | "command.result" | "error", request_id: string, payload: Record<string, unknown>): void {
     if (!this.#identity || this.#phase === "closed" || this.#phase === "failed") throw Error("bridge unavailable");
     const body = Buffer.from(canonical({ protocol: P7_SOLVING_GATEWAY_PROTOCOL, ...this.#identity,
       sequence: ++this.#outputSequence, request_id, kind, payload: jsonValue(payload) }));

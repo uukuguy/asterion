@@ -265,6 +265,62 @@ class PrimeP7SolvingGateway(DevelopmentGatewayTransport):
         self._output_sequence += 1
         return request_id
 
+    def _receive_until(
+        self, expected_id: str, expected_kinds: set[str]
+    ) -> dict[str, object]:
+        try:
+            deadline = time.monotonic() + self._deadline
+            while True:
+                frame = self._receive(deadline)
+                if frame["kind"] == "model.request":
+                    self._dispatch_callback(
+                        "model.response",
+                        frame["request_id"],
+                        "message",
+                        self._model_hook,
+                        frame["payload"],
+                    )
+                    continue
+                if frame["kind"] == "tool.request":
+                    self._dispatch_callback(
+                        "tool.response",
+                        frame["request_id"],
+                        "result",
+                        self._tool_hook,
+                        frame["payload"],
+                    )
+                    continue
+                if frame["kind"] == "compaction.accepted":
+                    self._accept_compaction_event(frame["payload"])
+                    continue
+                if (
+                    frame["request_id"] == expected_id
+                    and frame["kind"] in expected_kinds
+                ):
+                    return frame
+                if frame["kind"] == "command.result":
+                    self._resolve_nested(frame)
+                    continue
+                raise DevelopmentGatewayTransportError()
+        except BaseException:
+            self._fail_transport()
+            raise
+
+    def _accept_compaction_event(self, payload: object) -> None:
+        if type(payload) is not dict or set(payload) != {"replaced_messages", "replacement_messages", "summary_spans"}:
+            raise DevelopmentGatewayTransportError()
+        accept = _compaction_acceptor(self._model_hook)
+        if not callable(accept):
+            raise DevelopmentGatewayTransportError()
+        try:
+            accept(
+                replaced_messages=payload["replaced_messages"],
+                replacement_messages=payload["replacement_messages"],
+                summary_spans=payload["summary_spans"],
+            )
+        except BaseException:
+            raise DevelopmentGatewayTransportError() from None
+
     def _receive(self, deadline: float) -> dict[str, object]:
         if self._socket is None:
             raise DevelopmentGatewayTransportError()
@@ -337,6 +393,15 @@ def _normalize_result(value: object) -> tuple[dict[str, object], dict[str, objec
         "tool_callback_count": observations["tool_call_count"],
     }
     return normalized, value
+
+
+def _compaction_acceptor(hook: object) -> object:
+    accept = getattr(hook, "accept_compaction", None)
+    if callable(accept):
+        return accept
+    owner = getattr(hook, "__self__", None)
+    accept = getattr(owner, "accept_compaction", None)
+    return accept
 
 
 __all__ = (

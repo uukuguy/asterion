@@ -203,7 +203,8 @@ class PrimeP7SolvingSdkProvider:
         raise PrimeP7SolvingSdkProviderError()
 
     def accept_compaction(
-        self, *, replaced_messages: object, replacement_messages: object
+        self, *, replaced_messages: object, replacement_messages: object,
+        summary_spans: object | None = None,
     ) -> None:
         """Validate an explicit SDK compaction transition before the next callback."""
         try:
@@ -214,6 +215,8 @@ class PrimeP7SolvingSdkProvider:
                 raise ValueError
             if type(replaced_messages) is not list or type(replacement_messages) is not list:
                 raise ValueError
+            if summary_spans is not None:
+                _validate_summary_spans(summary_spans, self._pending_summaries)
             _validate_normal_history(replaced_messages, self._last_normal, [], None)
             expected = _compaction_transition(
                 replaced_messages, replacement_messages, self._pending_summaries
@@ -578,10 +581,24 @@ def _compaction_transition(
         if not history_text or not turn_text:
             raise ValueError
         merged = f"{history_text}\n\n---\n\n**Turn Context (split turn):**\n\n{turn_text}"
-    expected_replacement: list[object] = [_compaction_wrapper(merged)]
-    if _canonical_json(replacement_messages) != _canonical_json(expected_replacement):
+    expected: list[object] = [_compaction_wrapper(merged), *replaced_messages[cursor:]]
+    if _canonical_json(replacement_messages) != _canonical_json(expected):
         raise ValueError
-    return [*expected_replacement, *replaced_messages[cursor:]]
+    return expected
+
+
+def _validate_summary_spans(
+    value: object,
+    summaries: list[tuple[dict[str, object], dict[str, object], str, str, str | None]],
+) -> None:
+    if type(value) is not list or len(value) != len(summaries):
+        raise ValueError
+    expected = [
+        {"kind": kind, "transcript": transcript, "previous_summary": previous}
+        for _, _, kind, transcript, previous in summaries
+    ]
+    if _canonical_json(value) != _canonical_json(expected):
+        raise ValueError
 
 
 def _compaction_wrapper(summary: str) -> dict[str, object]:
