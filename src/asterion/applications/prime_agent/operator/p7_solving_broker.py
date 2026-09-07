@@ -10,7 +10,7 @@ import re
 import secrets
 from typing import Callable
 
-from .p7_solving_score import official_p7_partial_score
+from .p7_solving_score import P7SolvingScoreCalculator, official_p7_partial_score
 from .p7_solving_workload import (
     P7_SOLVING_ACTION_CAP,
     P7_SOLVING_ARC_AGI_WHEEL_SHA256,
@@ -87,7 +87,7 @@ def normalize_p7_action(value: object) -> dict[str, object]:
     name, data = value["name"], value["data"]
     if (
         type(name) is not str
-        or name not in {"RESET", *(f"ACTION{i}" for i in range(1, 8))}
+        or name not in {f"ACTION{i}" for i in range(1, 8)}
         or type(data) is not dict
     ):
         raise P7SolvingBrokerError()
@@ -124,6 +124,7 @@ class P7SolvingBroker:
         token: str | None = None,
         resource_sha256: str = P7_SOLVING_RESOURCE_SHA256,
         arc_agi_wheel_sha256: str = P7_SOLVING_ARC_AGI_WHEEL_SHA256,
+        score_calculator: P7SolvingScoreCalculator | None = None,
     ) -> None:
         if (
             not callable(getattr(engine, "observe", None))
@@ -144,6 +145,7 @@ class P7SolvingBroker:
         self._token = token or secrets.token_hex(32)
         self._resource_sha256 = resource_sha256
         self._wheel_sha256 = arc_agi_wheel_sha256
+        self._score_calculator = score_calculator
         self._sequence = 0
         self._initial_levels = initial["levels_completed"]
         self._last = initial
@@ -203,22 +205,20 @@ class P7SolvingBroker:
             for action in actions:
                 if self.action_count >= P7_SOLVING_ACTION_CAP:
                     raise ValueError
-                action_number = (
-                    None if action["name"] == "RESET" else int(str(action["name"])[6:])
-                )
-                if (
-                    action_number is not None
-                    and action_number not in self._last["available_actions"]
-                ):
+                action_number = int(str(action["name"])[6:])
+                if action_number not in self._last["available_actions"]:
                     raise ValueError
                 before = self._last["levels_completed"]
-                win_levels = self._last["win_levels"]
                 row = {"action": action}
                 self._journal.append(row)
-                after = normalize_p7_observation(self._engine.act(deepcopy(action)))
-                row["observation"] = after
-                if after["win_levels"] != win_levels:
+                after, invalid = self._apply_transition(
+                    self._engine, action, self._last
+                )
+                if invalid or after is None:
+                    row.clear()
+                    row.update({"action": action, "failure": "engine-invalid"})
                     raise ValueError
+                row["observation"] = after
                 self._last = after
                 completed = after["levels_completed"] - before
                 if (
@@ -242,13 +242,26 @@ class P7SolvingBroker:
             self._terminal, self._terminal_reason = "ERROR", "engine-invalid"
             raise P7SolvingBrokerError() from None
 
+    @staticmethod
+    def _apply_transition(
+        engine: object, action: dict[str, object], current: dict[str, object]
+    ) -> tuple[dict[str, object] | None, bool]:
+        try:
+            after = normalize_p7_observation(engine.act(deepcopy(action)))
+            completed = after["levels_completed"] - current["levels_completed"]
+            if after["win_levels"] != current["win_levels"] or completed not in (0, 1):
+                raise ValueError
+            return after, False
+        except BaseException:
+            return None, True
+
     def _score(self) -> str:
         if self._terminal != "LEVEL_SOLVED":
             return "0.000000"
         try:
             score = official_p7_partial_score(
                 self.action_count,
-                arc_agi_wheel_sha256=self._wheel_sha256,
+                calculator=self._score_calculator,
                 baseline_actions=P7_SOLVING_BASELINE_ACTIONS,
             )
             if type(score) is not str or _SCORE.fullmatch(score) is None:
@@ -304,13 +317,18 @@ class P7SolvingBroker:
             initial_levels = current["levels_completed"]
             transitioned_at = None
             for index, row in enumerate(self._journal[1:], 1):
-                before = current["levels_completed"]
-                current = normalize_p7_observation(engine.act(deepcopy(row["action"])))
-                if current != row["observation"]:
+                before = current
+                after, invalid = self._apply_transition(engine, row["action"], current)
+                if row.get("failure") == "engine-invalid":
+                    if index != seal.action_count or not invalid or after is not None:
+                        raise ValueError
+                    continue
+                if invalid or after is None or after != row.get("observation"):
                     raise ValueError
-                if current["levels_completed"] == before + 1:
+                current = after
+                if current["levels_completed"] == before["levels_completed"] + 1:
                     transitioned_at = index
-                elif current["levels_completed"] != before:
+                elif current["levels_completed"] != before["levels_completed"]:
                     raise ValueError
             if (
                 current != self._last

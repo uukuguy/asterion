@@ -101,6 +101,19 @@ class TestP7SolvingBroker(unittest.TestCase):
                     engine=FakeEngine(complete_on=None), token="secret"
                 ).request(value)
 
+        engine = FakeEngine(complete_on=None)
+        broker = P7SolvingBroker(engine=engine, token="secret")
+        with self.assertRaises(P7SolvingBrokerError):
+            broker.request(
+                request(
+                    "secret",
+                    1,
+                    "act",
+                    {"actions": [{"name": "RESET", "data": {}}]},
+                )
+            )
+        self.assertEqual(engine.calls, [])
+
     def test_action6_requires_exact_bounded_integer_coordinates(self) -> None:
         from asterion.applications.prime_agent.operator.p7_solving_broker import (
             P7SolvingBroker,
@@ -327,6 +340,10 @@ class TestP7SolvingBroker(unittest.TestCase):
         self.assertEqual(
             broker.presentation()["applied_actions"], [{"name": "ACTION1", "data": {}}]
         )
+        replay = broker.replay(lambda: Ambiguous(complete_on=None))
+        self.assertEqual(replay["terminal_reason"], "engine-invalid")
+        with self.assertRaises(P7SolvingBrokerError):
+            broker.replay(lambda: FakeEngine(complete_on=None))
 
 
 if __name__ == "__main__":

@@ -119,6 +119,9 @@ class P7SolvingBrokerService:
         ):
             raise P7SolvingBrokerServiceError()
         self._interpreter = interpreter
+        self._runtime_root = interpreter.parent.parent.parent
+        if interpreter != self._runtime_root / "venv/bin/python3":
+            raise P7SolvingBrokerServiceError()
         self._source = asterion_src
         self._resource = resource_root
         self._resource_sha256 = resource_sha256
@@ -176,6 +179,9 @@ class P7SolvingBrokerService:
                 or self._pycache.is_symlink()
             ):
                 raise ValueError
+            from .p7_runtime_lock import verify_p7_development_runtime
+
+            runtime = verify_p7_development_runtime(self._runtime_root)
             command = (
                 str(self._interpreter),
                 "-I",
@@ -202,6 +208,10 @@ class P7SolvingBrokerService:
                 str(self._resource),
                 "--resource-sha256",
                 self._resource_sha256,
+                "--runtime-root",
+                str(self._runtime_root),
+                "--runtime-sha256",
+                runtime.runtime_sha256,
             )
             self._process = subprocess.Popen(
                 command,

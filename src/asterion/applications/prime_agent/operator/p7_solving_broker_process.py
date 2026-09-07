@@ -106,10 +106,7 @@ class _ArcadeEngine:
     def act(self, action: dict[str, object]) -> dict[str, object]:
         try:
             name, data = action["name"], action["data"]
-            if name == "RESET":
-                self._last = self._environment.reset()
-            else:
-                self._last = self._environment.step(self._game_action[name], data)
+            self._last = self._environment.step(self._game_action[name], data)
             return self._observation(self._last)
         except BaseException:
             raise P7SolvingBrokerProcessError() from None
@@ -228,6 +225,9 @@ def _serve(args: argparse.Namespace) -> None:
     from asterion.applications.prime_agent.operator.p7_solving_broker import (
         P7SolvingBroker,
     )
+    from asterion.applications.prime_agent.operator.p7_solving_score import (
+        bind_p7_solving_score_calculator,
+    )
     from asterion.applications.prime_agent.operator.p7_solving_workload import (
         P7_SOLVING_ARC_AGI_WHEEL_SHA256,
         P7_SOLVING_GAME_ID,
@@ -241,12 +241,16 @@ def _serve(args: argparse.Namespace) -> None:
     ):
         raise P7SolvingBrokerProcessError()
     verify_p7_solving_process_resource(resource)
+    score_calculator = bind_p7_solving_score_calculator(
+        Path(args.runtime_root), runtime_sha256=args.runtime_sha256
+    )
     engine = _ArcadeEngine(resource, private)
     broker = P7SolvingBroker(
         engine=engine,
         token=args.model_token,
         resource_sha256=args.resource_sha256,
         arc_agi_wheel_sha256=args.arc_agi_wheel_sha256,
+        score_calculator=score_calculator,
     )
     stop = threading.Event()
     control_sequence = 0
@@ -311,6 +315,8 @@ def main(argv: list[str] | None = None) -> int:
         "private-dir",
         "resource-root",
         "resource-sha256",
+        "runtime-root",
+        "runtime-sha256",
     ):
         parser.add_argument("--" + name, required=True)
     try:
