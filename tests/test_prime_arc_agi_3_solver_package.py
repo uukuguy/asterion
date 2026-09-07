@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from typing import cast
 import unittest
 
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
@@ -46,10 +47,12 @@ class TestPrimeArcAgi3SolveReceipt(unittest.TestCase):
         )
         for changes in (
             {"receipt_sha256": "sha256:" + "0" * 64},
-            {"primitive_action_count": 23},
-            {"partial_game_score": "not-a-score"},
-            {"partial_game_score": "100.000001"},
+            {"run_id": "other-run"},
+            {"scope": "other"},
+            {"promotion": "promoted"},
             {"completed_level_count": 0},
+            {"primitive_action_count": 23},
+            {"partial_game_score": "3.571430"},
         ):
             with self.subTest(changes=changes):
                 forged = object.__new__(PrimeArcAgi3SolveReceipt)
@@ -70,8 +73,8 @@ class TestPrimeArcAgi3SolveReceipt(unittest.TestCase):
                 PrimeArcAgi3SolveReceipt.create(
                     run_id="prime-p7-solve-route",
                     completed_level_count=1,
-                    primitive_action_count=values.get("primitive_action_count", 22),
-                    partial_game_score=values.get("partial_game_score", "3.571429"),
+                    primitive_action_count=cast(int, values.get("primitive_action_count", 22)),
+                    partial_game_score=cast(str, values.get("partial_game_score", "3.571429")),
                 )
         receipt = PrimeArcAgi3SolveReceipt.create(
             run_id="prime-p7-solve-route",

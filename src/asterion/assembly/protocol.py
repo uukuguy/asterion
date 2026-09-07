@@ -142,17 +142,19 @@ def resolve_assembly(
     runtime_capabilities = runtime_manifest["capabilities"]
     assert isinstance(runtime_capabilities, list)
     try:
-        provided_capabilities = {
-            capability
-            for manifest in manifests
-            for capability in manifest["provides_capabilities"]
-        }
+        self_provided_capabilities: set[str] = set()
+        for manifest in manifests:
+            capability_id = manifest["capability_id"]
+            provided = manifest["provides_capabilities"]
+            assert isinstance(capability_id, str) and isinstance(provided, (list, tuple))
+            if capability_id in provided and all(isinstance(value, str) for value in provided):
+                self_provided_capabilities.add(capability_id)
         composition = compose_capabilities(
             manifests,
             host_capabilities=set(runtime_capabilities)
             | (
                 set(_string_edges(validated_assembly, "host_capabilities"))
-                - provided_capabilities
+                - self_provided_capabilities
             ),
             host_policies=set(_string_edges(validated_assembly, "host_policies")),
             host_events=set(_string_edges(validated_assembly, "host_events")),

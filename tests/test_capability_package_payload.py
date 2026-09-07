@@ -236,6 +236,39 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
         with self.assertRaises(AttributeError):
             setattr(payload.manifest, "resources", ())
 
+    def test_empty_declared_directories_are_empty_real_directories(self) -> None:
+        def empty_payload(root: Path) -> None:
+            _create_payload(root)
+            (root / "benchmark-suites" / "suite.json").unlink()
+            (root / "resources" / "example.conformance").unlink()
+            (root / "conformance" / "externalization.json").unlink()
+            (root / "benchmark-suites").rmdir()
+            _write_canonical_json(
+                root / "capability-package.json",
+                _package_manifest(suites=[], resources=[], conformance=[]),
+            )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = (Path(temporary_directory) / "payload").resolve()
+            empty_payload(root)
+            self.assertIsInstance(open_portable_payload(root), PortableCapabilityPayload)
+        for kind in ("file", "directory", "symlink"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary_directory:
+                root = (Path(temporary_directory) / "payload").resolve()
+                empty_payload(root)
+                resource = root / "resources" / "unexpected"
+                if kind == "file":
+                    resource.write_text("unexpected")
+                elif kind == "directory":
+                    resource.mkdir()
+                else:
+                    outside = Path(temporary_directory) / "outside"
+                    outside.mkdir()
+                    (root / "resources").rmdir()
+                    os.symlink(outside, root / "resources")
+                with self.assertRaises(CapabilityPackagePayloadError):
+                    open_portable_payload(root)
+
     def test_payload_resource_root_is_a_deeply_immutable_snapshot(self) -> None:
         payload = open_portable_payload(self.root)
         capability_bytes = payload.resource_root.joinpath(

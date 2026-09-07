@@ -13,10 +13,11 @@ from typing import Protocol, runtime_checkable
 _RUN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _SCORE = re.compile(r"(?:0|[1-9][0-9]{0,2})\.[0-9]{6}\Z")
-_FIELDS = frozenset((
+_FIELDS: frozenset[str] = frozenset((
     "run_id", "scope", "promotion", "completed_level_count", "primitive_action_count",
     "partial_game_score", "receipt_sha256",
 ))
+_UNSIGNED_FIELDS = _FIELDS - {"receipt_sha256"}
 
 
 class PrimeArcAgi3SolveReceiptError(ValueError):
@@ -25,7 +26,7 @@ class PrimeArcAgi3SolveReceiptError(ValueError):
 
 def canonical_solve_receipt_sha256(unsigned: object) -> str:
     """Hash exactly the public unsigned receipt schema using canonical JSON."""
-    if type(unsigned) is not dict or frozenset(unsigned) != _FIELDS - {"receipt_sha256"}:
+    if type(unsigned) is not dict or frozenset(unsigned) != _UNSIGNED_FIELDS:
         raise PrimeArcAgi3SolveReceiptError("P7 solve receipt is invalid")
     try:
         encoded = json.dumps(unsigned, allow_nan=False, separators=(",", ":"), sort_keys=True)
@@ -67,7 +68,7 @@ def validate_prime_arc_agi_3_solve_receipt(receipt: object) -> None:
     """Validate an accessor return value before exposing its safe projection."""
     if type(receipt) is not PrimeArcAgi3SolveReceipt or frozenset(vars(receipt)) != _FIELDS:
         raise PrimeArcAgi3SolveReceiptError("P7 solve receipt is invalid")
-    unsigned = {name: getattr(receipt, name) for name in _FIELDS - {"receipt_sha256"}}
+    unsigned = {name: getattr(receipt, name) for name in _UNSIGNED_FIELDS}
     _validate_unsigned(unsigned)
     if (
         type(receipt.receipt_sha256) is not str
@@ -78,7 +79,7 @@ def validate_prime_arc_agi_3_solve_receipt(receipt: object) -> None:
 
 
 def _validate_unsigned(unsigned: object) -> None:
-    if type(unsigned) is not dict or frozenset(unsigned) != _FIELDS - {"receipt_sha256"}:
+    if type(unsigned) is not dict or frozenset(unsigned) != _UNSIGNED_FIELDS:
         raise PrimeArcAgi3SolveReceiptError("P7 solve receipt is invalid")
     run_id = unsigned["run_id"]
     score = unsigned["partial_game_score"]

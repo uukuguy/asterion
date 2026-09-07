@@ -368,7 +368,7 @@ def _validate_pinned_payload(
     )
 
     resource_contents = {}
-    if manifest.resources:
+    if manifest.resources or "resources" in _list_children(root):
         resource_dir = _open_child_directory(root, "resources", descriptors)
         resource_contents = _validate_resource_children(resource_dir, manifest)
     contents.update(
@@ -379,7 +379,7 @@ def _validate_pinned_payload(
     )
 
     conformance_contents = {}
-    if manifest.conformance:
+    if manifest.conformance or "conformance" in _list_children(root):
         conformance_dir = _open_child_directory(root, "conformance", descriptors)
         conformance_contents = _validate_conformance_children(conformance_dir, manifest)
     contents.update(

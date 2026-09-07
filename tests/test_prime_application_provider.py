@@ -27,6 +27,8 @@ from asterion.applications.prime_agent.restricted_worker import (
 )
 from asterion.services.restricted_worker import RestrictedWorkerLease
 from asterion.applications.prime_agent.source_lock import PrimeSourceLock
+from asterion.applications.first_party_packages import builtin_capability_registrations
+from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 
 
 def _profile(**changes: object) -> PrimeRestrictedWorkerProfile:
@@ -129,6 +131,8 @@ class TestPrimeApplicationProvider(unittest.TestCase):
         self.assertEqual(
             [(item.application_id, item.version) for item in provider.applications],
             [
+                ("prime.arc-agi-3-solving", "1.0.0"),
+                ("prime.arc-agi-3", "1.0.0"),
                 ("prime.capability-program", "1.0.0"),
                 ("prime.bounded-autonomy", "1.0.0"),
                 ("prime.continual-improvement", "1.0.0"),
@@ -195,6 +199,25 @@ class TestPrimeApplicationProvider(unittest.TestCase):
             select_application_provider_id("prime.recursive-workflow@1.0.0"),
             "prime-agent",
         )
+        self.assertEqual(
+            select_application_provider_id("prime.arc-agi-3-solving@1.0.0"),
+            "prime-agent",
+        )
+
+    def test_solver_package_is_discoverable_from_the_builtin_registration(self) -> None:
+        source = BuiltinCapabilitySource(builtin_capability_registrations())
+        candidate = next(
+            candidate
+            for candidate in source.discover_metadata()
+            if (candidate.package_ref.package_id, candidate.package_ref.version)
+            == ("prime-arc-agi-3-solver", "1.0.0")
+        )
+
+        payload = source.open_payload(candidate)
+        package = source.load_provider(candidate)
+
+        self.assertEqual(payload.manifest.package_ref, candidate.package_ref)
+        self.assertEqual(package.package_ref, candidate.package_ref)
 
     def test_preflight_verifies_trusted_lock_against_explicit_source_root(self) -> None:
         with TemporaryDirectory() as temporary_directory:
