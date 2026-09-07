@@ -39,6 +39,11 @@ P7_SOLVING_PROVIDER_COST_LIMIT = 5_000_000
 P7_SOLVING_PROVIDER_DEADLINE_SECONDS = 3_600
 P7_SOLVING_PROVIDER_CALLBACK_OUTPUT_LIMIT = 4_096
 _REQUEST_COST_RESERVATION = 39_062
+_FAILURE_CATEGORIES = frozenset({
+    "callback-limit", "input-limit", "output-limit", "cost-limit", "deadline",
+    "dns", "connect", "tls", "timeout", "http-4xx", "http-5xx", "response",
+    "internal",
+})
 _NORMAL_OPTION_KEYS = frozenset(
     {"apiKey", "maxRetries", "maxRetryDelayMs", "model", "serviceTier", "sessionId", "signal", "toolExecution", "transport"}
 )
@@ -64,7 +69,7 @@ class PrimeP7SolvingSdkProvider:
     __slots__ = (
         "_calls", "_normal_calls", "_summary_calls", "_inflight", "_lock",
         "_cancelled", "_child_pid", "_closed", "_cleanup_task", "_config",
-        "_deadline", "_failure", "_issued", "_last_normal", "_pending_summaries",
+        "_deadline", "_failure", "_failure_category", "_issued", "_last_normal", "_pending_summaries",
         "_accepted_compaction", "_provisional", "_terminal", "_finalized", "_uncertain",
     )
 
@@ -79,6 +84,7 @@ class PrimeP7SolvingSdkProvider:
         self._config = config
         self._deadline: float | None = None
         self._failure: _ProviderFailure | None = None
+        self._failure_category = "internal"
         self._issued: list[tuple[dict[str, object], dict[str, object], str]] = []
         self._last_normal: tuple[dict[str, object], dict[str, object]] | None = None
         self._pending_summaries: list[tuple[dict[str, object], dict[str, object], str, str, str | None]] = []
@@ -90,11 +96,15 @@ class PrimeP7SolvingSdkProvider:
         return "PrimeP7SolvingSdkProvider(redacted)"
 
     async def __call__(self, body: bytes) -> bytes:
+        self._failure = None
+        self._failure_category = "internal"
         if (
             type(body) is not bytes or not body
-            or len(body) > P7_SOLVING_PROVIDER_REQUEST_BYTES
             or self._closed or self._cancelled or self._finalized
         ):
+            raise PrimeP7SolvingSdkProviderError()
+        if len(body) > P7_SOLVING_PROVIDER_REQUEST_BYTES:
+            self._failure_category = "input-limit"
             raise PrimeP7SolvingSdkProviderError()
         self._inflight += 1
         try:
@@ -104,11 +114,10 @@ class PrimeP7SolvingSdkProvider:
             self._inflight -= 1
 
     async def _call_serial(self, body: bytes) -> bytes:
-        if (
-            self._closed or self._cancelled or self._finalized
-            or self._child_pid is not None
-            or self._calls >= P7_SOLVING_PROVIDER_CALLBACK_LIMIT
-        ):
+        if self._closed or self._cancelled or self._finalized or self._child_pid is not None:
+            raise PrimeP7SolvingSdkProviderError()
+        if self._calls >= P7_SOLVING_PROVIDER_CALLBACK_LIMIT:
+            self._failure_category = "callback-limit"
             raise PrimeP7SolvingSdkProviderError()
         try:
             request, callback_kind = _decode_request(
@@ -120,12 +129,17 @@ class PrimeP7SolvingSdkProvider:
         if self._deadline is None:
             self._deadline = time.monotonic() + P7_SOLVING_PROVIDER_DEADLINE_SECONDS
         remaining = self._deadline - time.monotonic()
-        if (
-            remaining <= 0
-            or self._provisional.input_tokens >= P7_SOLVING_PROVIDER_INPUT_LIMIT
-            or self._provisional.output_tokens >= P7_SOLVING_PROVIDER_OUTPUT_LIMIT
-            or self._provisional.cost_microunits + _REQUEST_COST_RESERVATION > P7_SOLVING_PROVIDER_COST_LIMIT
-        ):
+        if remaining <= 0:
+            self._failure_category = "deadline"
+            raise PrimeP7SolvingSdkProviderError()
+        if self._provisional.input_tokens >= P7_SOLVING_PROVIDER_INPUT_LIMIT:
+            self._failure_category = "input-limit"
+            raise PrimeP7SolvingSdkProviderError()
+        if self._provisional.output_tokens >= P7_SOLVING_PROVIDER_OUTPUT_LIMIT:
+            self._failure_category = "output-limit"
+            raise PrimeP7SolvingSdkProviderError()
+        if self._provisional.cost_microunits + _REQUEST_COST_RESERVATION > P7_SOLVING_PROVIDER_COST_LIMIT:
+            self._failure_category = "cost-limit"
             raise PrimeP7SolvingSdkProviderError()
         self._calls += 1
         if callback_kind == "normal":
@@ -160,11 +174,14 @@ class PrimeP7SolvingSdkProvider:
                 self._provisional.output_tokens + usage.output_tokens,
                 self._provisional.cost_microunits + usage.cost_microunits,
             )
-            if (
-                next_usage.input_tokens > P7_SOLVING_PROVIDER_INPUT_LIMIT
-                or next_usage.output_tokens > P7_SOLVING_PROVIDER_OUTPUT_LIMIT
-                or next_usage.cost_microunits > P7_SOLVING_PROVIDER_COST_LIMIT
-            ):
+            if next_usage.input_tokens > P7_SOLVING_PROVIDER_INPUT_LIMIT:
+                self._failure_category = "input-limit"
+                raise ValueError
+            if next_usage.output_tokens > P7_SOLVING_PROVIDER_OUTPUT_LIMIT:
+                self._failure_category = "output-limit"
+                raise ValueError
+            if next_usage.cost_microunits > P7_SOLVING_PROVIDER_COST_LIMIT:
+                self._failure_category = "cost-limit"
                 raise ValueError
             reply = json.loads(response.decode("utf-8", "strict"))
             if type(reply) is not dict:
@@ -190,6 +207,9 @@ class PrimeP7SolvingSdkProvider:
         except BaseException as error:
             if type(error) is _ProviderFailure:
                 self._failure = error
+                self._failure_category = error.kind
+            elif isinstance(error, TimeoutError):
+                self._failure_category = "deadline"
             self._terminal = None
             await self._reap_shielded()
             failed = True
@@ -244,6 +264,10 @@ class PrimeP7SolvingSdkProvider:
 
     def callback_counts(self) -> dict[str, int]:
         return {"normal": self._normal_calls, "summary": self._summary_calls}
+
+    def failure_category(self) -> str:
+        category = self._failure.kind if self._failure is not None else self._failure_category
+        return category if category in _FAILURE_CATEGORIES else "internal"
 
     async def close(self) -> None:
         self._closed = True

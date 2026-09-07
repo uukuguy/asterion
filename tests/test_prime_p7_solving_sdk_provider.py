@@ -4,6 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 from typing import cast
 import unittest
 from unittest import mock
@@ -103,6 +104,49 @@ s.on("data",x=>{{b=Buffer.concat([b,x]);while(b.length>=4){{let n=b.readUInt32BE
 
 
 class TestP7SolvingSdkProvider(unittest.IsolatedAsyncioTestCase):
+    async def test_failure_category_distinguishes_local_limits_and_provider_failures(self) -> None:
+        from asterion.applications.prime_agent.operator import p7_solving_sdk_provider as subject
+
+        for category, attribute, value in (
+            ("callback-limit", "_calls", subject.P7_SOLVING_PROVIDER_CALLBACK_LIMIT),
+            ("input-limit", "_provisional", SimpleNamespace(
+                input_tokens=subject.P7_SOLVING_PROVIDER_INPUT_LIMIT,
+                output_tokens=0, cost_microunits=0,
+            )),
+            ("output-limit", "_provisional", SimpleNamespace(
+                input_tokens=0,
+                output_tokens=subject.P7_SOLVING_PROVIDER_OUTPUT_LIMIT,
+                cost_microunits=0,
+            )),
+            ("cost-limit", "_provisional", SimpleNamespace(
+                input_tokens=0, output_tokens=0,
+                cost_microunits=subject.P7_SOLVING_PROVIDER_COST_LIMIT,
+            )),
+            ("deadline", "_deadline", 0.0),
+        ):
+            with self.subTest(category=category):
+                provider = subject.create_prime_p7_solving_sdk_provider({
+                    "DEEPSEEK_API_KEY": "SENTINEL_SECRET",
+                    "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash",
+                })
+                setattr(provider, attribute, value)
+                with self.assertRaises(subject.PrimeP7SolvingSdkProviderError):
+                    await provider(_normal([{"role": "user", "content": [{"type": "text", "text": "solve"}]}]))
+                self.assertEqual(provider.failure_category(), category)
+
+        provider = subject.create_prime_p7_solving_sdk_provider({
+            "DEEPSEEK_API_KEY": "SENTINEL_SECRET",
+            "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash",
+        })
+        with mock.patch.object(
+            subject.PrimeP7SolvingSdkProvider, "_receive_result",
+            side_effect=subject._ProviderFailure("dns"),
+        ):
+            with self.assertRaises(subject.PrimeP7SolvingSdkProviderError):
+                await provider(_normal([{"role": "user", "content": [{"type": "text", "text": "solve"}]}]))
+        self.assertEqual(provider.failure_category(), "dns")
+        self.assertNotIn("SENTINEL_SECRET", repr(provider))
+
     async def test_compaction_summaries_serialize_finalize_and_dynamic_history_is_exact(self) -> None:
         from asterion.applications.prime_agent.operator import p7_solving_sdk_provider as subject
         provider = subject.create_prime_p7_solving_sdk_provider({"DEEPSEEK_API_KEY": "SENTINEL_SECRET", "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"})

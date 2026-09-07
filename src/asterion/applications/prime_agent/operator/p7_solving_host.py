@@ -29,6 +29,11 @@ from .p7_solving_renderer import (
 _RUN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _SCORE = re.compile(r"(?:0|[1-9][0-9]?|100)\.[0-9]{6}\Z")
+_MODEL_FAILURE_CATEGORIES = frozenset({
+    "callback-limit", "input-limit", "output-limit", "cost-limit", "deadline",
+    "dns", "connect", "tls", "timeout", "http-4xx", "http-5xx", "response",
+    "internal",
+})
 
 
 class PrimeP7SolvingHostError(ValueError):
@@ -54,6 +59,7 @@ class P7SolvingProvider(Protocol):
     async def __call__(self, body: bytes) -> bytes: ...
     def finalize(self) -> object: ...
     def callback_counts(self) -> dict[str, int]: ...
+    def failure_category(self) -> str: ...
     async def close(self) -> None: ...
 
 
@@ -173,6 +179,12 @@ async def run_p7_solving_lifecycle(
                 return reply
             except BaseException:
                 _emit(progress, "model", "failed")
+                try:
+                    presentation.write(
+                        f"Model callback failed: {_provider_failure_category(provider)}"
+                    )
+                except BaseException:
+                    pass
                 raise
 
         async def tool_hook(payload: object) -> dict[str, object]:
@@ -366,6 +378,17 @@ def _strict_json(value: object) -> dict[str, object]:
     if type(parsed) is not dict or _canonical(parsed) != value:
         raise ValueError
     return parsed
+
+
+def _provider_failure_category(provider: object) -> str:
+    try:
+        method = getattr(provider, "failure_category", None)
+        if not callable(method):
+            return "internal"
+        category = method()
+    except BaseException:
+        return "internal"
+    return category if type(category) is str and category in _MODEL_FAILURE_CATEGORIES else "internal"
 
 
 def _worker_result(value: object, cell_count: int) -> dict[str, object]:

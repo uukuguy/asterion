@@ -117,16 +117,17 @@ class _Worker:
 
 
 class _Provider:
-    def __init__(self, log: list[str], *, fail: bool = False) -> None:
+    def __init__(self, log: list[str], *, fail: bool = False, category: str = "internal") -> None:
         self.log = log
         self.fail = fail
+        self.category = category
         self.calls = 0
 
     async def __call__(self, body: bytes) -> bytes:
         self.calls += 1
         self.log.append("provider:call")
         if self.fail:
-            raise ValueError("limit")
+            raise ValueError("private payload SENTINEL_SECRET")
         json.loads(body)
         return b'{"content":[{"text":"continue","type":"text"}],"role":"assistant","stopReason":"stop","timestamp":1}'
 
@@ -136,6 +137,9 @@ class _Provider:
 
     def callback_counts(self) -> dict[str, int]:
         return {"normal": self.calls, "summary": 0}
+
+    def failure_category(self) -> str:
+        return self.category
 
     async def close(self) -> None:
         self.log.append("provider:close")
@@ -200,6 +204,26 @@ class _Gateway:
 
 
 class TestPrimeP7SolvingHost(unittest.IsolatedAsyncioTestCase):
+    async def test_model_failure_renders_only_fixed_safe_category(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_solving_host import (
+            PrimeP7SolvingHostError,
+            run_p7_solving_lifecycle,
+        )
+
+        log: list[str] = []
+        broker = _Broker(log)
+        sink = _Sink(log)
+        with self.assertRaises(PrimeP7SolvingHostError):
+            await run_p7_solving_lifecycle(
+                gateway=_Gateway(log, broker, mode="provider-failure"),
+                provider=_Provider(log, fail=True, category="input-limit"),
+                worker=_Worker(log, broker), broker=broker,
+                receipt_store=_StoreProbe().value, run_id="p7-failure",
+                session_id="session-p7-failure", presentation=sink,
+        )
+        self.assertEqual(sink.records, ["Model callback failed: input-limit"])
+        self.assertNotIn("SENTINEL_SECRET", repr(sink.records))
+
     def test_model_callback_uses_provider_canonical_utf8(self) -> None:
         from asterion.applications.prime_agent.operator.p7_solving_host import (
             _canonical,
