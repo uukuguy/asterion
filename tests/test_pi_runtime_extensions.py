@@ -409,6 +409,109 @@ class PiExtensionFactoryTests(unittest.TestCase):
                     )
                 client.assert_not_called()
 
+    def test_factory_rejects_comment_bearing_sources_before_client(self) -> None:
+        def close_lease(**kwargs: object) -> object:
+            kwargs["extension_lease"].close()  # type: ignore[union-attr]
+            return object()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            cases = (
+                (
+                    "after-export",
+                    'export/*gap*/{value}from "./dependency.mjs";\n',
+                ),
+                (
+                    "before-braces",
+                    'export /*gap*/ {value}from "./dependency.mjs";\n',
+                ),
+                (
+                    "inside-braces",
+                    'export {/*gap*/value}from "./dependency.mjs";\n',
+                ),
+                (
+                    "around-star",
+                    'export /*gap*/ * /*gap*/ from "./dependency.mjs";\n',
+                ),
+                (
+                    "around-from",
+                    'export {value}/*gap*/from/*gap*/"./dependency.mjs";\n',
+                ),
+                (
+                    "before-specifier",
+                    'export {value}from /*gap*/ "package";\n',
+                ),
+            )
+            factory = default_runtime_factory_registry().select("pi.reference").factory
+            for label, prefix in cases:
+                extension = root / f"comment-{label}.mjs"
+                extension.write_text(
+                    prefix + "export default () => {};\n", encoding="utf-8"
+                )
+                binding = PiExtensionBinding(
+                    extension_id="prime.ipython",
+                    path=extension,
+                    capabilities=("prime.tool.ipython",),
+                    inherited_fds=(),
+                    environment={},
+                )
+                with (
+                    self.subTest(label=label),
+                    patch(
+                        "asterion.runtimes.pi_extensions.os.dup", wraps=os.dup
+                    ) as duplicated,
+                    patch(
+                        "asterion.runtime.defaults.PiRuntimeClient",
+                        side_effect=close_lease,
+                    ) as client,
+                    self.assertRaises(RuntimeFactoryError),
+                ):
+                    factory(
+                        self._context(
+                            root,
+                            host_services={"prime.ipython": binding},
+                            extension_host_capability="prime.ipython",
+                        )
+                    )
+                client.assert_not_called()
+                duplicated.assert_not_called()
+
+    def test_factory_accepts_minimal_self_contained_p7_extension(self) -> None:
+        source = '''
+export default function registerPrimeIpython(pi) {
+  pi.registerTool({
+    name: "prime_ipython",
+    execute: async () => ({ content: [] }),
+  });
+}
+'''
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            extension = root / "prime-ipython.mjs"
+            extension.write_text(source, encoding="utf-8")
+            binding = PiExtensionBinding(
+                extension_id="prime.ipython",
+                path=extension,
+                capabilities=("prime.tool.ipython",),
+                inherited_fds=(),
+                environment={},
+            )
+            runtime = (
+                default_runtime_factory_registry()
+                .select("pi.reference")
+                .factory(
+                    self._context(
+                        root,
+                        host_services={"prime.ipython": binding},
+                        extension_host_capability="prime.ipython",
+                    )
+                )
+            )
+
+        self.assertEqual(runtime._env["ASTERION_PI_EXTENSION_SOURCE_NAME"], extension.name)
+        self.assertEqual(runtime._command[-2], "--extension")
+        runtime.close()
+
     def test_factory_without_extension_preserves_reference_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()

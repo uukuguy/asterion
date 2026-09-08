@@ -333,7 +333,12 @@ def _validate_source(name: str, source: bytes) -> None:
     if _SOURCE_NAME.fullmatch(name) is None or not source:
         raise ValueError
     text = source.decode("utf-8")
-    if "\x00" in text or re.search(r"\bimport\s*\(", text):
+    if (
+        "\x00" in text
+        or "//" in text
+        or "/*" in text
+        or re.search(r"\bimport\s*\(", text)
+    ):
         raise ValueError
     if _REEXPORT.search(text):
         raise ValueError
