@@ -19,9 +19,15 @@ _SOURCE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\.mjs")
 _STATIC_IMPORT = re.compile(
     r"\bimport\s+(?:(?:[^\"'\n;]+?)\s+from\s+)?[\"']([^\"']+)[\"']\s*;?"
 )
+_REEXPORT = re.compile(
+    r"\bexport\s*(?:\{.*?\}|\*)(?:\s+as\s+[A-Za-z_$][\w$]*)?"
+    r"\s*from\s*[\"']",
+    re.DOTALL,
+)
 _SOURCE_FD = "ASTERION_PI_EXTENSION_SOURCE_FD"
 _SOURCE_NAME_ENV = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
+_RESERVED_ENVIRONMENT_PREFIX = "ASTERION_PI_EXTENSION_"
 _LOADER_FILENAME = "asterion_pi_extension_loader.mjs"
 _MAX_SOURCE_BYTES = 4 * 1024 * 1024
 
@@ -80,6 +86,7 @@ class PiExtensionBinding:
         if any(
             type(name) is not str
             or not name.startswith(environment_prefix)
+            or name.startswith(_RESERVED_ENVIRONMENT_PREFIX)
             or re.fullmatch(r"[A-Z][A-Z0-9_]*", name) is None
             or type(value) is not str
             or "\x00" in value
@@ -99,9 +106,6 @@ class PiExtensionBinding:
 
     def __repr__(self) -> str:
         return "<PiExtensionBinding redacted>"
-
-    def command_args(self) -> tuple[str, str]:
-        return ("--extension", str(self.path))
 
     def preflight(self, loader_path: Path | None = None) -> PiExtensionLease:
         """Pin validated source bytes, loader identity, and declared resources."""
@@ -331,7 +335,7 @@ def _validate_source(name: str, source: bytes) -> None:
     text = source.decode("utf-8")
     if "\x00" in text or re.search(r"\bimport\s*\(", text):
         raise ValueError
-    if re.search(r"\bexport\b[^;\n]*\bfrom\s*[\"']", text):
+    if _REEXPORT.search(text):
         raise ValueError
     imports = list(re.finditer(r"\bimport\b", text))
     matches = list(_STATIC_IMPORT.finditer(text))

@@ -51,9 +51,7 @@ class PiExtensionBindingTests(unittest.TestCase):
             )
 
         self.assertEqual(binding.capabilities, ("prime.tool.ipython",))
-        self.assertEqual(
-            binding.command_args(), ("--extension", str(extension.resolve()))
-        )
+        self.assertFalse(hasattr(binding, "command_args"))
         self.assertNotIn("ASTERION_PRIME_IPYTHON_FD", repr(binding))
         self.assertNotIn("7", repr(binding.environment))
         with self.assertRaises(TypeError):
@@ -171,6 +169,29 @@ class PiExtensionBindingTests(unittest.TestCase):
                         inherited_fds=(7,),
                         environment=environment,  # type: ignore[arg-type]
                     )
+
+    def test_extension_binding_rejects_reserved_loader_environment_before_io(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            extension = Path(temp_dir, "extension.mjs").resolve()
+            extension.write_text("export default () => {};\n", encoding="utf-8")
+            for extension_id in ("pi", "pi.extension"):
+                with (
+                    self.subTest(extension_id=extension_id),
+                    patch("asterion.runtimes.pi_extensions.os.open") as opened,
+                    patch("asterion.runtimes.pi_extensions.os.dup") as duplicated,
+                    self.assertRaises(ValueError),
+                ):
+                    PiExtensionBinding(
+                        extension_id=extension_id,
+                        path=extension,
+                        capabilities=(f"{extension_id}.tool",),
+                        inherited_fds=(7,),
+                        environment={"ASTERION_PI_EXTENSION_SOURCE_FD": "7"},
+                    )
+                opened.assert_not_called()
+                duplicated.assert_not_called()
 
 
 class PiExtensionFactoryTests(unittest.TestCase):
@@ -332,6 +353,51 @@ class PiExtensionFactoryTests(unittest.TestCase):
                 with (
                     self.subTest(name=name),
                     patch("asterion.runtime.defaults.PiRuntimeClient") as client,
+                    self.assertRaises(RuntimeFactoryError),
+                ):
+                    factory(
+                        self._context(
+                            root,
+                            host_services={"prime.ipython": binding},
+                            extension_host_capability="prime.ipython",
+                        )
+                    )
+                client.assert_not_called()
+
+    def test_factory_rejects_multiline_and_compact_reexports_before_client(
+        self,
+    ) -> None:
+        def close_lease(**kwargs: object) -> object:
+            kwargs["extension_lease"].close()  # type: ignore[union-attr]
+            return object()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            sources = (
+                'export {\n  value\n} from "./dependency.mjs";\n'
+                "export default () => {};\n",
+                'export *\nfrom "package";\nexport default () => {};\n',
+                'export {value}from "./dependency.mjs";\n'
+                "export default () => {};\n",
+                'export*from "./dependency.mjs";\nexport default () => {};\n',
+            )
+            factory = default_runtime_factory_registry().select("pi.reference").factory
+            for index, source in enumerate(sources):
+                extension = root / f"multiline-{index}.mjs"
+                extension.write_text(source, encoding="utf-8")
+                binding = PiExtensionBinding(
+                    extension_id="prime.ipython",
+                    path=extension,
+                    capabilities=("prime.tool.ipython",),
+                    inherited_fds=(),
+                    environment={},
+                )
+                with (
+                    self.subTest(index=index),
+                    patch(
+                        "asterion.runtime.defaults.PiRuntimeClient",
+                        side_effect=close_lease,
+                    ) as client,
                     self.assertRaises(RuntimeFactoryError),
                 ):
                     factory(
@@ -618,6 +684,76 @@ for event in events: print(json.dumps(event), flush=True)
         self.assertEqual(tool_result.payload["output"]["fd"], "<redacted>")
         self.assertEqual(usage.payload["input_tokens"], int(source_fd))
         self.assertIn("<redacted>", rendered)
+
+    async def test_redaction_preserves_protocol_controls_matching_environment(
+        self,
+    ) -> None:
+        script = r'''
+import json, os, sys
+request = json.loads(sys.stdin.readline())
+values = {
+    "event_type": os.environ["ASTERION_PRIME_IPYTHON_EVENT_TYPE"],
+    "response": os.environ["ASTERION_PRIME_IPYTHON_RESPONSE"],
+    "one": os.environ["ASTERION_PRIME_IPYTHON_ONE"],
+    "call_fragment": os.environ["ASTERION_PRIME_IPYTHON_CALL_FRAGMENT"],
+}
+call_id = values["call_fragment"] + values["one"]
+free_text = "|".join(values.values())
+events = (
+    {"type": "response", "id": request["id"], "success": True},
+    {"type": "agent_start"},
+    {"type": "turn_start"},
+    {"type": "tool_execution_start", "toolCallId": call_id, "toolName": "grep",
+     "args": dict(values)},
+    {"type": "tool_execution_end", "toolCallId": call_id, "isError": False,
+     "result": dict(values)},
+    {"type": "message_update", "assistantMessageEvent": {
+        "type": "text_delta", "delta": free_text}},
+    {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop",
+     "usage": {"input": 1, "output": 1}, "content": free_text}},
+    {"type": "agent_end"},
+)
+for event in events: print(json.dumps(event), flush=True)
+'''
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            binding = PiExtensionBinding(
+                extension_id="prime.ipython",
+                path=PiExtensionFactoryTests._extension(root),
+                capabilities=("prime.tool.ipython",),
+                inherited_fds=(),
+                environment={
+                    "ASTERION_PRIME_IPYTHON_EVENT_TYPE": "type",
+                    "ASTERION_PRIME_IPYTHON_RESPONSE": "response",
+                    "ASTERION_PRIME_IPYTHON_ONE": "1",
+                    "ASTERION_PRIME_IPYTHON_CALL_FRAGMENT": "call-",
+                },
+            )
+            runtime = self._python_runtime(root, binding, script)
+            events = [
+                event
+                async for event in runtime.run(
+                    RunRequest(
+                        run_id="control-safe-redaction",
+                        input_text="test",
+                        requested_capabilities=("prime.tool.ipython",),
+                    )
+                )
+            ]
+
+        tool_call = next(event for event in events if event.type == "tool.call")
+        tool_result = next(event for event in events if event.type == "tool.result")
+        text_delta = next(event for event in events if event.type == "text.delta")
+        usage = next(event for event in events if event.type == "usage.reported")
+        self.assertEqual(tool_call.payload["call_id"], "call-1")
+        self.assertEqual(tool_result.payload["call_id"], "call-1")
+        self.assertEqual(
+            set(tool_call.payload["arguments"].values()), {"<redacted>"}
+        )
+        self.assertEqual(set(tool_result.payload["output"].values()), {"<redacted>"})
+        self.assertEqual(text_delta.payload["text"], "<redacted>|" * 3 + "<redacted>")
+        self.assertEqual(usage.payload, {"input_tokens": 1, "output_tokens": 1})
+        self.assertEqual(events[-1].type, "run.completed")
 
     async def test_extension_errors_are_redacted_and_close_every_lease_fd(self) -> None:
         scripts = (

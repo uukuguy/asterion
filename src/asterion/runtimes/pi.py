@@ -569,44 +569,88 @@ def _validated_observation(
 
 
 def _redact_sensitive(
-    value: object,
+    event: dict[str, object],
     sensitive_values: tuple[str | int, ...],
-    *,
-    redact_integers: bool = False,
-) -> object:
+) -> dict[str, object]:
     if not sensitive_values:
-        return value
+        return event
+    redacted = dict(event)
+    event_type = event.get("type")
+    if event_type == "tool_execution_start" and "args" in event:
+        redacted["args"] = _redact_freeform(event["args"], sensitive_values)
+    elif event_type == "tool_execution_end" and "result" in event:
+        redacted["result"] = _redact_freeform(event["result"], sensitive_values)
+    elif event_type == "message_update":
+        assistant = event.get("assistantMessageEvent")
+        if isinstance(assistant, Mapping) and "delta" in assistant:
+            redacted_assistant = dict(assistant)
+            redacted_assistant["delta"] = _redact_text(
+                assistant["delta"], sensitive_values
+            )
+            redacted["assistantMessageEvent"] = redacted_assistant
+    elif event_type == "message_end":
+        message = event.get("message")
+        if isinstance(message, Mapping):
+            redacted_message = dict(message)
+            if "text" in message:
+                redacted_message["text"] = _redact_text(
+                    message["text"], sensitive_values
+                )
+            if "content" in message:
+                redacted_message["content"] = _redact_message_content(
+                    message["content"], sensitive_values
+                )
+            redacted["message"] = redacted_message
+    return redacted
+
+
+def _redact_freeform(
+    value: object, sensitive_values: tuple[str | int, ...]
+) -> object:
     if isinstance(value, dict):
-        event_type = value.get("type")
         return {
-            _redact_sensitive(key, sensitive_values): _redact_sensitive(
-                item,
-                sensitive_values,
-                redact_integers=(
-                    redact_integers
-                    or (event_type == "tool_execution_start" and key == "args")
-                    or (event_type == "tool_execution_end" and key == "result")
-                ),
+            _redact_freeform(key, sensitive_values): _redact_freeform(
+                item, sensitive_values
             )
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [
-            _redact_sensitive(
-                item, sensitive_values, redact_integers=redact_integers
-            )
-            for item in value
-        ]
-    if redact_integers and type(value) is int and value in sensitive_values:
+        return [_redact_freeform(item, sensitive_values) for item in value]
+    if type(value) is int and value in sensitive_values:
         return "<redacted>"
+    return _redact_text(value, sensitive_values)
+
+
+def _redact_message_content(
+    value: object, sensitive_values: tuple[str | int, ...]
+) -> object:
     if isinstance(value, str):
-        redacted = value
-        for sensitive in sensitive_values:
-            if not isinstance(sensitive, str) or not sensitive:
-                continue
+        return _redact_text(value, sensitive_values)
+    if not isinstance(value, list):
+        return value
+    redacted: list[object] = []
+    for block in value:
+        if isinstance(block, Mapping) and "text" in block:
+            redacted_block = dict(block)
+            redacted_block["text"] = _redact_text(
+                block["text"], sensitive_values
+            )
+            redacted.append(redacted_block)
+        else:
+            redacted.append(block)
+    return redacted
+
+
+def _redact_text(
+    value: object, sensitive_values: tuple[str | int, ...]
+) -> object:
+    if not isinstance(value, str):
+        return value
+    redacted = value
+    for sensitive in sensitive_values:
+        if isinstance(sensitive, str) and sensitive:
             redacted = redacted.replace(sensitive, "<redacted>")
-        return redacted
-    return value
+    return redacted
 
 
 def _assistant_delta(event: Mapping[str, object]) -> str | None:
