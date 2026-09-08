@@ -96,7 +96,7 @@ CLI/operator host
   -> exact application assembly
        <- exact Asterion capability packages
   -> Asterion runner
-  -> selected runtime and injected host services
+  -> selected peer AgentRuntime implementation and injected host services
 ```
 
 Python remains the sole orchestration, composition, assembly, and execution
@@ -114,6 +114,19 @@ Prime-style semantics that the current wrapper delegates to Prime Agent while
 consuming only public Asterion framework, capability-package, assembly, runner,
 runtime, control, and host-service contracts. P1 through P7 configure and
 exercise this agent; they must not each recreate it.
+
+An agent implementation can participate through both orthogonal Asterion
+contracts:
+
+- `AgentRuntimeClient` executes one already composed application request; and
+- `ControlPlaneClient` manages a long-running agent system that may propose
+  execution of applications from its immutable portfolio.
+
+The first P7 delivery exercises Asterion-prime through its `AgentRuntimeClient`
+surface. Later long-running and recursive applications also exercise its
+`ControlPlaneClient` surface. Both surfaces belong to the same peer
+Asterion-prime product and share its private session semantics; neither may
+delegate those semantics to Prime Agent.
 
 The Asterion-prime agent owns:
 
@@ -175,7 +188,9 @@ supports one real ARC application, and solves one real level. It includes:
 6. a private trace recorder joining Pi events, Asterion-prime agent events,
    IPython activity, and ARC transitions under one run identity;
 7. a passive diagnostic analyzer and neutral baseline comparator;
-8. an installed `prime.arc-agi-3-solving@1.0.0` route selecting `pi.reference`;
+8. an installed `prime.arc-agi-3-solving@1.0.0` route selecting
+   `asterion.prime`, whose internal model/tool loop uses the common Pi
+   integration;
    and
 9. deletion of the Prime SDK P7 execution path and correction of false status
    claims.
@@ -189,11 +204,12 @@ is pending.
 
 ## Component design
 
-### Pi runtime integration
+### Pi foundation integration
 
 The existing framework Pi integration remains the shared bottom-level model
-and tool-loop foundation used by the first Asterion-prime slice. It is not the
-Asterion-prime product and is equally available to peer agent implementations.
+and tool-loop foundation used internally by the first Asterion-prime slice. It
+is not the application-selected `asterion.prime` runtime identity and is
+equally available to peer agent implementations.
 The generic Pi layer gains an exact mechanism for host-resolved application
 extensions and tool capabilities. Manifests contain compatibility identities
 only; extension paths, commands, credentials, provider configuration, and
@@ -402,9 +418,10 @@ replay mismatch, cleanup, immutability, and sentinel-secret redaction.
 ### 3. Provider-free installed-route gate
 
 Build and install the Asterion wheel outside the source tree. Select
-`prime.arc-agi-3-solving@1.0.0`, compose it with `pi.reference`, inject exact
+`prime.arc-agi-3-solving@1.0.0`, compose it with `asterion.prime`, inject exact
 fake host services, execute through the public runner, and verify the complete
-runtime stream, private trace, public receipt, and zero Prime source access.
+runtime stream, private trace, public receipt, internal Pi binding, and zero
+Prime source access.
 
 ### 4. DeepSeek live-solving gate
 
@@ -461,8 +478,9 @@ The first delivery is complete only when all of the following are true:
 
 - Asterion implementation and release artifacts have no Prime Agent source or
   SDK execution dependency;
-- the installed P7 route selects Asterion's Pi runtime and only injected
-  Asterion host services;
+- the installed P7 route selects the Asterion-prime AgentRuntime, uses the
+  common Pi foundation internally, and receives only injected Asterion host
+  services;
 - provider-free and source-detached gates pass;
 - DeepSeek V4 Flash autonomously completes the first LS20 level within the
   fixed preset;
