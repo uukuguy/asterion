@@ -6,6 +6,7 @@ from importlib import resources
 import json
 from pathlib import Path
 import subprocess
+import tarfile
 from tempfile import TemporaryDirectory
 import unittest
 from types import SimpleNamespace
@@ -43,6 +44,29 @@ class TestPrimeP7SolvingPreparation(unittest.TestCase):
         self.assertFalse(any(term in raw.lower() for term in (
             "credential", "command", "executable", "environment", "prompt\"",
         )))
+
+    def test_sdist_contains_every_generated_gateway_output_needed_by_wheel(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temporary:
+            dist = Path(temporary) / "dist"
+            subprocess.run(
+                ("uv", "build", "--sdist", "--out-dir", str(dist), "."),
+                cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            with tarfile.open(next(dist.glob("*.tar.gz"))) as source_distribution:
+                names = {
+                    "/".join(Path(name).parts[1:])
+                    for name in source_distribution.getnames()
+                }
+            expected = {
+                "packages/typescript/prime-gateway/dist/src/" + name
+                for name in (
+                    "p7-solving-session.js", "p7-solving-session.d.ts",
+                    "p7-solving-bridge.js", "p7-solving-bridge.d.ts",
+                    "p7-solving-main.js", "p7-solving-main.d.ts",
+                )
+            }
+            self.assertTrue(expected <= names)
 
     def test_wheel_contains_outputs_and_clean_install_discovers_provider(self) -> None:
         root = Path(__file__).resolve().parents[1]

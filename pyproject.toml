@@ -105,3 +105,13 @@ artifacts = [
 "schemas/operation/v1/operation-request-descriptor.schema.json" = "asterion/schemas/operation/v1/operation-request-descriptor.schema.json"
 "schemas/operation/v1/operation-transaction.schema.json" = "asterion/schemas/operation/v1/operation-transaction.schema.json"
 "schemas/operation/v1/operation-receipt.schema.json" = "asterion/schemas/operation/v1/operation-receipt.schema.json"
+
+[tool.hatch.build.targets.sdist]
+artifacts = [
+    "packages/typescript/prime-gateway/dist/src/p7-solving-session.js",
+    "packages/typescript/prime-gateway/dist/src/p7-solving-session.d.ts",
+    "packages/typescript/prime-gateway/dist/src/p7-solving-bridge.js",
+    "packages/typescript/prime-gateway/dist/src/p7-solving-bridge.d.ts",
+    "packages/typescript/prime-gateway/dist/src/p7-solving-main.js",
+    "packages/typescript/prime-gateway/dist/src/p7-solving-main.d.ts",
+]
