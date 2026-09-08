@@ -93,12 +93,15 @@ Expected: FAIL because the detachment gate and corrected architecture wording do
 - [ ] **Step 3: Add the closed static gate**
 
 ```python
-FORBIDDEN = (
-    "primeSourceRoot",
-    "ASTERION_PRIME_SOURCE_ROOT",
-    "createAgentSession",
-    "loadPrimeSdk",
-    "3th-party/prime-agent",
+FORBIDDEN = tuple(
+    "".join(parts)
+    for parts in (
+        ("prime", "SourceRoot"),
+        ("ASTERION_", "PRIME_SOURCE_ROOT"),
+        ("createAgent", "Session"),
+        ("loadPrime", "Sdk"),
+        ("3th-party/", "prime-agent"),
+    )
 )
 
 def assert_asterion_prime_source_detached(root: Path) -> None:
