@@ -47,6 +47,22 @@ def _client(root: Path) -> PiRpcClient:
 
 
 class DciPiRpcProxyTests(unittest.TestCase):
+    def test_failed_common_cleanup_keeps_transport_for_a_bounded_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client = _client(Path(directory).resolve())
+            transport = MagicMock()
+            transport.stop.side_effect = RuntimeError("cleanup timed out")
+            process = MagicMock()
+            transport.process = process
+            client._session = transport
+            client.proc = process
+
+            with self.assertRaisesRegex(RuntimeError, "cleanup timed out"):
+                client.stop()
+
+        self.assertIs(client._session, transport)
+        self.assertIs(client.proc, process)
+
     def test_start_binds_exact_command_and_child_environment_to_common_session(
         self,
     ) -> None:

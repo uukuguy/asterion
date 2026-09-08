@@ -5,11 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import os
 import queue
+import signal as process_signal
 import subprocess
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from enum import Enum
+from io import UnsupportedOperation
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Protocol
@@ -32,14 +37,129 @@ class CancellationSignal(Protocol):
     def cancelled(self) -> bool: ...
 
 
-def _freeze(value: object) -> object:
+def _freeze(value: object, active: set[int] | None = None) -> object:
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("Pi RPC event payload is invalid")
+        return value
+    if active is None:
+        active = set()
     if isinstance(value, Mapping):
-        return MappingProxyType(
-            {str(key): _freeze(item) for key, item in value.items()}
-        )
+        if any(type(key) is not str for key in value):
+            raise ValueError("Pi RPC event payload is invalid")
+        identity = id(value)
+        if identity in active:
+            raise ValueError("Pi RPC event payload is invalid")
+        active.add(identity)
+        try:
+            return MappingProxyType(
+                {key: _freeze(item, active) for key, item in value.items()}
+            )
+        finally:
+            active.remove(identity)
     if isinstance(value, (list, tuple)):
-        return tuple(_freeze(item) for item in value)
-    return value
+        identity = id(value)
+        if identity in active:
+            raise ValueError("Pi RPC event payload is invalid")
+        active.add(identity)
+        try:
+            return tuple(_freeze(item, active) for item in value)
+        finally:
+            active.remove(identity)
+    raise ValueError("Pi RPC event payload is invalid")
+
+
+class PiRpcDirective(Enum):
+    CONTINUE = "continue"
+    ABORT = "abort"
+    COMPLETE = "complete"
+
+
+class PiRpcPromptControl:
+    """Common deadline, cancellation, abort, and bounded-wait controller."""
+
+    def __init__(
+        self,
+        session: PiRpcSession,
+        *,
+        timeout_seconds: float | None,
+        signal: CancellationSignal | threading.Event | None,
+    ) -> None:
+        self._session = session
+        self._timeout_seconds = timeout_seconds
+        self._signal = signal
+        self._deadline = (
+            time.monotonic() + timeout_seconds
+            if timeout_seconds is not None and timeout_seconds > 0
+            else None
+        )
+        self._abort_sent = False
+
+    def remaining_seconds(self) -> float | None:
+        return (
+            None
+            if self._deadline is None
+            else max(0.0, self._deadline - time.monotonic())
+        )
+
+    def checkpoint(self) -> None:
+        if self._session._is_cancelled(self._signal):
+            self.abort()
+            raise RuntimeError("RPC prompt was cancelled")
+        if self.remaining_seconds() == 0:
+            self.abort()
+            raise RuntimeError(
+                f"RPC prompt timed out after {self._timeout_seconds:g} seconds"
+            )
+
+    def check_before_prompt(self) -> None:
+        if self._session._is_cancelled(self._signal):
+            raise RuntimeError("RPC prompt was cancelled")
+        if self.remaining_seconds() == 0:
+            raise RuntimeError(
+                f"RPC prompt timed out after {self._timeout_seconds:g} seconds"
+            )
+
+    def poll_seconds(self) -> float | None:
+        remaining = self.remaining_seconds()
+        if self._signal is None:
+            return remaining
+        return _POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining)
+
+    def abort(self) -> None:
+        if not self._abort_sent:
+            self._session.abort()
+            self._abort_sent = True
+
+    def sleep(self, seconds: float) -> None:
+        end = time.monotonic() + max(0.0, seconds)
+        while True:
+            self.checkpoint()
+            delay = end - time.monotonic()
+            if delay <= 0:
+                return
+            remaining = self.remaining_seconds()
+            time.sleep(
+                min(
+                    _POLL_SECONDS,
+                    delay,
+                    delay if remaining is None else remaining,
+                )
+            )
+
+
+@dataclass(slots=True)
+class _ProcessState:
+    process: subprocess.Popen[bytes]
+    stdout_queue: queue.Queue[object]
+    stderr: bytearray
+    output_error: RuntimeError | None = None
+    stdout_thread: threading.Thread | None = None
+    stderr_thread: threading.Thread | None = None
+    stdout_started: bool = False
+    stderr_started: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,31 +259,29 @@ class PiRpcSession:
         self.config = config
         self._popen = _popen
         self._thread_factory = _thread_factory
-        self.process: subprocess.Popen[bytes] | None = None
-        self._stdout_queue: queue.Queue[object] = queue.Queue()
-        self._stdout_thread: threading.Thread | None = None
-        self._stderr_thread: threading.Thread | None = None
-        self._stderr = bytearray()
-        self._output_error: RuntimeError | None = None
+        self._state: _ProcessState | None = None
+        self._last_stderr = b""
         self._request_id = 0
         self._run_active = False
 
     @property
+    def process(self) -> subprocess.Popen[bytes] | None:
+        return None if self._state is None else self._state.process
+
+    @property
     def stderr(self) -> bytes:
-        return bytes(self._stderr)
+        return self._last_stderr if self._state is None else bytes(self._state.stderr)
 
     def next_id(self) -> str:
         self._request_id += 1
         return f"py-{self._request_id}"
 
     def start(self) -> None:
-        if self.process is not None:
+        if self._state is not None:
             raise RuntimeError("RPC session already started")
-        self._stdout_queue = queue.Queue()
-        self._stderr = bytearray()
-        self._output_error = None
+        self._last_stderr = b""
         try:
-            self.process = self._popen(
+            process = self._popen(
                 list(self.config.command),
                 cwd=self.config.cwd,
                 env=dict(self.config.environment),
@@ -171,64 +289,76 @@ class PiRpcSession:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 pass_fds=self.config.inherited_fds,
+                start_new_session=os.name != "nt",
             )
-            self._stdout_thread = self._thread_factory(
-                target=self._drain_stdout, daemon=True
+            state = _ProcessState(process, queue.Queue(), bytearray())
+            self._state = state
+            state.stdout_thread = self._thread_factory(
+                target=self._drain_stdout, args=(state,), daemon=True
             )
-            self._stdout_thread.start()
-            self._stderr_thread = self._thread_factory(
-                target=self._drain_stderr, daemon=True
+            state.stdout_thread.start()
+            state.stdout_started = True
+            state.stderr_thread = self._thread_factory(
+                target=self._drain_stderr, args=(state,), daemon=True
             )
-            self._stderr_thread.start()
+            state.stderr_thread.start()
+            state.stderr_started = True
         except BaseException:
             self.stop()
             raise
 
-    def _fail_output(self, message: str) -> None:
+    @staticmethod
+    def _fail_output(state: _ProcessState, message: str) -> None:
         error = RuntimeError(message)
-        self._output_error = error
-        self._stdout_queue.put(error)
+        state.output_error = error
+        state.stdout_queue.put(error)
 
-    def _drain_stdout(self) -> None:
-        process = self.process
-        assert process is not None and process.stdout is not None
+    def _drain_stdout(self, state: _ProcessState) -> None:
+        process = state.process
+        assert process.stdout is not None
         total_bytes = 0
         event_count = 0
         try:
             for raw in process.stdout:
                 total_bytes += len(raw)
                 if len(raw) > _MAX_STDOUT_LINE_BYTES or total_bytes > _MAX_STDOUT_BYTES:
-                    self._fail_output("Pi RPC output limit exceeded")
+                    self._fail_output(state, "Pi RPC output limit exceeded")
                     return
                 try:
                     payload = json.loads(raw.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError):
-                    self._fail_output("Pi RPC emitted invalid JSONL")
+                    self._fail_output(state, "Pi RPC emitted invalid JSONL")
                     return
                 if not isinstance(payload, dict):
-                    self._fail_output("Pi RPC emitted a non-object JSON value")
+                    self._fail_output(state, "Pi RPC emitted a non-object JSON value")
                     return
                 event_count += 1
                 if event_count > _MAX_EVENT_COUNT:
-                    self._fail_output("Pi RPC output limit exceeded")
+                    self._fail_output(state, "Pi RPC output limit exceeded")
                     return
-                self._stdout_queue.put(payload)
+                state.stdout_queue.put(payload)
+        except (OSError, ValueError):
+            pass
         finally:
-            self._stdout_queue.put(_STDOUT_EOF)
+            state.stdout_queue.put(_STDOUT_EOF)
 
-    def _drain_stderr(self) -> None:
-        process = self.process
-        assert process is not None and process.stderr is not None
-        for raw in process.stderr:
-            remaining = _MAX_STDERR_BYTES - len(self._stderr)
-            if remaining > 0:
-                self._stderr.extend(raw[:remaining])
-            if len(raw) > remaining:
-                self._fail_output("Pi RPC output limit exceeded")
-                return
+    def _drain_stderr(self, state: _ProcessState) -> None:
+        process = state.process
+        assert process.stderr is not None
+        try:
+            for raw in process.stderr:
+                remaining = _MAX_STDERR_BYTES - len(state.stderr)
+                if remaining > 0:
+                    state.stderr.extend(raw[:remaining])
+                if len(raw) > remaining:
+                    self._fail_output(state, "Pi RPC output limit exceeded")
+                    return
+        except (OSError, ValueError):
+            pass
 
     def send(self, payload: Mapping[str, object]) -> None:
-        process = self.process
+        state = self._state
+        process = None if state is None else state.process
         if process is None or process.stdin is None:
             raise RuntimeError("RPC session is not running")
         encoded = (json.dumps(dict(payload), separators=(",", ":")) + "\n").encode()
@@ -236,13 +366,16 @@ class PiRpcSession:
         process.stdin.flush()
 
     def read_json_line(self, *, timeout_seconds: float | None = None) -> dict[str, Any]:
+        state = self._state
+        if state is None:
+            raise RuntimeError("RPC session is not running")
         try:
-            item = self._stdout_queue.get(timeout=timeout_seconds)
+            item = state.stdout_queue.get(timeout=timeout_seconds)
         except queue.Empty as error:
             raise TimeoutError("Timed out waiting for an RPC event") from error
         if item is _STDOUT_EOF:
-            if self._output_error is not None:
-                raise self._output_error
+            if state.output_error is not None:
+                raise state.output_error
             raise RuntimeError("Pi RPC process exited unexpectedly")
         if isinstance(item, BaseException):
             raise item
@@ -250,10 +383,77 @@ class PiRpcSession:
             raise RuntimeError("Pi RPC queue returned an invalid event")
         return item
 
+    def drive_prompt(
+        self,
+        message: str,
+        *,
+        timeout_seconds: float | None,
+        signal: CancellationSignal | threading.Event | None,
+        on_event: Callable[[dict[str, Any], PiRpcPromptControl], PiRpcDirective],
+    ) -> float | None:
+        """Drive one prompt exchange while the caller interprets Pi events."""
+
+        if type(message) is not str:
+            raise ValueError("Pi RPC prompt is invalid")
+        control = PiRpcPromptControl(
+            self,
+            timeout_seconds=timeout_seconds,
+            signal=signal,
+        )
+        control.check_before_prompt()
+        request_id = self.next_id()
+        self.send({"id": request_id, "type": "prompt", "message": message})
+        acknowledged = False
+        while True:
+            control.checkpoint()
+            try:
+                event = self.read_json_line(timeout_seconds=control.poll_seconds())
+            except TimeoutError:
+                control.checkpoint()
+                continue
+            directive = on_event(event, control)
+            if type(directive) is not PiRpcDirective:
+                raise RuntimeError("Pi RPC prompt directive is invalid")
+            if event.get("type") == "response":
+                if event.get("id") != request_id:
+                    raise RuntimeError("Pi RPC response did not match the prompt")
+                if acknowledged or event.get("success") is not True:
+                    raise RuntimeError("RPC prompt failed")
+                acknowledged = True
+            if directive is PiRpcDirective.ABORT:
+                control.abort()
+                continue
+            if directive is PiRpcDirective.COMPLETE:
+                if not acknowledged:
+                    event_type = event.get("type", "terminal event")
+                    raise RuntimeError(
+                        f"Received {event_type} before prompt acknowledgement"
+                    )
+                return control.remaining_seconds()
+
+    def abort(self) -> None:
+        """Send one literal abort request when the process is still writable."""
+
+        try:
+            self.send({"id": self.next_id(), "type": "abort"})
+        except (BrokenPipeError, OSError, RuntimeError):
+            pass
+
+    @staticmethod
+    def _is_cancelled(
+        signal: CancellationSignal | threading.Event | None,
+    ) -> bool:
+        if signal is None:
+            return False
+        if isinstance(signal, threading.Event):
+            return signal.is_set()
+        return signal.cancelled
+
     def stop(self) -> None:
-        process = self.process
-        if process is None:
+        state = self._state
+        if state is None:
             return
+        process = state.process
         failure: BaseException | None = None
         try:
             if process.stdin is not None:
@@ -265,30 +465,73 @@ class PiRpcSession:
                 try:
                     process.wait(timeout=_GRACEFUL_EXIT_SECONDS)
                 except subprocess.TimeoutExpired:
-                    process.terminate()
+                    self._signal_process(process, process_signal.SIGTERM)
                     try:
                         process.wait(timeout=_PROCESS_EXIT_SECONDS)
                     except subprocess.TimeoutExpired:
-                        process.kill()
+                        self._signal_process(process, process_signal.SIGKILL)
                         try:
                             process.wait(timeout=_PROCESS_EXIT_SECONDS)
                         except subprocess.TimeoutExpired as error:
                             failure = error
         finally:
-            for thread in (self._stdout_thread, self._stderr_thread):
-                if thread is not None:
+            threads = tuple(
+                thread
+                for thread, started in (
+                    (state.stdout_thread, state.stdout_started),
+                    (state.stderr_thread, state.stderr_started),
+                )
+                if thread is not None and started
+            )
+            for thread in threads:
+                thread.join(timeout=_PIPE_DRAIN_SECONDS)
+            alive = tuple(thread for thread in threads if thread.is_alive())
+            if alive:
+                self._signal_process(process, process_signal.SIGKILL)
+                self._close_pipe_descriptors(process)
+                for thread in alive:
                     thread.join(timeout=_PIPE_DRAIN_SECONDS)
-            for stream in (process.stdout, process.stderr):
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except OSError:
-                        pass
-            self._stdout_thread = None
-            self._stderr_thread = None
-            self.process = None
+                alive = tuple(thread for thread in alive if thread.is_alive())
+            if not alive:
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except (OSError, ValueError):
+                            pass
+                self._last_stderr = bytes(state.stderr)
+                if failure is None:
+                    self._state = None
+            elif failure is None:
+                failure = RuntimeError("Pi RPC pipe cleanup timed out")
         if failure is not None:
             raise RuntimeError("Pi RPC process cleanup timed out") from failure
+
+    @staticmethod
+    def _signal_process(process: subprocess.Popen[bytes], signal_number: int) -> None:
+        try:
+            if os.name != "nt":
+                os.killpg(process.pid, signal_number)
+            elif signal_number == process_signal.SIGTERM:
+                process.terminate()
+            else:
+                process.kill()
+        except (AttributeError, OSError):
+            pass
+
+    @staticmethod
+    def _close_pipe_descriptors(process: subprocess.Popen[bytes]) -> None:
+        for stream in (process.stdout, process.stderr):
+            if stream is None:
+                continue
+            try:
+                descriptor = stream.fileno()
+            except (OSError, UnsupportedOperation, ValueError):
+                continue
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
     async def run(
         self,
@@ -304,76 +547,59 @@ class PiRpcSession:
         if self._run_active or self.process is not None:
             raise RuntimeError("Pi RPC session already has an active run")
         self._run_active = True
-        deadline = asyncio.get_running_loop().time() + self.config.deadline_seconds
         events: list[PiRpcEvent] = []
         text_parts: list[str] = []
         text_bytes = 0
-        request_id = self.next_id()
-        acknowledged = False
+
+        def handle_event(
+            raw: dict[str, Any], _control: PiRpcPromptControl
+        ) -> PiRpcDirective:
+            nonlocal text_bytes
+            event_type = raw.get("type")
+            if type(event_type) is not str or not event_type:
+                raise RuntimeError("Pi RPC event type is invalid")
+            event = PiRpcEvent(
+                sequence=len(events) + 1,
+                type=event_type,
+                payload={key: value for key, value in raw.items() if key != "type"},
+            )
+            events.append(event)
+            on_event(event)
+            if event_type == "message_update":
+                assistant_event = raw.get("assistantMessageEvent")
+                if (
+                    isinstance(assistant_event, Mapping)
+                    and assistant_event.get("type") == "text_delta"
+                    and isinstance(assistant_event.get("delta"), str)
+                ):
+                    delta = assistant_event["delta"]
+                    encoded_bytes = len(delta.encode("utf-8"))
+                    text_bytes += encoded_bytes
+                    if text_bytes > _MAX_FINAL_TEXT_BYTES:
+                        raise RuntimeError("Pi RPC output limit exceeded")
+                    text_parts.append(delta)
+            elif event_type == "agent_end":
+                raise RuntimeError("Pi RPC agent ended before agent_settled")
+            elif event_type == "agent_settled":
+                return PiRpcDirective.COMPLETE
+            return PiRpcDirective.CONTINUE
+
         try:
             self.start()
-            self.send({"id": request_id, "type": "prompt", "message": prompt})
-            while True:
-                if signal.cancelled:
-                    self._send_abort()
-                    raise RuntimeError("Pi RPC prompt was cancelled")
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    self._send_abort()
-                    raise RuntimeError(
-                        f"Pi RPC prompt timed out after {self.config.deadline_seconds:g} seconds"
-                    )
-                try:
-                    raw = await asyncio.to_thread(
-                        self.read_json_line,
-                        timeout_seconds=min(_POLL_SECONDS, remaining),
-                    )
-                except TimeoutError:
-                    continue
-                event_type = raw.get("type")
-                if type(event_type) is not str or not event_type:
-                    raise RuntimeError("Pi RPC event type is invalid")
-                event = PiRpcEvent(
-                    sequence=len(events) + 1,
-                    type=event_type,
-                    payload={key: value for key, value in raw.items() if key != "type"},
-                )
-                events.append(event)
-                on_event(event)
-                if event_type == "response":
-                    if raw.get("id") != request_id:
-                        raise RuntimeError("Pi RPC response did not match the prompt")
-                    if acknowledged or raw.get("success") is not True:
-                        raise RuntimeError("Pi RPC prompt failed")
-                    acknowledged = True
-                    continue
-                if event_type == "message_update":
-                    assistant_event = raw.get("assistantMessageEvent")
-                    if (
-                        isinstance(assistant_event, Mapping)
-                        and assistant_event.get("type") == "text_delta"
-                        and isinstance(assistant_event.get("delta"), str)
-                    ):
-                        delta = assistant_event["delta"]
-                        encoded_bytes = len(delta.encode("utf-8"))
-                        text_bytes += encoded_bytes
-                        if text_bytes > _MAX_FINAL_TEXT_BYTES:
-                            raise RuntimeError("Pi RPC output limit exceeded")
-                        text_parts.append(delta)
-                    continue
-                if event_type == "agent_end":
-                    raise RuntimeError("Pi RPC agent ended before agent_settled")
-                if event_type == "agent_settled":
-                    if not acknowledged:
-                        raise RuntimeError(
-                            "Received agent_settled before prompt acknowledgement"
-                        )
-                    self.stop()
-                    if self._output_error is not None:
-                        raise self._output_error
-                    return PiRpcResult("".join(text_parts), tuple(events), self.stderr)
+            await asyncio.to_thread(
+                self.drive_prompt,
+                prompt,
+                timeout_seconds=self.config.deadline_seconds,
+                signal=signal,
+                on_event=handle_event,
+            )
+            state = self._state
+            self.stop()
+            if state is not None and state.output_error is not None:
+                raise state.output_error
+            return PiRpcResult("".join(text_parts), tuple(events), self.stderr)
         except asyncio.CancelledError:
-            self._send_abort()
+            self.abort()
             raise
         finally:
             try:
@@ -381,11 +607,12 @@ class PiRpcSession:
             finally:
                 self._run_active = False
 
-    def _send_abort(self) -> None:
-        try:
-            self.send({"id": self.next_id(), "type": "abort"})
-        except (BrokenPipeError, OSError, RuntimeError):
-            pass
 
-
-__all__ = ("PiRpcConfig", "PiRpcEvent", "PiRpcResult", "PiRpcSession")
+__all__ = (
+    "PiRpcConfig",
+    "PiRpcDirective",
+    "PiRpcEvent",
+    "PiRpcPromptControl",
+    "PiRpcResult",
+    "PiRpcSession",
+)

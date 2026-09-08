@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import sys
 import tempfile
 import time
@@ -8,7 +9,12 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
-from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcResult, PiRpcSession
+from asterion.runtimes.pi_rpc import (
+    PiRpcConfig,
+    PiRpcEvent,
+    PiRpcResult,
+    PiRpcSession,
+)
 
 
 _FAKE_PI = r"""
@@ -55,6 +61,16 @@ elif mode == "stderr-oversized":
     sys.stderr.flush()
     emit({"type": "response", "id": request["id"], "success": True})
     emit({"type": "agent_settled"})
+elif mode == "stdout-total-oversized":
+    emit({"type": "response", "id": request["id"], "success": True})
+    for _ in range(130):
+        emit({"type": "progress", "padding": "x" * (32 * 1024)})
+    emit({"type": "agent_settled"})
+elif mode == "event-count-oversized":
+    emit({"type": "response", "id": request["id"], "success": True})
+    for index in range(2048):
+        emit({"type": "progress", "index": index})
+    emit({"type": "agent_settled"})
 elif mode == "deadline":
     emit({"type": "response", "id": request["id"], "success": True})
     time.sleep(60)
@@ -90,6 +106,30 @@ else:
 @dataclass
 class FakeSignal:
     cancelled: bool
+
+
+class _StuckThread:
+    def __init__(self, **_kwargs: object) -> None:
+        pass
+
+    def start(self) -> None:
+        pass
+
+    def join(self, timeout: float | None = None) -> None:
+        del timeout
+
+    def is_alive(self) -> bool:
+        return True
+
+
+class _ExitedProcess:
+    def __init__(self) -> None:
+        self.stdin = io.BytesIO()
+        self.stdout = io.BytesIO()
+        self.stderr = io.BytesIO()
+
+    def poll(self) -> int:
+        return 0
 
 
 class PiRpcSessionTests(unittest.TestCase):
@@ -171,6 +211,14 @@ class PiRpcSessionTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             state["idle"] = False  # type: ignore[index]
 
+    def test_events_reject_non_json_mutable_leaves(self) -> None:
+        for value in (bytearray(b"mutable"), {"mutable"}, object()):
+            with (
+                self.subTest(value_type=type(value).__name__),
+                self.assertRaisesRegex(ValueError, "payload"),
+            ):
+                PiRpcEvent(1, "event", {"value": value})
+
     def test_malformed_json_fails_closed(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "invalid JSONL"):
             self.collect("malformed")
@@ -202,6 +250,14 @@ class PiRpcSessionTests(unittest.TestCase):
     def test_stderr_cap_fails_closed_even_when_stdout_settles(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "output limit"):
             self.collect("stderr-oversized")
+
+    def test_aggregate_stdout_byte_cap_fails_closed(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "output limit"):
+            self.collect("stdout-total-oversized")
+
+    def test_event_count_cap_fails_closed(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "output limit"):
+            self.collect("event-count-oversized")
 
     def test_command_arguments_are_passed_literally(self) -> None:
         marker = self.work / "shell-was-used"
@@ -257,6 +313,25 @@ class PiRpcSessionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "timed out"):
             self.collect("ignore-term", deadline_seconds=0.05)
         self.assertLess(time.monotonic() - started, 2.0)
+
+    def test_unresolved_reader_cleanup_is_reported_and_blocks_state_reuse(
+        self,
+    ) -> None:
+        process = _ExitedProcess()
+        session = PiRpcSession(
+            PiRpcConfig(("fake",), self.work, {}, deadline_seconds=1.0),
+            _popen=lambda *_args, **_kwargs: process,  # type: ignore[arg-type]
+            _thread_factory=_StuckThread,  # type: ignore[arg-type]
+        )
+        session.start()
+
+        started = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, "cleanup.*timed out"):
+            session.stop()
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertIs(session.process, process)
+        with self.assertRaisesRegex(RuntimeError, "already started"):
+            session.start()
 
 
 if __name__ == "__main__":

@@ -16,7 +16,12 @@ from typing import Any, NoReturn, TextIO
 
 from asterion.capabilities.dci.implementation.config import PI_MIN_NODE_VERSION, PI_MIN_NODE_VERSION_TEXT
 from asterion.capabilities.dci.implementation.config import parse_node_version
-from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
+from asterion.runtimes.pi_rpc import (
+    PiRpcConfig,
+    PiRpcDirective,
+    PiRpcPromptControl,
+    PiRpcSession,
+)
 
 
 FINAL_ANSWER_RECOVERY_PROMPT = (
@@ -776,14 +781,14 @@ class PiRpcClient:
         session = self._session
         if session is None:
             return
-        try:
-            session.stop()
-        finally:
-            self._last_stderr = session.stderr
-            self._session = None
-            self.proc = None
+        session.stop()
+        self._last_stderr = session.stderr
+        self._session = None
+        self.proc = None
 
     def _next_id(self) -> str:
+        if self._session is not None:
+            return self._session.next_id()
         self._request_id += 1
         return f"py-{self._request_id}"
 
@@ -926,74 +931,40 @@ class PiRpcClient:
         cancel_event: threading.Event | None = None,
         final_answer_recovery: str | None = None,
     ) -> str:
-        if cancel_event is not None and cancel_event.is_set():
-            raise RuntimeError("RPC prompt was cancelled")
-        request_id = self._next_id()
-        self._send({"id": request_id, "type": "prompt", "message": message})
+        session = self._session
+        if session is None:
+            raise RuntimeError("RPC client is not running")
         text_parts: list[str] = []
-        prompt_ack = False
         turns = 0
         sent_abort = False
-        settled = False
         terminal_assistant_error = False
-        deadline = (
-            time.monotonic() + timeout_seconds
-            if timeout_seconds and timeout_seconds > 0
-            else None
-        )
 
-        def abort() -> None:
-            try:
-                self._send({"id": self._next_id(), "type": "abort"})
-            except (BrokenPipeError, RuntimeError):
-                pass
-
-        while True:
-            if cancel_event is not None and cancel_event.is_set():
-                abort()
-                raise RuntimeError("RPC prompt was cancelled")
-            try:
-                remaining = (
-                    None if deadline is None else max(0.0, deadline - time.monotonic())
-                )
-                poll_timeout = (
-                    remaining
-                    if cancel_event is None
-                    else 0.1 if remaining is None else min(0.1, remaining)
-                )
-                event = self._read_json_line(timeout_seconds=poll_timeout)
-            except TimeoutError as error:
-                if cancel_event is not None and not cancel_event.is_set() and (
-                    deadline is None or time.monotonic() < deadline
-                ):
-                    continue
-                abort()
-                raise RuntimeError(
-                    f"RPC prompt timed out after {timeout_seconds:g} seconds"
-                ) from error
+        def handle_event(
+            event: dict[str, Any], control: PiRpcPromptControl
+        ) -> PiRpcDirective:
+            nonlocal text_parts
+            nonlocal turns
+            nonlocal sent_abort
+            nonlocal terminal_assistant_error
             if on_event is not None:
                 on_event(event)
             event_type = event.get("type")
             if event_type == "response":
-                if event.get("id") == request_id:
-                    if event.get("success") is not True:
-                        raise RuntimeError("RPC prompt failed")
-                    prompt_ack = True
-                continue
+                return PiRpcDirective.CONTINUE
             if event_type == "agent_start":
                 text_parts = []
                 terminal_assistant_error = False
-                continue
+                return PiRpcDirective.CONTINUE
             if event_type == "turn_start":
                 turns += 1
                 if max_turns is not None and turns > max_turns and not sent_abort:
-                    self._send({"id": self._next_id(), "type": "abort"})
                     sent_abort = True
                     print(
                         f"[runner] Reached max_turns={max_turns}; sent RPC abort.",
                         file=sys.stderr,
                     )
-                continue
+                    return PiRpcDirective.ABORT
+                return PiRpcDirective.CONTINUE
             if event_type == "message_update":
                 assistant_event = event.get("assistantMessageEvent", {})
                 if (
@@ -1005,7 +976,7 @@ class PiRpcClient:
                         text_parts.append(delta)
                         if self.stream_text:
                             print(delta, end="", file=sys.stdout, flush=True)
-                continue
+                return PiRpcDirective.CONTINUE
             if event_type == "message_end":
                 message_value = event.get("message")
                 if (
@@ -1014,80 +985,60 @@ class PiRpcClient:
                     and message_value.get("stopReason") == "error"
                 ):
                     terminal_assistant_error = True
-                continue
+                return PiRpcDirective.CONTINUE
             if event_type == "tool_execution_start" and self.show_tools:
                 print(
                     f"[tool:start] {event.get('toolName', 'unknown')}", file=sys.stderr
                 )
-                continue
+                return PiRpcDirective.CONTINUE
             if event_type == "tool_execution_end" and self.show_tools:
                 error_state = "yes" if event.get("isError") else "no"
                 print(
                     f"[tool:end] {event.get('toolName', 'unknown')} error={error_state}",
                     file=sys.stderr,
                 )
-                continue
+                return PiRpcDirective.CONTINUE
             if event_type == "agent_end":
-                if not prompt_ack:
-                    raise RuntimeError(
-                        "Received agent_end before prompt acknowledgement"
-                    )
                 if "willRetry" not in event:
-                    break
-                continue
+                    return PiRpcDirective.COMPLETE
+                return PiRpcDirective.CONTINUE
             if event_type == "agent_settled":
-                if not prompt_ack:
+                while True:
+                    control.checkpoint()
+                    remaining = control.remaining_seconds()
+                    try:
+                        state = self.probe_protocol(
+                            timeout_seconds=(
+                                10.0
+                                if remaining is None
+                                else min(10.0, remaining)
+                            ),
+                            on_event=on_event,
+                            cancel_event=cancel_event,
+                        )
+                    except RuntimeError:
+                        control.checkpoint()
+                        raise
+                    if not state["isCompacting"]:
+                        break
+                    control.sleep(0.05)
+                if state["isStreaming"] or state["pendingMessageCount"] != 0:
                     raise RuntimeError(
-                        "Received agent_settled before prompt acknowledgement"
+                        "Pi RPC agent_settled postcondition failed: session is not idle"
                     )
-                settled = True
-                break
+                return PiRpcDirective.COMPLETE
+            return PiRpcDirective.CONTINUE
+
+        remaining = session.drive_prompt(
+            message,
+            timeout_seconds=timeout_seconds,
+            signal=cancel_event,
+            on_event=handle_event,
+        )
         if terminal_assistant_error:
             raise RuntimeError("Pi provider returned an assistant error")
-        if settled:
-            while True:
-                if cancel_event is not None and cancel_event.is_set():
-                    abort()
-                    raise RuntimeError("RPC prompt was cancelled")
-                remaining = (
-                    None if deadline is None else deadline - time.monotonic()
-                )
-                if remaining is not None and remaining <= 0:
-                    abort()
-                    raise RuntimeError(
-                        f"RPC prompt timed out after {timeout_seconds:g} seconds"
-                    )
-                try:
-                    state = self.probe_protocol(
-                        timeout_seconds=(
-                            10.0 if remaining is None else min(10.0, remaining)
-                        ),
-                        on_event=on_event,
-                        cancel_event=cancel_event,
-                    )
-                except RuntimeError:
-                    if cancel_event is not None and cancel_event.is_set():
-                        abort()
-                        raise RuntimeError("RPC prompt was cancelled") from None
-                    if deadline is not None and time.monotonic() >= deadline:
-                        abort()
-                        raise RuntimeError(
-                            f"RPC prompt timed out after {timeout_seconds:g} seconds"
-                        ) from None
-                    raise
-                if not state["isCompacting"]:
-                    break
-                time.sleep(0.05)
-            if (
-                state["isStreaming"]
-                or state["pendingMessageCount"] != 0
-            ):
-                raise RuntimeError(
-                    "Pi RPC agent_settled postcondition failed: session is not idle"
-                )
         final_text = "".join(text_parts)
         if final_answer_recovery is not None and not final_text.strip():
-            remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
                 raise RuntimeError(
                     f"RPC prompt timed out after {timeout_seconds:g} seconds"
