@@ -1,38 +1,142 @@
-# P2 Task 4 — sealed worker facade
+# Task 4 report: Asterion-prime session and AgentRuntime
 
-Implemented separate P2-only Docker and broker-relay facades.  They admit
-only the code-owned long-context role, exact workload digest, and exact image;
-the Docker command path has no inherited host environment and fixes the P2
-entrypoint and seccomp identity.  P1 role/workload values are rejected.
+## Scope delivered
 
-The worker receipt hashes only opaque canonical completion bytes supplied by
-the sealed launcher path.  Context exit forcefully waits for engine cleanup
-before permitting a cleanup receipt.  The relay is one-at-a-time, revokes on
-close or cancellation, rejects subsequent requests, and exposes no provider
-surface.
+- Added the source-independent `AsterionPrimeSession` over the injected common
+  `PiRpcSession`, exact `prime.ipython` binding, and its already-open pinned
+  single-run lease. Host/operator integration retains ownership of resolution
+  and preflight; the session does not discover paths, read provider settings,
+  compose, authorize, retry, or persist.
+- Enforced the fixed P7 slice limits: 128 model callbacks, 500 tool callbacks,
+  and a 3,600,000 ms deadline. A session accepts one active request, consumes
+  its lease once, and rejects reused run IDs.
+- Added immutable, redacted `PrimeToolCall` / `PrimeToolResult` values and a
+  deterministic ledger that accepts each call/result ID once and refuses a
+  successful seal for unmatched or uncertain effects.
+- Added the exact `asterion.prime` runtime manifest with sorted capabilities
+  `prime.arc-agi-3-solving` and `prime.tool.ipython`.
+- Normalized only closed Pi native event shapes into contiguous
+  `asterion.agent-runtime/v1` events. Model prose, provider payloads, IPython
+  arguments/results, stderr, extension paths, and launch values are not placed
+  in public events or errors. Terminal completion/cancellation contains only
+  status; transport failures use one fixed public-safe code/message.
+- The session owns lease closure after completion, failure, cancellation,
+  protocol rejection, explicit close, and unstarted-object finalization.
 
-Provider-free verification passed:
+## Clarified constructor seam
+
+The task owner confirmed during implementation that construction receives all
+three of the following values: an injected common `PiRpcSession`, an exact
+`PiExtensionBinding`, and the already-open `PiExtensionLease`. Construction
+fails closed unless the binding is exactly `prime.ipython`, its capability is
+exactly `prime.tool.ipython`, the lease belongs to that binding, and the
+transport command, environment, inherited descriptors, and deadline reflect
+the lease launch material exactly. The session does not call `preflight()`.
+
+## Files
+
+- `src/asterion/agents/prime/__init__.py`
+- `src/asterion/agents/prime/session.py`
+- `src/asterion/agents/prime/tools.py`
+- `src/asterion/runtimes/asterion_prime.py`
+- `tests/test_asterion_prime_session.py`
+- `tests/test_asterion_prime_runtime.py`
+- `.superpowers/sdd/task-4-report.md` (this required report)
+
+## TDD evidence
+
+Initial missing-product RED:
 
 ```text
-uv run python -m unittest -v tests.test_prime_programmatic_long_context_worker tests.test_prime_programmatic_long_context_docker_cli tests.test_prime_programmatic_long_context_launcher_protocol
-uv run ruff check src/asterion/applications/prime_agent/operator/programmatic_long_context_worker.py src/asterion/applications/prime_agent/operator/programmatic_long_context_docker_cli.py tests/test_prime_programmatic_long_context_worker.py tests/test_prime_programmatic_long_context_docker_cli.py
-uv run pyright src/asterion/applications/prime_agent/operator/programmatic_long_context_worker.py src/asterion/applications/prime_agent/operator/programmatic_long_context_docker_cli.py tests/test_prime_programmatic_long_context_worker.py tests/test_prime_programmatic_long_context_docker_cli.py
-git diff --check
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session tests.test_asterion_prime_runtime
+
+ERROR: ModuleNotFoundError: No module named 'asterion.agents.prime.session'
+ERROR: ModuleNotFoundError: No module named 'asterion.runtimes.asterion_prime'
+Ran 2 tests; FAILED (errors=2), exit 1.
 ```
 
-No Docker daemon, model provider, network, or benchmark execution occurred.
+Initial focused GREEN:
 
-## Review correction
+```text
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session tests.test_asterion_prime_runtime
+Ran 16 tests in 0.071s; OK.
+```
 
-The facade now parses the fixed P2 completion schema and requires canonical
-re-encoding byte equality before deriving its result digest.  It retains an
-execution-only, one-shot cleanup tombstone; rejects execution after confirmed
-destruction; removes any returned lease rejected after launch; and makes the
-broker relay consumed after its first request.  Engine removal runs in a
-separate task behind a repeated shield loop, so outer cancellation is
-re-raised only after removal has completed and destruction state is recorded.
+Self-review RED/GREEN:
 
-New provider-free regressions cover arbitrary completion bytes, lifecycle
-ordering and one-shot cleanup, mismatched returned lease cleanup, sequential
-relay reuse, and cancellation during cleanup.  The focused command above now
-passes 14 tests.
+- An unstarted abandoned session test first failed with
+  `TypeError: cannot create weak reference to 'AsterionPrimeSession' object`;
+  the weakref finalizer implementation then passed.
+- Malicious tool mappings initially raised raw `RuntimeError` values containing
+  `PRIVATE-MAPPING-*`, and an explicitly closed session could still invoke its
+  transport. After normalization and the closed-lease admission check, both
+  focused tests passed with no retained exception context.
+
+Independent-review RED/GREEN:
+
+- The extra-environment regression initially accepted
+  `PRIVATE_PROVIDER_SECRET`; the lookalike-session regression initially allowed
+  an arbitrary callable object to expose the `asterion.prime` identity. Both
+  failed as expected before their fixes.
+- Construction now requires exact transport/lease environment equality, and
+  the runtime adapter requires an exact validated `AsterionPrimeSession`.
+  Focused rerun: 2 tests, OK.
+- The review's type-narrowing finding was fixed; scoped pyright reports
+  `0 errors, 0 warnings, 0 informations`.
+
+Final protocol and detachment GREEN:
+
+```text
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
+  tests.test_runtime_protocol tests.test_asterion_prime_architecture
+Ran 30 tests in 0.067s; OK.
+```
+
+Final static verification:
+
+```text
+uv run ruff check <six owned implementation/test files>
+All checks passed!
+
+uv run python -m py_compile <six owned implementation/test files>
+exit 0
+
+uv run pyright <Task 4 source/test files>
+0 errors, 0 warnings, 0 informations
+
+git diff --check -- <Task 4 owned files and report>
+exit 0
+```
+
+## Self-review
+
+- Confirmed one contiguous stream and one terminal for every returned stream;
+  malformed native events raise a generic `ProtocolError` before buffered
+  public events are yielded.
+- Confirmed tool code/results and model deltas are validated/accounted for but
+  not projected onto the public stream; only call identity/name, error status,
+  and numeric usage cross the adapter boundary.
+- Confirmed duplicate/unmatched results, duplicate terminals, unknown native
+  event types, callback overflow, request deadline overrides, active overlap,
+  reused IDs, closed leases, and launch-material mismatches fail closed.
+- Confirmed no Prime Agent source, SDK, loader, launcher, or source lock is
+  referenced; the Task 1 static detachment gate passes.
+- Independent review found no remaining critical/high issue after its three
+  findings were resolved.
+
+## Concerns and boundary
+
+- This is only the framework/session protocol slice. It does not register a
+  provider, assembly, application, P7 extension, or live-solving route.
+- Exact child environment equality intentionally prevents provider credentials
+  or arbitrary `.env` values from being smuggled into this runtime slice.
+  Subsequent application integration must use the approved host-injection
+  boundary; widening child environment inheritance requires an explicit
+  contract change and privacy review.
+- A protocol-invalid Pi callback raises `ProtocolError` rather than returning a
+  partial failure stream. This preserves the brief's explicit fail-closed
+  unmatched-result behavior and ensures no partially translated private event
+  is observable.
