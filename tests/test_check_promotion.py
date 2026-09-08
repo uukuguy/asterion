@@ -416,7 +416,9 @@ class PromotionCheckTests(unittest.TestCase):
                 mock.patch(
                     "tools.check_promotion._materialize_operational_dependency_tree"
                 ),
-                mock.patch("tools.check_promotion.verify_operational_locks"),
+                mock.patch(
+                    "tools.check_promotion.verify_operational_locks"
+                ) as verifier,
             ):
                 _prepare_external_operational_prime_checkout(
                     Path("/external/prime-source"),
@@ -424,6 +426,7 @@ class PromotionCheckTests(unittest.TestCase):
                     "a" * 40,
                     resource_root,
                     cache.resolve(),
+                    node_executable=Path("/node22/bin/node"),
                 )
 
         self.assertEqual(len(subprocess_environments), 7)
@@ -441,6 +444,12 @@ class PromotionCheckTests(unittest.TestCase):
                 if subprocess_commands[index][0] == "npm":
                     self.assertEqual(environment["NPM_CONFIG_CACHE"], str(cache.resolve()))
                     self.assertEqual(environment["NPM_CONFIG_OFFLINE"], "true")
+        verifier.assert_called_once_with(
+            target,
+            resource_root,
+            node_executable=Path("/node22/bin/node"),
+            temporary_root=target.parents[1].resolve(),
+        )
 
     def test_installed_operational_harness_uses_closed_environment(self) -> None:
         hostile_environment = {
@@ -568,6 +577,7 @@ class PromotionCheckTests(unittest.TestCase):
 
     def test_quick_copy_excludes_external_generated_and_cache_paths(self) -> None:
         excluded = (
+            ".asterion-private",
             ".git",
             ".worktrees",
             ".venv",
@@ -741,8 +751,12 @@ class PromotionCheckTests(unittest.TestCase):
         ambient_resolver.assert_not_called()
 
         rendered = tuple(" ".join(command) for command in commands)
+        self.assertLess(
+            rendered.index("npm run build --prefix packages/typescript/prime-gateway"),
+            rendered.index("uv sync --frozen --extra dci"),
+        )
         for expected in (
-            "uv sync --frozen",
+            "uv sync --frozen --extra dci",
             "uv run python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification",
             "uv run python -m unittest discover -s tests -v",
             "uv run python -m compileall -q src tests tools",

@@ -437,6 +437,7 @@ def verify_operational_locks(
     resource_root: Path,
     *,
     node_executable: Path | None = None,
+    temporary_root: Path | None = None,
 ) -> OperationalHarnessLocks:
     """Verify the exact unimported real-Prime operation anchor boundary."""
 
@@ -444,10 +445,12 @@ def verify_operational_locks(
         locks = _load_operational_harness_locks(resource_root)
         root = _source_root(source_root)
         resources = resource_root.resolve(strict=True)
-        temporary_root = Path(tempfile.gettempdir()).resolve(strict=True)
+        trusted_temporary_root = (
+            temporary_root or Path(tempfile.gettempdir())
+        ).resolve(strict=True)
         try:
-            relative_source = root.relative_to(temporary_root)
-            relative_resources = resources.relative_to(temporary_root)
+            relative_source = root.relative_to(trusted_temporary_root)
+            relative_resources = resources.relative_to(trusted_temporary_root)
         except ValueError:
             raise OSError
         if not relative_source.parts or not relative_resources.parts:
@@ -457,7 +460,7 @@ def verify_operational_locks(
         if _is_asterion_project_tree_ancestor(root):
             raise OSError
         for relative_path in (relative_source, relative_resources):
-            current = temporary_root
+            current = trusted_temporary_root
             for part in relative_path.parts:
                 current = current / part
                 if current.is_symlink() or not current.is_dir():

@@ -402,6 +402,7 @@ def _is_wheel_operational_resource_smoke(source: str) -> bool:
 
 ROOT_EXCLUDED_NAMES = frozenset(
     {
+        ".asterion-private",
         "3th-party",
         "build",
         "corpora",
@@ -1023,7 +1024,12 @@ def _prepare_external_operational_prime_checkout(
     _ignore_generated_prime_checkout_paths(target)
     _materialize_operational_dependency_tree(target)
     try:
-        verify_operational_locks(target, resource_root)
+        verify_operational_locks(
+            target,
+            resource_root,
+            node_executable=node_executable,
+            temporary_root=target.parents[1].resolve(),
+        )
     except (OperationalHarnessError, OSError, RuntimeError):
         raise PromotionError(
             "external Prime operational source binding could not be created"
@@ -1292,7 +1298,6 @@ def _run_full(
     copy_root: Path, venv_root: Path, runner: Runner, *, node_executable: Path
 ) -> int:
     initial_commands = (
-        ("uv", "sync", "--frozen"),
         (
             "npm",
             "ci",
@@ -1315,6 +1320,7 @@ def _run_full(
             "packages/typescript/prime-gateway",
         ),
         ("npm", "run", "build", "--prefix", "packages/typescript/prime-gateway"),
+        ("uv", "sync", "--frozen", "--extra", "dci"),
         (
             "uv",
             "run",

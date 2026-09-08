@@ -289,7 +289,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
         self.assertEqual(len(bound_assemblies), 7)
         self.assertEqual(
             len(tuple((package_root / "applications").glob("*/assemblies/*.json"))),
-            10,
+            17,
         )
         self.assertEqual(
             len(
@@ -326,7 +326,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
                 "composed-assemblies": {"actual": 7, "expected": 7},
                 "context-profiles": {"actual": 5, "expected": 5},
                 "executable-assemblies": {"actual": 7, "expected": 7},
-                "packaged-assemblies": {"actual": 10, "expected": 10},
+                "packaged-assemblies": {"actual": 17, "expected": 17},
                 "paper-benchmarks": {"actual": 13, "expected": 13},
                 "paper-scopes": {"actual": 17, "expected": 17},
                 "provider-requests": {"actual": 0, "expected": 0},
@@ -339,8 +339,20 @@ class InstalledAcceptanceTests(unittest.TestCase):
                 "applications/dci_agent_lite/assemblies/"
                 "dci-local-research.json",
                 "applications/prime_agent/assemblies/"
+                "prime-arc-agi-3-solving.json",
+                "applications/prime_agent/assemblies/prime-arc-agi-3.json",
+                "applications/prime_agent/assemblies/prime-bounded-autonomy.json",
+                "applications/prime_agent/assemblies/"
                 "prime-capability-program.json",
+                "applications/prime_agent/assemblies/"
+                "prime-continual-improvement.json",
                 "applications/prime_agent/assemblies/prime-ipython-coding.json",
+                "applications/prime_agent/assemblies/"
+                "prime-long-session-continuity.json",
+                "applications/prime_agent/assemblies/"
+                "prime-programmatic-long-context.json",
+                "applications/prime_agent/assemblies/"
+                "prime-recursive-workflow.json",
             ),
         )
         self.assertTrue(
@@ -800,7 +812,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 for check in result.checks
                 if check.check_id == "packaged-assemblies"
             )
-            self.assertEqual(dict(packaged.counts)["actual"], 10)
+            self.assertEqual(dict(packaged.counts)["actual"], 17)
 
         with self.subTest(layer="bound"):
             installed = create_dci_provider()
