@@ -6,7 +6,7 @@ import threading
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from asterion.capabilities.dci.implementation.runtime.pi_rpc import PiRpcClient
 
@@ -35,6 +35,49 @@ def _client(root: Path) -> PiRpcClient:
 
 
 class DciPiRpcRecoveryTests(unittest.TestCase):
+    def test_recovery_frames_flow_unchanged_through_common_transport(self) -> None:
+        events = (
+            {"type": "response", "id": "py-1", "success": True},
+            {"type": "agent_start"},
+            {"type": "turn_start"},
+            {"type": "message_end", "message": {"role": "assistant"}},
+            {"type": "agent_end"},
+            {"type": "response", "id": "py-2", "success": True},
+            {"type": "agent_start"},
+            {"type": "turn_start"},
+            {
+                "type": "message_update",
+                "assistantMessageEvent": {
+                    "type": "text_delta",
+                    "delta": "recovered answer",
+                },
+            },
+            {"type": "agent_end"},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            client = _client(Path(directory).resolve())
+            transport = MagicMock()
+            transport.read_json_line.side_effect = events
+            client._session = transport
+            answer = client.prompt_and_wait(
+                "question",
+                max_turns=3,
+                final_answer_recovery="recover final answer",
+            )
+
+        self.assertEqual(answer, "recovered answer")
+        self.assertEqual(
+            [call.args[0] for call in transport.send.call_args_list],
+            [
+                {"id": "py-1", "type": "prompt", "message": "question"},
+                {
+                    "id": "py-2",
+                    "type": "prompt",
+                    "message": "recover final answer",
+                },
+            ],
+        )
+
     def test_tool_using_recovery_shares_the_original_turn_limit(self) -> None:
         events = (
             {"type": "response", "id": "py-1", "success": True},

@@ -6,7 +6,7 @@ import subprocess
 import shutil
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from asterion.capabilities.dci.implementation.runtime.pi_rpc import PiRpcClient
 
@@ -47,6 +47,42 @@ def _client(root: Path) -> PiRpcClient:
 
 
 class DciPiRpcProxyTests(unittest.TestCase):
+    def test_start_binds_exact_command_and_child_environment_to_common_session(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            client = _client(root)
+            (client.package_dir / "dist").mkdir()
+            (client.package_dir / "dist" / "cli.js").write_text(
+                "", encoding="utf-8"
+            )
+            expected_command = client._build_command(node_bin="/usr/bin/node")
+            with patch.dict("os.environ", {"PATH": "/usr/bin"}, clear=True):
+                expected_environment = client._child_environment(
+                    node_bin="/usr/bin/node"
+                )
+                transport = MagicMock()
+                transport.process = MagicMock()
+                with (
+                    patch(
+                        "asterion.capabilities.dci.implementation.runtime.pi_rpc.resolve_node_bin",
+                        return_value="/usr/bin/node",
+                    ),
+                    patch(
+                        "asterion.capabilities.dci.implementation.runtime.pi_rpc.PiRpcSession",
+                        return_value=transport,
+                    ) as session_type,
+                ):
+                    client.start()
+
+        config = session_type.call_args.args[0]
+        self.assertEqual(config.command, tuple(expected_command))
+        self.assertEqual(dict(config.environment), expected_environment)
+        self.assertEqual(config.cwd, root)
+        transport.start.assert_called_once_with()
+        self.assertIs(client.proc, transport.process)
+
     def test_observation_values_exist_only_in_copied_child_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

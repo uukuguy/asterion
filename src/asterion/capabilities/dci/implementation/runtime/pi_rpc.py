@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import os
-import queue
 import shlex
 import shutil
 import subprocess
@@ -18,9 +16,9 @@ from typing import Any, NoReturn, TextIO
 
 from asterion.capabilities.dci.implementation.config import PI_MIN_NODE_VERSION, PI_MIN_NODE_VERSION_TEXT
 from asterion.capabilities.dci.implementation.config import parse_node_version
+from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
 
 
-_STDOUT_EOF = object()
 FINAL_ANSWER_RECOVERY_PROMPT = (
     "Stop using tools. Based only on the evidence already gathered in this session, "
     "provide the requested final answer now as non-empty text."
@@ -679,12 +677,10 @@ class PiRpcClient:
         self.observation_extension_path = observation_extension_path
         self.observation_fd = observation_fd
         self.observation_contract = observation_contract
+        self._session: PiRpcSession | None = None
         self.proc: subprocess.Popen[bytes] | None = None
         self.command: list[str] | None = None
-        self.stderr_chunks: list[str] = []
-        self._stdout_queue: queue.Queue[object] = queue.Queue()
-        self._stdout_thread: threading.Thread | None = None
-        self._stderr_thread: threading.Thread | None = None
+        self._last_stderr = b""
         self._request_id = 0
 
     def _build_command(self, *, node_bin: str | None = None) -> list[str]:
@@ -743,77 +739,48 @@ class PiRpcClient:
         return environment
 
     def start(self) -> None:
-        if self.proc is not None:
+        if self._session is not None:
             raise RuntimeError("RPC client already started")
         node_bin = resolve_node_bin(os.environ)
         environment = self._child_environment(node_bin=node_bin)
         self.command = self._build_command(node_bin=node_bin)
-        self.proc = subprocess.Popen(
-            self.command,
-            cwd=self.cwd,
-            env=environment,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            pass_fds=tuple(
-                sorted(
-                    {
-                        *self.inherited_fds,
-                        *(
-                            (self.observation_fd,)
-                            if self.observation_fd is not None
-                            else ()
-                        ),
-                    }
-                )
-            ),
+        self._last_stderr = b""
+        inherited_fds = tuple(
+            sorted(
+                {
+                    *self.inherited_fds,
+                    *((self.observation_fd,) if self.observation_fd is not None else ()),
+                }
+            )
         )
-        self._stdout_queue = queue.Queue()
-        self._stdout_thread = threading.Thread(target=self._drain_stdout, daemon=True)
-        self._stdout_thread.start()
-        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
-        self._stderr_thread.start()
-
-    def _drain_stdout(self) -> None:
-        assert self.proc is not None and self.proc.stdout is not None
+        session = PiRpcSession(
+            PiRpcConfig(
+                command=tuple(self.command),
+                cwd=self.cwd,
+                environment=environment,
+                deadline_seconds=10.0,
+                inherited_fds=inherited_fds,
+            ),
+            _popen=subprocess.Popen,
+            _thread_factory=threading.Thread,
+        )
+        self._session = session
         try:
-            for raw in self.proc.stdout:
-                try:
-                    payload = json.loads(raw.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    self._stdout_queue.put(RuntimeError("Pi RPC emitted invalid JSONL"))
-                    return
-                if not isinstance(payload, dict):
-                    self._stdout_queue.put(
-                        RuntimeError("Pi RPC emitted a non-object JSON value")
-                    )
-                    return
-                self._stdout_queue.put(payload)
-        finally:
-            self._stdout_queue.put(_STDOUT_EOF)
-
-    def _drain_stderr(self) -> None:
-        assert self.proc is not None and self.proc.stderr is not None
-        for raw in self.proc.stderr:
-            self.stderr_chunks.append(raw.decode("utf-8", errors="replace"))
+            session.start()
+        except BaseException:
+            self._session = None
+            raise
+        self.proc = session.process
 
     def stop(self) -> None:
-        if self.proc is None:
+        session = self._session
+        if session is None:
             return
-        process = self.proc
         try:
-            if process.poll() is None:
-                process.terminate()
-                process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=2)
+            session.stop()
         finally:
-            for thread in (self._stdout_thread, self._stderr_thread):
-                if thread is not None:
-                    thread.join(timeout=1)
-            self._stdout_thread = None
-            self._stderr_thread = None
+            self._last_stderr = session.stderr
+            self._session = None
             self.proc = None
 
     def _next_id(self) -> str:
@@ -821,27 +788,16 @@ class PiRpcClient:
         return f"py-{self._request_id}"
 
     def _send(self, payload: dict[str, Any]) -> None:
-        if self.proc is None or self.proc.stdin is None:
+        if self._session is None:
             raise RuntimeError("RPC client is not running")
-        self.proc.stdin.write(
-            (json.dumps(payload, separators=(",", ":")) + "\n").encode()
-        )
-        self.proc.stdin.flush()
+        self._session.send(payload)
 
     def _read_json_line(
         self, *, timeout_seconds: float | None = None
     ) -> dict[str, Any]:
-        try:
-            item = self._stdout_queue.get(timeout=timeout_seconds)
-        except queue.Empty as error:
-            raise TimeoutError("Timed out waiting for an RPC event") from error
-        if item is _STDOUT_EOF:
-            raise RuntimeError("Pi RPC process exited unexpectedly")
-        if isinstance(item, BaseException):
-            raise item
-        if not isinstance(item, dict):
-            raise RuntimeError("Pi RPC queue returned an invalid event")
-        return item
+        if self._session is None:
+            raise RuntimeError("RPC client is not running")
+        return self._session.read_json_line(timeout_seconds=timeout_seconds)
 
     def probe_protocol(
         self,
@@ -1151,4 +1107,7 @@ class PiRpcClient:
         return final_text
 
     def get_stderr(self) -> str:
-        return "".join(self.stderr_chunks)
+        stderr = (
+            self._last_stderr if self._session is None else self._session.stderr
+        )
+        return stderr.decode("utf-8", errors="replace")
