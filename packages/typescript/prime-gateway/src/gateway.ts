@@ -95,11 +95,11 @@ type CheckpointPayload = Extract<
 /** Exact, body-free receipt contract emitted by the locked Prime client module. */
 export const PRIME_CLIENT_RECEIPT_FORMAT = "asterion.prime-client-receipt/v1";
 export const PRIME_CLIENT_ARTIFACT_LOCK_DIGEST =
-  "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d";
+  "b18609e70cbf29e0740f347929fb7835f7ff0bf48a109565f5b26fa5f22d7893";
 export const PRIME_CLIENT_MODULE_LOCK_DIGEST =
-  "577f5ea261d515223d578673f7431fd12d141fb5160c1611315ab015892485a8";
+  "4fe5c8e010e244c0287eee07f85501540ecd5b4b173061b2598f2f8de716da51";
 export const PRIME_CLIENT_BUNDLE_DIGEST =
-  "5ada8386371b8b68bf2bf34b892fdee1b93ad936dfa906110901b14141b63e86";
+  "c093f1b3d54f7cc877c96e82541688ef8aa3b293c5c8c5b3a13de10c0c31fcc0";
 
 /** Digests for the repository resource that gates real Prime operations. */
 export const PRIME_OPERATIONAL_MODULE_LOCK_DIGEST =

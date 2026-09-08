@@ -1,6 +1,6 @@
 {
-  "artifact_lock_sha256": "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d",
-  "bundle_sha256": "5ada8386371b8b68bf2bf34b892fdee1b93ad936dfa906110901b14141b63e86",
+  "artifact_lock_sha256": "b18609e70cbf29e0740f347929fb7835f7ff0bf48a109565f5b26fa5f22d7893",
+  "bundle_sha256": "c093f1b3d54f7cc877c96e82541688ef8aa3b293c5c8c5b3a13de10c0c31fcc0",
   "format": "asterion.prime-client-module-lock/v1",
   "modules": [
     {"built_path": "packages/coding-agent/dist/core/sdk.js", "module_id": "sdk", "sha256": "16f6d32a79af61e7be0557f53ed6968b2102ddbb141bf45cb4059a1bce6dc0bc", "source_path": "packages/coding-agent/src/core/sdk.ts"},
@@ -16,6 +16,6 @@
   ],
   "node_floor": "22.8.0",
   "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
-  "transitive_lock_sha256": "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d",
+  "transitive_lock_sha256": "b18609e70cbf29e0740f347929fb7835f7ff0bf48a109565f5b26fa5f22d7893",
   "zero_effect_expectations": {"credential_reads": 0, "network_requests": 0, "provider_operations": 0}
 }

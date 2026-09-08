@@ -1,7 +1,7 @@
 {
   "format": "asterion.prime-ecosystem-module-lock/v1",
   "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
-  "artifact_lock_sha256": "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d",
+  "artifact_lock_sha256": "b18609e70cbf29e0740f347929fb7835f7ff0bf48a109565f5b26fa5f22d7893",
   "bundle_sha256": "a8136c6051c19a2e67ebc74a0e092a2c7c8030aa816ad25dfaa069d77671ec94",
   "modules": [
     {

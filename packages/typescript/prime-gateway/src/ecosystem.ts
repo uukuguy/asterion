@@ -10,9 +10,9 @@ import { basename, isAbsolute, join, normalize } from "node:path";
 
 export const PRIME_ECOSYSTEM_FRAME = "asterion.prime-ecosystem-frame/v1";
 export const PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST =
-  "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d";
+  "b18609e70cbf29e0740f347929fb7835f7ff0bf48a109565f5b26fa5f22d7893";
 export const PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST =
-  "4cee1b9e8a1292e92232f2cafe0872988658a27680bece3755f710ac1bad5dd2";
+  "bb273e393ee4e22911bc08b2ba7f3685bd3a6e6b6dbbca20119f190352d48e9f";
 export const PRIME_ECOSYSTEM_BUNDLE_DIGEST =
   "a8136c6051c19a2e67ebc74a0e092a2c7c8030aa816ad25dfaa069d77671ec94";
 export const MAX_ECOSYSTEM_BYTES = 8 * 1024 * 1024;

@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 const executeFile = promisify(execFile);
 const FORMAT = "asterion.prime-client-frame/v1";
 const SOURCE_COMMIT = "a18809e00ea30638584d87b3afea7285a9d7296c";
-const ARTIFACT_LOCK_DIGEST = "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d";
+const ARTIFACT_LOCK_DIGEST = "b18609e70cbf29e0740f347929fb7835f7ff0bf48a109565f5b26fa5f22d7893";
 const ANCHORS = Object.freeze([
   ["sdk", "packages/coding-agent/dist/core/sdk.js", "16f6d32a79af61e7be0557f53ed6968b2102ddbb141bf45cb4059a1bce6dc0bc"],
   ["cli", "packages/coding-agent/dist/cli-main.js", "9a10343ae1b5c01861e26c365386127acfa2bf4bd490a5a06673dde746446716"],

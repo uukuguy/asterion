@@ -190,14 +190,14 @@ async function ecosystemFrameFixture() {
   await chmod(projectionRoot, 0o700);
   return {
     frame: {
-      artifactLockDigest: "34374afe3bbef57b6690764a174a22f2fbd3952e26cfac788c955a363a54274d",
+      artifactLockDigest: "b18609e70cbf29e0740f347929fb7835f7ff0bf48a109565f5b26fa5f22d7893",
       authorityDigest: createHash("sha256").update("authority-1@7").digest("hex"),
       effectId: `ecosystem:sidecar:${portfolioDigest.slice(0, 32)}`,
       features: [],
       format: "asterion.prime-ecosystem-frame/v1",
       limits: { deadlineMs: 30_000, maxBytes: 8 * 1024 * 1024, maxEntries: 4096, maxProcesses: 1 },
       mcpCredentialLeaseId: "mcp-lease:SIDECAR_PRIVATE_LEASE",
-      moduleLockDigest: "4cee1b9e8a1292e92232f2cafe0872988658a27680bece3755f710ac1bad5dd2",
+      moduleLockDigest: "bb273e393ee4e22911bc08b2ba7f3685bd3a6e6b6dbbca20119f190352d48e9f",
       portfolioDigest,
       projectionRoot,
       registrations: [],
