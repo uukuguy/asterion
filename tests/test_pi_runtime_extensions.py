@@ -574,7 +574,8 @@ events = (
     {"type": "message_update", "assistantMessageEvent": {
         "type": "text_delta", "delta": "safe:" + secret + private_path + metadata}},
     {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop",
-     "usage": {"input": 1, "output": 1}, "content": secret + private_path + metadata}},
+     "usage": {"input": source_fd, "output": 1},
+     "content": secret + private_path + metadata}},
     {"type": "agent_end"},
 )
 for event in events: print(json.dumps(event), flush=True)
@@ -612,8 +613,10 @@ for event in events: print(json.dumps(event), flush=True)
         self.assertNotIn(f"{source_fd}|", rendered)
         tool_call = next(event for event in events if event.type == "tool.call")
         tool_result = next(event for event in events if event.type == "tool.result")
+        usage = next(event for event in events if event.type == "usage.reported")
         self.assertEqual(tool_call.payload["arguments"]["fd"], "<redacted>")
         self.assertEqual(tool_result.payload["output"]["fd"], "<redacted>")
+        self.assertEqual(usage.payload["input_tokens"], int(source_fd))
         self.assertIn("<redacted>", rendered)
 
     async def test_extension_errors_are_redacted_and_close_every_lease_fd(self) -> None:

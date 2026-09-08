@@ -569,20 +569,35 @@ def _validated_observation(
 
 
 def _redact_sensitive(
-    value: object, sensitive_values: tuple[str | int, ...]
+    value: object,
+    sensitive_values: tuple[str | int, ...],
+    *,
+    redact_integers: bool = False,
 ) -> object:
     if not sensitive_values:
         return value
     if isinstance(value, dict):
+        event_type = value.get("type")
         return {
             _redact_sensitive(key, sensitive_values): _redact_sensitive(
-                item, sensitive_values
+                item,
+                sensitive_values,
+                redact_integers=(
+                    redact_integers
+                    or (event_type == "tool_execution_start" and key == "args")
+                    or (event_type == "tool_execution_end" and key == "result")
+                ),
             )
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_redact_sensitive(item, sensitive_values) for item in value]
-    if type(value) is int and value in sensitive_values:
+        return [
+            _redact_sensitive(
+                item, sensitive_values, redact_integers=redact_integers
+            )
+            for item in value
+        ]
+    if redact_integers and type(value) is int and value in sensitive_values:
         return "<redacted>"
     if isinstance(value, str):
         redacted = value
