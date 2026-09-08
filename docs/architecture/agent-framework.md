@@ -59,9 +59,15 @@ CLI / host -> exact agent system -> selected control provider
            -> exact application assembly -> runner -> runtime / host services
 ```
 
-Prime Gateway and the future Asterion-native kernel are peer implementations
-behind that boundary. Python retains portable state, authority, budgets,
-journal and application invocation; an engine retains only its opaque
+`asterion-prime` (`asterion.prime`) and `asterion-native`
+(`asterion.native`) are peer agent implementations behind that boundary.
+`asterion-prime` owns reusable Prime-style agent semantics using only Asterion
+contracts; it does not import, load, launch, inspect, or require Prime Agent
+source or SDK code. P1 through P7 are applications of `asterion-prime`, not
+the agent implementation itself. Prime Gateway evidence is historical and
+non-native compatibility evidence; it cannot support a claim that Asterion
+implements Prime-style capabilities. Python retains portable state, authority,
+budgets, journal and application invocation; an engine retains only its opaque
 continuation capsule. Existing applications that do not select an agent system
 continue through the ordinary provider and assembly path unchanged.
 

@@ -26,14 +26,14 @@ from the host-supplied base registry plus the selected provider's bindings.
 snapshot and fails closed on every duplicate runtime ID; providers cannot
 override host bindings through precedence.
 
-Prime owns the `prime.agent` binding, its application-to-profile table, and its
-exact host-service requirements. Those definitions live under
-`asterion.applications.prime_agent`, while the runtime adapter continues to
-implement the public `AgentRuntimeClient` protocol under `asterion.runtimes`.
-The application package also owns the P1–P7 profile constants and their closed
-route allowlist. The runtime adapter accepts one already selected, structurally
-valid profile and contains no application profile constants or default profile.
-The framework default registry has no Prime imports or routes.
+Historical Prime Gateway compatibility code owns the `prime.agent` binding, its
+application-to-profile table, and its exact host-service requirements. It is
+not `asterion-prime`, and its evidence is historical and non-native. The peer
+agent implementations are `asterion.prime` and `asterion.native`; both consume
+the same Asterion framework contracts. `asterion-prime` must remain detached
+from Prime Agent source and SDK code. P1 through P7 are applications of
+`asterion-prime`, not runtime identities or agent implementations. The
+framework default registry has no Prime imports or routes.
 
 ## Selection and execution
 
