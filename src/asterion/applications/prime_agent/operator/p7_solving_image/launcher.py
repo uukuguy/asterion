@@ -8,8 +8,10 @@ import json
 import os
 from pathlib import Path
 import socket
+import stat
 import struct
 import sys
+from types import ModuleType
 from typing import NoReturn
 
 from IPython.core.interactiveshell import InteractiveShell
@@ -85,10 +87,28 @@ def _execute(shell: InteractiveShell, code: str, count: int) -> dict[str, object
         return {"cell_count": count, "is_error": True, "output": "cell execution failed"}
 
 
+def _load_client() -> None:
+    # Load only the host-seeded module; never add the writable workspace to sys.path.
+    path = "/workspace/p7_client.py"
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            _unavailable()
+        source = stream.read(_CELL_CAP + 1)
+    if not source or len(source) > _CELL_CAP:
+        _unavailable()
+    module = ModuleType("p7_client")
+    module.__file__ = path
+    exec(compile(source, path, "exec"), module.__dict__)
+    sys.modules["p7_client"] = module
+
+
 def serve() -> None:
+    listener: socket.socket | None = None
     try:
         if _SOCKET.exists() or _SOCKET.is_symlink():
             _unavailable()
+        _load_client()
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(str(_SOCKET))
         os.chmod(_SOCKET, 0o600)
@@ -104,10 +124,8 @@ def serve() -> None:
                 except BaseException:
                     _write_response(connection, {"cell_count": count, "is_error": True, "output": "cell execution failed"})
     finally:
-        try:
+        if listener is not None:
             listener.close()
-        except UnboundLocalError:
-            pass
         try:
             _SOCKET.unlink()
         except OSError:

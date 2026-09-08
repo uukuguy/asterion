@@ -30,8 +30,16 @@ class TestP7SolvingKernel(unittest.TestCase):
         if build.returncode:
             raise unittest.SkipTest("solve image cannot be built")
 
-    def test_persistent_ipython_namespace_across_two_cells(self) -> None:
+    def test_workspace_client_import_persists_across_two_cells(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_solving_client import (
+            p7_solving_client_module_bytes,
+        )
+
         with tempfile.TemporaryDirectory() as workspace:
+            Path(workspace).chmod(0o777)
+            (Path(workspace) / "p7_client.py").write_bytes(
+                p7_solving_client_module_bytes("/broker/model.sock", "test-token")
+            )
             started = subprocess.run(
                 ["docker", "run", "--detach", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp:rw,nodev,noexec,nosuid,size=16777216,uid=65534,gid=65534,mode=0700", "--volume", f"{workspace}:/workspace:rw,rprivate", TAG],
                 capture_output=True,
@@ -52,11 +60,12 @@ class TestP7SolvingKernel(unittest.TestCase):
                     if probe.returncode == 0:
                         break
                     time.sleep(0.05)
-                first = json.loads(subprocess.check_output(["docker", "exec", container, "/usr/local/bin/prime-p7-solving", "--client", base64.b64encode(b"x = 41").decode()], text=True, timeout=10))
-                second = json.loads(subprocess.check_output(["docker", "exec", container, "/usr/local/bin/prime-p7-solving", "--client", base64.b64encode(b"print(x + 1)").decode()], text=True, timeout=10))
+                first = json.loads(subprocess.check_output(["docker", "exec", container, "/usr/local/bin/prime-p7-solving", "--client", base64.b64encode(b"import p7_client\np7_client._SEQUENCE = 41").decode()], text=True, timeout=10))
+                second = json.loads(subprocess.check_output(["docker", "exec", container, "/usr/local/bin/prime-p7-solving", "--client", base64.b64encode(b"import p7_client, sys\nassert '/workspace' not in sys.path and '' not in sys.path\nprint(p7_client._SEQUENCE + 1)").decode()], text=True, timeout=10))
             finally:
                 subprocess.run(["docker", "rm", "--force", container], capture_output=True, check=False)
         self.assertEqual(first["cell_count"], 1)
+        self.assertFalse(first["is_error"])
         self.assertEqual(second["cell_count"], 2)
         self.assertFalse(second["is_error"])
         self.assertIn("42", second["output"])

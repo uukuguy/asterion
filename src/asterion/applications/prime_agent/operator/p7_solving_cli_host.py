@@ -35,6 +35,7 @@ from asterion.services.progress import HostProgressEvent, HostProgressReporter
 from asterion.services.registry import HostServiceFactoryBinding, HostServiceFactoryContext
 
 from .p7_solving_host import P7SolvingReceiptStore, run_p7_solving_lifecycle
+from .p7_solving_prompt import P7_SOLVING_PROMPT
 from .p7_solving_resource_lock import verify_p7_solving_resources
 from .p7_solving_preparation import p7_solving_preparation_lock
 
@@ -221,6 +222,7 @@ def _operator_config(path: Path) -> Mapping[str, object]:
 async def _run_lifecycle(
     resources: _Resources, run_id: str, *, receipt_store: P7SolvingReceiptStore,
     progress: HostProgressReporter | None, presentation: HostPresentationSink | None,
+    prompt: str = P7_SOLVING_PROMPT, mode: str = "autonomous",
 ) -> PrimeArcAgi3SolveReceipt:
     """Late-bind executable resources so factory preflight never starts a model or game."""
     try:
@@ -263,6 +265,8 @@ async def _run_lifecycle(
                     prime_source_root=str(resources.paths.source_root), workspace=workspace,
                     progress=progress,
                     presentation=NOOP_HOST_PRESENTATION_SINK if presentation is None else presentation,
+                    prompt=prompt,
+                    mode=mode,
                 )
         finally:
             try:

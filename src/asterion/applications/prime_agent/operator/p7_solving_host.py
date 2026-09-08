@@ -19,7 +19,13 @@ from asterion.services.presentation import (
 from asterion.services.progress import HostProgressEvent, HostProgressReporter
 
 from .p7_solving_broker_service import P7SolvingBrokerServiceError
-from .p7_solving_prompt import P7_SOLVING_PROMPT, validate_p7_solving_prompt
+from .p7_solving_prompt import (
+    P7_SEEDED_INTEGRATION_CELL,
+    validate_p7_seeded_integration_cell,
+    P7_SOLVING_PROMPT,
+    validate_p7_seeded_integration_prompt,
+    validate_p7_solving_prompt,
+)
 from .p7_solving_renderer import (
     create_p7_solving_presentation,
     render_p7_solving_presentation,
@@ -132,6 +138,8 @@ async def run_p7_solving_lifecycle(
     workspace: str = "/workspace",
     progress: HostProgressReporter | None = None,
     presentation: HostPresentationSink = NOOP_HOST_PRESENTATION_SINK,
+    prompt: str = P7_SOLVING_PROMPT,
+    mode: str = "autonomous",
 ) -> PrimeArcAgi3SolveReceipt:
     """Run one prompt and publish a receipt only after replay and cleanup close."""
 
@@ -139,9 +147,9 @@ async def run_p7_solving_lifecycle(
     try:
         _validate_inputs(
             gateway, provider, worker, broker, receipt_store, run_id, session_id,
-            prime_source_root, workspace, presentation,
+            prime_source_root, workspace, presentation, prompt, mode,
         )
-        validate_p7_solving_prompt(P7_SOLVING_PROMPT)
+        _validate_prompt(prompt, mode)
     except BaseException:
         _emit(progress, "preflight", "failed")
         raise PrimeP7SolvingHostError() from None
@@ -154,8 +162,12 @@ async def run_p7_solving_lifecycle(
     model_calls = tool_calls = executed_cells = 0
     active_phase: str | None = None
     validation_started = False
+    validation_stage = "provider-usage"
 
     try:
+        if mode == "seeded":
+            presentation.write("Mode: seeded")
+            presentation.write("Purpose: integration chain verification")
         _emit(progress, "worker", "started")
         active_phase = "worker"
         client = broker.start()
@@ -210,10 +222,19 @@ async def run_p7_solving_lifecycle(
                         "isError": False,
                     }
                 stage = "worker-execution"
-                result = await worker.execute_cell(payload["code"])
+                cell = P7_SEEDED_INTEGRATION_CELL if mode == "seeded" else payload["code"]
+                result = await worker.execute_cell(cell)
                 executed_cells += 1
                 stage = "worker-result"
                 normalized = _worker_result(result, executed_cells)
+                if normalized["is_error"]:
+                    stage = "worker-cell"
+                    if mode == "seeded":
+                        raise PrimeP7SolvingHostError()
+                    try:
+                        presentation.write("IPython cell failed")
+                    except BaseException:
+                        pass
                 terminal = "ACTIVE"
                 stage = "broker-seal"
                 try:
@@ -250,7 +271,7 @@ async def run_p7_solving_lifecycle(
             workspace=workspace,
         )
         gateway_opened = True
-        result = await gateway.prompt(P7_SOLVING_PROMPT)
+        result = await gateway.prompt(prompt)
         _completed(result, model_calls, tool_calls)
         if not solved_latched:
             raise ValueError
@@ -261,7 +282,9 @@ async def run_p7_solving_lifecycle(
         active_phase = "validation"
         validation_started = True
         provider_usage = _usage(provider.finalize())
+        validation_stage = "terminal-witness"
         witness = _witness(gateway.terminal_witness(), run_id, session_id)
+        validation_stage = "callback-accounting"
         counts = provider.callback_counts()
         if (
             type(counts) is not dict
@@ -273,11 +296,25 @@ async def run_p7_solving_lifecycle(
             or witness["tools"] != tool_calls
             or witness["input_tokens"] != provider_usage["input_tokens"]
             or witness["output_tokens"] != provider_usage["output_tokens"]
+            or (
+                mode == "seeded"
+                and (
+                    model_calls,
+                    tool_calls,
+                    executed_cells,
+                    counts["normal"],
+                    counts["summary"],
+                )
+                != (1, 1, 1, 1, 0)
+            )
         ):
             raise ValueError
+        validation_stage = "broker-seal"
         seal = _seal(broker.seal(), require_completed=True)
+        validation_stage = "broker-replay"
         replay = _replay(broker.replay(), seal)
         del replay
+        validation_stage = "presentation-projection"
         raw_presentation = broker.presentation()
         if (
             raw_presentation.get("action_count") != seal["action_count"]
@@ -291,9 +328,15 @@ async def run_p7_solving_lifecycle(
             model_callback_count=model_calls,
             tool_callback_count=executed_cells,
         )
+        validation_stage = "presentation-render"
         render_p7_solving_presentation(local, presentation)
         receipt_values = cast(int, seal["action_count"]), cast(str, seal["score"])
     except BaseException as error:
+        if active_phase == "validation":
+            try:
+                presentation.write(f"Validation failed at stage: {validation_stage}")
+            except BaseException:
+                pass
         if active_phase is not None:
             _emit(progress, active_phase, "failed")
             active_phase = None
@@ -341,6 +384,8 @@ def _validate_inputs(
     prime_source_root: object,
     workspace: object,
     presentation: object,
+    prompt: object,
+    mode: object,
 ) -> None:
     methods = (
         (gateway, ("bind", "open", "prompt", "terminal_witness", "close")),
@@ -357,7 +402,19 @@ def _validate_inputs(
         or _RUN_ID.fullmatch(session_id) is None
         or any(type(path) is not str or not path.startswith("/") or path.startswith("//") or "\x00" in path for path in (prime_source_root, workspace))
         or not callable(getattr(presentation, "write", None))
+        or type(prompt) is not str
+        or mode not in {"autonomous", "seeded"}
     ):
+        raise ValueError
+
+
+def _validate_prompt(prompt: str, mode: str) -> None:
+    if mode == "autonomous":
+        validate_p7_solving_prompt(prompt)
+    elif mode == "seeded":
+        validate_p7_seeded_integration_prompt(prompt)
+        validate_p7_seeded_integration_cell(P7_SEEDED_INTEGRATION_CELL)
+    else:
         raise ValueError
 
 

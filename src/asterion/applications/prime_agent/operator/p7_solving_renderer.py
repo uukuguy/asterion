@@ -30,7 +30,7 @@ _FIELDS: Final = frozenset(
 )
 _MAX_LAYERS: Final = 4
 _MAX_SIDE: Final = 64
-_MAX_CELLS: Final = 4096
+_MAX_CELLS: Final = _MAX_LAYERS * _MAX_SIDE * _MAX_SIDE
 
 
 class P7SolvingRendererError(ValueError):

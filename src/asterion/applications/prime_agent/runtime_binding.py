@@ -7,6 +7,7 @@ from asterion.runtime.factory import (
     RuntimeFactoryContext,
     RuntimeFactoryError,
 )
+from asterion.runtime.host import AgentRuntimeClient
 from asterion.runtimes.prime_agent import (
     PRIME_IPYTHON_CAPABILITY,
     PRIME_RUNTIME_ID,
@@ -99,7 +100,7 @@ def prime_profile_for_application(application_id: str) -> PrimeVerificationProfi
         raise RuntimeFactoryError("Prime runtime configuration is invalid") from None
 
 
-def _create(context: RuntimeFactoryContext) -> PrimeAgentRuntimeClient:
+def _create(context: RuntimeFactoryContext) -> AgentRuntimeClient:
     if (
         context.provider_id != "prime-agent"
         or context.application_version != "1.0.0"
@@ -128,8 +129,9 @@ def _create(context: RuntimeFactoryContext) -> PrimeAgentRuntimeClient:
         host_key, profile = _ROUTES[context.application_id]
     except KeyError:
         raise RuntimeFactoryError("Prime runtime configuration is invalid") from None
+    service = context.host_services.get(host_key)
     if set(context.host_services) != {host_key} or not isinstance(
-        context.host_services[host_key], PrimeSmallVerificationService
+        service, PrimeSmallVerificationService
     ):
         raise RuntimeFactoryError("Prime runtime configuration is invalid")
-    return PrimeAgentRuntimeClient(context.host_services[host_key], profile=profile)
+    return PrimeAgentRuntimeClient(service, profile=profile)

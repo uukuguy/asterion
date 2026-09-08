@@ -106,7 +106,7 @@ class _Worker:
     async def execute_cell(self, code: str) -> dict[str, object]:
         self.executed.append(code)
         self.log.append("worker:cell")
-        self.broker.action_count += 3
+        self.broker.action_count += 13 if code.startswith("import p7_client\np7_client.observe()") else 3
         if self.broker.action_count >= 6 and self.broker.terminal_reason == "level-completed":
             self.broker.solved = True
             self.log.append("broker:level")
@@ -153,6 +153,7 @@ class _Gateway:
         self.prompts = 0
         self.model_hook = None
         self.tool_hook = None
+        self.tool_results: list[dict[str, object]] = []
 
     def bind(self, *, model_hook, tool_hook) -> None:
         self.model_hook, self.tool_hook = model_hook, tool_hook
@@ -172,7 +173,10 @@ class _Gateway:
             raise AssertionError("provider failure did not propagate")
         if self.mode == "noncompletion":
             return {"lifecycle": "completed", "normal_model_callback_count": 1, "summary_model_callback_count": 0, "tool_callback_count": 0}
-        await self.tool_hook({"tool_call_id": "cell-1", "code": "explore()"})
+        self.tool_results.append(await self.tool_hook({"tool_call_id": "cell-1", "code": "explore()"}))
+        if self.mode == "seeded":
+            self.log.append("gateway:quiescent")
+            return {"lifecycle": "completed", "normal_model_callback_count": 1, "summary_model_callback_count": 0, "tool_callback_count": 1}
         await self.tool_hook({"tool_call_id": "cell-2", "code": "refine()"})
         before = len(getattr(self.tool_hook, "__self__", ())) if False else None
         del before
@@ -184,6 +188,7 @@ class _Gateway:
 
     def terminal_witness(self) -> dict[str, object]:
         self.log.append("gateway:witness")
+        tools = 1 if self.mode == "seeded" else 3
         return {
             "identity": {"run_id": "p7-success", "session_id": "session-p7-success", "runtime_id": "prime.agent", "generation": 1},
             "result": {
@@ -193,10 +198,10 @@ class _Gateway:
                 "observations": {
                     "active_tool_names": ["ipython"], "compact_count": 0,
                     "normal_model_callback_count": 1, "summary_model_callback_count": 0,
-                    "rlm_child_count": 0, "tool_call_count": 3, "solved_latched": True,
+                    "rlm_child_count": 0, "tool_call_count": tools, "solved_latched": True,
                 },
             },
-            "cumulative": {"normal_model_callback_count": 1, "summary_model_callback_count": 0, "tool_callback_count": 3},
+            "cumulative": {"normal_model_callback_count": 1, "summary_model_callback_count": 0, "tool_callback_count": tools},
         }
 
     async def close(self) -> None:
@@ -204,6 +209,119 @@ class _Gateway:
 
 
 class TestPrimeP7SolvingHost(unittest.IsolatedAsyncioTestCase):
+    async def test_seeded_cell_error_stops_after_first_execution(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_solving_host import (
+            PrimeP7SolvingHostError,
+            run_p7_solving_lifecycle,
+        )
+        from asterion.applications.prime_agent.operator.p7_solving_prompt import (
+            P7_SEEDED_INTEGRATION_PROMPT,
+        )
+
+        class FailedWorker(_Worker):
+            async def execute_cell(self, code: str) -> dict[str, object]:
+                self.executed.append(code)
+                return {"cell_count": len(self.executed), "output": "SENTINEL_SECRET", "is_error": True}
+
+        log: list[str] = []
+        broker, sink, progress = _Broker(log), _Sink(log), _Progress()
+        worker = FailedWorker(log, broker)
+        with self.assertRaises(PrimeP7SolvingHostError):
+            await run_p7_solving_lifecycle(
+                gateway=_Gateway(log, broker), provider=_Provider(log), worker=worker,
+                broker=broker, receipt_store=_StoreProbe().value, run_id="p7-failure",
+                session_id="session-p7-failure", presentation=sink, progress=progress,
+                prompt=P7_SEEDED_INTEGRATION_PROMPT, mode="seeded",
+            )
+        self.assertEqual(len(worker.executed), 1)
+        self.assertIn("Tool callback failed at stage: worker-cell", sink.records)
+        self.assertNotIn("SENTINEL_SECRET", repr(sink.records))
+        self.assertNotIn("broker:seal", log)
+        self.assertIn("worker:cleanup", log)
+
+    async def test_autonomous_cell_error_is_returned_with_safe_failure_presentation(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_solving_host import (
+            run_p7_solving_lifecycle,
+        )
+
+        class FailedThenRecoveredWorker(_Worker):
+            async def execute_cell(self, code: str) -> dict[str, object]:
+                result = await super().execute_cell(code)
+                if len(self.executed) == 1:
+                    result.update(is_error=True, output="SENTINEL_SECRET")
+                return result
+
+        log: list[str] = []
+        broker, sink = _Broker(log), _Sink(log)
+        gateway = _Gateway(log, broker)
+        await run_p7_solving_lifecycle(
+            gateway=gateway, provider=_Provider(log), worker=FailedThenRecoveredWorker(log, broker),
+            broker=broker, receipt_store=_StoreProbe().value, run_id="p7-success",
+            session_id="session-p7-success", presentation=sink,
+        )
+        self.assertIn("IPython cell failed", sink.records)
+        self.assertIs(gateway.tool_results[0]["isError"], True)
+        self.assertNotIn("SENTINEL_SECRET", repr(sink.records))
+
+    async def test_seeded_prompt_is_explicit_and_reaches_the_same_lifecycle(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_solving_host import (
+            run_p7_solving_lifecycle,
+        )
+        from asterion.applications.prime_agent.operator.p7_solving_prompt import (
+            P7_SEEDED_INTEGRATION_CELL,
+            P7_SEEDED_INTEGRATION_PROMPT,
+        )
+
+        class SeededFrameBroker(_Broker):
+            def presentation(self) -> dict[str, object]:
+                value = super().presentation()
+                # The real first-level completion returns two 64 x 64 frames.
+                value["initial_grid"] = [[[0] * 64 for _ in range(64)]]
+                value["completion_grid"] = [
+                    [[color] * 64 for _ in range(64)] for color in (0, 1)
+                ]
+                return value
+
+        log: list[str] = []
+        broker, sink = SeededFrameBroker(log), _Sink(log)
+        gateway, worker = _Gateway(log, broker, mode="seeded"), _Worker(log, broker)
+        receipt = await run_p7_solving_lifecycle(
+            gateway=gateway, provider=_Provider(log), worker=worker,
+            broker=broker, receipt_store=_StoreProbe().value, run_id="p7-success",
+            session_id="session-p7-success", presentation=sink,
+            prompt=P7_SEEDED_INTEGRATION_PROMPT, mode="seeded",
+        )
+
+        self.assertEqual(receipt.completed_level_count, 1)
+        self.assertEqual(gateway.prompts, 1)
+        self.assertEqual(worker.executed, [P7_SEEDED_INTEGRATION_CELL])
+        self.assertEqual(sink.records[:2], [
+            "Mode: seeded", "Purpose: integration chain verification",
+        ])
+        self.assertIn("Layer 2:", sink.records)
+
+    async def test_seeded_mode_rejects_more_than_one_tool_callback(self) -> None:
+        from asterion.applications.prime_agent.operator.p7_solving_host import (
+            PrimeP7SolvingHostError,
+            run_p7_solving_lifecycle,
+        )
+        from asterion.applications.prime_agent.operator.p7_solving_prompt import (
+            P7_SEEDED_INTEGRATION_PROMPT,
+        )
+
+        log: list[str] = []
+        broker, sink = _Broker(log), _Sink(log)
+        gateway = _Gateway(log, broker)
+        with self.assertRaises(PrimeP7SolvingHostError):
+            await run_p7_solving_lifecycle(
+                gateway=gateway, provider=_Provider(log), worker=_Worker(log, broker),
+                broker=broker, receipt_store=_StoreProbe().value, run_id="p7-success",
+                session_id="session-p7-success", presentation=sink,
+                prompt=P7_SEEDED_INTEGRATION_PROMPT, mode="seeded",
+            )
+        self.assertIn("Validation failed at stage: callback-accounting", sink.records)
+        self.assertIn("worker:cleanup", log)
+
     async def test_model_failure_renders_only_fixed_safe_category(self) -> None:
         from asterion.applications.prime_agent.operator.p7_solving_host import (
             PrimeP7SolvingHostError,
