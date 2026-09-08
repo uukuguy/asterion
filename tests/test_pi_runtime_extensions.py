@@ -512,6 +512,110 @@ export default function registerPrimeIpython(pi) {
         self.assertEqual(runtime._command[-2], "--extension")
         runtime.close()
 
+    def test_factory_rejects_every_dependency_syntax_form(self) -> None:
+        def close_lease(**kwargs: object) -> object:
+            kwargs["extension_lease"].close()  # type: ignore[union-attr]
+            return object()
+
+        cases = (
+            (
+                "namespace-compact",
+                'export*as namespace from "./dependency.mjs";\n',
+            ),
+            (
+                "namespace-spaced",
+                'export * as namespace from "./dependency.mjs";\n',
+            ),
+            ("named-compact", 'export{value}from "./dependency.mjs";\n'),
+            ("star-compact", 'export*from "./dependency.mjs";\n'),
+            (
+                "named-multiline",
+                'export {\n value\n}\nfrom\n"./dependency.mjs";\n',
+            ),
+            (
+                "namespace-multiline",
+                'export\n*\nas\nnamespace\nfrom\n"package";\n',
+            ),
+            ("node-reexport", 'export {readFileSync} from "node:fs";\n'),
+            ("relative-import", 'import value from "./dependency.mjs";\n'),
+            ("bare-import", 'import {value} from "package";\n'),
+            ("relative-side-effect", 'import "./dependency.mjs";\n'),
+            ("bare-side-effect", 'import "package";\n'),
+            ("relative-dynamic", 'const value = import("./dependency.mjs");\n'),
+            ("node-dynamic", 'const value = import("node:fs");\n'),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            factory = default_runtime_factory_registry().select("pi.reference").factory
+            for label, prefix in cases:
+                extension = root / f"dependency-{label}.mjs"
+                extension.write_text(
+                    prefix + "export default () => {};\n", encoding="utf-8"
+                )
+                binding = PiExtensionBinding(
+                    extension_id="prime.ipython",
+                    path=extension,
+                    capabilities=("prime.tool.ipython",),
+                    inherited_fds=(),
+                    environment={},
+                )
+                with (
+                    self.subTest(label=label),
+                    patch(
+                        "asterion.runtimes.pi_extensions.os.dup", wraps=os.dup
+                    ) as duplicated,
+                    patch(
+                        "asterion.runtime.defaults.PiRuntimeClient",
+                        side_effect=close_lease,
+                    ) as client,
+                    self.assertRaises(RuntimeFactoryError),
+                ):
+                    factory(
+                        self._context(
+                            root,
+                            host_services={"prime.ipython": binding},
+                            extension_host_capability="prime.ipython",
+                        )
+                    )
+                client.assert_not_called()
+                duplicated.assert_not_called()
+
+    def test_factory_accepts_node_imports_and_harmless_literal_words(self) -> None:
+        cases = (
+            'import {readFileSync} from "node:fs";\n',
+            'import*as fs from "node:fs";\n',
+            'import "node:fs";\n',
+            'import {\nreadFileSync as read\n}\nfrom\n"node:fs";\n',
+            'const phrase = "import value from ./dependency.mjs";\n'
+            "const reverse = 'from then import';\n"
+            'const template = `export * from "package" and import("package")`;\n'
+            'const markers = "https://example.invalid/a/*literal*/";\n',
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            factory = default_runtime_factory_registry().select("pi.reference").factory
+            for index, prefix in enumerate(cases):
+                extension = root / f"supported-{index}.mjs"
+                extension.write_text(
+                    prefix + "export default () => {};\n", encoding="utf-8"
+                )
+                binding = PiExtensionBinding(
+                    extension_id="prime.ipython",
+                    path=extension,
+                    capabilities=("prime.tool.ipython",),
+                    inherited_fds=(),
+                    environment={},
+                )
+                with self.subTest(index=index):
+                    runtime = factory(
+                        self._context(
+                            root,
+                            host_services={"prime.ipython": binding},
+                            extension_host_capability="prime.ipython",
+                        )
+                    )
+                    runtime.close()
+
     def test_factory_without_extension_preserves_reference_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()

@@ -16,20 +16,19 @@ from asterion.immutable import RedactedImmutableMapping
 
 _IDENTITY = re.compile(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*")
 _SOURCE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\.mjs")
-_STATIC_IMPORT = re.compile(
-    r"\bimport\s+(?:(?:[^\"'\n;]+?)\s+from\s+)?[\"']([^\"']+)[\"']\s*;?"
-)
-_REEXPORT = re.compile(
-    r"\bexport\s*(?:\{.*?\}|\*)(?:\s+as\s+[A-Za-z_$][\w$]*)?"
-    r"\s*from\s*[\"']",
-    re.DOTALL,
-)
+_NODE_SPECIFIER = re.compile(r"node:[A-Za-z0-9][A-Za-z0-9_./-]*")
 _SOURCE_FD = "ASTERION_PI_EXTENSION_SOURCE_FD"
 _SOURCE_NAME_ENV = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
 _RESERVED_ENVIRONMENT_PREFIX = "ASTERION_PI_EXTENSION_"
 _LOADER_FILENAME = "asterion_pi_extension_loader.mjs"
 _MAX_SOURCE_BYTES = 4 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class _JavaScriptToken:
+    kind: str
+    value: str
 
 
 def pi_extension_loader_path() -> Path:
@@ -333,22 +332,212 @@ def _validate_source(name: str, source: bytes) -> None:
     if _SOURCE_NAME.fullmatch(name) is None or not source:
         raise ValueError
     text = source.decode("utf-8")
+    if "\x00" in text:
+        raise ValueError
+    tokens = _javascript_tokens(text)
+    _validate_javascript_dependencies(tokens)
+    if not any(
+        token.kind == "identifier"
+        and token.value == "export"
+        and index + 1 < len(tokens)
+        and tokens[index + 1].kind == "identifier"
+        and tokens[index + 1].value == "default"
+        for index, token in enumerate(tokens)
+    ):
+        raise ValueError
+
+
+def _javascript_tokens(source: str) -> tuple[_JavaScriptToken, ...]:
+    tokens: list[_JavaScriptToken] = []
+    index = 0
+    while index < len(source):
+        character = source[index]
+        if character.isspace():
+            index += 1
+            continue
+        if character in {'"', "'"}:
+            value, index = _quoted_javascript_value(source, index, character)
+            tokens.append(_JavaScriptToken("string", value))
+            continue
+        if character == "`":
+            value, index = _template_javascript_value(source, index)
+            tokens.append(_JavaScriptToken("template", value))
+            continue
+        if character == "/" and index + 1 < len(source):
+            if source[index + 1] in {"/", "*"}:
+                raise ValueError
+        if character.isalpha() or character in {"_", "$"}:
+            end = index + 1
+            while end < len(source) and (
+                source[end].isalnum() or source[end] in {"_", "$"}
+            ):
+                end += 1
+            tokens.append(_JavaScriptToken("identifier", source[index:end]))
+            index = end
+            continue
+        tokens.append(_JavaScriptToken("punctuator", character))
+        index += 1
+    return tuple(tokens)
+
+
+def _quoted_javascript_value(
+    source: str, start: int, quote: str
+) -> tuple[str, int]:
+    value: list[str] = []
+    index = start + 1
+    while index < len(source):
+        character = source[index]
+        if character == quote:
+            return "".join(value), index + 1
+        if character in {"\r", "\n"}:
+            raise ValueError
+        if character == "\\":
+            if index + 1 >= len(source):
+                raise ValueError
+            value.extend((character, source[index + 1]))
+            index += 2
+            continue
+        value.append(character)
+        index += 1
+    raise ValueError
+
+
+def _template_javascript_value(source: str, start: int) -> tuple[str, int]:
+    value: list[str] = []
+    index = start + 1
+    while index < len(source):
+        character = source[index]
+        if character == "`":
+            return "".join(value), index + 1
+        if character == "\\":
+            if index + 1 >= len(source):
+                raise ValueError
+            value.extend((character, source[index + 1]))
+            index += 2
+            continue
+        if character == "$" and index + 1 < len(source) and source[index + 1] == "{":
+            raise ValueError
+        value.append(character)
+        index += 1
+    raise ValueError
+
+
+def _validate_javascript_dependencies(
+    tokens: tuple[_JavaScriptToken, ...],
+) -> None:
+    for index, token in enumerate(tokens):
+        if token.kind != "identifier" or (
+            index > 0 and tokens[index - 1].value == "."
+        ):
+            continue
+        if token.value == "import":
+            _validate_javascript_import(tokens, index)
+        elif token.value == "export":
+            _validate_javascript_export(tokens, index)
+
+
+def _validate_javascript_import(
+    tokens: tuple[_JavaScriptToken, ...], index: int
+) -> None:
+    cursor = index + 1
+    if cursor >= len(tokens):
+        raise ValueError
+    following = tokens[cursor]
+    if following.value == "(":
+        raise ValueError
+    if following.value == ".":
+        if (
+            cursor + 1 < len(tokens)
+            and tokens[cursor + 1].kind == "identifier"
+            and tokens[cursor + 1].value == "meta"
+        ):
+            return
+        raise ValueError
+    if following.kind == "string":
+        _validate_node_specifier(following.value)
+        return
+
+    depths = {"(": 0, "[": 0, "{": 0}
+    closing = {")": "(", "]": "[", "}": "{"}
+    while cursor < len(tokens):
+        token = tokens[cursor]
+        if token.value in depths:
+            depths[token.value] += 1
+        elif token.value in closing:
+            opener = closing[token.value]
+            depths[opener] -= 1
+            if depths[opener] < 0:
+                raise ValueError
+        elif token.value == ";" and not any(depths.values()):
+            raise ValueError
+        elif (
+            token.kind == "identifier"
+            and token.value == "from"
+            and not any(depths.values())
+        ):
+            if cursor + 1 >= len(tokens) or tokens[cursor + 1].kind != "string":
+                raise ValueError
+            _validate_node_specifier(tokens[cursor + 1].value)
+            return
+        cursor += 1
+    raise ValueError
+
+
+def _validate_javascript_export(
+    tokens: tuple[_JavaScriptToken, ...], index: int
+) -> None:
+    cursor = index + 1
+    if cursor >= len(tokens):
+        raise ValueError
+    following = tokens[cursor]
+    if following.kind == "identifier" and following.value in {
+        "default",
+        "var",
+        "let",
+        "const",
+        "function",
+        "class",
+    }:
+        return
+    if following.kind == "identifier" and following.value == "async":
+        if (
+            cursor + 1 < len(tokens)
+            and tokens[cursor + 1].kind == "identifier"
+            and tokens[cursor + 1].value == "function"
+        ):
+            return
+        raise ValueError
+    if following.value == "*":
+        raise ValueError
+    if following.value != "{":
+        raise ValueError
+    closing = _matching_javascript_brace(tokens, cursor)
     if (
-        "\x00" in text
-        or "//" in text
-        or "/*" in text
-        or re.search(r"\bimport\s*\(", text)
+        closing + 1 < len(tokens)
+        and tokens[closing + 1].kind == "identifier"
+        and tokens[closing + 1].value == "from"
     ):
         raise ValueError
-    if _REEXPORT.search(text):
-        raise ValueError
-    imports = list(re.finditer(r"\bimport\b", text))
-    matches = list(_STATIC_IMPORT.finditer(text))
-    if len(imports) != len(matches) or any(
-        not match.group(1).startswith("node:") for match in matches
-    ):
-        raise ValueError
-    if re.search(r"\bexport\s+default\b", text) is None:
+
+
+def _matching_javascript_brace(
+    tokens: tuple[_JavaScriptToken, ...], start: int
+) -> int:
+    depth = 0
+    for index in range(start, len(tokens)):
+        if tokens[index].value == "{":
+            depth += 1
+        elif tokens[index].value == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+            if depth < 0:
+                break
+    raise ValueError
+
+
+def _validate_node_specifier(specifier: str) -> None:
+    if _NODE_SPECIFIER.fullmatch(specifier) is None:
         raise ValueError
 
 
