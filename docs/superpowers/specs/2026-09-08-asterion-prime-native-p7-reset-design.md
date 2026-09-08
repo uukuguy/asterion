@@ -1,13 +1,17 @@
-# Asterion-Prime Native P7 Reset Design
+# Asterion-Prime P7 Reset Design
 
 **Date:** 2026-09-08  
 **Status:** Approved for planning  
-**First delivery:** Native ARC-AGI-3 LS20 level-one solve  
+**First delivery:** Asterion-owned ARC-AGI-3 LS20 level-one solve
 
 ## Decision
 
-Asterion-prime reproduces Prime-style agent capabilities using Asterion's
-existing Pi foundation. Asterion implementation code and release artifacts
+Asterion-prime is Asterion's Prime-style agent implementation built on the
+existing Pi foundation. It is a peer of `asterion-native`: both consume the
+same Asterion framework contracts, support Asterion capability packages, and
+may operate portfolios of assembled applications. P1 through P7 are
+applications of Asterion-prime, not the agent implementation itself. Asterion
+implementation code and release artifacts
 must not import, dynamically load, launch, inspect, source-lock, or require
 Prime Agent source code or its SDK. Prime Agent may run only as an external
 black-box baseline whose exported log is converted into a neutral comparison
@@ -32,6 +36,9 @@ This design supersedes the runtime and completion claims in:
 Existing wrapper results remain historical compatibility experiments. They are
 not evidence that Asterion implements Prime-style capabilities.
 
+In this document, “Asterion-owned” means implemented without Prime Agent
+source or SDK. It does not mean the separate peer product `asterion-native`.
+
 ## Product and source boundary
 
 The authoritative implementation remains the wheel rooted at `pyproject.toml`
@@ -49,7 +56,7 @@ The following are forbidden from Asterion implementation and release paths:
 - preparation, build, or launch steps for Prime Agent; and
 - tests that can pass only when Prime Agent source is present.
 
-The product name `asterion-prime`, its P1-P7 capability identities, and neutral
+The product name `asterion-prime`, its P1-P7 application identities, and neutral
 behavioral vocabulary may remain. Naming a capability does not create a source
 dependency.
 
@@ -76,19 +83,20 @@ Asterion owns application composition, runtime selection, host-service
 injection, authority, budgets, process lifecycle, evidence, and public-safe
 projection.
 
-The native execution direction remains:
+The ownership and execution direction remains:
 
 ```text
 CLI/operator host
-  -> selected Asterion provider
+  -> exact agent system
+  -> selected peer agent implementation
+       +-> asterion-prime
+       `-> asterion-native
+  -> public Asterion control contract
+  -> canonical journal, authority, and admission
   -> exact application assembly
-  -> catalog/composer
-  -> exact capability implementation
+       <- exact Asterion capability packages
   -> Asterion runner
-  -> pi.reference runtime
-  -> operator-selected Pi provider/model
-  -> application-owned Pi tool extension
-  -> injected Asterion host services
+  -> selected runtime and injected host services
 ```
 
 Python remains the sole orchestration, composition, assembly, and execution
@@ -98,40 +106,98 @@ execution. The application runner receives an already resolved plan, runtime,
 implementations, cancellation signal, and read-only host services; it does not
 discover, authorize, retry, persist, schedule, or select a model.
 
+## Asterion-prime agent boundary
+
+The missing product is an Asterion-owned `asterion-prime` agent implementation
+at the same architectural level as `asterion-native`. It provides the reusable
+Prime-style semantics that the current wrapper delegates to Prime Agent while
+consuming only public Asterion framework, capability-package, assembly, runner,
+runtime, control, and host-service contracts. P1 through P7 configure and
+exercise this agent; they must not each recreate it.
+
+The Asterion-prime agent owns:
+
+- session creation, lifecycle, state, immutable event publication, and exact
+  terminal classification;
+- application tool registration, allowlisting, activation, sequential tool
+  execution, cancellation, and uncertain-effect handling;
+- persistent conversation and application state over the Pi session;
+- context accounting, compaction requests, summary replacement boundaries,
+  and post-compaction continuity;
+- parent/child session trees, bounded child creation, explicit family
+  messaging, and result collection;
+- detach/attach, checkpoints, recovery admission, and lease ownership;
+- goal and bounded-autonomy state needed by applications;
+- hooks for deterministic quality evaluation, evidence-backed improvement,
+  rollback, and passive observation; and
+- a closed private event interface through which the operator trace recorder
+  can join model, tool, session, child, compaction, and application events.
+
+The agent does not duplicate Pi's provider adapters, model inference loop, or
+native message/tool protocol. It also does not duplicate Asterion composition,
+capability packages, assemblies, runner execution, runtime adapters, host
+services, credentials, or command authorization. Those remain in the common
+Asterion framework, Pi, or the operator boundary as already assigned.
+
+Implementation is split accordingly:
+
+- genuinely domain-neutral Pi RPC, extension, session, and event translation
+  belongs in the common Asterion runtime layer and is available equally to
+  `asterion-prime`, `asterion-native`, and other products;
+- Prime-style reusable session, child-agent, continuity, autonomy, and
+  improvement semantics belong only in the peer Asterion-prime agent
+  implementation; and
+- ARC rules, frames, actions, scoring, and solve policy belong only to the P7
+  application.
+
+Asterion-prime completeness is a prerequisite for claiming native P1-P7
+completion. The P7 vertical slice may initially exercise only the agent subset
+it needs, but that proves the shared-framework integration and P7 application,
+not the full Asterion-prime agent. The remaining agent contracts must be
+implemented and verified before the full Asterion-prime program is complete.
+
 ## First delivery scope
 
-The first delivery implements the smallest complete native path that can solve
-one real ARC level. It includes:
+The first delivery implements the smallest complete Asterion-owned
+Asterion-prime slice
+that consumes shared Asterion framework contracts and capability packages,
+supports one real ARC application, and solves one real level. It includes:
 
 1. a framework-level Pi RPC/session integration capable of loading exact,
    application-owned extensions and reporting their capabilities;
-2. an Asterion-prime Pi extension that registers only `ipython` for the P7
+2. an Asterion-prime agent session using that integration, with exact tool,
+   lifecycle, limit, cancellation, and private-event contracts;
+3. an Asterion-prime Pi extension that registers only `ipython` for the P7
    application;
-3. one persistent, restricted IPython worker owned by an injected host service;
-4. the existing source-independent ARC broker behavior for `observe`, `status`,
+4. one persistent, restricted IPython worker owned by an injected host service;
+5. the existing source-independent ARC broker behavior for `observe`, `status`,
    and validated `act` requests;
-5. a private trace recorder joining Pi events, IPython activity, and ARC
-   transitions under one run identity;
-6. a passive diagnostic analyzer and neutral baseline comparator;
-7. an installed `prime.arc-agi-3-solving@1.0.0` route selecting `pi.reference`;
+6. a private trace recorder joining Pi events, Asterion-prime agent events,
+   IPython activity, and ARC transitions under one run identity;
+7. a passive diagnostic analyzer and neutral baseline comparator;
+8. an installed `prime.arc-agi-3-solving@1.0.0` route selecting `pi.reference`;
    and
-8. deletion of the Prime SDK P7 execution path and correction of false status
+9. deletion of the Prime SDK P7 execution path and correction of false status
    claims.
 
-P1-P6 implementation is not part of this first code delivery. Their product
-goal is unchanged: each will be reimplemented on the same native Pi path after
-P7 proves the vertical architecture. No existing Prime SDK-backed P1-P6 result
-retains native completion status while that work is pending.
+P1-P6 application implementation and the agent contracts used only by those
+applications are not part of this first code delivery. Their product goal is
+unchanged: Asterion-prime is expanded and each application is reimplemented on
+the same native Pi path after P7 proves the vertical architecture. No existing
+Prime SDK-backed P1-P6 result retains native completion status while that work
+is pending.
 
 ## Component design
 
 ### Pi runtime integration
 
-The existing framework Pi runtime remains the sole agent runtime. The generic
-Pi layer gains an exact mechanism for host-resolved application extensions and
-tool capabilities. Manifests contain compatibility identities only; extension
-paths, commands, credentials, provider configuration, and mutable state remain
-operator-owned values supplied after preflight.
+The existing framework Pi integration remains the shared bottom-level model
+and tool-loop foundation used by the first Asterion-prime slice. It is not the
+Asterion-prime product and is equally available to peer agent implementations.
+The generic Pi layer gains an exact mechanism for host-resolved application
+extensions and tool capabilities. Manifests contain compatibility identities
+only; extension paths, commands, credentials, provider configuration, and
+mutable state remain operator-owned values supplied after preflight.
 
 The reusable Pi RPC/session behavior currently embedded in DCI product code is
 extracted only where it is genuinely domain-neutral. The Asterion-prime product
@@ -372,8 +438,9 @@ external-limited failure remains explicitly classified and is never promoted.
 
 ## P1-P6 continuation
 
-After P7 establishes the vertical path, P1-P6 are reimplemented in this order
-on the same native foundation:
+After P7 establishes the vertical path, the Asterion-prime agent is completed
+incrementally and P1-P6 applications are reimplemented in this order on the
+same native foundation:
 
 1. P1 persistent IPython coding;
 2. P2 programmatic long-context work;
@@ -385,8 +452,8 @@ on the same native foundation:
 Each capability receives its own provider-free and, where necessary, bounded
 provider gate. None imports Prime Agent, and none inherits completion status
 from the deleted wrapper path. Full native P1-P7 completion requires every
-named native gate to pass; solving P7 alone proves only the first vertical
-delivery.
+named native gate and every agent contract above to pass; solving P7 alone
+proves only the first Asterion-prime slice and application delivery.
 
 ## Completion criteria
 
