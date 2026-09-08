@@ -87,6 +87,7 @@ class PiRuntimeClient:
         cwd_authority: ProcessDirectoryAuthority | None = None,
         capabilities: tuple[str, ...],
         env: Mapping[str, str] | None = None,
+        inherited_fds: tuple[int, ...] = (),
         max_turns: int = 4,
         evidence_root: Path | None = None,
         provider: str | None = None,
@@ -103,6 +104,13 @@ class PiRuntimeClient:
         self._cwd_authority = cwd_authority
         self._capabilities = tuple(capabilities)
         self._env = dict(os.environ if env is None else env)
+        if (
+            type(inherited_fds) is not tuple
+            or any(type(fd) is not int or fd < 3 for fd in inherited_fds)
+            or tuple(sorted(set(inherited_fds))) != inherited_fds
+        ):
+            raise ValueError("Pi runtime inherited file descriptors are invalid")
+        self._inherited_fds = inherited_fds
         if (
             isinstance(max_turns, bool)
             or not isinstance(max_turns, int)
@@ -200,6 +208,7 @@ class PiRuntimeClient:
                         cwd=self._cwd,
                         cwd_authority=self._cwd_authority,
                         environment=self._env,
+                        inherited_fds=self._inherited_fds,
                         capabilities=self._capabilities,
                         max_turns=self._max_turns,
                         request=request,
@@ -271,6 +280,7 @@ async def _collect_runtime_snapshot(
     cwd: Path | None,
     cwd_authority: ProcessDirectoryAuthority | None,
     environment: Mapping[str, str],
+    inherited_fds: tuple[int, ...],
     capabilities: tuple[str, ...],
     max_turns: int,
     request: RunRequest,
@@ -295,9 +305,12 @@ async def _collect_runtime_snapshot(
                 command=command,
                 environment=environment,
             ) as launch:
+                pass_fds = tuple(sorted({*launch.pass_fds, *inherited_fds}))
+                for fd in inherited_fds:
+                    os.fstat(fd)
                 descriptor_options: dict[str, Any] = (
-                    {"pass_fds": launch.pass_fds}
-                    if launch.pass_fds
+                    {"pass_fds": pass_fds}
+                    if pass_fds
                     else {}
                 )
                 process = await asyncio.create_subprocess_exec(

@@ -20,6 +20,7 @@ from asterion.runtime.factory import (
 from asterion.runtime.working_directory import ProcessDirectoryAuthority
 from asterion.runtimes.claude_code import ClaudeCodeRuntimeClient
 from asterion.runtimes.pi import PiRuntimeClient, prepare_pi_evidence_root
+from asterion.runtimes.pi_extensions import PiExtensionBinding
 
 
 PI_CAPABILITIES = ("filesystem.read", "pi.tool.grep")
@@ -88,6 +89,7 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
         "cwd_host_capability",
         "environment",
         "evidence_root",
+        "extension_host_capability",
         "max_turns",
         "model",
         "provider",
@@ -123,6 +125,11 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
         context.options["evidence_root"], require_directory=False
     )
     environment = _pi_environment(context.options["environment"])
+    extension = _host_pi_extension_binding(context)
+    if extension is not None:
+        if set(environment).intersection(extension.environment):
+            raise RuntimeFactoryError("Pi extension environment is ambiguous")
+        environment.update(extension.environment)
     tools = context.options["tools"]
     if type(tools) is not str or tools != "read,grep":
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
@@ -159,12 +166,19 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     ):
         if value is not None:
             command.extend((option, value))
+    capabilities = PI_CAPABILITIES
+    inherited_fds: tuple[int, ...] = ()
+    if extension is not None:
+        command.extend(extension.command_args())
+        capabilities = tuple(sorted((*PI_CAPABILITIES, *extension.capabilities)))
+        inherited_fds = extension.inherited_fds
     return PiRuntimeClient(
         command=command,
         cwd=runtime_cwd,
         cwd_authority=cwd_authority,
-        capabilities=PI_CAPABILITIES,
+        capabilities=capabilities,
         env=environment,
+        inherited_fds=inherited_fds,
         max_turns=max_turns,
         evidence_root=evidence_root,
         provider=provider,
@@ -172,6 +186,37 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
         tools=normalized_tools,
         context_profile=context_profile,
     )
+
+
+def _host_pi_extension_binding(
+    context: RuntimeFactoryContext,
+) -> PiExtensionBinding | None:
+    selected = context.options.get("extension_host_capability")
+    bindings = tuple(
+        (capability_id, service)
+        for capability_id, service in context.host_services.items()
+        if type(service) is PiExtensionBinding
+    )
+    if selected is None:
+        return None
+    if (
+        type(selected) is not str
+        or re.fullmatch(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*", selected) is None
+        or len(bindings) != 1
+        or bindings[0][0] != selected
+    ):
+        raise RuntimeFactoryError("runtime host Pi extension is ambiguous")
+    binding = bindings[0][1]
+    assert type(binding) is PiExtensionBinding
+    if binding.extension_id != selected or set(PI_CAPABILITIES).intersection(
+        binding.capabilities
+    ):
+        raise RuntimeFactoryError("runtime host Pi extension is invalid")
+    try:
+        binding.preflight()
+    except (TypeError, ValueError):
+        raise RuntimeFactoryError("runtime host Pi extension is unavailable") from None
+    return binding
 
 
 def _host_directory_authority(
