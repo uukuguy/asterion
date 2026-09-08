@@ -219,6 +219,13 @@ git commit -m "refactor: share pi rpc session transport"
 - Produces: `PiExtensionBinding(extension_id, path, capabilities, inherited_fds, environment)`.
 - Consumes: one exact binding from `RuntimeFactoryContext.host_services` after preflight.
 
+**Approved protocol amendment (2026-09-09):** `path` identifies a comment-free,
+self-contained `.mjs` source artifact, not the pathname handed directly to Pi.
+Preflight pins its bytes and declared descriptors in an owned single-run lease.
+Pi receives an installed Asterion loader via literal `--extension LOADER_PATH`;
+the loader verifies and imports the pinned source FD. Only static `node:` imports
+are supported. All other dependency forms fail before runtime construction.
+
 - [ ] **Step 1: Write validation and immutability tests**
 
 ```python
