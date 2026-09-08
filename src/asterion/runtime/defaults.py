@@ -20,7 +20,11 @@ from asterion.runtime.factory import (
 from asterion.runtime.working_directory import ProcessDirectoryAuthority
 from asterion.runtimes.claude_code import ClaudeCodeRuntimeClient
 from asterion.runtimes.pi import PiRuntimeClient, prepare_pi_evidence_root
-from asterion.runtimes.pi_extensions import PiExtensionBinding
+from asterion.runtimes.pi_extensions import (
+    PiExtensionBinding,
+    PiExtensionLease,
+    pi_extension_loader_path,
+)
 
 
 PI_CAPABILITIES = ("filesystem.read", "pi.tool.grep")
@@ -125,11 +129,6 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
         context.options["evidence_root"], require_directory=False
     )
     environment = _pi_environment(context.options["environment"])
-    extension = _host_pi_extension_binding(context)
-    if extension is not None:
-        if set(environment).intersection(extension.environment):
-            raise RuntimeFactoryError("Pi extension environment is ambiguous")
-        environment.update(extension.environment)
     tools = context.options["tools"]
     if type(tools) is not str or tools != "read,grep":
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
@@ -159,6 +158,16 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
             "Pi reference runtime configuration is invalid"
         ) from None
 
+    extension_result = _host_pi_extension_binding(context)
+    extension: PiExtensionBinding | None = None
+    extension_lease: PiExtensionLease | None = None
+    if extension_result is not None:
+        extension, extension_lease = extension_result
+        if set(environment).intersection(extension_lease.environment):
+            extension_lease.close()
+            raise RuntimeFactoryError("Pi extension environment is ambiguous")
+        environment.update(extension_lease.environment)
+
     for option, value in (
         ("--provider", provider),
         ("--model", model),
@@ -169,28 +178,35 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     capabilities = PI_CAPABILITIES
     inherited_fds: tuple[int, ...] = ()
     if extension is not None:
-        command.extend(extension.command_args())
+        assert extension_lease is not None
+        command.extend(extension_lease.command_args())
         capabilities = tuple(sorted((*PI_CAPABILITIES, *extension.capabilities)))
-        inherited_fds = extension.inherited_fds
-    return PiRuntimeClient(
-        command=command,
-        cwd=runtime_cwd,
-        cwd_authority=cwd_authority,
-        capabilities=capabilities,
-        env=environment,
-        inherited_fds=inherited_fds,
-        max_turns=max_turns,
-        evidence_root=evidence_root,
-        provider=provider,
-        model=model,
-        tools=normalized_tools,
-        context_profile=context_profile,
-    )
+        inherited_fds = extension_lease.inherited_fds
+    try:
+        return PiRuntimeClient(
+            command=command,
+            cwd=runtime_cwd,
+            cwd_authority=cwd_authority,
+            capabilities=capabilities,
+            env=environment,
+            inherited_fds=inherited_fds,
+            extension_lease=extension_lease,
+            max_turns=max_turns,
+            evidence_root=evidence_root,
+            provider=provider,
+            model=model,
+            tools=normalized_tools,
+            context_profile=context_profile,
+        )
+    except Exception:
+        if extension_lease is not None:
+            extension_lease.close()
+        raise
 
 
 def _host_pi_extension_binding(
     context: RuntimeFactoryContext,
-) -> PiExtensionBinding | None:
+) -> tuple[PiExtensionBinding, PiExtensionLease] | None:
     selected = context.options.get("extension_host_capability")
     bindings = tuple(
         (capability_id, service)
@@ -213,10 +229,10 @@ def _host_pi_extension_binding(
     ):
         raise RuntimeFactoryError("runtime host Pi extension is invalid")
     try:
-        binding.preflight()
+        lease = binding.preflight(pi_extension_loader_path())
     except (TypeError, ValueError):
         raise RuntimeFactoryError("runtime host Pi extension is unavailable") from None
-    return binding
+    return binding, lease
 
 
 def _host_directory_authority(

@@ -13,6 +13,7 @@ import signal as process_signal
 import stat
 import sys
 import time
+import weakref
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from copy import deepcopy
@@ -38,6 +39,7 @@ from asterion.pathlight.runtime_observation import (
     validate_runtime_observation_batch,
 )
 from asterion.runtimes.pi_observation import PiObservationBuilder
+from asterion.runtimes.pi_extensions import PiExtensionLease
 
 
 _MAX_STDOUT_LINE_BYTES = 64 * 1024
@@ -88,6 +90,7 @@ class PiRuntimeClient:
         capabilities: tuple[str, ...],
         env: Mapping[str, str] | None = None,
         inherited_fds: tuple[int, ...] = (),
+        extension_lease: PiExtensionLease | None = None,
         max_turns: int = 4,
         evidence_root: Path | None = None,
         provider: str | None = None,
@@ -111,6 +114,23 @@ class PiRuntimeClient:
         ):
             raise ValueError("Pi runtime inherited file descriptors are invalid")
         self._inherited_fds = inherited_fds
+        if extension_lease is not None and (
+            not isinstance(extension_lease, PiExtensionLease)
+            or extension_lease.closed
+            or extension_lease.inherited_fds != inherited_fds
+            or any(
+                self._env.get(name) != value
+                for name, value in extension_lease.environment.items()
+            )
+        ):
+            raise ValueError("Pi runtime extension lease is invalid")
+        self._extension_lease = extension_lease
+        self._extension_consumed = False
+        self._extension_finalizer = (
+            weakref.finalize(self, extension_lease.close)
+            if extension_lease is not None
+            else None
+        )
         if (
             isinstance(max_turns, bool)
             or not isinstance(max_turns, int)
@@ -174,7 +194,35 @@ class PiRuntimeClient:
         except Exception:
             return None
 
+    def close(self) -> None:
+        """Release any extension resources held by an unstarted runtime."""
+
+        lease = self._extension_lease
+        self._extension_lease = None
+        if lease is not None:
+            lease.close()
+        if self._extension_finalizer is not None:
+            self._extension_finalizer.detach()
+
     async def run(
+        self,
+        request: RunRequest,
+        *,
+        signal: CancellationSignal | None = None,
+    ) -> AsyncIterator[RunEvent]:
+        lease = self._extension_lease
+        if self._extension_consumed:
+            raise ProtocolError("Pi runtime extension lease is unavailable")
+        if lease is not None:
+            self._extension_consumed = True
+        try:
+            async for event in self._run_once(request, signal=signal):
+                yield event
+        finally:
+            if lease is not None:
+                self.close()
+
+    async def _run_once(
         self,
         request: RunRequest,
         *,
@@ -209,6 +257,12 @@ class PiRuntimeClient:
                         cwd_authority=self._cwd_authority,
                         environment=self._env,
                         inherited_fds=self._inherited_fds,
+                        extension_lease=self._extension_lease,
+                        sensitive_values=(
+                            ()
+                            if self._extension_lease is None
+                            else self._extension_lease.sensitive_values
+                        ),
                         capabilities=self._capabilities,
                         max_turns=self._max_turns,
                         request=request,
@@ -281,6 +335,8 @@ async def _collect_runtime_snapshot(
     cwd_authority: ProcessDirectoryAuthority | None,
     environment: Mapping[str, str],
     inherited_fds: tuple[int, ...],
+    extension_lease: PiExtensionLease | None,
+    sensitive_values: tuple[str | int, ...],
     capabilities: tuple[str, ...],
     max_turns: int,
     request: RunRequest,
@@ -305,6 +361,8 @@ async def _collect_runtime_snapshot(
                 command=command,
                 environment=environment,
             ) as launch:
+                if extension_lease is not None:
+                    extension_lease.validate_launch()
                 pass_fds = tuple(sorted({*launch.pass_fds, *inherited_fds}))
                 for fd in inherited_fds:
                     os.fstat(fd)
@@ -390,6 +448,8 @@ async def _collect_runtime_snapshot(
                 raise ProtocolError("Pi runtime emitted invalid JSONL") from None
             if not isinstance(event, dict):
                 raise ProtocolError("Pi runtime emitted an invalid JSONL object")
+            event = _redact_sensitive(event, sensitive_values)
+            assert isinstance(event, dict)
 
             try:
                 observation_builder.consume(event, time.monotonic_ns())
@@ -506,6 +566,32 @@ def _validated_observation(
         return validate_runtime_observation_batch(observation.to_mapping())
     except Exception:
         return None
+
+
+def _redact_sensitive(
+    value: object, sensitive_values: tuple[str | int, ...]
+) -> object:
+    if not sensitive_values:
+        return value
+    if isinstance(value, dict):
+        return {
+            _redact_sensitive(key, sensitive_values): _redact_sensitive(
+                item, sensitive_values
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive(item, sensitive_values) for item in value]
+    if type(value) is int and value in sensitive_values:
+        return "<redacted>"
+    if isinstance(value, str):
+        redacted = value
+        for sensitive in sensitive_values:
+            if not isinstance(sensitive, str) or not sensitive:
+                continue
+            redacted = redacted.replace(sensitive, "<redacted>")
+        return redacted
+    return value
 
 
 def _assistant_delta(event: Mapping[str, object]) -> str | None:

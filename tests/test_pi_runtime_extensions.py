@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -11,7 +12,29 @@ from unittest.mock import patch
 from asterion.runtime.defaults import PI_CAPABILITIES, default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 from asterion.runtime.host import RunRequest
+from asterion.runtime.protocol import ProtocolError
 from asterion.runtimes.pi_extensions import PiExtensionBinding
+
+
+NODE_PI_HARNESS = r'''
+import { pathToFileURL } from "node:url";
+const position = process.argv.lastIndexOf("--extension");
+const loader = await import(pathToFileURL(process.argv[position + 1]).href);
+const tools = [];
+await loader.default({ registerTool: (tool) => tools.push(tool) });
+let input = "";
+for await (const chunk of process.stdin) { input += chunk; if (input.includes("\n")) break; }
+const request = JSON.parse(input.trim());
+const answer = tools[0]?.name ?? "missing";
+for (const event of [
+  {type: "response", id: request.id, success: true},
+  {type: "agent_start"},
+  {type: "turn_start"},
+  {type: "message_update", assistantMessageEvent: {type: "text_delta", delta: answer}},
+  {type: "message_end", message: {role: "assistant", stopReason: "stop", usage: {input: 1, output: 1}}},
+  {type: "agent_end"},
+]) console.log(JSON.stringify(event));
+'''
 
 
 class PiExtensionBindingTests(unittest.TestCase):
@@ -170,19 +193,26 @@ class PiExtensionFactoryTests(unittest.TestCase):
                     )
                 )
 
-        self.assertEqual(runtime._command[-2:], ("--extension", str(extension)))
+        self.assertEqual(runtime._command[-2], "--extension")
+        self.assertEqual(
+            Path(runtime._command[-1]).name,
+            "asterion_pi_extension_loader.mjs",
+        )
+        self.assertNotIn(str(extension), runtime._command)
         self.assertEqual(
             runtime.manifest.capabilities,
             (*PI_CAPABILITIES, "prime.tool.ipython"),
         )
-        self.assertEqual(runtime._inherited_fds, (descriptor,))
-        self.assertEqual(
-            runtime._env,
-            {
-                "BASE_RUNTIME_VALUE": "base",
-                "ASTERION_PRIME_IPYTHON_FD": str(descriptor),
-            },
+        self.assertNotIn(descriptor, runtime._inherited_fds)
+        self.assertEqual(len(runtime._inherited_fds), 2)
+        self.assertNotEqual(
+            runtime._env["ASTERION_PRIME_IPYTHON_FD"], str(descriptor)
         )
+        self.assertEqual(runtime._env["BASE_RUNTIME_VALUE"], "base")
+        self.assertEqual(
+            runtime._env["ASTERION_PI_EXTENSION_SOURCE_NAME"], extension.name
+        )
+        runtime.close()
 
     def test_factory_rejects_missing_multiple_or_mismatched_bindings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -270,6 +300,49 @@ class PiExtensionFactoryTests(unittest.TestCase):
             finally:
                 os.close(write_fd)
 
+    def test_factory_rejects_unsupported_extension_source_forms(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            sources = (
+                ("extension.ts", "export default () => {};\n"),
+                (
+                    "relative.mjs",
+                    'import value from "./dependency.mjs"; export default () => value;\n',
+                ),
+                (
+                    "bare.mjs",
+                    'import value from "package"; export default () => value;\n',
+                ),
+                (
+                    "dynamic.mjs",
+                    'export default async () => import("node:fs");\n',
+                ),
+            )
+            factory = default_runtime_factory_registry().select("pi.reference").factory
+            for name, source in sources:
+                extension = root / name
+                extension.write_text(source, encoding="utf-8")
+                binding = PiExtensionBinding(
+                    extension_id="prime.ipython",
+                    path=extension,
+                    capabilities=("prime.tool.ipython",),
+                    inherited_fds=(),
+                    environment={},
+                )
+                with (
+                    self.subTest(name=name),
+                    patch("asterion.runtime.defaults.PiRuntimeClient") as client,
+                    self.assertRaises(RuntimeFactoryError),
+                ):
+                    factory(
+                        self._context(
+                            root,
+                            host_services={"prime.ipython": binding},
+                            extension_host_capability="prime.ipython",
+                        )
+                    )
+                client.assert_not_called()
+
     def test_factory_without_extension_preserves_reference_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
@@ -293,7 +366,7 @@ class PiExtensionFactoryTests(unittest.TestCase):
     @staticmethod
     def _extension(root: Path, name: str = "extension.mjs") -> Path:
         extension = root / name
-        extension.write_text("export {};\n", encoding="utf-8")
+        extension.write_text("export default () => {};\n", encoding="utf-8")
         return extension
 
     @staticmethod
@@ -339,14 +412,307 @@ class PiExtensionFactoryTests(unittest.TestCase):
 
 
 class PiExtensionProcessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_replaced_extension_path_executes_pinned_original_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            extension = root / "extension.mjs"
+            extension.write_text(
+                'export default (pi) => pi.registerTool({name: "original"});\n',
+                encoding="utf-8",
+            )
+            binding = PiExtensionBinding(
+                extension_id="prime.ipython",
+                path=extension,
+                capabilities=("prime.tool.ipython",),
+                inherited_fds=(),
+                environment={},
+            )
+            runtime = self._node_runtime(root, binding)
+            owned_fds = runtime._inherited_fds
+            extension.unlink()
+            extension.write_text(
+                'export default (pi) => pi.registerTool({name: "replacement"});\n',
+                encoding="utf-8",
+            )
+
+            events = [
+                event
+                async for event in runtime.run(
+                    RunRequest(
+                        run_id="pinned-source",
+                        input_text="test",
+                        requested_capabilities=("prime.tool.ipython",),
+                    )
+                )
+            ]
+
+        deltas = [event.payload["text"] for event in events if event.type == "text.delta"]
+        self.assertEqual(deltas, ["original"])
+        for descriptor in owned_fds:
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+    async def test_reused_host_fd_cannot_substitute_the_pinned_resource(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            extension = root / "extension.mjs"
+            extension.write_text(
+                'import {readFileSync} from "node:fs"; '
+                'export default (pi) => pi.registerTool({name: '
+                'readFileSync(Number(process.env.ASTERION_PRIME_IPYTHON_FD), '
+                '"utf8").trim()});\n',
+                encoding="utf-8",
+            )
+            original_read, original_write = os.pipe()
+            os.write(original_write, b"original-resource")
+            os.close(original_write)
+            binding = PiExtensionBinding(
+                extension_id="prime.ipython",
+                path=extension,
+                capabilities=("prime.tool.ipython",),
+                inherited_fds=(original_read,),
+                environment={"ASTERION_PRIME_IPYTHON_FD": str(original_read)},
+            )
+            runtime = self._node_runtime(root, binding)
+            pinned_fd = int(runtime._env["ASTERION_PRIME_IPYTHON_FD"])
+            self.assertNotEqual(pinned_fd, original_read)
+            os.close(original_read)
+            replacement_read, replacement_write = os.pipe()
+            if replacement_read != original_read:
+                os.dup2(replacement_read, original_read)
+                os.close(replacement_read)
+            os.write(replacement_write, b"replacement-resource")
+            os.close(replacement_write)
+            try:
+                events = [
+                    event
+                    async for event in runtime.run(
+                        RunRequest(
+                            run_id="pinned-resource",
+                            input_text="test",
+                            requested_capabilities=("prime.tool.ipython",),
+                        )
+                    )
+                ]
+            finally:
+                os.close(original_read)
+
+        deltas = [event.payload["text"] for event in events if event.type == "text.delta"]
+        self.assertEqual(deltas, ["original-resource"])
+
+    async def test_loader_replacement_is_rejected_before_process_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            extension = PiExtensionFactoryTests._extension(root)
+            installed_loader = (
+                Path(__file__).parents[1]
+                / "src/asterion/runtimes/resources/asterion_pi_extension_loader.mjs"
+            )
+            loader = root / "asterion_pi_extension_loader.mjs"
+            shutil.copyfile(installed_loader, loader)
+            binding = PiExtensionBinding(
+                extension_id="prime.ipython",
+                path=extension,
+                capabilities=("prime.tool.ipython",),
+                inherited_fds=(),
+                environment={},
+            )
+            with patch(
+                "asterion.runtime.defaults.pi_extension_loader_path",
+                return_value=loader,
+            ):
+                runtime = self._node_runtime(root, binding)
+            loader.unlink()
+            loader.write_text("export default () => {};\n", encoding="utf-8")
+
+            with (
+                patch(
+                    "asterion.runtimes.pi.asyncio.create_subprocess_exec"
+                ) as process,
+                self.assertRaises(ProtocolError),
+            ):
+                _ = [
+                    event
+                    async for event in runtime.run(
+                        RunRequest(
+                            run_id="replaced-loader",
+                            input_text="test",
+                            requested_capabilities=("prime.tool.ipython",),
+                        )
+                    )
+                ]
+            process.assert_not_called()
+
+    async def test_public_events_redact_adversarial_extension_channels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            extension = PiExtensionFactoryTests._extension(root)
+            secret = "SECRET-extension-value"
+            private_path = str(extension)
+            script = r'''
+import json, os, sys
+request = json.loads(sys.stdin.readline())
+secret = os.environ["ASTERION_PRIME_IPYTHON_TOKEN"]
+private_path = PRIVATE_PATH
+metadata = "|".join((
+    os.environ["ASTERION_PI_EXTENSION_SOURCE_FD"],
+    os.environ["ASTERION_PI_EXTENSION_SOURCE_NAME"],
+    os.environ["ASTERION_PI_EXTENSION_SOURCE_SHA256"],
+))
+source_fd = int(os.environ["ASTERION_PI_EXTENSION_SOURCE_FD"])
+print(secret + private_path + metadata, file=sys.stderr, flush=True)
+events = (
+    {"type": "response", "id": request["id"], "success": True},
+    {"type": "provider_request_context", "provider": secret, "model": private_path,
+     "messages": [{"role": "user", "content": metadata}]},
+    {"type": "agent_start"},
+    {"type": "turn_start"},
+    {"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "grep",
+     "args": {secret: private_path, "metadata": metadata, "fd": source_fd}},
+    {"type": "tool_execution_end", "toolCallId": "call-1", "isError": False,
+     "result": {private_path: secret, "metadata": metadata, "fd": source_fd}},
+    {"type": "message_update", "assistantMessageEvent": {
+        "type": "text_delta", "delta": "safe:" + secret + private_path + metadata}},
+    {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop",
+     "usage": {"input": 1, "output": 1}, "content": secret + private_path + metadata}},
+    {"type": "agent_end"},
+)
+for event in events: print(json.dumps(event), flush=True)
+'''.replace("PRIVATE_PATH", json.dumps(private_path))
+            binding = PiExtensionBinding(
+                extension_id="prime.ipython",
+                path=extension,
+                capabilities=("prime.tool.ipython",),
+                inherited_fds=(),
+                environment={"ASTERION_PRIME_IPYTHON_TOKEN": secret},
+            )
+            runtime = self._python_runtime(root, binding, script)
+            source_fd = runtime._env["ASTERION_PI_EXTENSION_SOURCE_FD"]
+            events = [
+                event
+                async for event in runtime.run(
+                    RunRequest(
+                        run_id="adversarial-redaction",
+                        input_text="test",
+                        requested_capabilities=("prime.tool.ipython",),
+                    )
+                )
+            ]
+
+        rendered = repr([event.to_mapping() for event in events])
+        for sensitive in (
+            secret,
+            private_path,
+            "ASTERION_PRIME_IPYTHON_TOKEN",
+            "ASTERION_PI_EXTENSION_SOURCE_FD",
+            "ASTERION_PI_EXTENSION_SOURCE_NAME",
+            "ASTERION_PI_EXTENSION_SOURCE_SHA256",
+        ):
+            self.assertNotIn(sensitive, rendered)
+        self.assertNotIn(f"{source_fd}|", rendered)
+        tool_call = next(event for event in events if event.type == "tool.call")
+        tool_result = next(event for event in events if event.type == "tool.result")
+        self.assertEqual(tool_call.payload["arguments"]["fd"], "<redacted>")
+        self.assertEqual(tool_result.payload["output"]["fd"], "<redacted>")
+        self.assertIn("<redacted>", rendered)
+
+    async def test_extension_errors_are_redacted_and_close_every_lease_fd(self) -> None:
+        scripts = (
+            r'''
+import json, os, sys
+request = json.loads(sys.stdin.readline())
+secret = os.environ["ASTERION_PRIME_IPYTHON_TOKEN"]
+print(secret, file=sys.stderr, flush=True)
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": secret}}), flush=True)
+print(json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "usage": {"input": 1, "output": 1}, "content": secret}}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+''',
+            r'''
+import os, sys
+sys.stdin.readline()
+secret = os.environ["ASTERION_PRIME_IPYTHON_TOKEN"]
+print(secret, file=sys.stderr, flush=True)
+print(secret, flush=True)
+''',
+        )
+        for index, script in enumerate(scripts):
+            with self.subTest(index=index), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir).resolve()
+                extension = PiExtensionFactoryTests._extension(root)
+                secret = f"SECRET-extension-error-{index}"
+                binding = PiExtensionBinding(
+                    extension_id="prime.ipython",
+                    path=extension,
+                    capabilities=("prime.tool.ipython",),
+                    inherited_fds=(),
+                    environment={"ASTERION_PRIME_IPYTHON_TOKEN": secret},
+                )
+                runtime = self._python_runtime(root, binding, script)
+                owned_fds = runtime._inherited_fds
+                with self.assertRaises(ProtocolError) as raised:
+                    _ = [
+                        event
+                        async for event in runtime.run(
+                            RunRequest(
+                                run_id=f"redacted-error-{index}",
+                                input_text="test",
+                                requested_capabilities=("prime.tool.ipython",),
+                            )
+                        )
+                    ]
+                self.assertNotIn(secret, str(raised.exception))
+                self.assertNotIn(str(extension), str(raised.exception))
+                for descriptor in owned_fds:
+                    with self.assertRaises(OSError):
+                        os.fstat(descriptor)
+
+    async def test_prestart_cancellation_closes_every_extension_lease_fd(self) -> None:
+        class Cancelled:
+            cancelled = True
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            binding = PiExtensionBinding(
+                extension_id="prime.ipython",
+                path=PiExtensionFactoryTests._extension(root),
+                capabilities=("prime.tool.ipython",),
+                inherited_fds=(),
+                environment={},
+            )
+            runtime = self._python_runtime(root, binding, "raise AssertionError")
+            owned_fds = runtime._inherited_fds
+            with self.assertRaisesRegex(ProtocolError, "cancelled"):
+                _ = [
+                    event
+                    async for event in runtime.run(
+                        RunRequest(
+                            run_id="cancelled-extension",
+                            input_text="test",
+                            requested_capabilities=("prime.tool.ipython",),
+                        ),
+                        signal=Cancelled(),
+                    )
+                ]
+
+        for descriptor in owned_fds:
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
     async def test_runtime_passes_only_bound_environment_and_descriptors(self) -> None:
         script = r'''
-import json, os, sys
+import json, os, pathlib, sys
 request = json.loads(sys.stdin.readline())
 fd = int(os.environ["ASTERION_PRIME_IPYTHON_FD"])
 os.fstat(fd)
+source_fd = int(os.environ["ASTERION_PI_EXTENSION_SOURCE_FD"])
+os.fstat(source_fd)
 assert os.environ["ASTERION_PRIME_IPYTHON_TOKEN"] == "SECRET-extension-value"
-assert sys.argv[-2:] == ["--extension", os.environ["EXPECTED_EXTENSION"]]
+assert sys.argv[-2] == "--extension"
+assert pathlib.Path(sys.argv[-1]).name == "asterion_pi_extension_loader.mjs"
+assert os.environ["EXPECTED_EXTENSION"] not in sys.argv
 assert "SECRET_UNDECLARED" not in os.environ
 print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
 print(json.dumps({"type": "agent_start"}), flush=True)
@@ -408,6 +774,42 @@ print(json.dumps({"type": "agent_end"}), flush=True)
         self.assertNotIn(str(extension), rendered)
         self.assertNotIn("ASTERION_PRIME_IPYTHON", rendered)
         self.assertEqual(events[-1].type, "run.completed")
+
+    @staticmethod
+    def _node_runtime(root: Path, binding: PiExtensionBinding):
+        context = PiExtensionFactoryTests._context(
+            root,
+            host_services={"prime.ipython": binding},
+            command=json.dumps(
+                [
+                    str(Path(shutil.which("node") or "node").resolve()),
+                    "--input-type=module",
+                    "-e",
+                    NODE_PI_HARNESS,
+                    "--",
+                ],
+                separators=(",", ":"),
+            ),
+            environment="{}",
+            extension_host_capability="prime.ipython",
+        )
+        return (
+            default_runtime_factory_registry().select("pi.reference").factory(context)
+        )
+
+    @staticmethod
+    def _python_runtime(root: Path, binding: PiExtensionBinding, script: str):
+        context = PiExtensionFactoryTests._context(
+            root,
+            host_services={"prime.ipython": binding},
+            command=json.dumps(
+                [str(Path(sys.executable).resolve()), "-u", "-c", script],
+                separators=(",", ":"),
+            ),
+            environment="{}",
+            extension_host_capability="prime.ipython",
+        )
+        return default_runtime_factory_registry().select("pi.reference").factory(context)
 
 
 if __name__ == "__main__":
