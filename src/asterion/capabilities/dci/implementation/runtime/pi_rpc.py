@@ -836,21 +836,25 @@ class PiRpcClient:
                 if on_event is not None:
                     on_event(response)
                 continue
-            state = response.get("data")
-            if response.get("success") is not True or not isinstance(state, dict):
-                raise RuntimeError("Pi RPC get_state failed")
-            for field, expected in {
-                "isStreaming": bool,
-                "isCompacting": bool,
-                "messageCount": int,
-                "pendingMessageCount": int,
-            }.items():
-                value = state.get(field)
-                if not isinstance(value, expected) or (
-                    expected is int and isinstance(value, bool)
-                ):
-                    raise RuntimeError("Pi RPC get_state shape is invalid")
-            return state
+            return self._validate_state_response(response)
+
+    @staticmethod
+    def _validate_state_response(response: Mapping[str, Any]) -> dict[str, Any]:
+        state = response.get("data")
+        if response.get("success") is not True or not isinstance(state, dict):
+            raise RuntimeError("Pi RPC get_state failed")
+        for field, expected in {
+            "isStreaming": bool,
+            "isCompacting": bool,
+            "messageCount": int,
+            "pendingMessageCount": int,
+        }.items():
+            value = state.get(field)
+            if not isinstance(value, expected) or (
+                expected is int and isinstance(value, bool)
+            ):
+                raise RuntimeError("Pi RPC get_state shape is invalid")
+        return state
 
     def _request_entries(
         self, *, since: str | None = None, timeout_seconds: float = 10.0
@@ -1004,21 +1008,9 @@ class PiRpcClient:
                 return PiRpcDirective.CONTINUE
             if event_type == "agent_settled":
                 while True:
-                    control.checkpoint()
-                    remaining = control.remaining_seconds()
-                    try:
-                        state = self.probe_protocol(
-                            timeout_seconds=(
-                                10.0
-                                if remaining is None
-                                else min(10.0, remaining)
-                            ),
-                            on_event=on_event,
-                            cancel_event=cancel_event,
-                        )
-                    except RuntimeError:
-                        control.checkpoint()
-                        raise
+                    state = self._validate_state_response(
+                        control.request("get_state", on_event=on_event)
+                    )
                     if not state["isCompacting"]:
                         break
                     control.sleep(0.05)

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import io
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.runtimes.pi_rpc import (
     PiRpcConfig,
@@ -187,6 +190,70 @@ class PiRpcSessionTests(unittest.TestCase):
         self.assertEqual([event.sequence for event in result.events], [1, 2, 3, 4, 5])
         self.assertEqual(result.stderr, b"")
 
+    def test_async_callbacks_run_on_calling_loop_thread_and_context(self) -> None:
+        calling_thread = threading.get_ident()
+        context = contextvars.ContextVar("pi_rpc_test_context")
+        token = context.set("caller-context")
+        observed: list[tuple[int, str]] = []
+        try:
+            self.collect(
+                "ack-settled",
+                on_event=lambda event: observed.append(
+                    (threading.get_ident(), context.get())
+                ),
+            )
+        finally:
+            context.reset(token)
+
+        self.assertTrue(observed)
+        self.assertEqual({thread for thread, _value in observed}, {calling_thread})
+        self.assertEqual({value for _thread, value in observed}, {"caller-context"})
+
+    def test_async_cancellation_waits_for_prompt_driver_to_quiesce(self) -> None:
+        async def exercise() -> None:
+            marker = self.work / "abort-driver"
+            session = PiRpcSession(
+                PiRpcConfig(
+                    command=self.command("cancel", str(marker)),
+                    cwd=self.work,
+                    environment={},
+                    deadline_seconds=2.0,
+                )
+            )
+            callback_seen = threading.Event()
+            driver_exited = threading.Event()
+            original_drive = session.drive_prompt
+
+            def tracked_drive(*args: object, **kwargs: object) -> object:
+                try:
+                    return original_drive(*args, **kwargs)  # type: ignore[arg-type]
+                finally:
+                    time.sleep(0.3)
+                    driver_exited.set()
+
+            with patch.object(session, "drive_prompt", side_effect=tracked_drive):
+                task = asyncio.create_task(
+                    session.run(
+                        "inspect",
+                        signal=FakeSignal(False),
+                        on_event=lambda event: callback_seen.set(),
+                    )
+                )
+                for _ in range(100):
+                    if callback_seen.is_set():
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertTrue(callback_seen.is_set())
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+            self.assertTrue(driver_exited.is_set())
+            self.assertIsNone(session.process)
+            self.assertFalse(session._run_active)
+
+        asyncio.run(exercise())
+
     def test_results_are_immutable_copies(self) -> None:
         environment = {"VISIBLE": "before"}
         config = PiRpcConfig(
@@ -257,7 +324,7 @@ class PiRpcSessionTests(unittest.TestCase):
 
     def test_event_count_cap_fails_closed(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "output limit"):
-            self.collect("event-count-oversized")
+            self.collect("event-count-oversized", deadline_seconds=10.0)
 
     def test_command_arguments_are_passed_literally(self) -> None:
         marker = self.work / "shell-was-used"

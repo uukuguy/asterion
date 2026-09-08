@@ -6,6 +6,7 @@ import threading
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from asterion.capabilities.dci.implementation.runtime.pi_rpc import PiRpcClient
@@ -53,31 +54,51 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
             {"type": "turn_start"},
             {"type": "message_end", "message": {"role": "assistant"}},
             {"type": "agent_settled"},
+            {
+                "type": "response",
+                "id": "py-2",
+                "command": "get_state",
+                "success": True,
+                "data": {
+                    "isStreaming": False,
+                    "isCompacting": False,
+                    "messageCount": 1,
+                    "pendingMessageCount": 0,
+                },
+            },
         )
-        state = {
-            "isStreaming": False,
-            "isCompacting": False,
-            "messageCount": 1,
-            "pendingMessageCount": 0,
-        }
         with tempfile.TemporaryDirectory() as directory:
             client = _client(Path(directory).resolve())
             transport = _attach_transport(client)
             with (
                 patch.object(transport, "send") as send,
                 patch.object(transport, "read_json_line", side_effect=events),
-                patch.object(client, "probe_protocol", return_value=state),
+                patch.object(
+                    client,
+                    "probe_protocol",
+                    side_effect=AssertionError("nested DCI lifecycle"),
+                ),
                 patch(
-                    "asterion.capabilities.dci.implementation.runtime.pi_rpc.time.sleep",
-                    side_effect=AssertionError("direct settled wait"),
+                    "asterion.capabilities.dci.implementation.runtime.pi_rpc.time",
+                    SimpleNamespace(
+                        monotonic=MagicMock(
+                            side_effect=AssertionError("nested DCI deadline")
+                        )
+                    ),
                 ),
             ):
                 answer = client.prompt_and_wait("question", timeout_seconds=1.0)
                 next_request_id = client._next_id()
 
         self.assertEqual(answer, "")
-        self.assertEqual(send.call_args.args[0]["id"], "py-1")
-        self.assertEqual(next_request_id, "py-2")
+        self.assertEqual(
+            [call.args[0] for call in send.call_args_list],
+            [
+                {"id": "py-1", "type": "prompt", "message": "question"},
+                {"id": "py-2", "type": "get_state"},
+            ],
+        )
+        self.assertEqual(next_request_id, "py-3")
 
     def test_prompt_lifecycle_is_driven_only_by_common_transport(self) -> None:
         responses = {

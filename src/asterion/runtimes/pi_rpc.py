@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import math
 import os
@@ -29,6 +30,7 @@ _GRACEFUL_EXIT_SECONDS = 0.1
 _PROCESS_EXIT_SECONDS = 0.25
 _PIPE_DRAIN_SECONDS = 0.25
 _POLL_SECONDS = 0.05
+_PROMPT_DRIVER_EXIT_SECONDS = 1.0
 _STDOUT_EOF = object()
 
 
@@ -127,6 +129,39 @@ class PiRpcPromptControl:
         if self._signal is None:
             return remaining
         return _POLL_SECONDS if remaining is None else min(_POLL_SECONDS, remaining)
+
+    def read_event(self) -> dict[str, Any]:
+        """Read one event under this prompt's deadline and cancellation policy."""
+
+        while True:
+            self.checkpoint()
+            try:
+                return self._session.read_json_line(
+                    timeout_seconds=self.poll_seconds()
+                )
+            except TimeoutError:
+                self.checkpoint()
+
+    def request(
+        self,
+        request_type: str,
+        *,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        """Issue a nested RPC request without creating a second lifecycle."""
+
+        if type(request_type) is not str or not request_type:
+            raise ValueError("Pi RPC request type is invalid")
+        request_id = self._session.next_id()
+        self._session.send({"id": request_id, "type": request_type})
+        while True:
+            event = self.read_event()
+            if event.get("type") == "response":
+                if event.get("id") != request_id:
+                    raise RuntimeError("Pi RPC response did not match the request")
+                return event
+            if on_event is not None:
+                on_event(event)
 
     def abort(self) -> None:
         if not self._abort_sent:
@@ -405,12 +440,7 @@ class PiRpcSession:
         self.send({"id": request_id, "type": "prompt", "message": message})
         acknowledged = False
         while True:
-            control.checkpoint()
-            try:
-                event = self.read_json_line(timeout_seconds=control.poll_seconds())
-            except TimeoutError:
-                control.checkpoint()
-                continue
+            event = control.read_event()
             directive = on_event(event, control)
             if type(directive) is not PiRpcDirective:
                 raise RuntimeError("Pi RPC prompt directive is invalid")
@@ -550,6 +580,15 @@ class PiRpcSession:
         events: list[PiRpcEvent] = []
         text_parts: list[str] = []
         text_bytes = 0
+        loop = asyncio.get_running_loop()
+        local_cancel = threading.Event()
+
+        class RunCancellationSignal:
+            @property
+            def cancelled(self) -> bool:
+                return local_cancel.is_set() or signal.cancelled
+
+        run_signal = RunCancellationSignal()
 
         def handle_event(
             raw: dict[str, Any], _control: PiRpcPromptControl
@@ -584,28 +623,63 @@ class PiRpcSession:
                 return PiRpcDirective.COMPLETE
             return PiRpcDirective.CONTINUE
 
+        def dispatch_event(
+            raw: dict[str, Any], control: PiRpcPromptControl
+        ) -> PiRpcDirective:
+            result: concurrent.futures.Future[PiRpcDirective] = (
+                concurrent.futures.Future()
+            )
+
+            def invoke() -> None:
+                try:
+                    result.set_result(handle_event(raw, control))
+                except BaseException as error:
+                    result.set_exception(error)
+
+            loop.call_soon_threadsafe(invoke)
+            return result.result()
+
+        driver_task: asyncio.Task[float | None] | None = None
         try:
             self.start()
-            await asyncio.to_thread(
-                self.drive_prompt,
-                prompt,
-                timeout_seconds=self.config.deadline_seconds,
-                signal=signal,
-                on_event=handle_event,
+            driver_task = asyncio.create_task(
+                asyncio.to_thread(
+                    self.drive_prompt,
+                    prompt,
+                    timeout_seconds=self.config.deadline_seconds,
+                    signal=run_signal,
+                    on_event=dispatch_event,
+                )
             )
+            await asyncio.wait((driver_task,))
+            driver_task.result()
             state = self._state
             self.stop()
             if state is not None and state.output_error is not None:
                 raise state.output_error
             return PiRpcResult("".join(text_parts), tuple(events), self.stderr)
         except asyncio.CancelledError:
-            self.abort()
+            if driver_task is not None and not driver_task.done():
+                local_cancel.set()
+                self.abort()
+                done, _pending = await asyncio.wait(
+                    (driver_task,), timeout=_PROMPT_DRIVER_EXIT_SECONDS
+                )
+                if not done:
+                    raise RuntimeError(
+                        "Pi RPC prompt driver cleanup timed out"
+                    ) from None
+                try:
+                    driver_task.result()
+                except BaseException:
+                    pass
             raise
         finally:
-            try:
-                self.stop()
-            finally:
-                self._run_active = False
+            if driver_task is None or driver_task.done():
+                try:
+                    self.stop()
+                finally:
+                    self._run_active = False
 
 
 __all__ = (
