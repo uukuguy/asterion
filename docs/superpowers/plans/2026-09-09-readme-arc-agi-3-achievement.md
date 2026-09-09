@@ -40,11 +40,12 @@ Run:
 ```bash
 uv run python - <<'PY'
 import json
+import os
 from pathlib import Path
 from PIL import Image
 
 frames_path = Path("artifacts/arc-agi-3/games/ls20-9607627b/runs/p7-live-20260909065351/data/frames.jsonl")
-screenshot_path = Path("/Users/sujiangwen/Desktop/arc-agi-3-ls20.png")
+screenshot_path = Path(os.environ["ASTERION_README_SCREENSHOT"])
 frames = [json.loads(line) for line in frames_path.read_text().splitlines() if line.strip()]
 with Image.open(screenshot_path) as image:
     print({"frames": len(frames), "screenshot": image.size, "mode": image.mode})
@@ -102,7 +103,7 @@ Expected: `docs/assets/arc-agi-3/solve-replay.gif` exists, derives from all 30 s
 Run:
 
 ```bash
-cp /Users/sujiangwen/Desktop/arc-agi-3-ls20.png docs/assets/arc-agi-3/solve-report.png
+cp "$ASTERION_README_SCREENSHOT" docs/assets/arc-agi-3/solve-report.png
 ```
 
 Expected: the source and destination SHA-256 digests match exactly.
@@ -134,7 +135,7 @@ assert gif_path.stat().st_size > 0
 assert png_path.stat().st_size > 0
 print("ARC README assets: PASS")
 PY
-shasum -a 256 /Users/sujiangwen/Desktop/arc-agi-3-ls20.png docs/assets/arc-agi-3/solve-report.png
+shasum -a 256 "$ASTERION_README_SCREENSHOT" docs/assets/arc-agi-3/solve-report.png
 ```
 
 Expected: `ARC README assets: PASS`; the two PNG digest lines are identical.
@@ -275,7 +276,6 @@ assert "README.md" in chinese
 assert "## ARC-AGI-3 interactive reasoning" in english
 assert 'width="620"' in english and 'width="620"' in chinese
 for forbidden in (
-    "/Users/sujiangwen",
     "TemporaryItems",
     "3th-party/prime-agent",
     "chain-of-thought transcript",

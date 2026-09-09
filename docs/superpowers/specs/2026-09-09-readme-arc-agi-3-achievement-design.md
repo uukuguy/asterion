@@ -10,7 +10,7 @@ Update the repository introduction to reflect the current Asterion architecture 
 - `README.zh-CN.md`: complete Simplified Chinese counterpart.
 - A mutual language switch at the top of both files: `English | 简体中文`.
 - `docs/assets/arc-agi-3/solve-replay.gif`: compact animation derived from the 30 normalized frames of the sealed run.
-- `docs/assets/arc-agi-3/solve-report.png`: the supplied full-report screenshot copied from `/Users/sujiangwen/Desktop/arc-agi-3-ls20.png` into the repository.
+- `docs/assets/arc-agi-3/solve-report.png`: the operator-supplied full-report screenshot copied into the repository without resizing.
 
 Both image assets are documentation evidence generated from normalized run data. They must not contain private worker text, credentials, local paths, prompts, or provider payloads.
 
