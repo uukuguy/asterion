@@ -122,3 +122,58 @@ is external-config-limited and deferred to Task 9; it is not reported as PASS.
 - This task publishes and composes the injected native seam. It does not run a
   live model, register/acquire the later live host-service factories, prove an
   installed-wheel execution, or claim that one ARC level has been solved.
+
+## Focused execution-blocker correction
+
+Review found that the shared solver implementation still admitted only the
+legacy `prime.agent` preset and that the operator exposed options without
+constructing the assembly's four host services. The package now requires
+`asterion.prime` with only `prime.tool.ipython`, rejects the retired fixed input,
+and forwards the application-supplied `P7_SOLVE_PROMPT` unchanged through the
+normal `RunRequest`. Receipt access uses the assembly-declared private-trace
+boundary; there is no legacy provider, gateway, source-tree, seeded-action, or
+answer fallback.
+
+The operator now accepts only injected external edges and returns immutable,
+redacted `P7OperatorResources`. It creates the fixed ARC broker and persistent
+IPython host, a private unsealed trace recorder, and pinned Pi extension launch
+material with the exact DeepSeek provider/model command and approved process
+environment. The owned duplex bridge connects the compiled extension FD to the
+Python IPython host without starting the worker until a tool call. Pi process
+startup remains lazy in `PiRpcSession`. Partial construction closes sockets,
+trace descriptors, and any acquired extension lease; the returned cleanup
+handle boundedly closes the bridge/worker and remaining resources.
+
+Focused correction TDD:
+
+```text
+native package RED: CapabilityExecutionError: Prime solver runtime is unavailable
+operator RED: ImportError: cannot import name 'build_p7_operator_resources'
+
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_prime_arc_agi_3_solver_package tests.test_prime_p7_native_provider \
+  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
+  tests.test_asterion_prime_architecture
+Ran 46 tests in 0.119s
+OK
+
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_prime_p7_native_broker
+Ran 8 tests in 0.109s
+OK
+
+uv run ruff check <focused correction source/tests>
+All checks passed!
+
+uv run python -m py_compile <focused correction source/tests>
+exit 0
+
+uv run pyright <focused correction source/tests>
+0 errors, 0 warnings, 0 informations
+```
+
+Provider listing remains metadata-only: the end-to-end composition test observes
+zero worker starts and zero Pi process starts through provider selection,
+package/plan composition, host preflight, and runtime factory construction.
+`make promotion-check` was not rerun, per task-owner direction; its previously
+recorded external configuration limitation remains deferred to Task 9.

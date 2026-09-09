@@ -2,19 +2,108 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import FrozenInstanceError
-from typing import cast
+from typing import AsyncIterator, cast
 import unittest
 
+from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
+from asterion.capabilities.execution import CapabilityInvocation
+from asterion.capabilities.prime_arc_agi_3_solver.provider import (
+    CAPABILITY_REF,
+    PrimeArcAgi3SolvingImplementation,
+)
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
     PrimeArcAgi3SolveReceiptError,
     canonical_solve_receipt_sha256,
     validate_prime_arc_agi_3_solve_receipt,
 )
+from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
+
+
+class _NativeRuntime:
+    def __init__(self, receipt: PrimeArcAgi3SolveReceipt) -> None:
+        self.receipt = receipt
+        self.requests: list[RunRequest] = []
+
+    @property
+    def manifest(self) -> RuntimeManifest:
+        return RuntimeManifest("asterion.prime", ("prime.tool.ipython",))
+
+    async def run(
+        self, request: RunRequest, *, signal: object = None
+    ) -> AsyncIterator[RunEvent]:
+        del signal
+        self.requests.append(request)
+        yield RunEvent(
+            request.run_id,
+            1,
+            "run.started",
+            {"capabilities": ["prime.tool.ipython"]},
+        )
+        yield RunEvent(
+            request.run_id,
+            2,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "prime.p7-solving.receipt",
+                    "kind": "p7-solving",
+                    "media_type": (
+                        "application/vnd.asterion.prime.p7-solving-receipt+json"
+                    ),
+                    "sha256": self.receipt.receipt_sha256.removeprefix("sha256:"),
+                }
+            },
+        )
+        yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
+
+
+class _ReceiptAccessor:
+    def __init__(self, receipt: PrimeArcAgi3SolveReceipt) -> None:
+        self.receipt = receipt
+
+    def get_receipt(
+        self, *, run_id: str, receipt_sha256: str
+    ) -> PrimeArcAgi3SolveReceipt:
+        del run_id, receipt_sha256
+        return self.receipt
 
 
 class TestPrimeArcAgi3SolveReceipt(unittest.TestCase):
+    def test_native_implementation_requires_and_forwards_the_solve_prompt(self) -> None:
+        receipt = PrimeArcAgi3SolveReceipt.create(
+            run_id="native-solve",
+            completed_level_count=1,
+            primitive_action_count=2,
+            partial_game_score="1.000000",
+        )
+        runtime = _NativeRuntime(receipt)
+        invocation = CapabilityInvocation(
+            capability_ref=CAPABILITY_REF,
+            manifest={
+                "kind": "capability",
+                "capability_id": CAPABILITY_REF.capability_id,
+                "version": CAPABILITY_REF.version,
+            },
+            run_id=receipt.run_id,
+            input_text=P7_SOLVE_PROMPT,
+            upstream_artifacts=(),
+            runtime=runtime,
+            host_services={"prime.private-trace": _ReceiptAccessor(receipt)},
+        )
+
+        result = asyncio.run(PrimeArcAgi3SolvingImplementation().execute(invocation))
+
+        self.assertEqual(len(result.artifacts), 1)
+        self.assertEqual(len(runtime.requests), 1)
+        self.assertEqual(runtime.requests[0].input_text, P7_SOLVE_PROMPT)
+        self.assertEqual(
+            runtime.requests[0].requested_capabilities,
+            ("prime.tool.ipython",),
+        )
+
     def test_create_seals_the_exact_canonical_unsigned_receipt(self) -> None:
         unsigned = {
             "run_id": "prime-p7-solve-route",
@@ -34,7 +123,9 @@ class TestPrimeArcAgi3SolveReceipt(unittest.TestCase):
 
         self.assertEqual(receipt.scope, "p7-solving")
         self.assertEqual(receipt.promotion, "unpromoted")
-        self.assertEqual(receipt.receipt_sha256, canonical_solve_receipt_sha256(unsigned))
+        self.assertEqual(
+            receipt.receipt_sha256, canonical_solve_receipt_sha256(unsigned)
+        )
         with self.assertRaises(FrozenInstanceError):
             receipt.primitive_action_count = 23  # type: ignore[misc]
 
@@ -69,12 +160,19 @@ class TestPrimeArcAgi3SolveReceipt(unittest.TestCase):
             {"primitive_action_count": -1},
         )
         for values in cases:
-            with self.subTest(values=values), self.assertRaises(PrimeArcAgi3SolveReceiptError):
+            with (
+                self.subTest(values=values),
+                self.assertRaises(PrimeArcAgi3SolveReceiptError),
+            ):
                 PrimeArcAgi3SolveReceipt.create(
                     run_id="prime-p7-solve-route",
                     completed_level_count=1,
-                    primitive_action_count=cast(int, values.get("primitive_action_count", 22)),
-                    partial_game_score=cast(str, values.get("partial_game_score", "3.571429")),
+                    primitive_action_count=cast(
+                        int, values.get("primitive_action_count", 22)
+                    ),
+                    partial_game_score=cast(
+                        str, values.get("partial_game_score", "3.571429")
+                    ),
                 )
         receipt = PrimeArcAgi3SolveReceipt.create(
             run_id="prime-p7-solve-route",

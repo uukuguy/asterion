@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from asterion.agents.prime.session import AsterionPrimeSession
@@ -17,6 +18,7 @@ from asterion.runtime.host import AgentRuntimeClient
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
 from asterion.runtimes.pi_rpc import PiRpcSession
+from asterion.immutable import RedactedImmutableMapping
 
 
 _HOST_CAPABILITIES = frozenset(
@@ -45,6 +47,7 @@ class PreflightedPrimeLaunch:
     extension_binding: PiExtensionBinding
     extension_lease: PiExtensionLease
     approved_command: tuple[str, ...]
+    approved_environment: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         lease = self.extension_lease
@@ -58,14 +61,30 @@ class PreflightedPrimeLaunch:
             or lease.closed
             or self.extension_binding.extension_id != "prime.ipython"
             or self.extension_binding.capabilities != ("prime.tool.ipython",)
-            or self.extension_binding.binding_fingerprint
-            != lease.binding_fingerprint
+            or self.extension_binding.binding_fingerprint != lease.binding_fingerprint
             or self.rpc_session.process is not None
             or getattr(self.rpc_session, "_run_active", True)
         ):
             if type(lease) is PiExtensionLease:
                 lease.close()
             raise RuntimeFactoryError(_ERROR)
+        try:
+            environment = (
+                dict(lease.environment)
+                if self.approved_environment is None
+                else dict(self.approved_environment)
+            )
+        except (TypeError, ValueError):
+            lease.close()
+            raise RuntimeFactoryError(_ERROR) from None
+        if dict(self.rpc_session.config.environment) != environment or any(
+            environment.get(name) != value for name, value in lease.environment.items()
+        ):
+            lease.close()
+            raise RuntimeFactoryError(_ERROR)
+        object.__setattr__(
+            self, "approved_environment", RedactedImmutableMapping(environment)
+        )
 
     def __repr__(self) -> str:
         return "<PreflightedPrimeLaunch redacted>"
@@ -117,6 +136,7 @@ def build_asterion_prime_runtime(
             extension_binding=launch.extension_binding,
             extension_lease=launch.extension_lease,
             approved_command=launch.approved_command,
+            approved_environment=launch.approved_environment,
         )
         launch = None
         return AsterionPrimeRuntimeClient(session)

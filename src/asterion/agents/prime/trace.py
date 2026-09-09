@@ -47,7 +47,9 @@ def _reject() -> NoReturn:
     raise PrimeTraceError("trace is unavailable")
 
 
-def _snapshot(value: object, *, depth: int = 0, nodes: list[int] | None = None) -> object:
+def _snapshot(
+    value: object, *, depth: int = 0, nodes: list[int] | None = None
+) -> object:
     if nodes is None:
         nodes = [0]
     nodes[0] += 1
@@ -74,9 +76,15 @@ def _snapshot(value: object, *, depth: int = 0, nodes: list[int] | None = None) 
             copied[key] = _snapshot(item, depth=depth + 1, nodes=nodes)
         return MappingProxyType(dict(sorted(copied.items())))
     if type(value) is list:
-        return tuple(_snapshot(item, depth=depth + 1, nodes=nodes) for item in cast(list[object], value))
+        return tuple(
+            _snapshot(item, depth=depth + 1, nodes=nodes)
+            for item in cast(list[object], value)
+        )
     if type(value) is tuple:
-        return tuple(_snapshot(item, depth=depth + 1, nodes=nodes) for item in cast(tuple[object, ...], value))
+        return tuple(
+            _snapshot(item, depth=depth + 1, nodes=nodes)
+            for item in cast(tuple[object, ...], value)
+        )
     _reject()
 
 
@@ -91,7 +99,11 @@ def _plain(value: object) -> object:
 def _canonical_bytes(value: object) -> bytes:
     try:
         encoded = json.dumps(
-            _plain(value), allow_nan=False, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            _plain(value),
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
         ).encode("utf-8")
     except (TypeError, UnicodeEncodeError, ValueError):
         _reject()
@@ -174,7 +186,9 @@ def validate_trace(entries: object) -> tuple[PrimeTraceEntry, ...]:
             _reject()
         if entry.previous_sha256 != expected_previous:
             _reject()
-        if entry.sha256 != _entry_digest(sequence, entry.kind, identities, payload, expected_previous):
+        if entry.sha256 != _entry_digest(
+            sequence, entry.kind, identities, payload, expected_previous
+        ):
             _reject()
         expected_previous = entry.sha256
         validated.append(
@@ -209,7 +223,9 @@ class PrimeTraceRecorder:
     def __init__(self, directory: Path | str) -> None:
         if not isinstance(directory, (Path, str)):
             _reject()
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        flags = (
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
         descriptor: int | None = None
         try:
             descriptor = os.open(os.fspath(directory), flags)
@@ -263,7 +279,9 @@ class PrimeTraceRecorder:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         file_descriptor: int | None = None
         try:
-            file_descriptor = os.open(_SEAL_FILE, flags, 0o600, dir_fd=self._directory_fd)
+            file_descriptor = os.open(
+                _SEAL_FILE, flags, 0o600, dir_fd=self._directory_fd
+            )
             self._write_descriptor(file_descriptor, payload)
         except OSError:
             _reject()
@@ -272,10 +290,17 @@ class PrimeTraceRecorder:
                 os.close(file_descriptor)
 
     def append(
-        self, kind: str, identities: Mapping[str, str], private_payload: Mapping[str, object]
+        self,
+        kind: str,
+        identities: Mapping[str, str],
+        private_payload: Mapping[str, object],
     ) -> PrimeTraceEntry:
         trace_descriptor = self._trace_fd
-        if self._seal is not None or self._directory_fd is None or trace_descriptor is None:
+        if (
+            self._seal is not None
+            or self._directory_fd is None
+            or trace_descriptor is None
+        ):
             _reject()
         if type(kind) is not str or not kind or len(kind) > 128:
             _reject()
@@ -287,7 +312,9 @@ class PrimeTraceRecorder:
             _reject()
         stable_identities = _identities(identities)
         payload = _payload(private_payload)
-        if self._identities is not None and dict(self._identities) != dict(stable_identities):
+        if self._identities is not None and dict(self._identities) != dict(
+            stable_identities
+        ):
             _reject()
         entry = self._append_entry(kind, stable_identities, payload)
         if self._identities is None:
@@ -307,7 +334,9 @@ class PrimeTraceRecorder:
             identities=identities,
             payload=payload,
             previous_sha256=previous,
-            sha256=_entry_digest(len(self._entries) + 1, kind, identities, payload, previous),
+            sha256=_entry_digest(
+                len(self._entries) + 1, kind, identities, payload, previous
+            ),
         )
         self._write_descriptor(
             trace_descriptor,
@@ -365,6 +394,16 @@ class PrimeTraceRecorder:
             os.close(self._directory_fd)
             self._directory_fd = None
         return seal
+
+    def close(self) -> None:
+        """Release an unsealed operator-owned trace without publishing it."""
+
+        if self._trace_fd is not None:
+            os.close(self._trace_fd)
+            self._trace_fd = None
+        if self._directory_fd is not None:
+            os.close(self._directory_fd)
+            self._directory_fd = None
 
 
 __all__ = (

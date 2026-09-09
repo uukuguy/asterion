@@ -74,9 +74,7 @@ _NATIVE_DIAGNOSTIC_MESSAGES = MappingProxyType(
         _NativeDiagnostic.MESSAGE_UPDATE_MALFORMED: (
             "Asterion-prime message update is malformed"
         ),
-        _NativeDiagnostic.USAGE_MALFORMED: (
-            "Asterion-prime usage event is malformed"
-        ),
+        _NativeDiagnostic.USAGE_MALFORMED: ("Asterion-prime usage event is malformed"),
         _NativeDiagnostic.TOOL_CALL_MALFORMED: (
             "Asterion-prime tool call is malformed"
         ),
@@ -201,6 +199,7 @@ class AsterionPrimeSession:
         extension_binding: PiExtensionBinding,
         extension_lease: PiExtensionLease,
         approved_command: tuple[str, ...],
+        approved_environment: Mapping[str, str] | None = None,
         limits: AsterionPrimeLimits = ASTERION_PRIME_LIMITS,
     ) -> None:
         try:
@@ -209,6 +208,7 @@ class AsterionPrimeSession:
                 extension_binding,
                 extension_lease,
                 approved_command,
+                approved_environment,
                 limits,
             )
         except Exception:
@@ -234,6 +234,7 @@ class AsterionPrimeSession:
         binding: PiExtensionBinding,
         lease: PiExtensionLease,
         approved_command: tuple[str, ...],
+        approved_environment: Mapping[str, str] | None,
         limits: AsterionPrimeLimits,
     ) -> None:
         if (
@@ -262,10 +263,22 @@ class AsterionPrimeSession:
         if type(config) is not PiRpcConfig:
             raise ProtocolError("Asterion-prime launch material is invalid")
         environment = dict(lease.environment)
+        try:
+            configured_environment = (
+                environment
+                if approved_environment is None
+                else dict(approved_environment)
+            )
+        except (TypeError, ValueError):
+            raise ProtocolError("Asterion-prime launch material is invalid") from None
         if (
             environment.get(_SOURCE_NAME) != binding.path.name
             or type(environment.get(_SOURCE_SHA256)) is not str
-            or dict(config.environment) != environment
+            or any(
+                configured_environment.get(name) != value
+                for name, value in environment.items()
+            )
+            or dict(config.environment) != configured_environment
             or config.inherited_fds != lease.inherited_fds
             or config.command != approved_command
             or approved_command[-2:] != lease.command_args()
@@ -490,15 +503,11 @@ class AsterionPrimeSession:
     def _validate_message_update(payload: Mapping[str, object]) -> None:
         assistant = payload.get("assistantMessageEvent")
         if not isinstance(assistant, Mapping):
-            raise _NativeEventRejected(
-                _NativeDiagnostic.MESSAGE_UPDATE_MALFORMED
-            )
+            raise _NativeEventRejected(_NativeDiagnostic.MESSAGE_UPDATE_MALFORMED)
         if assistant.get("type") != "text_delta":
             return
         if type(assistant.get("delta")) is not str:
-            raise _NativeEventRejected(
-                _NativeDiagnostic.MESSAGE_UPDATE_MALFORMED
-            )
+            raise _NativeEventRejected(_NativeDiagnostic.MESSAGE_UPDATE_MALFORMED)
 
     @staticmethod
     def _assistant_usage(payload: Mapping[str, object]) -> Mapping[str, object] | None:

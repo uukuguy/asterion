@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import asyncio
 import tempfile
 import tomllib
 import unittest
@@ -32,6 +34,7 @@ from asterion.applications.prime.p7.ipython_host import (
 from asterion.applications.prime.p7.operator import (
     P7OperatorError,
     P7RuntimeSelection,
+    build_p7_operator_resources,
     p7_runtime_options,
     resolve_p7_runtime,
 )
@@ -55,8 +58,7 @@ from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSEMBLY = (
-    ROOT
-    / "src/asterion/applications/prime/assemblies/prime-arc-agi-3-solving.json"
+    ROOT / "src/asterion/applications/prime/assemblies/prime-arc-agi-3-solving.json"
 )
 
 
@@ -79,10 +81,14 @@ class _Engine:
 
 
 class _Worker:
+    def __init__(self) -> None:
+        self.starts = 0
+
     async def start(
         self, p7_client: P7ClientFacade, *, signal: CancellationSignal
     ) -> None:
         del p7_client, signal
+        self.starts += 1
 
     async def execute_cell(
         self, code: str, *, signal: CancellationSignal
@@ -226,7 +232,9 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             lowered,
         )
 
-    def test_operator_selection_is_fixed_and_runtime_options_are_immutable(self) -> None:
+    def test_operator_selection_is_fixed_and_runtime_options_are_immutable(
+        self,
+    ) -> None:
         selection = resolve_p7_runtime({"DEEPSEEK_API_KEY": "private-token"})
 
         self.assertEqual(
@@ -300,6 +308,83 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
             self.assertFalse(launch.extension_lease.closed)
             cast(AsterionPrimeRuntimeClient, runtime)._session.close()
+
+    def test_operator_builds_composed_native_runtime_without_starting_edges(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            extension = root / "prime_ipython.mjs"
+            extension.write_text(
+                "export default function extension() {}\n", encoding="utf-8"
+            )
+            trace_root = root / "trace"
+            trace_root.mkdir()
+            worker = _Worker()
+            process_starts: list[object] = []
+
+            def forbidden_popen(
+                *args: object, **kwargs: object
+            ) -> subprocess.Popen[bytes]:
+                process_starts.append((args, kwargs))
+                raise AssertionError("Pi process must remain inert")
+
+            resources = build_p7_operator_resources(
+                environment={"DEEPSEEK_API_KEY": "private-token"},
+                pi_base_command=("/usr/bin/pi", "--mode", "rpc"),
+                extension_path=extension,
+                working_directory=root,
+                worker=worker,
+                engine=_Engine(),
+                private_trace_root=trace_root,
+                popen=forbidden_popen,
+            )
+            composed = compose_installed_provider(
+                create_provider(),
+                runtime_factories=RuntimeFactoryRegistry(()),
+                installed_packages=(create_prime_arc_agi_3_solver_package(),),
+            )
+            assembly = composed.applications[0].assemblies[0]
+            assert assembly.runtime_binding is not None
+            runtime = assembly.runtime_binding.factory(
+                RuntimeFactoryContext(
+                    provider_id=composed.provider_id,
+                    application_id="prime.arc-agi-3-solving",
+                    application_version="1.0.0",
+                    runtime_id=assembly.runtime_id,
+                    assembly_path=assembly.path,
+                    options=resources.runtime_options,
+                    host_services=resources.host_services,
+                )
+            )
+
+            launch = cast(
+                PreflightedPrimeLaunch,
+                resources.host_services["prime.pi-extension"],
+            )
+            self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
+            self.assertEqual(
+                launch.approved_command,
+                (
+                    "/usr/bin/pi",
+                    "--mode",
+                    "rpc",
+                    "--provider",
+                    "deepseek",
+                    "--model",
+                    "deepseek-v4-flash",
+                    *launch.extension_lease.command_args(),
+                ),
+            )
+            self.assertEqual(
+                launch.rpc_session.config.environment["DEEPSEEK_API_KEY"],
+                "private-token",
+            )
+            self.assertEqual(worker.starts, 0)
+            self.assertEqual(process_starts, [])
+            self.assertNotIn("private-token", repr(resources))
+            cast(AsterionPrimeRuntimeClient, runtime)._session.close()
+            asyncio.run(resources.close())
 
     def test_runtime_factory_failure_closes_unhanded_lease(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
