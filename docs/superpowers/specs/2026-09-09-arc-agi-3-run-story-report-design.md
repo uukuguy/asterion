@@ -1,7 +1,7 @@
 # ARC-AGI-3 Run Story Report Design
 
 **Date:** 2026-09-09  
-**Status:** Under user review
+**Status:** Approved
 **Scope:** Asterion Prime application-owned ARC-AGI-3 solve artifacts and local report viewer
 
 ## Purpose
@@ -75,7 +75,9 @@ The compiler receives one explicit absolute run directory. It does not scan for 
 - `trace/prime-trace.jsonl` plus `prime-trace.seal.json` for ordered, hash-chained actions and identities;
 - the single recording below `recordings/` for the initial observation and post-action frames;
 - `worker-cells.jsonl` for private reasoning evidence used by the narrator;
-- optional future timing and usage fields recorded by the application runner.
+- `usage.reported` events emitted by Pi and persisted into the application-owned
+  private trace as authoritative input/output token counts;
+- optional future timing fields recorded by the application runner.
 
 The evidence reader validates the summary schema, sealed trace, stable identities, action sequence, frame count, frame shape, recording-to-trace correspondence, and terminal-state consistency before producing facts. Ambiguous or missing required inputs fail closed. Incomplete runs may omit a trace seal only when their summary truthfully identifies a non-completed terminal condition; such reports carry an explicit `UNVERIFIED` or `PARTIAL` evidence badge rather than a completion seal.
 
@@ -92,6 +94,13 @@ The internal application-owned model is `asterion.prime.arc-agi-3-run-story/v1`.
 - evidence-backed notable transitions such as collision/no-op, large visual change, state change, and completion.
 
 Missing measurements render as “未记录”; they are never reconstructed from filenames, filesystem modification times, or mockup values. In particular, the current successful run reports the actual `43` worker cells from `summary.json`; the earlier visual mockup's `41` is not carried into the artifact.
+
+Pi already reports token usage on assistant `message_end` events. The P7 event
+projector must retain those counts in private application evidence before it
+projects the public receipt-only stream. The report compiler sums only validated
+persisted usage records. Runs created before that persistence exists remain
+explicitly “未记录”; token counts are never reconstructed from text length or a
+provider invoice.
 
 The fact model is frozen before narration. Narration cannot change actions, frames, counts, identities, score, status, timestamps, or verification badges.
 
@@ -224,7 +233,10 @@ Broader repository checks are run only if implementation touches packaged resour
 
 The first delivery will:
 
-1. add the application-owned evidence reader, normalized process-data compiler, narrative validator, renderer, and loopback viewer;
+1. persist Pi's authoritative token-usage events in private P7 evidence without
+   widening the public receipt, then add the application-owned evidence reader,
+   normalized process-data compiler, narrative validator, renderer, and loopback
+   viewer;
 2. add CLI actions that compile one explicit run, add a versioned analysis, regenerate a web render, and serve the fixed artifact catalog;
 3. generate the first real data bundle, versioned analysis, and web render for `ls20-9607627b` from `p7-live-20260909065351`;
 4. verify that the report uses the recorded 23 actions, score `3.267621`, completion and replay seals, real frames, model identity, and 43 worker cells;
