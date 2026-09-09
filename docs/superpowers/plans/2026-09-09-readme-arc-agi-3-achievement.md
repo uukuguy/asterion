@@ -31,7 +31,7 @@
 
 **Interfaces:**
 - Consumes: the sealed run's normalized `data/frames.jsonl` and the operator-supplied `arc-agi-3-ls20.png` report screenshot.
-- Produces: repository-relative assets used by both README files; the GIF is 384×384 and the PNG remains at its original pixel dimensions.
+- Produces: repository-relative assets used by both README files; the GIF is 384×384 and the PNG remains at its original pixel dimensions. The source contains 30 environment frames; GIF encoding may coalesce identical consecutive frames while preserving their combined display duration.
 
 - [ ] **Step 1: Validate the source evidence before writing assets**
 
@@ -95,7 +95,7 @@ images[0].save(
 PY
 ```
 
-Expected: `docs/assets/arc-agi-3/solve-replay.gif` exists, contains 30 frames, uses nearest-neighbor scaling, and holds the final frame for 1.8 seconds.
+Expected: `docs/assets/arc-agi-3/solve-replay.gif` exists, derives from all 30 source frames, uses nearest-neighbor scaling, preserves a total duration of 16.3 seconds, and holds the final frame for 1.8 seconds. Pillow may encode the five identical source frames at indexes 16-20 as one 2.5-second GIF frame.
 
 - [ ] **Step 3: Copy the approved report screenshot without resizing it**
 
@@ -120,7 +120,13 @@ gif_path = Path("docs/assets/arc-agi-3/solve-replay.gif")
 png_path = Path("docs/assets/arc-agi-3/solve-report.png")
 with Image.open(gif_path) as image:
     assert image.size == (384, 384)
-    assert image.n_frames == 30
+    durations = []
+    for index in range(image.n_frames):
+        image.seek(index)
+        durations.append(image.info["duration"])
+    assert image.n_frames == 26
+    assert sum(durations) == 16_300
+    assert durations[-1] == 1_800
 with Image.open(png_path) as image:
     assert image.width >= 1500
     assert image.height >= 1500
