@@ -20,6 +20,7 @@ from asterion.applications.prime.p7.ipython_host import (
     RestrictedPersistentIpythonWorker,
     p7_client_facade,
 )
+from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
 from asterion.applications.prime.runtime_binding import PreflightedPrimeLaunch
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
 from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
@@ -183,7 +184,7 @@ class P7OperatorResources:
         self._bridge.close()
         ipython = cast(PersistentIpythonHost, self.host_services["prime.ipython"])
         await ipython.close()
-        trace = cast(PrimeTraceRecorder, self.host_services["prime.private-trace"])
+        trace = cast(P7PrivateTraceReceipt, self.host_services["prime.private-trace"])
         trace.close()
         launch = cast(PreflightedPrimeLaunch, self.host_services["prime.pi-extension"])
         launch.extension_lease.close()
@@ -333,6 +334,7 @@ def build_p7_operator_resources(
             worker=worker, p7_client=p7_client_facade(broker)
         )
         trace = PrimeTraceRecorder(private_trace_root)
+        private_trace = P7PrivateTraceReceipt(broker, trace)
         bridge = _IpythonBridgeServer(parent, ipython)
         bridge.start()
         parent = None
@@ -341,7 +343,7 @@ def build_p7_operator_resources(
                 "prime.arc-broker": broker,
                 "prime.ipython": ipython,
                 "prime.pi-extension": launch,
-                "prime.private-trace": trace,
+                "prime.private-trace": private_trace,
             },
             runtime_options=p7_runtime_options(selection),
             _bridge=bridge,

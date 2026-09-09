@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import FrozenInstanceError
+from hashlib import sha256
 from typing import AsyncIterator, cast
 import unittest
 
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
+from asterion.capabilities.prime_arc_agi_3_solver import provider as solver_provider
 from asterion.capabilities.execution import CapabilityInvocation
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
     CAPABILITY_REF,
@@ -72,6 +74,45 @@ class _ReceiptAccessor:
 
 
 class TestPrimeArcAgi3SolveReceipt(unittest.TestCase):
+    def test_only_the_application_owned_p7_prompt_is_admitted(self) -> None:
+        domain = b"asterion.prime-p7-solve-prompt/v1\0"
+        self.assertEqual(
+            solver_provider.P7_SOLVE_PROMPT_SHA256,
+            sha256(domain + P7_SOLVE_PROMPT.encode("utf-8")).hexdigest(),
+        )
+        receipt = PrimeArcAgi3SolveReceipt.create(
+            run_id="native-reject",
+            completed_level_count=1,
+            primitive_action_count=2,
+            partial_game_score="1.000000",
+        )
+        for rejected in (
+            "solve this arbitrary puzzle",
+            "solve-first-public-level",
+            "Use ACTION1 for seeded game ls20-9607627b",
+        ):
+            with self.subTest(rejected=rejected):
+                runtime = _NativeRuntime(receipt)
+                invocation = CapabilityInvocation(
+                    capability_ref=CAPABILITY_REF,
+                    manifest={
+                        "kind": "capability",
+                        "capability_id": CAPABILITY_REF.capability_id,
+                        "version": CAPABILITY_REF.version,
+                    },
+                    run_id=receipt.run_id,
+                    input_text=rejected,
+                    upstream_artifacts=(),
+                    runtime=runtime,
+                    host_services={"prime.private-trace": _ReceiptAccessor(receipt)},
+                )
+
+                with self.assertRaisesRegex(
+                    Exception, "Prime solver runtime is unavailable"
+                ):
+                    asyncio.run(PrimeArcAgi3SolvingImplementation().execute(invocation))
+                self.assertEqual(runtime.requests, [])
+
     def test_native_implementation_requires_and_forwards_the_solve_prompt(self) -> None:
         receipt = PrimeArcAgi3SolveReceipt.create(
             run_id="native-solve",

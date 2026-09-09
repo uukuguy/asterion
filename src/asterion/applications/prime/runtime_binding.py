@@ -9,6 +9,7 @@ from asterion.agents.prime.session import AsterionPrimeSession
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcStatus
 from asterion.applications.prime.p7.ipython_host import PersistentIpythonHost
+from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
 from asterion.runtime.factory import (
     RuntimeFactoryBinding,
     RuntimeFactoryContext,
@@ -112,7 +113,11 @@ def build_asterion_prime_runtime(
     try:
         ipython = context.host_services.get("prime.ipython")
         broker = context.host_services.get("prime.arc-broker")
-        trace = context.host_services.get("prime.private-trace")
+        trace_service = context.host_services.get("prime.private-trace")
+        trace_adapter = (
+            trace_service if type(trace_service) is P7PrivateTraceReceipt else None
+        )
+        trace = None if trace_adapter is None else trace_adapter.runtime_recorder
         if (
             context.provider_id != "prime-applications"
             or context.application_id != "prime.arc-agi-3-solving"
@@ -126,6 +131,9 @@ def build_asterion_prime_runtime(
             or getattr(ipython, "_lost", True)
             or type(broker) is not ArcBroker
             or broker.status() != ArcStatus(0, 0, 500, "active")
+            or trace_adapter is None
+            or trace is None
+            or not trace_adapter.matches_runtime_broker(broker)
             or type(trace) is not PrimeTraceRecorder
             or trace._seal is not None
             or trace._trace_fd is None

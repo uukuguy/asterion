@@ -177,3 +177,51 @@ zero worker starts and zero Pi process starts through provider selection,
 package/plan composition, host preflight, and runtime factory construction.
 `make promotion-check` was not rerun, per task-owner direction; its previously
 recorded external configuration limitation remains deferred to Task 9.
+
+## Final prompt and receipt boundary correction
+
+The capability package now admits exactly the application-authored prompt by a
+domain-separated SHA-256 contract. The prompt remains owned by
+`applications/prime/p7/prompt.py`; the package imports no application module,
+and the digest is not published in either manifest. Arbitrary, legacy-preset,
+and seeded-answer-like inputs are rejected before the runtime is called.
+
+The `prime.private-trace` service is now an application-owned immutable,
+redacted `P7PrivateTraceReceipt` adapter rather than a raw recorder. It binds
+the exact broker and recorder, exposes only the typed recorder property needed
+by runtime validation, and implements the package receipt-accessor protocol.
+After one terminal level transition it derives the content-safe score/receipt,
+checks the requested digest, appends terminal replay evidence, and seals once.
+Early, mismatched, or repeated access fails closed; unsuccessful paths close
+the underlying trace descriptors.
+
+Final focused evidence:
+
+```text
+prompt RED: AttributeError: provider has no P7_SOLVE_PROMPT_SHA256
+receipt RED: CapabilityExecutionError: Prime solver receipt accessor is unavailable
+
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_prime_arc_agi_3_solver_package tests.test_prime_p7_native_provider \
+  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
+  tests.test_asterion_prime_architecture
+Ran 48 tests in 0.095s
+OK
+
+uv run ruff check <final focused source/tests>
+All checks passed!
+
+uv run python -m py_compile <final focused source/tests>
+exit 0
+
+uv run pyright <final focused source/tests>
+0 errors, 0 warnings, 0 informations
+
+git diff --check -- <final focused source/tests>
+exit 0
+```
+
+The composed E2E test constructs the selected runtime before using a fake
+completed native runtime to transition the same injected broker and retrieve a
+real adapter-generated package result. Provider listing and construction still
+start neither the external worker nor the Pi/model process.

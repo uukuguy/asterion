@@ -11,7 +11,7 @@ import unittest
 from importlib import metadata
 from pathlib import Path
 from types import MappingProxyType
-from typing import cast
+from typing import AsyncIterator, cast
 
 from asterion.agents.prime.session import ASTERION_PRIME_LIMITS
 from asterion.agents.prime.trace import PrimeTraceRecorder
@@ -39,6 +39,12 @@ from asterion.applications.prime.p7.operator import (
     resolve_p7_runtime,
 )
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
+from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
+from asterion.capabilities.execution import CapabilityInvocation
+from asterion.capabilities.prime_arc_agi_3_solver.host import (
+    PrimeArcAgi3SolveReceipt,
+)
+from asterion.capabilities.prime_arc_agi_3_solver.provider import CAPABILITY_REF
 from asterion.applications.prime.runtime_binding import (
     PreflightedPrimeLaunch,
     asterion_prime_runtime_binding,
@@ -50,7 +56,12 @@ from asterion.runtime.factory import (
     RuntimeFactoryError,
     RuntimeFactoryRegistry,
 )
-from asterion.runtime.host import CancellationSignal
+from asterion.runtime.host import (
+    CancellationSignal,
+    RunEvent,
+    RunRequest,
+    RuntimeManifest,
+)
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
 from asterion.runtimes.pi_extensions import PiExtensionBinding
 from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
@@ -98,6 +109,60 @@ class _Worker:
 
     async def close(self) -> None:
         pass
+
+
+class _CompletingEngine(_Engine):
+    def step(self, action: str) -> dict[str, object]:
+        del action
+        observation = self.observe()
+        observation["levels_completed"] = 1
+        observation["state"] = "FINISHED"
+        return observation
+
+
+class _CompletingRuntime:
+    def __init__(self, broker: ArcBroker) -> None:
+        self.broker = broker
+        self.requests: list[RunRequest] = []
+
+    @property
+    def manifest(self) -> RuntimeManifest:
+        return RuntimeManifest("asterion.prime", ("prime.tool.ipython",))
+
+    async def run(
+        self, request: RunRequest, *, signal: object = None
+    ) -> AsyncIterator[RunEvent]:
+        del signal
+        self.requests.append(request)
+        self.broker.act(("ACTION1",))
+        receipt = PrimeArcAgi3SolveReceipt.create(
+            run_id=request.run_id,
+            completed_level_count=1,
+            primitive_action_count=1,
+            partial_game_score="3.571429",
+        )
+        yield RunEvent(
+            request.run_id,
+            1,
+            "run.started",
+            {"capabilities": ["prime.tool.ipython"]},
+        )
+        yield RunEvent(
+            request.run_id,
+            2,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "prime.p7-solving.receipt",
+                    "kind": "p7-solving",
+                    "media_type": (
+                        "application/vnd.asterion.prime.p7-solving-receipt+json"
+                    ),
+                    "sha256": receipt.receipt_sha256.removeprefix("sha256:"),
+                }
+            },
+        )
+        yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
 
 
 class TestPrimeP7NativeProvider(unittest.TestCase):
@@ -275,8 +340,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
     def test_runtime_binding_assembles_only_exact_preflighted_services(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            launch, trace = self._launch(root)
             broker = ArcBroker(engine=_Engine())
+            launch, trace = self._launch(root, broker)
             ipython = PersistentIpythonHost(
                 worker=_Worker(), p7_client=p7_client_facade(broker)
             )
@@ -335,7 +400,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 extension_path=extension,
                 working_directory=root,
                 worker=worker,
-                engine=_Engine(),
+                engine=_CompletingEngine(),
                 private_trace_root=trace_root,
                 popen=forbidden_popen,
             )
@@ -383,13 +448,35 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             self.assertEqual(worker.starts, 0)
             self.assertEqual(process_starts, [])
             self.assertNotIn("private-token", repr(resources))
+            fake_runtime = _CompletingRuntime(
+                cast(ArcBroker, resources.host_services["prime.arc-broker"])
+            )
+            implementation = dict(composed.applications[0].implementations)[
+                CAPABILITY_REF
+            ]
+            result = asyncio.run(
+                implementation.execute(
+                    CapabilityInvocation(
+                        capability_ref=CAPABILITY_REF,
+                        manifest=assembly.plan.capability_manifests[0],
+                        run_id="native-composed",
+                        input_text=P7_SOLVE_PROMPT,
+                        upstream_artifacts=(),
+                        runtime=fake_runtime,
+                        host_services=resources.host_services,
+                    )
+                )
+            )
+            self.assertEqual(len(result.artifacts), 1)
+            self.assertEqual(fake_runtime.requests[0].input_text, P7_SOLVE_PROMPT)
             cast(AsterionPrimeRuntimeClient, runtime)._session.close()
             asyncio.run(resources.close())
 
     def test_runtime_factory_failure_closes_unhanded_lease(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            launch, trace = self._launch(root)
+            broker = ArcBroker(engine=_Engine())
+            launch, trace = self._launch(root, broker)
             context = RuntimeFactoryContext(
                 provider_id="other-provider",
                 application_id="prime.arc-agi-3-solving",
@@ -398,7 +485,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 assembly_path=ASSEMBLY.resolve(),
                 options={},
                 host_services={
-                    "prime.arc-broker": ArcBroker(engine=_Engine()),
+                    "prime.arc-broker": broker,
                     "prime.ipython": PersistentIpythonHost(
                         worker=_Worker(),
                         p7_client=p7_client_facade(ArcBroker(engine=_Engine())),
@@ -414,8 +501,57 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 asterion_prime_runtime_binding().factory(context)
             self.assertTrue(launch.extension_lease.closed)
 
+    def test_private_trace_receipt_rejects_early_mismatch_and_repeated_access(
+        self,
+    ) -> None:
+        from asterion.applications.prime.p7.private_trace import (
+            P7PrivateTraceReceipt,
+            P7PrivateTraceReceiptError,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            for case in ("early", "mismatch", "repeated"):
+                with self.subTest(case=case):
+                    trace_root = root / case
+                    trace_root.mkdir()
+                    broker = ArcBroker(engine=_CompletingEngine())
+                    recorder = PrimeTraceRecorder(trace_root)
+                    adapter = P7PrivateTraceReceipt(broker, recorder)
+                    if case != "early":
+                        broker.act(("ACTION1",))
+                    expected = PrimeArcAgi3SolveReceipt.create(
+                        run_id="adapter-run",
+                        completed_level_count=1,
+                        primitive_action_count=1,
+                        partial_game_score="3.571429",
+                    )
+                    digest = (
+                        expected.receipt_sha256
+                        if case == "repeated"
+                        else "sha256:" + "0" * 64
+                    )
+                    if case != "repeated":
+                        with self.assertRaises(P7PrivateTraceReceiptError):
+                            adapter.get_receipt(
+                                run_id="adapter-run", receipt_sha256=digest
+                            )
+                        self.assertIsNone(recorder._trace_fd)
+                        continue
+
+                    self.assertEqual(
+                        adapter.get_receipt(
+                            run_id="adapter-run", receipt_sha256=digest
+                        ),
+                        expected,
+                    )
+                    with self.assertRaises(P7PrivateTraceReceiptError):
+                        adapter.get_receipt(run_id="adapter-run", receipt_sha256=digest)
+
     @staticmethod
-    def _launch(root: Path) -> tuple[PreflightedPrimeLaunch, PrimeTraceRecorder]:
+    def _launch(
+        root: Path, broker: ArcBroker
+    ) -> tuple[PreflightedPrimeLaunch, P7PrivateTraceReceipt]:
         source = root / "prime_ipython.mjs"
         source.write_text("export default function extension() {}\n", encoding="utf-8")
         binding = PiExtensionBinding(
@@ -445,7 +581,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 extension_lease=lease,
                 approved_command=command,
             ),
-            PrimeTraceRecorder(trace_root),
+            P7PrivateTraceReceipt(broker, PrimeTraceRecorder(trace_root)),
         )
 
     def test_pyproject_registers_only_the_new_selected_p7_provider(self) -> None:

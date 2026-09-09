@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from hashlib import sha256
 from pathlib import Path
 import re
 
@@ -30,6 +31,20 @@ CAPABILITY_REF = CapabilityRef("prime.arc-agi-3-solving", "1.0.0")
 _ARTIFACT_ID = "prime.p7-solving.receipt"
 _MEDIA_TYPE = "application/vnd.asterion.prime.p7-solving-receipt+json"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_PROMPT_DOMAIN = b"asterion.prime-p7-solve-prompt/v1\0"
+P7_SOLVE_PROMPT_SHA256 = (
+    "28b3d67d33a3364c5b0c90392cfa453ba74926a6852e43f5ec95c5ebecd02b30"
+)
+
+
+def _matches_p7_prompt(value: object) -> bool:
+    if type(value) is not str:
+        return False
+    try:
+        digest = sha256(_PROMPT_DOMAIN + value.encode("utf-8", "strict")).hexdigest()
+    except UnicodeError:
+        return False
+    return digest == P7_SOLVE_PROMPT_SHA256
 
 
 class PrimeArcAgi3SolvingImplementation:
@@ -41,9 +56,7 @@ class PrimeArcAgi3SolvingImplementation:
         if (
             invocation.runtime.manifest.runtime_id != "asterion.prime"
             or invocation.runtime.manifest.capabilities != ("prime.tool.ipython",)
-            or type(invocation.input_text) is not str
-            or not invocation.input_text.strip()
-            or invocation.input_text == "solve-first-public-level"
+            or not _matches_p7_prompt(invocation.input_text)
         ):
             raise CapabilityExecutionError("Prime solver runtime is unavailable")
         events = tuple(
@@ -151,4 +164,8 @@ def create_prime_arc_agi_3_solver_package() -> InstalledCapabilityPackage:
     )
 
 
-__all__ = ("PrimeArcAgi3SolvingImplementation", "create_prime_arc_agi_3_solver_package")
+__all__ = (
+    "P7_SOLVE_PROMPT_SHA256",
+    "PrimeArcAgi3SolvingImplementation",
+    "create_prime_arc_agi_3_solver_package",
+)
