@@ -33,10 +33,17 @@ _DEADLINE_MS = 60 * 60 * 1000
 _SOURCE_NAME = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
 _TRANSPORT_PROTOCOL_ERROR = "Asterion-prime transport protocol failed"
+_NATIVE_EVENT_ERROR = "Asterion-prime native event is invalid"
 
 
 class _CallbackRejected(Exception):
     pass
+
+
+class _NativeEventRejected(Exception):
+    def __init__(self, public_message: str) -> None:
+        super().__init__()
+        self.public_message = public_message
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,7 +257,7 @@ class AsterionPrimeSession:
         def consume_checked(event: PiRpcEvent) -> None:
             nonlocal model_callbacks, settled
             if type(event) is not PiRpcEvent or event.sequence != len(native) + 1:
-                raise ProtocolError("Asterion-prime native event is malformed")
+                raise _NativeEventRejected("Asterion-prime native event is malformed")
             native.append(event)
             event_type = event.type
             payload = event.payload
@@ -259,7 +266,9 @@ class AsterionPrimeSession:
             if event_type == "turn_start":
                 model_callbacks += 1
                 if model_callbacks > self._limits.model_callbacks:
-                    raise ProtocolError("Asterion-prime model callback limit exceeded")
+                    raise _NativeEventRejected(
+                        "Asterion-prime model callback limit exceeded"
+                    )
                 return
             if event_type == "message_update":
                 self._validate_message_update(payload)
@@ -271,12 +280,26 @@ class AsterionPrimeSession:
                 return
             if event_type == "tool_execution_start":
                 call = self._tool_call(payload)
-                ledger.record_call(call)
+                if ledger.callback_count >= self._limits.tool_callbacks:
+                    raise _NativeEventRejected(
+                        "Asterion-prime tool callback limit exceeded"
+                    )
+                try:
+                    ledger.record_call(call)
+                except ProtocolError:
+                    raise _NativeEventRejected(
+                        "Asterion-prime tool call is invalid"
+                    ) from None
                 pending_calls[call.call_id] = call
                 return
             if event_type == "tool_execution_end":
                 result = self._tool_result(payload)
-                ledger.record_result(result)
+                try:
+                    ledger.record_result(result)
+                except ProtocolError:
+                    raise _NativeEventRejected(
+                        "Asterion-prime tool result is invalid"
+                    ) from None
                 call = pending_calls.pop(result.call_id)
                 if result.status == "uncertain":
                     return
@@ -295,22 +318,22 @@ class AsterionPrimeSession:
                 return
             if event_type == "agent_settled":
                 if settled:
-                    raise ProtocolError(
+                    raise _NativeEventRejected(
                         "Asterion-prime emitted duplicate terminal event"
                     )
                 settled = True
                 return
-            raise ProtocolError("Asterion-prime native event type is invalid")
+            raise _NativeEventRejected("Asterion-prime native event type is invalid")
 
         def consume(event: PiRpcEvent) -> None:
             nonlocal callback_failure
             safe_failure: ProtocolError | None = None
             try:
                 consume_checked(event)
-            except ProtocolError as error:
-                safe_failure = ProtocolError(str(error))
+            except _NativeEventRejected as error:
+                safe_failure = ProtocolError(error.public_message)
             except Exception:
-                safe_failure = ProtocolError("Asterion-prime native event is invalid")
+                safe_failure = ProtocolError(_NATIVE_EVENT_ERROR)
             if safe_failure is not None:
                 callback_failure = safe_failure
                 raise _CallbackRejected from None
@@ -324,9 +347,7 @@ class AsterionPrimeSession:
                 on_event=consume,
             )
         except _CallbackRejected:
-            protocol_failure = callback_failure or ProtocolError(
-                "Asterion-prime native event is invalid"
-            )
+            protocol_failure = callback_failure or ProtocolError(_NATIVE_EVENT_ERROR)
         except ProtocolError:
             protocol_failure = ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
         except asyncio.CancelledError:
@@ -361,11 +382,11 @@ class AsterionPrimeSession:
     def _validate_message_update(payload: Mapping[str, object]) -> None:
         assistant = payload.get("assistantMessageEvent")
         if not isinstance(assistant, Mapping):
-            raise ProtocolError("Asterion-prime message update is malformed")
+            raise _NativeEventRejected("Asterion-prime message update is malformed")
         if assistant.get("type") != "text_delta":
             return
         if type(assistant.get("delta")) is not str:
-            raise ProtocolError("Asterion-prime message update is malformed")
+            raise _NativeEventRejected("Asterion-prime message update is malformed")
 
     @staticmethod
     def _assistant_usage(payload: Mapping[str, object]) -> Mapping[str, object] | None:
@@ -376,7 +397,7 @@ class AsterionPrimeSession:
         if usage is None:
             return None
         if not isinstance(usage, Mapping):
-            raise ProtocolError("Asterion-prime usage event is malformed")
+            raise _NativeEventRejected("Asterion-prime usage event is malformed")
         input_tokens = usage.get("input")
         output_tokens = usage.get("output")
         if (
@@ -387,7 +408,7 @@ class AsterionPrimeSession:
             or type(output_tokens) is not int
             or output_tokens < 0
         ):
-            raise ProtocolError("Asterion-prime usage event is malformed")
+            raise _NativeEventRejected("Asterion-prime usage event is malformed")
         return {"input_tokens": input_tokens, "output_tokens": output_tokens}
 
     @staticmethod
@@ -402,11 +423,16 @@ class AsterionPrimeSession:
             or name != "ipython"
             or not isinstance(arguments, Mapping)
         ):
-            raise ProtocolError("Asterion-prime tool call is malformed")
+            raise _NativeEventRejected("Asterion-prime tool call is malformed")
         assert isinstance(call_id, str)
         assert isinstance(name, str)
         assert isinstance(arguments, Mapping)
-        return PrimeToolCall(call_id, name, arguments)
+        try:
+            return PrimeToolCall(call_id, name, arguments)
+        except ProtocolError:
+            raise _NativeEventRejected(
+                "Asterion-prime tool call is malformed"
+            ) from None
 
     @staticmethod
     def _tool_result(payload: Mapping[str, object]) -> PrimeToolResult:
@@ -419,11 +445,16 @@ class AsterionPrimeSession:
             or type(is_error) is not bool
             or effect not in {"certain", "uncertain"}
         ):
-            raise ProtocolError("Asterion-prime tool result is malformed")
+            raise _NativeEventRejected("Asterion-prime tool result is malformed")
         status: Literal["ok", "error", "uncertain"] = (
             "uncertain" if effect == "uncertain" else ("error" if is_error else "ok")
         )
-        return PrimeToolResult(call_id, status, ())
+        try:
+            return PrimeToolResult(call_id, status, ())
+        except ProtocolError:
+            raise _NativeEventRejected(
+                "Asterion-prime tool result is malformed"
+            ) from None
 
 
 __all__ = (

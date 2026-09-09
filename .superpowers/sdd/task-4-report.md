@@ -222,3 +222,62 @@ uv run pyright <Task 4 files plus pi_extensions.py>
 git diff --check -- <expanded Task 3/4 scoped files and report>
 exit 0
 ```
+
+## Reviewer follow-up: hostile callback exception redaction
+
+One remaining review found that a hostile native `Mapping.get()` implementation
+could raise a secret-bearing `ProtocolError`. The callback wrapper previously
+copied `str(error)`, incorrectly treating exception type as proof that its
+message was code-owned.
+
+RED evidence:
+
+```text
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session.TestAsterionPrimeSession.\
+test_hostile_callback_protocol_errors_are_fixed_and_context_free
+
+Both `outer` and `nested` subtests failed because the observed message was
+`PRIVATE-MAPPING-PROTOCOL-ERROR` instead of the fixed native-event error.
+```
+
+The fix gives static local callback diagnostics a private
+`_NativeEventRejected` channel. Every other exception crossing an untrusted
+native mapping operation, including `ProtocolError`, becomes the fixed
+`Asterion-prime native event is invalid` error. The public exception retains
+neither the hostile message nor an exception context or cause.
+
+Focused GREEN evidence:
+
+```text
+uv run python -W error::ResourceWarning -m unittest -v \
+  <hostile outer/nested regression> <unmatched-result regression> \
+  <model-cap regression> <tool-cap regression>
+Ran 4 tests in 0.013s; OK.
+
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session
+Ran 22 tests in 0.098s; OK.
+
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
+  tests.test_runtime_protocol tests.test_asterion_prime_architecture \
+  tests.test_pi_runtime_extensions
+Ran 62 tests in 0.360s; OK.
+
+uv run ruff check <expanded Task 3/4 scoped files>
+All checks passed!
+
+uv run python -m py_compile <expanded Task 3/4 scoped files>
+exit 0
+
+uv run pyright <Task 4 files plus pi_extensions.py>
+0 errors, 0 warnings, 0 informations
+
+git diff --check -- <hostile-callback scoped files and report>
+exit 0
+```
+
+Independent focused re-review returned CLEAN/APPROVE after direct outer and
+nested hostile callback probes and found no attacker-controlled
+`ProtocolError(str(...))` path in the scoped files.

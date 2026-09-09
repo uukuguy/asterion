@@ -79,6 +79,18 @@ class HostileMapping(Mapping[str, object]):
         return 1
 
 
+class SecretProtocolErrorMapping(Mapping[str, object]):
+    def __getitem__(self, key: str) -> object:
+        del key
+        raise ProtocolError("PRIVATE-MAPPING-PROTOCOL-ERROR")
+
+    def __iter__(self):
+        return iter(("private",))
+
+    def __len__(self) -> int:
+        return 1
+
+
 def native_events(*values: tuple[str, Mapping[str, object]]) -> tuple[PiRpcEvent, ...]:
     return tuple(
         PiRpcEvent(sequence=index, type=event_type, payload=payload)
@@ -502,6 +514,34 @@ class TestAsterionPrimeSession(unittest.TestCase):
         )
         self.assertIsNone(caught.exception.__context__)
         self.assertTrue(lease.closed)
+
+    def test_hostile_callback_protocol_errors_are_fixed_and_context_free(self) -> None:
+        outer = PiRpcEvent(sequence=1, type="message_update", payload={})
+        object.__setattr__(outer, "payload", SecretProtocolErrorMapping())
+        nested = PiRpcEvent(sequence=1, type="message_update", payload={})
+        object.__setattr__(
+            nested,
+            "payload",
+            {"assistantMessageEvent": SecretProtocolErrorMapping()},
+        )
+
+        for label, event in (("outer", outer), ("nested", nested)):
+            with self.subTest(label=label):
+                fixture = SessionFixture()
+                try:
+                    session, _rpc, lease = fixture.make((event,))
+                    with self.assertRaises(ProtocolError) as caught:
+                        asyncio.run(collect(session))
+                    self.assertEqual(
+                        str(caught.exception),
+                        "Asterion-prime native event is invalid",
+                    )
+                    self.assertNotIn("PRIVATE", repr(caught.exception))
+                    self.assertIsNone(caught.exception.__context__)
+                    self.assertIsNone(caught.exception.__cause__)
+                    self.assertTrue(lease.closed)
+                finally:
+                    fixture.close()
 
     def test_rejects_non_fixed_request_and_transport_deadlines(self) -> None:
         session, rpc, lease = self.fixture.make()
