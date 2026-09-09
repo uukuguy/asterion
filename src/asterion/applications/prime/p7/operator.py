@@ -20,7 +20,10 @@ from asterion.applications.prime.p7.ipython_host import (
     RestrictedPersistentIpythonWorker,
     p7_client_facade,
 )
-from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
+from asterion.applications.prime.p7.private_trace import (
+    P7PrivateTraceReceipt,
+    P7_TRACE_IDENTITIES,
+)
 from asterion.applications.prime.runtime_binding import PreflightedPrimeLaunch
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
 from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
@@ -34,8 +37,6 @@ _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
 _BRIDGE_JOIN_SECONDS = 1.0
-
-
 class P7OperatorError(RuntimeError):
     """The fixed P7 model host is unavailable."""
 
@@ -132,6 +133,77 @@ class _IpythonBridgeServer:
                 "type": "result",
             }
         return json.dumps(response, separators=(",", ":"), sort_keys=True).encode()
+
+
+class _P7BrokerClient:
+    """Worker-facing mapping adapter over the native ARC broker."""
+
+    __slots__ = ("_broker", "_recorder")
+
+    def __init__(self, broker: ArcBroker, recorder: PrimeTraceRecorder) -> None:
+        self._broker = broker
+        self._recorder = recorder
+
+    def observe(self) -> Mapping[str, object]:
+        observation = self._broker.observe()
+        return {
+            "available_actions": list(observation.available_actions),
+            "frame": observation.frame,
+            "levels_completed": observation.levels_completed,
+            "state": observation.state,
+            "win_levels": observation.win_levels,
+        }
+
+    def status(self) -> Mapping[str, object]:
+        status = self._broker.status()
+        return {
+            "actions_remaining": status.actions_remaining,
+            "levels_completed": status.levels_completed,
+            "primitive_actions": status.primitive_actions,
+            "terminal_reason": status.terminal_reason,
+        }
+
+    def act(self, actions: object) -> Mapping[str, object]:
+        if (
+            type(actions) is not list
+            or not actions
+            or any(
+                type(action) is not dict
+                or set(action) != {"data", "name"}
+                or action.get("data") != {}
+                or type(action.get("name")) is not str
+                for action in actions
+            )
+        ):
+            raise P7OperatorError("P7 host services are unavailable")
+        result = self._broker.act(tuple(str(action["name"]) for action in actions))
+        for transition in result.transitions:
+            self._recorder.append(
+                "arc.action",
+                P7_TRACE_IDENTITIES,
+                {
+                    "action": transition.action,
+                    "after_sha256": transition.after_sha256,
+                    "before_sha256": transition.before_sha256,
+                    "levels_completed": transition.levels_completed,
+                    "sequence": transition.sequence,
+                },
+            )
+        return {
+            "applied_count": result.applied_count,
+            "levels_completed": result.levels_completed,
+            "terminal": self.status(),
+            "transitions": [
+                {
+                    "action": transition.action,
+                    "after_sha256": transition.after_sha256,
+                    "before_sha256": transition.before_sha256,
+                    "levels_completed": transition.levels_completed,
+                    "sequence": transition.sequence,
+                }
+                for transition in result.transitions
+            ],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,6 +391,7 @@ def build_p7_operator_resources(
                 environment=approved_environment,
                 deadline_seconds=selection.deadline_ms / 1000,
                 inherited_fds=lease.inherited_fds,
+                compact_events=True,
             ),
             _popen=popen,
         )
@@ -329,11 +402,11 @@ def build_p7_operator_resources(
             approved_command=command,
             approved_environment=approved_environment,
         )
+        trace = PrimeTraceRecorder(private_trace_root)
         broker = ArcBroker(engine=engine)
         ipython = PersistentIpythonHost(
-            worker=worker, p7_client=p7_client_facade(broker)
+            worker=worker, p7_client=p7_client_facade(_P7BrokerClient(broker, trace))
         )
-        trace = PrimeTraceRecorder(private_trace_root)
         private_trace = P7PrivateTraceReceipt(broker, trace)
         bridge = _IpythonBridgeServer(parent, ipython)
         bridge.start()

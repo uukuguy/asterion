@@ -304,6 +304,8 @@ class PiExtensionLease:
             for descriptor, identity in self._fd_identities.items():
                 if _fd_identity(descriptor) != identity:
                     raise OSError
+            source_fd = int(self.environment[_SOURCE_FD])
+            os.lseek(source_fd, 0, os.SEEK_SET)
         except OSError:
             raise ValueError("Pi extension lease is unavailable") from None
 
