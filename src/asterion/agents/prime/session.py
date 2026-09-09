@@ -26,10 +26,7 @@ from asterion.runtimes.pi_extensions import (
 from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcEvent, PiRpcResult, PiRpcSession
 
 
-ASTERION_PRIME_CAPABILITIES = (
-    "prime.arc-agi-3-solving",
-    "prime.tool.ipython",
-)
+ASTERION_PRIME_CAPABILITIES = ("prime.tool.ipython",)
 _MODEL_CALLBACKS = 128
 _TOOL_CALLBACKS = 500
 _DEADLINE_MS = 60 * 60 * 1000

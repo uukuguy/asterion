@@ -237,10 +237,7 @@ async def collect(
             RunRequest(
                 run_id=run_id,
                 input_text="solve level one",
-                requested_capabilities=(
-                    "prime.arc-agi-3-solving",
-                    "prime.tool.ipython",
-                ),
+                requested_capabilities=("prime.tool.ipython",),
                 deadline_ms=deadline_ms,
             ),
             signal=signal,

@@ -32,7 +32,7 @@ class TestAsterionPrimeRuntimeClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.manifest.runtime_id, "asterion.prime")
         self.assertEqual(
             client.manifest.capabilities,
-            ("prime.arc-agi-3-solving", "prime.tool.ipython"),
+            ("prime.tool.ipython",),
         )
 
     async def test_run_delegates_the_immutable_request_and_signal(self) -> None:
