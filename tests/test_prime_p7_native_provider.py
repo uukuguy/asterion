@@ -47,6 +47,7 @@ from asterion.capabilities.prime_arc_agi_3_solver.host import (
 from asterion.capabilities.prime_arc_agi_3_solver.provider import CAPABILITY_REF
 from asterion.applications.prime.runtime_binding import (
     PreflightedPrimeLaunch,
+    _P7SolveEventProjector,
     asterion_prime_runtime_binding,
 )
 from asterion.capability_packages import CapabilityPackageRef
@@ -166,6 +167,64 @@ class _CompletingRuntime:
 
 
 class TestPrimeP7NativeProvider(unittest.TestCase):
+    def test_p7_projector_persists_usage_without_widening_public_stream(
+        self,
+    ) -> None:
+        async def native_events() -> AsyncIterator[RunEvent]:
+            yield RunEvent(
+                "usage-run",
+                1,
+                "run.started",
+                {"capabilities": ["prime.tool.ipython"]},
+            )
+            yield RunEvent(
+                "usage-run",
+                2,
+                "usage.reported",
+                {"input_tokens": 120, "output_tokens": 31},
+            )
+            yield RunEvent(
+                "usage-run", 3, "run.completed", {"status": "completed"}
+            )
+
+        async def collect(projector: _P7SolveEventProjector) -> tuple[RunEvent, ...]:
+            request = RunRequest(
+                run_id="usage-run",
+                input_text=P7_SOLVE_PROMPT,
+                requested_capabilities=("prime.tool.ipython",),
+            )
+            return tuple([event async for event in projector(request, native_events())])
+
+        with tempfile.TemporaryDirectory() as directory:
+            trace_root = Path(directory).resolve()
+            broker = ArcBroker(engine=_CompletingEngine())
+            broker.act(("ACTION1",))
+            adapter = P7PrivateTraceReceipt(broker, PrimeTraceRecorder(trace_root))
+            projected = asyncio.run(collect(_P7SolveEventProjector(adapter)))
+            artifact = projected[1].payload["artifact"]
+            assert isinstance(artifact, MappingProxyType)
+            adapter.get_receipt(
+                run_id="usage-run",
+                receipt_sha256="sha256:" + str(artifact["sha256"]),
+            )
+
+            self.assertEqual(
+                tuple(event.type for event in projected),
+                ("run.started", "artifact.created", "run.completed"),
+            )
+            entries = [
+                json.loads(line)
+                for line in (trace_root / "prime-trace.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            usage = [entry for entry in entries if entry["kind"] == "arc.usage.reported"]
+            self.assertEqual(
+                [entry["payload"] for entry in usage],
+                [{"input_tokens": 120, "output_tokens": 31}],
+            )
+            self.assertNotIn("usage.reported", repr(projected))
+
     def test_p7_application_selects_only_asterion_prime(self) -> None:
         provider = create_provider()
 
@@ -281,14 +340,17 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "no-ops",
             "death paths",
             "one completed level",
+            "action1 is up",
+            "never use python or shell loops to submit actions",
+            "[plan]",
         ):
             self.assertIn(required, lowered)
         for forbidden in (
             "ls20",
             "9607627b",
-            "action1",
             "seed",
             "golden trace",
+            "action3, action3, action3",
         ):
             self.assertNotIn(forbidden, lowered)
         self.assertIn(

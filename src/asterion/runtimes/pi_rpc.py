@@ -13,7 +13,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from io import UnsupportedOperation
 from pathlib import Path
@@ -21,10 +21,12 @@ from types import MappingProxyType
 from typing import Any, Protocol
 
 
-_MAX_STDOUT_LINE_BYTES = 64 * 1024
+_MAX_STDOUT_LINE_BYTES = 1024 * 1024
 _MAX_STDOUT_BYTES = 4 * 1024 * 1024
+_MAX_COMPACT_STDOUT_BYTES = 64 * 1024 * 1024
+_MAX_RAW_STDOUT_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_STDERR_BYTES = 64 * 1024
-_MAX_EVENT_COUNT = 2048
+_MAX_EVENT_COUNT = 65536
 _MAX_FINAL_TEXT_BYTES = 1024 * 1024
 _GRACEFUL_EXIT_SECONDS = 0.1
 _PROCESS_EXIT_SECONDS = 0.25
@@ -32,6 +34,83 @@ _PIPE_DRAIN_SECONDS = 0.25
 _POLL_SECONDS = 0.05
 _PROMPT_DRIVER_EXIT_SECONDS = 1.0
 _STDOUT_EOF = object()
+
+
+def normalize_pi_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
+    """Translate one native Pi assistant usage payload to the runtime contract."""
+
+    message = payload.get("message")
+    if not isinstance(message, Mapping) or message.get("role") != "assistant":
+        return None
+    usage = message.get("usage")
+    if usage is None:
+        return None
+    if not isinstance(usage, Mapping):
+        raise ValueError("Pi usage event is invalid")
+    input_tokens = usage.get("input")
+    output_tokens = usage.get("output")
+    if (
+        isinstance(input_tokens, bool)
+        or type(input_tokens) is not int
+        or input_tokens < 0
+        or isinstance(output_tokens, bool)
+        or type(output_tokens) is not int
+        or output_tokens < 0
+    ):
+        raise ValueError("Pi usage event is invalid")
+    return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+
+
+def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
+    event_type = payload.get("type")
+    if event_type == "response":
+        return {
+            key: payload[key]
+            for key in ("type", "id", "success")
+            if key in payload
+        }
+    if event_type == "message_update":
+        update = payload.get("assistantMessageEvent")
+        compact_update: dict[str, object] = {}
+        if isinstance(update, Mapping):
+            if "type" in update:
+                compact_update["type"] = update["type"]
+            if update.get("type") == "text_delta" and "delta" in update:
+                compact_update["delta"] = ""
+        return {"type": event_type, "assistantMessageEvent": compact_update}
+    if event_type == "message_end":
+        message = payload.get("message")
+        compact_message: dict[str, object] = {}
+        if isinstance(message, Mapping):
+            if "role" in message:
+                compact_message["role"] = message["role"]
+            usage = message.get("usage")
+            if isinstance(usage, Mapping):
+                compact_message["usage"] = {
+                    key: usage[key] for key in ("input", "output") if key in usage
+                }
+        return {"type": event_type, "message": compact_message}
+    if event_type == "tool_execution_start":
+        return {
+            key: payload[key]
+            for key in ("type", "toolCallId", "toolName", "args")
+            if key in payload
+        }
+    if event_type == "tool_execution_end":
+        return {
+            key: payload[key]
+            for key in ("type", "toolCallId", "isError", "effect")
+            if key in payload
+        }
+    if event_type in {
+        "agent_start",
+        "agent_end",
+        "message_start",
+        "turn_start",
+        "turn_end",
+    }:
+        return {"type": event_type}
+    return payload
 
 
 class CancellationSignal(Protocol):
@@ -190,6 +269,7 @@ class _ProcessState:
     process: subprocess.Popen[bytes]
     stdout_queue: queue.Queue[object]
     stderr: bytearray
+    compact_final_text: bytearray = field(default_factory=bytearray)
     output_error: RuntimeError | None = None
     stdout_thread: threading.Thread | None = None
     stderr_thread: threading.Thread | None = None
@@ -204,6 +284,7 @@ class PiRpcConfig:
     environment: Mapping[str, str]
     deadline_seconds: float
     inherited_fds: tuple[int, ...] = ()
+    compact_events: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -237,6 +318,8 @@ class PiRpcConfig:
             type(fd) is not int or fd < 0 for fd in self.inherited_fds
         ):
             raise ValueError("Pi RPC inherited file descriptors are invalid")
+        if type(self.compact_events) is not bool:
+            raise ValueError("Pi RPC event projection is invalid")
         object.__setattr__(self, "command", tuple(self.command))
         object.__setattr__(self, "cwd", Path(self.cwd))
         object.__setattr__(self, "environment", MappingProxyType(environment))
@@ -296,6 +379,7 @@ class PiRpcSession:
         self._thread_factory = _thread_factory
         self._state: _ProcessState | None = None
         self._last_stderr = b""
+        self._last_failure: str | None = None
         self._request_id = 0
         self._run_active = False
 
@@ -306,6 +390,10 @@ class PiRpcSession:
     @property
     def stderr(self) -> bytes:
         return self._last_stderr if self._state is None else bytes(self._state.stderr)
+
+    @property
+    def last_failure(self) -> str | None:
+        return self._last_failure
 
     def next_id(self) -> str:
         self._request_id += 1
@@ -351,13 +439,17 @@ class PiRpcSession:
     def _drain_stdout(self, state: _ProcessState) -> None:
         process = state.process
         assert process.stdout is not None
+        raw_bytes = 0
         total_bytes = 0
         event_count = 0
         try:
             for raw in process.stdout:
-                total_bytes += len(raw)
-                if len(raw) > _MAX_STDOUT_LINE_BYTES or total_bytes > _MAX_STDOUT_BYTES:
-                    self._fail_output(state, "Pi RPC output limit exceeded")
+                raw_bytes += len(raw)
+                if len(raw) > _MAX_STDOUT_LINE_BYTES:
+                    self._fail_output(state, "Pi RPC output limit exceeded (line)")
+                    return
+                if raw_bytes > _MAX_RAW_STDOUT_BYTES:
+                    self._fail_output(state, "Pi RPC output limit exceeded (raw total)")
                     return
                 try:
                     payload = json.loads(raw.decode("utf-8"))
@@ -367,9 +459,37 @@ class PiRpcSession:
                 if not isinstance(payload, dict):
                     self._fail_output(state, "Pi RPC emitted a non-object JSON value")
                     return
+                if (
+                    self.config.compact_events
+                    and payload.get("type") == "message_update"
+                ):
+                    update = payload.get("assistantMessageEvent")
+                    if (
+                        isinstance(update, Mapping)
+                        and update.get("type") == "text_delta"
+                        and isinstance(update.get("delta"), str)
+                    ):
+                        encoded = update["delta"].encode("utf-8")
+                        remaining = _MAX_FINAL_TEXT_BYTES - len(state.compact_final_text)
+                        if remaining > 0:
+                            state.compact_final_text.extend(encoded[:remaining])
+                    continue
                 event_count += 1
                 if event_count > _MAX_EVENT_COUNT:
-                    self._fail_output(state, "Pi RPC output limit exceeded")
+                    self._fail_output(state, "Pi RPC output limit exceeded (events)")
+                    return
+                if self.config.compact_events:
+                    payload = _compact_rpc_event(payload)
+                total_bytes += len(
+                    json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                )
+                projected_limit = (
+                    _MAX_COMPACT_STDOUT_BYTES
+                    if self.config.compact_events
+                    else _MAX_STDOUT_BYTES
+                )
+                if total_bytes > projected_limit:
+                    self._fail_output(state, "Pi RPC output limit exceeded (projected total)")
                     return
                 state.stdout_queue.put(payload)
         except (OSError, ValueError):
@@ -386,7 +506,7 @@ class PiRpcSession:
                 if remaining > 0:
                     state.stderr.extend(raw[:remaining])
                 if len(raw) > remaining:
-                    self._fail_output(state, "Pi RPC output limit exceeded")
+                    self._fail_output(state, "Pi RPC output limit exceeded (stderr)")
                     return
         except (OSError, ValueError):
             pass
@@ -577,9 +697,11 @@ class PiRpcSession:
         if self._run_active or self.process is not None:
             raise RuntimeError("Pi RPC session already has an active run")
         self._run_active = True
+        self._last_failure = None
         events: list[PiRpcEvent] = []
         text_parts: list[str] = []
         text_bytes = 0
+        text_truncated = False
         loop = asyncio.get_running_loop()
         local_cancel = threading.Event()
 
@@ -593,7 +715,7 @@ class PiRpcSession:
         def handle_event(
             raw: dict[str, Any], _control: PiRpcPromptControl
         ) -> PiRpcDirective:
-            nonlocal text_bytes
+            nonlocal text_bytes, text_truncated
             event_type = raw.get("type")
             if type(event_type) is not str or not event_type:
                 raise RuntimeError("Pi RPC event type is invalid")
@@ -612,14 +734,21 @@ class PiRpcSession:
                     and isinstance(assistant_event.get("delta"), str)
                 ):
                     delta = assistant_event["delta"]
-                    encoded_bytes = len(delta.encode("utf-8"))
-                    text_bytes += encoded_bytes
-                    if text_bytes > _MAX_FINAL_TEXT_BYTES:
-                        raise RuntimeError("Pi RPC output limit exceeded")
-                    text_parts.append(delta)
-            elif event_type == "agent_end":
-                raise RuntimeError("Pi RPC agent ended before agent_settled")
-            elif event_type == "agent_settled":
+                    if text_truncated:
+                        return PiRpcDirective.CONTINUE
+                    encoded = delta.encode("utf-8")
+                    remaining = _MAX_FINAL_TEXT_BYTES - text_bytes
+                    if len(encoded) <= remaining:
+                        text_parts.append(delta)
+                        text_bytes += len(encoded)
+                    else:
+                        if remaining > 0:
+                            text_parts.append(
+                                encoded[:remaining].decode("utf-8", "ignore")
+                            )
+                            text_bytes = _MAX_FINAL_TEXT_BYTES
+                        text_truncated = True
+            elif event_type in {"agent_end", "agent_settled"}:
                 return PiRpcDirective.COMPLETE
             return PiRpcDirective.CONTINUE
 
@@ -657,7 +786,12 @@ class PiRpcSession:
             self.stop()
             if state is not None and state.output_error is not None:
                 raise state.output_error
-            return PiRpcResult("".join(text_parts), tuple(events), self.stderr)
+            final_text = (
+                bytes(state.compact_final_text).decode("utf-8", "ignore")
+                if self.config.compact_events and state is not None
+                else "".join(text_parts)
+            )
+            return PiRpcResult(final_text, tuple(events), self.stderr)
         except asyncio.CancelledError:
             if driver_task is not None and not driver_task.done():
                 local_cancel.set()
@@ -674,6 +808,9 @@ class PiRpcSession:
                 except BaseException:
                     pass
             raise
+        except Exception as error:
+            self._last_failure = str(error)
+            raise
         finally:
             if driver_task is None or driver_task.done():
                 try:
@@ -689,4 +826,5 @@ __all__ = (
     "PiRpcPromptControl",
     "PiRpcResult",
     "PiRpcSession",
+    "normalize_pi_usage",
 )

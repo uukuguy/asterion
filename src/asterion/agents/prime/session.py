@@ -23,7 +23,13 @@ from asterion.runtimes.pi_extensions import (
     PiExtensionLease,
     pi_extension_loader_path,
 )
-from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcEvent, PiRpcResult, PiRpcSession
+from asterion.runtimes.pi_rpc import (
+    PiRpcConfig,
+    PiRpcEvent,
+    PiRpcResult,
+    PiRpcSession,
+    normalize_pi_usage,
+)
 
 
 ASTERION_PRIME_CAPABILITIES = ("prime.tool.ipython",)
@@ -34,6 +40,12 @@ _SOURCE_NAME = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
 _TRANSPORT_PROTOCOL_ERROR = "Asterion-prime transport protocol failed"
 _NATIVE_EVENT_ERROR = "Asterion-prime native event is invalid"
+_CONTINUE_PROMPT = (
+    "Continue solving the same interactive puzzle from the current Python "
+    "state. Use only the ipython tool, check p7_client.status() and "
+    "p7_client.observe(), then take an available primitive action when the "
+    "level is not complete."
+)
 
 
 class _CallbackRejected(Exception):
@@ -187,6 +199,8 @@ class AsterionPrimeSession:
         "_extension_finalizer",
         "_extension_lease",
         "_limits",
+        "_completion_predicate",
+        "_continuation_prompt",
         "_rpc_session",
         "_used_run_ids",
         "__weakref__",
@@ -201,6 +215,8 @@ class AsterionPrimeSession:
         approved_command: tuple[str, ...],
         approved_environment: Mapping[str, str] | None = None,
         limits: AsterionPrimeLimits = ASTERION_PRIME_LIMITS,
+        completion_predicate: Callable[[], bool] | None = None,
+        continuation_prompt: Callable[[int], str] | None = None,
     ) -> None:
         try:
             self._validate_launch_material(
@@ -221,6 +237,12 @@ class AsterionPrimeSession:
         self._extension_lease = extension_lease
         self._extension_finalizer = weakref.finalize(self, extension_lease.close)
         self._limits = limits
+        if completion_predicate is not None and not callable(completion_predicate):
+            raise ProtocolError("Asterion-prime continuation is invalid")
+        if continuation_prompt is not None and not callable(continuation_prompt):
+            raise ProtocolError("Asterion-prime continuation is invalid")
+        self._completion_predicate = completion_predicate
+        self._continuation_prompt = continuation_prompt
         self._used_run_ids: set[str] = set()
         self._active = False
         self._consumed = False
@@ -365,17 +387,19 @@ class AsterionPrimeSession:
         native: list[PiRpcEvent] = []
         pending_calls: dict[str, PrimeToolCall] = {}
         model_callbacks = 0
-        settled = False
+        round_start = 0
+        round_terminal_seen = False
         callback_failure: ProtocolError | None = None
 
         def consume_checked(event: PiRpcEvent) -> None:
-            nonlocal model_callbacks, settled
-            if type(event) is not PiRpcEvent or event.sequence != len(native) + 1:
+            nonlocal model_callbacks, round_terminal_seen
+            expected_sequence = len(native) - round_start + 1
+            if type(event) is not PiRpcEvent or event.sequence != expected_sequence:
                 raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
             native.append(event)
             event_type = event.type
             payload = event.payload
-            if event_type in {"response", "agent_start", "turn_end"}:
+            if event_type in {"response", "agent_start", "message_start", "turn_end"}:
                 return
             if event_type == "turn_start":
                 model_callbacks += 1
@@ -386,7 +410,12 @@ class AsterionPrimeSession:
                 self._validate_message_update(payload)
                 return
             if event_type == "message_end":
-                usage = self._assistant_usage(payload)
+                try:
+                    usage = normalize_pi_usage(payload)
+                except ValueError:
+                    raise _NativeEventRejected(
+                        _NativeDiagnostic.USAGE_MALFORMED
+                    ) from None
                 if usage is not None:
                     emit("usage.reported", usage)
                 return
@@ -426,10 +455,10 @@ class AsterionPrimeSession:
                     },
                 )
                 return
-            if event_type == "agent_settled":
-                if settled:
+            if event_type in {"agent_end", "agent_settled"}:
+                if round_terminal_seen:
                     raise _NativeEventRejected(_NativeDiagnostic.DUPLICATE_TERMINAL)
-                settled = True
+                round_terminal_seen = True
                 return
             raise _NativeEventRejected(_NativeDiagnostic.EVENT_TYPE_INVALID)
 
@@ -451,53 +480,88 @@ class AsterionPrimeSession:
                 callback_failure = safe_failure
                 raise _CallbackRejected from None
 
-        protocol_failure: ProtocolError | None = None
-        result: PiRpcResult | None = None
-        try:
-            result = await self._rpc_session.run(
-                request.input_text,
-                signal=signal or _NeverCancelled(),
-                on_event=consume,
-            )
-        except _CallbackRejected:
-            protocol_failure = callback_failure or ProtocolError(_NATIVE_EVENT_ERROR)
-        except ProtocolError:
-            protocol_failure = ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
+        prompt = request.input_text
+        round_index = 0
+        while True:
+            protocol_failure: ProtocolError | None = None
+            result: PiRpcResult | None = None
+            round_start = len(native)
+            round_terminal_seen = False
+            try:
+                self._extension_lease.validate_launch()
+                result = await self._rpc_session.run(
+                    prompt,
+                    signal=signal or _NeverCancelled(),
+                    on_event=consume,
+                )
+            except _CallbackRejected:
+                protocol_failure = callback_failure or ProtocolError(
+                    _NATIVE_EVENT_ERROR
+                )
+            except ProtocolError:
+                protocol_failure = ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if signal is not None and signal.cancelled:
+                    emit("run.completed", {"status": "cancelled"})
+                else:
+                    emit(
+                        "run.failed",
+                        {
+                            "code": "asterion_prime_failed",
+                            "message": "Asterion-prime execution failed.",
+                        },
+                    )
+                return
+            if protocol_failure is not None:
+                raise protocol_failure from None
+            if result is None or type(result) is not PiRpcResult:
+                raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
+            result_events: tuple[PiRpcEvent, ...] | None = None
+            result_snapshot_failed = False
+            try:
+                result_events = _snapshot_native_events(result.events)
+            except BaseException:
+                result_snapshot_failed = True
+            if result_snapshot_failed or result_events is None:
+                raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR) from None
+            if result_events != tuple(native[round_start:]):
+                raise ProtocolError("Asterion-prime native result is malformed")
             if signal is not None and signal.cancelled:
                 emit("run.completed", {"status": "cancelled"})
-            else:
+                return
+            current_round = native[round_start:]
+            if (
+                not round_terminal_seen
+                or not current_round
+                or current_round[-1].type not in {"agent_end", "agent_settled"}
+            ):
+                raise ProtocolError("Asterion-prime native terminal is invalid")
+            if self._completion_predicate is None or self._completion_predicate():
+                ledger.seal()
+                emit("run.completed", {"status": "completed"})
+                return
+            if (
+                model_callbacks >= self._limits.model_callbacks
+                or ledger.callback_count >= self._limits.tool_callbacks
+            ):
                 emit(
                     "run.failed",
                     {
-                        "code": "asterion_prime_failed",
-                        "message": "Asterion-prime execution failed.",
+                        "code": "asterion_prime_goal_not_reached",
+                        "message": "Asterion-prime goal was not reached.",
                     },
                 )
-            return
-        if protocol_failure is not None:
-            raise protocol_failure from None
-        if result is None or type(result) is not PiRpcResult:
-            raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
-        result_events: tuple[PiRpcEvent, ...] | None = None
-        result_snapshot_failed = False
-        try:
-            result_events = _snapshot_native_events(result.events)
-        except BaseException:
-            result_snapshot_failed = True
-        if result_snapshot_failed or result_events is None:
-            raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR) from None
-        if result_events != tuple(native):
-            raise ProtocolError("Asterion-prime native result is malformed")
-        if signal is not None and signal.cancelled:
-            emit("run.completed", {"status": "cancelled"})
-            return
-        if not settled or not native or native[-1].type != "agent_settled":
-            raise ProtocolError("Asterion-prime native terminal is invalid")
-        ledger.seal()
-        emit("run.completed", {"status": "completed"})
+                return
+            round_index += 1
+            prompt = (
+                _CONTINUE_PROMPT
+                if self._continuation_prompt is None
+                else self._continuation_prompt(round_index)
+            )
+            if type(prompt) is not str or not prompt:
+                raise ProtocolError("Asterion-prime continuation is invalid")
 
     @staticmethod
     def _validate_message_update(payload: Mapping[str, object]) -> None:
@@ -508,29 +572,6 @@ class AsterionPrimeSession:
             return
         if type(assistant.get("delta")) is not str:
             raise _NativeEventRejected(_NativeDiagnostic.MESSAGE_UPDATE_MALFORMED)
-
-    @staticmethod
-    def _assistant_usage(payload: Mapping[str, object]) -> Mapping[str, object] | None:
-        message = payload.get("message")
-        if not isinstance(message, Mapping) or message.get("role") != "assistant":
-            return None
-        usage = message.get("usage")
-        if usage is None:
-            return None
-        if not isinstance(usage, Mapping):
-            raise _NativeEventRejected(_NativeDiagnostic.USAGE_MALFORMED)
-        input_tokens = usage.get("input")
-        output_tokens = usage.get("output")
-        if (
-            isinstance(input_tokens, bool)
-            or type(input_tokens) is not int
-            or input_tokens < 0
-            or isinstance(output_tokens, bool)
-            or type(output_tokens) is not int
-            or output_tokens < 0
-        ):
-            raise _NativeEventRejected(_NativeDiagnostic.USAGE_MALFORMED)
-        return {"input_tokens": input_tokens, "output_tokens": output_tokens}
 
     @staticmethod
     def _tool_call(payload: Mapping[str, object]) -> PrimeToolCall:

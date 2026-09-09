@@ -20,6 +20,7 @@ from asterion.pathlight.runtime_observation import (
     RuntimeObservationBatch,
     ToolCallObservation,
 )
+from asterion.runtimes.pi_rpc import normalize_pi_usage
 
 
 _Role = Literal["system", "user", "assistant", "tool-result", "unknown"]
@@ -454,15 +455,13 @@ class PiObservationBuilder:
             if call is not None:
                 content = message.get("content", message.get("text"))
                 call.response_sha256, call.response_length = _content_summary(content)
-                usage = message.get("usage")
-                if isinstance(usage, Mapping):
-                    input_tokens = usage.get("input")
-                    output_tokens = usage.get("output")
-                    if _nonnegative_int(input_tokens) and _nonnegative_int(
-                        output_tokens
-                    ):
-                        call.input_tokens = input_tokens
-                        call.output_tokens = output_tokens
+                try:
+                    usage = normalize_pi_usage(event)
+                except ValueError:
+                    usage = None
+                if usage is not None:
+                    call.input_tokens = usage["input_tokens"]
+                    call.output_tokens = usage["output_tokens"]
                 call.status = (
                     "failed" if message.get("stopReason") == "error" else "completed"
                 )

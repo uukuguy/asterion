@@ -9,7 +9,10 @@ from asterion.agents.prime.session import AsterionPrimeSession
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcStatus
 from asterion.applications.prime.p7.ipython_host import PersistentIpythonHost
-from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
+from asterion.applications.prime.p7.private_trace import (
+    P7PrivateTraceReceipt,
+    P7PrivateTraceReceiptError,
+)
 from asterion.runtime.factory import (
     RuntimeFactoryBinding,
     RuntimeFactoryContext,
@@ -40,6 +43,14 @@ _RUNTIME_OPTIONS = {
 _ERROR = "Asterion-prime runtime configuration is invalid"
 _RECEIPT_ARTIFACT = "prime.p7-solving.receipt"
 _RECEIPT_MEDIA_TYPE = "application/vnd.asterion.prime.p7-solving-receipt+json"
+
+
+def _p7_level_completed(broker: ArcBroker) -> bool:
+    try:
+        receipt = broker.seal()
+    except Exception:
+        return False
+    return receipt.levels_completed == 1 and receipt.terminal_reason == "level-completed"
 
 
 @dataclass(frozen=True, repr=False, slots=True)
@@ -122,6 +133,34 @@ class _P7SolveEventProjector:
                     request.run_id, sequence, event.type, event.to_mapping()["payload"]
                 )
                 continue
+            if event.type == "run.failed":
+                sequence += 1
+                yield RunEvent(
+                    request.run_id,
+                    sequence,
+                    event.type,
+                    event.to_mapping()["payload"],
+                )
+                continue
+            if event.type == "usage.reported":
+                try:
+                    self._trace.record_usage(
+                        input_tokens=event.payload["input_tokens"],
+                        output_tokens=event.payload["output_tokens"],
+                    )
+                except (KeyError, P7PrivateTraceReceiptError):
+                    sequence += 1
+                    yield RunEvent(
+                        request.run_id,
+                        sequence,
+                        "run.failed",
+                        {
+                            "code": "p7_usage_invalid",
+                            "message": "P7 usage evidence is invalid.",
+                        },
+                    )
+                    return
+                continue
             if event.type != "run.completed":
                 continue
             if event.payload != {"status": "completed"}:
@@ -130,7 +169,22 @@ class _P7SolveEventProjector:
                     request.run_id, sequence, event.type, event.to_mapping()["payload"]
                 )
                 continue
-            receipt_sha256 = self._trace.expected_receipt_sha256(run_id=request.run_id)
+            try:
+                receipt_sha256 = self._trace.expected_receipt_sha256(
+                    run_id=request.run_id
+                )
+            except P7PrivateTraceReceiptError:
+                sequence += 1
+                yield RunEvent(
+                    request.run_id,
+                    sequence,
+                    "run.failed",
+                    {
+                        "code": "p7_level_not_completed",
+                        "message": "P7 level was not completed.",
+                    },
+                )
+                continue
             sequence += 1
             yield RunEvent(
                 request.run_id,
@@ -195,6 +249,7 @@ def build_asterion_prime_runtime(
             extension_lease=launch.extension_lease,
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
+            completion_predicate=lambda: _p7_level_completed(broker),
         )
         launch = None
         return AsterionPrimeRuntimeClient(

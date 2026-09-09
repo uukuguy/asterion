@@ -15,6 +15,13 @@ from asterion.capabilities.prime_arc_agi_3_solver.host import (
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _SIX_PLACES = Decimal("0.000001")
+P7_TRACE_IDENTITIES = {
+    "application_id": "prime.arc-agi-3-solving",
+    "application_version": "1.0.0",
+    "model_id": "deepseek-v4-flash",
+    "reasoning_id": "asterion.prime",
+    "runtime_id": "asterion.prime",
+}
 
 
 class P7PrivateTraceReceiptError(RuntimeError):
@@ -66,6 +73,33 @@ class P7PrivateTraceReceipt:
 
         return broker is self._broker
 
+    def record_usage(self, *, input_tokens: int, output_tokens: int) -> None:
+        """Append one validated public runtime usage event to private evidence."""
+
+        if (
+            self._accessed
+            or isinstance(input_tokens, bool)
+            or type(input_tokens) is not int
+            or input_tokens < 0
+            or isinstance(output_tokens, bool)
+            or type(output_tokens) is not int
+            or output_tokens < 0
+        ):
+            raise P7PrivateTraceReceiptError("P7 usage evidence is invalid")
+        try:
+            self._recorder.append(
+                "arc.usage.reported",
+                P7_TRACE_IDENTITIES,
+                {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                },
+            )
+        except Exception:
+            raise P7PrivateTraceReceiptError(
+                "P7 usage evidence is invalid"
+            ) from None
+
     def close(self) -> None:
         """Release an unpublished trace and prevent later receipt access."""
 
@@ -93,12 +127,7 @@ class P7PrivateTraceReceipt:
                 raise ValueError
             self._recorder.append(
                 "arc.run.completed",
-                {
-                    "application_id": "prime.arc-agi-3-solving",
-                    "application_version": "1.0.0",
-                    "run_id": run_id,
-                    "runtime_id": "asterion.prime",
-                },
+                P7_TRACE_IDENTITIES,
                 {
                     "levels_completed": broker_receipt.levels_completed,
                     "primitive_actions": broker_receipt.primitive_actions,

@@ -193,6 +193,7 @@ class SessionFixture:
         failure: BaseException | None = None,
         entered: asyncio.Event | None = None,
         release: asyncio.Event | None = None,
+        completion_predicate: Callable[[], bool] | None = None,
     ) -> tuple[AsterionPrimeSession, FakePiRpcSession, PiExtensionLease]:
         lease = self.binding.preflight()
         config = PiRpcConfig(
@@ -217,6 +218,7 @@ class SessionFixture:
             extension_lease=lease,
             approved_command=config.command,
             limits=ASTERION_PRIME_LIMITS,
+            completion_predicate=completion_predicate,
         )
         return session, rpc, lease
 
@@ -315,6 +317,27 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertEqual(events[-1].payload, {"status": "completed"})
         self.assertNotIn("solved", repr(events))
         self.assertEqual(rpc.calls, 1)
+        self.assertTrue(lease.closed)
+
+    def test_unsatisfied_completion_predicate_continues_next_round(self) -> None:
+        checks = 0
+
+        def complete_after_second_round() -> bool:
+            nonlocal checks
+            checks += 1
+            return checks == 2
+
+        session, rpc, lease = self.fixture.make(
+            final_text="private",
+            completion_predicate=complete_after_second_round,
+        )
+
+        events = asyncio.run(collect(session))
+
+        validate_event_stream([event.to_mapping() for event in events])
+        self.assertEqual(rpc.calls, 2)
+        self.assertEqual(checks, 2)
+        self.assertEqual(events[-1].payload, {"status": "completed"})
         self.assertTrue(lease.closed)
 
     def test_abandoned_unstarted_session_closes_owned_lease(self) -> None:

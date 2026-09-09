@@ -17,6 +17,7 @@ from asterion.runtimes.pi_rpc import (
     PiRpcEvent,
     PiRpcResult,
     PiRpcSession,
+    normalize_pi_usage,
 )
 
 
@@ -46,7 +47,7 @@ elif mode == "agent-end":
     emit({"type": "response", "id": request["id"], "success": True})
     emit({"type": "agent_end"})
 elif mode == "oversized":
-    sys.stdout.write(" " * (64 * 1024 + 1) + "\n")
+    sys.stdout.write(" " * (1024 * 1024 + 1) + "\n")
     sys.stdout.flush()
 elif mode == "final-oversized":
     emit({"type": "response", "id": request["id"], "success": True})
@@ -66,12 +67,12 @@ elif mode == "stderr-oversized":
     emit({"type": "agent_settled"})
 elif mode == "stdout-total-oversized":
     emit({"type": "response", "id": request["id"], "success": True})
-    for _ in range(130):
+    for _ in range(513):
         emit({"type": "progress", "padding": "x" * (32 * 1024)})
     emit({"type": "agent_settled"})
 elif mode == "event-count-oversized":
     emit({"type": "response", "id": request["id"], "success": True})
-    for index in range(2048):
+    for index in range(65536):
         emit({"type": "progress", "index": index})
     emit({"type": "agent_settled"})
 elif mode == "deadline":
@@ -146,6 +147,29 @@ class PiRpcSessionTests(unittest.TestCase):
     def command(self, mode: str, *args: str) -> tuple[str, ...]:
         return (sys.executable, "-u", str(self.fake), mode, *args)
 
+    def test_normalize_pi_usage_projects_public_runtime_fields(self) -> None:
+        self.assertEqual(
+            normalize_pi_usage(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "usage": {"input": 120, "output": 31},
+                    }
+                }
+            ),
+            {"input_tokens": 120, "output_tokens": 31},
+        )
+        self.assertIsNone(normalize_pi_usage({"message": {"role": "user"}}))
+        with self.assertRaisesRegex(ValueError, "Pi usage event is invalid"):
+            normalize_pi_usage(
+                {
+                    "message": {
+                        "role": "assistant",
+                        "usage": {"input": True, "output": 1},
+                    }
+                }
+            )
+
     def collect(
         self,
         mode: str,
@@ -154,6 +178,7 @@ class PiRpcSessionTests(unittest.TestCase):
         deadline_seconds: float = 2.0,
         args: tuple[str, ...] = (),
         on_event=None,
+        compact_events: bool = False,
     ) -> PiRpcResult:
         session = PiRpcSession(
             PiRpcConfig(
@@ -161,6 +186,7 @@ class PiRpcSessionTests(unittest.TestCase):
                 cwd=self.work,
                 environment={},
                 deadline_seconds=deadline_seconds,
+                compact_events=compact_events,
             )
         )
         return asyncio.run(
@@ -189,6 +215,15 @@ class PiRpcSessionTests(unittest.TestCase):
         self.assertEqual(result.events, tuple(observed))
         self.assertEqual([event.sequence for event in result.events], [1, 2, 3, 4, 5])
         self.assertEqual(result.stderr, b"")
+
+    def test_compact_projection_retains_final_text_without_emitting_deltas(self) -> None:
+        result = self.collect("ack-settled", compact_events=True)
+
+        self.assertEqual(result.final_text, "done")
+        self.assertEqual(
+            [event.type for event in result.events],
+            ["response", "agent_start", "agent_settled"],
+        )
 
     def test_async_callbacks_run_on_calling_loop_thread_and_context(self) -> None:
         calling_thread = threading.get_ident()
@@ -302,17 +337,20 @@ class PiRpcSessionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "before prompt acknowledgement"):
             self.collect("no-ack")
 
-    def test_agent_end_is_not_a_settled_terminal(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "before agent_settled"):
-            self.collect("agent-end")
+    def test_agent_end_is_accepted_as_native_terminal(self) -> None:
+        result = self.collect("agent-end")
+
+        self.assertEqual([event.type for event in result.events], ["response", "agent_end"])
 
     def test_stdout_line_cap_fails_closed(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "output limit"):
             self.collect("oversized")
 
-    def test_final_text_cap_fails_closed(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "output limit"):
-            self.collect("final-oversized")
+    def test_final_text_cap_truncates_without_breaking_terminal(self) -> None:
+        result = self.collect("final-oversized")
+
+        self.assertLessEqual(len(result.final_text.encode("utf-8")), 1024 * 1024)
+        self.assertEqual(result.events[-1].type, "agent_settled")
 
     def test_stderr_cap_fails_closed_even_when_stdout_settles(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "output limit"):
