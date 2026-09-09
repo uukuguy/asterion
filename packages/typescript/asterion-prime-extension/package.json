@@ -1,0 +1,13 @@
+{
+  "name": "@asterion/prime-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "../asterion-runtime/node_modules/.bin/tsc -p tsconfig.json && node -e \"require('node:fs').renameSync('dist/ipython-extension.js','dist/ipython-extension.mjs')\"",
+    "test": "npm run build && node --test test/ipython-extension.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
