@@ -21,6 +21,7 @@ from asterion.applications.prime.p7.run_story import (
     compile_run,
     read_run_evidence,
     render_web,
+    export_standalone,
 )
 from asterion.applications.prime.p7.run_story.operator_narrator import (
     PiRunStoryNarrator,
@@ -400,6 +401,25 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
         self.assertIn("ONLINE EXPERIMENTS", html)
         self.assertIn("CONTROLLED EXECUTION", html)
         self.assertNotIn("3.571429", html)
+
+    def test_exports_one_self_contained_offline_html_file(self) -> None:
+        artifact_root = self.root / "artifacts" / "arc-agi-3"
+        bundle = compile_run(write_completed_fixture(self.root), artifact_root)
+        analysis = analyze_bundle(bundle.run_root, _StubNarrator(_valid_story()))
+        render = render_web(bundle.run_root, analysis.analysis_id)
+
+        first = export_standalone(render.render_root, artifact_root / "exports")
+        second = export_standalone(render.render_root, artifact_root / "exports")
+
+        self.assertEqual(first.path, second.path)
+        self.assertEqual(first.sha256, second.sha256)
+        html = first.path.read_text(encoding="utf-8")
+        self.assertNotIn('src="assets/', html)
+        self.assertNotIn('href="assets/', html)
+        self.assertIn("data:image/png;base64,", html)
+        self.assertIn("const __ASTERION_EMBEDDED__", html)
+        self.assertIn("fixture-run", html)
+        self.assertIn("一次受控移动验证", html)
 
     def test_server_is_read_only_utf8_and_rejects_escape(self) -> None:
         artifact_root = self.root / "artifacts" / "arc-agi-3"

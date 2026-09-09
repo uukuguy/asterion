@@ -13,6 +13,7 @@ from .model import RunStoryError, canonical_json
 from .operator_narrator import load_operator_narrator
 from .renderer import render_web
 from .server import serve_artifacts
+from .standalone import export_standalone
 from .storage import safe_id
 
 
@@ -39,6 +40,10 @@ def _parser() -> argparse.ArgumentParser:
     render.add_argument("game_id")
     render.add_argument("run_id")
     render.add_argument("--analysis", required=True)
+    export = commands.add_parser("export")
+    export.add_argument("game_id")
+    export.add_argument("run_id")
+    export.add_argument("--render", required=True)
     serve = commands.add_parser("serve")
     serve.add_argument("--open-browser", action="store_true")
     return parser
@@ -85,6 +90,17 @@ def main(
                 "render_id": result.render_id,
                 "game_id": args.game_id,
                 "run_id": args.run_id,
+            }
+        elif args.command == "export":
+            bundle = _bundle(root, args.game_id, args.run_id)
+            result = export_standalone(
+                bundle / "renders" / "web" / safe_id(args.render),
+                root / "exports",
+            )
+            payload = {
+                "file": result.path.relative_to(Path.cwd()).as_posix(),
+                "render_id": result.render_id,
+                "sha256": result.sha256,
             }
         else:
             root.mkdir(mode=0o750, parents=True, exist_ok=True)
