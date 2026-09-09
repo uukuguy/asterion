@@ -395,6 +395,10 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
         )
         html = (first.render_root / "index.html").read_text(encoding="utf-8")
         self.assertIn("ARC-AGI-3", html)
+        self.assertIn("关卡目标、对象含义和动力学规则不会直接给出", html)
+        self.assertIn("解题事实、事后分析与网页渲染分别版本化", html)
+        self.assertIn("ONLINE EXPERIMENTS", html)
+        self.assertIn("CONTROLLED EXECUTION", html)
         self.assertNotIn("3.571429", html)
 
     def test_server_is_read_only_utf8_and_rejects_escape(self) -> None:

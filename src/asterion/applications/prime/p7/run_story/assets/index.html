@@ -35,8 +35,8 @@
   <section class="solve"><div class="sec-head"><h2>解题过程：怎样发现规则并完成关卡</h2><p>观察 → 假设 → 实验 → 修正 → 完成</p></div><div id="solve-story" class="storyline"></div></section>
   <section class="understand"><div class="under-intro"><small>POST-SOLVE MODEL</small><h2>解题后，对题目的理解</h2><p>事实与推断分别标注；没有证据的结论保持未确定。</p></div><div id="understanding" class="answers"></div></section>
   <footer class="background">
-    <article class="about"><span class="eyebrow">ABOUT ARC-AGI-3</span><h2>交互式抽象推理协议</h2><p>智能体只得到通用操作接口，不直接知道关卡目标；它必须在有限动作内观察反馈、归纳规则、规划，并以环境状态确认完成。</p><div class="terms"><b>HIDDEN OBJECTIVE</b> · STATEFUL WORLD · ONLINE PLANNING · BOUNDED ACTIONS</div></article>
-    <article class="about asterion"><span class="eyebrow">ABOUT ASTERION</span><h2>通用智能体应用框架</h2><p>Asterion 负责应用装配、能力注入、运行时适配、受控执行和证据边界。本报告由 Asterion Prime 的密封运行记录生成。</p><div class="terms"><b>Application → Asterion Prime → Pi → Model → ARC Broker → Sealed Replay</b></div></article>
+    <article class="about"><span class="eyebrow">ABOUT ARC-AGI-3</span><h2>交互式抽象推理协议</h2><p>ARC-AGI-3 将抽象推理置于可交互环境中。智能体只获得当前画面、可用动作与执行反馈；关卡目标、对象含义和动力学规则不会直接给出，必须从状态变化中自行归纳。</p><p>每一步都会改变后续可观察状态，试错因此带有成本。智能体需要保留工作记忆，区分因果变化与动画噪声，提出可证伪假设并规划下一次实验，最终以环境返回的完成状态和可重放轨迹确认结果。</p><div class="terms"><b>HIDDEN OBJECTIVE</b> · STATEFUL WORLD · ONLINE EXPERIMENTS · BOUNDED ACTIONS</div></article>
+    <article class="about asterion"><span class="eyebrow">ABOUT ASTERION</span><h2>通用智能体应用框架</h2><p>Asterion 是可组合的通用智能体应用框架。它把应用装配、能力包、运行时、宿主服务和受控执行分成清晰边界，使同一套应用逻辑能够连接不同模型与智能体运行时，而不把凭据或执行权限交给模型。</p><p>Asterion Prime 在此基础上组合 Pi、语言模型、持久 IPython 与 ARC Broker，记录动作、画面、usage 和终态证据。解题事实、事后分析与网页渲染分别版本化，因此报告可验证、可重建，也可在样式更新后重新生成。</p><div class="terms"><b>COMPOSABLE CAPABILITIES</b> · RUNTIME ADAPTERS · CONTROLLED EXECUTION · VERIFIABLE ARTIFACTS</div></article>
   </footer>
 </main>
 <script src="assets/app.js"></script>
