@@ -9,6 +9,7 @@ import weakref
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+import asterion.agents.prime.session as prime_session_module
 from asterion.agents.prime.session import (
     ASTERION_PRIME_LIMITS,
     AsterionPrimeSession,
@@ -89,6 +90,29 @@ class SecretProtocolErrorMapping(Mapping[str, object]):
 
     def __len__(self) -> int:
         return 1
+
+
+class SecretBaseExceptionMapping(Mapping[str, object]):
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    def __getitem__(self, key: str) -> object:
+        del key
+        raise self._error
+
+    def __iter__(self):
+        return iter(("private",))
+
+    def __len__(self) -> int:
+        return 1
+
+
+def forged_native_diagnostic() -> BaseException:
+    diagnostic_type = prime_session_module._NativeEventRejected
+    error = diagnostic_type.__new__(diagnostic_type)
+    BaseException.__init__(error, "PRIVATE-FORGED-DIAGNOSTIC")
+    object.__setattr__(error, "code", "PRIVATE-FORGED-DIAGNOSTIC")
+    return error
 
 
 def native_events(*values: tuple[str, Mapping[str, object]]) -> tuple[PiRpcEvent, ...]:
@@ -542,6 +566,50 @@ class TestAsterionPrimeSession(unittest.TestCase):
                     self.assertTrue(lease.closed)
                 finally:
                     fixture.close()
+
+    def test_hostile_callback_base_exceptions_and_forgery_are_fixed(self) -> None:
+        error_factories = (
+            ("cancelled", lambda: asyncio.CancelledError("PRIVATE-CANCELLED")),
+            ("keyboard", lambda: KeyboardInterrupt("PRIVATE-KEYBOARD")),
+            ("system-exit", lambda: SystemExit("PRIVATE-SYSTEM-EXIT")),
+            ("forged-diagnostic", forged_native_diagnostic),
+        )
+        for placement in ("outer", "nested"):
+            for label, error_factory in error_factories:
+                with self.subTest(placement=placement, error=label):
+                    hostile = SecretBaseExceptionMapping(error_factory())
+                    event = PiRpcEvent(
+                        sequence=1,
+                        type="message_update",
+                        payload={},
+                    )
+                    object.__setattr__(
+                        event,
+                        "payload",
+                        hostile
+                        if placement == "outer"
+                        else {"assistantMessageEvent": hostile},
+                    )
+                    fixture = SessionFixture()
+                    try:
+                        session, _rpc, lease = fixture.make((event,))
+                        caught: BaseException | None = None
+                        try:
+                            asyncio.run(collect(session))
+                        except BaseException as error:
+                            caught = error
+                        self.assertIs(type(caught), ProtocolError)
+                        assert caught is not None
+                        self.assertEqual(
+                            str(caught),
+                            "Asterion-prime native event is invalid",
+                        )
+                        self.assertNotIn("PRIVATE", repr(caught))
+                        self.assertIsNone(caught.__context__)
+                        self.assertIsNone(caught.__cause__)
+                        self.assertTrue(lease.closed)
+                    finally:
+                        fixture.close()
 
     def test_rejects_non_fixed_request_and_transport_deadlines(self) -> None:
         session, rpc, lease = self.fixture.make()

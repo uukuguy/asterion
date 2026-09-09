@@ -281,3 +281,56 @@ exit 0
 Independent focused re-review returned CLEAN/APPROVE after direct outer and
 nested hostile callback probes and found no attacker-controlled
 `ProtocolError(str(...))` path in the scoped files.
+
+## Reviewer follow-up: structural hostile-event snapshot
+
+A broader review demonstrated that exception-class filtering was not a
+sufficient provenance boundary. An untrusted mapping could raise a
+`BaseException` outside `Exception`, or forge the module-private diagnostic
+exception with attacker text.
+
+RED evidence:
+
+```text
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session.TestAsterionPrimeSession.\
+test_hostile_callback_base_exceptions_and_forgery_are_fixed
+
+All eight outer/nested subtests failed:
+- CancelledError, KeyboardInterrupt, and SystemExit escaped as their native
+  BaseException types.
+- forged `_NativeEventRejected` instances exposed
+  `PRIVATE-FORGED-DIAGNOSTIC`.
+```
+
+The callback now snapshots the complete native event recursively into a new
+`PiRpcEvent` whose mappings/sequences contain only immutable builtin
+JSON-compatible values. This snapshot is the only untrusted-access phase and
+runs inside a `BaseException` guard that always selects the fixed native-event
+error. Only the trusted snapshot reaches native classification. Code-owned
+diagnostics use a closed `_NativeDiagnostic` enum and immutable enum-to-static
+message mapping; `_NativeEventRejected` refuses arbitrary strings.
+
+Focused GREEN evidence:
+
+```text
+uv run python -W error::ResourceWarning -m unittest -v \
+  <hostile BaseException/forgery regression> \
+  <hostile ProtocolError regression> <trusted malformed tool-result regression>
+Ran 3 tests in 0.041s; OK.
+
+uv run pyright src/asterion/agents/prime/session.py \
+  tests/test_asterion_prime_session.py
+0 errors, 0 warnings, 0 informations
+
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
+  tests.test_runtime_protocol tests.test_asterion_prime_architecture \
+  tests.test_pi_runtime_extensions
+Ran 63 tests in 0.349s; OK.
+```
+
+Independent focused re-review returned CLEAN/APPROVE. It additionally probed
+real task cancellation and confirmed that transport/task `CancelledError`
+still propagates unchanged, while payload-originated cancellation exceptions
+are normalized only inside the untrusted snapshot boundary.

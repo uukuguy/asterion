@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import weakref
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
+from enum import Enum
+from types import MappingProxyType
 from typing import Literal
 
 from asterion.agents.prime.tools import (
@@ -40,10 +43,105 @@ class _CallbackRejected(Exception):
     pass
 
 
+class _NativeDiagnostic(Enum):
+    EVENT_MALFORMED = "event_malformed"
+    MODEL_CALLBACK_LIMIT = "model_callback_limit"
+    TOOL_CALLBACK_LIMIT = "tool_callback_limit"
+    TOOL_CALL_INVALID = "tool_call_invalid"
+    TOOL_RESULT_INVALID = "tool_result_invalid"
+    DUPLICATE_TERMINAL = "duplicate_terminal"
+    EVENT_TYPE_INVALID = "event_type_invalid"
+    MESSAGE_UPDATE_MALFORMED = "message_update_malformed"
+    USAGE_MALFORMED = "usage_malformed"
+    TOOL_CALL_MALFORMED = "tool_call_malformed"
+    TOOL_RESULT_MALFORMED = "tool_result_malformed"
+
+
+_NATIVE_DIAGNOSTIC_MESSAGES = MappingProxyType(
+    {
+        _NativeDiagnostic.EVENT_MALFORMED: "Asterion-prime native event is malformed",
+        _NativeDiagnostic.MODEL_CALLBACK_LIMIT: (
+            "Asterion-prime model callback limit exceeded"
+        ),
+        _NativeDiagnostic.TOOL_CALLBACK_LIMIT: (
+            "Asterion-prime tool callback limit exceeded"
+        ),
+        _NativeDiagnostic.TOOL_CALL_INVALID: "Asterion-prime tool call is invalid",
+        _NativeDiagnostic.TOOL_RESULT_INVALID: "Asterion-prime tool result is invalid",
+        _NativeDiagnostic.DUPLICATE_TERMINAL: (
+            "Asterion-prime emitted duplicate terminal event"
+        ),
+        _NativeDiagnostic.EVENT_TYPE_INVALID: (
+            "Asterion-prime native event type is invalid"
+        ),
+        _NativeDiagnostic.MESSAGE_UPDATE_MALFORMED: (
+            "Asterion-prime message update is malformed"
+        ),
+        _NativeDiagnostic.USAGE_MALFORMED: (
+            "Asterion-prime usage event is malformed"
+        ),
+        _NativeDiagnostic.TOOL_CALL_MALFORMED: (
+            "Asterion-prime tool call is malformed"
+        ),
+        _NativeDiagnostic.TOOL_RESULT_MALFORMED: (
+            "Asterion-prime tool result is malformed"
+        ),
+    }
+)
+
+
 class _NativeEventRejected(Exception):
-    def __init__(self, public_message: str) -> None:
+    def __init__(self, code: _NativeDiagnostic) -> None:
+        if type(code) is not _NativeDiagnostic:
+            raise TypeError("Asterion-prime native diagnostic is invalid")
         super().__init__()
-        self.public_message = public_message
+        self.code = code
+
+
+def _snapshot_native_value(value: object, active: set[int] | None = None) -> object:
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError
+        return value
+    if active is None:
+        active = set()
+    if isinstance(value, Mapping):
+        identity = id(value)
+        if identity in active:
+            raise ValueError
+        active.add(identity)
+        try:
+            snapshot: dict[str, object] = {}
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise ValueError
+                snapshot[key] = _snapshot_native_value(item, active)
+            return MappingProxyType(snapshot)
+        finally:
+            active.remove(identity)
+    if isinstance(value, (list, tuple)):
+        if type(value) not in {list, tuple}:
+            raise ValueError
+        identity = id(value)
+        if identity in active:
+            raise ValueError
+        active.add(identity)
+        try:
+            return tuple(_snapshot_native_value(item, active) for item in value)
+        finally:
+            active.remove(identity)
+    raise ValueError
+
+
+def _snapshot_native_event(event: object) -> PiRpcEvent:
+    if type(event) is not PiRpcEvent:
+        raise ValueError
+    payload = _snapshot_native_value(event.payload)
+    if not isinstance(payload, Mapping):
+        raise ValueError
+    return PiRpcEvent(sequence=event.sequence, type=event.type, payload=payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,7 +355,7 @@ class AsterionPrimeSession:
         def consume_checked(event: PiRpcEvent) -> None:
             nonlocal model_callbacks, settled
             if type(event) is not PiRpcEvent or event.sequence != len(native) + 1:
-                raise _NativeEventRejected("Asterion-prime native event is malformed")
+                raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
             native.append(event)
             event_type = event.type
             payload = event.payload
@@ -266,9 +364,7 @@ class AsterionPrimeSession:
             if event_type == "turn_start":
                 model_callbacks += 1
                 if model_callbacks > self._limits.model_callbacks:
-                    raise _NativeEventRejected(
-                        "Asterion-prime model callback limit exceeded"
-                    )
+                    raise _NativeEventRejected(_NativeDiagnostic.MODEL_CALLBACK_LIMIT)
                 return
             if event_type == "message_update":
                 self._validate_message_update(payload)
@@ -281,14 +377,12 @@ class AsterionPrimeSession:
             if event_type == "tool_execution_start":
                 call = self._tool_call(payload)
                 if ledger.callback_count >= self._limits.tool_callbacks:
-                    raise _NativeEventRejected(
-                        "Asterion-prime tool callback limit exceeded"
-                    )
+                    raise _NativeEventRejected(_NativeDiagnostic.TOOL_CALLBACK_LIMIT)
                 try:
                     ledger.record_call(call)
                 except ProtocolError:
                     raise _NativeEventRejected(
-                        "Asterion-prime tool call is invalid"
+                        _NativeDiagnostic.TOOL_CALL_INVALID
                     ) from None
                 pending_calls[call.call_id] = call
                 return
@@ -298,7 +392,7 @@ class AsterionPrimeSession:
                     ledger.record_result(result)
                 except ProtocolError:
                     raise _NativeEventRejected(
-                        "Asterion-prime tool result is invalid"
+                        _NativeDiagnostic.TOOL_RESULT_INVALID
                     ) from None
                 call = pending_calls.pop(result.call_id)
                 if result.status == "uncertain":
@@ -318,20 +412,23 @@ class AsterionPrimeSession:
                 return
             if event_type == "agent_settled":
                 if settled:
-                    raise _NativeEventRejected(
-                        "Asterion-prime emitted duplicate terminal event"
-                    )
+                    raise _NativeEventRejected(_NativeDiagnostic.DUPLICATE_TERMINAL)
                 settled = True
                 return
-            raise _NativeEventRejected("Asterion-prime native event type is invalid")
+            raise _NativeEventRejected(_NativeDiagnostic.EVENT_TYPE_INVALID)
 
         def consume(event: PiRpcEvent) -> None:
             nonlocal callback_failure
+            try:
+                trusted_event = _snapshot_native_event(event)
+            except BaseException:
+                callback_failure = ProtocolError(_NATIVE_EVENT_ERROR)
+                raise _CallbackRejected from None
             safe_failure: ProtocolError | None = None
             try:
-                consume_checked(event)
+                consume_checked(trusted_event)
             except _NativeEventRejected as error:
-                safe_failure = ProtocolError(error.public_message)
+                safe_failure = ProtocolError(_NATIVE_DIAGNOSTIC_MESSAGES[error.code])
             except Exception:
                 safe_failure = ProtocolError(_NATIVE_EVENT_ERROR)
             if safe_failure is not None:
@@ -382,11 +479,15 @@ class AsterionPrimeSession:
     def _validate_message_update(payload: Mapping[str, object]) -> None:
         assistant = payload.get("assistantMessageEvent")
         if not isinstance(assistant, Mapping):
-            raise _NativeEventRejected("Asterion-prime message update is malformed")
+            raise _NativeEventRejected(
+                _NativeDiagnostic.MESSAGE_UPDATE_MALFORMED
+            )
         if assistant.get("type") != "text_delta":
             return
         if type(assistant.get("delta")) is not str:
-            raise _NativeEventRejected("Asterion-prime message update is malformed")
+            raise _NativeEventRejected(
+                _NativeDiagnostic.MESSAGE_UPDATE_MALFORMED
+            )
 
     @staticmethod
     def _assistant_usage(payload: Mapping[str, object]) -> Mapping[str, object] | None:
@@ -397,7 +498,7 @@ class AsterionPrimeSession:
         if usage is None:
             return None
         if not isinstance(usage, Mapping):
-            raise _NativeEventRejected("Asterion-prime usage event is malformed")
+            raise _NativeEventRejected(_NativeDiagnostic.USAGE_MALFORMED)
         input_tokens = usage.get("input")
         output_tokens = usage.get("output")
         if (
@@ -408,7 +509,7 @@ class AsterionPrimeSession:
             or type(output_tokens) is not int
             or output_tokens < 0
         ):
-            raise _NativeEventRejected("Asterion-prime usage event is malformed")
+            raise _NativeEventRejected(_NativeDiagnostic.USAGE_MALFORMED)
         return {"input_tokens": input_tokens, "output_tokens": output_tokens}
 
     @staticmethod
@@ -423,16 +524,14 @@ class AsterionPrimeSession:
             or name != "ipython"
             or not isinstance(arguments, Mapping)
         ):
-            raise _NativeEventRejected("Asterion-prime tool call is malformed")
+            raise _NativeEventRejected(_NativeDiagnostic.TOOL_CALL_MALFORMED)
         assert isinstance(call_id, str)
         assert isinstance(name, str)
         assert isinstance(arguments, Mapping)
         try:
             return PrimeToolCall(call_id, name, arguments)
         except ProtocolError:
-            raise _NativeEventRejected(
-                "Asterion-prime tool call is malformed"
-            ) from None
+            raise _NativeEventRejected(_NativeDiagnostic.TOOL_CALL_MALFORMED) from None
 
     @staticmethod
     def _tool_result(payload: Mapping[str, object]) -> PrimeToolResult:
@@ -445,7 +544,7 @@ class AsterionPrimeSession:
             or type(is_error) is not bool
             or effect not in {"certain", "uncertain"}
         ):
-            raise _NativeEventRejected("Asterion-prime tool result is malformed")
+            raise _NativeEventRejected(_NativeDiagnostic.TOOL_RESULT_MALFORMED)
         status: Literal["ok", "error", "uncertain"] = (
             "uncertain" if effect == "uncertain" else ("error" if is_error else "ok")
         )
@@ -453,7 +552,7 @@ class AsterionPrimeSession:
             return PrimeToolResult(call_id, status, ())
         except ProtocolError:
             raise _NativeEventRejected(
-                "Asterion-prime tool result is malformed"
+                _NativeDiagnostic.TOOL_RESULT_MALFORMED
             ) from None
 
 
