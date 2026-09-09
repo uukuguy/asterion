@@ -26,7 +26,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: test-typescript test-rust check-rust
 .PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded prime-readme-rlm-smoke prime-smoke-core
 .PHONY: prime-parity-inventory prime-verify-system-parity
-.PHONY: prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run prime-p7-solve prime-p7-seeded-run prime-apps-preflight
+.PHONY: prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run prime-p7-solve asterion-prime-p7-solve prime-p7-seeded-run prime-apps-preflight
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
 .PHONY: test.prime-long-running.provider-free test.prime-long-running.bounded
 .PHONY: test.prime-continual-harness.provider-free
@@ -298,6 +298,10 @@ prime-p7-solve:
 				--runtime prime.agent \
 				--run-id "$$1" \
 				--input solve-first-public-level' prime-p7-solve "$$run_id"
+
+asterion-prime-p7-solve:
+	@printf '%s\n' '[asterion-prime-p7-solve] ARC-AGI-3: native Asterion-prime fixed live solve' >&2; \
+		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'unset ASTERION_PRIME_NODE; export PYTHONPATH="$(CURDIR)/src"; exec ../external-prime/arc-agi-3/venv/bin/python tools/run_asterion_prime_p7.py'
 
 prime-p7-seeded-run:
 	@run_id="$${PRIME_RUN_ID:-prime-p7-seeded-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
