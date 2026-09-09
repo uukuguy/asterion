@@ -95,12 +95,14 @@ The internal application-owned model is `asterion.prime.arc-agi-3-run-story/v1`.
 
 Missing measurements render as “未记录”; they are never reconstructed from filenames, filesystem modification times, or mockup values. In particular, the current successful run reports the actual `43` worker cells from `summary.json`; the earlier visual mockup's `41` is not carried into the artifact.
 
-Pi already reports token usage on assistant `message_end` events. The P7 event
-projector must retain those counts in private application evidence before it
-projects the public receipt-only stream. The report compiler sums only validated
-persisted usage records. Runs created before that persistence exists remain
-explicitly “未记录”; token counts are never reconstructed from text length or a
-provider invoice.
+Pi already reports token usage on assistant `message_end` events. The common Pi
+runtime adapter normalizes those native fields into the existing public
+`asterion.agent-runtime/v1` `usage.reported` event. Asterion Prime consumes that
+public event without redefining its shape, while the P7 projector retains the
+counts in private application evidence before producing its receipt-only public
+projection. The report compiler sums only validated persisted usage records.
+Runs created before that persistence exists remain explicitly “未记录”; token
+counts are never reconstructed from text length or a provider invoice.
 
 The fact model is frozen before narration. Narration cannot change actions, frames, counts, identities, score, status, timestamps, or verification badges.
 

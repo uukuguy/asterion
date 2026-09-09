@@ -4,7 +4,7 @@
 
 **Goal:** Build an Asterion Prime-owned pipeline that compiles one explicit ARC-AGI-3 run into durable normalized process data, adds versioned evidence-cited interpretation, regenerates a professional interactive web report, and serves every report from one loopback-only catalog URL.
 
-**Architecture:** Keep the existing solver behavior untouched while extending future private traces with Pi's already-normalized usage events. A P7 application module validates an explicit private run root, publishes one immutable fact bundle below `artifacts/arc-agi-3/`, and then creates independently versioned analyses and web renders bound by SHA-256 identities. Only the analysis step may use an operator-injected narrator; compilation, rendering, catalog refresh, and serving are deterministic and provider-free.
+**Architecture:** Keep the existing solver behavior untouched. The common Pi runtime adapter translates native usage into the existing `asterion.agent-runtime/v1` contract; Asterion Prime consumes that public event, and P7 privately persists it before applying its receipt-only public projection. A P7 application module then validates an explicit private run root, publishes one immutable fact bundle below `artifacts/arc-agi-3/`, and creates independently versioned analyses and web renders bound by SHA-256 identities.
 
 **Tech Stack:** Python 3.10+ standard library, existing Asterion sealed trace validation and Pi RPC integration, plain UTF-8 HTML/CSS/JavaScript with Canvas, `unittest`, Hatch package resources.
 
@@ -18,7 +18,8 @@
 - No generated artifact may contain prompts, credentials, absolute paths, provider payloads, raw worker code/output, or arbitrary exception text.
 - Canonical JSON is UTF-8, sorted-key, compact JSON ending in one newline; JSONL preserves semantic record order.
 - Directories use mode `0750`, files use mode `0640`, symlink inputs/outputs fail closed, and immutable content IDs are never overwritten.
-- Pi `message_end` usage is authoritative and must be privately persisted and summed; legacy runs without persisted usage render it as `未记录`. Recording timestamps may be preserved as event facts but must not be promoted into an inferred elapsed metric.
+- The common Pi adapter, not Asterion Prime, normalizes native `message_end` usage into the public `usage.reported` contract. P7 privately persists and sums it; legacy runs without persisted usage render it as `未记录`.
+- Recording timestamps may be preserved as event facts but must not be promoted into an inferred elapsed metric.
 - The current run must report 23 actions, score `3.267621`, model `deepseek-v4-flash`, 43 reasoning cells, completed level 1, sealed trace, and verified replay.
 - The web render uses no CDN, web framework, telemetry, remote font, or runtime network request beyond same-origin artifact reads.
 - Verification is intentionally bounded to `uv run python -m unittest -v tests.test_prime_arc_agi_3_run_story`, plus `make promotion-check` because packaged resources change.
@@ -41,6 +42,9 @@
 - Create `src/asterion/applications/prime/p7/run_story/assets/styles.css`: approved professional poster layout and responsive rules.
 - Create `src/asterion/applications/prime/p7/run_story/assets/app.js`: catalog navigation, Canvas playback, diff overlay, and synchronized story selection.
 - Create `src/asterion/applications/prime/p7/run_story/assets/header-art.png`: approved ARC-AGI-3 decorative header art.
+- Modify `src/asterion/runtimes/pi_rpc.py`: expose one common native-Pi-to-runtime usage normalizer.
+- Modify `src/asterion/agents/prime/session.py`: consume the common normalizer instead of defining a Prime-specific copy.
+- Modify `src/asterion/runtimes/pi_observation.py`: reuse the same common usage-field validation.
 - Modify `src/asterion/applications/prime/p7/private_trace.py`: accumulate validated Pi usage records in the sealed private trace.
 - Modify `src/asterion/applications/prime/runtime_binding.py`: retain `usage.reported` privately before projecting the P7 public receipt-only stream.
 - Modify `src/asterion/cli.py`: route the top-level `arc-story` command before the generic parser.
@@ -48,20 +52,35 @@
 - Modify `.gitignore`: ignore only the generated `/artifacts/` tree.
 - Create `tests/test_prime_arc_agi_3_run_story.py`: one bounded test module covering deterministic facts, privacy, narration, render, and HTTP boundaries.
 
-### Task 0: Persist authoritative Pi token usage in private P7 evidence
+### Task 0: Normalize Pi usage in the public runtime adapter and persist it for P7
 
 **Files:**
+- Modify: `src/asterion/runtimes/pi_rpc.py`
+- Modify: `src/asterion/agents/prime/session.py`
+- Modify: `src/asterion/runtimes/pi_observation.py`
 - Modify: `src/asterion/applications/prime/p7/private_trace.py`
 - Modify: `src/asterion/applications/prime/runtime_binding.py`
+- Modify: `tests/test_pi_session.py`
+- Modify: `tests/test_asterion_prime_session.py`
 - Modify: `tests/test_prime_p7_native_provider.py`
 
 **Interfaces:**
-- Consumes: existing normalized runtime events of type `usage.reported` with exact payload keys `input_tokens` and `output_tokens`.
-- Produces: `P7PrivateTraceReceipt.record_usage(*, input_tokens: int, output_tokens: int) -> None`; sealed private trace entries of kind `arc.usage.reported`; unchanged public P7 event stream.
+- Consumes: native Pi `message_end` payloads with `message.role == "assistant"` and `message.usage.{input,output}`.
+- Produces: `normalize_pi_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None`; public runtime events with exact payload keys `input_tokens` and `output_tokens`; `P7PrivateTraceReceipt.record_usage(*, input_tokens: int, output_tokens: int) -> None`; sealed private trace entries of kind `arc.usage.reported`; unchanged P7 receipt-only public stream.
 
-- [ ] **Step 1: Add a regression proving usage is retained privately but not published**
+- [ ] **Step 1: Add common-adapter and P7 projection regressions**
 
 ```python
+def test_normalize_pi_usage_projects_public_runtime_fields(self) -> None:
+    payload = {"message": {"role": "assistant", "usage": {"input": 120, "output": 31}}}
+    self.assertEqual(
+        normalize_pi_usage(payload),
+        {"input_tokens": 120, "output_tokens": 31},
+    )
+    self.assertIsNone(normalize_pi_usage({"message": {"role": "user"}}))
+    with self.assertRaisesRegex(ValueError, "Pi usage event is invalid"):
+        normalize_pi_usage({"message": {"role": "assistant", "usage": {"input": True, "output": 1}}})
+
 def test_p7_projector_persists_usage_without_widening_public_stream(self) -> None:
     fixture = P7RuntimeFixture()
     fixture.native_events = (
@@ -79,13 +98,36 @@ def test_p7_projector_persists_usage_without_widening_public_stream(self) -> Non
     self.assertNotIn("usage.reported", repr(projected))
 ```
 
-- [ ] **Step 2: Run the focused P7 test and confirm failure**
+- [ ] **Step 2: Run the focused common-adapter and P7 tests and confirm failure**
 
-Run: `uv run python -m unittest -v tests.test_prime_p7_native_provider.TestPrimeP7NativeProvider.test_p7_projector_persists_usage_without_widening_public_stream`
+Run: `uv run python -m unittest -v tests.test_pi_session.PiRpcSessionTests.test_normalize_pi_usage_projects_public_runtime_fields tests.test_prime_p7_native_provider.TestPrimeP7NativeProvider.test_p7_projector_persists_usage_without_widening_public_stream`
 
-Expected: `FAIL` because the projector currently discards usage without recording it.
+Expected: `ERROR` because the common normalizer does not exist, and `FAIL` because the P7 projector discards usage without recording it.
 
-- [ ] **Step 3: Implement validated private usage recording**
+- [ ] **Step 3: Implement common Pi usage normalization and remove the Prime-specific copy**
+
+```python
+def normalize_pi_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
+    message = payload.get("message")
+    if not isinstance(message, Mapping) or message.get("role") != "assistant":
+        return None
+    usage = message.get("usage")
+    if usage is None:
+        return None
+    if not isinstance(usage, Mapping):
+        raise ValueError("Pi usage event is invalid")
+    input_tokens, output_tokens = usage.get("input"), usage.get("output")
+    if (
+        isinstance(input_tokens, bool) or type(input_tokens) is not int or input_tokens < 0
+        or isinstance(output_tokens, bool) or type(output_tokens) is not int or output_tokens < 0
+    ):
+        raise ValueError("Pi usage event is invalid")
+    return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+```
+
+Replace `AsterionPrimeSession._assistant_usage(payload)` with `normalize_pi_usage(payload)` and map its `ValueError` to the existing safe `_NativeDiagnostic.USAGE_MALFORMED`. Reuse the helper in `pi_observation.py` while keeping that module's call-association logic unchanged.
+
+- [ ] **Step 4: Implement validated private usage recording**
 
 ```python
 def record_usage(self, *, input_tokens: int, output_tokens: int) -> None:
@@ -123,17 +165,17 @@ if event.type == "usage.reported":
     continue
 ```
 
-- [ ] **Step 4: Run the focused P7 test**
+- [ ] **Step 5: Run the focused usage tests**
 
-Run: `uv run python -m unittest -v tests.test_prime_p7_native_provider.TestPrimeP7NativeProvider.test_p7_projector_persists_usage_without_widening_public_stream`
+Run: `uv run python -m unittest -v tests.test_pi_session.PiRpcSessionTests.test_normalize_pi_usage_projects_public_runtime_fields tests.test_asterion_prime_session.TestAsterionPrimeSession.test_session_emits_one_valid_terminal_and_closes_lease tests.test_prime_p7_native_provider.TestPrimeP7NativeProvider.test_p7_projector_persists_usage_without_widening_public_stream`
 
-Expected: test reports `ok`.
+Expected: all three tests report `ok`.
 
-- [ ] **Step 5: Commit private usage persistence**
+- [ ] **Step 6: Commit common normalization and private P7 persistence**
 
 ```bash
-git add src/asterion/applications/prime/p7/private_trace.py src/asterion/applications/prime/runtime_binding.py tests/test_prime_p7_native_provider.py
-git commit -m "feat: retain P7 token usage evidence"
+git add src/asterion/runtimes/pi_rpc.py src/asterion/runtimes/pi_observation.py src/asterion/agents/prime/session.py src/asterion/applications/prime/p7/private_trace.py src/asterion/applications/prime/runtime_binding.py tests/test_pi_session.py tests/test_asterion_prime_session.py tests/test_prime_p7_native_provider.py
+git commit -m "feat: normalize and retain Pi usage evidence"
 ```
 
 ### Task 1: Closed fact model and explicit evidence reader
