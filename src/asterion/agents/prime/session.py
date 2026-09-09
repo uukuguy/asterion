@@ -144,6 +144,12 @@ def _snapshot_native_event(event: object) -> PiRpcEvent:
     return PiRpcEvent(sequence=event.sequence, type=event.type, payload=payload)
 
 
+def _snapshot_native_events(events: object) -> tuple[PiRpcEvent, ...]:
+    if type(events) is not tuple:
+        raise ValueError
+    return tuple(_snapshot_native_event(event) for event in events)
+
+
 @dataclass(frozen=True, slots=True)
 class AsterionPrimeLimits:
     model_callbacks: int
@@ -465,7 +471,15 @@ class AsterionPrimeSession:
             raise protocol_failure from None
         if result is None or type(result) is not PiRpcResult:
             raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
-        if result.events != tuple(native):
+        result_events: tuple[PiRpcEvent, ...] | None = None
+        result_snapshot_failed = False
+        try:
+            result_events = _snapshot_native_events(result.events)
+        except BaseException:
+            result_snapshot_failed = True
+        if result_snapshot_failed or result_events is None:
+            raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR) from None
+        if result_events != tuple(native):
             raise ProtocolError("Asterion-prime native result is malformed")
         if signal is not None and signal.cancelled:
             emit("run.completed", {"status": "cancelled"})

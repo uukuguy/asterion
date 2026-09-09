@@ -334,3 +334,52 @@ Independent focused re-review returned CLEAN/APPROVE. It additionally probed
 real task cancellation and confirmed that transport/task `CancelledError`
 still propagates unchanged, while payload-originated cancellation exceptions
 are normalized only inside the untrusted snapshot boundary.
+
+## Reviewer follow-up: returned-event snapshot authority
+
+The final post-callback review found that callback events were trusted
+snapshots, but `PiRpcResult.events` was still compared as an unsnapshotted
+transport-owned tuple. A mutated payload equality implementation could execute
+again after the callback trust boundary.
+
+RED evidence:
+
+```text
+uv run python -W error::ResourceWarning -m unittest -v \
+  <hostile returned-event equality regression> \
+  <trusted returned-event mismatch regression>
+
+The trusted mismatch regression passed. All three hostile equality subtests
+failed: secret-bearing ProtocolError text leaked, and CancelledError/SystemExit
+escaped unchanged.
+```
+
+The session now snapshots the exact returned event tuple under a
+`BaseException` guard using the same recursive event snapshotter. The consumed
+callback snapshots and returned snapshots are the only values compared; no
+transport-owned event or mapping is accessed again. Snapshot failure raises
+the fixed transport protocol error after leaving the exception handler, so its
+public exception has neither hostile context nor cause. Trusted builtin
+mismatches still receive the static `native result is malformed` diagnostic.
+
+Focused GREEN evidence:
+
+```text
+uv run python -W error::ResourceWarning -m unittest -v \
+  <hostile returned-event equality regression> \
+  <trusted returned-event mismatch regression> \
+  <hostile callback BaseException regression> \
+  <trusted malformed tool-result regression>
+Ran 4 tests in 0.018s; OK.
+
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
+  tests.test_runtime_protocol tests.test_asterion_prime_architecture \
+  tests.test_pi_runtime_extensions
+Ran 65 tests in 0.347s; OK.
+```
+
+Independent focused re-review returned CLEAN/APPROVE. Direct probes confirmed
+fixed/context-free errors for hostile returned events, retained trusted
+mismatch diagnostics, no post-snapshot attacker access, and unchanged real
+task-cancellation propagation.

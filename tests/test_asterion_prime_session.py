@@ -36,6 +36,7 @@ class FakePiRpcSession:
         config: PiRpcConfig,
         events: tuple[PiRpcEvent, ...],
         *,
+        result_events: tuple[PiRpcEvent, ...] | None = None,
         final_text: str = "",
         failure: BaseException | None = None,
         entered: asyncio.Event | None = None,
@@ -43,6 +44,7 @@ class FakePiRpcSession:
     ) -> None:
         self.config = config
         self.events = events
+        self.result_events = result_events
         self.final_text = final_text
         self.failure = failure
         self.entered = entered
@@ -66,7 +68,11 @@ class FakePiRpcSession:
             on_event(event)
         if self.failure is not None:
             raise self.failure
-        return PiRpcResult(self.final_text, self.events, b"")
+        return PiRpcResult(
+            self.final_text,
+            self.events if self.result_events is None else self.result_events,
+            b"",
+        )
 
 
 class HostileMapping(Mapping[str, object]):
@@ -105,6 +111,25 @@ class SecretBaseExceptionMapping(Mapping[str, object]):
 
     def __len__(self) -> int:
         return 1
+
+
+class SecretResultEqualityMapping(Mapping[str, object]):
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    def __getitem__(self, key: str) -> object:
+        del key
+        raise self._error
+
+    def __iter__(self):
+        return iter(("id",))
+
+    def __len__(self) -> int:
+        return 1
+
+    def __eq__(self, other: object) -> bool:
+        del other
+        raise self._error
 
 
 def forged_native_diagnostic() -> BaseException:
@@ -163,6 +188,7 @@ class SessionFixture:
         self,
         events: tuple[PiRpcEvent, ...] = SUCCESS_EVENTS,
         *,
+        result_events: tuple[PiRpcEvent, ...] | None = None,
         final_text: str = "",
         failure: BaseException | None = None,
         entered: asyncio.Event | None = None,
@@ -179,6 +205,7 @@ class SessionFixture:
         rpc = FakePiRpcSession(
             config,
             events,
+            result_events=result_events,
             final_text=final_text,
             failure=failure,
             entered=entered,
@@ -610,6 +637,63 @@ class TestAsterionPrimeSession(unittest.TestCase):
                         self.assertTrue(lease.closed)
                     finally:
                         fixture.close()
+
+    def test_hostile_returned_event_equality_is_fixed_and_context_free(self) -> None:
+        error_factories = (
+            ("protocol", lambda: ProtocolError("PRIVATE-RESULT-PROTOCOL")),
+            ("cancelled", lambda: asyncio.CancelledError("PRIVATE-RESULT-CANCELLED")),
+            ("system-exit", lambda: SystemExit("PRIVATE-RESULT-SYSTEM-EXIT")),
+        )
+        for label, error_factory in error_factories:
+            with self.subTest(error=label):
+                result_event = PiRpcEvent(sequence=1, type="response", payload={})
+                object.__setattr__(
+                    result_event,
+                    "payload",
+                    SecretResultEqualityMapping(error_factory()),
+                )
+                returned = (result_event, *SUCCESS_EVENTS[1:])
+                fixture = SessionFixture()
+                try:
+                    session, _rpc, lease = fixture.make(
+                        SUCCESS_EVENTS,
+                        result_events=returned,
+                    )
+                    caught: BaseException | None = None
+                    try:
+                        asyncio.run(collect(session))
+                    except BaseException as error:
+                        caught = error
+                    self.assertIs(type(caught), ProtocolError)
+                    assert caught is not None
+                    self.assertEqual(
+                        str(caught),
+                        "Asterion-prime transport protocol failed",
+                    )
+                    self.assertNotIn("PRIVATE", repr(caught))
+                    self.assertIsNone(caught.__context__)
+                    self.assertIsNone(caught.__cause__)
+                    self.assertTrue(lease.closed)
+                finally:
+                    fixture.close()
+
+    def test_trusted_returned_events_must_match_callback_snapshots(self) -> None:
+        mismatched = (
+            PiRpcEvent(
+                sequence=1,
+                type="response",
+                payload={"id": "different", "success": True},
+            ),
+            *SUCCESS_EVENTS[1:],
+        )
+        session, _rpc, lease = self.fixture.make(
+            SUCCESS_EVENTS,
+            result_events=mismatched,
+        )
+
+        with self.assertRaisesRegex(ProtocolError, "native result is malformed"):
+            asyncio.run(collect(session))
+        self.assertTrue(lease.closed)
 
     def test_rejects_non_fixed_request_and_transport_deadlines(self) -> None:
         session, rpc, lease = self.fixture.make()
