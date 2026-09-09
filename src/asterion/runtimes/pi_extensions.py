@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import stat
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from asterion.immutable import RedactedImmutableMapping
@@ -23,6 +24,7 @@ _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
 _RESERVED_ENVIRONMENT_PREFIX = "ASTERION_PI_EXTENSION_"
 _LOADER_FILENAME = "asterion_pi_extension_loader.mjs"
 _MAX_SOURCE_BYTES = 4 * 1024 * 1024
+_BINDING_FINGERPRINT_DOMAIN = b"asterion.pi-extension-binding/v1\0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +46,7 @@ class PiExtensionBinding:
     capabilities: tuple[str, ...]
     inherited_fds: tuple[int, ...]
     environment: Mapping[str, str]
+    _binding_fingerprint: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if (
@@ -102,9 +105,32 @@ class PiExtensionBinding:
         if tuple(sorted(declared_fds)) != self.inherited_fds:
             raise ValueError("Pi extension binding is invalid")
         object.__setattr__(self, "environment", RedactedImmutableMapping(environment))
+        canonical = json.dumps(
+            {
+                "capabilities": list(self.capabilities),
+                "environment": environment,
+                "extension_id": self.extension_id,
+                "inherited_fds": list(self.inherited_fds),
+                "path": str(self.path),
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        object.__setattr__(
+            self,
+            "_binding_fingerprint",
+            hashlib.sha256(_BINDING_FINGERPRINT_DOMAIN + canonical).hexdigest(),
+        )
 
     def __repr__(self) -> str:
         return "<PiExtensionBinding redacted>"
+
+    @property
+    def binding_fingerprint(self) -> str:
+        """Return the opaque canonical identity copied into this binding's lease."""
+
+        return self._binding_fingerprint
 
     def preflight(self, loader_path: Path | None = None) -> PiExtensionLease:
         """Pin validated source bytes, loader identity, and declared resources."""
@@ -123,8 +149,10 @@ class PiExtensionLease:
         "inherited_fds",
         "loader_path",
         "sensitive_values",
+        "_binding_fingerprint",
         "_closed",
         "_fd_identities",
+        "_initialized",
         "_loader_digest",
         "_loader_fd",
     )
@@ -136,6 +164,7 @@ class PiExtensionLease:
         inherited_fds: tuple[int, ...],
         loader_path: Path,
         sensitive_values: tuple[str | int, ...],
+        binding_fingerprint: str,
         fd_identities: Mapping[int, tuple[int, int, int, int]],
         loader_digest: str,
         loader_fd: int,
@@ -144,10 +173,20 @@ class PiExtensionLease:
         self.inherited_fds = inherited_fds
         self.loader_path = loader_path
         self.sensitive_values = sensitive_values
+        self._binding_fingerprint = binding_fingerprint
         self._fd_identities = dict(fd_identities)
         self._loader_digest = loader_digest
         self._loader_fd = loader_fd
         self._closed = False
+        self._initialized = True
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if hasattr(self, "_initialized"):
+            raise AttributeError("Pi extension lease is immutable")
+        object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("Pi extension lease is immutable")
 
     @classmethod
     def open(
@@ -221,6 +260,7 @@ class PiExtensionLease:
                     *binding.inherited_fds,
                     *process_fds,
                 ),
+                binding_fingerprint=binding.binding_fingerprint,
                 fd_identities=identities,
                 loader_digest=loader_digest,
                 loader_fd=loader_fd,
@@ -235,6 +275,12 @@ class PiExtensionLease:
 
     def __repr__(self) -> str:
         return "<PiExtensionLease redacted>"
+
+    @property
+    def binding_fingerprint(self) -> str:
+        """Return the immutable identity of the binding that created this lease."""
+
+        return self._binding_fingerprint
 
     @property
     def closed(self) -> bool:
@@ -264,7 +310,7 @@ class PiExtensionLease:
     def close(self) -> None:
         if self._closed:
             return
-        self._closed = True
+        object.__setattr__(self, "_closed", True)
         for descriptor in (*self.inherited_fds, self._loader_fd):
             try:
                 os.close(descriptor)

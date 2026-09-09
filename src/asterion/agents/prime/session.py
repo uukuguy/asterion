@@ -32,6 +32,11 @@ _TOOL_CALLBACKS = 500
 _DEADLINE_MS = 60 * 60 * 1000
 _SOURCE_NAME = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
+_TRANSPORT_PROTOCOL_ERROR = "Asterion-prime transport protocol failed"
+
+
+class _CallbackRejected(Exception):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +75,7 @@ class AsterionPrimeSession:
 
     __slots__ = (
         "_active",
+        "_approved_command",
         "_consumed",
         "_extension_binding",
         "_extension_finalizer",
@@ -86,17 +92,23 @@ class AsterionPrimeSession:
         rpc_session: PiRpcSession,
         extension_binding: PiExtensionBinding,
         extension_lease: PiExtensionLease,
+        approved_command: tuple[str, ...],
         limits: AsterionPrimeLimits = ASTERION_PRIME_LIMITS,
     ) -> None:
         try:
             self._validate_launch_material(
-                rpc_session, extension_binding, extension_lease, limits
+                rpc_session,
+                extension_binding,
+                extension_lease,
+                approved_command,
+                limits,
             )
         except Exception:
             if type(extension_lease) is PiExtensionLease:
                 extension_lease.close()
             raise
         self._rpc_session = rpc_session
+        self._approved_command = approved_command
         self._extension_binding = extension_binding
         self._extension_lease = extension_lease
         self._extension_finalizer = weakref.finalize(self, extension_lease.close)
@@ -113,11 +125,15 @@ class AsterionPrimeSession:
         rpc_session: PiRpcSession,
         binding: PiExtensionBinding,
         lease: PiExtensionLease,
+        approved_command: tuple[str, ...],
         limits: AsterionPrimeLimits,
     ) -> None:
         if (
             type(binding) is not PiExtensionBinding
             or type(lease) is not PiExtensionLease
+            or type(approved_command) is not tuple
+            or not approved_command
+            or any(type(part) is not str or not part for part in approved_command)
             or type(limits) is not AsterionPrimeLimits
             or limits != ASTERION_PRIME_LIMITS
         ):
@@ -125,6 +141,7 @@ class AsterionPrimeSession:
         if (
             binding.extension_id != "prime.ipython"
             or binding.capabilities != ("prime.tool.ipython",)
+            or binding.binding_fingerprint != lease.binding_fingerprint
             or lease.closed
             or lease.loader_path != pi_extension_loader_path()
         ):
@@ -140,11 +157,11 @@ class AsterionPrimeSession:
         if (
             environment.get(_SOURCE_NAME) != binding.path.name
             or type(environment.get(_SOURCE_SHA256)) is not str
-            or str(binding.path) not in lease.sensitive_values
             or dict(config.environment) != environment
             or config.inherited_fds != lease.inherited_fds
-            or config.command[-2:] != lease.command_args()
-            or config.command.count(lease.command_args()[0]) != 1
+            or config.command != approved_command
+            or approved_command[-2:] != lease.command_args()
+            or approved_command.count(lease.command_args()[0]) != 1
             or config.deadline_seconds * 1000 != limits.deadline_ms
         ):
             raise ProtocolError("Asterion-prime launch material is invalid")
@@ -159,15 +176,12 @@ class AsterionPrimeSession:
                     raise ProtocolError("Asterion-prime launch material is invalid")
             elif leased != value:
                 raise ProtocolError("Asterion-prime launch material is invalid")
-        if any(
-            descriptor not in lease.sensitive_values
-            for descriptor in binding.inherited_fds
-        ):
-            raise ProtocolError("Asterion-prime launch material is invalid")
 
     def close(self) -> None:
         """Release the owned single-run lease without invoking the transport."""
 
+        if self._active:
+            raise ProtocolError("Asterion-prime already has an active request")
         self._extension_lease.close()
         self._extension_finalizer.detach()
 
@@ -228,10 +242,12 @@ class AsterionPrimeSession:
     ) -> None:
         ledger = PrimeToolLedger(max_callbacks=self._limits.tool_callbacks)
         native: list[PiRpcEvent] = []
+        pending_calls: dict[str, PrimeToolCall] = {}
         model_callbacks = 0
         settled = False
+        callback_failure: ProtocolError | None = None
 
-        def consume(event: PiRpcEvent) -> None:
+        def consume_checked(event: PiRpcEvent) -> None:
             nonlocal model_callbacks, settled
             if type(event) is not PiRpcEvent or event.sequence != len(native) + 1:
                 raise ProtocolError("Asterion-prime native event is malformed")
@@ -256,14 +272,18 @@ class AsterionPrimeSession:
             if event_type == "tool_execution_start":
                 call = self._tool_call(payload)
                 ledger.record_call(call)
-                emit(
-                    "tool.call",
-                    {"call_id": call.call_id, "name": call.name, "arguments": {}},
-                )
+                pending_calls[call.call_id] = call
                 return
             if event_type == "tool_execution_end":
                 result = self._tool_result(payload)
                 ledger.record_result(result)
+                call = pending_calls.pop(result.call_id)
+                if result.status == "uncertain":
+                    return
+                emit(
+                    "tool.call",
+                    {"call_id": call.call_id, "name": call.name, "arguments": {}},
+                )
                 emit(
                     "tool.result",
                     {
@@ -282,14 +302,33 @@ class AsterionPrimeSession:
                 return
             raise ProtocolError("Asterion-prime native event type is invalid")
 
+        def consume(event: PiRpcEvent) -> None:
+            nonlocal callback_failure
+            safe_failure: ProtocolError | None = None
+            try:
+                consume_checked(event)
+            except ProtocolError as error:
+                safe_failure = ProtocolError(str(error))
+            except Exception:
+                safe_failure = ProtocolError("Asterion-prime native event is invalid")
+            if safe_failure is not None:
+                callback_failure = safe_failure
+                raise _CallbackRejected from None
+
+        protocol_failure: ProtocolError | None = None
+        result: PiRpcResult | None = None
         try:
             result = await self._rpc_session.run(
                 request.input_text,
                 signal=signal or _NeverCancelled(),
                 on_event=consume,
             )
+        except _CallbackRejected:
+            protocol_failure = callback_failure or ProtocolError(
+                "Asterion-prime native event is invalid"
+            )
         except ProtocolError:
-            raise
+            protocol_failure = ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -304,13 +343,17 @@ class AsterionPrimeSession:
                     },
                 )
             return
-        if type(result) is not PiRpcResult or result.events != tuple(native):
+        if protocol_failure is not None:
+            raise protocol_failure from None
+        if result is None or type(result) is not PiRpcResult:
+            raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
+        if result.events != tuple(native):
             raise ProtocolError("Asterion-prime native result is malformed")
-        if not settled or not native or native[-1].type != "agent_settled":
-            raise ProtocolError("Asterion-prime native terminal is invalid")
         if signal is not None and signal.cancelled:
             emit("run.completed", {"status": "cancelled"})
             return
+        if not settled or not native or native[-1].type != "agent_settled":
+            raise ProtocolError("Asterion-prime native terminal is invalid")
         ledger.seal()
         emit("run.completed", {"status": "completed"})
 

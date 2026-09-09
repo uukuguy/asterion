@@ -152,6 +152,7 @@ class SessionFixture:
             rpc_session=rpc,  # type: ignore[arg-type]
             extension_binding=self.binding,
             extension_lease=lease,
+            approved_command=config.command,
             limits=ASTERION_PRIME_LIMITS,
         )
         return session, rpc, lease
@@ -318,6 +319,54 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertNotIn("1+1", repr(public))
         self.assertNotIn('"2"', repr(public))
 
+    def test_unmatched_tool_call_is_not_published_on_failure_or_cancellation(
+        self,
+    ) -> None:
+        events = native_events(
+            (
+                "tool_execution_start",
+                {
+                    "toolCallId": "call-private",
+                    "toolName": "ipython",
+                    "args": {"code": "PRIVATE-CODE"},
+                },
+            )
+        )
+        failure_session, _rpc, _lease = self.fixture.make(
+            events, failure=RuntimeError("PRIVATE-FAILURE")
+        )
+        failed = asyncio.run(collect(failure_session))
+        validate_event_stream([event.to_mapping() for event in failed])
+        self.assertEqual(
+            [event.type for event in failed], ["run.started", "run.failed"]
+        )
+        self.assertNotIn("call-private", repr(failed))
+
+        async def exercise_cancelled() -> list[RunEvent]:
+            fixture = SessionFixture()
+            try:
+                entered = asyncio.Event()
+                release = asyncio.Event()
+                signal = FakeSignal()
+                session, _rpc, _lease = fixture.make(
+                    events, entered=entered, release=release
+                )
+                task = asyncio.create_task(collect(session, signal=signal))
+                await entered.wait()
+                signal.cancelled = True
+                release.set()
+                return await task
+            finally:
+                fixture.close()
+
+        cancelled = asyncio.run(exercise_cancelled())
+        validate_event_stream([event.to_mapping() for event in cancelled])
+        self.assertEqual(
+            [event.type for event in cancelled], ["run.started", "run.completed"]
+        )
+        self.assertEqual(cancelled[-1].payload, {"status": "cancelled"})
+        self.assertNotIn("call-private", repr(cancelled))
+
     def test_tool_call_result_ids_must_match(self) -> None:
         events = native_events(
             ("response", {"id": "py-1", "success": True}),
@@ -440,6 +489,20 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertNotIn("PRIVATE", repr(events))
         self.assertTrue(lease.closed)
 
+    def test_transport_protocol_error_is_normalized_without_context(self) -> None:
+        session, _rpc, lease = self.fixture.make(
+            (), failure=ProtocolError("PRIVATE-TRANSPORT-PAYLOAD")
+        )
+
+        with self.assertRaises(ProtocolError) as caught:
+            asyncio.run(collect(session))
+
+        self.assertEqual(
+            str(caught.exception), "Asterion-prime transport protocol failed"
+        )
+        self.assertIsNone(caught.exception.__context__)
+        self.assertTrue(lease.closed)
+
     def test_rejects_non_fixed_request_and_transport_deadlines(self) -> None:
         session, rpc, lease = self.fixture.make()
         with self.assertRaisesRegex(ProtocolError, "fixed deadline"):
@@ -462,6 +525,7 @@ class TestAsterionPrimeSession(unittest.TestCase):
                     rpc_session=FakePiRpcSession(config, ()),  # type: ignore[arg-type]
                     extension_binding=fixture.binding,
                     extension_lease=lease,
+                    approved_command=config.command,
                     limits=ASTERION_PRIME_LIMITS,
                 )
             self.assertTrue(lease.closed)
@@ -516,10 +580,33 @@ class TestAsterionPrimeSession(unittest.TestCase):
         finally:
             fixture.close()
 
+    def test_close_while_active_preserves_lease_until_run_cleanup(self) -> None:
+        async def exercise() -> None:
+            entered = asyncio.Event()
+            release = asyncio.Event()
+            session, _rpc, lease = self.fixture.make(entered=entered, release=release)
+            descriptor = lease.inherited_fds[0]
+            task = asyncio.create_task(collect(session, "prime-run-active-close"))
+            await entered.wait()
+
+            with self.assertRaisesRegex(ProtocolError, "active request"):
+                session.close()
+            self.assertFalse(lease.closed)
+            os.fstat(descriptor)
+
+            release.set()
+            await task
+            self.assertTrue(lease.closed)
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+
+        asyncio.run(exercise())
+
     def test_binding_lease_and_rpc_launch_material_must_match(self) -> None:
         mismatches = (
             "binding",
             "command",
+            "extra command prefix",
             "environment",
             "extra environment",
             "descriptors",
@@ -534,10 +621,13 @@ class TestAsterionPrimeSession(unittest.TestCase):
                         other.binding if mismatch == "binding" else fixture.binding
                     )
                     command = ("pi", *lease.command_args())
+                    approved_command = command
                     environment = dict(lease.environment)
                     descriptors = lease.inherited_fds
                     if mismatch == "command":
                         command = ("pi",)
+                    elif mismatch == "extra command prefix":
+                        command = ("wrapper", "--unsafe", *command)
                     elif mismatch == "environment":
                         environment.pop("ASTERION_PI_EXTENSION_SOURCE_SHA256")
                     elif mismatch == "extra environment":
@@ -556,12 +646,51 @@ class TestAsterionPrimeSession(unittest.TestCase):
                             rpc_session=FakePiRpcSession(config, ()),  # type: ignore[arg-type]
                             extension_binding=binding,
                             extension_lease=lease,
+                            approved_command=approved_command,
                             limits=ASTERION_PRIME_LIMITS,
                         )
                     self.assertTrue(lease.closed)
                 finally:
                     fixture.close()
                     other.close()
+
+    def test_transplanted_lease_with_matching_shapes_is_rejected_by_identity(
+        self,
+    ) -> None:
+        other = SessionFixture()
+        try:
+            lease = self.fixture.binding.preflight()
+            self.assertEqual(self.fixture.binding.path.name, other.binding.path.name)
+            self.assertEqual(
+                self.fixture.binding.capabilities, other.binding.capabilities
+            )
+            self.assertEqual(
+                dict(self.fixture.binding.environment), dict(other.binding.environment)
+            )
+            self.assertNotEqual(
+                self.fixture.binding.binding_fingerprint,
+                other.binding.binding_fingerprint,
+            )
+            command = ("pi", *lease.command_args())
+            config = PiRpcConfig(
+                command=command,
+                cwd=self.fixture.root,
+                environment=dict(lease.environment),
+                deadline_seconds=ASTERION_PRIME_LIMITS.deadline_ms / 1000,
+                inherited_fds=lease.inherited_fds,
+            )
+
+            with self.assertRaisesRegex(ProtocolError, "launch material"):
+                AsterionPrimeSession(
+                    rpc_session=FakePiRpcSession(config, ()),  # type: ignore[arg-type]
+                    extension_binding=other.binding,
+                    extension_lease=lease,
+                    approved_command=command,
+                    limits=ASTERION_PRIME_LIMITS,
+                )
+            self.assertTrue(lease.closed)
+        finally:
+            other.close()
 
 
 if __name__ == "__main__":

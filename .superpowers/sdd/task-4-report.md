@@ -39,8 +39,10 @@ the lease launch material exactly. The session does not call `preflight()`.
 - `src/asterion/agents/prime/session.py`
 - `src/asterion/agents/prime/tools.py`
 - `src/asterion/runtimes/asterion_prime.py`
+- `src/asterion/runtimes/pi_extensions.py` (approved lease identity expansion)
 - `tests/test_asterion_prime_session.py`
 - `tests/test_asterion_prime_runtime.py`
+- `tests/test_pi_runtime_extensions.py` (focused identity regression)
 - `.superpowers/sdd/task-4-report.md` (this required report)
 
 ## TDD evidence
@@ -140,3 +142,83 @@ exit 0
   partial failure stream. This preserves the brief's explicit fail-closed
   unmatched-result behavior and ensures no partially translated private event
   is observable.
+
+## Reviewer follow-up: exact lease, command, and terminal boundaries
+
+The post-commit reviewer identified five additional boundary gaps. The focused
+fix retains the original Task 4 architecture while tightening admission and
+publication:
+
+- Native tool starts remain private until a certain matching result arrives;
+  the session then publishes the `tool.call` and `tool.result` together.
+  Failure or cancellation discards an unmatched staged call, so every returned
+  stream remains valid.
+- A transport-originated `ProtocolError` is normalized to the one fixed
+  `Asterion-prime transport protocol failed` error with no retained exception
+  context. Callback-local validation uses an explicit internal rejection path
+  and exposes only static public-safe messages; ledger unit errors retain their
+  specific contract diagnostics.
+- `PiExtensionBinding` now derives an opaque domain-separated canonical SHA-256
+  fingerprint over its immutable binding fields. Preflight copies it into an
+  immutable `PiExtensionLease`; session admission compares the two directly.
+  Matching basenames/environments cannot substitute a lease from another
+  absolute binding path.
+- The host injects an immutable `approved_command`; session construction
+  requires full tuple equality with `PiRpcConfig.command`, in addition to the
+  pinned loader suffix checks. Extra executable or flag prefixes fail closed.
+- External `close()` refuses an active request without closing or detaching its
+  lease. The run's `finally` path remains the sole active-run cleanup owner.
+
+Follow-up RED evidence:
+
+```text
+Lease identity / approved command:
+- AttributeError: PiExtensionBinding had no binding_fingerprint.
+- TypeError: AsterionPrimeSession rejected the new approved_command keyword.
+
+Publication / transport / close:
+- failure after tool_execution_start produced a protocol-invalid unmatched call.
+- transport ProtocolError exposed PRIVATE-TRANSPORT-PAYLOAD.
+- close() during a gated active run did not raise.
+
+Independent re-review:
+- direct assignment to lease._binding_fingerprint succeeded, allowing identity
+  mutation; the new regression failed because AttributeError was not raised.
+- Follow-up review found that deleting `_initialized` reopened normal slot
+  assignment; its regression likewise failed before deletion was guarded.
+```
+
+Each RED was observed before its corresponding implementation. The immutable
+lease fix guards both assignment and deletion after construction while
+`close()` changes only `_closed` through the class-owned internal path.
+
+Follow-up GREEN evidence:
+
+```text
+uv run python -W error::ResourceWarning -m unittest -v \
+  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
+  tests.test_runtime_protocol tests.test_asterion_prime_architecture \
+  tests.test_pi_runtime_extensions
+Ran 61 tests in 0.316s; OK.
+```
+
+Independent re-review found no critical/high issue; its sole medium immutable
+backing-slot finding was covered by a failing regression and then fixed.
+The final follow-up re-review returned CLEAN after both normal assignment and
+sentinel-deletion bypasses were closed.
+
+Follow-up static verification:
+
+```text
+uv run ruff check <expanded Task 3/4 scoped files>
+All checks passed!
+
+uv run python -m py_compile <expanded Task 3/4 scoped files>
+exit 0
+
+uv run pyright <Task 4 files plus pi_extensions.py>
+0 errors, 0 warnings, 0 informations
+
+git diff --check -- <expanded Task 3/4 scoped files and report>
+exit 0
+```

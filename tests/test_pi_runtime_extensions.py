@@ -38,6 +38,43 @@ for (const event of [
 
 
 class PiExtensionBindingTests(unittest.TestCase):
+    def test_preflight_carries_immutable_canonical_binding_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            first_path = root / "first" / "extension.mjs"
+            second_path = root / "second" / "extension.mjs"
+            first_path.parent.mkdir()
+            second_path.parent.mkdir()
+            first_path.write_text("export default function extension() {}\n")
+            second_path.write_text("export default function extension() {}\n")
+            first = PiExtensionBinding(
+                extension_id="prime.ipython",
+                path=first_path,
+                capabilities=("prime.tool.ipython",),
+                inherited_fds=(),
+                environment={},
+            )
+            second = PiExtensionBinding(
+                extension_id="prime.ipython",
+                path=second_path,
+                capabilities=("prime.tool.ipython",),
+                inherited_fds=(),
+                environment={},
+            )
+            lease = first.preflight()
+            self.addCleanup(lease.close)
+
+            self.assertRegex(first.binding_fingerprint, r"^[0-9a-f]{64}$")
+            self.assertEqual(lease.binding_fingerprint, first.binding_fingerprint)
+            self.assertNotEqual(first.binding_fingerprint, second.binding_fingerprint)
+            with self.assertRaises(AttributeError):
+                lease.binding_fingerprint = second.binding_fingerprint  # type: ignore[misc]
+            with self.assertRaises(AttributeError):
+                lease._binding_fingerprint = second.binding_fingerprint
+            with self.assertRaises(AttributeError):
+                del lease._initialized
+            self.assertEqual(lease.binding_fingerprint, first.binding_fingerprint)
+
     def test_extension_binding_is_exact_and_immutable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             extension = Path(temp_dir, "extension.mjs")
