@@ -1,5 +1,10 @@
 import { closeSync, read, write } from "node:fs";
 import { TextDecoder } from "node:util";
+import {
+  Object as TypeObject,
+  String as TypeString,
+  type Static,
+} from "typebox";
 
 export const PROTOCOL = "asterion.prime-ipython/v1";
 
@@ -29,30 +34,17 @@ interface ExecuteResult {
   output: string;
 }
 
-interface PiToolResult {
+export interface IpythonToolResult {
   content: Array<{ type: "text"; text: string }>;
-  details: { status: ResultStatus };
-  effect: "certain" | "uncertain";
-  isError: boolean;
+  details: Record<string, never>;
 }
 
-interface ExtensionApi {
-  registerTool(tool: {
-    name: "ipython";
-    description: string;
-    parameters: {
-      type: "object";
-      properties: { code: { type: "string"; minLength: 1 } };
-      required: ["code"];
-      additionalProperties: false;
-    };
-    execute(
-      id: string,
-      input: { code: string },
-      signal?: AbortSignal,
-    ): Promise<PiToolResult>;
-  }): void;
-}
+export const IPYTHON_PARAMETERS = TypeObject(
+  { code: TypeString({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+
+type IpythonInput = Static<typeof IPYTHON_PARAMETERS>;
 
 interface BridgeOptions {
   maxCodeBytes?: number;
@@ -169,14 +161,14 @@ export class IpythonBridge {
     requestId: string,
     code: string,
     signal?: AbortSignal,
-  ): Promise<PiToolResult> {
+  ): Promise<IpythonToolResult> {
     return await this.handle(
       { protocol: PROTOCOL, request_id: requestId, type: "execute", code },
       signal,
     );
   }
 
-  async handle(value: unknown, signal?: AbortSignal): Promise<PiToolResult> {
+  async handle(value: unknown, signal?: AbortSignal): Promise<IpythonToolResult> {
     if (!this.#validRequest(value) || signal?.aborted === true) throw unavailable();
     const request = value as ExecuteRequest;
     if (this.#closed || this.#active || this.#seen.has(request.request_id)) {
@@ -184,7 +176,7 @@ export class IpythonBridge {
     }
     this.#active = true;
     this.#seen.add(request.request_id);
-    let dispatched = false;
+    let possiblyDispatched = false;
     try {
       const raw = Buffer.from(JSON.stringify({
         code: request.code,
@@ -193,24 +185,27 @@ export class IpythonBridge {
         type: request.type,
       }) + "\n", "utf8");
       if (raw.length > this.#maxLineBytes) throw unavailable();
-      await writeAll(this.#descriptor, raw);
-      dispatched = true;
+      possiblyDispatched = true;
       const response = await this.#withCancellation(
-        this.#readResult(request.request_id),
+        this.#exchange(raw, request.request_id),
         signal,
       );
+      if (response.status !== "ok") throw unavailable();
       return {
         content: [{ type: "text", text: response.output }],
-        details: { status: response.status },
-        effect: response.status === "uncertain" ? "uncertain" : "certain",
-        isError: response.status !== "ok",
+        details: {},
       };
     } catch {
-      if (dispatched) this.#poison();
+      if (possiblyDispatched) this.#poison();
       throw unavailable();
     } finally {
       this.#active = false;
     }
+  }
+
+  async #exchange(raw: Buffer, requestId: string): Promise<ExecuteResult> {
+    await writeAll(this.#descriptor, raw);
+    return await this.#readResult(requestId);
   }
 
   #validRequest(value: unknown): value is ExecuteRequest {
@@ -317,7 +312,32 @@ export function toolNames(): string[] {
   return ["ipython"];
 }
 
-export default function register(pi: ExtensionApi): void {
+export function createIpythonTool(bridge: IpythonBridge) {
+  return {
+    name: "ipython" as const,
+    label: "ipython",
+    description: "Execute one cell in the injected persistent analysis worker.",
+    parameters: IPYTHON_PARAMETERS,
+    executionMode: "sequential" as const,
+    execute: async (
+      id: string,
+      input: IpythonInput,
+      signal?: AbortSignal,
+    ): Promise<IpythonToolResult> => {
+      try {
+        return await bridge.execute(id, input.code, signal);
+      } catch {
+        throw unavailable();
+      }
+    },
+  };
+}
+
+interface ExtensionApi {
+  registerTool(tool: ReturnType<typeof createIpythonTool>): void;
+}
+
+export function register(pi: ExtensionApi): void {
   const descriptor = descriptorFromEnvironment();
   if (typeof pi !== "object" || pi === null || typeof pi.registerTool !== "function") {
     try {
@@ -327,18 +347,7 @@ export default function register(pi: ExtensionApi): void {
   }
   try {
     const bridge = createIpythonBridge(descriptor);
-    pi.registerTool({
-      name: "ipython",
-      description: "Execute one cell in the injected persistent analysis worker.",
-      parameters: {
-        type: "object",
-        properties: { code: { type: "string", minLength: 1 } },
-        required: ["code"],
-        additionalProperties: false,
-      },
-      execute: async (id, input, signal) =>
-        await bridge.execute(id, input.code, signal),
-    });
+    pi.registerTool(createIpythonTool(bridge));
   } catch {
     try {
       closeSync(descriptor);

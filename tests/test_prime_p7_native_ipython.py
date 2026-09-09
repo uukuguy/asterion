@@ -5,9 +5,11 @@ import contextlib
 import io
 import os
 from pathlib import Path
+import tempfile
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 import unittest
+from unittest.mock import patch
 
 from asterion.runtime.host import CancellationSignal
 from asterion.runtimes.pi_extensions import PiExtensionBinding
@@ -89,6 +91,27 @@ class _LostWorker(_MemoryWorker):
         raise RuntimeError("SENTINEL-WORKER /private/path")
 
 
+class _ResultWorker(_MemoryWorker):
+    def __init__(self, status: str, output: str) -> None:
+        super().__init__()
+        self.status = status
+        self.output = output
+
+    async def execute_cell(
+        self, code: str, *, signal: CancellationSignal
+    ) -> IpythonWorkerResult:
+        from asterion.applications.prime.p7.ipython_host import IpythonWorkerResult
+
+        return IpythonWorkerResult(self.status, self.output)  # type: ignore[arg-type]
+
+
+class _CancellingWorker(_MemoryWorker):
+    async def execute_cell(
+        self, code: str, *, signal: CancellationSignal
+    ) -> IpythonWorkerResult:
+        raise asyncio.CancelledError("SENTINEL-CANCEL /private/path")
+
+
 class _BlockingWorker(_MemoryWorker):
     async def execute_cell(
         self, code: str, *, signal: CancellationSignal
@@ -116,18 +139,33 @@ class _CancellationResistantWorker(_MemoryWorker):
         self.release.set()
 
 
-class _ExistingRestrictedWorker:
+class _NeverClosingWorker(_LostWorker):
     def __init__(self) -> None:
+        super().__init__()
+        self.release_close = asyncio.Event()
+
+    async def close(self) -> None:
+        self.closed += 1
+        try:
+            await self.release_close.wait()
+        except asyncio.CancelledError:
+            await self.release_close.wait()
+
+
+class _DockerLifecycleTransport:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
         self.count = 0
         self.value: int | None = None
-        self.calls: list[str] = []
 
-    async def acquire(self, client: bytes) -> None:
-        self.calls.append("acquire")
-        if not client:
-            raise ValueError
+    async def create_solving(self, **_: object) -> str:
+        self.calls.append("create")
+        self.count = 0
+        return "a" * 64
 
-    async def execute_cell(self, code: str) -> dict[str, object]:
+    async def execute_solving(
+        self, _container: str, code: str, _control: object
+    ) -> dict[str, object]:
         self.calls.append("execute")
         self.count += 1
         if code == "value = 40":
@@ -139,8 +177,11 @@ class _ExistingRestrictedWorker:
             return {"cell_count": self.count, "is_error": True, "output": "raw"}
         return {"cell_count": self.count, "is_error": False, "output": output}
 
-    async def cleanup(self) -> None:
-        self.calls.append("cleanup")
+    async def remove_solving(self, *_: object) -> None:
+        self.calls.append("remove")
+
+    async def assert_solving_absent(self, *_: object) -> None:
+        self.calls.append("absent")
 
 
 class TestPersistentIpythonHost(unittest.IsolatedAsyncioTestCase):
@@ -208,8 +249,8 @@ class TestPersistentIpythonHost(unittest.IsolatedAsyncioTestCase):
             "import p7_client\nprint(sorted(name for name in dir(p7_client) if not name.startswith('_')))",
             _Signal(),
         )
-        self.assertEqual(result.status, "error")
-        self.assertEqual(result.content[0]["text"], "IPython cell failed")
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(result.content[0]["text"], "IPython cell result is uncertain")
         assert worker.namespace is not None
         client = worker.namespace["p7_client"]
         self.assertEqual(
@@ -224,12 +265,18 @@ class TestPersistentIpythonHost(unittest.IsolatedAsyncioTestCase):
             p7_client_facade,
         )
 
+        failed_worker = _MemoryWorker()
         failed = PersistentIpythonHost(
-            worker=_MemoryWorker(), p7_client=p7_client_facade(_Client())
+            worker=failed_worker, p7_client=p7_client_facade(_Client())
         )
         error = await failed.execute("c1", "import os", _Signal())
-        self.assertEqual(error.status, "error")
-        self.assertEqual(error.content[0]["text"], "IPython cell failed")
+        self.assertEqual(error.status, "uncertain")
+        self.assertEqual(error.content[0]["text"], "IPython cell result is uncertain")
+        self.assertEqual(failed_worker.closed, 1)
+        self.assertEqual(
+            (await failed.execute("c1-followup", "print(42)", _Signal())).status,
+            "uncertain",
+        )
 
         lost = PersistentIpythonHost(
             worker=_LostWorker(), p7_client=p7_client_facade(_Client())
@@ -239,6 +286,50 @@ class TestPersistentIpythonHost(unittest.IsolatedAsyncioTestCase):
         rendered = repr((lost, uncertain))
         for secret in ("SENTINEL", "/private/path", "import os"):
             self.assertNotIn(secret, rendered)
+
+    async def test_non_ok_result_output_is_discarded_and_latches_loss(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import (
+            PersistentIpythonHost,
+            p7_client_facade,
+        )
+
+        for worker_status in ("error", "uncertain"):
+            with self.subTest(worker_status=worker_status):
+                worker = _ResultWorker(
+                    worker_status, "SENTINEL-RAW-WORKER /private/path"
+                )
+                host = PersistentIpythonHost(
+                    worker=worker, p7_client=p7_client_facade(_Client())
+                )
+                result = await host.execute(
+                    f"c-{worker_status}", "p7_client.act([])", _Signal()
+                )
+                self.assertEqual(result.status, "uncertain")
+                self.assertEqual(worker.closed, 1)
+                self.assertNotIn("SENTINEL", repr(result))
+                followup = await host.execute(
+                    f"c-{worker_status}-next", "print(42)", _Signal()
+                )
+                self.assertEqual(followup.status, "uncertain")
+
+    async def test_lone_surrogate_output_is_redacted_uncertain_and_lost(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import (
+            PersistentIpythonHost,
+            p7_client_facade,
+        )
+
+        worker = _ResultWorker("ok", "\ud800SENTINEL")
+        host = PersistentIpythonHost(
+            worker=worker, p7_client=p7_client_facade(_Client())
+        )
+        result = await host.execute("c-surrogate", "print(42)", _Signal())
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(worker.closed, 1)
+        self.assertNotIn("SENTINEL", repr(result))
+        self.assertEqual(
+            (await host.execute("c-next", "print(1)", _Signal())).status,
+            "uncertain",
+        )
 
     async def test_cancellation_before_dispatch_is_error(self) -> None:
         from asterion.applications.prime.p7.ipython_host import (
@@ -289,6 +380,87 @@ class TestPersistentIpythonHost(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "uncertain")
         self.assertEqual(worker.closed, 1)
 
+    async def test_close_that_suppresses_cancellation_is_reaped_with_finite_bound(
+        self,
+    ) -> None:
+        from asterion.applications.prime.p7.ipython_host import (
+            PersistentIpythonHost,
+            p7_client_facade,
+        )
+
+        worker = _NeverClosingWorker()
+        host = PersistentIpythonHost(
+            worker=worker,
+            p7_client=p7_client_facade(_Client()),
+            cleanup_seconds=0.01,
+        )
+        result = await asyncio.wait_for(
+            host.execute("c1", "p7_client.act([])", _Signal()), timeout=1
+        )
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(worker.closed, 1)
+        worker.release_close.set()
+        await asyncio.sleep(0.01)
+
+    async def test_worker_cancellation_is_normalized_without_raw_context(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import (
+            PersistentIpythonHost,
+            p7_client_facade,
+        )
+
+        host = PersistentIpythonHost(
+            worker=_CancellingWorker(), p7_client=p7_client_facade(_Client())
+        )
+        with self.assertRaises(asyncio.CancelledError) as raised:
+            await host.execute("c1", "p7_client.act([])", _Signal())
+        self.assertEqual(raised.exception.args, ())
+        self.assertIsNone(raised.exception.__context__)
+
+    async def test_caller_cancellation_is_normalized_and_reaps_dispatch(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import (
+            PersistentIpythonHost,
+            p7_client_facade,
+        )
+
+        worker = _BlockingWorker()
+        host = PersistentIpythonHost(
+            worker=worker, p7_client=p7_client_facade(_Client())
+        )
+        running = asyncio.create_task(
+            host.execute("c1", "p7_client.act([])", _Signal())
+        )
+        await asyncio.sleep(0.01)
+        running.cancel("SENTINEL-CANCEL /private/path")
+        with self.assertRaises(asyncio.CancelledError) as raised:
+            await running
+        self.assertEqual(raised.exception.args, ())
+        self.assertIsNone(raised.exception.__context__)
+        self.assertEqual(worker.closed, 1)
+
+    def test_timing_controls_must_be_finite_and_positive(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import (
+            PersistentIpythonHost,
+            PersistentIpythonHostError,
+            p7_client_facade,
+        )
+
+        for field in ("deadline_seconds", "cleanup_seconds"):
+            for invalid in (float("nan"), float("inf"), float("-inf"), 0.0, -1.0):
+                with self.subTest(field=field, invalid=invalid):
+                    with self.assertRaises(PersistentIpythonHostError):
+                        if field == "deadline_seconds":
+                            PersistentIpythonHost(
+                                worker=_MemoryWorker(),
+                                p7_client=p7_client_facade(_Client()),
+                                deadline_seconds=invalid,
+                            )
+                        else:
+                            PersistentIpythonHost(
+                                worker=_MemoryWorker(),
+                                p7_client=p7_client_facade(_Client()),
+                                cleanup_seconds=invalid,
+                            )
+
     async def test_caps_and_duplicate_call_ids_fail_before_dispatch(self) -> None:
         from asterion.applications.prime.p7.ipython_host import (
             PersistentIpythonHost,
@@ -317,22 +489,40 @@ class TestPersistentIpythonHost(unittest.IsolatedAsyncioTestCase):
         from asterion.applications.prime.p7.ipython_host import (
             create_restricted_persistent_ipython_host,
         )
+        from asterion.applications.prime_agent.operator.p7_solving_docker import (
+            P7SolvingDockerWorker,
+        )
 
-        worker = _ExistingRestrictedWorker()
         client = b"def observe(): return {}\ndef status(): return {}\ndef act(actions): return {}\n"
-        host = create_restricted_persistent_ipython_host(
-            worker=worker,
-            p7_client_module=client,
-        )
-        first = await host.execute("c1", "value = 40", _Signal())
-        second = await host.execute("c2", "print(value + 2)", _Signal())
-        await host.close()
-        self.assertEqual(first.status, "ok")
-        self.assertEqual(second.content[0]["text"], "42\n")
-        self.assertEqual(
-            worker.calls,
-            ["acquire", "execute", "execute", "cleanup"],
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace, broker = root / "workspace", root / "broker"
+            workspace.mkdir()
+            broker.mkdir()
+            transport = _DockerLifecycleTransport()
+            worker = P7SolvingDockerWorker(
+                image_digest="sha256:" + "a" * 64,
+                transport=transport,
+                workspace=str(workspace),
+                broker_private_dir=str(broker),
+                broker_model_socket=str(broker / "model.sock"),
+            )
+            host = create_restricted_persistent_ipython_host(
+                worker=worker,
+                p7_client_module=client,
+            )
+            with patch(
+                "asterion.applications.prime_agent.operator.p7_solving_docker.os.fchown"
+            ):
+                first = await host.execute("c1", "value = 40", _Signal())
+                second = await host.execute("c2", "print(value + 2)", _Signal())
+                await host.close()
+            self.assertEqual(first.status, "ok")
+            self.assertEqual(second.content[0]["text"], "42\n")
+            self.assertEqual(
+                transport.calls,
+                ["create", "execute", "execute", "remove", "absent"],
+            )
 
 
 if __name__ == "__main__":

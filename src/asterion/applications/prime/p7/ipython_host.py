@@ -6,6 +6,7 @@ import ast
 import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from math import isfinite
 import re
 from time import monotonic
 from typing import Literal, Protocol, cast
@@ -235,6 +236,7 @@ class PersistentIpythonHost:
         "_max_code_bytes",
         "_max_output_bytes",
         "_deadline_seconds",
+        "_cleanup_seconds",
         "_lock",
         "_started",
         "_lost",
@@ -250,6 +252,7 @@ class PersistentIpythonHost:
         max_code_bytes: int = _DEFAULT_CODE_BYTES,
         max_output_bytes: int = _DEFAULT_OUTPUT_BYTES,
         deadline_seconds: float = _DEFAULT_DEADLINE_SECONDS,
+        cleanup_seconds: float = _CLEANUP_SECONDS,
     ) -> None:
         if (
             type(p7_client) is not P7ClientFacade
@@ -259,9 +262,8 @@ class PersistentIpythonHost:
             )
             or not _positive_int(max_code_bytes)
             or not _positive_int(max_output_bytes)
-            or isinstance(deadline_seconds, bool)
-            or not isinstance(deadline_seconds, (int, float))
-            or deadline_seconds <= 0
+            or not _positive_seconds(deadline_seconds)
+            or not _positive_seconds(cleanup_seconds)
         ):
             raise PersistentIpythonHostError()
         self._worker = worker
@@ -269,6 +271,7 @@ class PersistentIpythonHost:
         self._max_code_bytes = max_code_bytes
         self._max_output_bytes = max_output_bytes
         self._deadline_seconds = float(deadline_seconds)
+        self._cleanup_seconds = float(cleanup_seconds)
         self._lock = asyncio.Lock()
         self._started = False
         self._lost = False
@@ -299,24 +302,31 @@ class PersistentIpythonHost:
                 return _result(call_id, "error")
 
             task = asyncio.create_task(self._worker.execute_cell(code, signal=signal))
+            cancelled = False
+            value: object = None
             try:
                 value = await self._await_operation(task, signal)
             except asyncio.CancelledError:
                 await self._mark_lost()
-                raise
+                cancelled = True
             except BaseException:
                 await self._mark_lost()
                 return _result(call_id, "uncertain")
+            if cancelled:
+                raise asyncio.CancelledError() from None
             if type(value) is not IpythonWorkerResult:
                 await self._mark_lost()
                 return _result(call_id, "uncertain")
             worker_result = cast(IpythonWorkerResult, value)
-            if worker_result.status == "uncertain":
+            if worker_result.status != "ok":
                 await self._mark_lost()
                 return _result(call_id, "uncertain")
-            if worker_result.status == "error":
-                return _result(call_id, "error")
-            if len(worker_result.output.encode("utf-8", "strict")) > self._max_output_bytes:
+            try:
+                output_size = len(worker_result.output.encode("utf-8", "strict"))
+            except UnicodeError:
+                await self._mark_lost()
+                return _result(call_id, "uncertain")
+            if output_size > self._max_output_bytes:
                 await self._mark_lost()
                 return _result(call_id, "uncertain")
             return _result(call_id, "ok", worker_result.output)
@@ -330,32 +340,40 @@ class PersistentIpythonHost:
 
     async def _start(self, signal: CancellationSignal) -> bool:
         task = asyncio.create_task(self._worker.start(self._p7_client, signal=signal))
+        cancelled = False
         try:
             await self._await_operation(task, signal)
-            self._started = True
-            return True
         except asyncio.CancelledError:
             await self._mark_lost()
-            raise
+            cancelled = True
         except BaseException:
             await self._mark_lost()
             return False
+        if cancelled:
+            raise asyncio.CancelledError() from None
+        self._started = True
+        return True
 
     async def _await_operation(
         self, task: asyncio.Task[object], signal: CancellationSignal
     ) -> object:
         deadline = monotonic() + self._deadline_seconds
-        while not task.done():
-            if _cancelled(signal):
-                task.cancel()
-                await _reap_cancelled_task(task)
-                raise PersistentIpythonHostError()
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                task.cancel()
-                await _reap_cancelled_task(task)
-                raise TimeoutError
-            await asyncio.wait({task}, timeout=min(0.01, remaining))
+        try:
+            while not task.done():
+                if _cancelled(signal):
+                    task.cancel()
+                    await _reap_cancelled_task(task)
+                    raise PersistentIpythonHostError()
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    task.cancel()
+                    await _reap_cancelled_task(task)
+                    raise TimeoutError
+                await asyncio.wait({task}, timeout=min(0.01, remaining))
+        except asyncio.CancelledError:
+            task.cancel()
+            await _reap_cancelled_task(task)
+            raise
         return task.result()
 
     async def _mark_lost(self) -> None:
@@ -368,25 +386,29 @@ class PersistentIpythonHost:
     async def _bounded_close(self) -> None:
         task = asyncio.create_task(self._worker.close())
         cancelled = False
-        while not task.done():
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(task), timeout=_CLEANUP_SECONDS
-                )
-            except asyncio.CancelledError:
-                cancelled = True
-            except TimeoutError:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-                raise PersistentIpythonHostError() from None
-            except BaseException:
-                break
+        failed = False
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(task), timeout=self._cleanup_seconds
+            )
+        except asyncio.CancelledError:
+            cancelled = True
+            task.cancel()
+            await _reap_cancelled_task(task)
+        except TimeoutError:
+            failed = True
+            task.cancel()
+            await _reap_cancelled_task(task)
+        except BaseException:
+            failed = True
+        if cancelled:
+            raise asyncio.CancelledError() from None
+        if failed:
+            raise PersistentIpythonHostError() from None
         try:
             task.result()
         except BaseException:
             raise PersistentIpythonHostError() from None
-        if cancelled:
-            raise asyncio.CancelledError
 
 
 def create_restricted_persistent_ipython_host(
@@ -394,6 +416,7 @@ def create_restricted_persistent_ipython_host(
     worker: object,
     p7_client_module: bytes,
     deadline_seconds: float = _DEFAULT_DEADLINE_SECONDS,
+    cleanup_seconds: float = _CLEANUP_SECONDS,
 ) -> PersistentIpythonHost:
     """Adapt an operator-injected restricted P7 process without product imports."""
 
@@ -406,6 +429,7 @@ def create_restricted_persistent_ipython_host(
             max_code_bytes=_DEFAULT_CODE_BYTES,
             max_output_bytes=4096,
             deadline_seconds=deadline_seconds,
+            cleanup_seconds=cleanup_seconds,
         )
     except BaseException:
         raise PersistentIpythonHostError() from None
@@ -467,6 +491,15 @@ def _cancelled(signal: CancellationSignal) -> bool:
 
 def _positive_int(value: object) -> bool:
     return type(value) is int and value > 0
+
+
+def _positive_seconds(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and isfinite(value)
+        and value > 0
+    )
 
 
 async def _reap_cancelled_task(task: asyncio.Task[object]) -> None:

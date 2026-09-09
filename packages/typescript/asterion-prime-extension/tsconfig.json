@@ -10,7 +10,6 @@
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
     "removeComments": true,
-    "typeRoots": ["../asterion-runtime/node_modules/@types"],
     "types": ["node"]
   },
   "include": ["src/**/*.ts"]

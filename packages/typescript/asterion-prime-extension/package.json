@@ -4,10 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "../asterion-runtime/node_modules/.bin/tsc -p tsconfig.json && node -e \"require('node:fs').renameSync('dist/ipython-extension.js','dist/ipython-extension.mjs')\"",
+    "typecheck": "tsc -p tsconfig.contract.json",
+    "build": "npm run typecheck && esbuild src/ipython-extension.ts --bundle --platform=node --format=esm --target=node20 --supported:template-literal=false --outfile=dist/ipython-extension.mjs --legal-comments=none --minify-syntax --minify-whitespace --footer:js=\"export default register;\"",
     "test": "npm run build && node --test test/ipython-extension.test.mjs"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "esbuild": "0.28.1",
+    "typescript": "6.0.3"
   }
 }

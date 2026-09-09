@@ -110,3 +110,91 @@ one medium finding.
   credentials, model configuration, provider, assembly, or live game wiring.
 - Task 9 must make the deterministic `.mjs` a packaged resource before an
   installed-wheel claim is possible.
+
+## Formal-review correction
+
+The follow-up formal review identified one Critical, five Important, and two
+Minor findings. The Critical, all Important findings, and the requested
+cancellation-message Minor are fixed in the Task 5 boundary.
+
+### Follow-up RED evidence
+
+- The revised Python focused suite ran 15 tests and failed in the intended
+  reviewed gaps: post-dispatch worker `error` remained a reusable certain
+  error, a lone-surrogate result raised raw `UnicodeEncodeError`, NaN/infinite
+  deadlines were accepted, no configurable finite cleanup bound existed, and
+  worker cancellation retained sentinel arguments.
+- The revised Node suite first failed because the genuine TypeBox package was
+  absent. After dependency setup, contract assertions also rejected the old
+  missing `label`, plain-object schema, invented `isError`/`effect` result, and
+  reusable non-OK descriptor behavior.
+- Attempting to lock the expected public Pi declaration package at version
+  0.7.1 returned npm `ETARGET`: that version is not published on the configured
+  registry. With reviewer approval, the package instead owns an exact
+  compile-time structural contract and validates registration/schema/failure
+  behavior at runtime, without coupling to any adjacent source checkout.
+- The first bundled TypeBox artifact was rejected by Task 3's conservative
+  JavaScript tokenizer because a transitive helper retained interpolated
+  template literals. The deterministic build now lowers template literals and
+  emits an explicit final `export default`, after which the real Task 3 source
+  validator passes.
+
+### Follow-up GREEN evidence
+
+- `npm --prefix packages/typescript/asterion-prime-extension test`: 13 tests
+  passed. This includes the package-local compile assertion, genuine TypeBox
+  `IsSchema`, required `label`, exact success `AgentToolResult`, fixed-message
+  throws for `error`/`uncertain`, sentinel-output redaction, permanent poison,
+  strict surrogate rejection, and abort during an 8 MiB backpressured write.
+- `uv run python -W error::ResourceWarning -m unittest -v
+  tests.test_prime_p7_native_ipython tests.test_prime_ipython_host_orchestrator
+  tests.test_prime_ipython_host_supervisor tests.test_prime_p7_solving_docker`:
+  51 tests passed.
+- The focused native-host suite now has 16 passing tests, including a close
+  coroutine that suppresses its first cancellation, caller and worker
+  cancellation normalization with empty arguments/context, finite
+  NaN/positive-infinity/negative-infinity rejection, post-dispatch error and
+  lone-surrogate uncertainty, and the established restricted Docker worker
+  lifecycle exercised through a fake transport.
+- `uv run ruff check ...`, `python -m py_compile ...`, `uv run pyright ...`,
+  and `git diff --check`: passed; pyright reported 0 errors and 0 warnings.
+- The real Task 3 `_validate_source` contract, `PiExtensionBinding.preflight`,
+  pinned exact-byte loader, and inherited-FD Node child tests all pass.
+
+### Corrected build artifact proof
+
+- Package-local exact lock data now pins TypeBox, esbuild, TypeScript, Node
+  declarations, and platform-specific esbuild packages. TypeBox is bundled;
+  no non-Node runtime import remains.
+- Two consecutive builds produced identical SHA-256
+  `0419d726a5fc7b26183347c3494bc01b9cbc63ff6f2033c3a3ad0fcffd5cc456`.
+- The generated artifact is 18.9 KiB, comment-free JavaScript with only static
+  `node:fs` and `node:util` imports, and is still intentionally unstaged until
+  Task 9 owns packaged resources.
+
+### Corrected behavior
+
+- The extension registers exactly one `ipython` tool with a genuine TypeBox
+  schema and explicitly requests Pi's sequential execution mode for its single
+  persistent stateful worker. Success returns only `content` and `details`;
+  every non-OK worker result discards output, closes and poisons the inherited
+  descriptor, and throws the same body-free error.
+- The complete write/read exchange shares one abort/deadline race. The bridge
+  marks the descriptor possibly dispatched before the first write attempt, so
+  partial write, backpressure, cancellation, timeout, invalid UTF-8, and any
+  post-dispatch protocol failure all poison it.
+- The Python host treats every post-dispatch worker error as uncertain, latches
+  loss, bounds cleanup twice, and observes detached outcomes. Successful output
+  is strict UTF-8 before release. Timing controls must be finite and positive,
+  and propagated cancellation is recreated without caller/worker message or
+  exception context.
+
+### Follow-up self-review
+
+- Independent review found that the stateful tool had not explicitly requested
+  Pi's sequential execution mode. This was fixed and covered before commit.
+- The review also requested a direct adjacent-source declaration import. The
+  controller rejected that coupling after the public 0.7.1 package returned
+  `ETARGET` and approved the source-decoupled Asterion structural-contract
+  fallback already described above. No forbidden source/package coupling was
+  introduced.
