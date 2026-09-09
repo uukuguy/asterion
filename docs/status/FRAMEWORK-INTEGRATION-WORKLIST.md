@@ -1,6 +1,6 @@
 # Framework Integration Worklist
 
-> Updated: 2026-09-06. Status: complete.
+> Updated: 2026-09-10. Status: complete.
 
 ## Goal
 
@@ -54,8 +54,10 @@ evidence proves all of the following:
 - Native Phase 3.2 may continue as a parallel runtime/control integration, but
   its parity rows do not block W1–W3 and cannot substitute for cross-runtime
   framework evidence.
-- Prime P1–P7 remain closed at their named development boundaries. Further
-  Prime UX parity, ARC multi-game runs, and production promotion require their
+- Historical Prime P1–P7 reproductions remain closed at their named
+  development boundaries. Native `asterion.prime` now also has one verified P7
+  application slice; this does not promote P1–P6 or complete agent parity.
+  Further ARC levels, multi-game runs, and production promotion require their
   own scope and authorization.
 - `host_policies` remain declarative compatibility requirements. Preserving
   them in a resolved plan must not make the runner an authorization service.
@@ -68,8 +70,10 @@ evidence proves all of the following:
    operation without loading provider code during discovery.
 2. W1c resolved provider-owned runtime bindings while preserving metadata-only
    list and selected-only loading.
-3. Native runtime integration remains a parallel future milestone and must be
-   related explicitly to the existing control provider before a route is added.
+3. `asterion.prime` and `asterion.native` are peer integrations over the shared
+   framework. The native Asterion Prime P7 slice is recorded separately in
+   `ASTERION-PRIME-P7-EVIDENCE.md`; its remaining control-plane and P1–P6 work
+   stays outside this completed framework milestone.
 4. TypeScript package naming and executor protocol migration remain deferred
    until a concrete compatibility requirement justifies them.
 

@@ -10,12 +10,12 @@
   Native remain parallel runtime integrations.
 - Project route: managed
 - Canonical worklist: `docs/status/FRAMEWORK-INTEGRATION-WORKLIST.md`
-- Active work package: all seven Prime development reproductions and exact-selector
-  CLI routes are closed (7/7). Full multi-game benchmarking and production
-  promotion remain separately authorized work.
-  Existing provider-free acceptance implementations are retained. Native
-  parity and broad framework restructuring are not prerequisites for Prime
-  closure.
+- Active work package: the first native `asterion.prime` AgentRuntime slice and
+  P7 application are implemented and live verified. Historical P1–P7 Prime
+  Agent development reproductions remain closed at their named boundaries.
+  Asterion Prime control-plane parity and native P1–P6 applications are the next
+  program boundary; full multi-game benchmarking and production promotion
+  remain separately authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
   W2 public extension reference, W3a cross-package evidence, W3b
@@ -49,9 +49,14 @@
   canonical journal/state, application execution, and public-safe evidence.
 - TypeScript validates shared contracts and owns the Prime Node/Gateway
   boundary. Rust remains limited to controlled execution.
-- Prime Gateway and the future native kernel are peer control providers over
-  closed Asterion contracts; neither may authorize itself or bypass runners and
-  injected host services.
+- `asterion.prime` and `asterion.native` are peer agent integrations over the
+  shared Asterion framework. P1–P7 are applications, not the base agent kernel.
+  Neither integration may authorize itself or bypass runners and injected host
+  services.
+- The selected P7 solving route uses native `asterion.prime` plus Asterion's Pi
+  integration. It does not import Prime Agent source or SDK. The former P7 SDK
+  provider, gateway, CLI host, TypeScript bridge, seeded command, and package
+  artifacts have been removed.
 - Provider-neutral ledgers keep implemented, provider-free, bounded-provider,
   system-parity, and native-parity claims distinct. Evidence promotes only the
   exact scenario and domain it proves.
@@ -210,9 +215,22 @@
   residue inspection found zero remaining resources. This closes the bounded
   action-limit episode reproduction only; it does not claim a game WIN, full
   multi-game benchmark, or production promotion.
+- Native Asterion Prime P7 is live verified independently of that historical
+  four-action reproduction. Run `p7-live-20260909065351` used
+  `deepseek-v4-flash` to complete Level 1 of `ls20-9607627b` in 23 primitive
+  actions and 43 persistent IPython cells, with partial score `3.267621`, a
+  sealed 25-entry trace, verified replay, and complete cleanup. No answer or
+  action sequence was seeded. Exact digests and unrecorded-stat boundaries are
+  in `docs/status/ASTERION-PRIME-P7-EVIDENCE.md`.
 
 ## Open Problems
 
+- Implement the remaining Asterion Prime kernel surfaces: control-plane client,
+  durable session recovery, context accounting and compaction, child-agent
+  coordination, bounded autonomy, and improvement/rollback evidence.
+- Port P1–P6 applications to native `asterion.prime` before claiming complete
+  parity. Their existing Prime-Agent-backed runs are historical application
+  evidence, not native-kernel closure.
 - Keep every compound Asterion-native row missing until Phase 3.2+ evidence
   proves the exact mandatory scenarios.
 - Prove pinned/next-build compatibility only with separate exact locks and
@@ -253,12 +271,19 @@
 - `docs/superpowers/specs/2026-09-03-prime-ipython-workload-result-design.md`
 - `docs/status/PRIME-PARITY-LEDGER.md`
 - `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
+- `docs/status/ASTERION-PRIME-P7-EVIDENCE.md`
 - `.superpowers/sdd/client-interfaces-task-10-report.md`
 - `.superpowers/sdd/operational-parity-task-16-report.md`
 - `.superpowers/sdd/native-core-task-10-report.md`
 
 ### Implementation entry points
 
+- `src/asterion/agents/prime/` — native Asterion Prime session, runtime, trace,
+  and source-detachment boundary
+- `src/asterion/applications/prime/` — native Asterion Prime application
+  provider and P7 operator integration
+- `tools/run_asterion_prime_p7.py` — fixed native ARC-AGI-3 live research
+  entry point
 - `src/asterion/control/providers/prime/ecosystem_parity_testing.py` — exact
   reduction from four ecosystem receipts to ten observations
 - `src/asterion/control/providers/prime/parity_testing.py` — provider scenario

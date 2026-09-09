@@ -23,6 +23,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `PRIME-TYPICAL-APPLICATIONS.md` | 🟢 active | Canonical Prime seven-scenario worklist; P1–P7 development closures are CLI verified at named bounded scopes; full benchmarking and production promotion remain separate. |
 | `FRAMEWORK-INTEGRATION-WORKLIST.md` | 🟢 active | Canonical post-Prime framework worklist: core consistency, public extension, cross-package and cross-runtime integration evidence. |
 | `FRAMEWORK-PUBLIC-INVENTORY.md` | 🟢 active | Metadata-only inventory of application providers, capability refs, AgentRuntime IDs, separate control providers, and evidence boundaries. |
+| `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native Asterion Prime P7 live-run facts, digests, verification boundary, and remaining parity work. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `DECISIONS.md` | 🟢 active | Indexed active architecture, trust-boundary, cleanup, and Prime-first seven-scenario closure decisions. |
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |

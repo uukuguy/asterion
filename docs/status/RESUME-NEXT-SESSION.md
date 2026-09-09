@@ -1,43 +1,107 @@
-# Live Session Checkpoint
+# Next-Session Handoff
 
-> Updated: 2026-09-07. **Prime command closure is complete at the development boundary.**
+> Updated: 2026-09-10 00:33 CST. Active continuation checkpoint.
 
-## Direction
+## TL;DR
 
-Asterion 的核心是统一智能体框架与能力包集成协议；Prime 和 Native 是并行 runtime。Prime P1-P7 的端到端实现已全部保留，当前 Make 入口已完成可重复准备、用途说明、安全进度和重启后恢复收口。
+- 原生 `asterion.prime` 已通过 Asterion 的 Pi 集成真正完成 ARC-AGI-3 `ls20-9607627b` Level 1；没有使用 prime-agent 源码、SDK、预置答案或动作序列。
+- 旧 Prime SDK P7 解题套壳已删除；`prime.arc-agi-3-solving@1.0.0` 只由原生 `prime-applications` 提供。
+- 解题过程已形成固定制品体系：规范化事实、版本化分析、版本化渲染、可回放网页和单文件 HTML 导出。
+- 双语 README 已调整为 Asterion 框架主体、ARC-AGI-3 应用案例；GitHub About 与 Topics 已同步。
 
-研发验证覆盖正常链路和关键边界断言。不要把当前证据提升为发布、promotion、完整 benchmark 或论文复现实验结论。
+## Where things stand
 
-## Verified state
+- 完成运行：`p7-live-20260909065351`
+- 游戏：`ls20-9607627b`，Level 1
+- 模型：`deepseek-v4-flash`
+- 结果：23 个动作、30 个画面帧、43 个推理单元、部分得分 `3.267621`
+- 终态：Level completed
+- 证据：轨迹已封存，回放验证通过
+- 该早期运行没有记录 Token 和用时，不得估算或补写。
+- Accepted analysis：`analysis-eaebabce55daf73d3eda`
+- Current render：`web-2936ab8ccd2c7b525b2d`
+- 单文件导出 SHA-256：
+  `c8ca0a727b1b36c803f3a9b1b2e2e111424f3fbbc4964ec40f6767730a62e561`
+- 本地 `main` 比 `origin/main` 领先 17 个提交；没有执行 push。
+- 原生 P7/Pi 实现和正式入口已提交。工作区仍有用户所有的报告、`AGENTS.md`、旧计划和临时目录；不要清理、重置或覆盖。
 
-- `make prime-apps-preflight` 在所选 Orb/root/worktree 中完成 P1-P7 锁定资源准备和 host context 开关，固定七行全部 `PASS`，退出 0。它不执行 runtime、模型、工具、worker workload 或应用容器。
-- `PRIME_RUN_ID=prime-p2-20260907-final-b make prime-p2-run` 退出 0；stderr 显示用途和完整受控阶段，stdout 恰好一个最终 JSON，且没有 `file://` 私有路径。trace 为 `b32283e764e9d2192ab13bb5825b3e7d01b5e38491b9ae002c873f4c7cadda86`。
-- P2 最终运行后的容器、gateway/Node 进程、`/tmp`、仓库和 `.asterion-private` run-specific residue 为零。
-- `make test.framework-provider-free` 通过；聚焦 126 个 unittest、`make docs-check` 和 `git diff --check` 通过。P3-P7 的 host/progress 修复另有 40 个聚焦测试通过。
-- Sol 对 `739e207b^..8ce70a69` 的最终材料复审为 APPROVE，无剩余 Critical、Major 或 Minor finding。
+## What this session delivered
 
-## Prior bounded E2E evidence
+- `063b6cc9`：将 Pi usage 规范化放回公共 runtime 边界。
+- `96d8cd38`：建立数据优先、可重新生成的 ARC 解题制品体系。
+- `1ee4bb7a`：扩展解题报告的 ARC-AGI-3 与 Asterion 背景说明。
+- `962a173d`：支持单文件离线 HTML 导出。
+- `51ebae2e`：加入真实解题回放 GIF 与完整报告截图。
+- `885db712`：重写英文和中文 README，以 Asterion 框架为主体、ARC 为应用案例。
+- `e593bd89`：记录 README 纠偏和 GitHub 元数据结果。
+- `c27985e7`：固化原生 P7 真解题运行的稳定性修复。
+- `6c07c3f7`：加入固定原生 P7 真解题入口和运行比较工具。
+- `e8ac49ec`：删除 Prime SDK P7 套壳路径和发行物。
 
-P1-P7 均有此前真实开发边界成功证据，trace 分别为：P1 `9672ba00a1b439c39e319a7f6ae8607e7d00a14795047c7b42f9e56c7686dbcf`、P2 `4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`、P3 `b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`、P4 `0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`、P5 `64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`、P6 `51f6454e90a2286dfd0fabaa3f3cf7f7870cd57abf95890845b4efd01048b335`、P7 `a2c1fa78367c4eb4e5b424ca5a717c9cb83f5db8661f57cec22a58a9ff2f0ef1`。这些结果均为 development-only、`unpromoted`；P7 只证明一个最多四步的离线 episode，不代表完整 game WIN 或 benchmark。
+主要入口：
 
-## Command contract
+- `src/asterion/applications/prime/p7/run_story/`
+- `artifacts/arc-agi-3/`
+- `README.md`
+- `README.zh-CN.md`
+- `docs/assets/arc-agi-3/`
+- `docs/superpowers/specs/2026-09-09-readme-arc-agi-3-achievement-design.md`
 
-- `make prime-p1-run` … `make prime-p7-run` 各自先在 stderr 显示固定用途，再在同一 Orb 中准备所选场景并以 `asterion run --progress` 执行。
-- 长期 Node、seccomp、Gateway、source、image 与 P7 资源收据位于 ignored `.asterion-private/prime-development/`，不再依赖 Orb `/tmp`。
-- `uv` 使用 quiet 模式；准备和 host 进度仍在 stderr，应用结果保留在 stdout。
-- 开发 seccomp/image authority 与 promoted catalogs 分离；四个 closed v1 协议、manifests、runner authority、provider selection、budgets、prompts 和 result schemas 未改变。
+GitHub 当前公开信息：
 
-## Evidence boundary
+- Description：
+  `Composable multi-runtime agent application framework for deterministic capability assembly, controlled execution, and verifiable AI applications.`
+- Website：
+  `https://github.com/uukuguy/asterion#architecture`
+- Topics 保持 11 项，包括 `agent-framework`、`multi-runtime`、`capability-system`、`interactive-reasoning` 和 `arc-agi-3`。
 
-七项均为 **Implemented**，且聚合 provider-free host preflight 为 **Verified**。P1 与 P2 有真实命令成功证据；本轮没有逐个重跑 P3-P7 的模型执行，因此不要声称七项都在当前会话完成了真实付费端到端执行。
+## Verification completed
 
-## Next concrete action
+- `make docs-check`
+  - 204 份 Markdown、57 个本地链接通过。
+- `uv run python -m unittest -v tests.test_prime_arc_agi_3_run_story`
+  - 10/10 通过。
+- GitHub GFM API 渲染：
+  - 中英文标题顺序、互链、图片及尺寸通过。
+- GitHub About 回读：
+  - Description、Website 和 Topics 与批准值完全一致。
+- 没有在文档阶段重新调用模型或 ARC 环境。
+- 112 个 P7 原生路由、脱钩、打包清单和保留 broker 边界测试通过。
+- Prime Gateway TypeScript 重新编译通过；`uv build --wheel` 通过，wheel 不含已删除的 SDK 套壳。
 
-Prime 七项命令入口已收口。下一阶段回到框架主线：围绕统一能力包接入协议审查剩余计划，优先选择一个独立能力包做跨 provider/runtime 集成证明。若需要增加 runtime、capability/package、application、protocol 或 host service，严格按 `AGENTS.md` 的 intent 路由和依赖方向实施。
+## Next steps
 
-## Preservation
+1. 为 `asterion.prime` ControlPlaneClient、持久会话/恢复和上下文管理制定独立计划。
+2. 在核心 agent 能力到位后，将 P1–P6 逐个迁移到原生 `asterion.prime`；不得将历史 Prime Agent 运行冒充为原生闭环。
+3. 若继续 ARC-AGI-3 研究，为下一题或下一关创建新 run；沿用固定制品目录和报告生成链路。
+4. 在明确要求前不要 push 本地 17 个提交，也不要启动新的模型运行。
 
-- Operator LLM 配置仍只由应用/operator integration 从仓库 `.env` 解析和注入。
-- 保留无关 `.superpowers/sdd/task-1-report.md`、未跟踪旧 plan/spec 和现有 `tmp*` 目录。
-- 不 broad-stage、reset、clean、push 或 promote。
-- Native 与 Prime 保持并行 runtime。
+## Do not repeat
+
+- 不得重新把 Asterion Prime 实现建立在 prime-agent 源码或 SDK 上。
+- 不得用预置答案、预置动作或 seeded replay 冒充智能体真解题。
+- 不得把 ARC-AGI-3 写成 Asterion 项目的主体；它只是一个应用案例。
+- 不得把事后证据讲解称为隐藏思维链。
+- 不得为旧运行推测 Token、用时或未记录的模型统计。
+- 不要为解题研究增加过度、极端的测试；保留关键边界断言即可。
+- 不要清理现有脏工作区或临时目录，除非逐项确认所有权。
+
+## Ready-to-paste commands
+
+```bash
+make docs-check
+uv run python -m unittest -v tests.test_prime_arc_agi_3_run_story
+
+uv run asterion arc-story serve
+
+uv run asterion arc-story export \
+  ls20-9607627b \
+  p7-live-20260909065351 \
+  --render web-2936ab8ccd2c7b525b2d
+
+gh repo view uukuguy/asterion \
+  --json description,homepageUrl,repositoryTopics
+
+git status --short
+git log --oneline origin/main..HEAD
+```
