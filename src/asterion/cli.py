@@ -109,6 +109,10 @@ def main(
     assert stdout is not None
     assert stderr is not None
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv[:1] == ["arc-story"]:
+        from asterion.applications.prime.p7.run_story.cli import main as arc_story_main
+
+        return arc_story_main(raw_argv[1:], stdout=stdout, stderr=stderr)
     if raw_argv[:1] == ["pathlight"]:
         from asterion.cli_pathlight import main as pathlight_main
 

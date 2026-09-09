@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ARC-AGI-3 · Asterion 解题记录</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<main id="report" data-manifest="render.json">
+  <header class="mast">
+    <div class="folio"><span><b>ASTERION PRIME</b> / INTERACTIVE REASONING RECORD</span><span id="folio-run">RUN</span></div>
+    <div class="head">
+      <section class="identity"><h1>ARC-AGI-3</h1><div id="subtitle" class="subtitle">正在读取运行证据</div><div id="runline" class="runline"></div></section>
+      <figure class="art-slot"><img src="assets/header-art.png" alt="ARC-AGI-3 交互环境与推理路径示意"></figure>
+      <section id="verification" class="result"></section>
+    </div>
+  </header>
+  <section class="player">
+    <div class="stage">
+      <div class="stage-head"><span id="step-label">FRAME 0</span><span id="change-label">0 CELLS CHANGED</span></div>
+      <div class="frame-shell"><canvas id="frame" width="640" height="640" aria-label="真实 ARC-AGI-3 画面"></canvas></div>
+      <nav class="controls" aria-label="回放控制">
+        <button id="previous" type="button" aria-label="上一帧">‹</button>
+        <button id="play" type="button" aria-label="播放或暂停">▶</button>
+        <button id="next" type="button" aria-label="下一帧">›</button>
+        <input id="timeline" type="range" min="0" value="0" step="1" aria-label="画面位置">
+        <span id="frame-count">0 / 0</span>
+        <button id="speed" type="button">1×</button>
+        <button id="diff-toggle" type="button" aria-pressed="false">DIFF OFF</button>
+      </nav>
+    </div>
+    <aside id="step-explanation" class="step-copy"><small>RUN EVIDENCE</small><h2>等待载入</h2><p>正在读取规范化动作与画面。</p></aside>
+  </section>
+  <section class="solve"><div class="sec-head"><h2>解题过程：怎样发现规则并完成关卡</h2><p>观察 → 假设 → 实验 → 修正 → 完成</p></div><div id="solve-story" class="storyline"></div></section>
+  <section class="understand"><div class="under-intro"><small>POST-SOLVE MODEL</small><h2>解题后，对题目的理解</h2><p>事实与推断分别标注；没有证据的结论保持未确定。</p></div><div id="understanding" class="answers"></div></section>
+  <footer class="background">
+    <article class="about"><span class="eyebrow">ABOUT ARC-AGI-3</span><h2>交互式抽象推理协议</h2><p>智能体只得到通用操作接口，不直接知道关卡目标；它必须在有限动作内观察反馈、归纳规则、规划，并以环境状态确认完成。</p><div class="terms"><b>HIDDEN OBJECTIVE</b> · STATEFUL WORLD · ONLINE PLANNING · BOUNDED ACTIONS</div></article>
+    <article class="about asterion"><span class="eyebrow">ABOUT ASTERION</span><h2>通用智能体应用框架</h2><p>Asterion 负责应用装配、能力注入、运行时适配、受控执行和证据边界。本报告由 Asterion Prime 的密封运行记录生成。</p><div class="terms"><b>Application → Asterion Prime → Pi → Model → ARC Broker → Sealed Replay</b></div></article>
+  </footer>
+</main>
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -62,6 +62,7 @@ prime-agent = "asterion.applications.prime_agent.provider:create_provider"
 packages = ["src/asterion"]
 artifacts = [
     "src/asterion/applications/prime/resources/*.mjs",
+    "src/asterion/applications/prime/p7/run_story/assets/*",
     "src/asterion/applications/prime_agent/operator/resources/*.json",
     "src/asterion/applications/prime_agent/operator/resources/*.txt",
     "src/asterion/capabilities/dci/resources/pi/*.ts",
@@ -112,6 +113,7 @@ artifacts = [
 
 [tool.hatch.build.targets.sdist]
 artifacts = [
+    "src/asterion/applications/prime/p7/run_story/assets/*",
     "packages/typescript/prime-gateway/dist/src/p7-solving-session.js",
     "packages/typescript/prime-gateway/dist/src/p7-solving-session.d.ts",
     "packages/typescript/prime-gateway/dist/src/p7-solving-bridge.js",

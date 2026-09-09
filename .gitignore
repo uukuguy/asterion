@@ -35,6 +35,7 @@ packages/rust/**/target/
 /outputs/
 /runs/
 /logs/
+/artifacts/
 
 # Editors and operating systems
 .DS_Store

@@ -927,7 +927,7 @@ assert run["levels_completed"] == 1
 assert run["verification"] == "VERIFIED"
 assert run["elapsed_seconds"] is None
 assert run["usage"] is None  # This run predates private Pi usage persistence.
-assert len(actions) == 23 and len(frames) == 24
+assert len(actions) == 23 and len(frames) == 30
 print("real bundle verified")
 PY
 ```
@@ -973,7 +973,7 @@ The delivery is complete only when all of the following are true:
 
 - `uv run python -m unittest -v tests.test_prime_arc_agi_3_run_story` passes.
 - `make promotion-check` passes after packaged assets are added.
-- The real bundle records exactly 23 actions, 24 frames, score `3.267621`, model `deepseek-v4-flash`, 43 reasoning cells, one completed level, sealed trace, and verified replay.
+- The real bundle records exactly 23 actions and 30 visual frames (including multi-frame action animations), score `3.267621`, model `deepseek-v4-flash`, 43 reasoning cells, one completed level, sealed trace, and verified replay.
 - `elapsed_seconds` remains null unless an authoritative field supplies it; `usage` is summed from persisted Pi records, while the existing legacy run remains null because those events were not retained at solve time.
 - A byte scan of `artifact.json`, `data/`, `analyses/`, `renders/`, and `catalog.json` contains no raw worker content, prompt sentinel, credential sentinel, absolute private run path, or provider payload.
 - Re-running `compile` returns the same bundle; re-running `render` with the same inputs returns the same render ID; changing only `theme_version` creates a new render while leaving every `data/` digest unchanged.
