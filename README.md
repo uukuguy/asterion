@@ -1,138 +1,146 @@
+<p align="right"><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a></p>
+
 # Asterion
 
-Asterion is a composable, multi-runtime agent application framework. This
-repository contains the Python framework, built-in controlled-code and DCI
-application providers, schemas, examples, TypeScript runtime
-components, and a Rust controlled executor.
+Composable, multi-runtime infrastructure for building verifiable agent applications.
 
-## Installation
+Asterion separates capability packages, exact application assemblies, agent runtimes, host services, and controlled execution behind closed public contracts. Python owns orchestration and composition, TypeScript validates shared contracts and Node integration, and Rust owns controlled execution. The project is research-stage, with provider-free verification kept separate from operator-authorized model work.
 
-Install the locked development environment from the repository root:
+## ARC-AGI-3 interactive reasoning
+
+On 9 September 2026, native Asterion Prime completed **Level 1 of ARC-AGI-3 game `ls20-9607627b`** in one sealed run. It used Asterion's Pi integration with `deepseek-v4-flash`; it did not import or execute prime-agent source code.
+
+<p align="center">
+  <img src="docs/assets/arc-agi-3/solve-replay.gif" alt="Replay of Asterion Prime solving ARC-AGI-3 game ls20-9607627b Level 1" width="480">
+</p>
+
+This is evidence for one completed interactive level—not a claim that Asterion has solved the complete ARC-AGI-3 benchmark or matched another system.
+
+| Run fact | Recorded value |
+|---|---:|
+| Application / runtime | Asterion Prime / `asterion.prime`, using Pi |
+| Model | `deepseek-v4-flash` |
+| Actions | 23 |
+| Visual observations | 30 frames, including multi-frame action animation |
+| Reasoning cells | 43 |
+| Partial game score | `3.267621` |
+| Completion | 1 level; terminal state `level completed` |
+| Evidence | sealed trace; replay verified |
+| Token usage / elapsed time | not recorded by this legacy run; not estimated |
+
+### What the task tests
+
+ARC-AGI-3 is not a static “input grid → output grid” exercise. The agent receives a changing visual world and a small bounded action set, while the objective and object semantics are initially hidden. It must:
+
+- infer what can be controlled and what constitutes progress;
+- preserve state across a sequence of observations and actions;
+- perform small, falsifiable experiments instead of committing to an early guess;
+- revise its working model when the screen contradicts it; and
+- finish by changing the environment into a success state, not by merely describing an answer.
+
+In this level, repeated controlled movements revealed that the colored strips were fixed two-state objects rather than freely moving pieces. The agent compared corresponding row and column bands, tested reversibility, identified the remaining mismatches, and completed the required configuration in 23 actions. These statements are post-run interpretations grounded in the action and frame evidence; they are not a publication of hidden chain-of-thought.
+
+### Solve and evidence path
+
+```mermaid
+flowchart LR
+    A[Asterion Prime] --> P[Pi]
+    P --> M[Model]
+    A --> I[Persistent IPython]
+    I --> B[ARC broker]
+    B --> E[Environment]
+    E --> T[Sealed trace]
+    T --> V[Replay verification]
+    V --> R[Regenerable report]
+```
+
+Asterion Prime supplied the reusable agent loop: persistent programmatic state, model/tool interaction, bounded execution, and evidence capture. P7 supplied the ARC-AGI-3 application—its broker, action surface, task context, run limits, and completion handling. The environment, not the model, supplied the terminal completion fact.
+
+### The complete solve report
+
+The standalone report combines the replay, frame differences, evidence-cited narration, key experiments, and the post-solve model of the level. It is intentionally generated from stored run artifacts, so visual design and explanation can improve without changing the original solve.
+
+<p align="center">
+  <img src="docs/assets/arc-agi-3/solve-report.png" alt="Standalone Asterion ARC-AGI-3 solve report with replay, evidence-backed narration, and post-solve understanding" width="620">
+</p>
+
+## How the evidence is preserved
+
+ARC solve artifacts live in a stable `artifacts/arc-agi-3/` hierarchy during local research. Four layers stay separate:
+
+1. **Normalized facts** — immutable run identity, actions, observations, terminal state, usage, and verification evidence.
+2. **Versioned analysis** — evidence references and post-run explanations attached to the facts without rewriting them.
+3. **Versioned rendering** — replaceable web presentation built from one exact analysis.
+4. **Standalone export** — one self-contained HTML file with its data, styles, scripts, and images embedded for distribution.
+
+Only the compact replay and approved screenshot are committed here. Private run artifacts remain outside the distribution, while the report can be regenerated locally from the retained evidence.
+
+## Architecture
+
+```text
+CLI / host
+  → selected application provider
+  → exact assembly
+  → capability catalog and deterministic composer
+  → exact implementation bindings
+  → sequential runner
+  → runtime adapter and explicitly injected host services
+```
+
+The core contracts are `asterion.agent-runtime/v1`, `asterion.capability/v1`, `asterion.capability-package/v1`, and `asterion.application-assembly/v1`. Manifests describe compatibility, not authority: they contain no prompts, credentials, commands, executable paths, provider configuration, or mutable state.
+
+Two peer agent surfaces share this framework:
+
+- **Asterion Prime (`asterion.prime`)** implements reusable Prime-style capabilities over Asterion's common Pi transport. P1 through P7 are applications of this implementation, not its foundation.
+- **Asterion Native (`asterion.native`)** is the peer native control-plane implementation. It currently remains a control provider rather than an `AgentRuntime` adapter.
+
+Framework modules remain domain-neutral. DCI is the complete reference product and ARC-AGI-3 solving is an Asterion Prime application; neither is a dependency that generic composition or runtime code may assume.
+
+## Install and inspect
+
+Python 3.10 or newer and [`uv`](https://docs.astral.sh/uv/) are required. Node.js 22.x plus npm are needed for Pi and TypeScript integration; Rust is needed only for the controlled-executor checks.
 
 ```bash
 uv sync --frozen
-```
-
-Python 3.10 or newer and `uv` are required. Node.js 22.19.0 (22.x LTS) plus npm
-are required for `make setup-pi`; Rust is needed only for its corresponding
-cross-language checks.
-
-## Discovery and installed acceptance
-
-These commands inspect the installed package and make no provider request:
-
-```bash
 uv run asterion list
 uv run asterion describe --provider dci-agent-lite
 uv run asterion verify --provider dci-agent-lite --level acceptance
 ```
 
-`acceptance` reports installed inventory and executable reachability
-separately. In the selected controlled-code and DCI provider acceptance scope,
-the wheel packages 10/10 expected assembly resources; 7/7 are bound, compose
-against exact runtime manifests, and have complete implementation bindings. The unbound
-resources are `applications/dci_agent_lite/assemblies/dci-local-research.json`,
-`applications/prime_agent/assemblies/prime-capability-program.json`, and
-`applications/prime_agent/assemblies/prime-ipython-coding.json`; they are
-reported as package-relative inventory, not as product entry points for that
-acceptance scope. The check also covers providers, capability manifests,
-context profiles, benchmark identities, and paper scopes. This provider-free
-acceptance checks metadata and entry-point reachability only; it does not
-execute a runtime or model, construct runtime clients, contact an Agent or
-Judge, or run a dataset.
+`list`, `describe`, and `acceptance` inspect installed metadata, exact assemblies, and executable reachability without constructing a model runtime or making a provider request.
 
-## External Pi and resources
+## Generate an ARC solve report
 
-From a fresh clone, prepare the locked Pi source and the two corpora used by
-preflight/basic verification:
+The story pipeline accepts a retained sealed run and writes into the fixed local artifact hierarchy:
 
 ```bash
-uv sync --frozen
-make setup-pi
-make setup-resources-basic
+uv run asterion arc-story compile /absolute/path/to/sealed-run
+uv run asterion arc-story analyze GAME_ID RUN_ID
+uv run asterion arc-story render GAME_ID RUN_ID --analysis ANALYSIS_ID
+uv run asterion arc-story export GAME_ID RUN_ID --render RENDER_ID
+uv run asterion arc-story serve
+```
+
+`compile` normalizes and validates the original evidence. `analyze` is the only model-backed stage and requires operator-owned Pi/model configuration. `render`, `export`, and `serve` operate on stored artifacts; `export` produces a single distributable HTML file rather than a service-dependent page.
+
+## External runtimes and resources
+
+From a fresh clone, prepare the locked external Pi checkout and the small DCI resource profile with:
+
+```bash
+make setup
 cp .env.template .env
-# authenticate Pi and the independent Judge using operator-owned credentials
+# authenticate Pi and the independent Judge with operator-owned credentials
 make doctor
 ```
 
-`make setup` composes the first three provisioning commands. Setup may use
-Git, npm, Hugging Face, disk, and network, but it performs zero Agent operations
-and zero Judge operations and never runs a dataset.
+Pi is external and pinned by `pi-revision.txt`; a global `pi` executable is not runtime authority. Authentication remains in the operator-managed Pi agent directory or environment. Corpora, datasets, credentials, generated outputs, and private evidence are never vendored into the Asterion package.
 
-Pi is an external checkout, never vendored into this repository. A global `pi`
-executable is not the runtime authority: Asterion launches the checkout pinned
-by `pi-revision.txt` at `DCI_PI_DIR` (default `./pi`). `DCI_PI_AGENT_DIR`
-(default `~/.pi/agent`) selects separately managed Pi authentication. Setup
-never reads, copies, creates, or prints authentication files.
+Setup may use network and disk, but performs zero Agent and zero Judge operations. Local corpus access can still send selected content to the configured model provider during an authorized run.
 
-Pi dependency installation uses `npm ci`, and the AI package compiles the
-locked commit's checked-in model catalogs without refreshing them from moving
-model APIs. If an earlier failed setup left a dirty checkout without a built
-CLI, setup refuses to overwrite it: preserve or discard those changes
-explicitly, or select another clean `DCI_PI_DIR`, then run `make setup-pi`
-again.
+## DCI reference product
 
-`ASTERION_DCI_RESOURCE_ROOT` is the parent of external `corpus/` and `data/`
-trees. `make setup-resources-basic` prepares only `corpus/wiki_corpus` and
-`corpus/bc_plus_docs`. Benchmark paths come from private DCI operator
-configuration; capability manifests contain no dataset or corpus paths.
-
-Local corpus access means Asterion points Pi or Claude Code at operator-owned
-files instead of a hosted retrieval service. It does not mean every relevant
-document fragment stays on-device: selected corpus content can still be sent to
-the configured Agent model provider during a run.
-
-Keep Agent and Judge credentials in `.env`, exported environment variables, or
-the selected Pi agent directory; never commit them. External `pi/`, `data/`,
-`corpus/`, generated outputs, and private evidence remain outside the
-distribution.
-
-## Prime Gateway managed control
-
-Prime Gateway is an optional peer control provider for long-running,
-strongly-controlled sessions. Prime owns the controller session; Asterion owns
-the exact application portfolio, admission, execution, budgets, cancellation,
-journal, and public evidence. Prime source remains external; the wheel contains
-only Asterion's control manifest, exact artifact lock, and authenticated control
-skill.
-
-```bash
-make prime-check ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent
-make prime-verify-provider-free
-```
-
-The first command checks the pinned source and performs zero provider work. The
-second launches the real gateway against a deterministic fake daemon and proves
-ten process/fault scenarios with zero model-provider operations. External daemon
-preflight and explicitly authorized bounded readiness are separate; promotion
-never starts bounded provider work. See the
-[Prime Gateway operator guide](docs/guides/prime-control-operator-guide.md) and
-[Prime parity ledger](docs/status/PRIME-PARITY-LEDGER.md) for exact evidence
-labels and the deferred native-kernel scope.
-
-## Cost boundaries
-
-- `acceptance`, `list`, `describe`, `make test`, and `make check` are
-  provider-free.
-- setup, checks, `doctor`, and `preflight` are provider-free and report zero
-  Agent and zero Judge operations.
-- `basic` performs bounded Agent/Judge work when correctly configured.
-- `complete` includes the bounded provider-backed path plus acceptance.
-- Full datasets, paper-score reproduction, and publication require separate
-  governance. A passing bounded run is **Verified-bounded** only and does not
-  make `paper_full_executable=false` true.
-
-Authorization is explicit and host-owned; Asterion does not require a monetary
-amount to authorize a benchmark. An optional amount may be supplied as private
-DCI operator configuration, but it is never serialized into a manifest, plan,
-or public result and never grants execution authority.
-
-DCI exposes an immutable instance catalog over the generic benchmark
-subsystem. List it and select an exact version:
-
-The underlying exact suites remain `dci.github@1.0.0`,
-`dci.paper-main@1.0.0`, and `dci.all@1.0.0`; product instances bind those
-suites to an exact application, task selection, executor, and finite range.
+DCI exercises the generic framework with research, evaluation, benchmarking, analysis, and export capabilities. Provider-free discovery and planning remain separate from execution:
 
 ```bash
 uv run asterion-dci benchmark instances --json
@@ -144,55 +152,17 @@ uv run asterion-dci benchmark plan \
   --capability-source-lock "$OPERATOR_SELECTED_SOURCE_LOCK"
 ```
 
-Listing, locking, and planning create no evidence, load no capability
-implementation provider, perform no Agent/Judge work, and run no dataset. The
-default range is one case per task. `--all-cases` only resolves the finite
-catalog range; it is not authority to execute that range.
+See the [DCI operator guide](docs/OPERATOR-GUIDE.md), [capability usage guide](docs/guides/asterion-capability-usage.md), and [documentation hub](docs/README.md).
 
-The product-owned installed host runs only after explicit authorization, exact
-source selection, and a private absolute evidence root:
+## Security and cost boundaries
 
-```bash
-uv run asterion-dci benchmark run \
-  --instance dci.local-fixture@1.0.0 \
-  --case-limit 1 \
-  --capability-source-lock "$OPERATOR_SELECTED_SOURCE_LOCK" \
-  --evidence-root "$OPERATOR_SELECTED_PRIVATE_EVIDENCE_ROOT" \
-  --execute
-```
-
-Resume additionally requires the returned compatible run ID and the same
-instance, range, lock, and evidence root. `dci.local-fixture@1.0.0` is
-provider-free. Real instances use external data, model/network access, and an
-independent Judge; the default bounded range controls their cost. No credential,
-path, cached configuration, prior plan, or evidence grants execution authority.
-Full datasets and paper reproduction remain separately governed.
-
-See [the DCI operator guide](docs/OPERATOR-GUIDE.md) and
-[instance backlog](docs/status/DCI-BENCHMARK-INSTANCES.md).
-
-Use `make help` to see the same boundary beside every command group.
-
-## Capability package sources
-
-Built-in, installed-distribution, and explicit local-directory packages are
-source forms of the same capability-package contract. A built-in registration
-is not a privileged implementation layer. DCI is one package implementation of
-the generic Asterion benchmark subsystem, and its built-in form exists only
-after the same payload was proven through a clean external wheel using the
-public SDK and conformance kit.
-
-Source resolution has no hidden precedence. Multiple candidates for the same
-exact package remain ambiguous even when their payload digests match; the host
-must supply an exact source lock. Metadata discovery does not import provider
-code, and only the selected installed extension is loaded. Installed extension
-code is therefore part of the operator's trusted computing base after exact
-selection, not trusted metadata during discovery.
-
-Operator-owned credentials, provider configuration, datasets, corpus roots,
-private environment, and evidence stay outside package manifests. Archive and
-registry source forms are intentionally deferred until their trust,
-verification, and lifecycle design is approved.
+- `list`, `describe`, `acceptance`, `make test`, and `make check` are provider-free.
+- Setup and preflight check external readiness but do not authorize model work.
+- `basic` and `complete` may perform explicitly bounded Agent/Judge work.
+- Full datasets, paper reproduction, and publication runs require separate operator authorization.
+- Runners receive resolved plans and read-only host services; they do not discover, authorize, persist, schedule, retry, or choose runtimes.
+- The Rust executor applies trusted policy, direct invocation, cleared environments, deadlines, output caps, and cancellation. It is controlled execution, not an OS sandbox.
+- Public surfaces redact prompts, answers, credentials, provider payloads, private paths, corpus text, and raw model output.
 
 ## Development
 
@@ -203,33 +173,21 @@ make docs-check
 make check
 ```
 
-The [documentation hub](docs/README.md) links the framework architecture,
-capability usage, complete DCI reference, and functional verification guide.
-Long-running agent development starts with the
-[Agent Control Protocol](docs/architecture/AGENT-CONTROL-PROTOCOL.md); the
-[Prime parity ledger](docs/status/PRIME-PARITY-LEDGER.md) keeps foundation,
-Prime-managed and native-kernel claims distinct.
+The repository uses Python `unittest`, TypeScript contract validation, and Rust tests. Changes to packaged resources, entry points, schemas, or distribution assumptions additionally require `make promotion-check`.
+
+The architectural starting points are [Agent application framework](docs/architecture/agent-framework.md), [Runtime/provider boundaries](docs/architecture/runtime-provider-boundaries.md), and [Agent Control Protocol](docs/architecture/AGENT-CONTROL-PROTOCOL.md).
 
 ## Promotion
-
-Before making this directory the root of a Git repository, run:
 
 ```bash
 make check
 ASTERION_PROMOTION_NPM_CACHE="$(npm config get cache)" make promotion-check
 ```
 
-`promotion-check` copies the standalone tree into a temporary directory and
-re-runs the provider-free repository gates there. Its npm dependencies require
-an absolute, pre-populated, operator-owned npm cache supplied through
-`ASTERION_PROMOTION_NPM_CACHE`; the cache is an external tool resource, not
-packaged evidence. A cache miss fails and does not access the network. It does
-not create a remote, publish a package, or run a provider.
+`promotion-check` copies the standalone tree into a temporary directory and reruns provider-free distribution gates. It does not publish a package, create a remote, or run a provider.
 
-## Mixed-repository integration parity
+## Compatibility and history
 
-The historical `538/538` delegated-selector matrix is a **mixed-repository only**
-integration gate maintained by DCI-Agent-Lite. It compares the original DCI
-baseline with Asterion and is not a current standalone acceptance result. The
-standalone package deliberately does not ship that baseline, its governance
-ledger, retained private evidence, or its integration verifier.
+The repository still contains **Prime Gateway** compatibility and historical parity surfaces for controlled comparison with external Prime Agent source. They are not the implementation of native Asterion Prime and cannot establish native capability parity. The native `asterion.prime` path is source-independent and must remain completely detached from Prime Agent source and SDK code.
+
+Likewise, the historical `538/538` delegated-selector matrix is mixed-repository DCI integration evidence, not a current standalone acceptance result. Current claims are tied to named commands and evidence boundaries rather than inherited snapshots.
