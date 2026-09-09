@@ -130,6 +130,15 @@ def _observation_digest(value: ArcObservation) -> str:
     )
 
 
+def _engine_identity(engine: object) -> tuple[str, int]:
+    game_id, seed = getattr(engine, "game_id", None), getattr(engine, "seed", None)
+    if type(game_id) is not str or type(seed) is not int or type(seed) is bool:
+        raise ValueError
+    if game_id != P7_GAME_ID or seed != P7_SEED:
+        raise ValueError
+    return game_id, seed
+
+
 class ArcBroker:
     """Journal bounded primitive actions and close at the first level transition."""
 
@@ -140,6 +149,7 @@ class ArcBroker:
             raise ArcBrokerError("unavailable")
         typed_engine = cast(_ArcEngine, engine)
         try:
+            self._identity = _engine_identity(engine)
             initial = _snapshot_observation(typed_engine.observe())
             if initial.levels_completed != 0:
                 raise ValueError
@@ -203,6 +213,10 @@ class ArcBroker:
         validated = self._validate_actions(actions)
         transitions: list[ArcTransition] = []
         for action in validated:
+            if action not in self._current.available_actions:
+                self._failed_action = action
+                self._terminal_reason = "action-unavailable"
+                raise ArcBrokerError("unavailable")
             before = self._current
             self._actions_dispatched += 1
             try:

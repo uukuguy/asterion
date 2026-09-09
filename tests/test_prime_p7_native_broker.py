@@ -7,15 +7,31 @@ import unittest
 
 
 class _Engine:
-    def __init__(self, *, level_after: int | None = None, raises_on: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        level_after: int | None = None,
+        raises_on: int | None = None,
+        game_id: str = "ls20-9607627b",
+        seed: int = 0,
+        remove_second_after_first: bool = False,
+    ) -> None:
         self.level_after = level_after
         self.raises_on = raises_on
+        self.game_id = game_id
+        self.seed = seed
+        self.remove_second_after_first = remove_second_after_first
         self.calls: list[str] = []
         self.levels_completed = 0
+        self.observe_calls = 0
 
     def observe(self) -> dict[str, object]:
+        self.observe_calls += 1
+        available = ["ACTION1", "ACTION2", "ACTION3"]
+        if self.remove_second_after_first and self.calls:
+            available.remove("ACTION2")
         return {
-            "available_actions": ["ACTION1", "ACTION2", "ACTION3"],
+            "available_actions": available,
             "frame": [[[len(self.calls) % 10, 1]]],
             "levels_completed": self.levels_completed,
             "state": "NOT_FINISHED",
@@ -98,3 +114,23 @@ class TestNativeP7Broker(unittest.TestCase):
             observed.state = "FORGED"  # type: ignore[misc]
         engine.step("ACTION1")
         self.assertEqual(observed.frame, (((0, 1),),))
+
+    def test_identity_mismatch_is_rejected_before_observation(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+
+        engine = _Engine(game_id="other-game")
+        with self.assertRaises(ArcBrokerError):
+            ArcBroker(engine=engine)
+        self.assertEqual(engine.observe_calls, 0)
+
+    def test_later_action_loses_authority_when_first_changes_availability(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBrokerError
+
+        broker, engine = _broker()
+        engine.remove_second_after_first = True
+        with self.assertRaisesRegex(ArcBrokerError, "unavailable"):
+            broker.act(("ACTION1", "ACTION2"))
+        self.assertEqual(engine.calls, ["ACTION1"])
+        self.assertEqual(broker.seal().terminal_reason, "action-unavailable")
+        with self.assertRaisesRegex(ArcBrokerError, "closed"):
+            broker.status()

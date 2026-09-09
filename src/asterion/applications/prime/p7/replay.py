@@ -5,7 +5,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol, cast
 
-from .broker import ArcBrokerError, ArcRunReceipt, ArcTransition, _observation_digest, _snapshot_observation
+from .broker import (
+    ArcBrokerError,
+    ArcRunReceipt,
+    ArcTransition,
+    _engine_identity,
+    _observation_digest,
+    _snapshot_observation,
+)
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, replay_sha256
 
 
@@ -47,6 +54,7 @@ def replay_arc_run(
     engine = None
     try:
         engine = cast(_ArcEngine, engine_factory())
+        _engine_identity(engine)
         current = _snapshot_observation(engine.observe())
         if current.levels_completed != 0:
             raise ValueError

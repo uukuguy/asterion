@@ -29,3 +29,14 @@
 This establishes plumbing and deterministic replay only.  The tests use a
 controlled ARC-shaped engine and do not solve the public level; known action
 traces remain replay/plumbing evidence, not acceptance evidence.
+
+## Follow-up authority review
+
+- RED: the native suite exposed three missing checks: broker identity mismatch,
+  fresh replay identity mismatch, and a second batched action made unavailable
+  by the first transition.
+- GREEN: adapters now present exact `game_id` and `seed` before the broker or
+  replay verifier calls `observe`; the broker stores that immutable identity.
+  Every action is also re-authorized against the current immutable observation
+  directly before dispatch.  Loss of authority closes the broker without
+  dispatching the later action.
