@@ -2,116 +2,111 @@
 
 # Asterion
 
-Composable, multi-runtime infrastructure for building verifiable agent applications.
+**A composable, multi-runtime agent application framework.**
 
-Asterion separates capability packages, exact application assemblies, agent runtimes, host services, and controlled execution behind closed public contracts. Python owns orchestration and composition, TypeScript validates shared contracts and Node integration, and Rust owns controlled execution. The project is research-stage, with provider-free verification kept separate from operator-authorized model work.
+Asterion turns agent capabilities into exact, executable applications without giving models ownership of credentials, authority, or infrastructure. It provides versioned contracts for capabilities and runtimes, deterministic application assembly, controlled execution, and evidence that can be inspected independently of model output.
 
-## ARC-AGI-3 interactive reasoning
+The repository contains the authoritative Python framework in `src/asterion/`, shared TypeScript contracts and Node integration, a Rust controlled executor, built-in application providers, schemas, conformance fixtures, and operator documentation.
 
-On 9 September 2026, native Asterion Prime completed **Level 1 of ARC-AGI-3 game `ls20-9607627b`** in one sealed run. It used Asterion's Pi integration with `deepseek-v4-flash`; it did not import or execute prime-agent source code.
+## Why Asterion
 
-<p align="center">
-  <img src="docs/assets/arc-agi-3/solve-replay.gif" alt="Replay of Asterion Prime solving ARC-AGI-3 game ls20-9607627b Level 1" width="480">
-</p>
+Agent applications need more than a prompt and a tool loop. Their behavior depends on which capability implementation was selected, which runtime executed it, which host services were authorized, and what evidence survived the run. Asterion makes those decisions explicit:
 
-This is evidence for one completed interactive level—not a claim that Asterion has solved the complete ARC-AGI-3 benchmark or matched another system.
-
-| Run fact | Recorded value |
-|---|---:|
-| Application / runtime | Asterion Prime / `asterion.prime`, using Pi |
-| Model | `deepseek-v4-flash` |
-| Actions | 23 |
-| Visual observations | 30 frames, including multi-frame action animation |
-| Reasoning cells | 43 |
-| Partial game score | `3.267621` |
-| Completion | 1 level; terminal state `level completed` |
-| Evidence | sealed trace; replay verified |
-| Token usage / elapsed time | not recorded by this legacy run; not estimated |
-
-### What the task tests
-
-ARC-AGI-3 is not a static “input grid → output grid” exercise. The agent receives a changing visual world and a small bounded action set, while the objective and object semantics are initially hidden. It must:
-
-- infer what can be controlled and what constitutes progress;
-- preserve state across a sequence of observations and actions;
-- perform small, falsifiable experiments instead of committing to an early guess;
-- revise its working model when the screen contradicts it; and
-- finish by changing the environment into a success state, not by merely describing an answer.
-
-In this level, repeated controlled movements revealed that the colored strips were fixed two-state objects rather than freely moving pieces. The agent compared corresponding row and column bands, tested reversibility, identified the remaining mismatches, and completed the required configuration in 23 actions. These statements are post-run interpretations grounded in the action and frame evidence; they are not a publication of hidden chain-of-thought.
-
-### Solve and evidence path
-
-```mermaid
-flowchart LR
-    A[Asterion Prime] --> P[Pi]
-    P --> M[Model]
-    A --> I[Persistent IPython]
-    I --> B[ARC broker]
-    B --> E[Environment]
-    E --> T[Sealed trace]
-    T --> V[Replay verification]
-    V --> R[Regenerable report]
-```
-
-Asterion Prime supplied the reusable agent loop: persistent programmatic state, model/tool interaction, bounded execution, and evidence capture. P7 supplied the ARC-AGI-3 application—its broker, action surface, task context, run limits, and completion handling. The environment, not the model, supplied the terminal completion fact.
-
-### The complete solve report
-
-The standalone report combines the replay, frame differences, evidence-cited narration, key experiments, and the post-solve model of the level. It is intentionally generated from stored run artifacts, so visual design and explanation can improve without changing the original solve.
-
-<p align="center">
-  <img src="docs/assets/arc-agi-3/solve-report.png" alt="Standalone Asterion ARC-AGI-3 solve report with replay, evidence-backed narration, and post-solve understanding" width="620">
-</p>
-
-## How the evidence is preserved
-
-ARC solve artifacts live in a stable `artifacts/arc-agi-3/` hierarchy during local research. Four layers stay separate:
-
-1. **Normalized facts** — immutable run identity, actions, observations, terminal state, usage, and verification evidence.
-2. **Versioned analysis** — evidence references and post-run explanations attached to the facts without rewriting them.
-3. **Versioned rendering** — replaceable web presentation built from one exact analysis.
-4. **Standalone export** — one self-contained HTML file with its data, styles, scripts, and images embedded for distribution.
-
-Only the compact replay and approved screenshot are committed here. Private run artifacts remain outside the distribution, while the report can be regenerated locally from the retained evidence.
+- **Composable capabilities** — applications are assembled from exact, versioned packages rather than hidden source discovery.
+- **Multiple runtimes** — application contracts stay stable while Pi, Claude Code, or application-owned runtimes translate native events into one public protocol.
+- **Deterministic assembly** — missing edges, duplicate identities, ambiguous implementations, and dependency cycles fail closed before execution.
+- **Host-owned authority** — credentials, execution policy, datasets, cancellation, and provider configuration remain outside portable manifests and are injected explicitly.
+- **Verifiable operation** — validated event streams, immutable artifacts, receipts, sealed traces, and replay checks separate environment facts from model claims.
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    H[CLI / host] --> P[Selected provider]
+    P --> A[Exact application assembly]
+    A --> C[Capability catalog + composer]
+    C --> I[Exact implementation bindings]
+    I --> R[Sequential runner]
+    R --> RT[Selected runtime]
+    R --> S[Injected host services]
+    RT --> E[Validated events + artifacts]
+    S --> E
+```
+
+The dependency direction is deliberate:
+
 ```text
-CLI / host
-  → selected application provider
-  → exact assembly
-  → capability catalog and deterministic composer
-  → exact implementation bindings
-  → sequential runner
-  → runtime adapter and explicitly injected host services
+CLI / host → selected provider → assembly → catalog / composer
+           → exact implementations → runner → runtime / host services
 ```
 
-The core contracts are `asterion.agent-runtime/v1`, `asterion.capability/v1`, `asterion.capability-package/v1`, and `asterion.application-assembly/v1`. Manifests describe compatibility, not authority: they contain no prompts, credentials, commands, executable paths, provider configuration, or mutable state.
+Framework modules under `runtime/`, `packages/`, `assembly/`, `runner/`, and `services/` remain domain-neutral. Products and applications depend on the framework; generic framework code does not import DCI, ARC-AGI-3, tests, or adjacent source trees.
 
-Two peer agent surfaces share this framework:
+Language ownership is equally explicit: **Python** owns orchestration, composition, assembly, and execution flow; **TypeScript** validates shared contracts and Node integration; **Rust** owns controlled command execution. The Rust executor applies trusted policy, direct invocation, cleared environments, deadlines, output limits, and cancellation—it is not an operating-system sandbox.
 
-- **Asterion Prime (`asterion.prime`)** implements reusable Prime-style capabilities over Asterion's common Pi transport. P1 through P7 are applications of this implementation, not its foundation.
-- **Asterion Native (`asterion.native`)** is the peer native control-plane implementation. It currently remains a control provider rather than an `AgentRuntime` adapter.
+## Core building blocks
 
-Framework modules remain domain-neutral. DCI is the complete reference product and ARC-AGI-3 solving is an Asterion Prime application; neither is a dependency that generic composition or runtime code may assume.
+| Building block | Responsibility |
+|---|---|
+| Runtime Protocol | One run identity, contiguous events, matched tool calls/results, cancellation, and exactly one terminal event |
+| Capability package | Versioned behavior, compatibility edges, declared artifacts, policies, and exact implementation bindings |
+| Application assembly | Exact capability references, runtime compatibility, and required host-service edges |
+| Provider | Publishes installed applications and loads only the entry point selected by exact identity |
+| Composer | Resolves a deterministic execution plan and rejects ambiguity, missing dependencies, or cycles |
+| Runner | Executes the resolved plan sequentially; it does not discover, authorize, retry, persist, schedule, or select runtimes |
+| Host service | Injects narrow operator-owned facilities only after host preflight |
+| Evidence | Public-safe events, immutable artifacts, receipts, digests, sealed traces, and replay verification |
 
-## Install and inspect
+The closed v1 contracts are:
 
-Python 3.10 or newer and [`uv`](https://docs.astral.sh/uv/) are required. Node.js 22.x plus npm are needed for Pi and TypeScript integration; Rust is needed only for the controlled-executor checks.
+- `asterion.agent-runtime/v1`
+- `asterion.capability/v1`
+- `asterion.capability-package/v1`
+- `asterion.application-assembly/v1`
 
-```bash
-uv sync --frozen
-uv run asterion list
-uv run asterion describe --provider dci-agent-lite
-uv run asterion verify --provider dci-agent-lite --level acceptance
-```
+Their JSON schemas, Python validators, TypeScript validators, and conformance fixtures must agree. Manifests describe compatibility, not authority: they never contain prompts, credentials, commands, executable paths, environment values, provider configuration, or mutable state.
 
-`list`, `describe`, and `acceptance` inspect installed metadata, exact assemblies, and executable reachability without constructing a model runtime or making a provider request.
+## Agent implementations
 
-## Generate an ARC solve report
+| Implementation | Current role |
+|---|---|
+| **Asterion Prime** (`asterion.prime`) | Source-independent Prime-style agent implementation over Asterion's Pi transport, persistent programmatic state, bounded execution, and evidence capture |
+| **Asterion Native** (`asterion.native`) | Peer native control-plane implementation sharing the same Asterion framework contracts; currently a control provider, not an `AgentRuntime` adapter |
 
-The story pipeline accepts a retained sealed run and writes into the fixed local artifact hierarchy:
+P1 through P7 are applications built on Asterion Prime capabilities. They are not the implementation of the Prime foundation itself. Native Asterion Prime does not import, load, launch, inspect, or require prime-agent source or SDK code.
+
+## Applications
+
+Asterion is a framework; concrete behavior lives in applications assembled from its capabilities.
+
+| Application surface | What it exercises |
+|---|---|
+| P1–P6 | Persistent IPython work, programmatic long context, recursive workflow, inference scaling, continual execution, and related Prime-style application patterns |
+| P7 / ARC-AGI-3 | Stateful visual interaction, online experiments, bounded actions, environment feedback, and replayable solve evidence |
+| DCI | A complete reference product for research, evaluation, benchmarking, analysis, and export |
+| Controlled code | Capability composition and execution through explicitly injected controlled host services |
+
+### ARC-AGI-3 interactive reasoning
+
+On 9 September 2026, Asterion Prime completed **Level 1 of game `ls20-9607627b`** in one sealed run using Pi and `deepseek-v4-flash`. This demonstrates one Asterion application; it is not a claim that the complete ARC-AGI-3 benchmark was solved or that another agent was matched.
+
+<p align="center">
+  <img src="docs/assets/arc-agi-3/solve-replay.gif" alt="Replay of Asterion Prime completing ARC-AGI-3 game ls20-9607627b Level 1" width="360">
+</p>
+
+| Actions | Frames | Reasoning cells | Partial score | Result | Evidence |
+|---:|---:|---:|---:|---|---|
+| 23 | 30 | 43 | `3.267621` | 1 level completed | sealed trace; replay verified |
+
+ARC-AGI-3 hides the objective and object semantics inside a stateful environment. The agent must learn through small falsifiable actions, retain what changed, revise contradicted hypotheses, and make the environment report success. In this level, controlled experiments revealed fixed two-state row and column bands; comparison and reversible probes isolated the remaining mismatches before completion. Token usage and elapsed time were not recorded by this early run and are not estimated.
+
+`Asterion Prime → Pi → model → persistent IPython → ARC broker → environment → sealed trace → replay verification`
+
+<p align="center">
+  <img src="docs/assets/arc-agi-3/solve-report.png" alt="Asterion ARC-AGI-3 report with replay, evidence-backed narration, and post-solve understanding" width="460">
+</p>
+
+The report keeps normalized facts, versioned post-run analysis, versioned rendering, and standalone export separate. Its narration cites stored action/frame evidence; it is not hidden chain-of-thought. A retained sealed run can be rebuilt and exported as one distributable HTML file:
 
 ```bash
 uv run asterion arc-story compile /absolute/path/to/sealed-run
@@ -121,11 +116,26 @@ uv run asterion arc-story export GAME_ID RUN_ID --render RENDER_ID
 uv run asterion arc-story serve
 ```
 
-`compile` normalizes and validates the original evidence. `analyze` is the only model-backed stage and requires operator-owned Pi/model configuration. `render`, `export`, and `serve` operate on stored artifacts; `export` produces a single distributable HTML file rather than a service-dependent page.
+`analyze` is the model-backed stage; compile, render, export, and serving operate on retained evidence. Local research artifacts use the stable `artifacts/arc-agi-3/` hierarchy and remain outside the package distribution.
+
+## Install and inspect
+
+Python 3.10 or newer and [`uv`](https://docs.astral.sh/uv/) are required. Node.js 22.x plus npm are needed for Pi and TypeScript integration; Rust is needed for controlled-executor checks.
+
+```bash
+uv sync --frozen
+uv run asterion list
+uv run asterion describe --provider dci-agent-lite
+uv run asterion verify --provider dci-agent-lite --level acceptance
+```
+
+`list`, `describe`, and `acceptance` inspect installed metadata, exact assemblies, and implementation reachability without constructing a model runtime or making a provider request.
+
+Capability packages may be built in, installed through a distribution entry point, or selected from an explicit local directory. All forms follow the same contract. Source resolution has no hidden precedence: multiple candidates for one exact identity remain ambiguous until the host supplies an exact source lock.
 
 ## External runtimes and resources
 
-From a fresh clone, prepare the locked external Pi checkout and the small DCI resource profile with:
+Prepare the locked external Pi checkout and small DCI resource profile from a fresh clone:
 
 ```bash
 make setup
@@ -134,13 +144,11 @@ cp .env.template .env
 make doctor
 ```
 
-Pi is external and pinned by `pi-revision.txt`; a global `pi` executable is not runtime authority. Authentication remains in the operator-managed Pi agent directory or environment. Corpora, datasets, credentials, generated outputs, and private evidence are never vendored into the Asterion package.
+Pi remains external and is pinned by `pi-revision.txt`; a global `pi` executable is not runtime authority. Authentication belongs to the operator-managed Pi agent directory or environment. Corpora, datasets, credentials, private evidence, and generated output remain outside the Asterion distribution.
 
-Setup may use network and disk, but performs zero Agent and zero Judge operations. Local corpus access can still send selected content to the configured model provider during an authorized run.
+Setup and preflight may inspect network, disk, and external readiness, but perform zero Agent and zero Judge operations. Provider-backed `basic` and `complete` presets are separately bounded. Full datasets, paper reproduction, and publication runs require separate operator authorization.
 
-## DCI reference product
-
-DCI exercises the generic framework with research, evaluation, benchmarking, analysis, and export capabilities. Provider-free discovery and planning remain separate from execution:
+DCI's provider-free catalog and plan surfaces can be inspected without loading a model:
 
 ```bash
 uv run asterion-dci benchmark instances --json
@@ -152,19 +160,18 @@ uv run asterion-dci benchmark plan \
   --capability-source-lock "$OPERATOR_SELECTED_SOURCE_LOCK"
 ```
 
-See the [DCI operator guide](docs/OPERATOR-GUIDE.md), [capability usage guide](docs/guides/asterion-capability-usage.md), and [documentation hub](docs/README.md).
+See the [documentation hub](docs/README.md), [DCI operator guide](docs/OPERATOR-GUIDE.md), and [capability usage guide](docs/guides/asterion-capability-usage.md).
 
-## Security and cost boundaries
+## Security and execution boundaries
 
-- `list`, `describe`, `acceptance`, `make test`, and `make check` are provider-free.
-- Setup and preflight check external readiness but do not authorize model work.
-- `basic` and `complete` may perform explicitly bounded Agent/Judge work.
-- Full datasets, paper reproduction, and publication runs require separate operator authorization.
-- Runners receive resolved plans and read-only host services; they do not discover, authorize, persist, schedule, retry, or choose runtimes.
-- The Rust executor applies trusted policy, direct invocation, cleared environments, deadlines, output caps, and cancellation. It is controlled execution, not an OS sandbox.
-- Public surfaces redact prompts, answers, credentials, provider payloads, private paths, corpus text, and raw model output.
+- Trust-boundary failures fail closed before execution.
+- Public surfaces redact prompts, answers, credentials, provider payloads, corpus text, raw output, host-service values, and private paths.
+- Runtime streams require one run ID, contiguous sequences, paired tool calls/results, and one terminal event.
+- Runners receive resolved plans, exact implementations, a cancellation signal, and read-only host services.
+- `executor.controlled` does not authorize commands; the operator-owned host injects authority after preflight.
+- Configuration, caches, prior plans, and retained evidence never grant execution authority.
 
-## Development
+## Development and promotion
 
 ```bash
 make test
@@ -173,21 +180,17 @@ make docs-check
 make check
 ```
 
-The repository uses Python `unittest`, TypeScript contract validation, and Rust tests. Changes to packaged resources, entry points, schemas, or distribution assumptions additionally require `make promotion-check`.
+Use `make promotion-check` after changing packaged resources, entry points, schemas, or distribution assumptions. It copies the standalone tree to a temporary directory and reruns provider-free distribution gates; it neither publishes a package nor invokes a model provider.
 
-The architectural starting points are [Agent application framework](docs/architecture/agent-framework.md), [Runtime/provider boundaries](docs/architecture/runtime-provider-boundaries.md), and [Agent Control Protocol](docs/architecture/AGENT-CONTROL-PROTOCOL.md).
+Architecture references:
 
-## Promotion
-
-```bash
-make check
-ASTERION_PROMOTION_NPM_CACHE="$(npm config get cache)" make promotion-check
-```
-
-`promotion-check` copies the standalone tree into a temporary directory and reruns provider-free distribution gates. It does not publish a package, create a remote, or run a provider.
+- [Agent application framework](docs/architecture/agent-framework.md)
+- [Runtime and provider boundaries](docs/architecture/runtime-provider-boundaries.md)
+- [Agent Control Protocol](docs/architecture/AGENT-CONTROL-PROTOCOL.md)
+- [Security boundaries](docs/security.md)
 
 ## Compatibility and history
 
-The repository still contains **Prime Gateway** compatibility and historical parity surfaces for controlled comparison with external Prime Agent source. They are not the implementation of native Asterion Prime and cannot establish native capability parity. The native `asterion.prime` path is source-independent and must remain completely detached from Prime Agent source and SDK code.
+The repository retains **Prime Gateway** compatibility and historical parity surfaces for controlled comparison with external Prime Agent source. They are not native Asterion Prime and cannot establish native capability parity. The native `asterion.prime` path remains source-independent and completely detached from Prime Agent source and SDK code.
 
-Likewise, the historical `538/538` delegated-selector matrix is mixed-repository DCI integration evidence, not a current standalone acceptance result. Current claims are tied to named commands and evidence boundaries rather than inherited snapshots.
+The historical `538/538` delegated-selector matrix is mixed-repository DCI integration evidence, not a current standalone acceptance result. Current claims are tied to named verification commands and explicit evidence boundaries rather than inherited snapshots.
