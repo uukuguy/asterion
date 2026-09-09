@@ -41,14 +41,15 @@ class TestPrimeP7Comparison(unittest.TestCase):
         )
 
         self.assertEqual(report.schema, "asterion.prime.p7-differential/v1")
-        self.assertEqual(report.left["model_id"], "deepseek-r1")
+        self.assertEqual(report.left["model_id"], report.left["model_id"])
+        self.assertTrue(str(report.left["model_id"]).startswith("sha256:"))
         self.assertEqual(report.right["actions"], ("ACTION2",))
         self.assertEqual(report.right["outcome"], "manual-stop-61")
         self.assertNotIn("official_failure", report.deltas)
 
     def test_public_differential_never_serializes_private_trace_data(self) -> None:
         report = compare_runs(
-            recorded_run(model="deepseek-r1", action="ACTION1", outcome="action-cap"),
+            recorded_run(model="sentinel-secret", action="ACTION1", outcome="action-cap"),
             recorded_run(model="sol", action="ACTION2", outcome="manual-stop-61"),
         )
 

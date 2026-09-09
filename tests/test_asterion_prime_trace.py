@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from asterion.agents.prime.trace import PrimeTraceError, PrimeTraceRecorder
+from asterion.applications.prime.p7.diagnostics import analyze_trace
 
 
 class TestPrimeTraceRecorder(unittest.TestCase):
@@ -52,3 +54,18 @@ class TestPrimeTraceRecorder(unittest.TestCase):
                 recorder.append("arc.action", {"model_id": "two"}, {})
             with self.assertRaises(PrimeTraceError):
                 recorder.append("arc.action", {"model_id": "one"}, {"value": object()})
+
+    def test_analysis_requires_the_final_seal_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            identities = {"model_id": "deepseek-r1", "reasoning_id": "sol"}
+            recorder.append("arc.action", identities, {"action": "ACTION1"})
+            with self.assertRaises(PrimeTraceError):
+                analyze_trace(recorder.snapshot())
+
+            recorder.seal()
+            sealed = recorder.entries
+            self.assertEqual(sealed[-1].kind, "trace.sealed")
+            self.assertEqual(recorder.seal().final_sha256, sealed[-1].sha256)
+            with self.assertRaises(PrimeTraceError):
+                analyze_trace(sealed[:-1] + (replace(sealed[-1], payload={}),))

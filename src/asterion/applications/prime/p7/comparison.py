@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from hashlib import sha256
 import re
 from typing import cast
 
@@ -25,11 +26,14 @@ class DifferentialReport:
     deltas: Mapping[str, object]
 
 
-def _safe_identity(identities: Mapping[str, str], *names: str) -> str | None:
+def _identity_projection(identities: Mapping[str, str], domain: str, *names: str) -> str | None:
     for name in names:
         value = identities.get(name)
-        if type(value) is str and re.fullmatch(r"[A-Za-z0-9._:@-]{1,128}", value):
-            return value
+        if type(value) is str:
+            return "sha256:" + sha256(
+                f"asterion.prime.p7.{domain}.identity/v1\x00".encode("utf-8")
+                + value.encode("utf-8")
+            ).hexdigest()
     return None
 
 
@@ -82,9 +86,9 @@ def _normalise(entries: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
         "entry_count": len(entries),
         "failure_markers": failure_markers,
         "hypothesis_markers": hypothesis_markers,
-        "model_id": _safe_identity(identities, "model_id", "model"),
+        "model_id": _identity_projection(identities, "model", "model_id", "model"),
         "outcome": outcome,
-        "reasoning_id": _safe_identity(identities, "reasoning_id", "reasoning"),
+        "reasoning_id": _identity_projection(identities, "reasoning", "reasoning_id", "reasoning"),
         "replan_markers": replan_markers,
         "state_digests": tuple(state_digests),
     }

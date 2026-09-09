@@ -187,6 +187,17 @@ def validate_trace(entries: object) -> tuple[PrimeTraceEntry, ...]:
                 sha256=entry.sha256,
             )
         )
+    if not validated or validated[-1].kind != "trace.sealed":
+        _reject()
+    marker = validated[-1]
+    if (
+        any(entry.kind == "trace.sealed" for entry in validated[:-1])
+        or set(marker.payload) != {"entry_count", "final_sha256"}
+        or marker.payload["entry_count"] != len(validated) - 1
+        or marker.payload["final_sha256"] != marker.previous_sha256
+        or marker.previous_sha256 is None
+    ):
+        _reject()
     return tuple(validated)
 
 
@@ -268,6 +279,8 @@ class PrimeTraceRecorder:
             _reject()
         if type(kind) is not str or not kind or len(kind) > 128:
             _reject()
+        if kind == "trace.sealed":
+            _reject()
         try:
             kind.encode("utf-8")
         except UnicodeEncodeError:
@@ -276,14 +289,25 @@ class PrimeTraceRecorder:
         payload = _payload(private_payload)
         if self._identities is not None and dict(self._identities) != dict(stable_identities):
             _reject()
+        entry = self._append_entry(kind, stable_identities, payload)
+        if self._identities is None:
+            self._identities = stable_identities
+        return entry
+
+    def _append_entry(
+        self, kind: str, identities: Mapping[str, str], payload: Mapping[str, object]
+    ) -> PrimeTraceEntry:
+        trace_descriptor = self._trace_fd
+        if trace_descriptor is None:
+            _reject()
         previous = self._entries[-1].sha256 if self._entries else None
         entry = PrimeTraceEntry(
             sequence=len(self._entries) + 1,
             kind=kind,
-            identities=stable_identities,
+            identities=identities,
             payload=payload,
             previous_sha256=previous,
-            sha256=_entry_digest(len(self._entries) + 1, kind, stable_identities, payload, previous),
+            sha256=_entry_digest(len(self._entries) + 1, kind, identities, payload, previous),
         )
         self._write_descriptor(
             trace_descriptor,
@@ -296,10 +320,13 @@ class PrimeTraceRecorder:
                 "sha256": entry.sha256,
             },
         )
-        if self._identities is None:
-            self._identities = stable_identities
         self._entries.append(entry)
         return entry
+
+    def snapshot(self) -> tuple[PrimeTraceEntry, ...]:
+        """Return the current private snapshot; only a sealed one is analyzable."""
+
+        return tuple(self._entries)
 
     @property
     def entries(self) -> tuple[PrimeTraceEntry, ...]:
@@ -310,10 +337,17 @@ class PrimeTraceRecorder:
     def seal(self) -> PrimeTraceSeal:
         if self._seal is not None:
             return self._seal
-        final_sha256 = self._entries[-1].sha256 if self._entries else _digest({"entries": ()})
+        if not self._entries or self._identities is None:
+            _reject()
+        previous_sha256 = self._entries[-1].sha256
+        final_entry = self._append_entry(
+            "trace.sealed",
+            self._identities,
+            {"entry_count": len(self._entries), "final_sha256": previous_sha256},
+        )
         seal = PrimeTraceSeal(
             entry_count=len(self._entries),
-            final_sha256=final_sha256,
+            final_sha256=final_entry.sha256,
             sealed_at=datetime.now(timezone.utc).isoformat(),
         )
         self._write_seal(
