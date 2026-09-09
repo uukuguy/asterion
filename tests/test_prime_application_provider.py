@@ -131,7 +131,6 @@ class TestPrimeApplicationProvider(unittest.TestCase):
         self.assertEqual(
             [(item.application_id, item.version) for item in provider.applications],
             [
-                ("prime.arc-agi-3-solving", "1.0.0"),
                 ("prime.arc-agi-3", "1.0.0"),
                 ("prime.capability-program", "1.0.0"),
                 ("prime.bounded-autonomy", "1.0.0"),
@@ -201,7 +200,7 @@ class TestPrimeApplicationProvider(unittest.TestCase):
         )
         self.assertEqual(
             select_application_provider_id("prime.arc-agi-3-solving@1.0.0"),
-            "prime-agent",
+            "prime-applications",
         )
 
     def test_solver_package_is_discoverable_from_the_builtin_registration(self) -> None:

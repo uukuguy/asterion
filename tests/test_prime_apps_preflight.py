@@ -32,7 +32,7 @@ class _Entry:
 
 
 class TestPrimeAppsPreflight(unittest.TestCase):
-    def test_solving_row_uses_distinct_display_and_preparation_without_execution(self) -> None:
+    def test_preflight_covers_only_the_seven_development_applications(self) -> None:
         prepared: list[tuple[str, ...]] = []
 
         def prepare(_: Path, scenarios: tuple[str, ...]):
@@ -47,9 +47,10 @@ class TestPrimeAppsPreflight(unittest.TestCase):
         )
 
         self.assertEqual(result, 0)
-        self.assertEqual(_ROWS[-1][:2], ("prime-p7-solve", "p7-solving"))
-        self.assertIn(("p7-solving",), prepared)
-        self.assertIn("prime-p7-solve PASS\n", stdout.getvalue())
+        self.assertEqual(_ROWS[-1][:2], ("prime-p7", "p7"))
+        self.assertNotIn(("p7-solving",), prepared)
+        self.assertIn("prime-p7 PASS\n", stdout.getvalue())
+        self.assertNotIn("prime-p7-solve", stdout.getvalue())
         self.assertEqual(stderr.getvalue(), "")
 
 

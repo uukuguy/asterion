@@ -49,9 +49,8 @@ class TestPrimeDevelopmentPreparation(unittest.TestCase):
         with self.assertRaises(subject.PrimeDevelopmentPreparationError):
             subject.prepare_prime_development(Path.cwd(), ("p8",))
 
-    def test_solving_is_a_separate_selector_without_changing_p7_lock(self) -> None:
-        self.assertIn("p7-solving", subject._SCENARIOS)
-        self.assertIn("p7", subject._SCENARIOS)
+    def test_scenarios_are_the_seven_development_applications(self) -> None:
+        self.assertEqual(subject._SCENARIOS, frozenset(f"p{i}" for i in range(1, 8)))
         self.assertEqual(
             subject._lock()["p7"]["resource_sha256"],
             "sha256:210d4f6423e6d577b239fa441b90b91c79c06fe983d6be3019ff119a99d39ebd",

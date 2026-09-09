@@ -16,7 +16,7 @@ class TestPrimeMakePresets(unittest.TestCase):
             ("p4", "prime-p5-run:"),
             ("p5", "prime-p6-run:"),
             ("p6", "prime-p7-run:"),
-            ("p7", "prime-p7-solve:"),
+            ("p7", "asterion-prime-p7-solve:"),
         )
         for scenario, next_target in targets:
             with self.subTest(scenario=scenario):
@@ -117,7 +117,7 @@ class TestPrimeMakePresets(unittest.TestCase):
         cases = (
             ("p5", "prime-p6-run:", "Bounded autonomy: diagnose, repair, and validate the fixed clamp task", "prime.bounded-autonomy@1.0.0"),
             ("p6", "prime-p7-run:", "Continual improvement: evaluate, refine, holdout-test, then activate or roll back", "prime.continual-improvement@1.0.0"),
-            ("p7", "prime-p7-solve:", "ARC-AGI-3: run one offline episode capped at four actions and replay its score", "prime.arc-agi-3@1.0.0"),
+            ("p7", "asterion-prime-p7-solve:", "ARC-AGI-3: run one offline episode capped at four actions and replay its score", "prime.arc-agi-3@1.0.0"),
         )
         for scenario, next_target, purpose, application in cases:
             with self.subTest(scenario=scenario):
@@ -146,17 +146,17 @@ class TestPrimeMakePresets(unittest.TestCase):
         self.assertIn("--isolated", recipe)
         self.assertIn("tools/preflight_prime_apps.py", recipe)
 
-    def test_p7_solving_preset_is_exact_and_does_not_change_development_smoke(self) -> None:
+    def test_p7_solving_uses_only_the_native_asterion_prime_preset(self) -> None:
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
-        solve = makefile.split("prime-p7-solve:\n", 1)[1].split("\nprime-apps-preflight:", 1)[0]
-        for required in (
-            "[prime-p7-solve] ARC-AGI-3: solve the first public level once with fixed model and bounded resources",
-            "--scenario p7-solving", "--provider prime-agent",
-            "--application prime.arc-agi-3-solving@1.0.0", "--runtime prime.agent",
-            "--input solve-first-public-level", "asterion run --progress",
-        ):
-            self.assertIn(required, solve)
-        development = makefile.split("prime-p7-run:\n", 1)[1].split("\nprime-p7-solve:", 1)[0]
+        solve = makefile.split("asterion-prime-p7-solve:\n", 1)[1].split(
+            "\nprime-apps-preflight:", 1
+        )[0]
+        self.assertIn("tools/run_asterion_prime_p7.py", solve)
+        self.assertNotRegex(makefile, r"(?m)^prime-p7-solve:")
+        self.assertNotRegex(makefile, r"(?m)^prime-p7-seeded-run:")
+        development = makefile.split("prime-p7-run:\n", 1)[1].split(
+            "\nasterion-prime-p7-solve:", 1
+        )[0]
         self.assertIn("run one offline episode capped at four actions and replay its score", development)
         self.assertIn("prime.arc-agi-3@1.0.0", development)
 

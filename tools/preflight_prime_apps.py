@@ -28,7 +28,6 @@ _ROWS = (
     ("prime-p5", "p5", "prime.bounded-autonomy", "prime.bounded-autonomy-development"),
     ("prime-p6", "p6", "prime.continual-improvement", "prime.continual-improvement-development"),
     ("prime-p7", "p7", "prime.arc-agi-3", "prime.arc-agi-3-development"),
-    ("prime-p7-solve", "p7-solving", "prime.arc-agi-3-solving", "prime.arc-agi-3-solving"),
 )
 _VERSION = "1.0.0"
 _RUNTIME_ID = "prime.agent"

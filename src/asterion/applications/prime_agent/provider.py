@@ -13,7 +13,6 @@ from asterion.applications.provider import (
     InstalledApplicationProvider,
 )
 from asterion.capability_packages import CapabilityPackageRef
-from asterion.applications.first_party_packages import PRIME_ARC_AGI_3_SOLVER_PACKAGE
 from asterion.applications.prime_agent.operator.arc_agi_3_worker import ArcAgi3Worker
 from asterion.applications.prime_agent.operator.restricted_scenario_worker import (
     RestrictedScenarioEngine,
@@ -66,15 +65,6 @@ def create_provider() -> InstalledApplicationProvider:
         provider_id="prime-agent",
         resource_root=root,
         applications=(
-            InstalledApplication(
-                application_id="prime.arc-agi-3-solving",
-                version="1.0.0",
-                assembly_paths=(
-                    root / "applications/prime_agent/assemblies/prime-arc-agi-3-solving.json",
-                ),
-                capability_packages=(PRIME_ARC_AGI_3_SOLVER_PACKAGE,),
-                runtime_ids=("prime.agent",),
-            ),
             InstalledApplication(
                 application_id="prime.arc-agi-3",
                 version="1.0.0",

@@ -342,17 +342,6 @@ class TestPrimeP7SolvingHost(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sink.records, ["Model callback failed: input-limit"])
         self.assertNotIn("SENTINEL_SECRET", repr(sink.records))
 
-    def test_model_callback_uses_provider_canonical_utf8(self) -> None:
-        from asterion.applications.prime_agent.operator.p7_solving_host import (
-            _canonical,
-        )
-        from asterion.applications.prime_agent.operator.p7_solving_sdk_provider import (
-            _canonical_json,
-        )
-
-        value = {"systemPrompt": "Prime π"}
-        self.assertEqual(_canonical(value), _canonical_json(value).encode("utf-8"))
-
     async def test_success_is_quiescent_replayed_cleaned_then_published(self) -> None:
         from asterion.applications.prime_agent.operator.p7_solving_host import (
             run_p7_solving_lifecycle,

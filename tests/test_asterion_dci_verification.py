@@ -338,8 +338,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
             (
                 "applications/dci_agent_lite/assemblies/"
                 "dci-local-research.json",
-                "applications/prime_agent/assemblies/"
-                "prime-arc-agi-3-solving.json",
+                "applications/prime/assemblies/prime-arc-agi-3-solving.json",
                 "applications/prime_agent/assemblies/prime-arc-agi-3.json",
                 "applications/prime_agent/assemblies/prime-bounded-autonomy.json",
                 "applications/prime_agent/assemblies/"

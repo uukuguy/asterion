@@ -36,13 +36,8 @@ from asterion.applications.prime_agent.operator.p7_development_workload import (
     P7_DEVELOPMENT_ARC_AGI_WHEEL_SHA256,
     P7_DEVELOPMENT_ARCENGINE_WHEEL_SHA256,
 )
-from asterion.applications.prime_agent.operator.p7_solving_preparation import (
-    P7SolvingPreparationError,
-    prepare_p7_solving,
-)
-
 _MESSAGE = "Prime development preparation is unavailable"
-_SCENARIOS = frozenset({"p1", "p2", "p3", "p4", "p5", "p6", "p7", "p7-solving"})
+_SCENARIOS = frozenset({"p1", "p2", "p3", "p4", "p5", "p6", "p7"})
 _MAX_ARCHIVE = 128 * 1024 * 1024
 _MAX_EXTRACTED = 512 * 1024 * 1024
 # Official locked Node archives contain 5,866 entries; retain a finite cap above it.
@@ -658,7 +653,7 @@ def _prepare_gateway(
     try:
         _gateway_aggregate(repo, gateway, "outputs")
         return
-    except (PrimeDevelopmentPreparationError, P7SolvingPreparationError):
+    except PrimeDevelopmentPreparationError:
         pass
     _run(
         ["npm", "--prefix", "packages/typescript/prime-gateway", "run", "build"],
@@ -867,7 +862,7 @@ def _image_identities(
     if type(images) is not dict:
         raise PrimeDevelopmentPreparationError()
     result: dict[str, str] = {}
-    for selected in sorted(set(scenarios) - {"p7-solving"}):
+    for selected in sorted(set(scenarios)):
         image = images.get(selected)
         image = _image_record(image, selected, "linux/" + arch)
         if _inspect_image(image["tag"], runner=runner) != image["digest"]:
@@ -951,11 +946,9 @@ def prepare_prime_development(
         if emit:
             emit("gateway", "started")
         _prepare_gateway(repo, lock.get("gateway"), runner=runner)
-        if "p7-solving" in scenarios:
-            prepare_p7_solving(repo, runner=runner)
         if emit:
             emit("gateway", "succeeded")
-    except (PrimeDevelopmentPreparationError, P7SolvingPreparationError):
+    except PrimeDevelopmentPreparationError:
         if emit:
             emit("gateway", "failed")
         raise
@@ -965,7 +958,7 @@ def prepare_prime_development(
         images = lock.get("images")
         if type(images) is not dict:
             raise PrimeDevelopmentPreparationError()
-        for scenario in sorted(set(scenarios) - {"p7-solving"}):
+        for scenario in sorted(set(scenarios)):
             _prepare_image(
                 repo, scenario, images.get(scenario), "linux/" + arch, runner=runner
             )
@@ -990,8 +983,6 @@ def prepare_prime_development(
         identities = _identities(
             repo, root, lock, arch, scenarios, seccomp_lock, runner=runner
         )
-        if "p7-solving" in scenarios:
-            identities.update(prepare_p7_solving(repo, runner=runner))
     except Exception:
         if emit:
             emit("source", "failed")
@@ -1069,10 +1060,6 @@ def resolve_prepared_prime_development(
                 **resource_identities,
                 **_image_identities(
                     repo, lock, arch, tuple(scenarios), runner=runner
-                ),
-                **(
-                    prepare_p7_solving(repo, runner=runner)
-                    if "p7-solving" in scenarios else {}
                 ),
             },
         )
