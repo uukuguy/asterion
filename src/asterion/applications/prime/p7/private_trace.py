@@ -88,18 +88,7 @@ class P7PrivateTraceReceipt:
             ):
                 raise ValueError
             broker_receipt = self._broker.seal()
-            if (
-                type(broker_receipt) is not ArcRunReceipt
-                or broker_receipt.levels_completed != 1
-                or broker_receipt.terminal_reason != "level-completed"
-            ):
-                raise ValueError
-            receipt = PrimeArcAgi3SolveReceipt.create(
-                run_id=run_id,
-                completed_level_count=broker_receipt.levels_completed,
-                primitive_action_count=broker_receipt.primitive_actions,
-                partial_game_score=_partial_score(broker_receipt.primitive_actions),
-            )
+            receipt = self._receipt_for(run_id, broker_receipt)
             if receipt.receipt_sha256 != receipt_sha256:
                 raise ValueError
             self._recorder.append(
@@ -124,6 +113,35 @@ class P7PrivateTraceReceipt:
             raise P7PrivateTraceReceiptError(
                 "P7 solve receipt is unavailable"
             ) from None
+
+    def expected_receipt_sha256(self, *, run_id: str) -> str:
+        """Return the pending public receipt identity without sealing its trace."""
+
+        if self._accessed:
+            raise P7PrivateTraceReceiptError("P7 solve receipt is unavailable")
+        try:
+            return self._receipt_for(run_id, self._broker.seal()).receipt_sha256
+        except Exception:
+            raise P7PrivateTraceReceiptError(
+                "P7 solve receipt is unavailable"
+            ) from None
+
+    @staticmethod
+    def _receipt_for(
+        run_id: str, broker_receipt: ArcRunReceipt
+    ) -> PrimeArcAgi3SolveReceipt:
+        if (
+            type(broker_receipt) is not ArcRunReceipt
+            or broker_receipt.levels_completed != 1
+            or broker_receipt.terminal_reason != "level-completed"
+        ):
+            raise ValueError
+        return PrimeArcAgi3SolveReceipt.create(
+            run_id=run_id,
+            completed_level_count=broker_receipt.levels_completed,
+            primitive_action_count=broker_receipt.primitive_actions,
+            partial_game_score=_partial_score(broker_receipt.primitive_actions),
+        )
 
 
 __all__ = (

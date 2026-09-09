@@ -228,6 +228,15 @@ class PromotionCheckTests(unittest.TestCase):
                     ):
                         _resolve_promotion_npm_cache(raw)
 
+    def test_promotion_npm_cache_uses_a_local_empty_argument_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            with mock.patch("tools.check_promotion.tempfile.gettempdir", return_value=str(temporary)):
+                cache = _resolve_promotion_npm_cache("")
+
+            self.assertEqual(cache, (temporary / "asterion-promotion-npm-cache").resolve())
+            self.assertTrue(cache.is_dir())
+
     def test_closed_npm_environment_uses_only_declared_cache_configuration(self) -> None:
         hostile_environment = {
             "HOME": "/host/home",

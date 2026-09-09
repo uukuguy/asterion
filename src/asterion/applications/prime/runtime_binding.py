@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 
 from asterion.agents.prime.session import AsterionPrimeSession
@@ -15,7 +15,7 @@ from asterion.runtime.factory import (
     RuntimeFactoryContext,
     RuntimeFactoryError,
 )
-from asterion.runtime.host import AgentRuntimeClient
+from asterion.runtime.host import AgentRuntimeClient, RunEvent, RunRequest
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
 from asterion.runtimes.pi_rpc import PiRpcSession
@@ -38,6 +38,8 @@ _RUNTIME_OPTIONS = {
     "provider": "deepseek",
 }
 _ERROR = "Asterion-prime runtime configuration is invalid"
+_RECEIPT_ARTIFACT = "prime.p7-solving.receipt"
+_RECEIPT_MEDIA_TYPE = "application/vnd.asterion.prime.p7-solving-receipt+json"
 
 
 @dataclass(frozen=True, repr=False, slots=True)
@@ -101,6 +103,54 @@ def asterion_prime_runtime_binding() -> RuntimeFactoryBinding:
     )
 
 
+class _P7SolveEventProjector:
+    """Project native tool traffic into the fixed P7 receipt-only stream."""
+
+    __slots__ = ("_trace",)
+
+    def __init__(self, trace: P7PrivateTraceReceipt) -> None:
+        self._trace = trace
+
+    async def __call__(
+        self, request: RunRequest, events: AsyncIterator[RunEvent]
+    ) -> AsyncIterator[RunEvent]:
+        sequence = 0
+        async for event in events:
+            if event.type == "run.started":
+                sequence += 1
+                yield RunEvent(
+                    request.run_id, sequence, event.type, event.to_mapping()["payload"]
+                )
+                continue
+            if event.type != "run.completed":
+                continue
+            if event.payload != {"status": "completed"}:
+                sequence += 1
+                yield RunEvent(
+                    request.run_id, sequence, event.type, event.to_mapping()["payload"]
+                )
+                continue
+            receipt_sha256 = self._trace.expected_receipt_sha256(run_id=request.run_id)
+            sequence += 1
+            yield RunEvent(
+                request.run_id,
+                sequence,
+                "artifact.created",
+                {
+                    "artifact": {
+                        "artifact_id": _RECEIPT_ARTIFACT,
+                        "kind": "p7-solving",
+                        "media_type": _RECEIPT_MEDIA_TYPE,
+                        "sha256": receipt_sha256.removeprefix("sha256:"),
+                    }
+                },
+            )
+            sequence += 1
+            yield RunEvent(
+                request.run_id, sequence, event.type, event.to_mapping()["payload"]
+            )
+
+
 def build_asterion_prime_runtime(
     context: RuntimeFactoryContext,
 ) -> AgentRuntimeClient:
@@ -147,7 +197,9 @@ def build_asterion_prime_runtime(
             approved_environment=launch.approved_environment,
         )
         launch = None
-        return AsterionPrimeRuntimeClient(session)
+        return AsterionPrimeRuntimeClient(
+            session, event_projector=_P7SolveEventProjector(trace_adapter)
+        )
     except RuntimeFactoryError:
         raise
     except Exception:

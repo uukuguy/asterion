@@ -506,6 +506,12 @@ class PromotionError(RuntimeError):
 
 def _resolve_promotion_npm_cache(raw: str) -> Path:
     candidate = Path(raw)
+    if raw == "":
+        candidate = Path(tempfile.gettempdir()) / "asterion-promotion-npm-cache"
+        try:
+            candidate.mkdir(mode=0o700, exist_ok=True)
+        except OSError:
+            raise PromotionError("declared npm cache is invalid") from None
     try:
         if not candidate.is_absolute() or candidate.is_symlink():
             raise OSError
@@ -1309,6 +1315,23 @@ def _run_full(
             "packages/typescript/asterion-runtime",
         ),
         ("npm", "run", "build", "--prefix", "packages/typescript/asterion-runtime"),
+        (
+            "npm",
+            "ci",
+            "--offline",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+            "--prefix",
+            "packages/typescript/asterion-prime-extension",
+        ),
+        (
+            "npm",
+            "run",
+            "build",
+            "--prefix",
+            "packages/typescript/asterion-prime-extension",
+        ),
         (
             "npm",
             "ci",

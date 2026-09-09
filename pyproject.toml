@@ -61,6 +61,7 @@ prime-agent = "asterion.applications.prime_agent.provider:create_provider"
 [tool.hatch.build.targets.wheel]
 packages = ["src/asterion"]
 artifacts = [
+    "src/asterion/applications/prime/resources/*.mjs",
     "src/asterion/applications/prime_agent/operator/resources/*.json",
     "src/asterion/applications/prime_agent/operator/resources/*.txt",
     "src/asterion/capabilities/dci/resources/pi/*.ts",
@@ -70,6 +71,8 @@ artifacts = [
     "src/asterion/control/providers/prime/resources/skills/asterion-control/pyproject.toml",
     "src/asterion/control/providers/prime/resources/skills/asterion-control/src/asterion_control/*.py",
 ]
+
+[tool.hatch.build.hooks.custom]
 
 [tool.hatch.build.targets.wheel.force-include]
 "packages/typescript/prime-gateway/dist/src/p7-solving-session.js" = "asterion/applications/prime_agent/operator/resources/p7-solving/p7-solving-session.js"
