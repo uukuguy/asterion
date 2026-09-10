@@ -162,6 +162,11 @@ test("registers exactly the ipython tool", async () => {
   assert.deepEqual(toolNames(), ["ipython"]);
   assert.deepEqual(registered.map((tool) => tool.name), ["ipython"]);
   assert.equal(registered[0].label, "ipython");
+  assert.equal(
+    registered[0].description,
+    "Execute one bounded persistent Python cell using only the symbols and imports permitted by the active application.",
+  );
+  assert.doesNotMatch(registered[0].description, /p7_client|puzzle/i);
   assert.equal(registered[0].executionMode, "sequential");
   assert.equal(IsSchema(registered[0].parameters), true);
   assert.deepEqual(registered[0].parameters.required, ["code"]);

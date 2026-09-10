@@ -319,7 +319,7 @@ export function createIpythonTool(bridge: IpythonBridge) {
   return {
     name: "ipython" as const,
     label: "ipython",
-    description: "Execute one bounded persistent Python cell. Import p7_client, then use p7_client.summary(), render(), observe(), status(), diff(), and act_and_observe(actionName) with currently available action names to inspect and operate the current puzzle.",
+    description: "Execute one bounded persistent Python cell using only the symbols and imports permitted by the active application.",
     parameters: IPYTHON_PARAMETERS,
     executionMode: "sequential" as const,
     execute: async (
