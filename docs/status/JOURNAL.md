@@ -2236,3 +2236,5 @@
 - 17:26 更新 native control 恢复检查点，确保 worker 实现从已验证边界继续 [be089977]
 - 15:20 实现 Native P1 持久 worker 与独立 oracle，验证三回合状态连续及安全收据 [99638af6]
 - 18:31 封存 P1 文件效果并限制写入，恢复跨版本生命周期与 Python 3.10 导入 [7d6e8521]
+- 18:46 更新 P1 worker 恢复检查点，确保发布从跨版本已验证边界继续 [cb717b07]
+- 17:28 发布 Native P1 精确包、assembly 与单 runtime dispatch，保留 P7 行为 [1f3993dd]
