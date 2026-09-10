@@ -13,7 +13,7 @@ from typing import Any
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import digest
 from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
-from asterion import cli as asterion_cli
+from asterion.applications import first_party_cli as asterion_cli
 from asterion.applications.prime.p7.run_story import (
     RunStoryError,
     ArtifactApplication,

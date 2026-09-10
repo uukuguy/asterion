@@ -26,6 +26,12 @@ def main(argv: list[str] | None = None, **kwargs: Any) -> int:
         ),
     )
     raw_argv = sys.argv[1:] if argv is None else argv
+    if raw_argv[:1] == ["arc-story"]:
+        from asterion.applications.prime.p7.run_story.cli import main as arc_story_main
+
+        return arc_story_main(
+            raw_argv[1:], stdout=kwargs.get("stdout"), stderr=kwargs.get("stderr")
+        )
     if raw_argv[:1] == ["benchmark"]:
         try:
             package_sources = _capability_package_sources(package_sources)
