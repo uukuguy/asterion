@@ -32,6 +32,8 @@ from asterion.capability_sdk import run_capability_conformance
 CONTROLLED_CODE = CapabilityPackageRef("controlled-code", "1.0.0")
 DCI = CapabilityPackageRef("dci", "1.0.0")
 PRIME_AGENT = CapabilityPackageRef("prime-agent", "1.0.0")
+PRIME_ARC_AGI_3_SOLVER = CapabilityPackageRef("prime-arc-agi-3-solver", "1.0.0")
+PRIME_IPYTHON_CODING_NATIVE = CapabilityPackageRef("prime-ipython-coding-native", "1.0.0")
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "extensions" / "minimal" / "payload"
 
 
@@ -106,7 +108,13 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
 
         self.assertEqual(
             tuple(item.package_ref for item in registrations),
-            (CONTROLLED_CODE, DCI, PRIME_AGENT),
+            (
+                CONTROLLED_CODE,
+                DCI,
+                PRIME_AGENT,
+                PRIME_ARC_AGI_3_SOLVER,
+                PRIME_IPYTHON_CODING_NATIVE,
+            ),
         )
         self.assertNotIn(
             CapabilityPackageRef("dci-agent-lite", "1.0.0"),
@@ -246,15 +254,22 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
         with self.assertRaises(BuiltinCapabilitySourceError):
             source.validate_source_identity(mismatched, payload)
 
-    def test_every_builtin_has_portable_externalization_and_conformance(self) -> None:
+    def test_every_builtin_has_portable_payload_and_declared_conformance(self) -> None:
         source = BuiltinCapabilitySource(builtin_capability_sources())
+        declared_conformance = {
+            CONTROLLED_CODE: ("externalization.json",),
+            DCI: ("externalization.json",),
+            PRIME_AGENT: ("externalization.json",),
+            PRIME_ARC_AGI_3_SOLVER: (),
+            PRIME_IPYTHON_CODING_NATIVE: (),
+        }
 
         for candidate in source.discover_metadata():
             with self.subTest(package=candidate.package_ref.package_id):
                 payload = source.open_payload(candidate)
                 self.assertEqual(
                     tuple(item.resource_id for item in payload.manifest.conformance),
-                    ("externalization.json",),
+                    declared_conformance[candidate.package_ref],
                 )
                 installed = source.load_provider(candidate)
                 result = run_capability_conformance(installed)
