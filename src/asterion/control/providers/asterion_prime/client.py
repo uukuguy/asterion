@@ -22,6 +22,7 @@ from asterion.control.session_context import (
 
 
 _ERROR_MESSAGE = "Asterion Prime control plane is unavailable"
+_CANCELLED_MESSAGE = "Asterion Prime control plane operation was cancelled"
 
 
 class AsterionPrimeControlError(RuntimeError):
@@ -79,6 +80,7 @@ class AsterionPrimeControlPlaneClient:
         return self._manifest
 
     async def send(self, command: ControlCommand) -> None:
+        cancelled = False
         failed = False
         try:
             self._require_open()
@@ -90,8 +92,12 @@ class AsterionPrimeControlPlaneClient:
                 command.authority_revision,
             )
             await self._attachment.accept_control(command)
+        except asyncio.CancelledError:
+            cancelled = True
         except Exception:
             failed = True
+        if cancelled:
+            _raise_cancelled()
         if failed:
             _raise_control_error()
 
@@ -116,6 +122,7 @@ class AsterionPrimeControlPlaneClient:
     async def _iterate_events(
         self, cursor: EventCursor | None
     ) -> AsyncIterator[ControlEvent]:
+        cancelled = False
         failed = False
         try:
             self._require_open()
@@ -133,8 +140,12 @@ class AsterionPrimeControlPlaneClient:
                     raise ValueError
                 expected += 1
                 yield event
+        except asyncio.CancelledError:
+            cancelled = True
         except Exception:
             failed = True
+        if cancelled:
+            _raise_cancelled()
         if failed:
             _raise_control_error()
 
@@ -142,6 +153,7 @@ class AsterionPrimeControlPlaneClient:
         self, command: SessionContextCommand
     ) -> SessionContextReceipt:
         receipt: SessionContextReceipt | None = None
+        cancelled = False
         failed = False
         try:
             self._require_open()
@@ -163,23 +175,33 @@ class AsterionPrimeControlPlaneClient:
                 or receipt.operation != command.operation
             ):
                 raise ValueError
+        except asyncio.CancelledError:
+            cancelled = True
         except Exception:
             failed = True
+        if cancelled:
+            _raise_cancelled()
         if failed or receipt is None:
             _raise_control_error()
         return receipt
 
     async def cancel_session_context(self, command_id: str) -> None:
+        cancelled = False
         failed = False
         try:
             self._require_open()
             await self._attachment.cancel_context(command_id)
+        except asyncio.CancelledError:
+            cancelled = True
         except Exception:
             failed = True
+        if cancelled:
+            _raise_cancelled()
         if failed:
             _raise_control_error()
 
     async def sync_authority_snapshot(self, budget: RemainingBudget) -> None:
+        cancelled = False
         failed = False
         try:
             self._require_open()
@@ -189,23 +211,32 @@ class AsterionPrimeControlPlaneClient:
                 budget,
                 authority_revision=self._authority_revision,
             )
+        except asyncio.CancelledError:
+            cancelled = True
         except Exception:
             failed = True
+        if cancelled:
+            _raise_cancelled()
         if failed:
             _raise_control_error()
 
     async def close(self) -> None:
-        async with self._close_lock:
-            if self._closed:
-                return
-            self._closed = True
-            failed = False
-            try:
+        cancelled = False
+        failed = False
+        try:
+            async with self._close_lock:
+                if self._closed:
+                    return
+                self._closed = True
                 await self._attachment.close()
-            except Exception:
-                failed = True
-            if failed:
-                _raise_control_error()
+        except asyncio.CancelledError:
+            cancelled = True
+        except Exception:
+            failed = True
+        if cancelled:
+            _raise_cancelled()
+        if failed:
+            _raise_control_error()
 
     def _require_open(self) -> None:
         if self._closed:
@@ -227,6 +258,10 @@ class AsterionPrimeControlPlaneClient:
 
 def _raise_control_error() -> NoReturn:
     raise AsterionPrimeControlError(_ERROR_MESSAGE) from None
+
+
+def _raise_cancelled() -> NoReturn:
+    raise asyncio.CancelledError(_CANCELLED_MESSAGE) from None
 
 
 __all__ = (

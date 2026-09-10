@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, replace
 import hashlib
 import json
@@ -10,7 +11,7 @@ import unittest
 from typing import Any, cast
 from unittest.mock import patch
 
-from asterion.agents.prime.backend import PrimeSessionBackend
+from asterion.agents.prime.backend import PrimePromptRequest, PrimeSessionBackend
 from asterion.agents.prime.compaction_budget import ModelPrice
 from asterion.agents.prime.context import PrimeContextWitnessSession
 from asterion.agents.prime.session import AsterionPrimeLimits
@@ -193,6 +194,36 @@ def create_command(command_id: str = "create-1") -> ControlCommand:
     )
 
 
+def compact_command() -> SessionContextCommand:
+    return SessionContextCommand(
+        "compact-cancel-1",
+        "session-1",
+        1,
+        1,
+        "compact-cancel-key-1",
+        "session.compact",
+        {
+            "continuation_id": "continuation-1",
+            "instructions_ref": None,
+            "budget": {
+                "controller_tokens": 16_000,
+                "application_tokens": 0,
+                "child_tokens": 0,
+                "aggregate_tokens": 16_000,
+                "cost_micros": 125_000,
+                "deadline_ms": 100_000,
+            },
+        },
+    )
+
+
+def _raise_private_cancellation(secret: str) -> None:
+    try:
+        raise RuntimeError(f"{secret}:private-cause")
+    except RuntimeError:
+        raise asyncio.CancelledError(f"{secret}:private-cancel")
+
+
 class TestAsterionPrimeControlFactory(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.fixture = PrimeBackendHarness()
@@ -358,6 +389,145 @@ class TestAsterionPrimeControlClient(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(raised.exception.__cause__)
         self.assertNotIn(secret, rendered)
         self.assertNotIn(str(self.fixture.private), rendered)
+
+    async def test_delegate_cancellations_keep_semantics_and_erase_private_chain(
+        self,
+    ) -> None:
+        secret = "SENTINEL_PRIVATE_CANCELLATION"
+        command = SessionContextCommand(
+            "describe-cancel-1",
+            "session-1",
+            1,
+            1,
+            "describe-cancel-key-1",
+            "session.describe",
+            {},
+        )
+
+        async def cancelled_async(*_args: object, **_kwargs: object) -> None:
+            _raise_private_cancellation(secret)
+
+        def cancelled_sync(*_args: object, **_kwargs: object) -> None:
+            _raise_private_cancellation(secret)
+
+        cases = (
+            (
+                "send",
+                "accept_control",
+                cancelled_async,
+                lambda: self.client.send(create_command()),
+            ),
+            (
+                "context",
+                "execute_context",
+                cancelled_async,
+                lambda: self.client.execute_session_context(command),
+            ),
+            (
+                "cancel-context",
+                "cancel_context",
+                cancelled_async,
+                lambda: self.client.cancel_session_context("compact-cancel-1"),
+            ),
+            (
+                "authority",
+                "sync_authority_snapshot",
+                cancelled_sync,
+                lambda: self.client.sync_authority_snapshot(remaining_budget()),
+            ),
+        )
+        for name, attribute, replacement, invoke in cases:
+            with self.subTest(name=name):
+                with patch.object(self.client._attachment, attribute, replacement):
+                    with self.assertRaises(asyncio.CancelledError) as raised:
+                        await invoke()
+                self.assertEqual(
+                    str(raised.exception),
+                    "Asterion Prime control plane operation was cancelled",
+                )
+                self.assertIsNone(raised.exception.__context__)
+                self.assertIsNone(raised.exception.__cause__)
+                self.assertNotIn(secret, repr(raised.exception))
+
+        with patch.object(
+            self.client._attachment,
+            "replay_events",
+            cancelled_sync,
+        ):
+            with self.assertRaises(asyncio.CancelledError) as event_cancelled:
+                [event async for event in self.client.events()]
+        self.assertEqual(
+            str(event_cancelled.exception),
+            "Asterion Prime control plane operation was cancelled",
+        )
+        self.assertIsNone(event_cancelled.exception.__context__)
+        self.assertIsNone(event_cancelled.exception.__cause__)
+
+        with patch.object(self.client._attachment, "close", cancelled_async):
+            with self.assertRaises(asyncio.CancelledError) as close_cancelled:
+                await self.client.close()
+        self.assertEqual(
+            str(close_cancelled.exception),
+            "Asterion Prime control plane operation was cancelled",
+        )
+        self.assertIsNone(close_cancelled.exception.__context__)
+        self.assertIsNone(close_cancelled.exception.__cause__)
+
+    async def test_real_compact_cancellation_is_sanitized_after_ack_and_stays_fenced(
+        self,
+    ) -> None:
+        secret = "SENTINEL_PRIVATE_COMPACT_CANCEL"
+        await self.client.send(create_command())
+        await self.fixture.backend.execute_prompt(
+            PrimePromptRequest(
+                "stage-before-cancel",
+                "session-1",
+                1,
+                "SENTINEL_PRIVATE_STAGE_BEFORE_CANCEL",
+            )
+        )
+        cast(Any, self.fixture.rpc).compact_terminal_release = asyncio.Event()
+        task = asyncio.create_task(
+            self.client.execute_session_context(compact_command())
+        )
+        await asyncio.wait_for(self.fixture.rpc.acknowledged.wait(), 1.0)
+
+        task.cancel(secret)
+        with self.assertRaises(asyncio.CancelledError) as raised:
+            await task
+
+        self.assertEqual(
+            str(raised.exception),
+            "Asterion Prime control plane operation was cancelled",
+        )
+        self.assertIsNone(raised.exception.__context__)
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertNotIn(secret, repr(raised.exception))
+        snapshot = self.fixture.backend.snapshot()
+        self.assertEqual(snapshot.phase, "recovery-required")
+        self.assertEqual(snapshot.outstanding_effect, "compact-cancel-1")
+        self.assertEqual(self.fixture.rpc.compacts, 1)
+
+    async def test_close_lock_wait_cancellation_is_sanitized(self) -> None:
+        secret = "SENTINEL_PRIVATE_CLOSE_LOCK_CANCEL"
+        await self.client._close_lock.acquire()
+        task = asyncio.create_task(self.client.close())
+        await asyncio.sleep(0)
+        try:
+            task.cancel(secret)
+            with self.assertRaises(asyncio.CancelledError) as raised:
+                await task
+        finally:
+            self.client._close_lock.release()
+
+        self.assertEqual(
+            str(raised.exception),
+            "Asterion Prime control plane operation was cancelled",
+        )
+        self.assertIsNone(raised.exception.__context__)
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertNotIn(secret, repr(raised.exception))
+        self.assertFalse(self.client._closed)
 
     async def test_close_only_detaches_and_is_idempotent(self) -> None:
         await self.client.close()

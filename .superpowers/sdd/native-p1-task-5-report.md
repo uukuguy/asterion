@@ -97,7 +97,7 @@ Provider-free commands run during implementation:
 uv run python -m unittest -v tests.test_asterion_prime_control \
   tests.test_asterion_prime_recovery tests.test_control_provider \
   tests.test_control_recovery
-PASS: 43 tests (Gate G4)
+PASS: 46 tests (Gate G4, including cancellation redaction)
 
 uv run python -m unittest -q tests.test_prime_control_factory \
   tests.test_prime_control_client tests.test_prime_session_context_parity \
@@ -124,6 +124,30 @@ PASS: client.py, factory.py, and resources/control-plane.json are present
 The independent review reported no Critical findings. Its one Important
 redaction finding was reproduced and fixed before the final gates; the focused
 follow-up review is recorded in the task handoff.
+
+## Cancellation-review repair
+
+A later independent review found that `asyncio.CancelledError` is outside
+`Exception` and could therefore preserve a private cancellation message and
+exception chain across the adapter boundary. A strict follow-up RED reproduced
+both forms:
+
+- every public asynchronous delegate was injected with a private
+  `RuntimeError` chained into `CancelledError`; and
+- the real backend completed one prompt, entered compact, durably acknowledged
+  the persisted witness, and was then cancelled with a sentinel message.
+
+Before the fix, the sentinel cancellation escaped unchanged. The client now
+handles cancellation separately on control send, event iteration, context
+execute/cancel, authority synchronization, and close. It exits the handler
+before raising a new `asyncio.CancelledError` with the fixed message
+`Asterion Prime control plane operation was cancelled`. Tests require empty
+`__context__` and `__cause__` while preserving cancellation semantics. The real
+backend test also requires the existing `recovery-required` phase and exact
+compact outstanding-effect fence, so this adapter repair does not weaken or
+replace backend uncertainty handling. A final lock-contention regression also
+cancels while `close()` is waiting to acquire its lock, proving that the public
+entry sanitizes cancellation before any attachment-side work begins.
 
 ## Unfinished boundary
 
