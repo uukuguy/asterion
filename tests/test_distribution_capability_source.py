@@ -27,7 +27,9 @@ from asterion.capability_packages.sources.distribution import (
 
 FIXTURE_PROJECT = Path(__file__).parent / "fixtures" / "extensions" / "distribution"
 PACKAGE_REF = CapabilityPackageRef("acme.sample", "1.0.0")
+POISON_PACKAGE_REF = CapabilityPackageRef("acme.poison", "1.0.0")
 SOURCE_ID = "acme.sample.python-distribution"
+POISON_SOURCE_ID = "acme.poison.python-distribution"
 SOURCE_KIND = "python-distribution"
 DIST_NAME = "asterion-acme-sample-extension"
 PAYLOAD_RELATIVE = "asterion_capability_packages/acme.sample/1.0.0/payload"
@@ -220,7 +222,16 @@ class DistributionCapabilitySourceTests(unittest.TestCase):
                 else:
                     os.environ["ASTERION_TEST_FORBID_PROVIDER_IMPORT"] = previous
 
-        self.assertEqual(len(candidates), 1)
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual(
+            {record.package_ref for record in candidates},
+            {PACKAGE_REF, POISON_PACKAGE_REF},
+        )
+        by_ref = {record.package_ref: record for record in candidates}
+        self.assertEqual(by_ref[PACKAGE_REF].source_id, SOURCE_ID)
+        self.assertEqual(by_ref[POISON_PACKAGE_REF].source_id, POISON_SOURCE_ID)
+        self.assertEqual(by_ref[PACKAGE_REF].source_kind, SOURCE_KIND)
+        self.assertEqual(by_ref[POISON_PACKAGE_REF].source_kind, SOURCE_KIND)
         self.assertEqual(candidate.package_ref, PACKAGE_REF)
         self.assertEqual(candidate.source_id, SOURCE_ID)
         self.assertEqual(candidate.source_kind, SOURCE_KIND)
@@ -230,6 +241,11 @@ class DistributionCapabilitySourceTests(unittest.TestCase):
             {"distribution_name": DIST_NAME, "distribution_version": "1.0.0"},
         )
         self.assertEqual(payload.manifest.package_ref, PACKAGE_REF)
+        self.assertNotEqual(
+            by_ref[POISON_PACKAGE_REF].payload_sha256,
+            payload.payload_sha256,
+        )
+        self.assertNotIn("acme_sample_extension.poison", sys.modules)
 
     def test_load_provider_loads_only_selected_entry_after_identity_validation(
         self,

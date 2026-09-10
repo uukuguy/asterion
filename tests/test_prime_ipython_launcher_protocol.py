@@ -166,13 +166,19 @@ class TestPrimeIpythonLauncherProtocol(unittest.TestCase):
                 self.assertIn(required, launcher)
         for required in (
             "FROM python:3.11.11-bookworm@sha256:4ca910a51a1a474e5d95aa52455331b2a94272eeae3c498be1ad7a2ff9b00bf3",
-            "COPY requirements.lock /opt/prime-requirements.lock",
+            "COPY image/requirements.lock /opt/prime-requirements.lock",
             "pip install --no-cache-dir --require-hashes",
-            "COPY launcher.py /usr/local/bin/prime-ipython-coding.py",
+            "COPY image/launcher.py /usr/local/bin/prime-ipython-coding.py",
             'ENTRYPOINT [\"/usr/local/bin/prime-ipython-coding.py\"]',
         ):
             with self.subTest(dockerfile=required):
                 self.assertIn(required, dockerfile)
+        for prohibited in (
+            "COPY requirements.lock /opt/prime-requirements.lock",
+            "COPY launcher.py /usr/local/bin/prime-ipython-coding.py",
+        ):
+            with self.subTest(prohibited_dockerfile=prohibited):
+                self.assertNotIn(prohibited, dockerfile)
         for prohibited in (
             'replace("return 0", "return 42", 1)',
             "def answer()",
