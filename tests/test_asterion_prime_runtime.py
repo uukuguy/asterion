@@ -59,9 +59,13 @@ class TestAsterionPrimeRuntimeClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [])
         self.assertEqual(calls, [(request, signal)])
 
-    def test_rejects_unvalidated_session_lookalike(self) -> None:
+    def test_accepts_narrow_private_run_protocol(self) -> None:
+        client = AsterionPrimeRuntimeClient(FakeSession())
+        self.assertEqual(client.manifest.runtime_id, "asterion.prime")
+
+    def test_rejects_absent_or_noncallable_run(self) -> None:
         with self.assertRaisesRegex(ProtocolError, "session is invalid"):
-            AsterionPrimeRuntimeClient(FakeSession())  # type: ignore[arg-type]
+            AsterionPrimeRuntimeClient(object())  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

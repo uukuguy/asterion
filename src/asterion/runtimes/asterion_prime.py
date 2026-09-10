@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
+from typing import Protocol, runtime_checkable
 
 from asterion.agents.prime.session import (
     ASTERION_PRIME_CAPABILITIES,
-    AsterionPrimeSession,
 )
 from asterion.runtime.host import (
     CancellationSignal,
@@ -17,6 +17,16 @@ from asterion.runtime.host import (
 from asterion.runtime.protocol import ProtocolError
 
 
+@runtime_checkable
+class _PrimeRuntimeSession(Protocol):
+    def run(
+        self,
+        request: RunRequest,
+        *,
+        signal: CancellationSignal | None = None,
+    ) -> AsyncIterator[RunEvent]: ...
+
+
 class AsterionPrimeRuntimeClient:
     """Expose one injected Asterion-prime session as an AgentRuntime client."""
 
@@ -24,14 +34,14 @@ class AsterionPrimeRuntimeClient:
 
     def __init__(
         self,
-        session: AsterionPrimeSession,
+        session: _PrimeRuntimeSession,
         *,
         event_projector: Callable[
             [RunRequest, AsyncIterator[RunEvent]], AsyncIterator[RunEvent]
         ]
         | None = None,
     ) -> None:
-        if type(session) is not AsterionPrimeSession:
+        if not isinstance(session, _PrimeRuntimeSession) or not callable(session.run):
             raise ProtocolError("Asterion-prime session is invalid")
         if event_projector is not None and not callable(event_projector):
             raise ProtocolError("Asterion-prime event projector is invalid")

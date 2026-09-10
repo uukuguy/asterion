@@ -9,7 +9,7 @@ import weakref
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-import asterion.agents.prime.session as prime_session_module
+import asterion.agents.prime.execution as prime_session_module
 from asterion.agents.prime.session import (
     ASTERION_PRIME_LIMITS,
     AsterionPrimeSession,
