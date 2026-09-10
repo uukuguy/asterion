@@ -610,7 +610,8 @@ class PrimeContextWitnessSession:
             try:
                 self._no_pending()
                 value = _record(_json(raw.decode("utf-8")))
-                _domain(value)
+                if _encode(value) != raw:
+                    _fail()
                 return value
             finally:
                 raw[:] = b"\x00" * len(raw)
@@ -698,7 +699,15 @@ class PrimeContextWitnessSession:
         finally:
             self._active = False
 
-    async def receive_persisted(self, *, persist: Callable) -> PrimeCompactionEvidence:
+    async def receive_persisted(
+        self, *, persist: Callable[[bytes], object]
+    ) -> PrimeCompactionEvidence:
+        """Persist the exact validated canonical private frame as immutable bytes.
+
+        The checkpoint owner must durably store these bytes before returning.
+        Retaining the bytes is safe; decoded mutable dictionaries never cross
+        this callback boundary. Evidence is derived from this same frame.
+        """
         self._enter("approved")
         try:
             persisted = await self._receive()
@@ -710,7 +719,7 @@ class PrimeContextWitnessSession:
             )
             if not callable(persist):
                 _fail()
-            result = persist(persisted)
+            result = persist(_encode(persisted))
             if inspect.isawaitable(result):
                 result = await asyncio.wait_for(result, self._timeout)
             if result is False:

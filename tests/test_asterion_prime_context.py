@@ -352,7 +352,7 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
         evidence = await self.session.receive_persisted(
             persist=lambda value: stored.append(value)
         )
-        self.assertEqual(stored[0]["summary"], "checkpoint")
+        self.assertEqual(json.loads(stored[0])["summary"], "checkpoint")
         self.assertEqual((await receive(self.peer))["phase"], "ack")
         self.assertFalse(self.uncertain)
         self.assertEqual(evidence.command_nonce, COMMAND)
@@ -364,6 +364,89 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
         self.assertEqual(decision["status"], "reject")
         self.assertEqual(reserved, [])
         self.assertFalse(self.uncertain)
+
+    async def test_persister_receives_retained_immutable_canonical_bytes(self):
+        await self.arm()
+        await self.decision()
+        original = material()[1]
+        expected = encode(original)
+        retained = []
+
+        def mutating_persister(value):
+            retained.append(value)
+            try:
+                value[0] = 0
+            except TypeError:
+                pass
+
+        await send(self.peer, original)
+        evidence = await self.session.receive_persisted(persist=mutating_persister)
+        self.assertEqual((await receive(self.peer))["phase"], "ack")
+        self.assertIsInstance(retained[0], bytes)
+        self.assertEqual(retained[0], expected)
+        original["summary"] = SECRET
+        decoded = json.loads(retained[0])
+        decoded["summary"] = SECRET
+        self.session.close()
+        self.assertEqual(retained[0], expected)
+        stored_entry = json.loads(retained[0])["compaction_entry"]
+        self.assertEqual(digest(stored_entry), evidence.compact_entry_sha256)
+        self.assertEqual(
+            hashlib.sha256(stored_entry["summary"].encode()).hexdigest(),
+            evidence.summary_sha256,
+        )
+
+    async def test_noncanonical_proposal_bytes_fence_before_reservation(self):
+        for variant in ["whitespace", "key-order"]:
+            with self.subTest(variant=variant):
+                channel, peer = socket.socketpair()
+                peer.setblocking(False)
+                uncertain, reserved = [], []
+                session = self.context.PrimeContextWitnessSession(
+                    channel,
+                    launch_nonce=LAUNCH,
+                    timeout_seconds=0.15,
+                    mark_uncertain=lambda: uncertain.append(True),
+                )
+                try:
+                    await session.arm(command_nonce=COMMAND, authority_sha256=AUTHORITY)
+                    await receive(peer)
+                    proposal = material()[0]
+                    raw = (
+                        json.dumps(proposal, ensure_ascii=False, sort_keys=True)
+                        if variant == "whitespace"
+                        else json.dumps(
+                            proposal, ensure_ascii=False, separators=(",", ":")
+                        )
+                    ).encode()
+                    await asyncio.get_running_loop().sock_sendall(
+                        peer, struct.pack("!I", len(raw)) + raw
+                    )
+                    with self.assertRaises(self.context.PrimeContextError):
+                        await session.receive_proposal_and_decide(
+                            price=ModelPrice(0, 0),
+                            remaining_callbacks=2,
+                            deadline=time.monotonic() + 1,
+                            reserve=reserved.append,
+                        )
+                    self.assertEqual(reserved, [])
+                    self.assertEqual(uncertain, [True])
+                finally:
+                    session.close()
+                    peer.close()
+
+    async def test_noncanonical_persisted_bytes_fence_without_calling_persister(self):
+        await self.arm()
+        await self.decision()
+        raw = json.dumps(material()[1], ensure_ascii=False, sort_keys=True).encode()
+        await asyncio.get_running_loop().sock_sendall(
+            self.peer, struct.pack("!I", len(raw)) + raw
+        )
+        stored = []
+        with self.assertRaises(self.context.PrimeContextError):
+            await self.session.receive_persisted(persist=stored.append)
+        self.assertEqual(stored, [])
+        self.assertEqual(self.uncertain, [True])
 
     async def test_expired_deadline_and_overpriced_quote_reject(self):
         await self.arm()
@@ -487,8 +570,9 @@ class TestPrimeContextWitnessIntegration(
             )
             self.assertEqual(len(reserved), 1)
             self.assertEqual(len(stored), 1)
+            checkpoint = json.loads(stored[0])
             self.assertEqual(
-                stored[0]["compaction_entry"]["summary"], stored[0]["summary"]
+                checkpoint["compaction_entry"]["summary"], checkpoint["summary"]
             )
             self.assertLess(
                 evidence.after_context_tokens, evidence.before_context_tokens
