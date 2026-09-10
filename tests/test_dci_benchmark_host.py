@@ -22,6 +22,7 @@ from asterion.applications.dci_agent_lite.benchmark_source_lock import (
 )
 from asterion.applications.dci_agent_lite.operator_config import load_operator_config
 from asterion.benchmarks import (
+    BenchmarkHostError,
     BenchmarkTaskExecutor,
     BenchmarkTaskImplementation,
     BenchmarkTaskRequest,
@@ -251,6 +252,68 @@ class DciBenchmarkHostTests(unittest.TestCase):
                 )
             )
             self.assertNotIn(str(root), repr(invocation))
+
+    def test_default_host_opens_dci_builtin_source_lock_before_provider_loading(
+        self,
+    ) -> None:
+        instance = select_benchmark_instance("dci.qa.bamboogle@1.0.0")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            lock_path = root / "lock.json"
+            write_benchmark_source_lock(
+                resolve_benchmark_source_lock(instance),
+                lock_path,
+            )
+            host = DciBenchmarkHost(instance=instance, operator_config=None)
+
+            with patch(
+                "asterion.applications.dci_agent_lite.benchmark_host."
+                "load_prepared_capability_source",
+                side_effect=AssertionError("provider load must wait for authorization"),
+            ):
+                _, resolved = _resolved(host, instance, lock_path)
+                draft = host.create_plan(
+                    resolved,
+                    application_ref=instance.application_ref,
+                    suite_ref=instance.suite_ref,
+                    case_limit=1,
+                    execute=False,
+                    authorization=None,
+                    resume_run_id=None,
+                )
+
+        self.assertEqual(
+            draft.package_locks[0].entries[0].source_id,
+            "dci.builtin",
+        )
+
+    def test_ambiguous_dci_builtin_sources_fail_before_provider_loading(self) -> None:
+        instance = select_benchmark_instance("dci.qa.bamboogle@1.0.0")
+        first = RecordingBuiltinSource()
+        second = RecordingBuiltinSource()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            lock_path = root / "lock.json"
+            write_benchmark_source_lock(
+                resolve_benchmark_source_lock(instance, package_sources=(first,)),
+                lock_path,
+            )
+            host = DciBenchmarkHost(
+                instance=instance,
+                operator_config=None,
+                package_sources=(first, second),
+            )
+            metadata = host.discover_metadata(
+                application_ref=instance.application_ref,
+                suite_ref=instance.suite_ref,
+            )
+            source_lock = host.resolve_source_lock(lock_path)
+
+            with self.assertRaises(BenchmarkHostError):
+                host.open_selected_payloads(metadata, source_lock)
+
+        self.assertEqual(first.provider_loads, 0)
+        self.assertEqual(second.provider_loads, 0)
 
     def test_real_host_requires_private_config_before_provider_loading(self) -> None:
         instance = select_benchmark_instance("dci.qa.bamboogle@1.0.0")

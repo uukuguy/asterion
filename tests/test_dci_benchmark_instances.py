@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.applications.dci_agent_lite.cli import main
 from asterion.applications.dci_agent_lite.benchmark_instances import (
@@ -15,6 +16,7 @@ from asterion.applications.dci_agent_lite.benchmark_instances import (
     resolve_case_limit,
     select_benchmark_instance,
 )
+from tests.test_dci_benchmark_host import RecordingBuiltinSource
 
 
 EXPECTED_SELECTORS = (
@@ -354,6 +356,176 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             self.assertEqual(json.loads(default_stdout.getvalue())["case_limit"], 1)
             self.assertEqual(all_code, 0, all_stderr.getvalue())
             self.assertEqual(json.loads(all_stdout.getvalue())["case_limit"], 125)
+
+    def test_bamboogle_plan_uses_dci_builtin_source_before_provider_loading(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            lock = Path(temp) / "source-lock.json"
+            self.assertEqual(
+                main(
+                    [
+                        "benchmark",
+                        "lock",
+                        "--instance",
+                        "dci.qa.bamboogle@1.0.0",
+                        "--output",
+                        str(lock),
+                    ],
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                ),
+                0,
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                side_effect=AssertionError("plan must not read operator config"),
+            ), patch(
+                "asterion.capability_packages.sources.builtin."
+                "BuiltinCapabilitySource.load_provider",
+                side_effect=AssertionError("provider load must wait for execution"),
+            ), patch(
+                "asterion.benchmarks.cli.InstalledBenchmarkCommandHost.authorize_execution",
+                side_effect=AssertionError("plan must not authorize execution"),
+            ), patch(
+                "asterion.benchmarks.cli.InstalledBenchmarkCommandHost.run",
+                side_effect=AssertionError("plan must not run benchmarks"),
+            ):
+                code = main(
+                    [
+                        "benchmark",
+                        "plan",
+                        "--instance",
+                        "dci.qa.bamboogle@1.0.0",
+                        "--capability-source-lock",
+                        str(lock),
+                    ],
+                    stdout=stdout,
+                    stderr=stderr,
+                    benchmark_host_factory=lambda _config: (_ for _ in ()).throw(
+                        AssertionError("plan must not construct execution host")
+                    ),
+                )
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        plan = json.loads(stdout.getvalue())
+        self.assertEqual(
+            plan["package_locks"][0]["source_id"],
+            "dci.builtin",
+        )
+
+    def test_bamboogle_plan_rejects_ambiguous_builtin_sources_before_provider_loading(
+        self,
+    ) -> None:
+        first = RecordingBuiltinSource()
+        second = RecordingBuiltinSource()
+        with tempfile.TemporaryDirectory() as temp:
+            lock = Path(temp) / "source-lock.json"
+            self.assertEqual(
+                main(
+                    [
+                        "benchmark",
+                        "lock",
+                        "--instance",
+                        "dci.qa.bamboogle@1.0.0",
+                        "--output",
+                        str(lock),
+                    ],
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                    benchmark_package_sources=(first,),
+                ),
+                0,
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                side_effect=AssertionError("plan must not read operator config"),
+            ), patch(
+                "asterion.capability_packages.sources.builtin."
+                "BuiltinCapabilitySource.load_provider",
+                side_effect=AssertionError("provider load must wait for execution"),
+            ), patch(
+                "asterion.benchmarks.cli.InstalledBenchmarkCommandHost.authorize_execution",
+                side_effect=AssertionError("plan must not authorize execution"),
+            ), patch(
+                "asterion.benchmarks.cli.InstalledBenchmarkCommandHost.run",
+                side_effect=AssertionError("plan must not run benchmarks"),
+            ):
+                code = main(
+                    [
+                        "benchmark",
+                        "plan",
+                        "--instance",
+                        "dci.qa.bamboogle@1.0.0",
+                        "--capability-source-lock",
+                        str(lock),
+                    ],
+                    stdout=stdout,
+                    stderr=stderr,
+                    benchmark_host_factory=lambda _config: (_ for _ in ()).throw(
+                        AssertionError("plan must not construct execution host")
+                    ),
+                    benchmark_package_sources=(first, second),
+                )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(
+            stderr.getvalue(),
+            "asterion benchmark: benchmark host command failed\n",
+        )
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(first.provider_loads, 0)
+        self.assertEqual(second.provider_loads, 0)
+
+    def test_bamboogle_plan_host_construction_failure_is_redacted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            lock = Path(temp) / "source-lock.json"
+            self.assertEqual(
+                main(
+                    [
+                        "benchmark",
+                        "lock",
+                        "--instance",
+                        "dci.qa.bamboogle@1.0.0",
+                        "--output",
+                        str(lock),
+                    ],
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                ),
+                0,
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                side_effect=AssertionError("plan must not read operator config"),
+            ), patch(
+                "asterion.applications.dci_agent_lite.cli."
+                "InstalledBenchmarkCommandHost",
+                side_effect=RuntimeError("PRIVATE-CONSTRUCTOR-SENTINEL"),
+            ):
+                code = main(
+                    [
+                        "benchmark",
+                        "plan",
+                        "--instance",
+                        "dci.qa.bamboogle@1.0.0",
+                        "--capability-source-lock",
+                        str(lock),
+                    ],
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stderr.getvalue(), "asterion-dci: command failed\n")
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertNotIn("PRIVATE-CONSTRUCTOR-SENTINEL", stderr.getvalue())
 
 
 if __name__ == "__main__":

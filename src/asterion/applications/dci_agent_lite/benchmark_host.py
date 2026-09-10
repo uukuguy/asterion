@@ -228,7 +228,7 @@ class DciBenchmarkHost:
             resolution=resolve_installed_benchmark(
                 application_ref=self._instance.application_ref,
                 source_lock_path=source_lock,
-                package_sources=self._package_sources,
+                package_sources=self._sources(),
             ),
             source_lock_path=source_lock,
         )

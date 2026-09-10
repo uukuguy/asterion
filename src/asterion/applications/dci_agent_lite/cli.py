@@ -9,8 +9,13 @@ from decimal import Decimal, DecimalException
 from pathlib import Path
 from typing import TextIO
 
-from asterion.benchmarks.cli import BenchmarkCommandHost
+from asterion.benchmarks.cli import BenchmarkCommandHost, InstalledBenchmarkCommandHost
 from asterion.capability_packages.sources.base import CapabilityPackageSource
+from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
+from asterion.capability_packages.sources.distribution import (
+    DistributionCapabilityPackageSource,
+)
+from asterion.applications.first_party_packages import builtin_capability_registrations
 from asterion.applications.dci_agent_lite.operator_config import (
     DciOperatorConfig,
     load_operator_config,
@@ -146,9 +151,18 @@ def main(
             stderr.write("asterion-dci: command failed\n")
             return 2
         selected_benchmark_host = benchmark_host
-        if (
-            selected_benchmark_host is None
-            and _execution_host_ready(delegated_arguments)
+        if selected_benchmark_host is None and delegated_arguments[:1] == ["plan"]:
+            try:
+                selected_benchmark_host = InstalledBenchmarkCommandHost(
+                    package_sources=_benchmark_package_sources(
+                        benchmark_package_sources
+                    ),
+                )
+            except Exception:
+                stderr.write("asterion-dci: command failed\n")
+                return 2
+        elif selected_benchmark_host is None and _execution_host_ready(
+            delegated_arguments
         ):
             try:
                 if benchmark_host_factory is not None:
@@ -281,6 +295,17 @@ def _list_benchmark_instances(
                 f"{value['cost_class']}\n"
             )
     return 0
+
+
+def _benchmark_package_sources(
+    values: Sequence[CapabilityPackageSource] | None,
+) -> tuple[CapabilityPackageSource, ...]:
+    if values is not None:
+        return tuple(values)
+    return (
+        BuiltinCapabilitySource(builtin_capability_registrations()),
+        DistributionCapabilityPackageSource(),
+    )
 
 
 def _create_benchmark_source_lock(
