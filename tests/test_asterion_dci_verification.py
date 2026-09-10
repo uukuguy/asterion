@@ -289,7 +289,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
         self.assertEqual(len(bound_assemblies), 7)
         self.assertEqual(
             len(tuple((package_root / "applications").glob("*/assemblies/*.json"))),
-            17,
+            18,
         )
         self.assertEqual(
             len(
@@ -326,7 +326,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
                 "composed-assemblies": {"actual": 7, "expected": 7},
                 "context-profiles": {"actual": 5, "expected": 5},
                 "executable-assemblies": {"actual": 7, "expected": 7},
-                "packaged-assemblies": {"actual": 17, "expected": 17},
+                "packaged-assemblies": {"actual": 18, "expected": 18},
                 "paper-benchmarks": {"actual": 13, "expected": 13},
                 "paper-scopes": {"actual": 17, "expected": 17},
                 "provider-requests": {"actual": 0, "expected": 0},
@@ -339,6 +339,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
                 "applications/dci_agent_lite/assemblies/"
                 "dci-local-research.json",
                 "applications/prime/assemblies/prime-arc-agi-3-solving.json",
+                "applications/prime/assemblies/prime-ipython-coding.json",
                 "applications/prime_agent/assemblies/prime-arc-agi-3.json",
                 "applications/prime_agent/assemblies/prime-bounded-autonomy.json",
                 "applications/prime_agent/assemblies/"
@@ -374,6 +375,10 @@ class InstalledAcceptanceTests(unittest.TestCase):
             patch(
                 "asterion.runtime.defaults._create_claude_code_runtime",
                 side_effect=AssertionError("acceptance constructed Claude"),
+            ),
+            patch(
+                "asterion.applications.prime.create_provider",
+                side_effect=AssertionError("acceptance loaded native provider"),
             ),
         ):
             result = verifier(acceptance_request())
@@ -775,6 +780,35 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         self.assertEqual(tuple(checks), ("installed-closure",))
         self.assertEqual(checks["installed-closure"].status, "FAIL")
 
+    def test_acceptance_rejects_same_count_native_p1_assembly_substitution(self) -> None:
+        verifier = _dci_verifier(repo_root=PROJECT, backend=ExplodingBackend())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            package_root = Path(temp_dir) / "asterion"
+            shutil.copytree(SOURCE, package_root)
+            assembly_root = package_root / "applications/prime/assemblies"
+            (assembly_root / "prime-ipython-coding.json").rename(
+                assembly_root / "same-count-substitute.json"
+            )
+            resource_files = resources.files
+
+            def files(anchor):
+                if anchor == "asterion":
+                    return package_root
+                if anchor == "asterion.capabilities.dci":
+                    return package_root / "capabilities/dci"
+                return resource_files(anchor)
+
+            with patch("importlib.resources.files", side_effect=files):
+                result = verifier(acceptance_request())
+
+        self.assert_named_layers(
+            result, packaged="FAIL", bound="PASS", composed="PASS", executable="PASS"
+        )
+        packaged = next(
+            check for check in result.checks if check.check_id == "packaged-assemblies"
+        )
+        self.assertEqual(dict(packaged.counts), {"actual": 18, "expected": 18})
+
     def test_acceptance_reports_independent_damage_layers(self) -> None:
         verifier = _dci_verifier(repo_root=PROJECT, backend=ExplodingBackend())
 
@@ -811,7 +845,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 for check in result.checks
                 if check.check_id == "packaged-assemblies"
             )
-            self.assertEqual(dict(packaged.counts)["actual"], 17)
+            self.assertEqual(dict(packaged.counts)["actual"], 18)
 
         with self.subTest(layer="bound"):
             installed = create_dci_provider()
