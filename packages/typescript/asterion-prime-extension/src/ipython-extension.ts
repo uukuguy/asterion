@@ -1,5 +1,8 @@
 import { closeSync, read, write } from "node:fs";
 import { TextDecoder } from "node:util";
+import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment, type ContextWitness } from "./context-witness.js";
+export { registerContextWitness, ContextWitness } from "./context-witness.js";
+export { canonicalJson, projectPrimeContext, countRebuiltContext } from "./context-counter.js";
 import {
   Object as TypeObject,
   String as TypeString,
@@ -337,20 +340,20 @@ interface ExtensionApi {
   registerTool(tool: ReturnType<typeof createIpythonTool>): void;
 }
 
-export function register(pi: ExtensionApi): void {
-  const descriptor = descriptorFromEnvironment();
-  if (typeof pi !== "object" || pi === null || typeof pi.registerTool !== "function") {
-    try {
-      closeSync(descriptor);
-    } catch {}
-    throw unavailable();
-  }
+export function register(pi: ExtensionApi, dependencies?: unknown): void {
+  let descriptor: number | undefined;
+  let witness: ContextWitness | undefined;
   try {
+    descriptor = descriptorFromEnvironment();
+    if (typeof pi !== "object" || pi === null || typeof pi.registerTool !== "function") throw unavailable();
     const bridge = createIpythonBridge(descriptor);
+    witness = registerContextWitnessFromEnvironment(pi, dependencies);
     pi.registerTool(createIpythonTool(bridge));
   } catch {
+    witness?.close();
+    discardContextWitnessEnvironment();
     try {
-      closeSync(descriptor);
+      if (descriptor !== undefined) closeSync(descriptor);
     } catch {}
     throw unavailable();
   }

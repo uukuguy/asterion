@@ -1,4 +1,4 @@
-"""Generate the self-contained native P7 Pi extension for package builds."""
+"""Bundle IPython and private context observers into one installed Pi extension."""
 
 from __future__ import annotations
 

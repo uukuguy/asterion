@@ -1,0 +1,199 @@
+{
+  "format": "asterion.prime-context-parity/v1",
+  "cases": [
+    {
+      "name": "unicode-decimals-tools-and-empty-content",
+      "raw_messages": [
+        {
+          "role": "user",
+          "content": "你好 🌍\n",
+          "timestamp": 999
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "考える"
+            },
+            {
+              "type": "toolCall",
+              "id": "ignored",
+              "name": "ipython",
+              "arguments": {
+                "𐀀": 1e-7,
+                "": -0.0,
+                "nested": {
+                  "z": 1.25,
+                  "a": 1e+21
+                }
+              }
+            }
+          ],
+          "usage": {
+            "cost": 999
+          }
+        },
+        {
+          "role": "toolResult",
+          "toolName": "ipython",
+          "isError": false,
+          "content": [
+            {
+              "type": "text",
+              "text": ""
+            },
+            {
+              "type": "image",
+              "mimeType": "image/png",
+              "data": "YWJj"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": []
+        }
+      ],
+      "projection": {
+        "format": "asterion.prime-context-projection/v1",
+        "system_prompt": "",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "你好 🌍\n"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "thinking",
+                "thinking": "考える"
+              },
+              {
+                "type": "toolCall",
+                "name": "ipython",
+                "arguments_json": "{\"nested\":{\"a\":1e+21,\"z\":1.25},\"\":0,\"𐀀\":1e-7}"
+              }
+            ]
+          },
+          {
+            "role": "toolResult",
+            "tool_name": "ipython",
+            "is_error": false,
+            "content": [
+              {
+                "type": "text",
+                "text": ""
+              },
+              {
+                "type": "image",
+                "media_type": "image/png",
+                "byte_length": 3,
+                "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": []
+          }
+        ]
+      },
+      "canonical_json": "{\"format\":\"asterion.prime-context-projection/v1\",\"messages\":[{\"content\":[{\"text\":\"你好 🌍\\n\",\"type\":\"text\"}],\"role\":\"user\"},{\"content\":[{\"thinking\":\"考える\",\"type\":\"thinking\"},{\"arguments_json\":\"{\\\"nested\\\":{\\\"a\\\":1e+21,\\\"z\\\":1.25},\\\"\\\":0,\\\"𐀀\\\":1e-7}\",\"name\":\"ipython\",\"type\":\"toolCall\"}],\"role\":\"assistant\"},{\"content\":[{\"text\":\"\",\"type\":\"text\"},{\"byte_length\":3,\"media_type\":\"image/png\",\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"type\":\"image\"}],\"is_error\":false,\"role\":\"toolResult\",\"tool_name\":\"ipython\"},{\"content\":[],\"role\":\"assistant\"}],\"system_prompt\":\"\"}",
+      "asterion_units": 609,
+      "sha256": "d5cdb4a98fec8bf0ba35762d65436188fb04d5dad985c07bea75cab26c44146e"
+    },
+    {
+      "name": "prior-summary-split-turn-and-bash",
+      "raw_messages": [
+        {
+          "role": "compactionSummary",
+          "summary": "之前的状态",
+          "tokensBefore": 99999,
+          "retainedMessageCount": 2
+        },
+        {
+          "role": "user",
+          "content": "split turn prefix"
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "retained suffix"
+            }
+          ]
+        },
+        {
+          "role": "bashExecution",
+          "command": "printf hello",
+          "output": "hello",
+          "exitCode": 0,
+          "cancelled": false,
+          "truncated": false
+        },
+        {
+          "role": "custom",
+          "customType": "session_slash_command",
+          "content": "excluded"
+        },
+        {
+          "role": "branchSummary",
+          "summary": "分支"
+        }
+      ],
+      "projection": {
+        "format": "asterion.prime-context-projection/v1",
+        "system_prompt": "",
+        "messages": [
+          {
+            "role": "compactionSummary",
+            "summary": "之前的状态",
+            "retained_message_count": 2,
+            "custom_instructions": null
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "split turn prefix"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "retained suffix"
+              }
+            ]
+          },
+          {
+            "role": "bashExecution",
+            "command": "printf hello",
+            "output": "hello",
+            "exit_code": 0,
+            "cancelled": false,
+            "truncated": false
+          },
+          {
+            "role": "branchSummary",
+            "summary": "分支"
+          }
+        ]
+      },
+      "canonical_json": "{\"format\":\"asterion.prime-context-projection/v1\",\"messages\":[{\"custom_instructions\":null,\"retained_message_count\":2,\"role\":\"compactionSummary\",\"summary\":\"之前的状态\"},{\"content\":[{\"text\":\"split turn prefix\",\"type\":\"text\"}],\"role\":\"user\"},{\"content\":[{\"text\":\"retained suffix\",\"type\":\"text\"}],\"role\":\"assistant\"},{\"cancelled\":false,\"command\":\"printf hello\",\"exit_code\":0,\"output\":\"hello\",\"role\":\"bashExecution\",\"truncated\":false},{\"role\":\"branchSummary\",\"summary\":\"分支\"}],\"system_prompt\":\"\"}",
+      "asterion_units": 498,
+      "sha256": "cc7e8e41e1208455a114363762115d55690cde00decd3ecff36ab1ceee3102c8"
+    }
+  ]
+}
