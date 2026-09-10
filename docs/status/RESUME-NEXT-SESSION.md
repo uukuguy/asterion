@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-10 13:18 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-10 14:08 CST. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -9,7 +9,7 @@
 - 解题过程已形成固定制品体系：规范化事实、版本化分析、版本化渲染、可回放网页和单文件 HTML 导出。
 - 双语 README 已调整为 Asterion 框架主体、ARC-AGI-3 应用案例；GitHub About 与 Topics 已同步。
 - `602013fe` 已固化原生 P7 的精确证据边界：单题 Level 1 成功不代表完整 parity、多题 benchmark 或 production promotion。
-- 原生 P1 计划 Task 0–2 已完成：压缩闭包/预算、可复用 Pi RPC、认证 compact witness 均已独立复审。
+- 原生 P1 计划 Task 0–3 已完成：压缩闭包/预算、可复用 Pi RPC、认证 compact witness 与未知结果恢复封锁均已独立复审。
 
 ## Where things stand
 
@@ -46,6 +46,7 @@
 - `79e9a964`、`81ae89a6`、`e5340a77`：实现并加固可复用 Pi RPC 生命周期及可证未派发复用。
 - `082b9067`、`59e14138`：加入指纹绑定依赖注入和认证 compact witness。
 - `d5ed4501`、`b23ea401`：封存规范持久化字节，并用可执行快照和同字节 loader 关闭 TOCTOU。
+- `a61b9abb`：统一封锁 session-context 派发后未知结果，并同步共享预算快照。
 
 主要入口：
 
@@ -82,11 +83,12 @@ GitHub 当前公开信息：
 - Task 0：7 个聚焦、59 个回归、13 个 TypeScript 测试及 wheel/installed smoke 通过；完整 promotion 因既有外部 Prime source binding 受限，不得记为 PASS。
 - Task 1：72 个命名回归及 Ruff、format、Pyright、diff 检查通过，Astra 复审 clean。
 - Task 2：74 个 Python、35 个扩展、8 个 loader 测试及 Ruff、typecheck、wheel 字节一致性通过；Sol 复审批准，仅留一个非门禁 Pyright 类型质量 Minor。
+- Task 3：79 个相关回归、Ruff、Pyright 与 settlement 窄探针通过；Sol 复审无 findings。
 
 ## Next steps
 
-1. 从 Task 3 开始，封锁所有 post-dispatch unknown session-context outcome；brief 已生成于 `.superpowers/sdd/task-3-brief.md`。
-2. 继续按计划逐任务 TDD、独立复审、修复再复审，随后实现 Task 4–9 的共享 backend、native control、P1 worker/oracle、装配与验收。
+1. 从 Task 4 开始实现共享 Asterion Prime backend 与 durable store；brief 已生成于 `.superpowers/sdd/task-4-brief.md`。
+2. 继续按计划逐任务 TDD、独立复审、修复再复审，随后实现 Task 5–9 的 native control、P1 worker/oracle、装配与验收。
 3. 在原生 P1 闭环后，再按 P2、P4、P3、P5、P6 的依赖顺序迁移；不得将历史 Prime Agent 运行冒充为原生闭环。
 4. 在明确要求前不要 push，也不要启动计划外模型运行。
 
