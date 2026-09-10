@@ -109,5 +109,7 @@ artifacts = [
 
 [tool.hatch.build.targets.sdist]
 artifacts = [
+    ".asterion-prime-extension-build.json",
+    "src/asterion/applications/prime/resources/ipython-extension.mjs",
     "src/asterion/applications/prime/p7/run_story/assets/*",
 ]
