@@ -55,6 +55,13 @@ class PrimeBackendError(RuntimeError):
     """Fixed errors never interpolate private payloads or upstream exceptions."""
 
 
+class PrimeBackendBudgetError(PrimeBackendError):
+    """Positive pre-dispatch budget rejection; no effect has started."""
+
+    def __init__(self) -> None:
+        super().__init__("Prime backend budget is unavailable")
+
+
 class PrimeToolExecutor(Protocol):
     """The preflighted application's worker owner; Pi invokes its bound tools."""
 
@@ -545,9 +552,10 @@ class PrimeSessionBackend:
                 raise ValueError
         except Exception:
             raise PrimeBackendError("Prime backend worker identity mismatch") from None
+        if self._budget is None:
+            raise PrimeBackendError("Prime backend budget is unavailable")
         if (
-            self._budget is None
-            or (
+            (
                 kind != "context"
                 and any(
                     getattr(self._budget, field)
@@ -564,9 +572,9 @@ class PrimeSessionBackend:
             or self._usage.aggregate_tokens >= self._token_cap
             or self._usage.cost_micros >= self._cost_cap
         ):
-            raise PrimeBackendError("Prime backend budget is unavailable")
+            raise PrimeBackendBudgetError()
         if self._remaining_seconds() <= 0:
-            raise PrimeBackendError("Prime backend budget is unavailable")
+            raise PrimeBackendBudgetError()
         self._append(
             f"started-{command_id}",
             "effect-started",
@@ -1214,6 +1222,7 @@ class PrimeSessionBackend:
 __all__ = (
     "PrimeAttachment",
     "PrimeBackendError",
+    "PrimeBackendBudgetError",
     "PrimeBackendEvent",
     "PrimeCleanupReceipt",
     "PrimePromptRequest",

@@ -520,17 +520,25 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.session_status, "paused")
 
     async def test_prompt_budget_dimensions_reject_before_dispatch(self):
+        from asterion.agents.prime import backend as backend_module
+
+        self.assertTrue(
+            hasattr(backend_module, "PrimeBackendBudgetError"),
+            "typed pre-dispatch budget rejection is missing",
+        )
+        error_type = backend_module.PrimeBackendBudgetError
         for index, budget in enumerate(
             (
                 RemainingBudget(10, 0, 0, 10, 10, 1000),
                 RemainingBudget(10, 10, 0, 0, 10, 1000),
                 RemainingBudget(10, 10, 0, 10, 0, 1000),
+                RemainingBudget(10, 10, 0, 10, 10, 0),
             )
         ):
             with self.subTest(budget=budget):
                 self.backend.sync_authority_snapshot(budget, authority_revision=1)
                 before = self.store.position
-                with self.assertRaises(PrimeBackendError):
+                with self.assertRaises(error_type):
                     await self.backend.execute_prompt(self.request(f"prompt-{index}"))
                 self.assertEqual(self.store.position, before)
         self.assertEqual(self.rpc.calls, 0)

@@ -27,6 +27,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded prime-readme-rlm-smoke prime-smoke-core
 .PHONY: prime-parity-inventory prime-verify-system-parity
 .PHONY: prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run asterion-prime-p7-solve prime-apps-preflight
+.PHONY: asterion-prime-p1-run
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
 .PHONY: test.prime-long-running.provider-free test.prime-long-running.bounded
 .PHONY: test.prime-continual-harness.provider-free
@@ -61,6 +62,7 @@ help:
 	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-readme-rlm-smoke prime-smoke-core prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free test.prime-long-running.bounded"
 	@echo "Prime development execution (Orb Ubuntu): prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run"
 	@echo "Asterion Prime live research: asterion-prime-p7-solve"
+	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
 	@echo "Prime development host preflight (Orb Ubuntu): prime-apps-preflight"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
@@ -291,6 +293,13 @@ prime-p7-run:
 asterion-prime-p7-solve:
 	@printf '%s\n' '[asterion-prime-p7-solve] ARC-AGI-3: native Asterion-prime fixed live solve' >&2; \
 		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'unset ASTERION_PRIME_NODE; export PYTHONPATH="$(CURDIR)/src"; exec ../external-prime/arc-agi-3/venv/bin/python tools/run_asterion_prime_p7.py'
+
+asterion-prime-p1-run:
+	@exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p1-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		printf '\''%s\n'\'' '\''[asterion-prime-p1-run] native Asterion-prime fixed small verification'\'' >&2; \
+		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH ASTERION_PRIME_NODE; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_WORKER_PYTHON="$$2/../external-prime/arc-agi-3/venv/bin/python"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p1.operator'\'' asterion-prime-p1-run "$$1" "$(CURDIR)"'
 
 prime-apps-preflight:
 	@exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/preflight_prime_apps.py'
