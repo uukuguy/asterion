@@ -84,6 +84,7 @@ from asterion.applications.prime.p7.operator import build_p7_operator_resources
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 from asterion.applications.provider import resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_solver.provider import create_prime_arc_agi_3_solver_package
+from asterion.capabilities.prime_ipython_coding_native.provider import create_prime_ipython_coding_native_package
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext
@@ -122,7 +123,7 @@ async def main():
     worker.broker = resources_.host_services["prime.arc-broker"]
     receipt = None
     try:
-        provider = resolve_installed_provider(create_provider(), runtime_factories=default_runtime_factory_registry(), installed_packages=(create_prime_arc_agi_3_solver_package(),))
+        provider = resolve_installed_provider(create_provider(), runtime_factories=default_runtime_factory_registry(), installed_packages=(create_prime_arc_agi_3_solver_package(), create_prime_ipython_coding_native_package()))
         application = provider.applications[0]
         assembly = application.assemblies[0]
         runtime = assembly.runtime_binding.factory(RuntimeFactoryContext(provider_id="prime-applications", application_id="prime.arc-agi-3-solving", application_version="1.0.0", runtime_id="asterion.prime", assembly_path=assembly.path, options=resources_.runtime_options, host_services=resources_.host_services))

@@ -45,6 +45,9 @@ from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
 )
 from asterion.capabilities.prime_arc_agi_3_solver.provider import CAPABILITY_REF
+from asterion.capabilities.prime_ipython_coding_native.provider import (
+    create_prime_ipython_coding_native_package,
+)
 from asterion.applications.prime.runtime_binding import (
     PreflightedPrimeLaunch,
     _P7SolveEventProjector,
@@ -229,7 +232,10 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-applications")
-        self.assertEqual(len(provider.applications), 1)
+        self.assertEqual(
+            tuple(application.application_id for application in provider.applications),
+            ("prime.arc-agi-3-solving", "prime.ipython-coding"),
+        )
         application = provider.applications[0]
         self.assertEqual(
             (application.application_id, application.version),
@@ -245,7 +251,10 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         composed = compose_installed_provider(
             create_provider(),
             runtime_factories=RuntimeFactoryRegistry(()),
-            installed_packages=(create_prime_arc_agi_3_solver_package(),),
+            installed_packages=(
+                create_prime_arc_agi_3_solver_package(),
+                create_prime_ipython_coding_native_package(),
+            ),
         )
 
         assembly = composed.applications[0].assemblies[0]
@@ -469,7 +478,10 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             composed = compose_installed_provider(
                 create_provider(),
                 runtime_factories=RuntimeFactoryRegistry(()),
-                installed_packages=(create_prime_arc_agi_3_solver_package(),),
+                installed_packages=(
+                    create_prime_arc_agi_3_solver_package(),
+                    create_prime_ipython_coding_native_package(),
+                ),
             )
             assembly = composed.applications[0].assemblies[0]
             assert assembly.runtime_binding is not None

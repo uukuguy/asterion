@@ -186,7 +186,7 @@ class TestPrimeApplicationProvider(unittest.TestCase):
         )
         self.assertEqual(
             select_application_provider_id("prime.ipython-coding@1.0.0"),
-            "prime-agent",
+            "prime-applications",
         )
         self.assertEqual(
             select_application_provider_id(

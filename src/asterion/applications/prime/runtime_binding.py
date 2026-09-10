@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
+from typing import cast
 
 from asterion.agents.prime.session import AsterionPrimeSession
 from asterion.agents.prime.trace import PrimeTraceRecorder
@@ -50,7 +51,9 @@ def _p7_level_completed(broker: ArcBroker) -> bool:
         receipt = broker.seal()
     except Exception:
         return False
-    return receipt.levels_completed == 1 and receipt.terminal_reason == "level-completed"
+    return (
+        receipt.levels_completed == 1 and receipt.terminal_reason == "level-completed"
+    )
 
 
 @dataclass(frozen=True, repr=False, slots=True)
@@ -130,7 +133,10 @@ class _P7SolveEventProjector:
             if event.type == "run.started":
                 sequence += 1
                 yield RunEvent(
-                    request.run_id, sequence, event.type, event.to_mapping()["payload"]
+                    request.run_id,
+                    sequence,
+                    event.type,
+                    cast(Mapping[str, object], event.to_mapping()["payload"]),
                 )
                 continue
             if event.type == "run.failed":
@@ -139,14 +145,14 @@ class _P7SolveEventProjector:
                     request.run_id,
                     sequence,
                     event.type,
-                    event.to_mapping()["payload"],
+                    cast(Mapping[str, object], event.to_mapping()["payload"]),
                 )
                 continue
             if event.type == "usage.reported":
                 try:
                     self._trace.record_usage(
-                        input_tokens=event.payload["input_tokens"],
-                        output_tokens=event.payload["output_tokens"],
+                        input_tokens=cast(int, event.payload["input_tokens"]),
+                        output_tokens=cast(int, event.payload["output_tokens"]),
                     )
                 except (KeyError, P7PrivateTraceReceiptError):
                     sequence += 1
@@ -166,7 +172,10 @@ class _P7SolveEventProjector:
             if event.payload != {"status": "completed"}:
                 sequence += 1
                 yield RunEvent(
-                    request.run_id, sequence, event.type, event.to_mapping()["payload"]
+                    request.run_id,
+                    sequence,
+                    event.type,
+                    cast(Mapping[str, object], event.to_mapping()["payload"]),
                 )
                 continue
             try:
@@ -201,14 +210,17 @@ class _P7SolveEventProjector:
             )
             sequence += 1
             yield RunEvent(
-                request.run_id, sequence, event.type, event.to_mapping()["payload"]
+                request.run_id,
+                sequence,
+                event.type,
+                cast(Mapping[str, object], event.to_mapping()["payload"]),
             )
 
 
-def build_asterion_prime_runtime(
+def build_p7_runtime(
     context: RuntimeFactoryContext,
 ) -> AgentRuntimeClient:
-    """Assemble one runtime from exact host-preflighted resources."""
+    """Assemble P7 from its exact host-preflighted resources."""
 
     if type(context) is not RuntimeFactoryContext:
         raise RuntimeFactoryError(_ERROR)
@@ -264,8 +276,26 @@ def build_asterion_prime_runtime(
             launch.extension_lease.close()
 
 
+def build_asterion_prime_runtime(
+    context: RuntimeFactoryContext,
+) -> AgentRuntimeClient:
+    """Dispatch one runtime binding by exact native Prime application key."""
+
+    if type(context) is not RuntimeFactoryContext:
+        raise RuntimeFactoryError(_ERROR)
+    key = (context.application_id, context.application_version)
+    if key == ("prime.ipython-coding", "1.0.0"):
+        from asterion.applications.prime.p1.runtime_binding import build_p1_runtime
+
+        return build_p1_runtime(context)
+    if key == ("prime.arc-agi-3-solving", "1.0.0"):
+        return build_p7_runtime(context)
+    raise RuntimeFactoryError(_ERROR)
+
+
 __all__ = (
     "PreflightedPrimeLaunch",
     "asterion_prime_runtime_binding",
     "build_asterion_prime_runtime",
+    "build_p7_runtime",
 )

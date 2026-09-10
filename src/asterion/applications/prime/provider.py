@@ -7,6 +7,7 @@ from pathlib import Path
 
 from asterion.applications.first_party_packages import (
     PRIME_ARC_AGI_3_SOLVER_PACKAGE,
+    PRIME_IPYTHON_CODING_NATIVE_PACKAGE,
 )
 from asterion.applications.provider import (
     APPLICATION_PROVIDER_PROTOCOL,
@@ -19,7 +20,7 @@ from asterion.applications.prime.runtime_binding import (
 
 
 def create_provider() -> InstalledApplicationProvider:
-    """Return the single native P7 application and its peer runtime binding."""
+    """Return sorted native Prime applications and one peer runtime binding."""
 
     root = Path(str(resources.files("asterion"))).resolve()
     return InstalledApplicationProvider(
@@ -31,10 +32,18 @@ def create_provider() -> InstalledApplicationProvider:
                 application_id="prime.arc-agi-3-solving",
                 version="1.0.0",
                 assembly_paths=(
-                    root
-                    / "applications/prime/assemblies/prime-arc-agi-3-solving.json",
+                    root / "applications/prime/assemblies/prime-arc-agi-3-solving.json",
                 ),
                 capability_packages=(PRIME_ARC_AGI_3_SOLVER_PACKAGE,),
+                runtime_ids=("asterion.prime",),
+            ),
+            InstalledApplication(
+                application_id="prime.ipython-coding",
+                version="1.0.0",
+                assembly_paths=(
+                    root / "applications/prime/assemblies/prime-ipython-coding.json",
+                ),
+                capability_packages=(PRIME_IPYTHON_CODING_NATIVE_PACKAGE,),
                 runtime_ids=("asterion.prime",),
             ),
         ),

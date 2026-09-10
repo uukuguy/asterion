@@ -20,6 +20,9 @@ CONTROLLED_CODE_SOURCE_ID = "controlled-code.builtin"
 DCI_PACKAGE = CapabilityPackageRef("dci", "1.0.0")
 PRIME_AGENT_PACKAGE = CapabilityPackageRef("prime-agent", "1.0.0")
 PRIME_ARC_AGI_3_SOLVER_PACKAGE = CapabilityPackageRef("prime-arc-agi-3-solver", "1.0.0")
+PRIME_IPYTHON_CODING_NATIVE_PACKAGE = CapabilityPackageRef(
+    "prime-ipython-coding-native", "1.0.0"
+)
 
 
 def builtin_capability_registrations() -> tuple[BuiltinCapabilityRegistration, ...]:
@@ -46,6 +49,11 @@ def builtin_capability_registrations() -> tuple[BuiltinCapabilityRegistration, .
             PRIME_ARC_AGI_3_SOLVER_PACKAGE,
             package_root / "prime_arc_agi_3_solver/payload",
             create_prime_arc_agi_3_solver_package,
+        ),
+        BuiltinCapabilityRegistration(
+            PRIME_IPYTHON_CODING_NATIVE_PACKAGE,
+            package_root / "prime_ipython_coding_native/payload",
+            create_prime_ipython_coding_native_package,
         ),
     )
 
@@ -106,15 +114,27 @@ def create_prime_arc_agi_3_solver_package() -> InstalledCapabilityPackage:
     return create()
 
 
+def create_prime_ipython_coding_native_package() -> InstalledCapabilityPackage:
+    """Load the selected native P1 package after source selection."""
+
+    from asterion.capabilities.prime_ipython_coding_native import (
+        create_prime_ipython_coding_native_package as create,
+    )
+
+    return create()
+
+
 __all__ = (
     "CONTROLLED_CODE_PACKAGE",
     "CONTROLLED_CODE_SOURCE_ID",
     "DCI_PACKAGE",
     "PRIME_AGENT_PACKAGE",
     "PRIME_ARC_AGI_3_SOLVER_PACKAGE",
+    "PRIME_IPYTHON_CODING_NATIVE_PACKAGE",
     "builtin_capability_registrations",
     "create_controlled_code_package",
     "create_dci_package",
     "create_prime_agent_package",
     "create_prime_arc_agi_3_solver_package",
+    "create_prime_ipython_coding_native_package",
 )
