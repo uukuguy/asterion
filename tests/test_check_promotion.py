@@ -175,6 +175,7 @@ class PromotionCheckTests(unittest.TestCase):
                 (str(temporary / "missing-node"), None),
                 (str(linked_node), None),
                 (str(node), "v21.9.0\n"),
+                (str(node), "v22.14.0\n"),
             )
             for raw, version in cases:
                 with self.subTest(raw=raw, version=version):
@@ -324,12 +325,18 @@ class PromotionCheckTests(unittest.TestCase):
         from tools.check_promotion import (
             WHEEL_OPERATIONAL_RESOURCE_SMOKE,
             WHEEL_PROTOCOL_RESOURCE_SMOKE,
+            _wheel_protocol_resource_smoke,
         )
 
         self.assertIn("prime-client-module-lock.json", WHEEL_PROTOCOL_RESOURCE_SMOKE)
         self.assertIn("prime-client-module.mjs", WHEEL_PROTOCOL_RESOURCE_SMOKE)
         self.assertIn("runClientPackage", WHEEL_PROTOCOL_RESOURCE_SMOKE)
         self.assertIn("external_prime_root", WHEEL_PROTOCOL_RESOURCE_SMOKE)
+        rendered_protocol_smoke = _wheel_protocol_resource_smoke(
+            Path("/sealed/node22/bin/node")
+        )
+        self.assertIn("'/sealed/node22/bin/node'", rendered_protocol_smoke)
+        self.assertNotIn("('node',", rendered_protocol_smoke)
         self.assertIn("prime-operational-harness.mjs", WHEEL_OPERATIONAL_RESOURCE_SMOKE)
         self.assertIn(
             "prime-operational-module-lock.json", WHEEL_OPERATIONAL_RESOURCE_SMOKE
@@ -821,6 +828,8 @@ class PromotionCheckTests(unittest.TestCase):
             operational_smoke_source,
         )
         smoke_source = protocol_smokes[0][2]
+        self.assertIn("'/sealed/node22/bin/node'", smoke_source)
+        self.assertNotIn("('node',", smoke_source)
         self.assertIn("'applications/*/assemblies/*.json'", smoke_source)
         self.assertIn("'capabilities/*/capability-package.json'", smoke_source)
         self.assertIn("'capabilities/*/manifests/*.json'", smoke_source)

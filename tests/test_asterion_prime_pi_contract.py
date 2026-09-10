@@ -204,6 +204,20 @@ assert.equal(covered.messages[0].content[0].sha256.length,64);
 assert.equal(covered.messages[1].tool_name,'ipython');
 assert.equal(covered.messages[2].exit_code,0);
 assert.equal(covered.messages[3].retained_message_count,2);
+const empty=projectPrimeContext([], 'system');
+const excluded=projectPrimeContext([
+ {role:'bashExecution',command:'secret-command',output:'secret-output',exitCode:0,cancelled:false,truncated:false,excludeFromContext:true},
+ ...['session_slash_command','session_slash_command_result','compaction_outcome'].map(customType =>
+  ({role:'custom',customType,content:`excluded-${customType}`})),
+], 'system');
+assert.deepEqual(excluded.messages, []);
+assert.equal(countRebuiltContext(excluded), countRebuiltContext(empty));
+const included=projectPrimeContext([
+ {role:'bashExecution',command:'pwd',output:'visible-output',exitCode:0,cancelled:false,truncated:false,excludeFromContext:false},
+ {role:'custom',customType:'heartbeat_prompt',content:'visible-custom'},
+], 'system');
+assert.equal(included.messages.length, 2);
+assert(countRebuiltContext(included) > countRebuiltContext(empty));
 console.log('projection PASS');
 """
         completed = subprocess.run(

@@ -183,7 +183,7 @@ assert client_lock['source_commit'] == prime_lock['source_commit']
 assert (prime_root / 'prime-client-module.mjs').is_file()
 external_prime_root = (Path.cwd() / '3th-party/prime-agent').resolve()
 compaction_verified = subprocess.run(
-    ('node', str(compaction_root / 'pi-compaction-verifier.mjs'), '--verify',
+    (__ASTERION_PROMOTION_NODE_EXECUTABLE__, str(compaction_root / 'pi-compaction-verifier.mjs'), '--verify',
      str(external_prime_root), str(compaction_lock_path),
      str(prime_root / 'prime-artifact-lock.json')),
     check=True, capture_output=True, text=True,
@@ -213,7 +213,7 @@ module_smoke = (
     "receipt.scenarioEvidence.length !== 11) process.exit(1);"
 )
 module_result = subprocess.run(
-    ('node', '--input-type=module', '--eval', module_smoke),
+    (__ASTERION_PROMOTION_NODE_EXECUTABLE__, '--input-type=module', '--eval', module_smoke),
     cwd='/', capture_output=True, text=True, check=False,
 )
 assert module_result.returncode == 0
@@ -413,6 +413,12 @@ def _wheel_operational_resource_smoke(node_executable: Path) -> str:
     )
 
 
+def _wheel_protocol_resource_smoke(node_executable: Path) -> str:
+    return WHEEL_PROTOCOL_RESOURCE_SMOKE.replace(
+        "__ASTERION_PROMOTION_NODE_EXECUTABLE__", repr(str(node_executable))
+    )
+
+
 def _is_wheel_operational_resource_smoke(source: str) -> bool:
     prefix, marker, suffix = WHEEL_OPERATIONAL_RESOURCE_SMOKE.partition(
         "__ASTERION_PROMOTION_NODE_EXECUTABLE__"
@@ -564,8 +570,12 @@ def _resolve_promotion_node_executable(raw: str) -> Path:
             text=True,
             timeout=10,
         )
-        if completed.returncode != 0 or not re.fullmatch(
-            r"v22\.\d+\.\d+\n?", completed.stdout
+        version = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)\n?", completed.stdout)
+        if (
+            completed.returncode != 0
+            or version is None
+            or int(version.group(1)) != 22
+            or (int(version.group(2)), int(version.group(3))) < (15, 0)
         ):
             raise OSError
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError):
@@ -1390,7 +1400,7 @@ def _run_full(
         ("uv", "venv", str(venv_root)),
         ("uv", "pip", "install", "--python", str(python), str(wheels[0])),
         (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
-        (str(python), "-c", WHEEL_PROTOCOL_RESOURCE_SMOKE),
+        (str(python), "-c", _wheel_protocol_resource_smoke(node_executable)),
         (str(python), "-c", _wheel_operational_resource_smoke(node_executable)),
         (str(asterion), "list"),
         (

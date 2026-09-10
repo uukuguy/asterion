@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 
 const FORMAT = "asterion.prime-context-projection/v1";
 const SAFE_INTEGER_MAX = Number.MAX_SAFE_INTEGER;
+const EXCLUDED_CUSTOM_CONTEXT_TYPES = new Set([
+  "session_slash_command",
+  "session_slash_command_result",
+  "compaction_outcome",
+]);
 
 type CanonicalPrimitive = null | boolean | number | string;
 type CanonicalValue = CanonicalPrimitive | CanonicalValue[] | { [key: string]: CanonicalValue };
@@ -235,6 +240,18 @@ function projectMessage(value: unknown): PrimeContextMessage {
   }
 }
 
+/** Match Pi's convertToLlm exclusions without dropping other extension context. */
+function excludedFromModelContext(value: unknown): boolean {
+  const message = record(value);
+  const role = string(message.role);
+  return (
+    (role === "bashExecution" && message.excludeFromContext === true) ||
+    (role === "custom" &&
+      typeof message.customType === "string" &&
+      EXCLUDED_CUSTOM_CONTEXT_TYPES.has(message.customType))
+  );
+}
+
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
     for (const child of Object.values(value)) deepFreeze(child);
@@ -249,7 +266,7 @@ export function projectPrimeContext(messages: unknown, systemPrompt = ""): Prime
   const projection: PrimeContextProjectionV1 = {
     format: FORMAT,
     system_prompt: string(systemPrompt),
-    messages: messages.map(projectMessage),
+    messages: messages.filter((message) => !excludedFromModelContext(message)).map(projectMessage),
   };
   return deepFreeze(projection);
 }
