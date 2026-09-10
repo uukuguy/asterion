@@ -7,9 +7,9 @@ import { builtinModules, findPackageJSON, registerHooks } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-export const ARTIFACT_LOCK = join(REPO_ROOT, "packages/typescript/prime-gateway/resources/prime-artifact-lock.json");
-export const COMPACTION_LOCK = join(REPO_ROOT, "packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json");
+const REPO_ROOT = import.meta.url.startsWith("file:") ? resolve(dirname(fileURLToPath(import.meta.url)), "..") : null;
+export const ARTIFACT_LOCK = REPO_ROOT === null ? null : join(REPO_ROOT, "packages/typescript/prime-gateway/resources/prime-artifact-lock.json");
+export const COMPACTION_LOCK = REPO_ROOT === null ? null : join(REPO_ROOT, "packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json");
 export const ENTRY_POINTS = Object.freeze([
   "packages/ai/dist/index.js",
   "packages/coding-agent/dist/core/agent-session.js",
@@ -25,6 +25,7 @@ const sortObject = (value) => Array.isArray(value) ? value.map(sortObject)
   : value !== null && typeof value === "object"
     ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortObject(value[key])])) : value;
 export const canonicalEvidence = (value) => JSON.stringify(sortObject(value));
+const lockBytes = (input) => input instanceof Uint8Array ? Buffer.from(input) : readFileSync(input);
 
 function beneath(root, path) {
   const name = relative(root, path);
@@ -50,7 +51,7 @@ export function verifyArtifactRoot(sourceRoot, artifactLockPath = ARTIFACT_LOCK)
   try {
     if (!isAbsolute(sourceRoot) || realpathSync(sourceRoot) !== sourceRoot
         || !lstatSync(sourceRoot).isDirectory()) fail();
-    const bytes = readFileSync(artifactLockPath);
+    const bytes = lockBytes(artifactLockPath);
     const artifact = JSON.parse(bytes);
     if (artifact.format !== "asterion.prime-artifact-lock/v1"
         || artifact.package_name !== "@earendil-works/pi-coding-agent"
@@ -132,7 +133,7 @@ export async function buildCompactionLock(sourceRoot) {
 export function verifyCompactionLock(sourceRoot, lockPath = COMPACTION_LOCK, artifactLockPath = ARTIFACT_LOCK) {
   try {
     const verified = verifyArtifactRoot(sourceRoot, artifactLockPath);
-    const lock = JSON.parse(readFileSync(lockPath));
+    const lock = JSON.parse(lockBytes(lockPath));
     if (lock.format !== FORMAT || lock.package_version !== "0.7.1"
         || lock.package_name !== verified.pkg.name
         || lock.source_commit !== verified.artifact.source_commit
@@ -168,6 +169,45 @@ export function guardCompactionImports(verified) {
   });
 }
 
+/** Generic loader provider: verify only, before constructing any Pi dependencies. */
+export function verifyDependencies(context) {
+  return verifyCompactionLock(context.sourceRoot, context.lockBytes, context.artifactLockBytes);
+}
+
+/** Application-owned exact exports; the loader owns the returned guard lifetime. */
+export async function createDependencies(context) {
+  const verified = verifyDependencies(context);
+  const guard = guardCompactionImports(verified);
+  try {
+    const load = (name) => import(pathToFileURL(join(verified.root, name)).href);
+    const compactionPath = "packages/coding-agent/dist/core/compaction/compaction.js";
+    const source = readFileSync(exactFile(verified.root, compactionPath), "utf8");
+    if (sha256(source) !== verified.lock.files[compactionPath]) fail();
+    const matches = [...source.matchAll(/const TURN_PREFIX_SUMMARIZATION_PROMPT = `([^`]+)`;/gu)];
+    if (matches.length !== 1 || matches[0][1].includes("${") || matches[0][1].includes("\\")) fail();
+    const compaction = await load(compactionPath);
+    const session = await load("packages/coding-agent/dist/core/session-manager.js");
+    const messages = await load("packages/coding-agent/dist/core/messages.js");
+    const utils = await load("packages/coding-agent/dist/core/compaction/utils.js");
+    const dependencies = Object.freeze({
+      buildSessionContext: session.buildSessionContext,
+      prepareCompaction: compaction.prepareCompaction,
+      convertToLlm: messages.convertToLlm,
+      serializeConversation: utils.serializeConversation,
+      buildSummarizationPrompt: compaction.buildSummarizationPrompt,
+      summarizationSystemPrompt: utils.SUMMARIZATION_SYSTEM_PROMPT,
+      turnPrefixPrompt: matches[0][1],
+    });
+    for (const [name, value] of Object.entries(dependencies)) {
+      if (typeof value !== (name === "summarizationSystemPrompt" || name === "turnPrefixPrompt" ? "string" : "function")) fail();
+    }
+    let closed = false;
+    return Object.freeze({dependencies, close() {
+      if (!closed) {closed = true; guard.deregister();}
+    }});
+  } catch { guard.deregister(); fail(); }
+}
+
 /** The probe compiles the same TypeScript counter later bundled in the witness. */
 export async function loadContextCounter() {
   const { build } = await esbuild();
@@ -178,7 +218,7 @@ export async function loadContextCounter() {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
 }
 
-if (process.argv[1] && pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url) {
+if (import.meta.url.startsWith("file:") && process.argv[1] && pathToFileURL(realpathSync(process.argv[1])).href === import.meta.url) {
   try {
     if (process.argv[2] === "--verify" && process.argv.length === 6) {
       const result = verifyCompactionLock(process.argv[3], process.argv[4], process.argv[5]);

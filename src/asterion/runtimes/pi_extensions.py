@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -21,10 +22,89 @@ _NODE_SPECIFIER = re.compile(r"node:[A-Za-z0-9][A-Za-z0-9_./-]*")
 _SOURCE_FD = "ASTERION_PI_EXTENSION_SOURCE_FD"
 _SOURCE_NAME_ENV = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
+_DEPENDENCIES_ENV = "ASTERION_PI_EXTENSION_DEPENDENCIES"
 _RESERVED_ENVIRONMENT_PREFIX = "ASTERION_PI_EXTENSION_"
 _LOADER_FILENAME = "asterion_pi_extension_loader.mjs"
 _MAX_SOURCE_BYTES = 4 * 1024 * 1024
 _BINDING_FINGERPRINT_DOMAIN = b"asterion.pi-extension-binding/v1\0"
+
+
+@dataclass(frozen=True, repr=False, slots=True)
+class PiExtensionDependencies:
+    """Operator-selected verifier/factory and its exact private resource closure."""
+
+    provider_path: Path
+    source_root: Path
+    closure_lock_path: Path
+    artifact_lock_path: Path
+    node_executable: Path
+    exports: Mapping[str, str]
+    _fingerprint: str = field(init=False, repr=False)
+    _digests: tuple[str, ...] = field(init=False, repr=False)
+    _root_identity: tuple[int, int, int, int] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        try:
+            paths = (
+                self.provider_path,
+                self.closure_lock_path,
+                self.artifact_lock_path,
+            )
+            for path in (*paths, self.source_root, self.node_executable):
+                if (
+                    not isinstance(path, Path)
+                    or not path.is_absolute()
+                    or path.resolve(strict=True) != path
+                ):
+                    raise ValueError
+            if (
+                not self.source_root.is_dir()
+                or not self.node_executable.is_file()
+                or not os.access(self.node_executable, os.X_OK)
+            ):
+                raise ValueError
+            if (
+                not isinstance(self.exports, Mapping)
+                or not self.exports
+                or any(
+                    type(name) is not str
+                    or re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", name) is None
+                    or kind not in ("function", "string")
+                    for name, kind in self.exports.items()
+                )
+            ):
+                raise ValueError
+            digests = tuple(
+                hashlib.sha256(_read_exact_source(path)).hexdigest() for path in paths
+            )
+            root_identity = _stat_identity(
+                os.stat(self.source_root, follow_symlinks=False)
+            )
+            exports = dict(sorted(self.exports.items()))
+            canonical = json.dumps(
+                {
+                    "paths": [
+                        str(path)
+                        for path in (*paths, self.source_root, self.node_executable)
+                    ],
+                    "digests": digests,
+                    "root_identity": root_identity,
+                    "exports": exports,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            object.__setattr__(self, "exports", RedactedImmutableMapping(exports))
+            object.__setattr__(self, "_digests", digests)
+            object.__setattr__(self, "_root_identity", root_identity)
+            object.__setattr__(
+                self, "_fingerprint", hashlib.sha256(canonical).hexdigest()
+            )
+        except (OSError, TypeError, ValueError):
+            raise ValueError("Pi extension dependencies are invalid") from None
+
+    def __repr__(self) -> str:
+        return "<PiExtensionDependencies redacted>"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +126,7 @@ class PiExtensionBinding:
     capabilities: tuple[str, ...]
     inherited_fds: tuple[int, ...]
     environment: Mapping[str, str]
+    dependencies: PiExtensionDependencies | None = None
     _binding_fingerprint: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -66,8 +147,7 @@ class PiExtensionBinding:
             type(self.capabilities) is not tuple
             or not self.capabilities
             or any(
-                type(capability) is not str
-                or _IDENTITY.fullmatch(capability) is None
+                type(capability) is not str or _IDENTITY.fullmatch(capability) is None
                 for capability in self.capabilities
             )
             or tuple(sorted(set(self.capabilities))) != self.capabilities
@@ -105,6 +185,11 @@ class PiExtensionBinding:
         if tuple(sorted(declared_fds)) != self.inherited_fds:
             raise ValueError("Pi extension binding is invalid")
         object.__setattr__(self, "environment", RedactedImmutableMapping(environment))
+        if (
+            self.dependencies is not None
+            and type(self.dependencies) is not PiExtensionDependencies
+        ):
+            raise ValueError("Pi extension binding is invalid")
         canonical = json.dumps(
             {
                 "capabilities": list(self.capabilities),
@@ -112,6 +197,11 @@ class PiExtensionBinding:
                 "extension_id": self.extension_id,
                 "inherited_fds": list(self.inherited_fds),
                 "path": str(self.path),
+                **(
+                    {"dependencies": self.dependencies._fingerprint}
+                    if self.dependencies is not None
+                    else {}
+                ),
             },
             ensure_ascii=True,
             separators=(",", ":"),
@@ -155,6 +245,7 @@ class PiExtensionLease:
         "_initialized",
         "_loader_digest",
         "_loader_fd",
+        "_dependencies",
     )
 
     def __init__(
@@ -168,6 +259,7 @@ class PiExtensionLease:
         fd_identities: Mapping[int, tuple[int, int, int, int]],
         loader_digest: str,
         loader_fd: int,
+        dependencies: PiExtensionDependencies | None = None,
     ) -> None:
         self.environment = RedactedImmutableMapping(environment)
         self.inherited_fds = inherited_fds
@@ -177,6 +269,7 @@ class PiExtensionLease:
         self._fd_identities = dict(fd_identities)
         self._loader_digest = loader_digest
         self._loader_fd = loader_fd
+        self._dependencies = dependencies
         self._closed = False
         self._initialized = True
 
@@ -189,9 +282,7 @@ class PiExtensionLease:
         raise AttributeError("Pi extension lease is immutable")
 
     @classmethod
-    def open(
-        cls, binding: PiExtensionBinding, loader_path: Path
-    ) -> PiExtensionLease:
+    def open(cls, binding: PiExtensionBinding, loader_path: Path) -> PiExtensionLease:
         owned: list[int] = []
         try:
             source = _read_exact_source(binding.path)
@@ -232,7 +323,54 @@ class PiExtensionLease:
                     _SOURCE_SHA256: source_digest,
                 }
             )
-            process_fds = tuple(sorted((source_fd, *replacements.values())))
+            dependency_fds: list[int] = []
+            if binding.dependencies is not None:
+                dependency = binding.dependencies
+                metadata: dict[str, object] = {"exports": dict(dependency.exports)}
+                for name, path, expected_digest in zip(
+                    ("provider", "closureLock", "artifactLock"),
+                    (
+                        dependency.provider_path,
+                        dependency.closure_lock_path,
+                        dependency.artifact_lock_path,
+                    ),
+                    dependency._digests,
+                    strict=True,
+                ):
+                    contents = _read_exact_source(path)
+                    if hashlib.sha256(contents).hexdigest() != expected_digest:
+                        raise ValueError
+                    pinned_fd = _snapshot_source(contents)
+                    owned.append(pinned_fd)
+                    dependency_fds.append(pinned_fd)
+                    metadata[name] = {"fd": pinned_fd, "digest": expected_digest}
+                root_fd = os.open(
+                    dependency.source_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                )
+                owned.append(root_fd)
+                dependency_fds.append(root_fd)
+                root_details = os.fstat(root_fd)
+                if _stat_identity(root_details) != dependency._root_identity:
+                    raise ValueError
+                metadata["sourceRoot"] = {
+                    "path": str(dependency.source_root),
+                    "fd": root_fd,
+                    "dev": str(root_details.st_dev),
+                    "ino": str(root_details.st_ino),
+                }
+                environment[_DEPENDENCIES_ENV] = json.dumps(
+                    metadata, sort_keys=True, separators=(",", ":")
+                )
+            process_fds = tuple(
+                sorted((source_fd, *replacements.values(), *dependency_fds))
+            )
+            if binding.dependencies is not None:
+                _verify_dependencies(
+                    binding.dependencies,
+                    environment[_DEPENDENCIES_ENV],
+                    process_fds,
+                    loader_fd,
+                )
             identities = {fd: _fd_identity(fd) for fd in process_fds}
             sensitive = tuple(
                 sorted(
@@ -243,6 +381,20 @@ class PiExtensionLease:
                         *binding.environment.values(),
                         *environment.keys(),
                         *environment.values(),
+                        *(
+                            ()
+                            if binding.dependencies is None
+                            else (
+                                str(path)
+                                for path in (
+                                    binding.dependencies.provider_path,
+                                    binding.dependencies.source_root,
+                                    binding.dependencies.closure_lock_path,
+                                    binding.dependencies.artifact_lock_path,
+                                    binding.dependencies.node_executable,
+                                )
+                            )
+                        ),
                     },
                     key=len,
                     reverse=True,
@@ -264,6 +416,7 @@ class PiExtensionLease:
                 fd_identities=identities,
                 loader_digest=loader_digest,
                 loader_fd=loader_fd,
+                dependencies=binding.dependencies,
             )
         except (OSError, TypeError, ValueError, UnicodeError):
             for descriptor in reversed(owned):
@@ -306,7 +459,14 @@ class PiExtensionLease:
                     raise OSError
             source_fd = int(self.environment[_SOURCE_FD])
             os.lseek(source_fd, 0, os.SEEK_SET)
-        except OSError:
+            if self._dependencies is not None:
+                _verify_dependencies(
+                    self._dependencies,
+                    self.environment[_DEPENDENCIES_ENV],
+                    self.inherited_fds,
+                    self._loader_fd,
+                )
+        except (OSError, ValueError):
             raise ValueError("Pi extension lease is unavailable") from None
 
     def close(self) -> None:
@@ -318,6 +478,47 @@ class PiExtensionLease:
                 os.close(descriptor)
             except OSError:
                 pass
+
+
+def _verify_dependencies(
+    dependency: PiExtensionDependencies,
+    metadata: str,
+    descriptors: tuple[int, ...],
+    loader_fd: int,
+) -> None:
+    """Use the pinned provider's verifier before launch, without loading dependencies."""
+
+    script = (
+        'import {readFileSync} from "node:fs";'
+        'const loader = await import("data:text/javascript;base64," + '
+        'readFileSync(Number(process.argv[1])).toString("base64"));'
+        'try {await loader.verifyPinnedDependencies(readFileSync(0,"utf8"));}'
+        "catch {process.exitCode=1;}"
+    )
+    try:
+        os.lseek(loader_fd, 0, os.SEEK_SET)
+        result = subprocess.run(
+            [
+                str(dependency.node_executable),
+                "--input-type=module",
+                "-e",
+                script,
+                str(loader_fd),
+            ],
+            input=metadata.encode(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env={"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8"},
+            pass_fds=(*descriptors, loader_fd),
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise ValueError
+    except (OSError, subprocess.SubprocessError, ValueError):
+        raise ValueError("Pi extension dependencies are unavailable") from None
+    finally:
+        os.lseek(loader_fd, 0, os.SEEK_SET)
 
 
 def _open_regular(path: Path) -> int:

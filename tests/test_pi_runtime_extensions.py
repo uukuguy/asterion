@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,9 +15,10 @@ from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError
 from asterion.runtimes.pi_extensions import PiExtensionBinding
+from asterion.runtimes import pi_extensions
 
 
-NODE_PI_HARNESS = r'''
+NODE_PI_HARNESS = r"""
 import { pathToFileURL } from "node:url";
 const position = process.argv.lastIndexOf("--extension");
 const loader = await import(pathToFileURL(process.argv[position + 1]).href);
@@ -34,10 +36,142 @@ for (const event of [
   {type: "message_end", message: {role: "assistant", stopReason: "stop", usage: {input: 1, output: 1}}},
   {type: "agent_end"},
 ]) console.log(JSON.stringify(event));
-'''
+"""
 
 
 class PiExtensionBindingTests(unittest.TestCase):
+    def test_locked_provider_lease_loads_real_dependencies_in_child(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            extension = Path(temporary).resolve() / "extension.mjs"
+            extension.write_text(
+                "export default (pi, dependencies) => pi.registerTool({name: dependencies.prepareCompaction.name});\n"
+            )
+            dependency = pi_extensions.PiExtensionDependencies(
+                provider_path=root / "tools/build_asterion_prime_compaction_lock.mjs",
+                source_root=(root / "3th-party/prime-agent").resolve(strict=True),
+                closure_lock_path=root
+                / "packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json",
+                artifact_lock_path=root
+                / "packages/typescript/prime-gateway/resources/prime-artifact-lock.json",
+                node_executable=Path(shutil.which("node")).resolve(),
+                exports={
+                    "buildSessionContext": "function",
+                    "prepareCompaction": "function",
+                    "convertToLlm": "function",
+                    "serializeConversation": "function",
+                    "buildSummarizationPrompt": "function",
+                    "summarizationSystemPrompt": "string",
+                    "turnPrefixPrompt": "string",
+                },
+            )
+            binding = PiExtensionBinding(
+                extension_id="example.test",
+                path=extension,
+                capabilities=("example.test",),
+                inherited_fds=(),
+                environment={},
+                dependencies=dependency,
+            )
+            lease = binding.preflight()
+            self.addCleanup(lease.close)
+            lease.validate_launch()
+            result = subprocess.run(
+                [
+                    str(dependency.node_executable),
+                    "--input-type=module",
+                    "-e",
+                    'import {pathToFileURL} from "node:url";'
+                    "const loader=await import(pathToFileURL(process.argv[1]));"
+                    "const hooks=[]; const names=[];"
+                    "await loader.default({registerTool(tool) {names.push(tool.name);}, on(name,callback) {hooks.push(callback);}});"
+                    "for (const hook of hooks) await hook(); console.log(JSON.stringify(names));",
+                    str(lease.loader_path),
+                ],
+                env={"PATH": os.environ["PATH"], **lease.environment},
+                pass_fds=lease.inherited_fds,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), ["prepareCompaction"])
+            self.assertEqual(result.stderr, "")
+
+    def test_locked_dependencies_are_bound_verified_and_rechecked_before_launch(
+        self,
+    ) -> None:
+        dependency_type = getattr(pi_extensions, "PiExtensionDependencies", None)
+        self.assertIsNotNone(dependency_type, "generic locked dependencies are missing")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            extension = root / "extension.mjs"
+            extension.write_text("export default () => {};\n")
+            provider = root / "provider.mjs"
+            provider.write_text(
+                "export function verifyDependencies(context) {\n"
+                ' if (context.lockBytes.toString() !== "locked") throw Error("secret");\n'
+                '}\nexport function createDependencies() { return {dependencies: {value: "ok"}, close() {}}; }\n'
+            )
+            lock = root / "closure.json"
+            lock.write_text("locked")
+            artifact = root / "artifact.json"
+            artifact.write_text("artifact")
+            node = Path(shutil.which("node")).resolve()
+            dependency = dependency_type(
+                provider_path=provider,
+                source_root=root,
+                closure_lock_path=lock,
+                artifact_lock_path=artifact,
+                node_executable=node,
+                exports={"value": "string"},
+            )
+            binding = PiExtensionBinding(
+                extension_id="example.test",
+                path=extension,
+                capabilities=("example.test",),
+                inherited_fds=(),
+                environment={},
+                dependencies=dependency,
+            )
+            lease = binding.preflight()
+            self.addCleanup(lease.close)
+            lease.validate_launch()
+            self.assertNotIn(str(root), repr(dependency))
+            self.assertNotIn(str(root), repr(lease.environment))
+            plain = PiExtensionBinding(
+                extension_id="example.test",
+                path=extension,
+                capabilities=("example.test",),
+                inherited_fds=(),
+                environment={},
+            )
+            self.assertNotEqual(plain.binding_fingerprint, binding.binding_fingerprint)
+            with self.assertRaises(TypeError):
+                dependency.exports["extra"] = "string"
+            moved_root = root.with_name(root.name + "-moved")
+            root.rename(moved_root)
+            try:
+                with self.assertRaisesRegex(
+                    ValueError, "Pi extension lease is unavailable"
+                ):
+                    lease.validate_launch()
+            finally:
+                moved_root.rename(root)
+            lease.validate_launch()
+            descriptor = json.loads(
+                lease.environment["ASTERION_PI_EXTENSION_DEPENDENCIES"]
+            )["provider"]["fd"]
+            os.pwrite(descriptor, b"X", 0)
+            with self.assertRaisesRegex(
+                ValueError, "Pi extension lease is unavailable"
+            ):
+                lease.validate_launch()
+            lease.close()
+            for fd in lease.inherited_fds:
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+
     def test_preflight_carries_immutable_canonical_binding_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
