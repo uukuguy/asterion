@@ -801,6 +801,14 @@ class PiRpcSession:
                 driver_task.result()
             except BaseException:
                 pass
+            state = self._state
+            self._lifecycle_poisoned = (
+                request_written.is_set()
+                or not self._lifecycle_open
+                or state is None
+                or state.output_error is not None
+                or state.process.poll() is not None
+            )
             raise asyncio.CancelledError
         except BaseException as error:
             if request_written.is_set():

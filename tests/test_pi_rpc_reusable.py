@@ -217,6 +217,42 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         await rpc.close()
         self.assertIsNone(rpc.process)
 
+    async def test_cancelled_pre_dispatch_prompt_leaves_session_reusable(self) -> None:
+        rpc = self.make_session()
+        driver_started = threading.Event()
+        release_driver = threading.Event()
+        original_drive = rpc.drive_prompt
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+
+        def gated_drive(*args: object, **kwargs: object) -> object:
+            driver_started.set()
+            release_driver.wait()
+            return original_drive(*args, **kwargs)  # type: ignore[arg-type]
+
+        with (
+            patch.object(rpc, "drive_prompt", side_effect=gated_drive),
+            patch.object(rpc, "send", wraps=rpc.send) as send,
+        ):
+            task = asyncio.create_task(
+                rpc.prompt(
+                    "cancelled", signal=NeverCancelled(), on_event=lambda _event: None
+                )
+            )
+            await asyncio.wait_for(asyncio.to_thread(driver_started.wait), timeout=1.0)
+            task.cancel()
+            await asyncio.sleep(0)
+            release_driver.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+            self.assertEqual(send.call_count, 0)
+            result = await rpc.prompt(
+                "recovered", signal=NeverCancelled(), on_event=lambda _event: None
+            )
+
+        self.assertEqual(result.final_text, "recovered")
+
     async def test_concurrent_command_is_rejected_without_dispatch(self) -> None:
         rpc = self.make_session()
         signal = MutableSignal()
