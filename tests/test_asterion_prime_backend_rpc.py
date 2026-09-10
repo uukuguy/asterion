@@ -79,6 +79,7 @@ for line in sys.stdin:
             },
         })
         emit({"type": "agent_end"})
+        emit({"type": "agent_settled"})
     elif request["type"] == "compact":
         emit({"type": "compaction_start", "reason": "manual"})
         arm = receive_frame()

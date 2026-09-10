@@ -363,6 +363,25 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertEqual(rpc.calls, 0)
         self.assertTrue(lease.closed)
 
+    def test_accepts_agent_end_before_settled_without_public_payload(self) -> None:
+        session, _rpc, _lease = self.fixture.make(
+            native_events(
+                ("agent_end", {"messages": ["PRIVATE-ANSWER"]}),
+                ("agent_settled", {}),
+            )
+        )
+
+        public = asyncio.run(collect(session))
+
+        self.assertEqual(public[-1].payload, {"status": "completed"})
+        self.assertNotIn("PRIVATE-ANSWER", repr(public))
+
+    def test_agent_end_without_settled_is_not_completion(self) -> None:
+        session, _rpc, _lease = self.fixture.make(native_events(("agent_end", {})))
+
+        with self.assertRaisesRegex(ProtocolError, "native terminal is invalid"):
+            asyncio.run(collect(session))
+
     def test_maps_only_exact_native_tool_events(self) -> None:
         events = native_events(
             ("response", {"id": "py-1", "success": True}),
@@ -374,6 +393,17 @@ class TestAsterionPrimeSession(unittest.TestCase):
                     "toolCallId": "call-1",
                     "toolName": "ipython",
                     "args": {"code": "1+1"},
+                },
+            ),
+            (
+                "tool_execution_update",
+                {
+                    "toolCallId": "call-1",
+                    "toolName": "ipython",
+                    "args": {"code": "1+1"},
+                    "partialResult": {
+                        "content": [{"type": "text", "text": "PRIVATE-PARTIAL"}]
+                    },
                 },
             ),
             (
@@ -400,6 +430,7 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertEqual(public[2].payload["is_error"], False)
         self.assertIsNone(public[2].payload["output"])
         self.assertNotIn("1+1", repr(public))
+        self.assertNotIn("PRIVATE-PARTIAL", repr(public))
         self.assertNotIn('"2"', repr(public))
 
     def test_unmatched_tool_call_is_not_published_on_failure_or_cancellation(

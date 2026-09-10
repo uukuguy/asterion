@@ -1025,7 +1025,9 @@ class PiRpcSession:
                                 )
                                 text_bytes = _MAX_FINAL_TEXT_BYTES
                             text_truncated = True
-                elif event.type in {"agent_end", "agent_settled"}:
+                elif event.type == "agent_settled":
+                    # Pi emits agent_end before post-run work and agent_settled.
+                    # Consume the settlement before admitting another command.
                     return PiRpcDirective.COMPLETE
                 return PiRpcDirective.CONTINUE
 

@@ -78,6 +78,7 @@ class CodingPi(FakeReusablePi):
             {"message": {"role": "assistant", "usage": {"input": 3, "output": 2}}},
         )
         emit("agent_end", {})
+        emit("agent_settled", {})
         return PiRpcResult("SENTINEL_PRIVATE_MODEL_ANSWER", tuple(events), b"")
 
     async def compact(self, *, signal, on_event):

@@ -50,6 +50,8 @@ for line in sys.stdin:
             "type": "message_update",
             "assistantMessageEvent": {"type": "text_delta", "delta": message},
         })
+        if message.startswith("paired-terminal-"):
+            emit({"type": "agent_end", "messages": []})
         emit({"type": "agent_settled"})
         late_stderr = message == "late-stderr"
     elif request_type == "compact":
@@ -108,6 +110,34 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
                 {},
                 deadline_seconds=deadline_seconds,
             )
+        )
+
+    async def test_consecutive_prompts_consume_agent_end_then_agent_settled(self) -> None:
+        rpc = self.make_session()
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+
+        results = []
+        for stage in ("one", "two"):
+            results.append(
+                await rpc.prompt(
+                    f"paired-terminal-{stage}",
+                    signal=NeverCancelled(),
+                    on_event=self.events.append,
+                )
+            )
+
+        for result in results:
+            self.assertEqual(
+                [event.type for event in result.events[-2:]],
+                ["agent_end", "agent_settled"],
+            )
+        self.assertEqual(
+            [result.request_id for result in results], ["py-1", "py-2"]
+        )
+        self.assertEqual(
+            [event.sequence for event in self.events],
+            list(range(1, len(self.events) + 1)),
         )
 
     async def test_prompt_compact_prompt_reuses_one_process(self) -> None:

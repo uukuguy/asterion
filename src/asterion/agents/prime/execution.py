@@ -350,7 +350,16 @@ class PrimeExecutionKernel:
             self._native_events.append(event)
             event_type = event.type
             payload = event.payload
-            if event_type in {"response", "agent_start", "message_start", "turn_end"}:
+            if event_type in {
+                "response",
+                "agent_start",
+                "message_start",
+                "turn_end",
+                "agent_end",
+                "tool_execution_update",
+            }:
+                # agent_end precedes Pi's settlement; streaming tool updates
+                # carry private partial output and have no public projection.
                 return
             if event_type == "turn_start":
                 model_callbacks += 1
@@ -408,7 +417,7 @@ class PrimeExecutionKernel:
                     },
                 )
                 return
-            if event_type in {"agent_end", "agent_settled"}:
+            if event_type == "agent_settled":
                 if round_terminal_seen:
                     raise _NativeEventRejected(_NativeDiagnostic.DUPLICATE_TERMINAL)
                 round_terminal_seen = True
@@ -494,7 +503,7 @@ class PrimeExecutionKernel:
             if (
                 not round_terminal_seen
                 or not current_round
-                or current_round[-1].type not in {"agent_end", "agent_settled"}
+                or current_round[-1].type != "agent_settled"
             ):
                 raise ProtocolError("Asterion-prime native terminal is invalid")
             if self._completion_predicate is None or self._completion_predicate():

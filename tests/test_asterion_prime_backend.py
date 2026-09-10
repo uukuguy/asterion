@@ -89,6 +89,7 @@ class FakeReusablePi:
                 {"message": {"role": "assistant", "usage": {"input": 3, "output": 2}}},
             ),
             ("agent_end", {}),
+            ("agent_settled", {}),
         ):
             self.sequence += 1
             event = PiRpcEvent(self.sequence, kind, payload)
