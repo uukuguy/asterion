@@ -121,6 +121,41 @@ class P1PublicResult:
     receipt_sha256: str | None = None
 
 
+_PUBLIC_PROGRESS_STAGES = frozenset(
+    {
+        "authority.sync",
+        "backend.close",
+        "backend.open",
+        "compact.admit",
+        "compact.persist",
+        "host1.close",
+        "host1.open",
+        "host2.close",
+        "host2.recover",
+        "journal.reopen",
+        "oracle.pass",
+        "resume.admit",
+        "resume.persist",
+        "runner.start",
+        "runner.terminal",
+        "stage1.complete",
+        "stage2.complete",
+        "stage2.release",
+        "worker.close",
+    }
+)
+
+
+def _public_progress(stage: str) -> None:
+    if stage not in _PUBLIC_PROGRESS_STAGES:
+        raise P1OperatorError()
+    print(
+        json.dumps({"stage": stage}, separators=(",", ":"), sort_keys=True),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 class _NoActions:
     async def execute(self, *args: object, **kwargs: object):
         raise P1OperatorError()
@@ -1286,7 +1321,10 @@ def main(argv: list[str] | None = None) -> int:
         preflight = _preflight(os.environ)
 
         async def invoke() -> P1PublicResult:
-            return await run_fixed_small_verification(await _build_resources(preflight))
+            resources = await _build_resources(preflight)
+            if isinstance(resources, P1OperatorResources):
+                resources.observe = _public_progress
+            return await run_fixed_small_verification(resources)
 
         result = _run_operator(invoke)
     except BaseException:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict, replace
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -759,6 +760,22 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(
                     printed.call_args.args, ('{"status":"preflight-rejected"}',)
                 )
+
+    def test_public_progress_exposes_only_closed_stage_labels(self):
+        from asterion.applications.prime.p1 import operator
+
+        self.assertTrue(
+            callable(getattr(operator, "_public_progress", None)),
+            "public-safe P1 progress reporter is missing",
+        )
+        output = io.StringIO()
+        with patch.object(operator.sys, "stderr", output):
+            operator._public_progress("runner.start")
+            with self.assertRaises(operator.P1OperatorError):
+                operator._public_progress("SENTINEL_PRIVATE_STAGE")
+
+        self.assertEqual(output.getvalue(), '{"stage":"runner.start"}\n')
+        self.assertNotIn("SENTINEL_PRIVATE", output.getvalue())
 
     def test_launcher_exits_with_a_stubborn_coroutine_in_an_isolated_process(self):
         root = Path(__file__).resolve().parents[1]
