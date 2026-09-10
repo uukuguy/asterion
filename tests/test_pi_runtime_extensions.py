@@ -40,6 +40,128 @@ for (const event of [
 
 
 class PiExtensionBindingTests(unittest.TestCase):
+    def test_dependency_executable_identity_is_bound_before_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            binding = self._executable_binding(root)
+            executable = binding.dependencies.node_executable
+            executable.write_text("#!/bin/sh\nexit 0\n")
+            changed = self._executable_binding(root, copy_executable=False)
+            self.assertNotEqual(
+                binding.binding_fingerprint, changed.binding_fingerprint
+            )
+            with patch("asterion.runtimes.pi_extensions.subprocess.run") as launch:
+                with self.assertRaisesRegex(
+                    ValueError, "Pi extension binding is unavailable"
+                ):
+                    binding.preflight()
+            launch.assert_not_called()
+
+    def test_dependency_verifier_executes_owned_snapshot_and_cleans_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            binding = self._executable_binding(root)
+            executable = binding.dependencies.node_executable
+            calls = []
+            original_run = subprocess.run
+
+            def replace_original(command, **kwargs):
+                executable.write_text("#!/bin/sh\nexit 41\n")
+                calls.append(Path(command[0]))
+                self.assertNotEqual(Path(command[0]), executable)
+                self.assertEqual(Path(command[0]).stat().st_mode & 0o777, 0o500)
+                self.assertEqual(Path(command[0]).parent.stat().st_mode & 0o777, 0o500)
+                return original_run(command, **kwargs)
+
+            with patch(
+                "asterion.runtimes.pi_extensions.subprocess.run",
+                side_effect=replace_original,
+            ):
+                lease = binding.preflight()
+                self.addCleanup(lease.close)
+                lease.validate_launch()
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[0], calls[1])
+            lease.close()
+            self.assertFalse(calls[0].exists())
+            self.assertFalse(calls[0].parent.exists())
+
+    def test_failed_dependency_verification_removes_executable_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            binding = self._executable_binding(
+                root,
+                provider_source=(
+                    'export function verifyDependencies() {throw Error("private-sentinel");} '
+                    "export function createDependencies() {}\n"
+                ),
+            )
+            calls = []
+            original_run = subprocess.run
+
+            def observe(command, **kwargs):
+                calls.append(Path(command[0]))
+                return original_run(command, **kwargs)
+
+            with patch(
+                "asterion.runtimes.pi_extensions.subprocess.run", side_effect=observe
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "^Pi extension binding is unavailable$"
+                ):
+                    binding.preflight()
+            self.assertEqual(len(calls), 1)
+            self.assertFalse(calls[0].parent.exists())
+
+    def test_executable_cleanup_drift_does_not_leak_remaining_lease_descriptors(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            binding = self._executable_binding(Path(temporary).resolve())
+            lease = binding.preflight()
+            self.addCleanup(lease.close)
+            snapshot = lease._dependency_executable
+            descriptors = (*lease.inherited_fds, lease._loader_fd, snapshot._descriptor)
+            snapshot.path.parent.chmod(0o700)
+            snapshot.path.unlink()
+            snapshot.path.parent.rmdir()
+            lease.close()
+            for descriptor in descriptors:
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
+
+    @staticmethod
+    def _executable_binding(root, *, copy_executable=True, provider_source=None):
+        executable = root / "node"
+        if copy_executable:
+            shutil.copyfile(Path(shutil.which("node")).resolve(), executable)
+            executable.chmod(0o700)
+        source = root / "extension.mjs"
+        source.write_text("export default () => {};\n")
+        provider = root / "provider.mjs"
+        provider.write_text(
+            provider_source
+            or "export function verifyDependencies() {} export function createDependencies() {}\n"
+        )
+        lock = root / "lock.json"
+        lock.write_text("{}")
+        dependency = pi_extensions.PiExtensionDependencies(
+            provider_path=provider,
+            source_root=root,
+            closure_lock_path=lock,
+            artifact_lock_path=lock,
+            node_executable=executable,
+            exports={"value": "string"},
+        )
+        return PiExtensionBinding(
+            extension_id="example.test",
+            path=source,
+            capabilities=("example.test",),
+            inherited_fds=(),
+            environment={},
+            dependencies=dependency,
+        )
+
     def test_locked_provider_lease_loads_real_dependencies_in_child(self) -> None:
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:

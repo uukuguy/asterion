@@ -105,6 +105,62 @@ test("locked application provider uses the verified modules and releases its gua
   });
 });
 
+test("module guard rejects different or absent bytes returned by the next loader", () => {
+  const script = `
+    import assert from "node:assert/strict";
+    import {createHash} from "node:crypto";
+    import {mkdtempSync, realpathSync, writeFileSync, rmSync} from "node:fs";
+    import {tmpdir} from "node:os";
+    import {join} from "node:path";
+    import {pathToFileURL} from "node:url";
+    import {registerHooks} from "node:module";
+    import {guardCompactionImports} from "./tools/build_asterion_prime_compaction_lock.mjs";
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "asterion-load-race-")));
+    try {
+      for (const [index, source] of ["globalThis.__unverified = true; export default 2;", null].entries()) {
+        const name = "entry"+index+".mjs", original = "export default 1;";
+        const url = pathToFileURL(join(root,name)).href;
+        writeFileSync(join(root,name), original);
+        const attack = registerHooks({load(target,context,nextLoad) {
+          const loaded = nextLoad(target,context);
+          return target === url ? {...loaded,source} : loaded;
+        }});
+        const guard = guardCompactionImports({root,lock:{files:{[name]:createHash("sha256").update(original).digest("hex")}}});
+        try {
+          await assert.rejects(import(url), {message:"Pi compaction closure is incompatible"});
+          assert.equal(globalThis.__unverified, undefined);
+        } finally {guard.deregister();attack.deregister();}
+      }
+      // A later hook may mutate a lower hook's retained buffer after the guard
+      // returns. The compiled source must be the guard's independent copy.
+      for (const kind of ["buffer", "typed-array", "array-buffer"]) {
+        const name = kind+".mjs", original = "export default 1;";
+        const url = pathToFileURL(join(root,name)).href;
+        writeFileSync(join(root,name), original);
+        const bytes = new Uint8Array(Buffer.from(original));
+        const shared = kind === "buffer" ? Buffer.from(bytes.buffer)
+          : kind === "typed-array" ? bytes : bytes.buffer;
+        const lower = registerHooks({load(target,context,nextLoad) {
+          const loaded=nextLoad(target,context);
+          return target===url ? {...loaded,source:shared} : loaded;
+        }});
+        const guard = guardCompactionImports({root,lock:{files:{[name]:createHash("sha256").update(original).digest("hex")}}});
+        const upper = registerHooks({load(target,context,nextLoad) {
+          const loaded=nextLoad(target,context);
+          if(target===url)bytes.set(Buffer.from("export default 2;"));
+          return loaded;
+        }});
+        try {assert.equal((await import(url)).default,1);}
+        finally {upper.deregister();guard.deregister();lower.deregister();}
+      }
+    } finally {rmSync(root,{recursive:true,force:true});}
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: new URL("..", import.meta.url), timeout: 30_000, stdio: "pipe",
+    env: {PATH: process.env.PATH, LANG: "C.UTF-8"},
+  });
+});
+
 test("loader rejects dependency shape and digest drift with owned cleanup", async () => {
   for (const shape of ['{}', '{value: 1}', '{value: "ok", extra: "secret"}']) {
     const fixture = dependencyFixture(

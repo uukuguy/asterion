@@ -159,12 +159,22 @@ export function guardCompactionImports(verified) {
   return registerHooks({
     load(url, context, nextLoad) {
       if (url.startsWith("node:")) return nextLoad(url, context);
-      if (!url.startsWith("file:")) fail();
-      const path = realpathSync(fileURLToPath(url));
-      const name = relative(verified.root, path).split(sep).join("/");
-      if (!beneath(verified.root, path) || !Object.hasOwn(verified.lock.files, name)
-          || sha256(readFileSync(path)) !== verified.lock.files[name]) fail();
-      return nextLoad(url, context);
+      try {
+        if (!url.startsWith("file:")) fail();
+        const path = realpathSync(fileURLToPath(url));
+        const name = relative(verified.root, path).split(sep).join("/");
+        if (!beneath(verified.root, path) || !Object.hasOwn(verified.lock.files, name)) fail();
+        const loaded = nextLoad(url, context);
+        // Validate the bytes Node will compile, not a separate pathname read that
+        // the next hook/default loader can reopen after our check. Own the copy so
+        // a lower hook cannot subsequently mutate an aliased source buffer.
+        const returned = loaded.source;
+        const source = typeof returned === "string" ? Buffer.from(returned, "utf8")
+          : ArrayBuffer.isView(returned) ? Buffer.from(new Uint8Array(returned.buffer, returned.byteOffset, returned.byteLength))
+          : returned instanceof ArrayBuffer ? Buffer.from(new Uint8Array(returned)) : null;
+        if (source === null || sha256(source) !== verified.lock.files[name]) fail();
+        return { ...loaded, source };
+      } catch { fail(); }
     },
   });
 }
@@ -181,9 +191,9 @@ export async function createDependencies(context) {
   try {
     const load = (name) => import(pathToFileURL(join(verified.root, name)).href);
     const compactionPath = "packages/coding-agent/dist/core/compaction/compaction.js";
-    const source = readFileSync(exactFile(verified.root, compactionPath), "utf8");
+    const source = readFileSync(exactFile(verified.root, compactionPath));
     if (sha256(source) !== verified.lock.files[compactionPath]) fail();
-    const matches = [...source.matchAll(/const TURN_PREFIX_SUMMARIZATION_PROMPT = `([^`]+)`;/gu)];
+    const matches = [...source.toString("utf8").matchAll(/const TURN_PREFIX_SUMMARIZATION_PROMPT = `([^`]+)`;/gu)];
     if (matches.length !== 1 || matches[0][1].includes("${") || matches[0][1].includes("\\")) fail();
     const compaction = await load(compactionPath);
     const session = await load("packages/coding-agent/dist/core/session-manager.js");

@@ -26,6 +26,7 @@ _DEPENDENCIES_ENV = "ASTERION_PI_EXTENSION_DEPENDENCIES"
 _RESERVED_ENVIRONMENT_PREFIX = "ASTERION_PI_EXTENSION_"
 _LOADER_FILENAME = "asterion_pi_extension_loader.mjs"
 _MAX_SOURCE_BYTES = 4 * 1024 * 1024
+_MAX_EXECUTABLE_BYTES = 256 * 1024 * 1024
 _BINDING_FINGERPRINT_DOMAIN = b"asterion.pi-extension-binding/v1\0"
 
 
@@ -42,6 +43,8 @@ class PiExtensionDependencies:
     _fingerprint: str = field(init=False, repr=False)
     _digests: tuple[str, ...] = field(init=False, repr=False)
     _root_identity: tuple[int, int, int, int] = field(init=False, repr=False)
+    _node_identity: tuple[int, ...] = field(init=False, repr=False)
+    _node_digest: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         try:
@@ -77,6 +80,8 @@ class PiExtensionDependencies:
             digests = tuple(
                 hashlib.sha256(_read_exact_source(path)).hexdigest() for path in paths
             )
+            executable, node_identity = _read_executable(self.node_executable)
+            node_digest = hashlib.sha256(executable).hexdigest()
             root_identity = _stat_identity(
                 os.stat(self.source_root, follow_symlinks=False)
             )
@@ -90,6 +95,8 @@ class PiExtensionDependencies:
                     "digests": digests,
                     "root_identity": root_identity,
                     "exports": exports,
+                    "node_identity": node_identity,
+                    "node_digest": node_digest,
                 },
                 sort_keys=True,
                 separators=(",", ":"),
@@ -97,6 +104,8 @@ class PiExtensionDependencies:
             object.__setattr__(self, "exports", RedactedImmutableMapping(exports))
             object.__setattr__(self, "_digests", digests)
             object.__setattr__(self, "_root_identity", root_identity)
+            object.__setattr__(self, "_node_identity", node_identity)
+            object.__setattr__(self, "_node_digest", node_digest)
             object.__setattr__(
                 self, "_fingerprint", hashlib.sha256(canonical).hexdigest()
             )
@@ -246,6 +255,7 @@ class PiExtensionLease:
         "_loader_digest",
         "_loader_fd",
         "_dependencies",
+        "_dependency_executable",
     )
 
     def __init__(
@@ -260,6 +270,7 @@ class PiExtensionLease:
         loader_digest: str,
         loader_fd: int,
         dependencies: PiExtensionDependencies | None = None,
+        dependency_executable: _ExecutableSnapshot | None = None,
     ) -> None:
         self.environment = RedactedImmutableMapping(environment)
         self.inherited_fds = inherited_fds
@@ -270,6 +281,7 @@ class PiExtensionLease:
         self._loader_digest = loader_digest
         self._loader_fd = loader_fd
         self._dependencies = dependencies
+        self._dependency_executable = dependency_executable
         self._closed = False
         self._initialized = True
 
@@ -284,6 +296,7 @@ class PiExtensionLease:
     @classmethod
     def open(cls, binding: PiExtensionBinding, loader_path: Path) -> PiExtensionLease:
         owned: list[int] = []
+        dependency_executable: _ExecutableSnapshot | None = None
         try:
             source = _read_exact_source(binding.path)
             _validate_source(binding.path.name, source)
@@ -365,8 +378,9 @@ class PiExtensionLease:
                 sorted((source_fd, *replacements.values(), *dependency_fds))
             )
             if binding.dependencies is not None:
+                dependency_executable = _ExecutableSnapshot.open(binding.dependencies)
                 _verify_dependencies(
-                    binding.dependencies,
+                    dependency_executable,
                     environment[_DEPENDENCIES_ENV],
                     process_fds,
                     loader_fd,
@@ -381,6 +395,14 @@ class PiExtensionLease:
                         *binding.environment.values(),
                         *environment.keys(),
                         *environment.values(),
+                        *(
+                            ()
+                            if dependency_executable is None
+                            else (
+                                str(dependency_executable.path),
+                                str(dependency_executable.path.parent),
+                            )
+                        ),
                         *(
                             ()
                             if binding.dependencies is None
@@ -417,8 +439,11 @@ class PiExtensionLease:
                 loader_digest=loader_digest,
                 loader_fd=loader_fd,
                 dependencies=binding.dependencies,
+                dependency_executable=dependency_executable,
             )
         except (OSError, TypeError, ValueError, UnicodeError):
+            if dependency_executable is not None:
+                dependency_executable.close()
             for descriptor in reversed(owned):
                 try:
                     os.close(descriptor)
@@ -460,8 +485,10 @@ class PiExtensionLease:
             source_fd = int(self.environment[_SOURCE_FD])
             os.lseek(source_fd, 0, os.SEEK_SET)
             if self._dependencies is not None:
+                if self._dependency_executable is None:
+                    raise ValueError
                 _verify_dependencies(
-                    self._dependencies,
+                    self._dependency_executable,
                     self.environment[_DEPENDENCIES_ENV],
                     self.inherited_fds,
                     self._loader_fd,
@@ -473,15 +500,19 @@ class PiExtensionLease:
         if self._closed:
             return
         object.__setattr__(self, "_closed", True)
-        for descriptor in (*self.inherited_fds, self._loader_fd):
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+        try:
+            if self._dependency_executable is not None:
+                self._dependency_executable.close()
+        finally:
+            for descriptor in (*self.inherited_fds, self._loader_fd):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
 
 
 def _verify_dependencies(
-    dependency: PiExtensionDependencies,
+    executable: _ExecutableSnapshot,
     metadata: str,
     descriptors: tuple[int, ...],
     loader_fd: int,
@@ -496,10 +527,11 @@ def _verify_dependencies(
         "catch {process.exitCode=1;}"
     )
     try:
+        executable.validate()
         os.lseek(loader_fd, 0, os.SEEK_SET)
         result = subprocess.run(
             [
-                str(dependency.node_executable),
+                str(executable.path),
                 "--input-type=module",
                 "-e",
                 script,
@@ -519,6 +551,137 @@ def _verify_dependencies(
         raise ValueError("Pi extension dependencies are unavailable") from None
     finally:
         os.lseek(loader_fd, 0, os.SEEK_SET)
+
+
+def _read_executable(path: Path) -> tuple[bytes, tuple[int, ...]]:
+    descriptor = _open_regular(path)
+    try:
+        if path.resolve(strict=True) != path:
+            raise ValueError
+        before = os.fstat(descriptor)
+        contents = _read_fd(descriptor, _MAX_EXECUTABLE_BYTES)
+        after = os.fstat(descriptor)
+
+        def identity(value):
+            return (
+                *_stat_identity(value),
+                value.st_size,
+                value.st_mtime_ns,
+                value.st_ctime_ns,
+            )
+
+        if (
+            not contents
+            or identity(before) != identity(after)
+            or identity(after) != identity(os.stat(path, follow_symlinks=False))
+        ):
+            raise ValueError
+        return contents, identity(after)
+    finally:
+        os.close(descriptor)
+
+
+class _ExecutableSnapshot:
+    """Lease-owned exact executable bytes; never invoke the operator's mutable path.
+
+    Darwin rejects executing /dev/fd/N. A private read/execute-only snapshot is
+    used on supported hosts, with no write descriptors retained after sealing.
+    Like other host resources, this is not a sandbox against its owning OS user.
+    """
+
+    def __init__(self, path: Path, descriptor: int, digest: str) -> None:
+        self.path = path
+        self._descriptor = descriptor
+        self._digest = digest
+        self._identity = _fd_identity(descriptor)
+        self._directory_identity = _stat_identity(
+            os.stat(path.parent, follow_symlinks=False)
+        )
+        self._closed = False
+
+    @classmethod
+    def open(cls, dependency: PiExtensionDependencies) -> _ExecutableSnapshot:
+        contents, identity = _read_executable(dependency.node_executable)
+        if (
+            identity != dependency._node_identity
+            or hashlib.sha256(contents).hexdigest() != dependency._node_digest
+        ):
+            raise ValueError
+        directory = Path(tempfile.mkdtemp(prefix="asterion-pi-executable-")).resolve()
+        directory_identity = _stat_identity(os.stat(directory, follow_symlinks=False))
+        path = directory / "node"
+        descriptor = None
+        try:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+            with os.fdopen(os.open(path, flags, 0o700), "wb") as target:
+                target.write(contents)
+                target.flush()
+                os.fsync(target.fileno())
+            path.chmod(0o500)
+            directory.chmod(0o500)
+            descriptor = _open_regular(path)
+            snapshot = cls(path, descriptor, dependency._node_digest)
+            snapshot.validate()
+            return snapshot
+        except (OSError, ValueError):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            _remove_executable_snapshot(path, directory_identity)
+            raise
+
+    def validate(self) -> None:
+        if self._closed or self.path.resolve(strict=True) != self.path:
+            raise ValueError
+        if (
+            _stat_identity(os.stat(self.path, follow_symlinks=False)) != self._identity
+            or _fd_identity(self._descriptor) != self._identity
+            or _stat_identity(os.stat(self.path.parent, follow_symlinks=False))
+            != self._directory_identity
+            or hashlib.sha256(
+                _read_fd(self._descriptor, _MAX_EXECUTABLE_BYTES)
+            ).hexdigest()
+            != self._digest
+        ):
+            raise ValueError
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            os.close(self._descriptor)
+        except OSError:
+            pass
+        _remove_executable_snapshot(self.path, self._directory_identity)
+
+
+def _remove_executable_snapshot(
+    path: Path, directory_identity: tuple[int, ...]
+) -> None:
+    """Best-effort exact-target cleanup; failure must not hide a redacted error."""
+    descriptor = None
+    try:
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        if _fd_identity(descriptor)[:2] != directory_identity[:2]:
+            return
+        os.fchmod(descriptor, 0o700)
+        try:
+            os.unlink(path.name, dir_fd=descriptor)
+        except FileNotFoundError:
+            pass
+        if (
+            _stat_identity(os.stat(path.parent, follow_symlinks=False))[:2]
+            == directory_identity[:2]
+        ):
+            path.parent.rmdir()
+    except OSError:
+        pass
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def _open_regular(path: Path) -> int:
