@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-10 19:18 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-10 21:12 CST. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -9,7 +9,7 @@
 - 解题过程已形成固定制品体系：规范化事实、版本化分析、版本化渲染、可回放网页和单文件 HTML 导出。
 - 双语 README 已调整为 Asterion 框架主体、ARC-AGI-3 应用案例；GitHub About 与 Topics 已同步。
 - `602013fe` 已固化原生 P7 的精确证据边界：单题 Level 1 成功不代表完整 parity、多题 benchmark 或 production promotion。
-- 原生 P1 计划 Task 0–7 已完成：exact P1 package/assembly/public index 与唯一 `asterion.prime` dispatch 已独立复审。
+- 原生 P1 计划 Task 0–8 已完成：provider-free operator closed loop、bounded forced cleanup 与 cleanup-before-terminal 已独立复审。
 
 ## Where things stand
 
@@ -51,6 +51,7 @@
 - `bb38db23`、`bf61ff3f`：接入 native control/context，验证双 Host 恢复并清洗取消异常链。
 - `99638af6`、`7d6e8521`：实现 P1 worker/oracle/receipt，封存文件连续性、写入限额及 Python 3.10–3.14 可移植性。
 - `1f3993dd`：发布 native P1 capability/assembly/runtime，迁移公开 index 并保持 P7 单 binding 行为。
+- `a611bf42`：实现参数无关 Native P1 operator/coordinator、固定 Make preset 与有界 owner 清理。
 
 主要入口：
 
@@ -92,11 +93,12 @@ GitHub 当前公开信息：
 - Task 5：Gate G4 46 个、legacy 78 个测试通过；独立复审 96 个测试通过且无 findings。
 - Task 6：45 个 worker/oracle/portability 测试在 Python 3.10、3.11、3.12、3.14 的独立环境通过；Sol 安全复审无 findings。
 - Task 7：46 个实现回归及两次 fresh wheel/install 通过；Astra 复审仅留 Task 9 前需处理的 stale builtin-test Minor。promotion 仍因既有 external Prime source binding 受限，非 PASS。
+- Task 8：31 个 G6、137 个联合回归和真实 Pi 强制回收路径通过；Astra 提交级复审无 findings。
 
 ## Next steps
 
-1. 从 Task 8 开始实现参数无关 operator coordinator、固定 Make preset 与 provider-free closed loop。
-2. 完成 Task 9 的全量、安装、promotion、安全与一次授权 bounded-live 验收；先修 stale builtin capability 测试策略。
+1. 执行 Task 9 的 provider-free、installed、安全审查和 pre-live 门禁；先修 stale builtin capability 测试策略。
+2. 仅在 pre-live 门禁干净后运行一次授权的 bounded-live preset，再跑全仓与 promotion gates 并更新最终证据。
 3. 在原生 P1 闭环后，再按 P2、P4、P3、P5、P6 的依赖顺序迁移；不得将历史 Prime Agent 运行冒充为原生闭环。
 4. 在明确要求前不要 push，也不要启动计划外模型运行。
 

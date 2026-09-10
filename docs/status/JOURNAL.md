@@ -2238,3 +2238,5 @@
 - 18:31 封存 P1 文件效果并限制写入，恢复跨版本生命周期与 Python 3.10 导入 [7d6e8521]
 - 18:46 更新 P1 worker 恢复检查点，确保发布从跨版本已验证边界继续 [cb717b07]
 - 17:28 发布 Native P1 精确包、assembly 与单 runtime dispatch，保留 P7 行为 [1f3993dd]
+- 19:20 更新 Native P1 发布检查点，确保协调闭环从已批准装配继续 [beb25090]
+- 21:04 闭合 Native P1 provider-free operator，并以有界 owner 清理保证终态门控 [a611bf42]
