@@ -2226,3 +2226,7 @@
 - 13:12 固定验证器可执行快照与已加载源码字节，关闭依赖 TOCTOU 缺口 [b23ea401]
 - 13:20 更新原生 P1 Task 0–2 恢复检查点，确保后续可直接进入 Task 3 [efaa98ae]
 - 13:45 封锁 session-context 未知结果并同步共享预算，防止恢复重派 [a61b9abb]
+- 14:10 更新 Task 3 恢复检查点，确保共享 backend 从已验证边界继续 [02924747]
+- 15:26 增加持久 Prime backend 与共享执行内核，支持干净控制 attachment 重建 [de261473]
+- 16:18 加固 backend 恢复、typed compact 终结与预算生命周期校验，防止误恢复和漏限 [8f8c6709]
+- 17:02 绑定 compact 全程 deadline 与 witness/native 结果，防止越界确认和交叉接受 [f0169ca4]
