@@ -19,7 +19,7 @@ import re
 import socket
 import struct
 import time
-from typing import Literal, NoReturn
+from typing import Literal, NoReturn, cast
 
 from .compaction_budget import ModelPrice, quote_compaction_reservation
 
@@ -183,7 +183,7 @@ def _validate_argument(value: object, depth: int = 0) -> None:
         _fail()
     if type(value) in {int, Decimal}:
         try:
-            if not math.isfinite(float(value)):
+            if not math.isfinite(float(cast(int | Decimal, value))):
                 _fail()
         except OverflowError:
             _fail()
@@ -518,6 +518,7 @@ class PrimeContextWitnessSession:
         self._proposal: dict | None = None
         self._uncertain = False
         self._active = False
+        self._deadline: float | None = None
 
     def __repr__(self) -> str:
         return "<PrimeContextWitnessSession redacted>"
@@ -564,6 +565,11 @@ class PrimeContextWitnessSession:
             return
         _fail()
 
+    def _wait_seconds(self) -> float:
+        if self._deadline is None:
+            return self._timeout
+        return min(self._timeout, max(0.0, self._deadline - time.monotonic()))
+
     async def _send(self, value: dict) -> None:
         raw = bytearray(_encode(value))
         try:
@@ -572,10 +578,18 @@ class PrimeContextWitnessSession:
             self._no_pending()
             wire = bytearray(struct.pack("!I", len(raw))) + raw
             try:
+
+                async def send_frame():
+                    if self._wait_seconds() <= 0:
+                        _fail()
+                    await asyncio.get_running_loop().sock_sendall(self._socket, wire)
+
                 await asyncio.wait_for(
-                    asyncio.get_running_loop().sock_sendall(self._socket, wire),
-                    self._timeout,
+                    send_frame(),
+                    self._wait_seconds(),
                 )
+                if self._wait_seconds() <= 0:
+                    _fail()
             finally:
                 wire[:] = b"\x00" * len(wire)
         finally:
@@ -616,7 +630,10 @@ class PrimeContextWitnessSession:
             finally:
                 raw[:] = b"\x00" * len(raw)
 
-        return await asyncio.wait_for(read_frame(), self._timeout)
+        value = await asyncio.wait_for(read_frame(), self._wait_seconds())
+        if self._wait_seconds() <= 0:
+            _fail()
+        return value
 
     def _enter(self, state: str) -> None:
         if self._active or self._state != state:
@@ -624,9 +641,21 @@ class PrimeContextWitnessSession:
             _fail()
         self._active = True
 
-    async def arm(self, *, command_nonce: str, authority_sha256: str) -> None:
+    async def arm(
+        self,
+        *,
+        command_nonce: str,
+        authority_sha256: str,
+        deadline: float | None = None,
+    ) -> None:
+        """Bind an optional absolute deadline through the final persisted ack."""
         self._enter("idle")
         try:
+            if deadline is not None and (
+                type(deadline) not in {int, float} or not math.isfinite(deadline)
+            ):
+                _fail()
+            self._deadline = deadline
             self._nonce, self._authority = _hex(command_nonce), _hex(authority_sha256)
             if self._nonce in self._seen:
                 _fail()
@@ -668,12 +697,17 @@ class PrimeContextWitnessSession:
                     for key in ("main_summary_request", "turn_prefix_summary_request")
                 )
                 quote = quote_compaction_reservation(
-                    branch_input_caps=caps, branch_output_caps=(3276, 3276), price=price
+                    branch_input_caps=cast(tuple[int, int], caps),
+                    branch_output_caps=(3276, 3276),
+                    price=price,
                 )
                 result = reserve(quote)
                 if inspect.isawaitable(result):
                     result = await asyncio.wait_for(
-                        result, min(self._timeout, deadline - time.monotonic())
+                        result,
+                        min(
+                            self._wait_seconds(), max(0.0, deadline - time.monotonic())
+                        ),
                     )
                 if result is False or deadline <= time.monotonic():
                     _fail()
@@ -712,17 +746,19 @@ class PrimeContextWitnessSession:
         try:
             persisted = await self._receive()
             evidence = validate_compaction_witness(
-                self._proposal,
+                cast(Mapping[str, object], self._proposal),
                 persisted,
                 expected_launch_nonce=self._launch,
                 expected_command_nonce=self._nonce,
             )
             if not callable(persist):
                 _fail()
+            if self._wait_seconds() <= 0:
+                _fail()
             result = persist(_encode(persisted))
             if inspect.isawaitable(result):
-                result = await asyncio.wait_for(result, self._timeout)
-            if result is False:
+                result = await asyncio.wait_for(result, self._wait_seconds())
+            if result is False or self._wait_seconds() <= 0:
                 _fail()
             await self._send(self._base("ack"))
             self._proposal = None

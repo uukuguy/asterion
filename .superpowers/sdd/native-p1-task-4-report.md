@@ -1,8 +1,9 @@
 # Native P1 Task 4: shared backend and durable store
 
 Initial implementation commit: `de261473` (`feat: add shared prime session backend`).
-Review repair commit: the commit containing the repair section below, subject
-`fix: enforce prime live recovery and compact terminals`.
+First review repair: `8f8c6709` (`fix: enforce prime live recovery and compact terminals`).
+Second review repair: the commit containing the second-review section below,
+subject `fix: bind compact witness outcomes and absolute deadlines`.
 
 ## Scope and implemented interfaces
 
@@ -166,9 +167,61 @@ git diff --check
 PASS
 ```
 
-The bounded independent implementation re-review found no blocking Important
-issues in the repaired backend/kernel/Pi contracts; the parent integration lane
-will perform its own final review before advancing Tasks 5–9.
+The first bounded independent re-review found no blocking Important issues;
+the subsequent parent review found the two additional Important gaps below.
+The earlier review is not evidence that those gaps were already closed.
+
+## Second-review repairs (2026-09-10)
+
+- Full compact deadline: the 20ms command/65ms delayed persisted-frame repro
+  returned succeeded before repair. The backend now computes one monotonic
+  absolute deadline before arming, bounded by the command reservation, authority
+  snapshot and session lifetime, and passes that exact deadline to the witness
+  and RPC cancellation signal. Every witness socket wait, asynchronous persist,
+  synchronous persist return and ack send observes it. RPC terminal wait also
+  checks it even if the task already completed. Timeout cancels/drains the active
+  RPC, never emits a late ack, and preserves an unresolved/fenced effect.
+- Cross-channel success binding: independently changing native summary,
+  first-kept entry or private tokensBefore each reproduced succeeded before
+  repair. The backend now compares native summary SHA-256, firstKeptEntryId and
+  tokensBefore against the authenticated, durably persisted frame; the existing
+  native validator also requires end.result == response.data. Mismatch produces
+  uncertain/fenced, leaving the pending checkpoint unresolved. tokensBefore is
+  private diagnostic matching material and never supplies public context counts.
+  FakeReusablePi now derives its valid terminal fields from the witness fixture.
+- Final recovery read: an OSError in the last `_recover_record` (after refresh
+  validation) escaped with a private sentinel path before repair. The entire
+  `recover_checkpoint()` entry now normalizes that error and permanently poisons
+  the store, including this final read; its exception context is cleared.
+
+The four backend repro tests all failed before production fixes and then passed.
+The store final-read repro likewise ran RED→GREEN. Three new witness tests first
+failed on the missing optional deadline API, then proved expired arm sends no
+bytes, synchronous persistence cannot produce late ack, and asynchronous
+persistence is cancelled at the same deadline. `arm(..., deadline=None)` retains
+legacy per-step timeout behavior for existing callers. Three typing-only casts
+clarify existing validated context invariants so this newly included file also
+passes Pyright; they do not change validation or runtime behavior.
+
+Fresh second-review verification (provider-free):
+
+```text
+uv run python -m unittest -q tests.test_asterion_prime_store tests.test_asterion_prime_backend tests.test_asterion_prime_backend_rpc tests.test_asterion_prime_context tests.test_asterion_prime_session tests.test_prime_p7_native_installed tests.test_asterion_prime_runtime tests.test_pi_rpc_reusable tests.test_control_state tests.test_pi_session tests.test_dci_pi_rpc_recovery tests.test_dci_pi_rpc_proxy
+PASS: 179 tests
+
+uv run ruff check src/asterion/agents/prime/{state,store,backend,context,execution,session}.py src/asterion/runtimes/{asterion_prime,pi_rpc}.py tests/test_asterion_prime_{store,backend,backend_rpc,context,runtime,session}.py tests/test_pi_rpc_reusable.py
+PASS
+uv run ruff format --check <same files>
+PASS: 15 files
+uv run pyright src/asterion/agents/prime/{state,store,backend,context,execution,session}.py src/asterion/runtimes/{asterion_prime,pi_rpc}.py
+PASS: 0 errors, 0 warnings
+git diff --check
+PASS
+```
+
+A bounded independent read-only review of this second repair found no Important
+issue in the absolute-deadline or native/witness-binding changes. This remains
+subject to the parent integration review; no native P1 acceptance claim is made.
 
 ## Unfinished boundary
 

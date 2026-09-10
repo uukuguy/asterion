@@ -500,6 +500,47 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
             await self.session.receive_persisted(persist=pending)
         self.assertTrue(self.session.uncertain)
 
+    async def assert_absolute_persist_deadline(self, *, asynchronous):
+        deadline = time.monotonic() + 0.02
+        await self.session.arm(
+            command_nonce=COMMAND, authority_sha256=AUTHORITY, deadline=deadline
+        )
+        await receive(self.peer)
+        await self.decision(deadline=deadline)
+        await send(self.peer, material()[1])
+
+        async def delayed_async(_value):
+            await asyncio.sleep(0.065)
+
+        def delayed_sync(_value):
+            time.sleep(0.065)
+
+        with self.assertRaisesRegex(
+            self.context.PrimeContextError, "^invalid Prime context witness$"
+        ):
+            await self.session.receive_persisted(
+                persist=delayed_async if asynchronous else delayed_sync
+            )
+        self.assertTrue(self.session.uncertain)
+        self.assertEqual(await asyncio.get_running_loop().sock_recv(self.peer, 1), b"")
+
+    async def test_absolute_deadline_prevents_late_ack_after_sync_persist(self):
+        await self.assert_absolute_persist_deadline(asynchronous=False)
+
+    async def test_absolute_deadline_cancels_async_persist_without_ack(self):
+        await self.assert_absolute_persist_deadline(asynchronous=True)
+
+    async def test_expired_arm_deadline_never_sends_arm(self):
+        with self.assertRaisesRegex(
+            self.context.PrimeContextError, "^invalid Prime context witness$"
+        ):
+            await self.session.arm(
+                command_nonce=COMMAND,
+                authority_sha256=AUTHORITY,
+                deadline=time.monotonic() - 1,
+            )
+        self.assertEqual(await asyncio.get_running_loop().sock_recv(self.peer, 1), b"")
+
     async def test_malformed_and_duplicate_frames_fence(self):
         await self.arm()
         raw = encode(material()[0])

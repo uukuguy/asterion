@@ -57,6 +57,9 @@ class FakeReusablePi:
         self.lifecycle = object()
         self.dead = False
         self.pending_abort = None
+        self.compact_persist_delay = 0
+        self.compact_cancelled = False
+        self.compact_native_overrides = {}
 
     def validate_lifecycle(self, *, opened):
         if self.dead or self.closes or bool(self.opens) != opened or self.pending_abort:
@@ -97,6 +100,7 @@ class FakeReusablePi:
         self.closes += 1
 
     async def compact(self, *, signal, on_event):
+        self.compact_signal = signal
         self.compacts += 1
         arm = await receive(self.peer)
         proposal, persisted = material()
@@ -106,6 +110,11 @@ class FakeReusablePi:
         await send(self.peer, proposal)
         decision = await receive(self.peer)
         if decision["status"] == "approve":
+            try:
+                await asyncio.sleep(self.compact_persist_delay)
+            except asyncio.CancelledError:
+                self.compact_cancelled = True
+                raise
             if self.corrupt_compact:
                 persisted["summary_sha256"] = "0" * 64
             await send(self.peer, persisted)
@@ -114,10 +123,11 @@ class FakeReusablePi:
             if self.compact_terminal_release is not None:
                 await self.compact_terminal_release.wait()
         body = {
-            "summary": "checkpoint",
-            "firstKeptEntryId": "entry-1",
-            "tokensBefore": 100,
+            "summary": persisted["summary"],
+            "firstKeptEntryId": persisted["first_kept_entry_id"],
+            "tokensBefore": persisted["compaction_entry"]["tokensBefore"],
             "details": {},
+            **self.compact_native_overrides,
         }
         approved = decision["status"] == "approve"
         end = {"reason": "manual", "aborted": not approved, "willRetry": False}
@@ -716,6 +726,50 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
             self.rpc.compact_terminal_release.set()
             await task
         self.assertIsNone(self.store.recover_checkpoint().checkpoint.outstanding_effect)
+
+    async def test_compact_deadline_covers_delayed_persisted_witness(self):
+        await self.backend.execute_prompt(self.request())
+        before = self.store.recover_checkpoint().checkpoint
+        self.rpc.compact_persist_delay = 0.065
+        command = self.compact_command()
+        command = replace(
+            command,
+            payload={
+                **command.payload,
+                "budget": {**command.payload["budget"], "deadline_ms": 20},
+            },
+        )
+        receipt = await self.backend.execute_context(command)
+        self.assertEqual(receipt.status, "uncertain")
+        self.assertTrue(self.rpc.compact_cancelled)
+        self.assertTrue(self.rpc.compact_signal.cancelled)
+        self.assertFalse(self.rpc.acked)
+        self.assertEqual(self.backend.snapshot().outstanding_effect, command.command_id)
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+        self.assertEqual(self.store.recover_checkpoint().checkpoint, before)
+
+    async def assert_native_witness_mismatch(self, key, value):
+        await self.backend.execute_prompt(self.request())
+        self.rpc.compact_native_overrides = {key: value}
+        receipt = await self.backend.execute_context(self.compact_command())
+        self.assertEqual(receipt.status, "uncertain")
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+        self.assertEqual(
+            self.store.recover_checkpoint().checkpoint.outstanding_effect, "compact-1"
+        )
+        self.assertNotIn(
+            "CROSSED-SUMMARY", repr((receipt, self.backend.replay_events()))
+        )
+        self.assertNotIn("crossed-entry", repr((receipt, self.backend.replay_events())))
+
+    async def test_compact_native_summary_must_match_witness(self):
+        await self.assert_native_witness_mismatch("summary", "CROSSED-SUMMARY")
+
+    async def test_compact_native_first_kept_entry_must_match_witness(self):
+        await self.assert_native_witness_mismatch("firstKeptEntryId", "crossed-entry")
+
+    async def test_compact_native_private_tokens_before_must_match_witness(self):
+        await self.assert_native_witness_mismatch("tokensBefore", 999)
 
     async def test_rejected_compact_preserves_checkpoint_and_uncertain_fences(self):
         await self.backend.execute_prompt(self.request())

@@ -505,6 +505,43 @@ class TestFilePrimeSessionStore(unittest.TestCase):
                 finally:
                     store.close()
 
+    def test_final_checkpoint_recovery_os_error_is_redacted_and_poisons(self) -> None:
+        transcript = b"private transcript"
+        usage: dict[str, object] = {}
+        store = FilePrimeSessionStore(self.root, self.identity)
+        self.addCleanup(store.close)
+        store.append("event-1", "public.event", {"cursor": 1}, expected_position=0)
+        store.write_checkpoint(
+            _checkpoint(self.identity, transcript, usage),
+            expected_position=1,
+            transcript=transcript,
+            summary=None,
+            usage=usage,
+        )
+        original = store._recover_record
+        calls = 0
+        secret = f"PRIVATE-FINAL-RECOVERY-{self.root}"
+
+        def fail_only_after_refresh(record):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError(secret)
+            return original(record)
+
+        with (
+            patch.object(store, "_recover_record", side_effect=fail_only_after_refresh),
+            self.assertRaises(PrimeStoreError) as caught,
+        ):
+            store.recover_checkpoint()
+
+        self.assertEqual(calls, 2)
+        self.assertEqual(str(caught.exception), "Prime session store is unavailable")
+        self.assertNotIn(secret, repr(caught.exception))
+        self.assertIsNone(caught.exception.__context__)
+        with self.assertRaises(PrimeStoreError):
+            _ = store.position
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -160,14 +160,22 @@ class PrimeCleanupReceipt:
 
 
 class _Signal:
-    def __init__(self, owner: PrimeSessionBackend, outer: CancellationSignal | None):
+    def __init__(
+        self,
+        owner: PrimeSessionBackend,
+        outer: CancellationSignal | None,
+        *,
+        deadline: float | None = None,
+    ):
         self.owner, self.outer = owner, outer
+        self.deadline = deadline
 
     @property
     def cancelled(self) -> bool:
         return (
             self.owner._cancelled
             or self.owner._remaining_seconds() <= 0
+            or (self.deadline is not None and time.monotonic() >= self.deadline)
             or (self.outer is not None and self.outer.cancelled)
         )
 
@@ -883,13 +891,19 @@ class PrimeSessionBackend:
                 digest,
                 self._receipt(command, "rejected", None, "instructions-unavailable"),
             )
+        deadline = min(
+            time.monotonic() + self._remaining_seconds(),
+            time.monotonic() + int(budget["deadline_ms"]) / 1000,
+        )
         self._begin(command.command_id, digest, "context")
         rpc_task: asyncio.Task[PiRpcCompactResult] | None = None
         native: list[PiRpcEvent] = []
+        witness_binding: tuple[str, str, int] | None = None
         try:
             nonce = _digest(command.to_mapping())
             await self._witness.arm(
                 command_nonce=nonce,
+                deadline=deadline,
                 authority_sha256=_digest(
                     {
                         "revision": self._authority_revision,
@@ -901,11 +915,10 @@ class PrimeSessionBackend:
                 ),
             )
             rpc_task = asyncio.create_task(
-                self._rpc.compact(signal=_Signal(self, None), on_event=native.append)
-            )
-            deadline = min(
-                time.monotonic() + self._remaining_seconds(),
-                time.monotonic() + int(budget["deadline_ms"]) / 1000,
+                self._rpc.compact(
+                    signal=_Signal(self, None, deadline=deadline),
+                    on_event=native.append,
+                )
             )
 
             def reserve(quote: CompactionReservationQuote) -> bool:
@@ -944,8 +957,10 @@ class PrimeSessionBackend:
             )
             if not approved:
                 native_result = await asyncio.wait_for(
-                    rpc_task, max(0.001, deadline - time.monotonic())
+                    rpc_task, max(0.0, deadline - time.monotonic())
                 )
+                if time.monotonic() >= deadline:
+                    raise ValueError
                 if native_result.events != tuple(native):
                     raise ValueError
                 if native_result.outcome != "aborted":
@@ -960,6 +975,7 @@ class PrimeSessionBackend:
                 return result
 
             def persist(frame: bytes) -> None:
+                nonlocal witness_binding
                 value = json.loads(frame)
                 self._append(
                     f"witness-{command.command_id}",
@@ -977,14 +993,33 @@ class PrimeSessionBackend:
                 self._seal_checkpoint(
                     command.command_id, outstanding=command.command_id
                 )
+                witness_binding = (
+                    value["summary_sha256"],
+                    value["first_kept_entry_id"],
+                    value["compaction_entry"]["tokensBefore"],
+                )
 
             evidence = await self._witness.receive_persisted(persist=persist)
             native_result = await asyncio.wait_for(
-                rpc_task, max(0.001, deadline - time.monotonic())
+                rpc_task, max(0.0, deadline - time.monotonic())
             )
+            if time.monotonic() >= deadline:
+                raise ValueError
             if native_result.events != tuple(native):
                 raise ValueError
             if native_result.outcome != "completed":
+                raise ValueError
+            body = native_result.events[-2].payload.get("result")
+            if not isinstance(body, Mapping) or type(body.get("summary")) is not str:
+                raise ValueError
+            summary = body["summary"]
+            assert isinstance(summary, str)
+            # tokensBefore is private matching material, never our public count.
+            if witness_binding != (
+                hashlib.sha256(summary.encode()).hexdigest(),
+                body.get("firstKeptEntryId"),
+                body.get("tokensBefore"),
+            ):
                 raise ValueError
             self._kernel.observe_context_events(native_result)
             receipt = self._receipt(

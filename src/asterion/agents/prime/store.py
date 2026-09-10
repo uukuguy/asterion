@@ -363,11 +363,25 @@ class FilePrimeSessionStore:
 
     def recover_checkpoint(self) -> PrimeRecoveredCheckpoint | None:
         with self._mutex:
-            self._refresh_for_read()
-            checkpoints = self._checkpoint_records()
-            if not checkpoints:
-                return None
-            return self._recover_record(checkpoints[-1])
+            try:
+                self._refresh_for_read()
+                checkpoints = self._checkpoint_records()
+                if not checkpoints:
+                    return None
+                return self._recover_record(checkpoints[-1])
+            except PrimeStoreError:
+                self._poisoned = True
+                raise
+            except (
+                OSError,
+                TypeError,
+                ValueError,
+                UnicodeError,
+                json.JSONDecodeError,
+                PrimeStateError,
+            ):
+                self._poisoned = True
+                _fail()
 
     def close(self) -> None:
         with self._mutex:
