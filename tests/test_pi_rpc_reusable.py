@@ -4,13 +4,21 @@ import asyncio
 import json
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
-from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcResult, PiRpcSession
+from asterion.runtimes.pi_rpc import (
+    CancellationSignal,
+    PiRpcConfig,
+    PiRpcResult,
+    PiRpcSession,
+)
 
 
 _FAKE_REUSABLE_PI = r"""
@@ -22,6 +30,8 @@ import time
 def emit(value):
     sys.stdout.write(json.dumps(value, separators=(",", ":")) + "\n")
     sys.stdout.flush()
+
+late_stderr = False
 
 for line in sys.stdin:
     request = json.loads(line)
@@ -41,6 +51,7 @@ for line in sys.stdin:
             "assistantMessageEvent": {"type": "text_delta", "delta": message},
         })
         emit({"type": "agent_settled"})
+        late_stderr = message == "late-stderr"
     elif request_type == "compact":
         emit({"type": "compaction_start"})
         emit({"type": "compaction_end"})
@@ -54,6 +65,10 @@ for line in sys.stdin:
         break
     else:
         raise AssertionError(request_type)
+
+if late_stderr:
+    sys.stderr.write("late stderr\n")
+    sys.stderr.flush()
 """
 
 
@@ -252,6 +267,99 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "poisoned"):
             await rpc.compact(signal=NeverCancelled(), on_event=lambda _event: None)
 
+    async def test_second_task_cancellation_keeps_driver_owned_until_quiescent(
+        self,
+    ) -> None:
+        rpc = self.make_session()
+        driver_started = threading.Event()
+        cleanup_started = threading.Event()
+        release_driver = threading.Event()
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+
+        def slow_driver(*_args: object, **kwargs: object) -> None:
+            on_request_written = kwargs["on_request_written"]
+            signal = cast(CancellationSignal, kwargs["signal"])
+            assert callable(on_request_written)
+            on_request_written()
+            driver_started.set()
+            while not signal.cancelled:
+                time.sleep(0.01)
+            cleanup_started.set()
+            release_driver.wait()
+
+        with patch.object(rpc, "drive_prompt", side_effect=slow_driver):
+            task = asyncio.create_task(
+                rpc.prompt(
+                    "blocking", signal=NeverCancelled(), on_event=lambda _event: None
+                )
+            )
+            await asyncio.wait_for(asyncio.to_thread(driver_started.wait), timeout=1.0)
+            task.cancel()
+            await asyncio.wait_for(asyncio.to_thread(cleanup_started.wait), timeout=1.0)
+            task.cancel()
+            try:
+                await asyncio.sleep(0)
+
+                self.assertFalse(task.done())
+                with patch.object(
+                    rpc,
+                    "read_json_line",
+                    side_effect=AssertionError("competing reader"),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "active command"):
+                        await rpc.compact(
+                            signal=NeverCancelled(), on_event=lambda _event: None
+                        )
+            finally:
+                release_driver.set()
+                if not task.done():
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+
+            with self.assertRaisesRegex(RuntimeError, "poisoned"):
+                await rpc.compact(signal=NeverCancelled(), on_event=lambda _event: None)
+
+    async def test_prompt_send_that_transmits_then_raises_poisons_session(self) -> None:
+        rpc = self.make_session()
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+        original_send = rpc.send
+
+        def transmit_then_raise(payload: object) -> None:
+            original_send(payload)  # type: ignore[arg-type]
+            raise OSError("flush failed after dispatch")
+
+        with patch.object(rpc, "send", side_effect=transmit_then_raise):
+            with self.assertRaisesRegex(OSError, "flush failed after dispatch"):
+                await rpc.prompt(
+                    "first", signal=NeverCancelled(), on_event=lambda _event: None
+                )
+
+        with self.assertRaisesRegex(RuntimeError, "poisoned"):
+            await rpc.prompt(
+                "never-sent", signal=NeverCancelled(), on_event=lambda _event: None
+            )
+
+    async def test_compact_send_that_transmits_then_raises_poisons_session(
+        self,
+    ) -> None:
+        rpc = self.make_session()
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+        original_send = rpc.send
+
+        def transmit_then_raise(payload: object) -> None:
+            original_send(payload)  # type: ignore[arg-type]
+            raise OSError("flush failed after dispatch")
+
+        with patch.object(rpc, "send", side_effect=transmit_then_raise):
+            with self.assertRaisesRegex(OSError, "flush failed after dispatch"):
+                await rpc.compact(signal=NeverCancelled(), on_event=lambda _event: None)
+
+        with self.assertRaisesRegex(RuntimeError, "poisoned"):
+            await rpc.compact(signal=NeverCancelled(), on_event=lambda _event: None)
+
     async def test_close_is_idempotent_and_stops_once(self) -> None:
         rpc = self.make_session()
         await rpc.open(signal=NeverCancelled())
@@ -272,6 +380,50 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.request_id)
         self.assertEqual([event.sequence for event in result.events], [1, 2, 3, 4])
         self.assertIsNone(rpc.process)
+
+    async def test_legacy_run_rejects_close_between_open_and_prompt(self) -> None:
+        rpc = self.make_session()
+        prompt_entered = asyncio.Event()
+        release_prompt = asyncio.Event()
+        original_prompt = rpc.prompt
+
+        async def delayed_prompt(*args: object, **kwargs: object) -> PiRpcResult:
+            prompt_entered.set()
+            await release_prompt.wait()
+            return await original_prompt(*args, **kwargs)  # type: ignore[arg-type]
+
+        with patch.object(rpc, "prompt", side_effect=delayed_prompt):
+            task = asyncio.create_task(
+                rpc.run("legacy", signal=NeverCancelled(), on_event=lambda _event: None)
+            )
+            await asyncio.wait_for(prompt_entered.wait(), timeout=1.0)
+
+            close_rejected = False
+            try:
+                with self.assertRaisesRegex(RuntimeError, "active command"):
+                    await rpc.close()
+                close_rejected = True
+            finally:
+                release_prompt.set()
+                if not close_rejected:
+                    try:
+                        await task
+                    except BaseException:
+                        pass
+
+            result = await task
+
+        self.assertEqual(result.final_text, "legacy")
+        self.assertIsNone(rpc.process)
+
+    async def test_legacy_run_returns_stderr_drained_during_close(self) -> None:
+        rpc = self.make_session()
+
+        result = await rpc.run(
+            "late-stderr", signal=NeverCancelled(), on_event=lambda _event: None
+        )
+
+        self.assertEqual(result.stderr, b"late stderr\n")
 
 
 if __name__ == "__main__":

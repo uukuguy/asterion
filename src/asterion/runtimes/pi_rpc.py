@@ -406,6 +406,7 @@ class PiRpcSession:
         self._last_failure: str | None = None
         self._request_id = 0
         self._run_active = False
+        self._run_owner: asyncio.Task[object] | None = None
         self._command_lock = asyncio.Lock()
         self._lifecycle_open = False
         self._lifecycle_poisoned = False
@@ -594,9 +595,9 @@ class PiRpcSession:
         )
         control.check_before_prompt()
         request_id = self.next_id() if request_id is None else request_id
-        self.send({"id": request_id, "type": "prompt", "message": message})
         if on_request_written is not None:
             on_request_written()
+        self.send({"id": request_id, "type": "prompt", "message": message})
         acknowledged = False
         while True:
             event = control.read_event()
@@ -747,6 +748,10 @@ class PiRpcSession:
             raise RuntimeError(f"RPC {operation} was cancelled before start")
         return self._remaining_session_seconds(operation)
 
+    def _check_run_ownership(self) -> None:
+        if self._run_active and self._run_owner is not asyncio.current_task():
+            raise RuntimeError("Pi RPC session already has an active command")
+
     def _emit_event(
         self,
         raw: dict[str, Any],
@@ -778,18 +783,25 @@ class PiRpcSession:
             return driver_task.result()
         except asyncio.CancelledError:
             local_cancel.set()
-            done, _pending = await asyncio.wait(
-                (driver_task,), timeout=_PROMPT_DRIVER_EXIT_SECONDS
+            self._lifecycle_poisoned = True
+            cleanup_deadline = (
+                asyncio.get_running_loop().time() + _PROMPT_DRIVER_EXIT_SECONDS
             )
-            if not done:
-                self._lifecycle_poisoned = True
-                raise RuntimeError("Pi RPC prompt driver cleanup timed out") from None
+            while not driver_task.done():
+                remaining = cleanup_deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise RuntimeError(
+                        "Pi RPC prompt driver cleanup timed out"
+                    ) from None
+                try:
+                    await asyncio.wait((driver_task,), timeout=remaining)
+                except asyncio.CancelledError:
+                    continue
             try:
                 driver_task.result()
             except BaseException:
                 pass
-            self._lifecycle_poisoned = request_written.is_set()
-            raise
+            raise asyncio.CancelledError
         except BaseException as error:
             if request_written.is_set():
                 self._lifecycle_poisoned = True
@@ -799,6 +811,7 @@ class PiRpcSession:
     async def open(self, *, signal: CancellationSignal) -> None:
         """Start one reusable child and capture its absolute deadline."""
 
+        self._check_run_ownership()
         if signal.cancelled:
             raise RuntimeError("Pi RPC session was cancelled before start")
         if self._command_lock.locked():
@@ -827,6 +840,7 @@ class PiRpcSession:
     ) -> PiRpcResult:
         """Run one prompt on the currently open child."""
 
+        self._check_run_ownership()
         if type(prompt) is not str:
             raise ValueError("Pi RPC prompt is invalid")
         if self._command_lock.locked():
@@ -936,6 +950,7 @@ class PiRpcSession:
     ) -> PiRpcCompactResult:
         """Request native compaction on the currently open child."""
 
+        self._check_run_ownership()
         if self._command_lock.locked():
             raise RuntimeError("Pi RPC session already has an active command")
         async with self._command_lock:
@@ -961,8 +976,8 @@ class PiRpcSession:
                     absolute_deadline=absolute_deadline,
                 )
                 control.check_before_prompt()
-                self.send({"id": request_id, "type": "compact"})
                 request_written.set()
+                self.send({"id": request_id, "type": "compact"})
                 while True:
                     raw = control.read_event()
                     delivered: concurrent.futures.Future[PiRpcEvent] = (
@@ -1004,6 +1019,7 @@ class PiRpcSession:
     async def close(self) -> None:
         """Stop the reusable child; repeated calls are harmless."""
 
+        self._check_run_ownership()
         async with self._command_lock:
             if not self._lifecycle_open and self.process is None:
                 return
@@ -1031,6 +1047,7 @@ class PiRpcSession:
         if self._run_active or self.process is not None:
             raise RuntimeError("Pi RPC session already has an active run")
         self._run_active = True
+        self._run_owner = asyncio.current_task()
         self._last_failure = None
         try:
             await self.open(signal=signal)
@@ -1043,7 +1060,7 @@ class PiRpcSession:
             await self.close()
             if state is not None and state.output_error is not None:
                 raise state.output_error
-            return PiRpcResult(result.final_text, result.events, result.stderr)
+            return PiRpcResult(result.final_text, result.events, self.stderr)
         except Exception as error:
             self._last_failure = str(error)
             raise
@@ -1051,6 +1068,7 @@ class PiRpcSession:
             try:
                 await self.close()
             finally:
+                self._run_owner = None
                 self._run_active = False
 
 
