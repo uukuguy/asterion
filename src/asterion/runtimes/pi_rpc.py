@@ -372,6 +372,7 @@ class PiRpcCompactResult:
     rpc_type: Literal["compact"]
     events: tuple[PiRpcEvent, ...]
     stderr: bytes
+    outcome: Literal["completed", "aborted"] = "completed"
 
     def __post_init__(self) -> None:
         if type(self.request_id) is not str or not self.request_id:
@@ -384,6 +385,74 @@ class PiRpcCompactResult:
             raise ValueError("Pi RPC compact result events are invalid")
         if type(self.stderr) is not bytes:
             raise ValueError("Pi RPC stderr is invalid")
+        if self.outcome not in {"completed", "aborted"}:
+            raise ValueError("Pi RPC compact outcome is invalid")
+
+
+def validate_pi_compact_result(result: PiRpcCompactResult) -> None:
+    """Validate pinned manual-compaction events without interpreting error text."""
+    try:
+        if type(result) is not PiRpcCompactResult or len(result.events) != 3:
+            raise ValueError
+        start, end, response = result.events
+        if (
+            tuple(event.type for event in result.events)
+            != ("compaction_start", "compaction_end", "response")
+            or end.sequence != start.sequence + 1
+            or response.sequence != end.sequence + 1
+            or start.payload.get("reason") != "manual"
+            or end.payload.get("reason") != "manual"
+            or set(start.payload) - {"reason", "customInstructions"}
+            or start.payload.get("customInstructions") is not None
+            or end.payload.get("customInstructions") is not None
+            or end.payload.get("willRetry") is not False
+            or response.payload.get("id") != result.request_id
+            or response.payload.get("command") != "compact"
+        ):
+            raise ValueError
+        if result.outcome == "completed":
+            body = end.payload.get("result")
+            if (
+                set(end.payload)
+                - {"reason", "result", "aborted", "willRetry", "customInstructions"}
+                or end.payload.get("aborted") is not False
+                or not isinstance(body, Mapping)
+                or set(body)
+                - {"summary", "firstKeptEntryId", "tokensBefore", "details"}
+                or type(body.get("summary")) is not str
+                or not body["summary"]
+                or type(body.get("firstKeptEntryId")) is not str
+                or not body["firstKeptEntryId"]
+                or type(body.get("tokensBefore")) is not int
+                or body["tokensBefore"] < 0
+                or response.payload.get("success") is not True
+                or set(response.payload) != {"id", "command", "success", "data"}
+                or response.payload.get("data") != body
+            ):
+                raise ValueError
+        elif (
+            result.outcome != "aborted"
+            or set(end.payload)
+            - {
+                "reason",
+                "result",
+                "aborted",
+                "willRetry",
+                "customInstructions",
+                "errorSeverity",
+                "errorMessage",
+            }
+            or end.payload.get("aborted") is not True
+            or end.payload.get("result") is not None
+            or end.payload.get("errorMessage") is not None
+            or end.payload.get("errorSeverity") != "error"
+            or response.payload.get("success") is not False
+            or set(response.payload) != {"id", "command", "success", "error"}
+            or type(response.payload.get("error")) is not str
+        ):
+            raise ValueError
+    except BaseException:
+        raise ValueError("Pi RPC compact terminal is invalid") from None
 
 
 class PiRpcSession:
@@ -412,6 +481,59 @@ class PiRpcSession:
         self._lifecycle_poisoned = False
         self._session_deadline: float | None = None
         self._event_sequence = 0
+        self._lifecycle_identity: object | None = None
+        self._pending_compact_abort: PiRpcCompactResult | None = None
+
+    def validate_lifecycle(self, *, opened: bool) -> object | None:
+        """Return an opaque live-child identity after a nonmutating health check."""
+        if (
+            type(opened) is not bool
+            or self._command_lock.locked()
+            or self._run_active
+            or self._run_owner is not None
+        ):
+            raise RuntimeError("Pi RPC lifecycle is unavailable")
+        state = self._state
+        if opened:
+            if (
+                not self._lifecycle_open
+                or self._lifecycle_poisoned
+                or state is None
+                or state.output_error is not None
+                or state.process.poll() is not None
+                or self._session_deadline is None
+                or self._session_deadline <= time.monotonic()
+                or self._lifecycle_identity is None
+            ):
+                raise RuntimeError("Pi RPC lifecycle is unavailable")
+            return self._lifecycle_identity
+        if self._lifecycle_open or self._lifecycle_poisoned or state is not None:
+            raise RuntimeError("Pi RPC lifecycle is unavailable")
+        return None
+
+    def settle_rejected_compact(self, result: PiRpcCompactResult) -> None:
+        """A trusted owner confirms its independent rejection witness.
+
+        An abort alone does not prove no mutation. Only the exact pending typed
+        terminal can be settled, and the caller must have rejected its matching
+        compaction proposal before permitting any model/context mutation.
+        """
+        if (
+            type(result) is not PiRpcCompactResult
+            or result is not self._pending_compact_abort
+            or result.outcome != "aborted"
+            or self._command_lock.locked()
+            or not self._lifecycle_open
+            or not self._lifecycle_poisoned
+            or self._state is None
+            or self._state.output_error is not None
+            or self._state.process.poll() is not None
+            or result.events[-1].sequence != self._event_sequence
+        ):
+            raise RuntimeError("Pi RPC compact settlement is invalid")
+        validate_pi_compact_result(result)
+        self._pending_compact_abort = None
+        self._lifecycle_poisoned = False
 
     @property
     def process(self) -> subprocess.Popen[bytes] | None:
@@ -838,6 +960,8 @@ class PiRpcSession:
                 self._session_deadline = None
                 raise
             self._lifecycle_open = True
+            self._lifecycle_identity = object()
+            self._pending_compact_abort = None
 
     async def prompt(
         self,
@@ -976,7 +1100,7 @@ class PiRpcSession:
                 def cancelled(self) -> bool:
                     return local_cancel.is_set() or signal.cancelled
 
-            def drive() -> None:
+            def drive() -> PiRpcCompactResult:
                 control = PiRpcPromptControl(
                     self,
                     timeout_seconds=self.config.deadline_seconds,
@@ -1008,12 +1132,20 @@ class PiRpcSession:
                         raise RuntimeError(
                             "Pi RPC response did not match the compact request"
                         )
-                    if raw.get("success") is not True:
-                        raise RuntimeError("RPC compact failed")
-                    return
+                    result = PiRpcCompactResult(
+                        request_id,
+                        "compact",
+                        tuple(events),
+                        self.stderr,
+                        outcome="completed"
+                        if raw.get("success") is True
+                        else "aborted",
+                    )
+                    validate_pi_compact_result(result)
+                    return result
 
             driver_task = asyncio.create_task(asyncio.to_thread(drive))
-            await self._await_driver(
+            result = await self._await_driver(
                 driver_task,
                 local_cancel=local_cancel,
                 request_written=request_written,
@@ -1022,7 +1154,11 @@ class PiRpcSession:
             if state is not None and state.output_error is not None:
                 self._lifecycle_poisoned = True
                 raise state.output_error
-            return PiRpcCompactResult(request_id, "compact", tuple(events), self.stderr)
+            assert type(result) is PiRpcCompactResult
+            if result.outcome == "aborted":
+                self._pending_compact_abort = result
+                self._lifecycle_poisoned = True
+            return result
 
     async def close(self) -> None:
         """Stop the reusable child; repeated calls are harmless."""
@@ -1040,6 +1176,8 @@ class PiRpcSession:
                 self._lifecycle_open = False
                 self._lifecycle_poisoned = False
                 self._session_deadline = None
+                self._lifecycle_identity = None
+                self._pending_compact_abort = None
 
     async def run(
         self,
@@ -1089,4 +1227,5 @@ __all__ = (
     "PiRpcResult",
     "PiRpcSession",
     "normalize_pi_usage",
+    "validate_pi_compact_result",
 )

@@ -53,14 +53,14 @@ for line in sys.stdin:
         emit({"type": "agent_settled"})
         late_stderr = message == "late-stderr"
     elif request_type == "compact":
-        emit({"type": "compaction_start"})
-        emit({"type": "compaction_end"})
-        emit({
-            "type": "response",
-            "id": request["id"],
-            "command": "compact",
-            "success": True,
-        })
+        emit({"type": "compaction_start", "reason": "manual"})
+        if message == "reject-compact":
+            emit({"type": "compaction_end", "reason": "manual", "aborted": True, "willRetry": False, "errorSeverity": "error"})
+            emit({"type": "response", "id": request["id"], "command": "compact", "success": False, "error": "arbitrary private cancellation text"})
+        else:
+            result = {"summary": "private summary", "firstKeptEntryId": "entry-1", "tokensBefore": 100, "details": {}}
+            emit({"type": "compaction_end", "reason": "manual", "result": result, "aborted": False, "willRetry": False})
+            emit({"type": "response", "id": request["id"], "command": "compact", "success": True, "data": result})
     elif request_type == "abort":
         break
     else:
@@ -404,6 +404,48 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
             await rpc.close()
         self.assertEqual(stop.call_count, 1)
         self.assertIsNone(rpc.process)
+
+    async def test_aborted_compact_needs_exact_typed_settlement_before_reuse(self):
+        rpc = self.make_session()
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+        await rpc.prompt(
+            "reject-compact", signal=NeverCancelled(), on_event=lambda _: None
+        )
+        result = await rpc.compact(signal=NeverCancelled(), on_event=lambda _: None)
+        self.assertEqual(result.outcome, "aborted")
+        with self.assertRaises(RuntimeError):
+            rpc.validate_lifecycle(opened=True)
+        with self.assertRaises(RuntimeError):
+            await rpc.prompt(
+                "forbidden", signal=NeverCancelled(), on_event=lambda _: None
+            )
+        from dataclasses import replace
+
+        with self.assertRaises(RuntimeError):
+            rpc.settle_rejected_compact(replace(result))
+        rpc.settle_rejected_compact(result)
+        rpc.validate_lifecycle(opened=True)
+        second = await rpc.prompt(
+            "continued", signal=NeverCancelled(), on_event=lambda _: None
+        )
+        self.assertEqual(second.final_text, "continued")
+
+    async def test_lifecycle_validation_rejects_closed_or_dead_process(self):
+        rpc = self.make_session()
+        self.assertIsNone(rpc.validate_lifecycle(opened=False))
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+        identity = rpc.validate_lifecycle(opened=True)
+        self.assertIsNotNone(identity)
+        self.assertIs(identity, rpc.validate_lifecycle(opened=True))
+        rpc.process.kill()
+        await asyncio.to_thread(rpc.process.wait)
+        with self.assertRaises(RuntimeError):
+            rpc.validate_lifecycle(opened=True)
+        await rpc.close()
+        with self.assertRaises(RuntimeError):
+            rpc.validate_lifecycle(opened=True)
 
     async def test_legacy_run_remains_one_shot_and_hides_request_identity(self) -> None:
         rpc = self.make_session()

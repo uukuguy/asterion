@@ -36,6 +36,11 @@ from asterion.agents.prime.state import (
 from asterion.agents.prime.store import FilePrimeSessionStore
 from asterion.control.authority import BudgetUsage, RemainingBudget
 from asterion.control.host import ControlCommand, ControlEvent
+from asterion.control.state import (
+    ControlState,
+    SESSION_EVENT_STATUSES,
+    reduce_control_event,
+)
 from asterion.control.protocol import OPAQUE_ID
 from asterion.control.session_context import (
     SessionContextCommand,
@@ -55,6 +60,10 @@ class PrimeToolExecutor(Protocol):
 
     @property
     def identity_sha256(self) -> str: ...
+
+    def validate_lifecycle(self) -> object:
+        """Nonmutating health check returning the same live-owner identity."""
+        ...
 
     async def close(self) -> None: ...
 
@@ -156,8 +165,10 @@ class _Signal:
 
     @property
     def cancelled(self) -> bool:
-        return self.owner._cancelled or (
-            self.outer is not None and self.outer.cancelled
+        return (
+            self.owner._cancelled
+            or self.owner._remaining_seconds() <= 0
+            or (self.outer is not None and self.outer.cancelled)
         )
 
 
@@ -260,6 +271,11 @@ class PrimeSessionBackend:
                 raise ValueError
             if authority_id is not None:
                 _id(authority_id)
+            self._worker_lifecycle = (
+                None if tool_executor is None else tool_executor.validate_lifecycle()
+            )
+            if tool_executor is not None and self._worker_lifecycle is None:
+                raise ValueError
             self._kernel = PrimeExecutionKernel(
                 rpc_session=rpc_session,
                 extension_binding=extension_binding,
@@ -276,6 +292,10 @@ class PrimeSessionBackend:
             raise PrimeBackendError("Prime backend configuration is invalid") from None
         self.identity = identity
         self._store, self._rpc, self._lease = store, rpc_session, extension_lease
+        self._binding, self._approved_command = extension_binding, approved_command
+        self._approved_environment = (
+            None if approved_environment is None else dict(approved_environment)
+        )
         self._limits = limits
         self._token_cap, self._cost_cap = aggregate_tokens, cost_micros
         self._price, self._witness, self._tool_executor = (
@@ -287,6 +307,7 @@ class PrimeSessionBackend:
         self._authority_revision = 0
         self._budget: RemainingBudget | None = None
         self._usage = BudgetUsage.zero()
+        self._snapshot_usage = self._usage
         self._phase: Literal[
             "created",
             "open",
@@ -297,19 +318,25 @@ class PrimeSessionBackend:
         ] = "created"
         self._outstanding: str | None = None
         self._events: list[PrimeBackendEvent] = []
+        self._control_state = ControlState.empty(
+            identity.session_id, generation=identity.generation
+        )
         self._commands: dict[str, tuple[str, object]] = {}
         self._keys: dict[str, str] = {}
         self._transcript: list[Mapping[str, object]] = []
         self._summary: bytes | None = None
         self._covered_leaf: str | None = None
         self._checkpoint: PrimeCheckpoint | None = None
-        self._context_tokens = 0
+        # Only authenticated post-compaction projection proves a current count.
+        self._context_tokens: int | None = None
         self._turns = 0
         self._lock = asyncio.Lock()
         self._active_task: asyncio.Task | None = None
         self._cancelled = self._closing = self._opened = False
         self._cleanup: PrimeCleanupReceipt | None = None
         self._deadline: float | None = None
+        self._authority_deadline: float | None = None
+        self._rpc_lifecycle: object | None = None
         self._attachment_generation = 0
         self._position = 0
 
@@ -337,22 +364,53 @@ class PrimeSessionBackend:
         if type(identity) is not PrimeBackendIdentity or identity != self.identity:
             raise PrimeBackendError("Prime backend identity mismatch")
         self._ready(read_only=True)
+        if self._phase == "effect-active":
+            raise PrimeBackendError("Prime backend already has an active effect")
+        self._validate_recovery()
+        self._attachment_generation += 1
+        return PrimeAttachment(self, self._attachment_generation)
+
+    def _validate_recovery(self) -> None:
+        """Clean recovery means the same live resources, not just matching files."""
+        failed = False
         try:
+            if self._phase == "recovery-required" or self._outstanding is not None:
+                raise ValueError
+            if (
+                self._tool_executor is None
+                or self._tool_executor.identity_sha256
+                != self.identity.worker_identity_sha256
+            ):
+                raise ValueError
+            if self._tool_executor.validate_lifecycle() is not self._worker_lifecycle:
+                raise ValueError
+            self._kernel._validate_launch_material(
+                self._rpc,
+                self._binding,
+                self._lease,
+                self._approved_command,
+                self._approved_environment,
+                self._limits,
+            )
+            if (
+                self._rpc.validate_lifecycle(opened=self._opened)
+                is not self._rpc_lifecycle
+            ):
+                raise ValueError
             records = self._store.records()
             if len(records) != self._position:
                 raise ValueError
             recovered = self._store.recover_checkpoint()
-            if self._checkpoint is not None and (
-                recovered is None or recovered.checkpoint != self._checkpoint
-            ):
+            if (
+                None if recovered is None else recovered.checkpoint
+            ) != self._checkpoint:
                 raise ValueError
         except Exception:
-            self._phase = "recovery-required"
-            raise PrimeBackendError("Prime backend recovery required") from None
-        if self._phase == "recovery-required":
+            failed = True
+        if failed:
+            self._fence(self._outstanding or "resource-validation")
+            # Raise outside the handler: even introspecting __context__ is safe.
             raise PrimeBackendError("Prime backend recovery required")
-        self._attachment_generation += 1
-        return PrimeAttachment(self, self._attachment_generation)
 
     def replay_events(self, after_cursor: int = 0) -> tuple[PrimeBackendEvent, ...]:
         if type(after_cursor) is not int or not 0 <= after_cursor <= len(self._events):
@@ -371,6 +429,11 @@ class PrimeSessionBackend:
             raise PrimeBackendError("Prime backend recovery required") from None
 
     def _event(self, kind: str, payload: Mapping[str, object]) -> None:
+        if (
+            SESSION_EVENT_STATUSES.get(kind) == self._control_state.session_status
+            and kind in SESSION_EVENT_STATUSES
+        ):
+            return
         cursor = len(self._events) + 1
         event = ControlEvent(
             f"event-{cursor}",
@@ -381,12 +444,24 @@ class PrimeSessionBackend:
             kind,
             payload,
         )
+        state = reduce_control_event(self._control_state, event)
         self._append(
             f"event-{cursor}",
             "public.event",
             {"cursor": cursor, "event": event.to_mapping()},
         )
         self._events.append(PrimeBackendEvent(cursor, event))
+        self._control_state = state
+
+    def _require_created(self) -> None:
+        if self._control_state.session_status is None:
+            raise PrimeBackendError("Prime backend session is not created")
+
+    def _remaining_seconds(self) -> float:
+        deadlines = [
+            d for d in (self._deadline, self._authority_deadline) if d is not None
+        ]
+        return min(deadlines) - time.monotonic() if deadlines else 0.0
 
     def _ready(self, *, read_only: bool = False) -> None:
         if self._cleanup is not None or self._closing:
@@ -445,9 +520,13 @@ class PrimeSessionBackend:
             self._phase = "recovery-required"
             raise PrimeBackendError("Prime backend recovery required") from None
         self._budget, self._authority_revision = budget, revision
+        self._snapshot_usage = self._usage
+        self._authority_deadline = time.monotonic() + budget.deadline_ms / 1000
 
     def _begin(self, command_id: str, digest: str, kind: str) -> None:
         self._ready()
+        self._require_created()
+        self._validate_recovery()
         try:
             if (
                 self._tool_executor is None
@@ -460,11 +539,25 @@ class PrimeSessionBackend:
             raise PrimeBackendError("Prime backend worker identity mismatch") from None
         if (
             self._budget is None
-            or (kind != "context" and self._budget.aggregate_tokens == 0)
+            or (
+                kind != "context"
+                and any(
+                    getattr(self._budget, field)
+                    <= getattr(self._usage, field)
+                    - getattr(self._snapshot_usage, field)
+                    for field in (
+                        "aggregate_tokens",
+                        "application_tokens",
+                        "cost_micros",
+                    )
+                )
+            )
             or self._budget.deadline_ms == 0
+            or self._usage.aggregate_tokens >= self._token_cap
+            or self._usage.cost_micros >= self._cost_cap
         ):
             raise PrimeBackendError("Prime backend budget is unavailable")
-        if self._deadline is not None and time.monotonic() >= self._deadline:
+        if self._remaining_seconds() <= 0:
             raise PrimeBackendError("Prime backend budget is unavailable")
         self._append(
             f"started-{command_id}",
@@ -477,15 +570,17 @@ class PrimeSessionBackend:
 
     def _fence(self, command_id: str) -> None:
         self._outstanding, self._phase = command_id, "recovery-required"
+        self._context_tokens = None
         try:
             self._append(
                 f"uncertain-{command_id}",
                 "effect-uncertain",
                 {"command_id": command_id},
             )
-            self._event(
-                "session.recovery-required", {"reason_code": "uncertain-effect"}
-            )
+            if self._control_state.session_status is not None:
+                self._event(
+                    "session.recovery-required", {"reason_code": "uncertain-effect"}
+                )
         except Exception:
             # The original write-ahead record remains unresolved even on disk failure.
             pass
@@ -507,6 +602,16 @@ class PrimeSessionBackend:
         if (
             usage.aggregate_tokens > self._token_cap
             or usage.cost_micros > self._cost_cap
+        ):
+            raise PrimeBackendError("Prime backend usage limit exceeded")
+        if (
+            not controller
+            and self._budget is not None
+            and any(
+                getattr(usage, field) - getattr(self._snapshot_usage, field)
+                > getattr(self._budget, field)
+                for field in ("application_tokens", "aggregate_tokens", "cost_micros")
+            )
         ):
             raise PrimeBackendError("Prime backend usage limit exceeded")
         self._usage = usage
@@ -564,10 +669,15 @@ class PrimeSessionBackend:
             if signal is not None and signal.cancelled:
                 raise asyncio.CancelledError
             self._begin(request.command_id, digest, "prompt")
+            self._context_tokens = None
             try:
                 if not self._opened:
-                    await self._rpc.open(signal=_Signal(self, signal))
+                    await asyncio.wait_for(
+                        self._rpc.open(signal=_Signal(self, signal)),
+                        timeout=max(0.001, self._remaining_seconds()),
+                    )
                     self._opened = True
+                    self._rpc_lifecycle = self._rpc.validate_lifecycle(opened=True)
                     self._deadline = time.monotonic() + self._limits.deadline_ms / 1000
                 self._event("session.running", {"reason_code": "prompt-started"})
                 status: Literal["completed", "cancelled", "failed"] = "failed"
@@ -601,10 +711,13 @@ class PrimeSessionBackend:
                     elif kind == "run.failed":
                         status = "failed"
 
-                result = await self._kernel.invoke(
-                    RunRequest(request.command_id, request.input_text),
-                    _Signal(self, signal),
-                    emit,
+                result = await asyncio.wait_for(
+                    self._kernel.invoke(
+                        RunRequest(request.command_id, request.input_text),
+                        _Signal(self, signal),
+                        emit,
+                    ),
+                    timeout=max(0.001, self._remaining_seconds()),
                 )
                 if status != "completed":
                     self._fence(request.command_id)
@@ -685,6 +798,7 @@ class PrimeSessionBackend:
         digest = _digest(command.to_mapping())
         async with self._lock:
             self._ready(read_only=command.operation == "session.describe")
+            self._require_created()
             previous = self._duplicate(command.command_id, digest)
             if previous is not None:
                 assert isinstance(previous, SessionContextReceipt)
@@ -700,8 +814,10 @@ class PrimeSessionBackend:
                 )
                 receipt = self._receipt(
                     command,
-                    "succeeded",
-                    {
+                    "succeeded" if self._context_tokens is not None else "rejected",
+                    None
+                    if self._context_tokens is None
+                    else {
                         "continuation_id": self.identity.continuation_id,
                         "status": status,
                         "context_tokens": self._context_tokens,
@@ -709,17 +825,17 @@ class PrimeSessionBackend:
                         "usage": asdict(self._usage),
                         "name_sha256": None,
                     },
+                    "context-count-unavailable"
+                    if self._context_tokens is None
+                    else "completed",
                 )
             elif (
                 command.payload.get("continuation_id") != self.identity.continuation_id
             ):
                 raise PrimeBackendError("Prime backend continuation mismatch")
             elif command.operation == "session.continuation.resume":
+                self._validate_recovery()
                 if self._checkpoint is None or self._outstanding is not None:
-                    raise PrimeBackendError("Prime backend recovery required")
-                recovered = self._store.recover_checkpoint()
-                if recovered is None or recovered.checkpoint != self._checkpoint:
-                    self._fence(command.command_id)
                     raise PrimeBackendError("Prime backend recovery required")
                 receipt = self._receipt(
                     command,
@@ -788,7 +904,7 @@ class PrimeSessionBackend:
                 self._rpc.compact(signal=_Signal(self, None), on_event=native.append)
             )
             deadline = min(
-                self._deadline or time.monotonic(),
+                time.monotonic() + self._remaining_seconds(),
                 time.monotonic() + int(budget["deadline_ms"]) / 1000,
             )
 
@@ -832,7 +948,10 @@ class PrimeSessionBackend:
                 )
                 if native_result.events != tuple(native):
                     raise ValueError
-                self._kernel.observe_context_events(native_result.events)
+                if native_result.outcome != "aborted":
+                    raise ValueError
+                self._kernel.observe_context_events(native_result)
+                self._rpc.settle_rejected_compact(native_result)
                 receipt = self._receipt(
                     command, "rejected", None, "context-not-admitted"
                 )
@@ -865,7 +984,9 @@ class PrimeSessionBackend:
             )
             if native_result.events != tuple(native):
                 raise ValueError
-            self._kernel.observe_context_events(native_result.events)
+            if native_result.outcome != "completed":
+                raise ValueError
+            self._kernel.observe_context_events(native_result)
             receipt = self._receipt(
                 command,
                 "succeeded",
@@ -931,6 +1052,8 @@ class PrimeSessionBackend:
             command.session_id, self.identity.generation, command.authority_revision
         )
         digest = _digest(command.to_mapping())
+        if command.type != "session.create":
+            self._require_created()
         # Cancellation can interrupt the lock owner only after exact duplicate checks.
         if self._duplicate(command.command_id, digest) is not None:
             return
@@ -962,6 +1085,7 @@ class PrimeSessionBackend:
                     },
                 )
                 self._phase = "open"
+                self._event("session.running", {"reason_code": "session-created"})
             elif command.type == "session.attach":
                 cursor = command.payload["cursor"]
                 assert isinstance(cursor, Mapping)
@@ -970,11 +1094,14 @@ class PrimeSessionBackend:
                 self.replay_events(cursor["sequence"])  # type: ignore[arg-type]
             elif command.type in {"session.pause", "session.detach"}:
                 if command.type == "session.pause":
+                    if self._control_state.session_status not in {"running", "paused"}:
+                        raise PrimeBackendError("Prime backend control is unavailable")
                     self._phase = "suspended"
                     self._event("session.paused", {"reason_code": "operator-paused"})
             elif command.type == "session.resume":
-                if self._phase == "recovery-required":
-                    raise PrimeBackendError("Prime backend recovery required")
+                self._validate_recovery()
+                if self._control_state.session_status not in {"running", "paused"}:
+                    raise PrimeBackendError("Prime backend control is unavailable")
                 self._phase = "open"
                 self._event("session.running", {"reason_code": "operator-resumed"})
             elif command.type == "session.cancel":

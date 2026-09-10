@@ -51,7 +51,11 @@ class PrimeStoreError(RuntimeError):
 
 
 def _fail() -> NoReturn:
-    raise PrimeStoreError from None
+    try:
+        raise PrimeStoreError from None
+    except PrimeStoreError as error:
+        error.__context__ = None
+        raise
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -163,6 +167,8 @@ class FilePrimeSessionStore:
         self._identity_identity: tuple[int, int] | None = None
         self._record_identity: tuple[int, int] | None = None
         self._record_stamp: tuple[int, int, int] | None = None
+        self._identity_document = b""
+        self._identity_document_sha256 = ""
         self._records: tuple[PrimeStoreRecord, ...] = ()
         self._by_id: dict[str, PrimeStoreRecord] = {}
         self._mutex = threading.RLock()
@@ -176,6 +182,8 @@ class FilePrimeSessionStore:
             if max_record_bytes > max_bytes:
                 _fail()
             self._root = _root_path(root)
+            self._identity_document = _identity_document(identity)
+            self._identity_document_sha256 = _sha256(self._identity_document)
             self._root_fd = _open_root(self._root)
             root_details = os.fstat(self._root_fd)
             self._root_identity = _file_identity(root_details)
@@ -216,23 +224,25 @@ class FilePrimeSessionStore:
     @property
     def position(self) -> int:
         with self._mutex:
-            self._refresh()
+            self._refresh_for_read()
             return len(self._records)
 
     @property
     def identity(self) -> PrimeBackendIdentity:
         """Return the exact immutable identity bound to this store."""
 
-        return self._identity
+        with self._mutex:
+            self._refresh_for_read()
+            return self._identity
 
     def records(self) -> tuple[PrimeStoreRecord, ...]:
         with self._mutex:
-            self._refresh()
+            self._refresh_for_read()
             return self._records
 
     def has_record(self, record_id: str) -> bool:
         with self._mutex:
-            self._refresh()
+            self._refresh_for_read()
             if type(record_id) is not str or _ID.fullmatch(record_id) is None:
                 _fail()
             return record_id in self._by_id
@@ -353,7 +363,7 @@ class FilePrimeSessionStore:
 
     def recover_checkpoint(self) -> PrimeRecoveredCheckpoint | None:
         with self._mutex:
-            self._refresh()
+            self._refresh_for_read()
             checkpoints = self._checkpoint_records()
             if not checkpoints:
                 return None
@@ -381,12 +391,7 @@ class FilePrimeSessionStore:
         )
 
     def _initialize_identity(self, descriptor: int, created: bool) -> None:
-        expected = (
-            _canonical_bytes(
-                {"version": _IDENTITY_VERSION, "identity": self._identity.to_mapping()}
-            )
-            + b"\n"
-        )
+        expected = self._identity_document
         raw = _read_fd(descriptor)
         if created:
             if raw:
@@ -628,22 +633,34 @@ class FilePrimeSessionStore:
 
     def _refresh(self) -> None:
         self._require_usable()
-        self._confirm_bindings()
-        details = os.fstat(self._record_fd)
-        stamp = _file_stamp(details)
-        if stamp != self._record_stamp:
-            old = self._records
-            old_stamp = self._record_stamp
-            self._load_records()
-            if (
-                len(self._records) < len(old)
-                or self._records[: len(old)] != old
-                or (self._records == old and self._record_stamp != old_stamp)
-            ):
-                self._poisoned = True
-                _fail()
-        self._validate_root_artifacts()
-        self._validate_checkpoints()
+        try:
+            self._confirm_bindings()
+            details = os.fstat(self._record_fd)
+            stamp = _file_stamp(details)
+            if stamp != self._record_stamp:
+                old = self._records
+                old_stamp = self._record_stamp
+                self._load_records()
+                if (
+                    len(self._records) < len(old)
+                    or self._records[: len(old)] != old
+                    or (self._records == old and self._record_stamp != old_stamp)
+                ):
+                    _fail()
+            self._validate_root_artifacts()
+            self._validate_checkpoints()
+        except PrimeStoreError:
+            self._poisoned = True
+            raise
+
+    def _refresh_for_read(self) -> None:
+        try:
+            self._refresh()
+        except PrimeStoreError:
+            raise
+        except (OSError, TypeError, ValueError, UnicodeError, json.JSONDecodeError):
+            self._poisoned = True
+            _fail()
 
     def _require_usable(self) -> None:
         if self._closed or self._poisoned:
@@ -656,7 +673,10 @@ class FilePrimeSessionStore:
         identity = os.fstat(self._identity_fd)
         record = os.fstat(self._record_fd)
         if (
-            _file_identity(root) != self._root_identity
+            not stat.S_ISDIR(root.st_mode)
+            or root.st_uid != os.getuid()
+            or stat.S_IMODE(root.st_mode) != 0o700
+            or _file_identity(root) != self._root_identity
             or _file_identity(lock) != self._lock_identity
             or _file_identity(identity) != self._identity_identity
             or _file_identity(record) != self._record_identity
@@ -666,11 +686,19 @@ class FilePrimeSessionStore:
         if (
             not stat.S_ISDIR(path_details.st_mode)
             or _file_identity(path_details) != self._root_identity
+            or path_details.st_uid != os.getuid()
+            or stat.S_IMODE(path_details.st_mode) != 0o700
         ):
             _fail()
         _verify_regular_binding(self._root_fd, "records.jsonl", self._record_fd)
         _verify_regular_binding(self._root_fd, ".writer.lock", self._lock_fd)
         _verify_regular_binding(self._root_fd, "identity.json", self._identity_fd)
+        identity_document = _read_fd(self._identity_fd)
+        if (
+            _sha256(identity_document) != self._identity_document_sha256
+            or identity_document != self._identity_document
+        ):
+            _fail()
 
     def _close_descriptors(self) -> None:
         for descriptor in (
@@ -810,6 +838,15 @@ def _canonical_bytes(value: object) -> bytes:
     return json.dumps(
         plain, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
+
+
+def _identity_document(identity: PrimeBackendIdentity) -> bytes:
+    return (
+        _canonical_bytes(
+            {"version": _IDENTITY_VERSION, "identity": identity.to_mapping()}
+        )
+        + b"\n"
+    )
 
 
 def _json_value(value: object, depth: int = 0) -> object:

@@ -164,6 +164,40 @@ class TestFilePrimeSessionStore(unittest.TestCase):
         with self.assertRaises(PrimeStoreError):
             _ = store.position
 
+    def test_live_trust_rejects_root_and_identity_drift(self) -> None:
+        for case in ("root-mode", "identity-content"):
+            with self.subTest(case=case):
+                root = self.root.parent / case
+                root.mkdir(mode=0o700)
+                identity = _identity(root)
+                store = FilePrimeSessionStore(root, identity)
+                identity_file: Path | None = None
+                original: bytes | None = None
+                try:
+                    if case == "root-mode":
+                        os.chmod(root, 0o755)
+                    else:
+                        identity_file = root / "identity.json"
+                        original = identity_file.read_bytes()
+                        tampered = original.replace(b"session-1", b"session-2")
+                        self.assertEqual(len(tampered), len(original))
+                        identity_file.write_bytes(tampered)
+                    with self.assertRaises(PrimeStoreError):
+                        if case == "root-mode":
+                            _ = store.identity
+                        else:
+                            _ = store.position
+                    if case == "root-mode":
+                        os.chmod(root, 0o700)
+                    else:
+                        assert identity_file is not None and original is not None
+                        identity_file.write_bytes(original)
+                    with self.assertRaises(PrimeStoreError):
+                        store.records()
+                finally:
+                    os.chmod(root, 0o700)
+                    store.close()
+
     def test_append_is_canonical_immutable_and_idempotent(self) -> None:
         store = FilePrimeSessionStore(self.root, self.identity)
         self.addCleanup(store.close)
@@ -392,6 +426,84 @@ class TestFilePrimeSessionStore(unittest.TestCase):
         (self.root / "records.jsonl").symlink_to(target)
         with self.assertRaises(PrimeStoreError):
             FilePrimeSessionStore(self.root, self.identity)
+
+    def test_public_reads_redact_missing_artifacts_and_os_errors(self) -> None:
+        cases = (
+            "missing-records",
+            "missing-identity",
+            "missing-blob",
+            "read-eacces",
+            "stat-eacces",
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                root = self.root.parent / case
+                root.mkdir(mode=0o700)
+                identity = _identity(root)
+                store = FilePrimeSessionStore(root, identity)
+                secret = f"PRIVATE-{case}-{root}"
+                try:
+                    action = store.records
+                    context = patch(
+                        "asterion.agents.prime.store.os.getuid",
+                        return_value=os.getuid(),
+                    )
+                    if case == "missing-records":
+                        (root / "records.jsonl").unlink()
+
+                        def action() -> object:
+                            return store.position
+
+                    elif case == "missing-identity":
+                        (root / "identity.json").unlink()
+                    elif case == "missing-blob":
+                        transcript = b"private"
+                        usage: dict[str, object] = {}
+                        store.append(
+                            "event-1",
+                            "public.event",
+                            {"cursor": 1},
+                            expected_position=0,
+                        )
+                        store.write_checkpoint(
+                            _checkpoint(identity, transcript, usage),
+                            expected_position=1,
+                            transcript=transcript,
+                            summary=None,
+                            usage=usage,
+                        )
+                        next(root.glob("transcript-*.blob")).unlink()
+                        action = store.recover_checkpoint
+                    elif case == "read-eacces":
+                        journal = root / "records.jsonl"
+                        details = journal.stat()
+                        os.utime(
+                            journal,
+                            ns=(details.st_atime_ns, details.st_mtime_ns + 1),
+                        )
+                        context = patch(
+                            "asterion.agents.prime.store._read_fd",
+                            side_effect=OSError(secret),
+                        )
+                    else:
+                        context = patch(
+                            "asterion.agents.prime.store.os.stat",
+                            side_effect=OSError(secret),
+                        )
+
+                        def action() -> object:
+                            return store.has_record("record-1")
+
+                    with context, self.assertRaises(PrimeStoreError) as caught:
+                        action()
+                    rendered = repr(caught.exception)
+                    self.assertEqual(
+                        str(caught.exception), "Prime session store is unavailable"
+                    )
+                    self.assertNotIn(secret, rendered)
+                    self.assertIsNone(caught.exception.__context__)
+                finally:
+                    store.close()
 
 
 if __name__ == "__main__":

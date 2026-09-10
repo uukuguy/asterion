@@ -23,6 +23,7 @@ from asterion.agents.prime.state import PrimeBackendIdentity
 from asterion.agents.prime.store import FilePrimeSessionStore, private_root_identity
 from asterion.control.authority import RemainingBudget
 from asterion.control.host import ControlCommand
+from asterion.control.state import ControlState, reduce_control_event
 from asterion.control.session_context import SessionContextCommand
 from asterion.runtimes.pi_extensions import PiExtensionBinding
 from asterion.runtimes.pi_rpc import (
@@ -53,6 +54,19 @@ class FakeReusablePi:
         self.acked = False
         self.acknowledged = asyncio.Event()
         self.compact_terminal_release = None
+        self.lifecycle = object()
+        self.dead = False
+        self.pending_abort = None
+
+    def validate_lifecycle(self, *, opened):
+        if self.dead or self.closes or bool(self.opens) != opened or self.pending_abort:
+            raise ValueError("PRIVATE-LIFECYCLE")
+        return self.lifecycle if opened else None
+
+    def settle_rejected_compact(self, result):
+        if result is not self.pending_abort:
+            raise ValueError("PRIVATE-ABORT")
+        self.pending_abort = None
 
     async def open(self, *, signal):
         self.opens += 1
@@ -99,12 +113,41 @@ class FakeReusablePi:
             self.acknowledged.set()
             if self.compact_terminal_release is not None:
                 await self.compact_terminal_release.wait()
-        self.sequence += 1
-        event = PiRpcEvent(
-            self.sequence, "response", {"id": "compact-rpc", "success": True}
+        body = {
+            "summary": "checkpoint",
+            "firstKeptEntryId": "entry-1",
+            "tokensBefore": 100,
+            "details": {},
+        }
+        approved = decision["status"] == "approve"
+        end = {"reason": "manual", "aborted": not approved, "willRetry": False}
+        response = {"id": "compact-rpc", "command": "compact", "success": approved}
+        if approved:
+            end["result"] = body
+            response["data"] = body
+        else:
+            end["errorSeverity"] = "error"
+            response["error"] = "PRIVATE-ARBITRARY-CANCEL"
+        events = []
+        for kind, payload in (
+            ("compaction_start", {"reason": "manual"}),
+            ("compaction_end", end),
+            ("response", response),
+        ):
+            self.sequence += 1
+            event = PiRpcEvent(self.sequence, kind, payload)
+            events.append(event)
+            on_event(event)
+        result = PiRpcCompactResult(
+            "compact-rpc",
+            "compact",
+            tuple(events),
+            b"",
+            "completed" if approved else "aborted",
         )
-        on_event(event)
-        return PiRpcCompactResult("compact-rpc", "compact", (event,), b"")
+        if not approved:
+            self.pending_abort = result
+        return result
 
 
 class FakeToolExecutor:
@@ -112,12 +155,20 @@ class FakeToolExecutor:
 
     def __init__(self):
         self.closed = False
+        self.lifecycle = object()
+
+    def validate_lifecycle(self):
+        if self.closed:
+            raise ValueError("PRIVATE-WORKER-CLOSED")
+        return self.lifecycle
 
     async def close(self):
         self.closed = True
 
 
 class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
+    create_session = True
+
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
@@ -181,6 +232,19 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
             RemainingBudget(64000, 64000, 0, 64000, 500000, 600000),
             authority_revision=1,
         )
+        if self.create_session:
+            await self.backend.accept_control(
+                self.control(
+                    "session.create",
+                    "create-1",
+                    {
+                        "system_id": "example.coding",
+                        "system_version": "1.0.0",
+                        "goal_id": "goal-1",
+                        "goal_ref": "goal-ref-1",
+                    },
+                )
+            )
 
     async def asyncTearDown(self):
         await self.backend.close()
@@ -245,6 +309,22 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(first, second)
         self.assertEqual(self.rpc.calls, 2)
 
+    async def test_active_attachment_rejection_does_not_poison_live_effect(self):
+        self.rpc.release = asyncio.Event()
+        task = asyncio.create_task(self.backend.execute_prompt(self.request()))
+        await self.rpc.entered.wait()
+        before = self.store.position
+        try:
+            with self.assertRaises(PrimeBackendError):
+                self.backend.attach(self.identity)
+            self.assertEqual(self.backend.snapshot().phase, "effect-active")
+            self.assertEqual(self.backend.snapshot().outstanding_effect, "prompt-1")
+            self.assertEqual(self.store.position, before)
+        finally:
+            self.rpc.release.set()
+            await task
+        self.backend.attach(self.identity)
+
     async def test_uncertain_effect_fences_mutation(self):
         await self.backend.mark_uncertain("compact-1")
         with self.assertRaisesRegex(PrimeBackendError, "recovery required"):
@@ -289,8 +369,9 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
             "describe-1", "session-1", 1, 2, "describe-key", "session.describe", {}
         )
         receipt = await self.backend.execute_context(cmd)
-        self.assertEqual(receipt.status, "succeeded")
-        self.assertEqual(receipt.payload["result"]["usage"]["aggregate_tokens"], 0)
+        self.assertEqual(receipt.status, "rejected")
+        self.assertEqual(receipt.reason_code, "context-count-unavailable")
+        self.assertIsNone(receipt.payload["result"])
         self.assertEqual(self.rpc.calls, 0)
         with self.assertRaises(PrimeBackendError):
             self.backend.sync_authority_snapshot(
@@ -375,7 +456,7 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         )
         await self.backend.accept_control(create)
         await self.backend.accept_control(create)
-        self.assertEqual(len(self.backend.replay_events(0)), 1)
+        self.assertEqual(len(self.backend.replay_events(0)), 2)
         await self.backend.accept_control(self.control("session.pause", "pause-1"))
         with self.assertRaises(PrimeBackendError):
             await self.backend.execute_prompt(self.request())
@@ -414,7 +495,139 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         )
         with self.assertRaises(PrimeBackendError):
             await self.backend.accept_control(command)
-        self.assertEqual(self.backend.replay_events(0), ())
+        self.assertEqual(len(self.backend.replay_events(0)), 2)
+
+    async def test_all_lifecycle_events_pass_real_reducer(self):
+        await self.backend.accept_control(self.control("session.pause", "pause-1"))
+        await self.backend.accept_control(self.control("session.pause", "pause-2"))
+        await self.backend.accept_control(self.control("session.resume", "resume-1"))
+        await self.backend.accept_control(self.control("session.resume", "resume-2"))
+        await self.backend.execute_prompt(self.request())
+        await self.backend.accept_control(self.control("session.pause", "pause-3"))
+        state = ControlState.empty("session-1", generation=1)
+        for item in self.backend.replay_events():
+            state = reduce_control_event(state, item.event)
+        self.assertEqual(state.session_status, "paused")
+
+    async def test_prompt_budget_dimensions_reject_before_dispatch(self):
+        for index, budget in enumerate(
+            (
+                RemainingBudget(10, 0, 0, 10, 10, 1000),
+                RemainingBudget(10, 10, 0, 0, 10, 1000),
+                RemainingBudget(10, 10, 0, 10, 0, 1000),
+            )
+        ):
+            with self.subTest(budget=budget):
+                self.backend.sync_authority_snapshot(budget, authority_revision=1)
+                before = self.store.position
+                with self.assertRaises(PrimeBackendError):
+                    await self.backend.execute_prompt(self.request(f"prompt-{index}"))
+                self.assertEqual(self.store.position, before)
+        self.assertEqual(self.rpc.calls, 0)
+
+    async def test_synced_deadline_caps_active_prompt(self):
+        self.backend.sync_authority_snapshot(
+            RemainingBudget(10, 10, 0, 10, 10, 20), authority_revision=1
+        )
+        self.rpc.release = asyncio.Event()
+        with self.assertRaises(PrimeBackendError):
+            await asyncio.wait_for(self.backend.execute_prompt(self.request()), 0.2)
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+
+    async def test_resume_recovery_exception_is_fixed_and_fenced(self):
+        await self.backend.execute_prompt(self.request())
+        command = SessionContextCommand(
+            "resume-check",
+            "session-1",
+            1,
+            1,
+            "resume-check",
+            "session.continuation.resume",
+            {"continuation_id": "continuation-1"},
+        )
+        with patch.object(
+            self.store,
+            "recover_checkpoint",
+            side_effect=OSError("PRIVATE-RECOVERY-PATH"),
+        ):
+            with self.assertRaises(PrimeBackendError) as raised:
+                await self.backend.execute_context(command)
+        self.assertEqual(str(raised.exception), "Prime backend recovery required")
+        self.assertIsNone(raised.exception.__context__)
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+
+    async def test_attach_checks_live_lease_worker_and_pi(self):
+        await self.backend.execute_prompt(self.request())
+        self.rpc.dead = True
+        with self.assertRaises(PrimeBackendError):
+            self.backend.attach(self.identity)
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+
+    async def test_closed_worker_rejects_clean_attachment(self):
+        await self.worker.close()
+        with self.assertRaises(PrimeBackendError):
+            self.backend.attach(self.identity)
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+
+    async def test_replaced_worker_lifecycle_rejects_resume(self):
+        await self.backend.execute_prompt(self.request())
+        self.worker.lifecycle = object()
+        with self.assertRaises(PrimeBackendError):
+            await self.backend.execute_context(
+                SessionContextCommand(
+                    "resume-check",
+                    "session-1",
+                    1,
+                    1,
+                    "resume-check",
+                    "session.continuation.resume",
+                    {"continuation_id": "continuation-1"},
+                )
+            )
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+
+    async def test_closed_lease_rejects_resume(self):
+        await self.backend.execute_prompt(self.request())
+        self.lease.close()
+        with self.assertRaises(PrimeBackendError):
+            await self.backend.execute_context(
+                SessionContextCommand(
+                    "resume-check",
+                    "session-1",
+                    1,
+                    1,
+                    "resume-check",
+                    "session.continuation.resume",
+                    {"continuation_id": "continuation-1"},
+                )
+            )
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+
+    async def test_describe_only_reports_current_witnessed_projection(self):
+        await self.backend.execute_prompt(self.request())
+        compact = await self.backend.execute_context(self.compact_command())
+        describe = SessionContextCommand(
+            "describe-witness",
+            "session-1",
+            1,
+            1,
+            "describe-witness",
+            "session.describe",
+            {},
+        )
+        receipt = await self.backend.execute_context(describe)
+        self.assertEqual(
+            receipt.payload["result"]["context_tokens"],
+            compact.payload["result"]["after_context_tokens"],
+        )
+        await self.backend.execute_prompt(self.request("prompt-2"))
+        receipt = await self.backend.execute_context(
+            replace(
+                describe, command_id="describe-next", idempotency_key="describe-next"
+            )
+        )
+        self.assertEqual(receipt.reason_code, "context-count-unavailable")
+        self.assertIsNone(receipt.payload["result"])
 
     async def test_admitted_compact_can_consume_reserved_last_tokens(self):
         await self.backend.execute_prompt(self.request())
@@ -519,6 +732,25 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.rpc.acked)
         with self.assertRaises(PrimeBackendError):
             await self.backend.execute_prompt(self.request("prompt-2"))
+
+
+class TestPrimeBackendBeforeCreate(unittest.IsolatedAsyncioTestCase):
+    create_session = False
+    asyncSetUp = TestPrimeBackend.asyncSetUp
+    asyncTearDown = TestPrimeBackend.asyncTearDown
+    control = TestPrimeBackend.control
+    request = TestPrimeBackend.request
+    compact_command = TestPrimeBackend.compact_command
+
+    async def test_effects_require_explicit_create_without_mutation(self):
+        before = self.store.position
+        with self.assertRaises(PrimeBackendError):
+            await self.backend.execute_prompt(self.request())
+        with self.assertRaises(PrimeBackendError):
+            await self.backend.execute_context(self.compact_command())
+        self.assertEqual(self.store.position, before)
+        self.assertEqual((self.rpc.opens, self.rpc.calls, self.rpc.compacts), (0, 0, 0))
+        self.assertEqual(self.backend.replay_events(), ())
 
 
 if __name__ == "__main__":

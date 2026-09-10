@@ -24,9 +24,11 @@ from asterion.runtimes.pi_extensions import (
 )
 from asterion.runtimes.pi_rpc import (
     PiRpcConfig,
+    PiRpcCompactResult,
     PiRpcEvent,
     PiRpcResult,
     PiRpcSession,
+    validate_pi_compact_result,
     normalize_pi_usage,
 )
 
@@ -242,13 +244,14 @@ class PrimeExecutionKernel:
         await self._invoke(request, signal, emit)
         return PrimeExecutionResult(tuple(self._native_events), self._final_text)
 
-    def observe_context_events(self, events: tuple[PiRpcEvent, ...]) -> None:
-        """Advance the same native cursor across the non-prompt RPC."""
+    def observe_context_events(self, result: PiRpcCompactResult) -> None:
+        """Atomically advance the native cursor across a validated compact terminal."""
         try:
-            for event in _snapshot_native_events(events):
-                if event.sequence != self._sequence + 1 or event.type != "response":
-                    raise ValueError
-                self._sequence = event.sequence
+            validate_pi_compact_result(result)
+            events = _snapshot_native_events(result.events)
+            if events[0].sequence != self._sequence + 1:
+                raise ValueError
+            self._sequence = events[-1].sequence
         except BaseException:
             raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR) from None
 
