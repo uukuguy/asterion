@@ -576,7 +576,7 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
                         resources.close_host = original_close_host
                         await original_cleanup()
 
-    def test_make_worker_path_is_normalized_before_fixed_path_comparison(self):
+    def test_preflight_uses_the_current_isolated_interpreter_for_worker(self):
         import asterion
         from asterion.applications.prime.p1 import operator
 
@@ -588,17 +588,15 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
             installed.mkdir(parents=True)
             package = installed / "__init__.py"
             package.write_text("")
-            worker = parent / "external-prime/arc-agi-3/venv/bin/python"
+            worker = parent / "isolated/bin/python"
             worker.parent.mkdir(parents=True)
             worker.write_text("")
             environment = {
                 "ASTERION_PRIME_OPERATOR_ROOT": str(root),
-                "ASTERION_PRIME_WORKER_PYTHON": str(
-                    root / "../external-prime/arc-agi-3/venv/bin/python"
-                ),
             }
             with (
                 patch.object(asterion, "__file__", str(package)),
+                patch.object(operator.sys, "executable", str(worker)),
                 patch.object(
                     operator.subprocess,
                     "run",

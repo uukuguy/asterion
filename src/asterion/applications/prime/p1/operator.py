@@ -941,12 +941,10 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
     package = Path(str(asterion.__file__)).resolve(strict=True)
     if package.is_relative_to(root) or "site-packages" not in package.parts:
         raise P1OperatorError()
-    worker = (root.parent / "external-prime/arc-agi-3/venv/bin/python").absolute()
-    if (
-        Path(os.path.normpath(environment["ASTERION_PRIME_WORKER_PYTHON"])).absolute()
-        != worker
-        or not worker.is_file()
-    ):
+    # Preserve the isolated environment's interpreter path. Resolving its
+    # symlink would escape the environment and lose the installed Prime extras.
+    worker = Path(sys.executable).absolute()
+    if not worker.is_file():
         raise P1OperatorError()
     # A probe imports IPython but does not start a worker or Pi session.
     probe = subprocess.run(
@@ -976,7 +974,9 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
     ).absolute()
     if source.resolve(strict=True) != source:
         raise P1OperatorError()
-    node = Path(shutil.which("node") or "").resolve(strict=True)
+    node = Path(environment["ASTERION_PRIME_NODE"]).resolve(strict=True)
+    if not node.is_file():
+        raise P1OperatorError()
     resources = (
         Path(str(package_resources.files("asterion.applications.prime"))) / "resources"
     )

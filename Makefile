@@ -299,7 +299,7 @@ asterion-prime-p1-run:
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		printf '\''%s\n'\'' '\''[asterion-prime-p1-run] native Asterion-prime fixed small verification'\'' >&2; \
-		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH ASTERION_PRIME_NODE; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_WORKER_PYTHON="$$2/../external-prime/arc-agi-3/venv/bin/python"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p1.operator'\'' asterion-prime-p1-run "$$1" "$(CURDIR)"'
+		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p1.operator'\'' asterion-prime-p1-run "$$1" "$(CURDIR)"'
 
 prime-apps-preflight:
 	@exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/preflight_prime_apps.py'

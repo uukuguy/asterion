@@ -16,14 +16,24 @@ class TestPrimeMakePresets(unittest.TestCase):
             "trap",
             "build --wheel --out-dir",
             'orb -m "$(PRIME_ORB_MACHINE)"',
-            "unset PYTHONPATH ASTERION_PRIME_NODE",
+            "unset PYTHONPATH",
             "ASTERION_PRIME_OPERATOR_ROOT",
-            "ASTERION_PRIME_WORKER_PYTHON",
+            "ASTERION_PRIME_NODE",
+            "npm exec --offline --yes --package=node@22",
             "--isolated --with",
+            '--with "ipython==9.17.1"',
             "python -I -m asterion.applications.prime.p1.operator",
         ):
             self.assertIn(literal, recipe)
-        for option in ("--provider", "--model", "--cost", "--deadline", "PYTHONPATH=src"):
+        for option in (
+            "--provider",
+            "--model",
+            "--cost",
+            "--deadline",
+            "PYTHONPATH=src",
+            "ASTERION_PRIME_WORKER_PYTHON",
+            "unset PYTHONPATH ASTERION_PRIME_NODE",
+        ):
             self.assertNotIn(option, recipe)
 
     def test_public_presets_contain_uv_output_and_bind_the_orb_machine(self) -> None:
