@@ -13,6 +13,9 @@ from typing import Protocol
 CODE_CAP = 16384
 OUTPUT_CAP = 65536
 WIRE_CAP = 524288
+WRITE_CALL_CAP = 4096
+WRITE_CELL_CAP = 16384
+ROOT_BYTES_CAP = 32768
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
 
@@ -78,6 +81,12 @@ class P1CellObservation:
     file_reads: int
     audit_denials: int
     file_read_sha256: tuple[str, ...] = ()
+    file_identity: tuple[int, int] | None = None
+    file_write_calls: int = 0
+    file_write_bytes: int = 0
+    file_write_opens: int = 0
+    cell_write_bytes: int = 0
+    root_bytes: int = 0
 
     def __post_init__(self) -> None:
         if self.stage_one_verified is not None:
@@ -106,10 +115,16 @@ class P1CellObservation:
                         else None,
                         self.final_result,
                         self.call_observations,
+                        self.file_identity,
                     )
                 ),
                 "file_reads": self.file_reads,
                 "file_read_sha256": self.file_read_sha256,
+                "file_write_calls": self.file_write_calls,
+                "file_write_bytes": self.file_write_bytes,
+                "file_write_opens": self.file_write_opens,
+                "cell_write_bytes": self.cell_write_bytes,
+                "root_bytes": self.root_bytes,
                 "audit_denials": self.audit_denials,
             }
         )

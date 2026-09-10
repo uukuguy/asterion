@@ -18,6 +18,8 @@ file, call the same accumulator on input_tuple[3], and set final_result to that
 result plus the setup_value loaded from the file. Do not replace earlier state.
 Use only builtins and json/hashlib/math. Open relative files inside your assigned
 directory. No shell, system/environment access, introspection, or other imports.
+Each file write is limited to 4096 UTF-8 bytes, each cell to 16384 written bytes,
+and all regular files together to 32768 bytes (at most 32 regular files).
 """
 
 P1_SETUP_PROMPT = P1_TASK_STATEMENT + "\nPerform only the setup turn now."

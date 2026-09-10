@@ -6,13 +6,21 @@ import math
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import IO, NoReturn, Self
+from typing import IO, NoReturn
+
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing import TypeVar
+
+    Self = TypeVar("Self", bound="AuthorizedProcessTaskExecutor")
 
 from asterion.benchmarks.evidence import BenchmarkProgressEvent, BenchmarkTaskResult
 from asterion.benchmarks.model import BenchmarkTaskInvocation
@@ -138,7 +146,7 @@ class AuthorizedProcessTaskExecutor:
 
     @classmethod
     def create_pair(
-        cls,
+        cls: type[Self],
         *,
         poll_interval_seconds: float = 0.05,
     ) -> tuple[Self, AuthorizedProcessTaskIssuer]:

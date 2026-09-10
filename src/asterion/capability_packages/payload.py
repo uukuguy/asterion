@@ -11,7 +11,11 @@ import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
-from importlib.resources.abc import Traversable
+
+if sys.version_info >= (3, 11):
+    from importlib.resources.abc import Traversable
+else:  # Python 3.10 exposes the same protocol in importlib.abc.
+    from importlib.abc import Traversable
 from io import BytesIO, TextIOWrapper
 from pathlib import Path
 from types import MappingProxyType

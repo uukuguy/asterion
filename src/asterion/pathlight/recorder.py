@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
-from typing import Never, Protocol
+from typing import NoReturn, Protocol
 
 from asterion.pathlight.protocol import PathlightError, TraceEvent, TraceGraph, validate_trace_graph
 
@@ -117,7 +117,7 @@ class MemoryPathlightRecorder:
 class _ImmutableList(list[object]):
     """A list-compatible immutable value for validators that require lists."""
 
-    def _immutable(self, *args: object, **kwargs: object) -> Never:
+    def _immutable(self, *args: object, **kwargs: object) -> NoReturn:
         del args, kwargs
         raise TypeError("Pathlight snapshot is immutable")
 

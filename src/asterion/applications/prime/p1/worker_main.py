@@ -28,6 +28,10 @@ from traitlets.config import Config
 CODE_CAP = 16384
 OUTPUT_CAP = 65536
 WIRE_CAP = 524288
+WRITE_CALL_CAP = 4096
+WRITE_CELL_CAP = 16384
+ROOT_BYTES_CAP = 32768
+ROOT_FILE_CAP = 32
 
 
 class _Denied(RuntimeError):
@@ -47,8 +51,9 @@ class _Output(io.StringIO):
 
 
 class _ReadFile:
-    def __init__(self, stream, state: dict, tracked: bool) -> None:
+    def __init__(self, stream, state: dict, tracked: bool, append: bool) -> None:
         self._stream, self._state, self._tracked = stream, state, tracked
+        self._append = append
 
     def read(self, size: int = -1):
         value = self._stream.read(size)
@@ -59,7 +64,36 @@ class _ReadFile:
         return value
 
     def write(self, value):
-        return self._stream.write(value)
+        state = self._state
+        if type(value) not in {str, bytes, bytearray} or len(value) > WRITE_CALL_CAP:
+            state["audit_denials"] += 1
+            raise _Denied("P1 file write rejected")
+        data = value.encode("utf-8") if type(value) is str else value
+        size = len(data)
+        info = os.fstat(self._stream.fileno())
+        identity = (info.st_dev, info.st_ino)
+        position = info.st_size if self._append else self._stream.tell()
+        projected = max(info.st_size, position + size)
+        projected_total = (
+            sum(state["root_sizes"].values())
+            - state["root_sizes"].get(identity, 0)
+            + projected
+        )
+        if (
+            size > WRITE_CALL_CAP
+            or state["cell_write_bytes"] + size > WRITE_CELL_CAP
+            or projected_total > ROOT_BYTES_CAP
+        ):
+            state["audit_denials"] += 1
+            raise _Denied("P1 file write rejected")
+        state["cell_write_bytes"] += size
+        result = self._stream.write(value)
+        self._stream.flush()
+        state["root_sizes"][identity] = os.fstat(self._stream.fileno()).st_size
+        if self._tracked:
+            self._state["file_write_calls"] += 1
+            self._state["file_write_bytes"] += size
+        return result
 
     def close(self) -> None:
         self._stream.close()
@@ -69,6 +103,24 @@ class _ReadFile:
 
     def __exit__(self, *unused) -> None:
         self.close()
+
+
+def _root_sizes(directory_fd: int) -> dict[tuple[int, int], int]:
+    """Count logical regular-file bytes through the held root descriptor."""
+    result = {}
+    for name in os.listdir(directory_fd):
+        info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if stat.S_ISDIR(info.st_mode):
+            child_fd = os.open(
+                name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd
+            )
+            try:
+                result.update(_root_sizes(child_fd))
+            finally:
+                os.close(child_fd)
+        elif stat.S_ISREG(info.st_mode):
+            result[(info.st_dev, info.st_ino)] = info.st_size
+    return result
 
 
 def _validate(tree: ast.AST, state: dict) -> None:
@@ -170,6 +222,11 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
         "audit_denials": 0,
         "file_reads": 0,
         "file_read_sha256": [],
+        "file_write_calls": 0,
+        "file_write_bytes": 0,
+        "file_write_opens": 0,
+        "cell_write_bytes": 0,
+        "root_sizes": _root_sizes(root_fd),
         "fd_open": False,
     }
     module_surfaces = {
@@ -232,6 +289,7 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
             type(path) is not str
             or type(mode) is not str
             or mode not in {"r", "rb", "w", "wb", "a", "ab", "x", "xb"}
+            or encoding not in {None, "utf-8"}
         ):
             deny()
         parts = Path(path).parts
@@ -251,6 +309,11 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
                 os.close(parent_fd)
                 parent_fd = next_fd
             flags = os.O_RDONLY if mode[0] == "r" else os.O_WRONLY | os.O_CREAT
+            if mode[0] != "r" and len(state["root_sizes"]) >= ROOT_FILE_CAP:
+                try:
+                    os.stat(parts[-1], dir_fd=parent_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    deny()
             if mode[0] == "w":
                 flags |= os.O_TRUNC
             if mode[0] == "a":
@@ -263,13 +326,20 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
                 0o600,
                 dir_fd=parent_fd,
             )
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
+            file_info = os.fstat(fd)
+            if not stat.S_ISREG(file_info.st_mode):
                 os.close(fd)
                 deny()
             stream = os.fdopen(
                 fd, mode, encoding=None if "b" in mode else (encoding or "utf-8")
             )
-            return _ReadFile(stream, state, path == "stage-one.json" and mode[0] == "r")
+            state["root_sizes"][(file_info.st_dev, file_info.st_ino)] = (
+                file_info.st_size
+            )
+            tracked = parts == ("stage-one.json",)
+            if tracked and mode[0] != "r":
+                state["file_write_opens"] += 1
+            return _ReadFile(stream, state, tracked, mode[0] == "a")
         except OSError:
             deny()
         finally:
@@ -370,6 +440,16 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
             sequence += 1
             state["file_reads"] = 0
             state["file_read_sha256"] = []
+            state["file_write_calls"] = 0
+            state["file_write_bytes"] = 0
+            state["file_write_opens"] = 0
+            state["cell_write_bytes"] = 0
+            state["root_sizes"] = _root_sizes(root_fd)
+            if (
+                sum(state["root_sizes"].values()) > ROOT_BYTES_CAP
+                or len(state["root_sizes"]) > ROOT_FILE_CAP
+            ):
+                state["audit_denials"] += 1
             calls = []
 
             def profile(frame, event, arg):
@@ -456,6 +536,11 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
                     "call_observations": calls,
                     "file_reads": state["file_reads"],
                     "file_read_sha256": state["file_read_sha256"],
+                    "file_write_calls": state["file_write_calls"],
+                    "file_write_bytes": state["file_write_bytes"],
+                    "file_write_opens": state["file_write_opens"],
+                    "cell_write_bytes": state["cell_write_bytes"],
+                    "root_bytes": sum(state["root_sizes"].values()),
                     "audit_denials": state["audit_denials"],
                 }
             )

@@ -89,6 +89,42 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
         await self.cell(stage_two_cell(), 3)
         return self.oracle.verify_stage_two(self.worker.snapshot(), first)
 
+    async def test_verification_cannot_rewrite_identical_file(self) -> None:
+        from asterion.applications.prime.p1.oracle import P1OracleError
+
+        await self.cell(setup_cell(), 1)
+        rewrite = 'with open("./stage-one.json", "w") as rewritten:\n    rewritten.write(\'{"input":[3,7,11,17],"setup_value":40}\\n\')\n'
+        await self.cell(rewrite + verification_cell(), 2)
+        with self.assertRaises(P1OracleError):
+            self.oracle.verify_stage_one(self.worker.snapshot())
+
+    async def test_continuation_cannot_rewrite_identical_file(self) -> None:
+        from asterion.applications.prime.p1.oracle import P1OracleError
+
+        first = await self.first_stage()
+        self.checkpoint()
+        rewrite = 'with open("stage-one.json", "w") as rewritten:\n    rewritten.write(\'{"input":[3,7,11,17],"setup_value":40}\\n\')\n'
+        await self.cell(rewrite + stage_two_cell(), 3)
+        with self.assertRaises(P1OracleError):
+            self.oracle.verify_stage_two(self.worker.snapshot(), first)
+
+    async def test_continuation_cannot_replace_file_inode(self) -> None:
+        from pathlib import Path
+        from asterion.applications.prime.p1.oracle import P1OracleError
+
+        first = await self.first_stage()
+        self.checkpoint()
+        root = self.worker._root
+        assert root is not None
+        target = Path(root.name, "stage-one.json")
+        original = target.read_bytes()
+        target.rename(Path(root.name, "original-stage-one.json"))
+        with target.open("wb") as stream:
+            stream.write(original)
+        await self.cell(stage_two_cell(), 3)
+        with self.assertRaises(P1OracleError):
+            self.oracle.verify_stage_two(self.worker.snapshot(), first)
+
     async def test_two_stages_and_safe_receipt_bind_actual_cleanup(self) -> None:
         from asterion.applications.prime.p1.receipt import (
             build_native_receipt,

@@ -158,7 +158,14 @@ class P1Oracle:
         ).encode()
         expected_sha256 = sha256(expected_file).hexdigest()
         object_id = cells[0].accumulator_id
+        file_identity = cells[0].file_identity
         if type(object_id) is not int or object_id <= 0:
+            raise P1OracleError()
+        if (
+            file_identity is None
+            or cells[0].file_write_calls < 1
+            or cells[0].file_write_bytes < len(expected_file)
+        ):
             raise P1OracleError()
         for cell in cells:
             if (
@@ -167,8 +174,14 @@ class P1Oracle:
                 or cell.callable_probe != expected_probe
                 or cell.file_bytes != expected_file
                 or cell.file_sha256 != expected_sha256
+                or cell.file_identity != file_identity
             ):
                 raise P1OracleError()
+        if any(
+            cell.file_write_calls or cell.file_write_bytes or cell.file_write_opens
+            for cell in cells[1:]
+        ):
+            raise P1OracleError()
         verification = cells[1]
         if (
             verification.stage_one_verified

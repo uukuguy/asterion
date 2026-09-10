@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import shutil
-from importlib.resources.abc import Traversable
+import sys
+
+if sys.version_info >= (3, 11):
+    from importlib.resources.abc import Traversable
+else:  # Python 3.10 exposes the same protocol in importlib.abc.
+    from importlib.abc import Traversable
 from pathlib import Path
 
 from asterion.capability_packages.model import PortableCapabilityPayload

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from importlib.resources.abc import Traversable
+
+if sys.version_info >= (3, 11):
+    from importlib.resources.abc import Traversable
+else:  # Python 3.10 exposes the same protocol in importlib.abc.
+    from importlib.abc import Traversable
 from pathlib import Path
 from types import MappingProxyType
 from typing import cast

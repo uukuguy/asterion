@@ -7,6 +7,7 @@ import dataclasses
 import importlib.util
 import os
 from pathlib import Path
+import sys
 import time
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -69,6 +70,27 @@ class TestP1WorkerContract(unittest.TestCase):
 
 
 class TestP1Worker(unittest.IsolatedAsyncioTestCase):
+    def assert_redacted_cancellation(self, error: asyncio.CancelledError) -> None:
+        # Python 3.10 Task._make_cancelled_error adds an empty cancellation
+        # context even when the coroutine raises a fresh error outside handlers.
+        pending: list[BaseException] = [error]
+        seen = set()
+        while pending:
+            current = pending.pop()
+            self.assertNotIn(id(current), seen)
+            seen.add(id(current))
+            self.assertIs(type(current), asyncio.CancelledError)
+            self.assertEqual(current.args, ())
+            self.assertNotIn("sentinel", str(current))
+            self.assertFalse(getattr(current, "__notes__", ()))
+            for linked in (current.__context__, current.__cause__):
+                if linked is not None:
+                    pending.append(linked)
+        self.assertLessEqual(len(seen), 2)
+        if sys.version_info >= (3, 11):
+            self.assertIsNone(error.__context__)
+            self.assertIsNone(error.__cause__)
+
     async def asyncSetUp(self) -> None:
         if importlib.util.find_spec("asterion.applications.prime.p1") is None:
             self.skipTest("contract is not implemented yet")
@@ -163,6 +185,64 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(cleanup.reaped)
         self.assertEqual(cleanup.reap_count, 1)
 
+    async def test_large_file_write_is_denied_before_200kb_dispatch(self) -> None:
+        receipt = await self.cell(
+            "with open('extra.bin', 'wb') as stream:\n    stream.write(b'x' * 200000)"
+        )
+        self.assertEqual(receipt.status, "uncertain")
+        self.assertGreater(self.worker.snapshot().cells[-1].audit_denials, 0)
+        cleanup = await self.worker.close()
+        self.assertTrue(cleanup.root_removed)
+        self.assertEqual(cleanup.reap_count, 1)
+
+    async def test_file_write_call_and_cell_byte_boundaries(self) -> None:
+        receipt = await self.cell(
+            "with open('extra.bin', 'wb') as stream:\n    for index in range(4):\n        stream.write(b'x' * 4096)"
+        )
+        self.assertEqual(receipt.status, "ok")
+        receipt = await self.cell(
+            "with open('extra.bin', 'wb') as stream:\n    for index in range(4):\n        stream.write(b'x' * 4096)\n    stream.write(b'x')",
+            "cell-2",
+            "turn-2",
+        )
+        self.assertEqual(receipt.status, "uncertain")
+        self.assertGreater(self.worker.snapshot().cells[-1].audit_denials, 0)
+
+    async def test_root_byte_cap_accumulates_across_cells(self) -> None:
+        root = self.worker._root
+        assert root is not None
+        initial_bytes = sum(
+            path.stat().st_size for path in Path(root.name).rglob("*") if path.is_file()
+        )
+        for number, byte_count in ((1, 16384), (2, 32768 - initial_bytes - 16384)):
+            chunks, remainder = divmod(byte_count, 4096)
+            receipt = await self.cell(
+                f"with open('extra-{number}.bin', 'wb') as stream:\n    for index in range({chunks}):\n        stream.write(b'x' * 4096)\n    stream.write(b'x' * {remainder})",
+                f"cell-{number}",
+                f"turn-{number}",
+            )
+            self.assertEqual(receipt.status, "ok")
+        self.assertEqual(self.worker.snapshot().cells[-1].root_bytes, 32768)
+        receipt = await self.cell(
+            "with open('extra-3.bin', 'wb') as stream:\n    stream.write(b'x')",
+            "cell-3",
+            "turn-3",
+        )
+        self.assertEqual(receipt.status, "uncertain")
+        self.assertGreater(self.worker.snapshot().cells[-1].audit_denials, 0)
+
+    async def test_multibyte_write_cap_counts_utf8_bytes(self) -> None:
+        receipt = await self.cell(
+            "with open('extra.txt', 'w') as stream:\n    stream.write('é' * 2048)"
+        )
+        self.assertEqual(receipt.status, "ok")
+        receipt = await self.cell(
+            "with open('extra.txt', 'w') as stream:\n    stream.write('é' * 2049)",
+            "cell-2",
+            "turn-2",
+        )
+        self.assertEqual(receipt.status, "uncertain")
+
     async def test_caught_output_overflow_still_poisons_worker(self) -> None:
         receipt = await self.cell(
             "try:\n    print('x' * 65537)\nexcept Exception:\n    pass"
@@ -253,8 +333,7 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
             task.cancel("sentinel-close-cancel")
             with self.assertRaises(asyncio.CancelledError) as caught:
                 await task
-            self.assertEqual(caught.exception.args, ())
-            self.assertIsNone(caught.exception.__context__)
+            self.assert_redacted_cancellation(caught.exception)
 
     async def test_lifecycle_replacement_rejected_without_reaping(self) -> None:
         from asterion.applications.prime.p1.worker import P1WorkerError
@@ -273,8 +352,7 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
         task.cancel("sentinel-cancellation")
         with self.assertRaises(asyncio.CancelledError) as raised:
             await task
-        self.assertEqual(raised.exception.args, ())
-        self.assertIsNone(raised.exception.__context__)
+        self.assert_redacted_cancellation(raised.exception)
         cleanup = await self.worker.close()
         self.assertIs(await self.worker.close(), cleanup)
         self.assertEqual(cleanup.reap_count, 1)

@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import queue
+import select
 import signal
 import stat
 import subprocess
@@ -22,6 +23,8 @@ from asterion.agents.prime.tools import PrimeToolCall, PrimeToolResult
 from .task import P1_INPUT_TUPLE, P1_TASK_STATEMENT
 from .worker import (
     OUTPUT_CAP,
+    ROOT_BYTES_CAP,
+    WRITE_CELL_CAP,
     WIRE_CAP,
     P1CellObservation,
     P1CellReceipt,
@@ -49,6 +52,17 @@ class P1WorkerProcess:
             or deadline <= time.monotonic()
         ):
             raise P1WorkerError("P1 worker configuration rejected")
+        if not (
+            callable(getattr(select, "kqueue", None))
+            or (
+                callable(getattr(os, "waitid", None))
+                and all(
+                    hasattr(os, name)
+                    for name in ("P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+                )
+            )
+        ):
+            raise P1WorkerError("P1 worker configuration rejected")
         self._deadline = deadline
         self._interpreter = Path(interpreter or sys.executable).absolute()
         self._entrypoint = Path(__file__).with_name("worker_main.py").resolve()
@@ -71,6 +85,10 @@ class P1WorkerProcess:
         self._readers: list[threading.Thread] = []
         self._reader_stop = threading.Event()
         self._protocol_failed = threading.Event()
+        self._stdout_gone = threading.Event()
+        self._process_gone = threading.Event()
+        self._exit_watch: select.kqueue | None = None
+        self._liveness_ready = False
         self._reap_count = 0
 
     def __repr__(self) -> str:
@@ -113,6 +131,49 @@ class P1WorkerProcess:
     def cleanup_receipt(self) -> P1WorkerCleanupReceipt | None:
         return self._cleanup
 
+    def _open_exit_watch(self, process: subprocess.Popen[bytes]) -> None:
+        # macOS Python 3.10-3.12 has no os.waitid. Register against our still-owned
+        # child before accepting readiness; NOTE_EXIT observes even an unreaped
+        # zombie and never consumes Popen's eventual wait status.
+        if callable(getattr(select, "kqueue", None)):
+            watch = select.kqueue()
+            event = select.kevent(
+                process.pid,
+                filter=select.KQ_FILTER_PROC,
+                flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE | select.KQ_EV_CLEAR,
+                fflags=select.KQ_NOTE_EXIT,
+            )
+            try:
+                watch.control([event], 0, 0)
+            except Exception:
+                watch.close()
+                raise
+            self._exit_watch = watch
+        elif not (
+            callable(getattr(os, "waitid", None))
+            and all(
+                hasattr(os, name) for name in ("P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+            )
+        ):
+            raise ValueError
+        self._liveness_ready = True
+
+    def _has_exited(self, process: subprocess.Popen[bytes]) -> bool:
+        if self._process_gone.is_set():
+            return True
+        if self._exit_watch is not None:
+            # No wait/poll/reap, and no blocking. Latch an observed exit because
+            # retrieving a kevent clears that observer's notification.
+            exited = bool(self._exit_watch.control(None, 1, 0))
+        else:
+            exited = (
+                os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                is not None
+            )
+        if exited:
+            self._process_gone.set()
+        return exited
+
     def validate_lifecycle(self) -> object:
         valid = False
         try:
@@ -121,6 +182,7 @@ class P1WorkerProcess:
                 self._closed
                 or self._poisoned
                 or self._protocol_failed.is_set()
+                or self._stdout_gone.is_set()
                 or process is None
                 or process is not self._started_process
                 or self._identity is None
@@ -132,11 +194,7 @@ class P1WorkerProcess:
             ):
                 raise ValueError
             os.kill(process.pid, 0)
-            # WNOWAIT observes exit without reaping or changing process ownership.
-            if (
-                os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
-                is not None
-            ):
+            if self._has_exited(process):
                 raise ValueError
             root_stat = os.fstat(self._root_fd)
             path_stat = os.stat(self._root.name, follow_symlinks=False)
@@ -167,6 +225,7 @@ class P1WorkerProcess:
             while not self._reader_stop.is_set():
                 line = process.stdout.readline(WIRE_CAP + 1)
                 if not line:
+                    self._stdout_gone.set()
                     self._frames.put_nowait(None)
                     return
                 if len(line) > WIRE_CAP or not line.endswith(b"\n"):
@@ -276,6 +335,7 @@ class P1WorkerProcess:
                 start_new_session=True,
             )
             self._started_process = self._process
+            self._open_exit_watch(self._process)
             for target in (self._read_stdout, self._read_stderr):
                 thread = threading.Thread(target=target, daemon=True)
                 thread.start()
@@ -318,7 +378,7 @@ class P1WorkerProcess:
                 raise asyncio.CancelledError()
             raise P1WorkerError("P1 worker start failed")
 
-    def _file_bytes(self) -> bytes | None:
+    def _file_bytes(self) -> tuple[bytes | None, tuple[int, int] | None]:
         if self._root_fd is None:
             raise ValueError
         try:
@@ -328,14 +388,15 @@ class P1WorkerProcess:
                 dir_fd=self._root_fd,
             )
         except FileNotFoundError:
-            return None
+            return None, None
         try:
-            if not stat.S_ISREG(os.fstat(fd).st_mode):
+            file_stat = os.fstat(fd)
+            if not stat.S_ISREG(file_stat.st_mode):
                 raise ValueError
             data = os.read(fd, OUTPUT_CAP + 1)
             if len(data) > OUTPUT_CAP:
                 raise ValueError
-            return data
+            return data, (file_stat.st_dev, file_stat.st_ino)
         finally:
             os.close(fd)
 
@@ -357,6 +418,11 @@ class P1WorkerProcess:
             "call_observations",
             "file_reads",
             "file_read_sha256",
+            "file_write_calls",
+            "file_write_bytes",
+            "file_write_opens",
+            "cell_write_bytes",
+            "root_bytes",
             "audit_denials",
         }
         if (
@@ -372,9 +438,22 @@ class P1WorkerProcess:
         output = frame["output"]
         if type(output) is not str or len(output.encode("utf-8")) > OUTPUT_CAP:
             raise ValueError
-        for name in ("file_reads", "audit_denials"):
+        for name in (
+            "file_reads",
+            "audit_denials",
+            "file_write_calls",
+            "file_write_bytes",
+            "file_write_opens",
+        ):
             if type(frame[name]) is not int or not 0 <= frame[name] <= 100000:
                 raise ValueError
+        if (
+            type(frame["cell_write_bytes"]) is not int
+            or not 0 <= frame["cell_write_bytes"] <= WRITE_CELL_CAP
+            or type(frame["root_bytes"]) is not int
+            or not 0 <= frame["root_bytes"] <= ROOT_BYTES_CAP
+        ):
+            raise ValueError
         for name in ("accumulator_id", "final_result"):
             if frame[name] is not None and type(frame[name]) is not int:
                 raise ValueError
@@ -422,7 +501,7 @@ class P1WorkerProcess:
             )
         ):
             raise ValueError
-        data = self._file_bytes()
+        data, file_identity = self._file_bytes()
         observation = P1CellObservation(
             frame["sequence"],
             request.request_id,
@@ -440,6 +519,12 @@ class P1WorkerProcess:
             frame["file_reads"],
             frame["audit_denials"],
             tuple(read_digests),
+            file_identity,
+            frame["file_write_calls"],
+            frame["file_write_bytes"],
+            frame["file_write_opens"],
+            frame["cell_write_bytes"],
+            frame["root_bytes"],
         )
         return observation, output
 
@@ -538,23 +623,35 @@ class P1WorkerProcess:
             self._authority,
         )
 
+    def _signal_owned_process(self, process: subprocess.Popen[bytes], sig: int) -> None:
+        if self._liveness_ready and self._has_exited(process):
+            return
+        try:
+            os.killpg(process.pid, sig)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            # macOS can report EPERM for a child that became a zombie between
+            # observation and signaling. Only positive exit evidence permits it.
+            if self._liveness_ready:
+                if not self._has_exited(process):
+                    raise
+            else:
+                # Observer setup failed, but this exact Popen is still ours.
+                # Cleanup alone may reap; a zero-time wait must prove exit.
+                process.wait(timeout=0)
+
     def _reap_blocking(self) -> tuple[bool, bool]:
         process = self._started_process
         if process is None:
             return True, True
         self._reader_stop.set()
         if self._reap_count == 0:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            self._signal_owned_process(process, signal.SIGTERM)
             try:
                 process.wait(timeout=0.5)
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                self._signal_owned_process(process, signal.SIGKILL)
                 process.wait(timeout=1)
             self._reap_count += 1
         for pipe in (process.stdin, process.stdout, process.stderr):
@@ -562,6 +659,9 @@ class P1WorkerProcess:
                 pipe.close()
         for thread in self._readers:
             thread.join(timeout=1)
+        if self._exit_watch is not None:
+            self._exit_watch.close()
+            self._exit_watch = None
         return process.returncode is not None, all(
             pipe is None or pipe.closed
             for pipe in (process.stdin, process.stdout, process.stderr)
