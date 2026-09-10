@@ -441,6 +441,7 @@ class ControlHost:
                     session_status=lambda: self._state.session_status,
                     position_sink=self._advance_from_session_context,
                     recovery_sink=self._mark_session_context_recovery_required,
+                    authority_snapshot_sink=self._sync_authority_snapshot,
                 )
             )
         except SessionContextManagerError:

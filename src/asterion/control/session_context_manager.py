@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 from asterion.control.authority import (
@@ -64,6 +64,7 @@ class SessionContextManager:
         session_status: Callable[[], str | None],
         position_sink: Callable[[int], None] | None = None,
         recovery_sink: Callable[[], None] | None = None,
+        authority_snapshot_sink: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if (
             not isinstance(authority, AuthorityLedger)
@@ -75,6 +76,10 @@ class SessionContextManager:
             )
             or (position_sink is not None and not callable(position_sink))
             or (recovery_sink is not None and not callable(recovery_sink))
+            or (
+                authority_snapshot_sink is not None
+                and not callable(authority_snapshot_sink)
+            )
         ):
             raise SessionContextManagerError(
                 "session context manager construction is invalid"
@@ -112,6 +117,7 @@ class SessionContextManager:
         self._session_status = session_status
         self._position_sink = position_sink
         self._recovery_sink = recovery_sink
+        self._authority_snapshot_sink = authority_snapshot_sink
         self._execute_lock = asyncio.Lock()
         self._journal_position = position
         self._commands = dict(recovered.session_context_commands)
@@ -123,9 +129,12 @@ class SessionContextManager:
         }
         self._recovery_required = any(
             receipt.status == "uncertain" for receipt in self._receipts.values()
+        ) or any(
+            decision.status == "admitted" and command_id not in self._receipts
+            for command_id, decision in self._decisions.items()
         )
-        if self._recovery_required and self._recovery_sink is not None:
-            self._recovery_sink()
+        if self._recovery_required:
+            self._require_recovery()
 
     async def execute(
         self,
@@ -175,48 +184,75 @@ class SessionContextManager:
                 status="rejected",
                 reason_code=decision.reason,
             )
-        if self._cancellation_signal.cancelled:
-            return self._seal_host_receipt(
-                command,
-                status="cancelled",
-                reason_code="cancelled-before-dispatch",
-            )
+        if self._recovery_required and existing is not None:
+            # An admitted prefix has no proof that dispatch never happened.
+            return self._seal_delivery_uncertain(command, decision)
 
         try:
+            if self._authority_snapshot_sink is not None:
+                await self._authority_snapshot_sink()
+            if self._cancellation_signal.cancelled:
+                receipt = self._seal_host_receipt(
+                    command,
+                    status="cancelled",
+                    reason_code="cancelled-before-dispatch",
+                )
+                if self._authority_snapshot_sink is not None:
+                    await self._authority_snapshot_sink()
+                return receipt
             receipt = await self._client.execute_session_context(command)
-        except asyncio.CancelledError:
-            self._seal_provider_receipt(
-                command,
-                decision,
-                SessionContextReceipt(
-                    receipt_id=f"host-uncertain:{command.command_id}",
-                    command_id=command.command_id,
-                    session_id=command.session_id,
-                    generation=command.generation,
-                    operation=command.operation,
-                    status="uncertain",
-                    reason_code="delivery-outcome-unknown",
-                    payload={"evidence_ref": None, "result": None},
-                ),
-            )
+            if (
+                not isinstance(receipt, SessionContextReceipt)
+                or receipt.command_id != command.command_id
+                or receipt.session_id != command.session_id
+                or receipt.generation != command.generation
+                or receipt.operation != command.operation
+            ):
+                raise SessionContextManagerError("session context receipt is invalid")
+            sealed = self._seal_provider_receipt(command, decision, receipt)
+            if sealed.status != "uncertain" and self._authority_snapshot_sink is not None:
+                await self._authority_snapshot_sink()
+            return sealed
+        except (asyncio.CancelledError, Exception):
+            self._seal_delivery_uncertain(command, decision)
             raise SessionContextTransportError(
                 "persisted session context delivery is uncertain"
             ) from None
-        except Exception:
-            raise SessionContextTransportError(
-                "persisted session context delivery is uncertain"
-            ) from None
-        if (
-            not isinstance(receipt, SessionContextReceipt)
-            or receipt.command_id != command.command_id
-            or receipt.session_id != command.session_id
-            or receipt.generation != command.generation
-            or receipt.operation != command.operation
-        ):
-            raise SessionContextTransportError(
-                "persisted session context delivery is uncertain"
-            )
-        return self._seal_provider_receipt(command, decision, receipt)
+
+    def _seal_delivery_uncertain(
+        self,
+        command: SessionContextCommand,
+        decision: SessionContextDecision,
+    ) -> SessionContextReceipt:
+        existing = self._receipts.get(command.command_id)
+        if existing is not None:
+            # A durable receipt cannot be replaced after a local sink fails.
+            self._require_recovery()
+            return existing
+        return self._seal_provider_receipt(
+            command,
+            decision,
+            SessionContextReceipt(
+                receipt_id=f"host-uncertain:{command.command_id}",
+                command_id=command.command_id,
+                session_id=command.session_id,
+                generation=command.generation,
+                operation=command.operation,
+                status="uncertain",
+                reason_code="delivery-outcome-unknown",
+                payload={"evidence_ref": None, "result": None},
+            ),
+        )
+
+    def _require_recovery(self) -> None:
+        self._recovery_required = True
+        if self._recovery_sink is not None:
+            try:
+                self._recovery_sink()
+            except (asyncio.CancelledError, Exception):
+                raise SessionContextManagerError(
+                    "session context recovery fence delivery failed"
+                ) from None
 
     def snapshot(self) -> SessionContextManagerSnapshot:
         pending = tuple(
@@ -324,15 +360,14 @@ class SessionContextManager:
                         usage=None,
                     ),
                 )
-            except (JournalConflictError, TypeError, ValueError):
+                self._receipts[command.command_id] = receipt
+                self._advance(entry.position)
+            except (asyncio.CancelledError, Exception):
                 raise SessionContextManagerError(
                     "session context receipt journal failed"
                 ) from None
-            self._advance(entry.position)
-            self._receipts[command.command_id] = receipt
-            self._recovery_required = True
-            if self._recovery_sink is not None:
-                self._recovery_sink()
+            finally:
+                self._require_recovery()
             return receipt
         usage = self._receipt_usage(command, decision, receipt)
         return self._seal_definitive_receipt(decision, receipt, usage)
@@ -362,6 +397,8 @@ class SessionContextManager:
                     usage=usage,
                 ),
             )
+            self._receipts[receipt.command_id] = receipt
+            self._advance(entry.position)
             if settlement is not None:
                 self._authority.settle_session_context(
                     receipt.command_id,
@@ -371,8 +408,6 @@ class SessionContextManager:
             raise SessionContextManagerError(
                 "session context receipt settlement failed"
             ) from None
-        self._advance(entry.position)
-        self._receipts[receipt.command_id] = receipt
         return receipt
 
     def _receipt_usage(
@@ -430,7 +465,12 @@ class SessionContextManager:
     def _advance(self, position: int) -> None:
         self._journal_position = max(self._journal_position, position)
         if self._position_sink is not None:
-            self._position_sink(self._journal_position)
+            try:
+                self._position_sink(self._journal_position)
+            except Exception:
+                raise SessionContextManagerError(
+                    "session context journal position delivery failed"
+                ) from None
 
 
 def _authority_is_pristine(authority: AuthorityLedger) -> bool:

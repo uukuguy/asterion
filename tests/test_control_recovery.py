@@ -11,6 +11,7 @@ from asterion.control.authority import (
     AuthorityError,
     AuthorityLedger,
     BudgetUsage,
+    RemainingBudget,
     action_proposal_digest,
 )
 from asterion.control.host import ControlCommand, ControlEvent, EventCursor
@@ -1081,6 +1082,116 @@ class TestControlRecovery(unittest.TestCase):
             )
             asyncio.run(host.pump())
         self.assertEqual(host.snapshot().state.actions["action-1"].status, "succeeded")
+
+
+class TestSessionContextAuthorityRecovery(unittest.IsolatedAsyncioTestCase):
+    async def test_host_mirrors_compact_authority_and_fences_snapshot_failures(
+        self,
+    ) -> None:
+        from tests.test_session_context_manager import (
+            HostSessionContextClient,
+            compact_command,
+            receipt,
+        )
+        from asterion.control.session_context_manager import SessionContextManagerError
+
+        for failure_at in (None, 1, 2):
+            with self.subTest(failure_at=failure_at), tempfile.TemporaryDirectory() as directory:
+                plan = resolve_agent_system(
+                    _manifest(),
+                    application_providers=(_provider(Path(directory)),),
+                    control_factories=_control_factories(
+                        [], capabilities=(
+                            "action-proposals", "checkpointing", "event-replay",
+                            "session-lifecycle", "session.context-v1",
+                        ),
+                    ),
+                    host_capabilities=("clock.monotonic", "storage.private"),
+                )
+                snapshots: list[RemainingBudget] = []
+
+                class SnapshotClient(HostSessionContextClient):
+                    async def sync_authority_snapshot(self, budget: RemainingBudget) -> None:
+                        snapshots.append(budget)
+                        if len(snapshots) == failure_at:
+                            raise RuntimeError("SENTINEL_PRIVATE_SNAPSHOT")
+
+                root = Path(directory) / "journal"
+                store = FileCanonicalJournal.open(root, "session-1")
+                self.addCleanup(store.close)
+                envelope = replace(_envelope(), allowed_operations=("session.compact",))
+                client = SnapshotClient(plan.control_binding.manifest)
+                command = compact_command()
+                client.response = receipt(command)
+                host = ControlHost(
+                    session_id="session-1",
+                    generation=1,
+                    plan=plan,
+                    authority=AuthorityLedger(envelope),
+                    journal=store,
+                    client=client,
+                    session_context_client=client,
+                    action_executor=SpyExecutor(),
+                    clock_ms=lambda: 100,
+                )
+                manager = host.session_context_manager
+                assert manager is not None
+                if failure_at is None:
+                    self.assertEqual((await manager.execute(command)).status, "succeeded")
+                    self.assertEqual(len(snapshots), 2)
+                    self.assertEqual(
+                        snapshots[0].controller_tokens,
+                        envelope.budget_limit.controller_tokens - 100,
+                    )
+                    self.assertEqual(
+                        snapshots[1].controller_tokens,
+                        envelope.budget_limit.controller_tokens - 40,
+                    )
+                    self.assertEqual(
+                        snapshots[1].cost_micros,
+                        envelope.budget_limit.cost_micros - 400,
+                    )
+                    self.assertEqual(
+                        manager.snapshot().authority_usage, BudgetUsage(40, 0, 0, 40, 400),
+                    )
+                else:
+                    with self.assertRaises(SessionContextManagerError) as raised:
+                        await manager.execute(command)
+                    self.assertNotIn("SENTINEL_PRIVATE_SNAPSHOT", str(raised.exception))
+                    self.assertTrue(manager.snapshot().recovery_required)
+                    self.assertEqual(
+                        host.snapshot().state.session_status, "recovery_required",
+                    )
+                    self.assertEqual(len(client.commands), failure_at - 1)
+
+                calls = len(client.commands)
+                await host.close()
+                store.close()
+                reopened = FileCanonicalJournal.open(root, "session-1")
+                self.addCleanup(reopened.close)
+                recovered_host = ControlHost(
+                    session_id="session-1",
+                    generation=1,
+                    plan=plan,
+                    authority=AuthorityLedger(envelope),
+                    journal=reopened,
+                    client=client,
+                    session_context_client=client,
+                    action_executor=SpyExecutor(),
+                    clock_ms=lambda: 100,
+                )
+                recovered = recovered_host.session_context_manager
+                assert recovered is not None
+                replayed = await recovered.execute(command)
+                self.assertEqual(
+                    replayed.status, "uncertain" if failure_at == 1 else "succeeded",
+                )
+                self.assertEqual(len(client.commands), calls)
+                self.assertEqual(len(snapshots), 2 if failure_at is None else failure_at)
+                self.assertEqual(
+                    recovered.snapshot().authority_usage, manager.snapshot().authority_usage,
+                )
+                await recovered_host.close()
 
 
 if __name__ == "__main__":

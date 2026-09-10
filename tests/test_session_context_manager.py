@@ -6,9 +6,11 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import replace
 from pathlib import Path
 import tempfile
+from unittest.mock import patch
 
 from asterion.control.authority import (
     AuthorityEnvelope,
+    AuthorityError,
     AuthorityLedger,
     BudgetLimit,
     BudgetUsage,
@@ -19,6 +21,7 @@ from asterion.control.authority import (
 from asterion.control.journal import (
     FileCanonicalJournal,
     JournalCursor,
+    JournalEntry,
     JournalRecord,
     MemoryCanonicalJournal,
 )
@@ -695,7 +698,7 @@ class TestSessionContextManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sealed.status, "uncertain")
         self.assertEqual(sealed.reason_code, "delivery-outcome-unknown")
 
-    async def test_transport_uncertainty_recovers_only_with_same_command(self) -> None:
+    async def test_transport_uncertainty_recovers_without_redispatch(self) -> None:
         store = journal()
         command = tree_command()
         failing = FakeSessionContextClient()
@@ -730,8 +733,10 @@ class TestSessionContextManager(unittest.IsolatedAsyncioTestCase):
 
         result = await recovered.execute(command)
 
-        self.assertEqual(result.status, "succeeded")
-        self.assertEqual(recovered_client.commands, [command])
+        self.assertEqual(result.status, "uncertain")
+        self.assertTrue(manager.snapshot().recovery_required)
+        self.assertTrue(recovered.snapshot().recovery_required)
+        self.assertEqual(recovered_client.commands, [])
         self.assertEqual(
             tuple(entry.record.kind for entry in store.replay(JournalCursor(0))[-3:]),
             (
@@ -740,6 +745,202 @@ class TestSessionContextManager(unittest.IsolatedAsyncioTestCase):
                 "context.operation.receipted",
             ),
         )
+
+    async def test_post_dispatch_failures_are_durably_uncertain(self) -> None:
+        command = compact_command()
+        valid = receipt(command)
+        assert isinstance(valid.payload["result"], Mapping)
+        result = dict(valid.payload["result"])
+        result["usage"] = {
+            "controller_tokens": 101,
+            "application_tokens": 0,
+            "child_tokens": 0,
+            "aggregate_tokens": 101,
+            "cost_micros": 400,
+        }
+        cases = (
+            ("exception", None, "client"),
+            ("malformed", object(), None),
+            ("command", replace(valid, command_id="other-command"), None),
+            ("session", replace(valid, session_id="other-session"), None),
+            ("generation", replace(valid, generation=2), None),
+            ("operation", receipt(tree_command(command_id=command.command_id)), None),
+            (
+                "usage-over-reservation",
+                replace(valid, payload={"evidence_ref": None, "result": result}),
+                None,
+            ),
+            ("usage-reader", valid, "usage"),
+            ("settlement-preview", valid, "preview"),
+        )
+        for name, response, failure in cases:
+            with self.subTest(failure=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory) / "journal"
+                store = FileCanonicalJournal.open(root, "session-1")
+                self.addCleanup(store.close)
+                for entry in journal().replay(JournalCursor(0)):
+                    store.append(store.position, entry.record)
+                client = FakeSessionContextClient()
+                client.response = response  # type: ignore[assignment]
+                ledger = authority("session.compact")
+                fences: list[bool] = []
+                manager = SessionContextManager(
+                    session_id="session-1",
+                    generation=1,
+                    authority=ledger,
+                    journal=store,
+                    client=client,
+                    clock_ms=lambda: 100,
+                    cancellation_signal=MutableSignal(),
+                    session_status=lambda: "running",
+                    recovery_sink=lambda: fences.append(True),
+                )
+                if failure == "client":
+                    client.failure = RuntimeError("SENTINEL_PRIVATE_FAILURE")
+                target, attribute = (
+                    (ledger, "preview_session_context_settlement")
+                    if failure == "preview"
+                    else (manager, "_receipt_usage")
+                )
+                with patch.object(
+                    target,
+                    attribute,
+                    side_effect=AuthorityError("SENTINEL_PRIVATE_FAILURE")
+                    if failure in ("usage", "preview")
+                    else None,
+                    wraps=getattr(target, attribute),
+                ):
+                    with self.assertRaises(Exception) as raised:
+                        await manager.execute(command)
+                self.assertIsInstance(raised.exception, SessionContextTransportError)
+                self.assertNotIn("SENTINEL_PRIVATE_FAILURE", str(raised.exception))
+                self.assertTrue(manager.snapshot().recovery_required)
+                self.assertEqual(manager.snapshot().pending_command_ids, ())
+                self.assertTrue(fences)
+                self.assertEqual(
+                    ledger.reserved_session_context_ids, (command.command_id,),
+                )
+                self.assertEqual(ledger.usage, BudgetUsage.zero())
+                store.close()
+
+                reopened = FileCanonicalJournal.open(root, "session-1")
+                self.addCleanup(reopened.close)
+                recovered = SessionContextManager(
+                    session_id="session-1",
+                    generation=1,
+                    authority=authority("session.compact"),
+                    journal=reopened,
+                    client=client,
+                    clock_ms=lambda: 100,
+                    cancellation_signal=MutableSignal(),
+                    session_status=lambda: "running",
+                )
+                self.assertTrue(recovered.snapshot().recovery_required)
+                self.assertEqual((await recovered.execute(command)).status, "uncertain")
+                self.assertEqual(client.commands, [command])
+                self.assertNotIn(
+                    "SENTINEL_PRIVATE_FAILURE",
+                    repr(reopened.replay(JournalCursor(0))),
+                )
+
+    async def test_sealing_failures_install_local_fence_and_prevent_replay(self) -> None:
+        for fault in (
+            "journal-before", "journal-after", "settlement", "position", "recovery",
+        ):
+            with self.subTest(fault=fault):
+                store = journal()
+                ledger = authority("session.compact")
+                command = compact_command()
+                client = FakeSessionContextClient()
+                client.response = receipt(
+                    command, status="uncertain" if fault == "recovery" else "succeeded",
+                )
+                fences: list[bool] = []
+
+                def recovery_sink() -> None:
+                    fences.append(True)
+                    if fault == "recovery":
+                        raise RuntimeError("SENTINEL_PRIVATE_FAILURE")
+
+                def position_sink(position: int) -> None:
+                    if fault == "position" and position >= 5:
+                        raise RuntimeError("SENTINEL_PRIVATE_FAILURE")
+
+                manager = SessionContextManager(
+                    session_id="session-1",
+                    generation=1,
+                    authority=ledger,
+                    journal=store,
+                    client=client,
+                    clock_ms=lambda: 100,
+                    cancellation_signal=MutableSignal(),
+                    session_status=lambda: "running",
+                    recovery_sink=recovery_sink,
+                    position_sink=position_sink,
+                )
+                append = store.append
+
+                def failing_append(position: int, record: JournalRecord) -> JournalEntry:
+                    if record.kind == "context.operation.receipted":
+                        if fault == "journal-after":
+                            append(position, record)
+                        raise RuntimeError("SENTINEL_PRIVATE_FAILURE")
+                    return append(position, record)
+
+                target, attribute = (
+                    (store, "append")
+                    if fault.startswith("journal-")
+                    else (ledger, "settle_session_context")
+                )
+                side_effect = (
+                    failing_append
+                    if fault.startswith("journal-")
+                    else AuthorityError("SENTINEL_PRIVATE_FAILURE")
+                    if fault == "settlement"
+                    else None
+                )
+                with patch.object(
+                    target, attribute,
+                    side_effect=side_effect, wraps=getattr(target, attribute),
+                ):
+                    with self.assertRaises(Exception) as raised:
+                        await manager.execute(command)
+                self.assertIsInstance(raised.exception, SessionContextManagerError)
+                self.assertNotIn("SENTINEL_PRIVATE_FAILURE", str(raised.exception))
+                self.assertTrue(manager.snapshot().recovery_required)
+                self.assertTrue(fences)
+
+                # Recover the failure prefix before a live retry can add any records.
+                recovery_store = MemoryCanonicalJournal("session-1")
+                for entry in store.replay(JournalCursor(0)):
+                    recovery_store.append(recovery_store.position, entry.record)
+                recovered = SessionContextManager(
+                    session_id="session-1",
+                    generation=1,
+                    authority=authority("session.compact"),
+                    journal=recovery_store,
+                    client=client,
+                    clock_ms=lambda: 100,
+                    cancellation_signal=MutableSignal(),
+                    session_status=lambda: "running",
+                )
+                if fault == "journal-before":
+                    self.assertTrue(recovered.snapshot().recovery_required)
+                await recovered.execute(command)
+                self.assertEqual(client.commands, [command])
+
+                for retry in (
+                    command,
+                    replace(command, command_id="next-command", idempotency_key="next-key"),
+                ):
+                    try:
+                        result = await manager.execute(retry)
+                    except SessionContextManagerError:
+                        pass
+                    else:
+                        if retry is not command:
+                            self.assertEqual(result.status, "rejected")
+                    self.assertEqual(client.commands, [command])
 
     async def test_uncertain_receipt_fences_replay_without_redispatch(self) -> None:
         store = journal()
