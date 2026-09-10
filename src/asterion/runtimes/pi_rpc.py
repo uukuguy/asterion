@@ -18,7 +18,7 @@ from enum import Enum
 from io import UnsupportedOperation
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 
 _MAX_STDOUT_LINE_BYTES = 1024 * 1024
@@ -65,9 +65,7 @@ def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
     event_type = payload.get("type")
     if event_type == "response":
         return {
-            key: payload[key]
-            for key in ("type", "id", "success")
-            if key in payload
+            key: payload[key] for key in ("type", "id", "success") if key in payload
         }
     if event_type == "message_update":
         update = payload.get("assistantMessageEvent")
@@ -167,15 +165,18 @@ class PiRpcPromptControl:
         *,
         timeout_seconds: float | None,
         signal: CancellationSignal | threading.Event | None,
+        absolute_deadline: float | None = None,
     ) -> None:
         self._session = session
         self._timeout_seconds = timeout_seconds
         self._signal = signal
-        self._deadline = (
-            time.monotonic() + timeout_seconds
-            if timeout_seconds is not None and timeout_seconds > 0
-            else None
-        )
+        self._deadline = absolute_deadline
+        if (
+            self._deadline is None
+            and timeout_seconds is not None
+            and timeout_seconds > 0
+        ):
+            self._deadline = time.monotonic() + timeout_seconds
         self._abort_sent = False
 
     def remaining_seconds(self) -> float | None:
@@ -215,9 +216,7 @@ class PiRpcPromptControl:
         while True:
             self.checkpoint()
             try:
-                return self._session.read_json_line(
-                    timeout_seconds=self.poll_seconds()
-                )
+                return self._session.read_json_line(timeout_seconds=self.poll_seconds())
             except TimeoutError:
                 self.checkpoint()
 
@@ -350,6 +349,7 @@ class PiRpcResult:
     final_text: str
     events: tuple[PiRpcEvent, ...]
     stderr: bytes
+    request_id: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.final_text) is not str:
@@ -358,6 +358,30 @@ class PiRpcResult:
             type(event) is not PiRpcEvent for event in self.events
         ):
             raise ValueError("Pi RPC result events are invalid")
+        if type(self.stderr) is not bytes:
+            raise ValueError("Pi RPC stderr is invalid")
+        if self.request_id is not None and (
+            type(self.request_id) is not str or not self.request_id
+        ):
+            raise ValueError("Pi RPC request id is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class PiRpcCompactResult:
+    request_id: str
+    rpc_type: Literal["compact"]
+    events: tuple[PiRpcEvent, ...]
+    stderr: bytes
+
+    def __post_init__(self) -> None:
+        if type(self.request_id) is not str or not self.request_id:
+            raise ValueError("Pi RPC request id is invalid")
+        if self.rpc_type != "compact":
+            raise ValueError("Pi RPC compact result type is invalid")
+        if type(self.events) is not tuple or any(
+            type(event) is not PiRpcEvent for event in self.events
+        ):
+            raise ValueError("Pi RPC compact result events are invalid")
         if type(self.stderr) is not bytes:
             raise ValueError("Pi RPC stderr is invalid")
 
@@ -382,6 +406,11 @@ class PiRpcSession:
         self._last_failure: str | None = None
         self._request_id = 0
         self._run_active = False
+        self._command_lock = asyncio.Lock()
+        self._lifecycle_open = False
+        self._lifecycle_poisoned = False
+        self._session_deadline: float | None = None
+        self._event_sequence = 0
 
     @property
     def process(self) -> subprocess.Popen[bytes] | None:
@@ -470,7 +499,9 @@ class PiRpcSession:
                         and isinstance(update.get("delta"), str)
                     ):
                         encoded = update["delta"].encode("utf-8")
-                        remaining = _MAX_FINAL_TEXT_BYTES - len(state.compact_final_text)
+                        remaining = _MAX_FINAL_TEXT_BYTES - len(
+                            state.compact_final_text
+                        )
                         if remaining > 0:
                             state.compact_final_text.extend(encoded[:remaining])
                     continue
@@ -489,7 +520,9 @@ class PiRpcSession:
                     else _MAX_STDOUT_BYTES
                 )
                 if total_bytes > projected_limit:
-                    self._fail_output(state, "Pi RPC output limit exceeded (projected total)")
+                    self._fail_output(
+                        state, "Pi RPC output limit exceeded (projected total)"
+                    )
                     return
                 state.stdout_queue.put(payload)
         except (OSError, ValueError):
@@ -545,6 +578,9 @@ class PiRpcSession:
         timeout_seconds: float | None,
         signal: CancellationSignal | threading.Event | None,
         on_event: Callable[[dict[str, Any], PiRpcPromptControl], PiRpcDirective],
+        request_id: str | None = None,
+        on_request_written: Callable[[], None] | None = None,
+        absolute_deadline: float | None = None,
     ) -> float | None:
         """Drive one prompt exchange while the caller interprets Pi events."""
 
@@ -554,10 +590,13 @@ class PiRpcSession:
             self,
             timeout_seconds=timeout_seconds,
             signal=signal,
+            absolute_deadline=absolute_deadline,
         )
         control.check_before_prompt()
-        request_id = self.next_id()
+        request_id = self.next_id() if request_id is None else request_id
         self.send({"id": request_id, "type": "prompt", "message": message})
+        if on_request_written is not None:
+            on_request_written()
         acknowledged = False
         while True:
             event = control.read_event()
@@ -683,6 +722,301 @@ class PiRpcSession:
             except OSError:
                 pass
 
+    def _remaining_session_seconds(self, operation: str) -> float:
+        deadline = self._session_deadline
+        if deadline is None:
+            raise RuntimeError("Pi RPC session is not open")
+        remaining = max(0.0, deadline - time.monotonic())
+        if remaining == 0:
+            raise RuntimeError(
+                f"RPC {operation} timed out after "
+                f"{self.config.deadline_seconds:g} seconds"
+            )
+        return remaining
+
+    def _check_command_ready(self, operation: str, signal: CancellationSignal) -> float:
+        if not self._lifecycle_open or self.process is None:
+            raise RuntimeError("Pi RPC session is not open")
+        if self._lifecycle_poisoned:
+            raise RuntimeError("Pi RPC session is poisoned; close is required")
+        state = self._state
+        if state is not None and state.output_error is not None:
+            self._lifecycle_poisoned = True
+            raise state.output_error
+        if signal.cancelled:
+            raise RuntimeError(f"RPC {operation} was cancelled before start")
+        return self._remaining_session_seconds(operation)
+
+    def _emit_event(
+        self,
+        raw: dict[str, Any],
+        events: list[PiRpcEvent],
+        on_event: Callable[[PiRpcEvent], None],
+    ) -> PiRpcEvent:
+        event_type = raw.get("type")
+        if type(event_type) is not str or not event_type:
+            raise RuntimeError("Pi RPC event type is invalid")
+        self._event_sequence += 1
+        event = PiRpcEvent(
+            sequence=self._event_sequence,
+            type=event_type,
+            payload={key: value for key, value in raw.items() if key != "type"},
+        )
+        events.append(event)
+        on_event(event)
+        return event
+
+    async def _await_driver(
+        self,
+        driver_task: asyncio.Task[object],
+        *,
+        local_cancel: threading.Event,
+        request_written: threading.Event,
+    ) -> object:
+        try:
+            await asyncio.wait((driver_task,))
+            return driver_task.result()
+        except asyncio.CancelledError:
+            local_cancel.set()
+            done, _pending = await asyncio.wait(
+                (driver_task,), timeout=_PROMPT_DRIVER_EXIT_SECONDS
+            )
+            if not done:
+                self._lifecycle_poisoned = True
+                raise RuntimeError("Pi RPC prompt driver cleanup timed out") from None
+            try:
+                driver_task.result()
+            except BaseException:
+                pass
+            self._lifecycle_poisoned = request_written.is_set()
+            raise
+        except BaseException as error:
+            if request_written.is_set():
+                self._lifecycle_poisoned = True
+            self._last_failure = str(error)
+            raise
+
+    async def open(self, *, signal: CancellationSignal) -> None:
+        """Start one reusable child and capture its absolute deadline."""
+
+        if signal.cancelled:
+            raise RuntimeError("Pi RPC session was cancelled before start")
+        if self._command_lock.locked():
+            raise RuntimeError("Pi RPC session already has an active command")
+        async with self._command_lock:
+            if self._lifecycle_open or self.process is not None:
+                raise RuntimeError("Pi RPC session already has an active run")
+            self._last_failure = None
+            self._request_id = 0
+            self._event_sequence = 0
+            self._lifecycle_poisoned = False
+            self._session_deadline = time.monotonic() + self.config.deadline_seconds
+            try:
+                self.start()
+            except BaseException:
+                self._session_deadline = None
+                raise
+            self._lifecycle_open = True
+
+    async def prompt(
+        self,
+        prompt: str,
+        *,
+        signal: CancellationSignal,
+        on_event: Callable[[PiRpcEvent], None],
+    ) -> PiRpcResult:
+        """Run one prompt on the currently open child."""
+
+        if type(prompt) is not str:
+            raise ValueError("Pi RPC prompt is invalid")
+        if self._command_lock.locked():
+            raise RuntimeError("Pi RPC session already has an active command")
+        async with self._command_lock:
+            self._check_command_ready("prompt", signal)
+            absolute_deadline = self._session_deadline
+            assert absolute_deadline is not None
+            events: list[PiRpcEvent] = []
+            text_parts: list[str] = []
+            text_bytes = 0
+            text_truncated = False
+            loop = asyncio.get_running_loop()
+            local_cancel = threading.Event()
+            request_written = threading.Event()
+            request_id = self.next_id()
+            state = self._state
+            if self.config.compact_events and state is not None:
+                state.compact_final_text.clear()
+
+            class PromptCancellationSignal:
+                @property
+                def cancelled(self) -> bool:
+                    return local_cancel.is_set() or signal.cancelled
+
+            def handle_event(
+                raw: dict[str, Any], _control: PiRpcPromptControl
+            ) -> PiRpcDirective:
+                nonlocal text_bytes, text_truncated
+                event = self._emit_event(raw, events, on_event)
+                if event.type == "message_update":
+                    assistant_event = raw.get("assistantMessageEvent")
+                    if (
+                        isinstance(assistant_event, Mapping)
+                        and assistant_event.get("type") == "text_delta"
+                        and isinstance(assistant_event.get("delta"), str)
+                    ):
+                        delta = assistant_event["delta"]
+                        if text_truncated:
+                            return PiRpcDirective.CONTINUE
+                        encoded = delta.encode("utf-8")
+                        remaining = _MAX_FINAL_TEXT_BYTES - text_bytes
+                        if len(encoded) <= remaining:
+                            text_parts.append(delta)
+                            text_bytes += len(encoded)
+                        else:
+                            if remaining > 0:
+                                text_parts.append(
+                                    encoded[:remaining].decode("utf-8", "ignore")
+                                )
+                                text_bytes = _MAX_FINAL_TEXT_BYTES
+                            text_truncated = True
+                elif event.type in {"agent_end", "agent_settled"}:
+                    return PiRpcDirective.COMPLETE
+                return PiRpcDirective.CONTINUE
+
+            def dispatch_event(
+                raw: dict[str, Any], control: PiRpcPromptControl
+            ) -> PiRpcDirective:
+                result: concurrent.futures.Future[PiRpcDirective] = (
+                    concurrent.futures.Future()
+                )
+
+                def invoke() -> None:
+                    try:
+                        result.set_result(handle_event(raw, control))
+                    except BaseException as error:
+                        result.set_exception(error)
+
+                loop.call_soon_threadsafe(invoke)
+                return result.result()
+
+            driver_task = asyncio.create_task(
+                asyncio.to_thread(
+                    self.drive_prompt,
+                    prompt,
+                    timeout_seconds=self.config.deadline_seconds,
+                    signal=PromptCancellationSignal(),
+                    on_event=dispatch_event,
+                    request_id=request_id,
+                    on_request_written=request_written.set,
+                    absolute_deadline=absolute_deadline,
+                )
+            )
+            await self._await_driver(
+                driver_task,
+                local_cancel=local_cancel,
+                request_written=request_written,
+            )
+            if state is not None and state.output_error is not None:
+                self._lifecycle_poisoned = True
+                raise state.output_error
+            final_text = (
+                bytes(state.compact_final_text).decode("utf-8", "ignore")
+                if self.config.compact_events and state is not None
+                else "".join(text_parts)
+            )
+            return PiRpcResult(
+                final_text, tuple(events), self.stderr, request_id=request_id
+            )
+
+    async def compact(
+        self,
+        *,
+        signal: CancellationSignal,
+        on_event: Callable[[PiRpcEvent], None],
+    ) -> PiRpcCompactResult:
+        """Request native compaction on the currently open child."""
+
+        if self._command_lock.locked():
+            raise RuntimeError("Pi RPC session already has an active command")
+        async with self._command_lock:
+            self._check_command_ready("compact", signal)
+            absolute_deadline = self._session_deadline
+            assert absolute_deadline is not None
+            events: list[PiRpcEvent] = []
+            loop = asyncio.get_running_loop()
+            local_cancel = threading.Event()
+            request_written = threading.Event()
+            request_id = self.next_id()
+
+            class CompactCancellationSignal:
+                @property
+                def cancelled(self) -> bool:
+                    return local_cancel.is_set() or signal.cancelled
+
+            def drive() -> None:
+                control = PiRpcPromptControl(
+                    self,
+                    timeout_seconds=self.config.deadline_seconds,
+                    signal=CompactCancellationSignal(),
+                    absolute_deadline=absolute_deadline,
+                )
+                control.check_before_prompt()
+                self.send({"id": request_id, "type": "compact"})
+                request_written.set()
+                while True:
+                    raw = control.read_event()
+                    delivered: concurrent.futures.Future[PiRpcEvent] = (
+                        concurrent.futures.Future()
+                    )
+
+                    def invoke() -> None:
+                        try:
+                            delivered.set_result(
+                                self._emit_event(raw, events, on_event)
+                            )
+                        except BaseException as error:
+                            delivered.set_exception(error)
+
+                    loop.call_soon_threadsafe(invoke)
+                    delivered.result()
+                    if raw.get("type") != "response":
+                        continue
+                    if raw.get("id") != request_id:
+                        raise RuntimeError(
+                            "Pi RPC response did not match the compact request"
+                        )
+                    if raw.get("success") is not True:
+                        raise RuntimeError("RPC compact failed")
+                    return
+
+            driver_task = asyncio.create_task(asyncio.to_thread(drive))
+            await self._await_driver(
+                driver_task,
+                local_cancel=local_cancel,
+                request_written=request_written,
+            )
+            state = self._state
+            if state is not None and state.output_error is not None:
+                self._lifecycle_poisoned = True
+                raise state.output_error
+            return PiRpcCompactResult(request_id, "compact", tuple(events), self.stderr)
+
+    async def close(self) -> None:
+        """Stop the reusable child; repeated calls are harmless."""
+
+        async with self._command_lock:
+            if not self._lifecycle_open and self.process is None:
+                return
+            try:
+                self.stop()
+            except BaseException:
+                self._lifecycle_poisoned = True
+                raise
+            else:
+                self._lifecycle_open = False
+                self._lifecycle_poisoned = False
+                self._session_deadline = None
+
     async def run(
         self,
         prompt: str,
@@ -698,129 +1032,31 @@ class PiRpcSession:
             raise RuntimeError("Pi RPC session already has an active run")
         self._run_active = True
         self._last_failure = None
-        events: list[PiRpcEvent] = []
-        text_parts: list[str] = []
-        text_bytes = 0
-        text_truncated = False
-        loop = asyncio.get_running_loop()
-        local_cancel = threading.Event()
-
-        class RunCancellationSignal:
-            @property
-            def cancelled(self) -> bool:
-                return local_cancel.is_set() or signal.cancelled
-
-        run_signal = RunCancellationSignal()
-
-        def handle_event(
-            raw: dict[str, Any], _control: PiRpcPromptControl
-        ) -> PiRpcDirective:
-            nonlocal text_bytes, text_truncated
-            event_type = raw.get("type")
-            if type(event_type) is not str or not event_type:
-                raise RuntimeError("Pi RPC event type is invalid")
-            event = PiRpcEvent(
-                sequence=len(events) + 1,
-                type=event_type,
-                payload={key: value for key, value in raw.items() if key != "type"},
-            )
-            events.append(event)
-            on_event(event)
-            if event_type == "message_update":
-                assistant_event = raw.get("assistantMessageEvent")
-                if (
-                    isinstance(assistant_event, Mapping)
-                    and assistant_event.get("type") == "text_delta"
-                    and isinstance(assistant_event.get("delta"), str)
-                ):
-                    delta = assistant_event["delta"]
-                    if text_truncated:
-                        return PiRpcDirective.CONTINUE
-                    encoded = delta.encode("utf-8")
-                    remaining = _MAX_FINAL_TEXT_BYTES - text_bytes
-                    if len(encoded) <= remaining:
-                        text_parts.append(delta)
-                        text_bytes += len(encoded)
-                    else:
-                        if remaining > 0:
-                            text_parts.append(
-                                encoded[:remaining].decode("utf-8", "ignore")
-                            )
-                            text_bytes = _MAX_FINAL_TEXT_BYTES
-                        text_truncated = True
-            elif event_type in {"agent_end", "agent_settled"}:
-                return PiRpcDirective.COMPLETE
-            return PiRpcDirective.CONTINUE
-
-        def dispatch_event(
-            raw: dict[str, Any], control: PiRpcPromptControl
-        ) -> PiRpcDirective:
-            result: concurrent.futures.Future[PiRpcDirective] = (
-                concurrent.futures.Future()
-            )
-
-            def invoke() -> None:
-                try:
-                    result.set_result(handle_event(raw, control))
-                except BaseException as error:
-                    result.set_exception(error)
-
-            loop.call_soon_threadsafe(invoke)
-            return result.result()
-
-        driver_task: asyncio.Task[float | None] | None = None
         try:
-            self.start()
-            driver_task = asyncio.create_task(
-                asyncio.to_thread(
-                    self.drive_prompt,
-                    prompt,
-                    timeout_seconds=self.config.deadline_seconds,
-                    signal=run_signal,
-                    on_event=dispatch_event,
-                )
-            )
-            await asyncio.wait((driver_task,))
-            driver_task.result()
+            await self.open(signal=signal)
             state = self._state
-            self.stop()
+            result = await self.prompt(
+                prompt,
+                signal=signal,
+                on_event=on_event,
+            )
+            await self.close()
             if state is not None and state.output_error is not None:
                 raise state.output_error
-            final_text = (
-                bytes(state.compact_final_text).decode("utf-8", "ignore")
-                if self.config.compact_events and state is not None
-                else "".join(text_parts)
-            )
-            return PiRpcResult(final_text, tuple(events), self.stderr)
-        except asyncio.CancelledError:
-            if driver_task is not None and not driver_task.done():
-                local_cancel.set()
-                self.abort()
-                done, _pending = await asyncio.wait(
-                    (driver_task,), timeout=_PROMPT_DRIVER_EXIT_SECONDS
-                )
-                if not done:
-                    raise RuntimeError(
-                        "Pi RPC prompt driver cleanup timed out"
-                    ) from None
-                try:
-                    driver_task.result()
-                except BaseException:
-                    pass
-            raise
+            return PiRpcResult(result.final_text, result.events, result.stderr)
         except Exception as error:
             self._last_failure = str(error)
             raise
         finally:
-            if driver_task is None or driver_task.done():
-                try:
-                    self.stop()
-                finally:
-                    self._run_active = False
+            try:
+                await self.close()
+            finally:
+                self._run_active = False
 
 
 __all__ = (
     "PiRpcConfig",
+    "PiRpcCompactResult",
     "PiRpcDirective",
     "PiRpcEvent",
     "PiRpcPromptControl",
