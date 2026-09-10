@@ -31,6 +31,26 @@ def _run(
 
 
 class InstalledDciBenchmarkTests(unittest.TestCase):
+    def test_full_suite_declares_extras_while_core_gate_stays_bare(self) -> None:
+        environment = dict(os.environ)
+        full = _run(
+            ("make", "--no-print-directory", "-n", "test"),
+            cwd=PROJECT,
+            environment=environment,
+        )
+        self.assertEqual(full.returncode, 0, full.stderr)
+        self.assertIn(
+            "run --extra dci --extra prime python -m unittest discover -s tests -v",
+            full.stdout,
+        )
+        core = _run(
+            ("make", "--no-print-directory", "-n", "test.core-only"),
+            cwd=PROJECT,
+            environment=environment,
+        )
+        self.assertEqual(core.returncode, 0, core.stderr)
+        self.assertNotIn("--extra", core.stdout)
+
     def test_wheel_console_runs_and_resumes_local_instance(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
@@ -70,7 +90,7 @@ class InstalledDciBenchmarkTests(unittest.TestCase):
                     "install",
                     "--python",
                     str(virtual / "bin" / "python"),
-                    str(wheels[0]),
+                    f"{wheels[0]}[dci]",
                 ),
                 cwd=root,
                 environment=environment,

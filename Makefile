@@ -74,7 +74,7 @@ build:
 	$(UV_BIN) build .
 
 test:
-	$(UV_BIN) run python -m unittest discover -s tests -v
+	$(UV_BIN) run --extra dci --extra prime python -m unittest discover -s tests -v
 
 test.core-only:
 	$(UV_BIN) run python -m unittest -v tests.test_core_only_install tests.test_project_boundary
