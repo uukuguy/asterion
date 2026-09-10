@@ -767,14 +767,18 @@ class PromotionCheckTests(unittest.TestCase):
         ambient_resolver.assert_not_called()
 
         rendered = tuple(" ".join(command) for command in commands)
+        gateway_build = "npm run build --prefix packages/typescript/prime-gateway"
+        full_sync = "uv sync --frozen --extra dci --extra prime"
+        self.assertIn(gateway_build, rendered)
+        self.assertIn(full_sync, rendered)
         self.assertLess(
-            rendered.index("npm run build --prefix packages/typescript/prime-gateway"),
-            rendered.index("uv sync --frozen --extra dci"),
+            rendered.index(gateway_build),
+            rendered.index(full_sync),
         )
         for expected in (
-            "uv sync --frozen --extra dci",
-            "uv run python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification",
-            "uv run python -m unittest discover -s tests -v",
+            "uv sync --frozen --extra dci --extra prime",
+            "uv run --extra dci --extra prime python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification",
+            "uv run --extra dci --extra prime python -m unittest discover -s tests -v",
             "uv run python -m compileall -q src tests tools",
             "uv run ruff check src tests tools",
             "uv build .",
@@ -796,6 +800,13 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertTrue(
             any(command[:3] == ("uv", "pip", "install") for command in commands)
         )
+        installed_wheel = tuple(
+            command
+            for command in commands
+            if command[:3] == ("uv", "pip", "install")
+        )
+        self.assertEqual(len(installed_wheel), 1)
+        self.assertFalse(any("[dci]" in item or "[prime]" in item for item in installed_wheel[0]))
         wheel_smoke = next(
             command
             for command in commands
@@ -972,6 +983,68 @@ class PromotionCheckTests(unittest.TestCase):
                     ("--offline", "--ignore-scripts", "--no-audit", "--no-fund"),
                 )
 
+    def test_full_promotion_default_runner_seals_python_child_environments(self) -> None:
+        calls: list[tuple[tuple[str, ...], dict[str, str], str, str]] = []
+        ambient = {
+            "NPM_CONFIG_CACHE": "/ambient/uppercase-cache",
+            "npm_config_cache": "/ambient/lowercase-cache",
+            "NPM_CONFIG_OFFLINE": "false",
+            "npm_config_offline": "false",
+            "NPM_TOKEN": "npm-secret",
+            "NODE_AUTH_TOKEN": "node-secret",
+        }
+
+        def fake_run(
+            command: tuple[str, ...], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            environment = kwargs["env"]
+            assert isinstance(environment, dict)
+            calls.append((command, environment, "", ""))
+            cwd = kwargs["cwd"]
+            assert isinstance(cwd, Path)
+            if command == ("uv", "build", "."):
+                dist = cwd / "dist"
+                dist.mkdir()
+                (dist / "asterion-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
+            return completed(command, acceptance_stdout(command))
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            source = make_source(temporary)
+            cache = temporary / "operator-npm-cache"
+            cache.mkdir()
+            with (
+                mock.patch.dict(os.environ, ambient, clear=False),
+                mock.patch(
+                    "tools.check_promotion._resolve_operational_node",
+                    side_effect=AssertionError("full promotion resolved ambient Node"),
+                ),
+                mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
+            ):
+                run_promotion(
+                    source_root=source,
+                    npm_cache=cache,
+                    node_executable=Path("/node22/bin/node"),
+                )
+
+        canonical_cache = str(cache.resolve())
+        python_children = tuple(
+            (command, environment)
+            for command, environment, _, _ in calls
+            if command[:2] == ("uv", "run")
+            or command[0].endswith("/python")
+            or command[0].endswith("/asterion")
+        )
+        self.assertTrue(python_children)
+        for command, environment in python_children:
+            with self.subTest(command=command):
+                self.assertEqual(environment["NPM_CONFIG_CACHE"], canonical_cache)
+                self.assertEqual(environment["NPM_CONFIG_OFFLINE"], "true")
+                self.assertNotIn("npm_config_cache", environment)
+                self.assertNotIn("npm_config_offline", environment)
+                self.assertNotIn("NPM_TOKEN", environment)
+                self.assertNotIn("NODE_AUTH_TOKEN", environment)
+
     def test_npm_cache_miss_does_not_retry_online(self) -> None:
         npm_commands: list[tuple[str, ...]] = []
 
@@ -1008,6 +1081,239 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertEqual(npm_commands[0][:2], ("npm", "ci"))
         self.assertIn("--offline", npm_commands[0])
 
+    def test_npm_cache_miss_error_does_not_disclose_cache_path(self) -> None:
+        npm_commands: list[tuple[str, ...]] = []
+        npm_environments: list[dict[str, str]] = []
+
+        def fake_run(
+            command: tuple[str, ...], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            if command[0] == "npm":
+                environment = kwargs["env"]
+                assert isinstance(environment, dict)
+                npm_commands.append(command)
+                npm_environments.append(environment)
+                return subprocess.CompletedProcess(
+                    command,
+                    1,
+                    stdout="",
+                    stderr=f"npm ERR! code ENOTCACHED\nnpm ERR! cache {_cache_path}\n",
+                )
+            return completed(command, acceptance_stdout(command))
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            source = make_source(temporary)
+            cache = temporary / "operator-npm-cache"
+            cache.mkdir()
+            _cache_path = str(cache.resolve())
+            with (
+                mock.patch(
+                    "tools.check_promotion._resolve_operational_node",
+                    side_effect=AssertionError("promotion used ambient Node resolver"),
+                ),
+                mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
+                self.assertRaises(PromotionError) as raised,
+            ):
+                run_promotion(
+                    source_root=source,
+                    npm_cache=cache,
+                    node_executable=Path("/node22/bin/node"),
+                )
+
+        self.assertEqual(len(npm_commands), 1)
+        self.assertEqual(npm_commands[0][:2], ("npm", "ci"))
+        self.assertIn("--offline", npm_commands[0])
+        self.assertEqual(npm_environments[0]["NPM_CONFIG_CACHE"], _cache_path)
+        self.assertEqual(npm_environments[0]["NPM_CONFIG_OFFLINE"], "true")
+        self.assertNotIn(_cache_path, str(raised.exception))
+
+    def test_full_promotion_python_environment_keeps_real_npm_ci_offline(self) -> None:
+        import http.server
+        import threading
+
+        captured_environment: dict[str, str] | None = None
+        requests = 0
+
+        def fake_run(
+            command: tuple[str, ...], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            nonlocal captured_environment
+            environment = kwargs["env"]
+            assert isinstance(environment, dict)
+            if (
+                captured_environment is None
+                and command[:2] == ("uv", "run")
+                and "python" in command
+            ):
+                captured_environment = dict(environment)
+            cwd = kwargs["cwd"]
+            assert isinstance(cwd, Path)
+            if command == ("uv", "build", "."):
+                dist = cwd / "dist"
+                dist.mkdir()
+                (dist / "asterion-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
+            return completed(command, acceptance_stdout(command))
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                nonlocal requests
+                requests += 1
+                self.send_response(500)
+                self.end_headers()
+
+            def log_message(self, format: str, *args: object) -> None:
+                del format, args
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            source = make_source(temporary)
+            cache = temporary / "empty-npm-cache"
+            cache.mkdir()
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "NPM_CONFIG_CACHE": "/ambient/uppercase-cache",
+                        "npm_config_cache": "/ambient/lowercase-cache",
+                        "NPM_CONFIG_OFFLINE": "false",
+                        "npm_config_offline": "false",
+                    },
+                    clear=False,
+                ),
+                mock.patch(
+                    "tools.check_promotion._resolve_operational_node",
+                    side_effect=AssertionError("full promotion resolved ambient Node"),
+                ),
+                mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
+            ):
+                run_promotion(
+                    source_root=source,
+                    npm_cache=cache,
+                    node_executable=Path("/node22/bin/node"),
+                )
+
+            self.assertIsNotNone(captured_environment)
+            assert captured_environment is not None
+            canonical_cache = str(cache.resolve())
+            self.assertEqual(captured_environment["NPM_CONFIG_CACHE"], canonical_cache)
+            self.assertEqual(captured_environment["NPM_CONFIG_OFFLINE"], "true")
+            self.assertNotIn("npm_config_cache", captured_environment)
+            self.assertNotIn("npm_config_offline", captured_environment)
+
+            package_root = temporary / "offline-npm-fixture"
+            package_root.mkdir()
+            (package_root / "package.json").write_text(
+                json.dumps(
+                    {
+                        "private": True,
+                        "dependencies": {
+                            "invalid-test-fixture": "1.0.0",
+                        },
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            host, port = server.server_address
+            (package_root / "package-lock.json").write_text(
+                json.dumps(
+                    {
+                        "name": "offline-npm-fixture",
+                        "lockfileVersion": 3,
+                        "requires": True,
+                        "packages": {
+                            "": {
+                                "dependencies": {
+                                    "invalid-test-fixture": "1.0.0",
+                                },
+                            },
+                            "node_modules/invalid-test-fixture": {
+                                "version": "1.0.0",
+                                "resolved": f"http://{host}:{port}/invalid-test-fixture-1.0.0.tgz",
+                                "integrity": "sha512-invalid",
+                            },
+                        },
+                    },
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                npm_environment = dict(captured_environment)
+                npm_environment["NPM_CONFIG_REGISTRY"] = f"http://{host}:{port}/"
+                completed_process = subprocess.run(
+                    ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
+                    cwd=package_root,
+                    env=npm_environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+                server.server_close()
+
+        self.assertNotEqual(completed_process.returncode, 0)
+        self.assertIn("ENOTCACHED", completed_process.stderr + completed_process.stdout)
+        self.assertEqual(requests, 0)
+
+    def test_prime_operational_harness_rebuild_inherits_offline_npm_environment(
+        self,
+    ) -> None:
+        from tests import test_prime_operational_harness as harness
+
+        calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+        def fake_run(
+            command: tuple[str, ...], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            environment = kwargs["env"]
+            assert isinstance(environment, dict)
+            calls.append((command, environment))
+            return completed(command)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            root = temporary / "prime-agent"
+            root.mkdir()
+            cache = temporary / "promotion-npm-cache"
+            cache.mkdir()
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "NPM_CONFIG_CACHE": str(cache.resolve()),
+                        "NPM_CONFIG_OFFLINE": "true",
+                    },
+                    clear=True,
+                ),
+                mock.patch.object(
+                    harness,
+                    "_resolve_operational_node",
+                    return_value=Path("/node22/bin/node"),
+                ),
+                mock.patch.object(harness.subprocess, "run", side_effect=fake_run),
+                mock.patch.object(harness, "_materialize_operational_dependency_tree"),
+            ):
+                harness._rebuild_locked_workspaces(root)
+
+        npm_calls = tuple(call for call in calls if call[0][0] == "npm")
+        self.assertTrue(npm_calls)
+        first_command, first_environment = npm_calls[0]
+        self.assertEqual(
+            first_command,
+            ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
+        )
+        self.assertEqual(first_environment["NPM_CONFIG_CACHE"], str(cache.resolve()))
+        self.assertEqual(first_environment["NPM_CONFIG_OFFLINE"], "true")
+
     def test_full_plan_builds_prime_gateway_before_python_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             source = make_source(Path(temporary_directory))
@@ -1031,11 +1337,33 @@ class PromotionCheckTests(unittest.TestCase):
                 node_executable=Path("/node22/bin/node"),
             )
 
+        gateway_build = (
+            "npm",
+            "run",
+            "build",
+            "--prefix",
+            "packages/typescript/prime-gateway",
+        )
+        full_discovery = (
+            "uv",
+            "run",
+            "--extra",
+            "dci",
+            "--extra",
+            "prime",
+            "python",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "tests",
+            "-v",
+        )
+        self.assertIn(gateway_build, commands)
+        self.assertIn(full_discovery, commands)
         self.assertLess(
-            commands.index(
-                ("npm", "run", "build", "--prefix", "packages/typescript/prime-gateway")
-            ),
-            commands.index(("uv", "run", "python", "-m", "unittest", "discover", "-s", "tests", "-v")),
+            commands.index(gateway_build),
+            commands.index(full_discovery),
         )
 
     def test_external_prime_source_root_is_bound_into_isolated_copy(self) -> None:

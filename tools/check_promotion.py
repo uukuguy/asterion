@@ -1372,10 +1372,14 @@ def _run_full(
             "packages/typescript/prime-gateway",
         ),
         ("npm", "run", "build", "--prefix", "packages/typescript/prime-gateway"),
-        ("uv", "sync", "--frozen", "--extra", "dci"),
+        ("uv", "sync", "--frozen", "--extra", "dci", "--extra", "prime"),
         (
             "uv",
             "run",
+            "--extra",
+            "dci",
+            "--extra",
+            "prime",
             "python",
             "-m",
             "unittest",
@@ -1384,7 +1388,10 @@ def _run_full(
             "tests.test_resource_setup",
             "tests.test_asterion_dci_verification",
         ),
-        ("uv", "run", "python", "-m", "unittest", "discover", "-s", "tests", "-v"),
+        (
+            "uv", "run", "--extra", "dci", "--extra", "prime", "python",
+            "-m", "unittest", "discover", "-s", "tests", "-v",
+        ),
         ("uv", "run", "python", "-m", "compileall", "-q", "src", "tests", "tools"),
         ("uv", "run", "ruff", "check", "src", "tests", "tools"),
         ("uv", "build", "."),
@@ -1502,15 +1509,33 @@ def run_promotion(
     def promotion_runner(
         command: tuple[str, ...], cwd: Path
     ) -> subprocess.CompletedProcess[str]:
-        if command[0] == "npm" and runner is _default_runner:
-            return _default_runner(
-                command,
-                cwd,
-                environment=_closed_npm_subprocess_environment(
-                    cwd.parent, cache, node_executable=node
-                ),
+        if runner is not _default_runner:
+            return runner(command, cwd)
+        npm_environment = _closed_npm_subprocess_environment(
+            cwd.parent, cache, node_executable=node
+        )
+        if command[0] == "npm":
+            environment = npm_environment
+        else:
+            # Python tests launch nested npm processes; seal their npm policy too.
+            environment = {
+                key: value
+                for key, value in os.environ.items()
+                if not key.lower().startswith("npm_config_")
+                and key.upper() not in {"NPM_TOKEN", "NODE_AUTH_TOKEN"}
+            }
+            environment.update(
+                (key, value)
+                for key, value in npm_environment.items()
+                if key.startswith("NPM_CONFIG_")
             )
-        return runner(command, cwd)
+        completed = _default_runner(command, cwd, environment=environment)
+        return subprocess.CompletedProcess(
+            completed.args,
+            completed.returncode,
+            stdout=completed.stdout.replace(str(cache), "[npm-cache]"),
+            stderr=completed.stderr.replace(str(cache), "[npm-cache]"),
+        )
 
     temporary_options: dict[str, str] = {"prefix": "ap-"}
     if os.name == "posix":
