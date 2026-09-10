@@ -163,6 +163,18 @@ prime_lock = json.loads(
 )
 assert prime_lock['format'] == 'asterion.prime-artifact-lock/v1'
 assert len(prime_lock['source_commit']) == 40
+compaction_root = root / 'applications/prime/resources'
+compaction_lock_path = compaction_root / 'pi-compaction-lock.json'
+compaction_lock = json.loads(compaction_lock_path.read_text(encoding='utf-8'))
+assert compaction_lock['format'] == 'asterion.pi-compaction-lock/v1'
+assert compaction_lock['package_version'] == '0.7.1'
+assert compaction_lock['source_commit'] == prime_lock['source_commit']
+assert compaction_lock['artifact_lock_sha256'] == hashlib.sha256(
+    (prime_root / 'prime-artifact-lock.json').read_bytes()
+).hexdigest()
+assert 'prepareCompaction' not in compaction_lock['public_exports']
+assert 'buildSessionContext' in compaction_lock['public_exports']
+assert (compaction_root / 'pi-compaction-verifier.mjs').is_file()
 client_lock = json.loads(
     (prime_root / 'prime-client-module-lock.json').read_text(encoding='utf-8')
 )
@@ -170,6 +182,13 @@ assert client_lock['format'] == 'asterion.prime-client-module-lock/v1'
 assert client_lock['source_commit'] == prime_lock['source_commit']
 assert (prime_root / 'prime-client-module.mjs').is_file()
 external_prime_root = (Path.cwd() / '3th-party/prime-agent').resolve()
+compaction_verified = subprocess.run(
+    ('node', str(compaction_root / 'pi-compaction-verifier.mjs'), '--verify',
+     str(external_prime_root), str(compaction_lock_path),
+     str(prime_root / 'prime-artifact-lock.json')),
+    check=True, capture_output=True, text=True,
+)
+assert json.loads(compaction_verified.stdout)['package_version'] == '0.7.1'
 module_path = (prime_root / 'prime-client-module.mjs').resolve()
 frame = {
     'artifactLockDigest': hashlib.sha256(

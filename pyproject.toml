@@ -75,6 +75,8 @@ artifacts = [
 [tool.hatch.build.hooks.custom]
 
 [tool.hatch.build.targets.wheel.force-include]
+"packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json" = "asterion/applications/prime/resources/pi-compaction-lock.json"
+"tools/build_asterion_prime_compaction_lock.mjs" = "asterion/applications/prime/resources/pi-compaction-verifier.mjs"
 "packages/typescript/prime-gateway/resources/prime-artifact-lock.json" = "asterion/control/providers/prime/resources/prime-artifact-lock.json"
 "packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json" = "asterion/control/providers/prime/resources/prime-ecosystem-module-lock.json"
 "packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs" = "asterion/control/providers/prime/resources/prime-ecosystem-module.mjs"

@@ -1,0 +1,47 @@
+{
+  "branch_evidence": [
+    {
+      "branch": "main-summary",
+      "cost_micro_units": 21296,
+      "input_cap": 4096,
+      "input_cost_micro_units": 8192,
+      "input_tokens": 4096,
+      "observed_max_tokens": 3276,
+      "output_cap": 3276,
+      "output_cost_micro_units": 13104,
+      "output_tokens": 3276,
+      "price": {"input_per_million": 2000000, "output_per_million": 4000000},
+      "request_asterion_units": 4096,
+      "request_sha256": "295969af4ca1159f564cc557698f8c92a121f850a48806ff0f62740dcf1a1cd2",
+      "reserved_tokens": 7372,
+      "rounding": "ceil-each-input-output-component-before-summing"
+    },
+    {
+      "branch": "turn-prefix-summary",
+      "cost_micro_units": 21296,
+      "input_cap": 4096,
+      "input_cost_micro_units": 8192,
+      "input_tokens": 4096,
+      "observed_max_tokens": 2048,
+      "output_cap": 3276,
+      "output_cost_micro_units": 13104,
+      "output_tokens": 3276,
+      "price": {"input_per_million": 2000000, "output_per_million": 4000000},
+      "request_asterion_units": 4096,
+      "request_sha256": "d33f2711d8758ddaaaebcdaad987fd1e59f5c1413150c6ebbf9079b77f4060a3",
+      "reserved_tokens": 7372,
+      "rounding": "ceil-each-input-output-component-before-summing"
+    }
+  ],
+  "branches": ["main-summary", "turn-prefix-summary"],
+  "hook_order": ["session_before_compact", "session_compact"],
+  "input_caps": [4096, 4096],
+  "internal_module_beneath_locked_root": true,
+  "output_caps": [3276, 3276],
+  "pi_version": "0.7.1",
+  "public_prepare_compaction_exported": false,
+  "rpc_order": ["prompt", "compact", "prompt"],
+  "settings": {"autoCompact": false, "keepRecentTokens": 256, "reserveTokens": 4096},
+  "worst_case_cost_micro_units": 42592,
+  "worst_case_reserved_tokens": 14744
+}
