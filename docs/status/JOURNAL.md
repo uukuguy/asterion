@@ -2230,3 +2230,6 @@
 - 15:26 增加持久 Prime backend 与共享执行内核，支持干净控制 attachment 重建 [de261473]
 - 16:18 加固 backend 恢复、typed compact 终结与预算生命周期校验，防止误恢复和漏限 [8f8c6709]
 - 17:02 绑定 compact 全程 deadline 与 witness/native 结果，防止越界确认和交叉接受 [f0169ca4]
+- 17:10 更新共享 backend 恢复检查点，确保 Task 5 从已批准边界继续 [02a6d93c]
+- 14:36 接入 Prime native control/context 并验证干净恢复 [bb38db23]
+- 14:53 清洗 Prime control 取消异常链，防止私密消息泄漏 [bf61ff3f]

@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-10 17:08 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-10 17:24 CST. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -9,7 +9,7 @@
 - 解题过程已形成固定制品体系：规范化事实、版本化分析、版本化渲染、可回放网页和单文件 HTML 导出。
 - 双语 README 已调整为 Asterion 框架主体、ARC-AGI-3 应用案例；GitHub About 与 Topics 已同步。
 - `602013fe` 已固化原生 P7 的精确证据边界：单题 Level 1 成功不代表完整 parity、多题 benchmark 或 production promotion。
-- 原生 P1 计划 Task 0–4 已完成：共享 durable backend、唯一执行内核与 live attachment 恢复边界已独立复审。
+- 原生 P1 计划 Task 0–5 已完成：native control/context 已接到同一 backend，clean ControlHost reconstruction 已独立复审。
 
 ## Where things stand
 
@@ -48,6 +48,7 @@
 - `d5ed4501`、`b23ea401`：封存规范持久化字节，并用可执行快照和同字节 loader 关闭 TOCTOU。
 - `a61b9abb`：统一封锁 session-context 派发后未知结果，并同步共享预算快照。
 - `de261473`、`8f8c6709`、`f0169ca4`：实现共享 Prime backend/store/kernel，并加固 live 恢复、真实 compact 终结、全程 deadline 与 witness/native 绑定。
+- `bb38db23`、`bf61ff3f`：接入 native control/context，验证双 Host 恢复并清洗取消异常链。
 
 主要入口：
 
@@ -86,11 +87,12 @@ GitHub 当前公开信息：
 - Task 2：74 个 Python、35 个扩展、8 个 loader 测试及 Ruff、typecheck、wheel 字节一致性通过；Sol 复审批准，仅留一个非门禁 Pyright 类型质量 Minor。
 - Task 3：79 个相关回归、Ruff、Pyright 与 settlement 窄探针通过；Sol 复审无 findings。
 - Task 4：实现后经两轮阻断修复；最终 179 个实现侧测试与 141 个独立复审测试通过，Astra 复审无遗留 findings。
+- Task 5：Gate G4 46 个、legacy 78 个测试通过；独立复审 96 个测试通过且无 findings。
 
 ## Next steps
 
-1. 从 Task 5 开始把 native control 与 session-context clients 接到同一 backend，并验证 clean ControlHost reconstruction。
-2. 继续按计划逐任务 TDD、独立复审、修复再复审，随后实现 Task 6–9 的 P1 worker/oracle、装配与验收。
+1. 从 Task 6 开始实现受限的持久 P1 worker、固定 fixture、独立 oracle 与安全 receipt。
+2. 继续按计划逐任务 TDD、独立复审、修复再复审，随后实现 Task 7–9 的装配、协调器与验收。
 3. 在原生 P1 闭环后，再按 P2、P4、P3、P5、P6 的依赖顺序迁移；不得将历史 Prime Agent 运行冒充为原生闭环。
 4. 在明确要求前不要 push，也不要启动计划外模型运行。
 
