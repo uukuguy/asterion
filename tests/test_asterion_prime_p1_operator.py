@@ -78,7 +78,6 @@ class CodingPi(FakeReusablePi):
             {"message": {"role": "assistant", "usage": {"input": 3, "output": 2}}},
         )
         emit("agent_end", {})
-        emit("agent_settled", {})
         return PiRpcResult("SENTINEL_PRIVATE_MODEL_ANSWER", tuple(events), b"")
 
     async def compact(self, *, signal, on_event):
@@ -212,6 +211,12 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
                 "backend.open",
                 "host1.open",
                 "runner.start",
+                "stage1.setup.start",
+                "stage1.setup.complete",
+                "stage1.verify.start",
+                "stage1.verify.complete",
+                "stage1.oracle.start",
+                "stage1.oracle.complete",
                 "stage1.complete",
                 "compact.admit",
                 "compact.provider-call",

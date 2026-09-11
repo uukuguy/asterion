@@ -139,6 +139,12 @@ _PUBLIC_PROGRESS_STAGES = frozenset(
         "runner.start",
         "runner.terminal",
         "stage1.complete",
+        "stage1.oracle.complete",
+        "stage1.oracle.start",
+        "stage1.setup.complete",
+        "stage1.setup.start",
+        "stage1.verify.complete",
+        "stage1.verify.start",
         "stage2.complete",
         "stage2.release",
         "worker.close",
@@ -462,16 +468,22 @@ class P1OperatorResources:
         self, *, run_id: str, signal: CancellationSignal | None
     ) -> P1StageMilestone:
         self.coordination.check(run_id)
+        self.observe("stage1.setup.start")
         first = await self._prompt(
             "p1-setup",
             P1_TASK_STATEMENT
             + "\nPerform only the setup cell now. Do not execute verification or continuation yet.",
         )
+        self.observe("stage1.setup.complete")
+        self.observe("stage1.verify.start")
         second = await self._prompt(
             "p1-verify",
             "Perform only the stage-one verification cell required by task_statement. Preserve the objects and file; do not continue to stage two.",
         )
+        self.observe("stage1.verify.complete")
+        self.observe("stage1.oracle.start")
         self._stage_one = self.oracle.verify_stage_one(self.worker.snapshot())
+        self.observe("stage1.oracle.complete")
         return P1StageMilestone(
             "stage-one",
             self._stage_one.stage_one_effect_sha256,

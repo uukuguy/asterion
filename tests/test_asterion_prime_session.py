@@ -164,7 +164,7 @@ SUCCESS_EVENTS = native_events(
             }
         },
     ),
-    ("agent_settled", {}),
+    ("agent_end", {}),
 )
 
 
@@ -363,7 +363,7 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertEqual(rpc.calls, 0)
         self.assertTrue(lease.closed)
 
-    def test_accepts_agent_end_before_settled_without_public_payload(self) -> None:
+    def test_rejects_settled_after_agent_end_without_private_payload(self) -> None:
         session, _rpc, _lease = self.fixture.make(
             native_events(
                 ("agent_end", {"messages": ["PRIVATE-ANSWER"]}),
@@ -371,16 +371,20 @@ class TestAsterionPrimeSession(unittest.TestCase):
             )
         )
 
+        with self.assertRaises(ProtocolError) as caught:
+            asyncio.run(collect(session))
+
+        self.assertNotIn("PRIVATE-ANSWER", str(caught.exception))
+
+    def test_default_agent_end_terminal_completes_without_public_payload(self) -> None:
+        session, _rpc, _lease = self.fixture.make(
+            native_events(("agent_end", {"messages": ["PRIVATE-ANSWER"]}))
+        )
+
         public = asyncio.run(collect(session))
 
         self.assertEqual(public[-1].payload, {"status": "completed"})
         self.assertNotIn("PRIVATE-ANSWER", repr(public))
-
-    def test_agent_end_without_settled_is_not_completion(self) -> None:
-        session, _rpc, _lease = self.fixture.make(native_events(("agent_end", {})))
-
-        with self.assertRaisesRegex(ProtocolError, "native terminal is invalid"):
-            asyncio.run(collect(session))
 
     def test_maps_only_exact_native_tool_events(self) -> None:
         events = native_events(
@@ -414,7 +418,7 @@ class TestAsterionPrimeSession(unittest.TestCase):
                     "isError": False,
                 },
             ),
-            ("agent_settled", {}),
+            ("agent_end", {}),
         )
         session, _rpc, _lease = self.fixture.make(events)
 
@@ -506,7 +510,7 @@ class TestAsterionPrimeSession(unittest.TestCase):
                         "args": {"code": "1+1"},
                     },
                 ),
-                ("agent_settled", {}),
+                ("agent_end", {}),
             ),
             "uncertain": native_events(
                 (
@@ -526,7 +530,7 @@ class TestAsterionPrimeSession(unittest.TestCase):
                         "effect": "uncertain",
                     },
                 ),
-                ("agent_settled", {}),
+                ("agent_end", {}),
             ),
         }
         for label, events in cases.items():
@@ -544,7 +548,7 @@ class TestAsterionPrimeSession(unittest.TestCase):
     def test_model_callback_cap_is_exactly_128(self) -> None:
         events = native_events(
             *(("turn_start", {}) for _ in range(129)),
-            ("agent_settled", {}),
+            ("agent_end", {}),
         )
         session, _rpc, _lease = self.fixture.make(events)
 
@@ -780,7 +784,7 @@ class TestAsterionPrimeSession(unittest.TestCase):
     ) -> None:
         cases = {
             "duplicate terminal": native_events(
-                ("agent_settled", {}), ("agent_settled", {})
+                ("agent_end", {}), ("agent_end", {})
             ),
             "malformed private": native_events(
                 (

@@ -50,9 +50,7 @@ for line in sys.stdin:
             "type": "message_update",
             "assistantMessageEvent": {"type": "text_delta", "delta": message},
         })
-        if message.startswith("paired-terminal-"):
-            emit({"type": "agent_end", "messages": []})
-        emit({"type": "agent_settled"})
+        emit({"type": "agent_end", "messages": []})
         late_stderr = message == "late-stderr"
     elif request_type == "compact":
         emit({"type": "compaction_start", "reason": "manual"})
@@ -112,7 +110,24 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-    async def test_consecutive_prompts_consume_agent_end_then_agent_settled(self) -> None:
+    async def test_prompt_completes_on_default_agent_end_terminal(self) -> None:
+        rpc = self.make_session(deadline_seconds=0.2)
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+
+        result = await rpc.prompt(
+            "selected-default-terminal",
+            signal=NeverCancelled(),
+            on_event=self.events.append,
+        )
+
+        self.assertEqual(result.final_text, "selected-default-terminal")
+        self.assertEqual(
+            [event.type for event in result.events],
+            ["response", "agent_start", "message_update", "agent_end"],
+        )
+
+    async def test_consecutive_prompts_complete_on_agent_end_terminal(self) -> None:
         rpc = self.make_session()
         await rpc.open(signal=NeverCancelled())
         self.addAsyncCleanup(rpc.close)
@@ -129,8 +144,8 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
 
         for result in results:
             self.assertEqual(
-                [event.type for event in result.events[-2:]],
-                ["agent_end", "agent_settled"],
+                result.events[-1].type,
+                "agent_end",
             )
         self.assertEqual(
             [result.request_id for result in results], ["py-1", "py-2"]
