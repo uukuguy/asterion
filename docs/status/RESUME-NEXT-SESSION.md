@@ -1,134 +1,46 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-10 21:12 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-11 08:00 CST. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- 原生 `asterion.prime` 已通过 Asterion 的 Pi 集成真正完成 ARC-AGI-3 `ls20-9607627b` Level 1；没有使用 prime-agent 源码、SDK、预置答案或动作序列。
-- 旧 Prime SDK P7 解题套壳已删除；`prime.arc-agi-3-solving@1.0.0` 只由原生 `prime-applications` 提供。
-- 解题过程已形成固定制品体系：规范化事实、版本化分析、版本化渲染、可回放网页和单文件 HTML 导出。
-- 双语 README 已调整为 Asterion 框架主体、ARC-AGI-3 应用案例；GitHub About 与 Topics 已同步。
-- `602013fe` 已固化原生 P7 的精确证据边界：单题 Level 1 成功不代表完整 parity、多题 benchmark 或 production promotion。
-- 原生 P1 计划 Task 0–8 已完成：provider-free operator closed loop、bounded forced cleanup 与 cleanup-before-terminal 已独立复审。
+- Native P1 provider-free implementation and packaged preflight are complete; bounded live acceptance is still open.
+- Two live attempts reached `runner.start` and returned `recovery-required` before `stage1.complete`.
+- A deterministic real-Pi wire defect was reproduced and fixed in `3450428e`: each prompt now consumes `agent_end` followed by `agent_settled` before another command is admitted.
 
-## Where things stand
+## Verified facts
 
-- 完成运行：`p7-live-20260909065351`
-- 游戏：`ls20-9607627b`，Level 1
-- 模型：`deepseek-v4-flash`
-- 结果：23 个动作、30 个画面帧、43 个推理单元、部分得分 `3.267621`
-- 终态：Level completed
-- 证据：轨迹已封存，回放验证通过
-- 该早期运行没有记录 Token 和用时，不得估算或补写。
-- Accepted analysis：`analysis-eaebabce55daf73d3eda`
-- Current render：`web-2936ab8ccd2c7b525b2d`
-- 单文件导出 SHA-256：
-  `c8ca0a727b1b36c803f3a9b1b2e2e111424f3fbbc4964ec40f6767730a62e561`
-- 没有执行 push。
-- 原生 P7/Pi 实现和正式入口已提交。工作区仍有用户所有的报告、`AGENTS.md`、旧计划和临时目录；不要清理、重置或覆盖。
+- `fd4486cb` wires isolated IPython 9.17.1 and offline Node 22 into the fixed Make preset.
+- `0af4f3d8` removes the P7-specific instruction from the shared IPython tool description.
+- `a7058616` adds closed, redacted live progress stages.
+- Pinned Pi emits `agent_end`, then `agent_settled`; the old bridge returned at `agent_end`, leaving stale settlement for prompt two.
+- A provider-free two-prompt reproduction deterministically failed before the fix with `Received agent_settled before prompt acknowledgement`.
+- `3450428e` waits for settlement, accepts non-public tool progress, and aligns all relevant fakes with the real terminal sequence.
+- Focused verification after `3450428e`: 84 related tests pass; Ruff and `git diff --check` pass.
+- No model/provider was invoked by the diagnostic or focused verification.
 
-## What this session delivered
+## Current judgment
 
-- `063b6cc9`：将 Pi usage 规范化放回公共 runtime 边界。
-- `96d8cd38`：建立数据优先、可重新生成的 ARC 解题制品体系。
-- `1ee4bb7a`：扩展解题报告的 ARC-AGI-3 与 Asterion 背景说明。
-- `962a173d`：支持单文件离线 HTML 导出。
-- `51ebae2e`：加入真实解题回放 GIF 与完整报告截图。
-- `885db712`：重写英文和中文 README，以 Asterion 框架为主体、ARC 为应用案例。
-- `e593bd89`：记录 README 纠偏和 GitHub 元数据结果。
-- `c27985e7`：固化原生 P7 真解题运行的稳定性修复。
-- `6c07c3f7`：加入固定原生 P7 真解题入口和运行比较工具。
-- `e8ac49ec`：删除 Prime SDK P7 套壳路径和发行物。
-- `602013fe`：记录原生 P7 的运行摘要、精确摘要值、验证范围和未完成 parity 边界。
-- `f069db5e`：设计原生 P1 共享内核，限定 clean attachment reconstruction、真实 Pi compact 和保守 reservation charge。
-- `a886f08a`：给出原生 P1 的 10-task TDD 计划，前置 Pi closure lock、预算探针与不确定性恢复修复。
-- `28a573eb`、`45ef7177`：锁定 Pi 压缩闭包、真实双分支尺寸和保守预算，并修正投影 smoke。
-- `79e9a964`、`81ae89a6`、`e5340a77`：实现并加固可复用 Pi RPC 生命周期及可证未派发复用。
-- `082b9067`、`59e14138`：加入指纹绑定依赖注入和认证 compact witness。
-- `d5ed4501`、`b23ea401`：封存规范持久化字节，并用可执行快照和同字节 loader 关闭 TOCTOU。
-- `a61b9abb`：统一封锁 session-context 派发后未知结果，并同步共享预算快照。
-- `de261473`、`8f8c6709`、`f0169ca4`：实现共享 Prime backend/store/kernel，并加固 live 恢复、真实 compact 终结、全程 deadline 与 witness/native 绑定。
-- `bb38db23`、`bf61ff3f`：接入 native control/context，验证双 Host 恢复并清洗取消异常链。
-- `99638af6`、`7d6e8521`：实现 P1 worker/oracle/receipt，封存文件连续性、写入限额及 Python 3.10–3.14 可移植性。
-- `1f3993dd`：发布 native P1 capability/assembly/runtime，迁移公开 index 并保持 P7 单 binding 行为。
-- `a611bf42`：实现参数无关 Native P1 operator/coordinator、固定 Make preset 与有界 owner 清理。
+- The reproduced stale-terminal defect is the strongest explanation for the latest Stage 1 live failure, but live causality is not proven until the fixed preset succeeds or advances farther.
+- Keep verification research-weight: targeted contract tests plus one bounded live run; do not reopen the 4060-test release-style suite.
 
-主要入口：
+## Unfinished boundary
 
-- `src/asterion/applications/prime/p7/run_story/`
-- `artifacts/arc-agi-3/`
-- `README.md`
-- `README.zh-CN.md`
-- `docs/assets/arc-agi-3/`
-- `docs/superpowers/specs/2026-09-09-readme-arc-agi-3-achievement-design.md`
+- Native P1 is not accepted until `make asterion-prime-p1-run` returns `status: completed` with a non-null receipt hash.
+- If it still fails, use the last safe stage marker to narrow the next diagnosis; do not infer P1 capability from provider-free fakes.
+- P2–P6 reimplementation has not started and should remain behind P1 live closure.
 
-GitHub 当前公开信息：
+## Immediate next action
 
-- Description：
-  `Composable multi-runtime agent application framework for deterministic capability assembly, controlled execution, and verifiable AI applications.`
-- Website：
-  `https://github.com/uukuguy/asterion#architecture`
-- Topics 保持 11 项，包括 `agent-framework`、`multi-runtime`、`capability-system`、`interactive-reasoning` 和 `arc-agi-3`。
-
-## Verification completed
-
-- `make docs-check`
-  - 204 份 Markdown、57 个本地链接通过。
-- `uv run python -m unittest -v tests.test_prime_arc_agi_3_run_story`
-  - 10/10 通过。
-- GitHub GFM API 渲染：
-  - 中英文标题顺序、互链、图片及尺寸通过。
-- GitHub About 回读：
-  - Description、Website 和 Topics 与批准值完全一致。
-- 没有在文档阶段重新调用模型或 ARC 环境。
-- 112 个 P7 原生路由、脱钩、打包清单和保留 broker 边界测试通过。
-- Prime Gateway TypeScript 重新编译通过；`uv build --wheel` 通过，wheel 不含已删除的 SDK 套壳。
-- 原生 P1 书面 spec 经 Astra 与 Sol 独立复审，无 planning blocker；`make docs-check` 检查 205 份 Markdown、57 个链接通过。
-- 原生 P1 实施计划经三路子代理分析和 Astra 三轮关键复审后批准；`make docs-check` 检查 206 份 Markdown、57 个链接通过。
-- Task 0：7 个聚焦、59 个回归、13 个 TypeScript 测试及 wheel/installed smoke 通过；完整 promotion 因既有外部 Prime source binding 受限，不得记为 PASS。
-- Task 1：72 个命名回归及 Ruff、format、Pyright、diff 检查通过，Astra 复审 clean。
-- Task 2：74 个 Python、35 个扩展、8 个 loader 测试及 Ruff、typecheck、wheel 字节一致性通过；Sol 复审批准，仅留一个非门禁 Pyright 类型质量 Minor。
-- Task 3：79 个相关回归、Ruff、Pyright 与 settlement 窄探针通过；Sol 复审无 findings。
-- Task 4：实现后经两轮阻断修复；最终 179 个实现侧测试与 141 个独立复审测试通过，Astra 复审无遗留 findings。
-- Task 5：Gate G4 46 个、legacy 78 个测试通过；独立复审 96 个测试通过且无 findings。
-- Task 6：45 个 worker/oracle/portability 测试在 Python 3.10、3.11、3.12、3.14 的独立环境通过；Sol 安全复审无 findings。
-- Task 7：46 个实现回归及两次 fresh wheel/install 通过；Astra 复审仅留 Task 9 前需处理的 stale builtin-test Minor。promotion 仍因既有 external Prime source binding 受限，非 PASS。
-- Task 8：31 个 G6、137 个联合回归和真实 Pi 强制回收路径通过；Astra 提交级复审无 findings。
-
-## Next steps
-
-1. 执行 Task 9 的 provider-free、installed、安全审查和 pre-live 门禁；先修 stale builtin capability 测试策略。
-2. 仅在 pre-live 门禁干净后运行一次授权的 bounded-live preset，再跑全仓与 promotion gates 并更新最终证据。
-3. 在原生 P1 闭环后，再按 P2、P4、P3、P5、P6 的依赖顺序迁移；不得将历史 Prime Agent 运行冒充为原生闭环。
-4. 在明确要求前不要 push，也不要启动计划外模型运行。
-
-## Do not repeat
-
-- 不得重新把 Asterion Prime 实现建立在 prime-agent 源码或 SDK 上。
-- 不得用预置答案、预置动作或 seeded replay 冒充智能体真解题。
-- 不得把 ARC-AGI-3 写成 Asterion 项目的主体；它只是一个应用案例。
-- 不得把事后证据讲解称为隐藏思维链。
-- 不得为旧运行推测 Token、用时或未记录的模型统计。
-- 不要为解题研究增加过度、极端的测试；保留关键边界断言即可。
-- 不要清理现有脏工作区或临时目录，除非逐项确认所有权。
-
-## Ready-to-paste commands
+Run exactly once:
 
 ```bash
-make docs-check
-sed -n '1,220p' docs/superpowers/plans/2026-09-10-asterion-prime-native-p1-shared-kernel.md
-uv run python -m unittest -v tests.test_prime_arc_agi_3_run_story
-
-uv run asterion arc-story serve
-
-uv run asterion arc-story export \
-  ls20-9607627b \
-  p7-live-20260909065351 \
-  --render web-2936ab8ccd2c7b525b2d
-
-gh repo view uukuguy/asterion \
-  --json description,homepageUrl,repositoryTopics
-
-git status --short
-git log --oneline origin/main..HEAD
+make asterion-prime-p1-run
 ```
+
+Expected success: progress passes `stage1.complete`, compaction/reconstruction, and `stage2.complete`, then reports `status: completed` with `receipt_sha256`.
+
+## Working tree boundary
+
+- Do not clean or overwrite the user's modified `.superpowers/sdd/task-*-report.md`, `AGENTS.md`, old untracked plans, or `tmp*` directories.
+- No push is authorized.

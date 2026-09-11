@@ -2252,3 +2252,9 @@
 - 23:33 对齐 metadata 与 Docker fixtures 到既有精确合同 [2310f382]
 - 23:52 封闭 promotion 嵌套 npm 策略，并声明产品测试 extras [4c27a874]
 - 01:00 接通隔离 IPython 与 Node 22，使 Native P1 预检可执行 [fd4486cb]
+- 07:46 移除共享 IPython 的 P7 专用提示，避免 Native P1 模型误导 [0af4f3d8]
+- 07:51 输出封闭 P1 阶段枚举，使 live 恢复失败可定位且不泄密 [a7058616]
+
+## 2026-09-11
+
+- 07:59 等待 Pi settled 后再放行后续提示，消除跨轮终止事件污染 [3450428e]
