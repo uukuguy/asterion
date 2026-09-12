@@ -1,5 +1,29 @@
 # Repository Guidelines
 
+本项目是长时间自主研究型 AI 编程
+
+- 任务编排
+For GPT:
+积极使用 subagent完成具体任务，合理选择astra, sol,terra,luna 模型完成各项具体工作。根 sol 做集成调度，机械检查简单处理等重复性工作交给 Luna；日常独立脚本代码编写修复等工作交给 terra 完成；主力编程等工作交给sol，一直出错则该任务切换成 astra 编写；最复杂的契约设计、恢复合同、训练架构、复杂故
+障和最终关键复审等由 astra 处理，必要时安排 Sol 独立复审
+For Claude:
+积极使用 subagent完成具体任务，合理选择Fable, Opus, Sonnet, Haiku 模型完成各项具体工作。根 Opus 做集成调度，机械检查简单处理等重复性工作交给 Haiku；日常独立脚本代码编写修复等工作交给 Sonnet 完成；主力编程等工作交给 Opus，一直出错则该任务切换成 Fable 编写；最复杂的契约设计、恢复合同、训练架
+构、复杂故障和最终关键复审等由 Fable 处理，必要时安排 Opus 独立复审
+- 解题研究而非发布产品，测试不需要过于严苛极端，保证边界控制断言即可。不要在测试环节花费的过多时间
+- 研发阶段复审和测试的重点应该是变更后代码实现的评审
+- 及时完整提交，不要积累大量未跟踪、未提交的文件
+
+## Handoff 跨会话收口合同
+
+用户说 `handoff` 时，直接完成最终会话收口，不再把草稿交回用户确认：停止本会话遗留进程，处理并提交本会话改动，保证 `git status --short` 为空；把核心分析、已验证事实、当前判断、过时归档、未完成边界和下一动作写入 `RESUME-NEXT-SESSION.md`。同步修正 `CURRENT-STATE.md`、`DECISIONS.md`、`docs/status/INDEX.md` 与协作 `MEMORY.md` 的错误或缺失索引，使新会话执行 `project-state resume` 后无需聊天记忆即可继续。
+
+收口必须控制在必要范围：优先更新既有核心文件，不为一次交接扩张新的状态体系；验证以状态一致性、关键路径可检索、无遗留进程和 Git 干净为准。事实分类固定为：
+
+- **已验证事实**：由提交、测试、评估、进程或文件证据直接支持。
+- **当前判断**：基于现有证据选择的方向，尚未被端到端评估证明。
+- **历史归档**：已否决或被替代但值得避免重走的路径。
+- **未完成边界**：不得从局部代码或单元测试推断为任务能力完成。
+
 ## Scope and Authority
 
 Asterion is a composable, multi-runtime agent application framework. The wheel defined by root `pyproject.toml` and implemented in `src/asterion/` is authoritative. DCI is the reference product, not a dependency generic framework code may assume. Pi, data, credentials, generated evidence, and the parent DCI baseline remain external.
