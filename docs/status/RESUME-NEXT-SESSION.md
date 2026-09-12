@@ -18,6 +18,8 @@
 - Independent critical review returned APPROVE with no blocker/major after revision.
 - `make docs-check` passed with 207 Markdown files and 57 local links.
 - No Asterion/P1/Prime process from this session remains running.
+- Twelve pre-existing benchmark temporary directories were preserved in Git
+  stash `181800a4656fe4cf568991724ae88eaccd4eb5bf`; they are not active inputs.
 
 ## 当前判断
 
@@ -63,3 +65,5 @@ git status --short
 - Do not inspect or invoke `3th-party/prime-agent.git`.
 - Do not restore Prime checkout dependencies to satisfy old tests.
 - Do not push unless explicitly requested.
+- Restore the benchmark-residue stash only if its old fixture files are needed;
+  it is not part of the native reset implementation.
