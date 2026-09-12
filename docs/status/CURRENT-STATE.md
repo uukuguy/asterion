@@ -5,17 +5,15 @@
 - Project: Asterion
 - Active branch: local `main`; implementation verification is scoped to its
   named boundaries, and `origin/main` remains unchanged
-- Theme-level focus: close framework and capability-package integration gaps,
-  then prove independent cross-package and cross-runtime execution. Prime and
-  Native remain parallel runtime integrations.
+- Theme-level focus: remove every Prime Agent execution edge from the Asterion
+  distribution, revalidate native P7, then rebuild P1-P6 on that implementation.
 - Project route: managed
-- Canonical worklist: `docs/status/FRAMEWORK-INTEGRATION-WORKLIST.md`
-- Active work package: the first native `asterion.prime` AgentRuntime slice and
-  P7 application are implemented and live verified. Historical P1–P7 Prime
-  Agent development reproductions remain closed at their named boundaries.
-  Asterion Prime control-plane parity and native P1–P6 applications are the next
-  program boundary; full multi-game benchmarking and production promotion
-  remain separately authorized work.
+- Canonical worklist: implementation plan pending from
+  `docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md`
+- Active work package: P1-P7 native detachment planning. Native P7 is the
+  implementation anchor; P1-P6 Prime-backed execution is historical evidence,
+  not native closure. Full benchmarking and production promotion remain
+  separately authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
   W2 public extension reference, W3a cross-package evidence, W3b
@@ -47,8 +45,9 @@
   generic framework layers remain domain-neutral.
 - Python owns orchestration, exact resolution, authority, admission, budgets,
   canonical journal/state, application execution, and public-safe evidence.
-- TypeScript validates shared contracts and owns the Prime Node/Gateway
-  boundary. Rust remains limited to controlled execution.
+- TypeScript validates shared contracts and may own Asterion Pi extension or
+  Node integration code. Prime Gateway execution is legacy and must leave the
+  distribution. Rust remains limited to controlled execution.
 - `asterion.prime` and `asterion.native` are peer agent integrations over the
   shared Asterion framework. P1–P7 are applications, not the base agent kernel.
   Neither integration may authorize itself or bypass runners and injected host
@@ -65,8 +64,9 @@
 - The approved design places a new closed `asterion.agent-client/v1`
   projection above `ControlHost`; existing control/runtime v1 contracts remain
   unchanged.
-- Prime source, credentials, provider configuration, private content, and
-  generated evidence remain external and operator-owned.
+- Prime Agent may exist only as an external black-box baseline whose exported
+  neutral logs are read outside execution. Credentials, provider configuration,
+  private content, and generated evidence remain operator-owned.
 
 ## Verified Boundary
 
@@ -164,57 +164,10 @@
   depth policy, two-child work, causal messaging, active reconnect,
   application/oracle, healthy observations, budget, cleanup, and public
   privacy. This evidence is not Smoke Full or parity promotion evidence.
-- P1's development reproduction is CLI verified. The exact installed route
-  completed one Prime SDK session, five provider callbacks, two Docker-backed
-  IPython cells, manual compact, oracle and cleanup, then returned the safe
-  `p1-b-development/unpromoted` trace
-  `sha256:a8be640bdcee9c93ea3e382729db561e4c29e071d3ff776335daac4ff572c703`.
-  Post-run inspection found zero Prime Node processes and zero P1-B containers.
-  Production authority promotion remains separate release work.
-- P2 `prime.programmatic-long-context/v1` is CLI verified in development. Its
-  installed route completed one Prime SDK session, two model callbacks, one
-  Docker-backed IPython cell, the fixed corpus oracle and cleanup. It returned
-  only `p2-development/unpromoted` trace
-  `4ec38c0cb80010941892523610bb9cdbf8b37c213ed6c759fcd794f30d57a62e`;
-  post-run inspection found zero P2 containers and zero P2 Node processes.
-- P3 `prime.recursive-workflow/v1` is CLI verified through the exact installed
-  route: `make prime-p3-run` passed with trace
-  `sha256:b961b0ffc13a1e686a73361b9b25b9169690c942a5a84a3604d52f87e5ebe796`,
-  14 focused tests passed, and zero Prime processes or temporary directories
-  remained.
-- P4 `prime.long-session-continuity/v1` is CLI verified in development. The
-  installed route completed checkpoint persistence, direct native detach and
-  exact zero-gap reattach, one compact, five model callbacks, two Docker-backed
-  IPython cells, the repeated AST oracle and cleanup. `make prime-p4-run`
-  exited 0 with `p4-development/unpromoted` trace
-  `sha256:0bd39b78189f739dcb07123947599276d3f91e7dc24da9407be14ee283e5bebf`.
-  Crash/restart replay and production promotion remain separate work.
-- P5 `prime.bounded-autonomy/v1` is CLI verified in development. Its installed
-  route completed one real Prime session, four model callbacks, two Docker
-  IPython actions, failed-quality feedback, exact repair, independent host gates
-  and cleanup. `make prime-p5-run` exited 0 with
-  `p5-development/unpromoted` trace
-  `sha256:64268243e6e95133a7379e7e9819cc8e4d6609608d8af5375a7b4b6164c55103`;
-  residue inspection found zero P5 containers, gateways and workspaces.
-- P6 `prime.continual-improvement/v1` is development closure / CLI verified. The
-  exact `PRIME_RUN_ID=prime-p6-20260906-final make prime-p6-run` command exited 0
-  with scope `p6-development/unpromoted` and trace
-  `sha256:51f6454e90a2286dfd0fabaa3f3cf7f7870cd57abf95890845b4efd01048b335`.
-  Nineteen Python tests, two TypeScript tests, and Ruff passed; residue
-  inspection found zero Prime P6 containers. Production promotion remains
-  separate and is not claimed.
-- P7 `prime.arc-agi-3/v1` is development closure / CLI verified. The exact
-  `PRIME_RUN_ID=prime-p7-20260906-final-locked make prime-p7-run` command exited 0
-  with scope `p7-development/unpromoted` and trace
-  `sha256:a2c1fa78367c4eb4e5b424ca5a717c9cb83f5db8661f57cec22a58a9ff2f0ef1`.
-  The run used the official offline game `ls20-9607627b`, seed 0, one episode
-  capped at four actions, a real Prime SDK session with three prompts, six
-  model callbacks and three IPython actions, isolated broker/container
-  execution, host score replay and cleanup. Thirty-three focused Python tests
-  passed (one operator opt-in test skipped) and two P7 TypeScript tests passed;
-  residue inspection found zero remaining resources. This closes the bounded
-  action-limit episode reproduction only; it does not claim a game WIN, full
-  multi-game benchmark, or production promotion.
+- Historical P1-P7 development runs used Prime Agent SDK/Gateway execution.
+  Their traces remain behavioral history only and prove no native Asterion
+  Prime application closure. Formal legacy selectors and packaged execution
+  surfaces are pending removal; P1-P6 remain unavailable until rebuilt.
 - Native Asterion Prime P7 is live verified independently of that historical
   four-action reproduction. Run `p7-live-20260909065351` used
   `deepseek-v4-flash` to complete Level 1 of `ls20-9607627b` in 23 primitive
@@ -225,20 +178,16 @@
 
 ## Open Problems
 
-- Implement the remaining Asterion Prime kernel surfaces: control-plane client,
-  durable session recovery, context accounting and compaction, child-agent
-  coordination, bounded autonomy, and improvement/rollback evidence.
-- Port P1–P6 applications to native `asterion.prime` before claiming complete
-  parity. Their existing Prime-Agent-backed runs are historical application
-  evidence, not native-kernel closure.
+- Remove legacy Prime Agent provider/runtime/SDK/Gateway execution from all
+  formal entry points, package data, Make targets, tools, and acceptance tests.
+- Revalidate P7 without a Prime checkout, then rebuild P1, P2, P4, P3, P5, and
+  P6 on the shared native `asterion.prime` path.
 - Keep every compound Asterion-native row missing until Phase 3.2+ evidence
   proves the exact mandatory scenarios.
 - Prove pinned/next-build compatibility only with separate exact locks and
   reviewed difference records.
-- Prime source locking now hashes the declared source inputs while excluding
-  only declared generated build products. The pinned `a18809e...` checkout
-  reproduces cleanly, and the historical H-036/H-038 closure passed promotion. Those
-  historical results do not verify the current uncommitted changes.
+- Historical Prime source-lock results are archived evidence only. No Prime
+  source lock may remain in an Asterion implementation or release path.
 - Keep any real ARC-AGI-3 full-suite or multi-game reproduction behind an exact
   finite operator authorization; production promotion remains separate.
 
@@ -272,6 +221,7 @@
 - `docs/status/PRIME-PARITY-LEDGER.md`
 - `docs/status/PRIME-TYPICAL-APPLICATIONS.md`
 - `docs/status/ASTERION-PRIME-P7-EVIDENCE.md`
+- `docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md`
 - `.superpowers/sdd/client-interfaces-task-10-report.md`
 - `.superpowers/sdd/operational-parity-task-16-report.md`
 - `.superpowers/sdd/native-core-task-10-report.md`
@@ -288,8 +238,8 @@
   reduction from four ecosystem receipts to ten observations
 - `src/asterion/control/providers/prime/parity_testing.py` — provider scenario
   registry
-- `packages/typescript/prime-gateway/` — Prime daemon translation and durable
-  private bridge
+- `packages/typescript/prime-gateway/` — legacy Prime execution surface pending
+  removal from the distribution; not a native implementation reference
 - `tools/check_prime_parity.py` — exact domain and system claim reducer
 - `tools/verify_native_controller_core.py` — exact provider-free Native
   controller-core receipt verifier

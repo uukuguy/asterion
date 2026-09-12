@@ -10,6 +10,7 @@
 |---|---|---|
 | feedback | ✅ verified-active | `handoff` means a fast, complete cross-session closeout |
 | feedback | ✅ verified-active | Reconcile diagnostics with observed successful execution before concluding setup is missing |
+| feedback | ✅ verified-active | Preserve approved architecture across sessions; P7 is the native base for rebuilding P1-P6 |
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
 
 ## ✅ Verified Active
@@ -28,6 +29,16 @@
   configuration and path boundary before concluding that setup is missing.
 - State verification boundaries explicitly: provider-free checks, readiness,
   bounded provider-backed execution, and full-paper reproduction are distinct.
+
+### feedback — do not rediscover or reverse approved native direction
+
+- P7 completed the Prime Agent to Asterion Prime native transition. P1-P6 must
+  be rebuilt on that implementation, not repaired on Prime Agent wrappers.
+- Treat Prime Agent source/SDK as external historical evidence only. Do not
+  relabel a source-coupled execution path as native because Asterion owns its
+  outer orchestration.
+- For research development, emphasize review of changed implementation and
+  focused boundary assertions; avoid release-scale test suites unless asked.
 
 ## 🟠 Current Judgments
 

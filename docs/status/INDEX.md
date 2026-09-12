@@ -20,12 +20,12 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `DCI-BENCHMARK-INSTANCES.md` | 🟢 active | DCI benchmark implementation and verification backlog. |
 | `PATHLIGHT-DCI-DIAGNOSIS.md` | 🟢 active | Provider-free six-run DCI Pathlight diagnosis; safe numeric observations and unapproved follow-up proposals. |
 | `PRIME-PARITY-LEDGER.md` | 🟢 active | Pinned Prime baseline, stable parity domains, evidence levels and provider gap status. |
-| `PRIME-TYPICAL-APPLICATIONS.md` | 🟢 active | Canonical Prime seven-scenario worklist; P1–P7 development closures are CLI verified at named bounded scopes; full benchmarking and production promotion remain separate. |
-| `FRAMEWORK-INTEGRATION-WORKLIST.md` | 🟢 active | Canonical post-Prime framework worklist: core consistency, public extension, cross-package and cross-runtime integration evidence. |
+| `PRIME-TYPICAL-APPLICATIONS.md` | 🟡 decision-history | Historical Prime-backed P1-P7 behavior and traces; not native Asterion Prime closure. |
+| `FRAMEWORK-INTEGRATION-WORKLIST.md` | 🟡 decision-history | Completed framework integration worklist; superseded as active route by the 2026-09-12 native reset. |
 | `FRAMEWORK-PUBLIC-INVENTORY.md` | 🟢 active | Metadata-only inventory of application providers, capability refs, AgentRuntime IDs, separate control providers, and evidence boundaries. |
 | `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native Asterion Prime P7 live-run facts, digests, verification boundary, and remaining parity work. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
-| `DECISIONS.md` | 🟢 active | Indexed active architecture, trust-boundary, cleanup, and Prime-first seven-scenario closure decisions. |
+| `DECISIONS.md` | 🟢 active | Indexed architecture and trust-boundary decisions; D-2026-09-12-01 governs native P1-P7 work. |
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |
 

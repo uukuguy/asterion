@@ -6,14 +6,15 @@
 |---|---|---|
 | D-2026-07-26-01 | 🟢 active | Anchor explicit operator configuration to the environment-file directory |
 | D-2026-07-31-02 | 🟢 active | Complete every DCI instance's 50-case result before considering full datasets |
-| D-2026-08-10-03 | 🟢 active | Stage Prime-managed and native kernels as peer control providers |
+| D-2026-08-10-03 | 🔴 superseded | Stage Prime-managed and native kernels as peer control providers |
 | D-2026-08-27-04 | 🟢 active | Quiesce host-owned ecosystem projections before cleanup |
 | D-2026-09-02-05 | 🟢 active | Keep Prime Smoke Core and Smoke Full evidence as distinct closed claims |
 | D-2026-09-02-06 | 🟢 active | Make Prime a full RLM-harness capability program, not a Smoke Full roadmap |
-| D-2026-09-05-01 | 🟢 active | Prime and Native remain parallel runtimes; close Prime's seven end-to-end scenarios first |
-| D-2026-09-06-01 | 🟢 active | Resume the framework-first integration sequence after Prime closure |
+| D-2026-09-05-01 | 🔴 superseded | Prime and Native remain parallel runtimes; close Prime's seven end-to-end scenarios first |
+| D-2026-09-06-01 | 🔴 superseded | Resume the framework-first integration sequence after Prime closure |
 | D-2026-09-06-02 | 🟢 active | Retain closed v1 contracts after W2/W3 integration evidence |
 | D-2026-09-06-03 | 🟢 active | Separate provider-free framework gates from release regression |
+| D-2026-09-12-01 | 🟢 active | Use native P7 as the sole Asterion Prime base and rebuild P1-P6 without Prime Agent |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -43,7 +44,7 @@
 
 ## D-2026-08-10-03 — Peer long-running control providers
 
-- Status: 🟢 active
+- Status: 🔴 superseded by D-2026-09-12-01
 - Decision: First deliver Prime Agent through a managed TypeScript Gateway, then
   implement an Asterion-native kernel as a peer provider over the same closed
   Python-owned control contracts.
@@ -104,7 +105,7 @@
 
 ## D-2026-09-05-01 — Close Prime's seven scenarios before broad framework adjustment
 
-- Status: 🟢 active
+- Status: 🔴 superseded by D-2026-09-12-01
 - Decision: Prime and Native are parallel runtimes. Preserve the unified
   capability-package framework objective, but first close the existing seven
   Prime end-to-end reproductions. Native parity is not a dependency.
@@ -124,7 +125,7 @@
 
 ## D-2026-09-06-01 — Resume the framework-first integration sequence after Prime closure
 
-- Status: 🟢 active
+- Status: 🔴 superseded by D-2026-09-12-01
 - Decision: Use `FRAMEWORK-INTEGRATION-WORKLIST.md` as the canonical mainline.
   Repair existing v1 cross-layer inconsistencies before adding protocol
   versions, product parity features, registries, or execution engines.
@@ -172,3 +173,21 @@
   and `make promotion-check` retain their full regression behavior.
 - Evidence: `docs/architecture/layered-framework-gates.md`;
   `make test.framework-provider-free`; commit `62c56284`.
+
+## D-2026-09-12-01 — Native P7 is the sole Asterion Prime base
+
+- Status: 🟢 active
+- Decision: P7's Asterion-owned `asterion.prime` implementation is the only
+  formal base for P1-P7. Rebuild P1-P6 on it. Remove Prime Agent provider,
+  runtime, SDK, Gateway execution, checkout locators, and source locks from the
+  distribution and formal entry points.
+- Rationale: Prime-backed P1-P6 wrappers reproduce behavior but violate the
+  approved P7 reset. Keeping them selectable allowed a source-coupled P1 path
+  to be mistaken for native implementation and acceptance.
+- Consequence: P1-P6 are unavailable until their native selectors return.
+  Prime Agent may supply only exported neutral baseline logs outside execution.
+  Verification stays research-weight: focused boundaries, one provider-free
+  installed-wheel witness, P7 regression, then one bounded live run.
+- Evidence: explicit user decisions on 2026-09-11 and 2026-09-12;
+  `docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md`;
+  commit `49dad716`.
