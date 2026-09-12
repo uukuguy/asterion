@@ -1,3 +1,131 @@
+# Task 1 review-fix: exception-context redaction (2026-09-05)
+
+## Scope delivered
+
+- Deferred unavailable-error construction until after malformed material
+  normalization leaves its `except` block. The resulting public `ValueError`
+  has no retained `UnicodeEncodeError` context, while the issuer key is still
+  consumed before construction.
+- Regression coverage uses `CONFIG_SECRET_SENTINEL` plus an unpaired surrogate
+  and asserts both redacted traceback text and `exception.__context__ is None`.
+
+## TDD evidence
+
+RED:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_receipt
+FAILED (failures=3)
+ValueError.__context__ retained the underlying UnicodeEncodeError, whose
+.object included CONFIG_SECRET_SENTINEL and serialized receipt material.
+```
+
+GREEN:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_receipt
+Ran 5 tests in 0.003s
+OK
+
+uv run ruff check src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
+All checks passed!
+
+uv run pyright src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
+0 errors, 0 warnings, 0 informations
+
+git diff --check
+exit 0
+```
+
+# Task 1 review-fix: malformed unavailable receipt material (2026-09-05)
+
+## Scope delivered
+
+- Normalized every post-custody material validation, receipt construction, and
+  canonical encoding failure to the public-safe unavailable `ValueError`, with
+  exception chaining suppressed.
+- Added an exact-type guard before the image-digest regex and representative
+  regressions for a non-string digest plus surrogate `authority_version` and
+  `receipt_key_id`; each proves issuer custody remains consumed and redacts the
+  receipt-key/config sentinels.
+
+## TDD evidence
+
+RED:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_receipt
+FAILED (failures=2, errors=1)
+TypeError: expected string or bytes-like object, got 'object'
+UnicodeEncodeError escaped for surrogate authority_version and receipt_key_id
+```
+
+GREEN:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_receipt
+Ran 5 tests in 0.002s
+OK
+
+uv run ruff check src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
+All checks passed!
+
+uv run pyright src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
+0 errors, 0 warnings, 0 informations
+
+git diff --check
+exit 0
+```
+
+# Task 1 report: Prime P1 signed unavailable terminal issuer (2026-09-05)
+
+## Scope delivered
+
+- Added private frozen/slot-based terminal binding, unavailable material, and
+  issued-receipt value types in `authority_receipt.py`.
+- Added one-use issuer custody: issuance atomically removes its private HMAC
+  key, signs only the canonical `UNAVAILABLE` / `unavailable` payload, and
+  returns a deeply immutable, redacted, non-pickleable receipt object.
+- The unavailable payload encodes zero model/worker/tool facts and false
+  execution-success booleans. Its absent execution artifacts are deterministic
+  domain-separated `not-created` SHA-256 values.
+- Added representative custody/one-use and altered-binding redaction tests.
+  No IPC, process, lock, Docker, provider, network, or subprocess behavior was
+  changed.
+
+## TDD evidence
+
+RED, after adding the focused private-API test and before implementation:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_receipt
+ImportError: cannot import name '_AuthorityTerminalBinding' from
+asterion.applications.prime_agent.operator.authority_receipt
+```
+
+GREEN:
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_receipt tests.test_prime_p1_authority_protocol
+Ran 26 tests in 0.012s
+OK
+
+uv run ruff check src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
+All checks passed!
+
+uv run pyright src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
+0 errors, 0 warnings, 0 informations
+
+git diff --check
+exit 0
+```
+
+## Concern / handoff
+
+The global plan requires the packaged authority artifact lock to be refreshed
+when `authority_receipt.py` changes. Per Task 1 ownership, that lock was not
+modified; the Task 2 owner must refresh it alongside its protocol changes.
+
 # Task 1 report: Prime P1 fixed application-resource admission
 
 ## Scope delivered
@@ -215,3 +343,84 @@ No Docker connection, daemon projection probe, subprocess, network request,
 model invocation, readiness frame, execute request, or production claim was
 performed. The new identity operation is a static retained-resource check;
 later authority-process work must decide when it is consumed.
+
+## Task 1: Ready-only authority transport (2026-09-05)
+
+- RED: added focused authority-process checks for the authenticated ready
+  frame and resource-digest-before-transport ordering. They initially failed
+  because aggregate admission exited unavailable before either behavior.
+- GREEN: `_run_ready_execute_exchange()` now derives the complete retained
+  resource-set digest, consumes the key and socket once, uses
+  `AuthoritySession.ready_packet()` with the canonical request-contract SHA,
+  sends exactly one frame, releases every owner, and remains unavailable.
+  It does not receive a supervisor packet or enter execution.
+- Refreshed the packaged authority artifact lock for `authority_process.py`.
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_process \
+  tests.test_prime_p1_authority_protocol \
+  tests.test_prime_p1_resource_set_identity \
+  tests.test_prime_p1_authority_artifact_lock
+Ran 70 tests in 0.035s
+OK (skipped=1: existing Linux SCM_RIGHTS capability test)
+
+uv run ruff check src/asterion/applications/prime_agent/operator/authority_process.py \
+  tests/test_prime_p1_authority_process.py
+All checks passed!
+```
+
+## Resource-set identity test-evidence follow-up (2026-09-05)
+
+- RED: the strengthened full contribution-trace assertion initially failed:
+  it observed class names rather than the required ordered trace
+  `artifact, application, static, evidence, docker executable, docker socket,
+  socket-revalidate, docker-final, socket-revalidate`.
+- GREEN: `tests/test_prime_p1_resource_set_identity.py` now independently
+  computes the aggregate SHA-256 from the literal resource-set domain and
+  local length-delimiting encoding, then rejects a representative swap of the
+  first two real child contributions. It records the full trace above, so neither a
+  swapped collection order nor an early final revalidation can satisfy it.
+- Representative retained-identity mutations cover the Docker executable,
+  Docker socket identity, socket parent-chain, and daemon-version projection:
+  each either alters the independently expected aggregate or fails at the
+  retained-FD identity check. The only socket seam remains path revalidation,
+  because this test deliberately does not create or connect to a Docker daemon.
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_resource_set_identity \
+  tests.test_prime_p1_authority_resources \
+  tests.test_prime_p1_authority_artifact_lock \
+  tests.test_prime_p1_authority_application_resources \
+  tests.test_prime_p1_authority_docker_executable \
+  tests.test_prime_p1_authority_docker_socket
+Ran 76 tests in 2.330s
+OK (skipped=1: existing unavailable atomic Linux socket-flag test)
+
+uv run ruff check tests/test_prime_p1_resource_set_identity.py
+All checks passed!
+
+git diff --check
+exit 0
+```
+
+## Ready cleanup BaseException regression (2026-09-05)
+
+- RED: a `CloseBomb(BaseException)` from the retained socket escaped pre-ready
+  cleanup and prevented retained key/config closure.
+- GREEN: descriptor and pre-ready cleanup now normalize arbitrary close
+  `BaseException`s, continue each retained owner exactly once, and surface only
+  `PrimeP1AuthorityBootstrapError`. The authority artifact lock was refreshed.
+
+```text
+uv run python -m unittest -v tests.test_prime_p1_authority_process \
+  tests.test_prime_p1_authority_artifact_lock
+Ran 42 tests in 0.022s
+OK (skipped=1: existing Linux SCM_RIGHTS capability test)
+
+uv run ruff check src/asterion/applications/prime_agent/operator/authority_process.py \
+  tests/test_prime_p1_authority_process.py
+All checks passed!
+
+git diff --check
+exit 0
+```
