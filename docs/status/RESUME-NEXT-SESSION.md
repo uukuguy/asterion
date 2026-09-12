@@ -1,45 +1,44 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-11 08:12 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-12 11:50 CST. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Native P1 provider-free implementation and packaged preflight are complete; bounded live acceptance is still open.
-- Two live attempts reached `runner.start` and returned `recovery-required` before `stage1.complete`.
-- `3450428e` used the wrong `outputs/...-r9` source contract; `26519254` restores the selected default Pi's `agent_end` terminal and adds Stage 1 substage markers.
+- P7 is the completed Asterion Prime native implementation anchor.
+- P1-P6 must be rebuilt on P7's `asterion.prime` path; Prime Agent code/SDK is behavioral history only.
+- Unified design `49dad716` is written and independently approved; user review is the gate before implementation planning.
 
 ## Verified facts
 
-- `fd4486cb` wires isolated IPython 9.17.1 and offline Node 22 into the fixed Make preset.
-- `0af4f3d8` removes the P7-specific instruction from the shared IPython tool description.
-- `a7058616` adds closed, redacted live progress stages.
-- The selected default source under `3th-party/prime-agent` emits `agent_end` and no `agent_settled`; waiting for settlement deterministically times out.
-- `26519254` restores that exact terminal contract and adds safe setup/verify/oracle start/complete markers.
-- Focused verification after `26519254`: 86 related tests pass; Ruff and `git diff --check` pass.
-- No model/provider was invoked by the diagnostic or focused verification.
+- Current P1 operator still launches Prime Agent source modules, so its live attempts are invalid as native acceptance.
+- Current P2-P6 formal development execution paths use Prime SDK/Gateway/source preparation and have no native replacements yet.
+- The legacy `prime-agent` provider/runtime, host-service entry points, package resources, Make targets, and source locks remain distributed surfaces.
+- The local Prime checkout was renamed by the user and is strictly outside the execution/test boundary.
+- `make docs-check` passes: 207 Markdown files and 57 local links.
+- The new design passed critical review after adding exact application/package/assembly/service mappings, a complete legacy-surface inventory, and minimal P1-P7 witnesses.
 
-## Current judgment
+## Approved architecture
 
-- The third live failure is explained by the wrong settlement wait introduced in `3450428e`; the original Stage 1 failure remains unlocalized.
-- Keep verification research-weight: targeted contract tests plus one bounded live run; do not reopen the 4060-test release-style suite.
+- Formal applications select only `prime-applications`; formal runtime is only `asterion.prime`.
+- Remove Prime Agent provider/SDK execution from distribution and formal entry points; retain only neutral exported-log comparison.
+- P1 retains Asterion-owned worker/oracle/control components but replaces its execution spine.
+- P2-P6 receive native implementations under `src/asterion/applications/prime/` and native capability packages.
+- Verification remains research-weight: focused boundary tests, one provider-free installed-wheel witness, P7 anchor regression, then one bounded live run.
 
 ## Unfinished boundary
 
-- Native P1 is not accepted until `make asterion-prime-p1-run` returns `status: completed` with a non-null receipt hash.
-- If it still fails, the new setup/verify/oracle marker identifies the exact boundary; do not infer P1 capability from provider-free fakes.
-- P2–P6 reimplementation has not started and should remain behind P1 live closure.
+- No implementation changes for the unified reset have started.
+- P1-P6 are not native-complete and must not expose legacy fallback selectors while unavailable.
+- P7 must be revalidated after legacy release surfaces are removed; its application logic is not being rewritten.
 
 ## Immediate next action
 
-Run exactly once:
-
-```bash
-make asterion-prime-p1-run
-```
-
-Expected success: progress passes `stage1.complete`, compaction/reconstruction, and `stage2.complete`, then reports `status: completed` with `receipt_sha256`.
+1. User reviews `docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md`.
+2. After approval, invoke `writing-plans` and create the phased implementation plan.
+3. Execute global release-surface removal and expanded detachment gate before rebuilding P1.
 
 ## Working tree boundary
 
-- Do not clean or overwrite the user's modified `.superpowers/sdd/task-*-report.md`, `AGENTS.md`, old untracked plans, or `tmp*` directories.
+- Preserve user-owned modifications to `.superpowers/sdd/task-*-report.md`, `AGENTS.md`, old untracked plans, and `tmp*` directories.
+- Do not inspect or invoke the renamed external Prime checkout.
 - No push is authorized.
