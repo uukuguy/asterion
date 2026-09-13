@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 import socket
 import subprocess
-import shutil
 import sys
 import tempfile
 import time
@@ -583,38 +582,6 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
                         resources.close_host = original_close_host
                         await original_cleanup()
 
-    def test_preflight_uses_the_current_isolated_interpreter_for_worker(self):
-        import asterion
-        from asterion.applications.prime.p1 import operator
-
-        with tempfile.TemporaryDirectory() as temporary:
-            parent = Path(temporary).resolve()
-            root = parent / "checkout"
-            root.mkdir()
-            installed = parent / "site-packages/asterion"
-            installed.mkdir(parents=True)
-            package = installed / "__init__.py"
-            package.write_text("")
-            worker = parent / "isolated/bin/python"
-            worker.parent.mkdir(parents=True)
-            worker.write_text("")
-            environment = {
-                "ASTERION_PRIME_OPERATOR_ROOT": str(root),
-            }
-            with (
-                patch.object(asterion, "__file__", str(package)),
-                patch.object(operator.sys, "executable", str(worker)),
-                patch.object(
-                    operator.subprocess,
-                    "run",
-                    side_effect=RuntimeError("probe reached"),
-                ) as probe,
-            ):
-                with self.assertRaises(Exception):
-                    operator._preflight(environment)
-            self.assertEqual(probe.call_count, 1)
-            self.assertEqual(probe.call_args.args[0][0], str(worker))
-
     async def test_runner_early_exception_is_bounded_and_cleanup_precedes_cancel(self):
         from asterion.applications.prime.p1.operator import run_fixed_small_verification
 
@@ -689,70 +656,6 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
             finally:
                 rpc.stop()
 
-    def test_live_command_uses_a_locked_existing_main_entry(self):
-        from asterion.applications.prime.p1 import operator
-
-        self.assertTrue(
-            callable(getattr(operator, "_pi_command", None)),
-            "locked main command factory is missing",
-        )
-        root = Path(__file__).resolve().parents[1]
-        source = (root / "3th-party/prime-agent").resolve()
-        lock = json.loads(
-            (
-                root
-                / "packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json"
-            ).read_text()
-        )
-        command = operator._pi_command(
-            Path("/usr/bin/node"), source, ("--extension", "/private/extension.mjs")
-        )
-        self.assertTrue((source / "packages/coding-agent/dist/main.js").is_file())
-        self.assertIn("packages/coding-agent/dist/main.js", lock["files"])
-        self.assertIn(str(source / "packages/coding-agent/dist/main.js"), command)
-        self.assertEqual(command.count("--provider"), 1)
-        self.assertNotIn("rpc-entry.js", repr(command))
-
-    def test_locked_price_and_prepare_probe_does_not_enter_verifier_cli(self):
-        from asterion.applications.prime.p1.operator import _PRICE_PROBE
-
-        root = Path(__file__).resolve().parents[1]
-        selected_node = shutil.which("node")
-        assert selected_node is not None
-        node = str(Path(selected_node).resolve())
-        result = subprocess.run(
-            (
-                node,
-                "--input-type=module",
-                "--eval",
-                _PRICE_PROBE,
-                node,
-                str(root / "tools/build_asterion_prime_compaction_lock.mjs"),
-                str((root / "3th-party/prime-agent").resolve()),
-                str(
-                    root
-                    / "packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json"
-                ),
-                str(
-                    root
-                    / "packages/typescript/prime-gateway/resources/prime-artifact-lock.json"
-                ),
-            ),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            json.loads(result.stdout),
-            {
-                "input": 140000,
-                "output": 280000,
-                "agent_dir_variable": "PRIME_AGENT_CODING_AGENT_DIR",
-            },
-        )
-        self.assertEqual(result.stderr, "")
-
     def test_launcher_has_no_tuning_arguments_and_rejects_source_import(self):
         from asterion.applications.prime.p1 import operator
 
@@ -782,42 +685,6 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(output.getvalue(), '{"stage":"runner.start"}\n')
         self.assertNotIn("SENTINEL_PRIVATE", output.getvalue())
-
-    def test_launcher_exits_with_a_stubborn_coroutine_in_an_isolated_process(self):
-        root = Path(__file__).resolve().parents[1]
-        program = r"""
-import asyncio
-from asterion.applications.prime.p1 import operator
-operator._CLEANUP_SECONDS = .1
-operator._preflight = lambda environment: None
-async def build(_): return None
-operator._build_resources = build
-async def stubborn():
-    while True:
-        try: await asyncio.Event().wait()
-        except asyncio.CancelledError: pass
-async def run(_):
-    asyncio.create_task(stubborn())
-    await asyncio.sleep(0)
-    return operator.P1PublicResult('p1-fault', 'protocol-failure')
-operator.run_fixed_small_verification = run
-raise SystemExit(operator.main([]))
-"""
-        try:
-            result = subprocess.run(
-                (sys.executable, "-c", program),
-                cwd=root,
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-        except subprocess.TimeoutExpired:
-            self.fail("launcher hung while cancelling a stubborn coroutine")
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(result.stdout)["status"], "protocol-failure")
-        self.assertNotIn("completed", result.stdout)
-        self.assertNotIn("artifact", result.stdout)
-        self.assertEqual(result.stderr, "")
 
     def test_stubborn_host_owners_are_bounded_and_real_worker_is_reaped(self):
         root = Path(__file__).resolve().parents[1]
@@ -901,127 +768,6 @@ raise SystemExit(1)
                             os.killpg(int(pid_file.read_text()), signal.SIGKILL)
                         except ProcessLookupError:
                             pass
-
-    def test_launcher_does_not_join_a_stubborn_default_executor_thread(self):
-        root = Path(__file__).resolve().parents[1]
-        program = r"""
-import asyncio, threading
-from asterion.applications.prime.p1 import operator
-operator._CLEANUP_SECONDS = .1
-operator._preflight = lambda environment: None
-async def build(_): return None
-operator._build_resources = build
-async def run(_):
-    asyncio.get_running_loop().run_in_executor(None, threading.Event().wait)
-    await asyncio.sleep(0)
-    return operator.P1PublicResult('p1-fault', 'protocol-failure')
-operator.run_fixed_small_verification = run
-if hasattr(operator, '_entrypoint'): operator._entrypoint()
-else: raise SystemExit(operator.main([]))
-"""
-        try:
-            result = subprocess.run(
-                (sys.executable, "-c", program),
-                cwd=root,
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-        except subprocess.TimeoutExpired:
-            self.fail("launcher joined a stubborn default-executor thread at exit")
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(json.loads(result.stdout)["status"], "protocol-failure")
-        self.assertEqual(result.stderr, "")
-
-
-class TestP1OperatorInstalled(unittest.TestCase):
-    def test_installed_operator_and_closed_loop_use_shared_mount_wheel(self):
-        root = Path(__file__).resolve().parents[1]
-        with (
-            tempfile.TemporaryDirectory(
-                prefix=".asterion-prime-p1-wheel.", dir=root
-            ) as built,
-            tempfile.TemporaryDirectory(prefix="asterion-p1-installed-") as cwd,
-        ):
-            environment = dict(os.environ)
-            environment.pop("PYTHONPATH", None)
-            completed = subprocess.run(
-                ("uv", "build", "--wheel", "--out-dir", built),
-                cwd=root,
-                env=environment,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            self.assertEqual(completed.returncode, 0, completed.stderr)
-            wheels = tuple(Path(built).glob("asterion-*.whl"))
-            self.assertEqual(len(wheels), 1)
-            self.assertTrue(wheels[0].is_relative_to(root))
-            program = r"""
-import asyncio, shutil, sys, unittest
-from pathlib import Path
-from importlib import metadata, resources
-import asterion
-from asterion.applications.prime.p1 import operator, coordination
-source = Path(sys.argv[1])
-assert not Path(asterion.__file__).is_relative_to(source)
-site = Path(asterion.__file__).parent.parent
-assert Path(operator.__file__).is_relative_to(site)
-assert Path(coordination.__file__).is_relative_to(site)
-assert Path(str(resources.files('asterion'))).is_relative_to(site)
-distribution = metadata.distribution('asterion')
-assert Path(str(distribution.locate_file(''))).is_relative_to(site)
-entry = next(x for x in distribution.entry_points if x.group == 'asterion.application_index' and x.name == 'prime.ipython-coding__1.0.0')
-assert entry.value == 'asterion.applications.prime:create_provider'
-assert not any(name.startswith('asterion.applications.prime_agent') for name in sys.modules)
-async def construction_only():
-    from asterion.agents.prime.compaction_budget import ModelPrice
-    from asterion.runtimes.pi_extensions import PiExtensionDependencies
-    base = Path(str(resources.files('asterion.applications.prime'))) / 'resources'
-    node = Path(shutil.which('node')).resolve()
-    dependencies = PiExtensionDependencies(
-        base / 'pi-compaction-verifier.mjs', (source / '3th-party/prime-agent').resolve(),
-        base / 'pi-compaction-lock.json',
-        Path(str(resources.files('asterion.control.providers.prime'))) / 'resources/prime-artifact-lock.json',
-        node, {name: 'string' if name in {'summarizationSystemPrompt', 'turnPrefixPrompt'} else 'function' for name in ('buildSessionContext', 'buildSummarizationPrompt', 'convertToLlm', 'prepareCompaction', 'serializeConversation', 'summarizationSystemPrompt', 'turnPrefixPrompt')},
-    )
-    preflight = operator._Preflight(source, Path(sys.executable), node, (source / '3th-party/prime-agent').resolve(), base / 'ipython-extension.mjs', dependencies, ModelPrice(140000, 280000), {'LANG':'C.UTF-8', 'P1_AGENT_DIR_VARIABLE':'PRIME_AGENT_CODING_AGENT_DIR'})
-    owned = await operator._build_resources(preflight)
-    assert not owned.backend._opened
-    assert owned.backend.kernel.model_callbacks == 0
-    await owned.open()
-    cleanup = await owned.close_in_owner_order()
-    assert cleanup.complete
-    assert not owned.private_root.parent.exists()
-asyncio.run(construction_only())
-sys.path.append(str(source))
-from tests.test_asterion_prime_p1_operator import TestP1Operator
-result = unittest.TextTestRunner().run(unittest.TestSuite([TestP1Operator('test_real_closed_loop_and_cleanup_precede_runner_terminal')]))
-raise SystemExit(0 if result.wasSuccessful() else 1)
-"""
-            checked = subprocess.run(
-                (
-                    "uv",
-                    "run",
-                    "--isolated",
-                    "--with",
-                    str(wheels[0]),
-                    "--with",
-                    "ipython==9.17.1",
-                    "python",
-                    "-I",
-                    "-c",
-                    program,
-                    str(root),
-                ),
-                cwd=cwd,
-                env=environment,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            self.assertEqual(checked.returncode, 0, checked.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()
