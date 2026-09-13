@@ -668,6 +668,15 @@ lock. Evidence:
 The detachment spec anticipates exactly this relabeling: "A Prime Agent checkout
 is not the Pi runtime and cannot be reintroduced under a Pi label."
 
+**Reconciling a conflicting read.** A separate reconnaissance pass judged this
+file "content-clean" after grepping it for `prime_agent`, `3th-party`,
+`prime-gateway`, `ASTERION_PRIME_SOURCE_ROOT` and `prime.agent` — all zero. That
+grep set does not include `packages/coding-agent/dist`, which is the token that
+actually appears 259 times. The file is clean of the Asterion-side names and
+full of the checkout-side paths; both observations are true and only the second
+decides the verdict. Do not re-open this on the strength of a zero count from a
+narrower token set.
+
 Keep the `dci` / `native` / `asterion_prime` control-plane entries.
 
 - [ ] **Step 3: Verify the metadata is still coherent**
