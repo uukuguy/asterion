@@ -989,6 +989,31 @@ git commit -m "refactor(prime): remove Prime source execution from native P1 ope
 
 ---
 
+### Task 5 post-condition — the shape `applications/prime/p1/operator.py` is left in
+
+Landed at `ba89a4de`. Recorded because the result looks like dead code and is
+not:
+
+- `_preflight` retains only its genuine native guard — refuse source execution
+  of the *asterion* package — and then `raise P1OperatorError()`. `main()`
+  catches it, prints `preflight-rejected`, and exits 2. That is the spec's
+  required intermediate unavailability: no stub, no fallback, no fake path.
+- Fully deleted, with no vestigial parameters or fields: `_Preflight`,
+  `_pi_command`, `_PRICE_PROBE`, `_build_resources`, plus twelve now-unused
+  imports.
+- **Deliberately retained and now unreachable from `main()`:**
+  `P1OperatorResources`, `run_fixed_small_verification`, `_P1Bridge`,
+  `_force_close_pi`, `_run_operator`, `_public_progress`. These are the native
+  rebuild substrate Phase 4 builds on, they carry **no** Prime edge (the file
+  reports 0 gate hits), and eighteen passing tests still exercise their
+  contracts.
+
+> **Do not delete the retained functions as dead code.** A type checker reports
+> them as unaccessed, which is exactly the signal someone acts on. They are
+> unreferenced *from `main()`*, not unused: the spec's reuse rule keeps
+> Asterion-owned components precisely so the rebuild does not start from
+> nothing. If Phase 4 replaces one, it should replace it deliberately.
+
 ### Task 6: Remove the legacy Python packages
 
 **Files:**
