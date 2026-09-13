@@ -2307,3 +2307,4 @@
 - 00:27 红基线测试落 True 树（三测绿/红断言），真实树违规 1881 记录在案 [6fadf9b]
 - 00:28 移除 legacy Prime 打包面：entry-points 收至 3/5/2，force-include/artifacts 清 Prime 资源 [bb6e23e]
 - Task 7 落地：删 prime-gateway TS 包（97 文件/−52131 行）与 prime 锁/haress，asterion-prime-extension 门禁 266→0 [019e2c48]
+- Task 8 落地：删 204 个 Prime 耦合测试模块 + 2 fixture 树，重写 8 个 native 测试去 Prime 默认，collection 0 ImportError [663a0dab]
