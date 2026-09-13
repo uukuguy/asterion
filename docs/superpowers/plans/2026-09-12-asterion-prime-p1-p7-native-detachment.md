@@ -646,6 +646,51 @@ Consequences worth acting on rather than merely recording:
 - `os.*` errors: a permission-denied file must be *recorded*, not abort. The
   implementing agent already closed this (`OSError` → `None` → violation).
 
+### Queued round 5 — closing the silent-skip class
+
+Decided, not yet implemented. A second review pass found six more classes that
+survive the fixes above, and a census established which of them have live
+instances in this tree.
+
+| Item | Decision |
+|---|---|
+| Directory symlinks | **Record** as `symlinked-directory` |
+| Unreadable `SCAN_ROOT` | Record any errno **except** `ENOENT`; `ENOENT` means legitimately absent (a built-wheel-only surface has no `packages/typescript/`, and recording that would make the gate useless there) |
+| Uppercase `.YML` etc. | Normalise the suffix comparison to lowercase |
+| `makefile` / `GNUmakefile` | Add to `SCAN_NAMES` (exact match today misses both) |
+| Extensionless files | **Document, do not fix.** Including them drags every binary into `read_bytes`; a size cap would reintroduce the silent-skip class being closed |
+| Failed per-entry `stat` | Record. `onerror` covers only `os.scandir`, so `is_file()` failures vanish quietly today |
+| `SKIP_DIRS` at any depth | Unchanged. Path-conditional skipping trades a visible broad rule for an invisible clever one |
+| `.github/` root + `.yml`/`.yaml` suffixes | Add — `ci.yml` is currently invisible twice over (wrong root *and* wrong suffix) |
+| `prime-gateway` package path | Add a locator rule. Nothing matches `packages/typescript/prime-gateway/…` today, so dangling references after Task 7 would pass unnoticed |
+
+Two ordering rules that are semantics, not implementation detail — recorded here
+so they are not reordered by someone who does not know why:
+
+1. **Prune `SKIP_DIRS` from `dirnames` first, then check `os.path.islink`.** The
+   symlink rule's safety depends on what has already been excluded. Reversed, it
+   fires on `node_modules/@dci/agent-runtime` — a vendor workspace link — and the
+   next person deletes the rule. With the correct order the scanned surface
+   contains **zero** symlinked directories today, so a blanket record costs no
+   false positives and needs no allowlist.
+2. **`followlinks=False` stays.** That same link points at a sibling workspace
+   package, so following it would both double-count that subtree and re-open the
+   skip question from a path never decided about.
+
+Census facts for the implementer: all eight symlinks in this tree (1 directory +
+7 `node_modules/.bin` entries) are inside `node_modules`; `tools/` has no
+extensionless files at its top level.
+
+The replacement walk must be built **per `SCAN_ROOT`**, not once over the repo
+root — walking the root silently changes scoping and drags `docs/` and
+`.github/` into the surface whether or not that was intended.
+
+Expect the count to move for **two independent reasons at once** when the
+`.github/` root and the `prime-gateway` rule land: newly visible files, and a new
+rule over old ones. The implementing agent reports the delta split by rule *and*
+by file, with an explicit line confirming the symlink/`ENOENT` work moved
+nothing — otherwise a correct new red reads as a regression.
+
 ### Task 2: Establish the red baseline on the real tree
 
 **Files:**
