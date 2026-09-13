@@ -2295,5 +2295,7 @@
 - 00:56 round 5 裁决：符号链接记录（先剪 SKIP_DIRS）、ENOENT 视为缺席、followlinks=False 保留 [807d1253]
 - 00:58 Task 4 落地：Makefile −122 行，legacy targets 与 3 变量全清，promotion-check 剥离 source root [701bde7]
 - 01:00 修正 Task 4 验证 grep 需锚词边界（asterion-prime-p1-run 子串冲突致永不通过）[702b9312]
+- 01:14 round 5 落地：tests 15→23，新增 prime-gateway 规则 +76；#1 类修复确认零丢失 [8291f192]
+- 01:17 该规则暴露计划缺口：check_promotion.py 六处 gateway 引用（:1090 把已删包的锁拷进发行物）[cd6d2048]
 - 00:27 红基线测试落 True 树（三测绿/红断言），真实树违规 1881 记录在案 [6fadf9b]
 - 00:28 移除 legacy Prime 打包面：entry-points 收至 3/5/2，force-include/artifacts 清 Prime 资源 [bb6e23e]

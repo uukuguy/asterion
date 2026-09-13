@@ -1,46 +1,47 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-14 00:42. **Session remains active — not a final handoff.**
+> Updated: 2026-09-14 01:20. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Phase 1 is **4 of 11 tasks done**.
-- Gate is finished and trusted: 15 tests, real tree **1856** (1105 `legacy-prime-import`, 614 `prime-source-locator`, 137 `prime-sdk-edge`, 0 `undecodable-surface-file`).
-- **Phase 1 runs one writer at a time.** The gate scans the whole tree, so a scan is never valid while anything anywhere is uncommitted. This is a recorded discipline, not a preference — see the plan's "Execution discipline".
+- Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Phase 1 is **6 of 11 tasks done**; Task 5 is executing.
+- Gate is complete: **23 tests**, real tree **1925** (1105 `legacy-prime-import`, 607 `prime-source-locator`, 76 `prime-gateway-reference`, 137 `prime-sdk-edge`).
+- **Phase 1 runs one writer at a time.** The gate walks the whole tree, so a scan is never valid while anything anywhere is uncommitted.
 
 ## 已验证事实
 
-- Task 1 `9582dab0` — semantic release-surface gate. 15 tests OK.
-- Task 2 `6fadf9b7` — red baseline. `test_gate_detects_the_known_p1_operator_edges` is the meaningful one and it passes (the gate sees `applications/prime/p1/operator.py`).
-- Task 3 `bb6e23ee` — packaging surface removed. Entry points now **3 / 5 / 2** (`asterion.applications` / `application_index` / `host_services`). Gate 1881 → 1856, delta exactly the 25 `pyproject.toml` hits (−16 legacy-import, −9 locator, 0 sdk-edge). Protected ranges (`:91-108` schemas, `:110-115` sdist) intact.
-- Task 3b `d57f7808` — an unreadable surface file is recorded as an `undecodable-surface-file` violation instead of aborting the scan. Fail-closed preserved at the assertion boundary; one bad file no longer masks every other finding.
-- **Six gate defects were introduced by the plan and all were caught before shipping.** The three that mattered most: a coverage regression that dropped the Prime SDK tokens (137 real hits, 85 of them Prime SDK session construction in `prime-gateway/src/p*-development-session.ts`); a fail-open that treated undecodable files as clean; and a codec probe written as `info.encode(...) != b"..."` when `CodecInfo.encode` returns a `(bytes, length)` **tuple**, making it true for every codec and refusing every `.py` file.
-- `pyproject.toml:79-80` shipped a **Prime checkout lock** (`pi-compaction-lock.json`, 394 KB, `source_commit a18809e0…`, `entry_points` under `packages/coding-agent/dist/*`) mislabelled as a native compaction lock. Both the spec inventory and the manual inventory had it as native. The gate caught it on its first run. Now REMOVE.
-- **A concurrent-agent incident, resolved.** One agent's in-flight broken edit made another agent's scan abort on `src/asterion/immutable.py`; the second agent reported it as a transient concurrent read. It was deterministic — `immutable.py` is index 0 in `Path("src/asterion").rglob("*.py")`, the first `.py` the broken gate tried.
+- **T1** `9582dab0` — semantic release-surface gate. **T2** `6fadf9b7` — red baseline; the meaningful test (gate sees `applications/prime/p1/operator.py`) passes.
+- **T3** `bb6e23ee` — packaging surface. Entry points **3 / 5 / 2**. **T3b** `d57f7808` — an unreadable file is recorded, not an abort.
+- **T4** `701bde75` — Make surface: −122 lines, all legacy targets and `ASTERION_PRIME_SOURCE_ROOT`/`_AUTHORITY`/`_MAX_COST_MICROS` gone; `promotion-check` keeps `ASTERION_PRIME_NODE`. Verified: `make help` and `make -n test.framework-core` both exit 0.
+- **Round 5** `8291f192` — 15 → 23 tests. Closed the silent-skip class: `os.walk` per root, `followlinks=False`, prune `SKIP_DIRS` then record `symlinked-directory`, `ENOENT` = absent, case-insensitive suffixes, `.github/` + `.yml`, and a new `prime-gateway-reference` rule (**+76**). Delta: `legacy-prime-import` +0, `prime-sdk-edge` +0, `prime-source-locator` +1 (the newly visible `ci.yml`).
+- **`#1` confirmed in the strongest form:** all four structural rules are 0 on the real tree and *the set of disappeared findings is empty* — swapping `rglob` for `os.walk` lost nothing.
+- **The gateway rule found a plan gap on a retained file.** `tools/check_promotion.py` has six sites, not the two the plan enumerated: `:240,242` assembly paths and `:1090,1372,1374,1450` gateway paths. `:1090` copied the deleted package's `prime-artifact-lock.json` into the distribution. All six now specified in Task 10.
+- **Six gate defects, all introduced by the plan, all caught before shipping.** The three worst: dropped Prime SDK tokens (137 real hits); undecodable files treated as clean; and a codec probe `info.encode(...) != b"..."` where `CodecInfo.encode` returns a `(bytes, length)` **tuple**, making it true for every codec and refusing every `.py` file.
+- **`pyproject.toml:79-80` shipped a Prime checkout lock** (`pi-compaction-lock.json`, `source_commit a18809e0…`, entry points under `packages/coding-agent/dist/*`) mislabelled native. Both the spec inventory and the manual inventory had it as native; the gate caught it on its first run.
 
 ## 当前判断
 
-- Delete-first per the spec's order. P1-P6 go unavailable.
+- Delete-first per the spec's order. P1-P6 go unavailable; the spec prefers that to a legacy fallback.
 - Prime Gateway leaves, so H-035/H-036/H-037 evidence is reclassified historical in Task 11.
-- The gate's limits are documented rather than implied: line-local literal matching only; `SCAN_ROOTS` excludes `docs/scripts/schemas`; the allowed-env-var scrub can manufacture a false positive; no line-continuation awareness.
+- The gate is a **regression guard, not an adversarial control**. Its docstring now states the precise claim: no forbidden token as a contiguous literal on one line, in a readable file with a scanned suffix under a scanned root. Known accepted evasion: runtime-assembled tokens (`"ASTERION_PRIME_" "SOURCE_ROOT"`, `importlib`, f-strings, cross-line splits) — documented beside that claim, not deferred.
 
 ## 未完成边界
 
-- Phase 1 Tasks 4-11 **not started**. No legacy package, Make target, TypeScript surface, or test has been deleted yet — only `pyproject.toml` references.
+- Tasks 5-11 open. No legacy Python package, TypeScript surface, tool, or test has been deleted yet — only `pyproject.toml` and `Makefile` references.
 - P7 not revalidated; no P1-P6 rebuilt.
 - Open: `agent-client/v1` retention (Task 9 audit, explicit report required).
 - Open: `../external-prime/arc-agi-3/venv/bin/python` — Phase 2 decides whether the ARC broker becomes an injected host service.
 
 ## Risks carried into later phases
 
-1. **Native P7 may resolve compaction through the Prime checkout lock.** Expected; the migration order places P7 revalidation after removal to surface it. Do not restore the lock to make P7 pass.
+1. **Native P7 may resolve compaction through the Prime checkout lock.** Expected; migration order surfaces it. Do not restore the lock to make P7 pass.
 2. **No detached Pi artifact has been shown to exist.** Every "pi"-named artifact inspected resolves under `ASTERION_PRIME_SOURCE_ROOT`. Phase 3 must name a genuinely detached one or report that none exists.
-3. **CI hard-fails on cache-key change.** `.github/workflows/ci.yml:26` hashFiles names prime-gateway lockfiles and `:27-29` exits 1 on a miss.
+3. **CI hard-fails on cache-key change.** `.github/workflows/ci.yml:26` hashFiles names prime-gateway lockfiles; `:27-29` exits 1 on a miss. The gate now sees this file (the +1 locator hit).
 
 ## 下一动作
 
-1. Task 4 — remove the legacy Make surface: `ASTERION_PRIME_SOURCE_ROOT` / `_AUTHORITY` / `_MAX_COST_MICROS`, `prime-check`, `prime-setup`, `prime-p{1..7}-run`, `prime-apps-preflight`, `prime-verify-bounded`, `prime-verify-native-rlm-bounded`, `test.prime-long-running.bounded`, `test.prime-continual-harness.bounded`; strip the variable from `promotion-check`; sync `.PHONY` and `help`.
-2. Tasks 5-11 in order, **one writer at a time**. Task 11 Step 3 is the green-gate acceptance.
+1. Task 5 — excise the six Prime couplings from `src/asterion/applications/prime/p1/operator.py`. **Breaks the dependency; builds no replacement** — P1 goes unavailable and stays that way until Phase 4.
+2. Tasks 6-11 in order, one writer at a time. Task 11 Step 3 is the green-gate acceptance.
 
 ## Ready-to-paste commands
 
@@ -56,4 +57,4 @@ git log --oneline -8
 - Do not inspect or invoke `3th-party/prime-agent.git`. `../external-prime/` is a separate external resource and is not covered by that prohibition.
 - Do not restore Prime checkout dependencies to satisfy old tests, and do not weaken the gate to silence a red.
 - Do not revive the multi-thousand-test promotion suite as a P1-P7 gate.
-- Three stale sibling worktrees exist on `codex/*` branches (`asterion-p1-workload`, `asterion-p2-worker`, `asterion-p3-real-rlm`, all 2026-09-03). They are outside this work and were not touched.
+- Three stale sibling worktrees exist on `codex/*` branches (`asterion-p1-workload`, `asterion-p2-worker`, `asterion-p3-real-rlm`, 2026-09-03). Outside this work; untouched.
