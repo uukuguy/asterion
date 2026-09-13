@@ -1099,7 +1099,7 @@ git commit -m "refactor(prime): delete legacy Prime Agent provider, runtime, cap
 - [ ] **Step 1: Confirm the consumer set**
 
 Run: `grep -rn 'prime-gateway' --include='package.json' --include='*.mk' --include='Makefile' --include='*.toml' . 2>/dev/null | grep -v node_modules | grep -v '^./3th-party'`
-Expected: only `Makefile` targets already slated for rework (Task 9) and
+Expected: only `Makefile` targets already slated for rework (Task 10) and
 possibly a workspace manifest line.
 
 - [ ] **Step 2: Delete the package and de-list it**
@@ -1301,7 +1301,7 @@ Already resolved by evidence — do not re-litigate, just verify:
 | `tools/generate_prime_ipython_release_spec.py` | REMOVE | `:13` imports `operator.release_spec_generation` |
 | `tools/generate_prime_development_lock.py` | REMOVE | generates a Prime development lock |
 | `tools/prepare_prime_development.py` | REMOVE | invoked by every `prime-pN-run` target |
-| `tools/check_promotion.py` | **RETAIN, re-point** | `:240,242` reference legacy assembly paths as string literals only — no import edge. Re-point at the post-removal distribution; do not delete |
+| `tools/check_promotion.py` | **RETAIN, re-point** | `:240,242` are legacy assembly paths as string literals — no import edge. Re-point; do not delete. **Six sites total, all of them** (see below) |
 | `tools/compare_prime_p7_runs.py` | RETAIN if neutral | the spec explicitly permits neutral external-log normalization. Keep only if it reads an exported log and starts no process |
 | `tools/preflight_prime_apps.py` | AUDIT | read it; it selects a legacy application set (also a REMOVE Make target) |
 | `tools/check_docs.py` | RETAIN | 0 hits; survives |
@@ -1405,6 +1405,22 @@ time with a misleading message rather than at import:
 `tools/check_docs.py` exempts `docs/status`, `docs/superpowers/plans` and
 `docs/superpowers/specs` from *import* checks but **not** from link checks, so a
 dangling link fails `make docs-check`.
+
+**`tools/check_promotion.py` — six sites, not two.** The plan originally
+enumerated only `:240,242`. The gate's `prime-gateway-reference` rule found four
+more on this *retained* file, and they are real work rather than rule noise:
+
+| Line | Reference | Why it must go |
+|---|---|---|
+| `:240`, `:242` | legacy `applications/prime_agent/assemblies/*.json` paths, as string literals | the assemblies are deleted in Task 6 |
+| `:1090` | `copy_root / "packages/typescript/prime-gateway/resources"` → `prime-artifact-lock.json` | **copies the deleted package's artifact lock into the distribution** — the sharpest of the six |
+| `:1372` | `"packages/typescript/prime-gateway"` | path into a deleted package |
+| `:1374` | `("npm", "run", "build", "--prefix", "packages/typescript/prime-gateway")` | builds a deleted package |
+| `:1450` | `("npm", "test", "--prefix", "packages/typescript/prime-gateway")` | tests a deleted package |
+
+Re-point the distribution assertions at what actually ships; do not delete the
+file. `:1090` in particular must be removed rather than re-pointed, since its
+whole purpose was verifying a lock whose subject no longer exists.
 
 - [ ] **Step 4: Verify**
 
