@@ -2286,3 +2286,5 @@
 - 00:09 BOM 门控落地，13 测试通过，真实树仍 1881 不变；Task 1 收口 [de6e8ce8]
 - 00:11 消解 compaction 锁分歧：清单位差在 coding-agent/dist 这一 token [3fc282b6]
 - 00:20 三轮安全复审后改法：门禁只接受 ASCII 兼容编码，按规则关闭整类 [0c94c49c]
+- 00:24 我给的 codec 探针写错（encode 返回元组），会拒全部 .py；由实现方拦下 [9582dab0]
+- 00:25 计划回写正确探针写法；真实树 1856，prime-sdk-edge 137 [765daccf]
