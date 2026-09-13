@@ -8,12 +8,15 @@
 - Theme-level focus: remove every Prime Agent execution edge from the Asterion
   distribution, revalidate native P7, then rebuild P1-P6 on that implementation.
 - Project route: managed
-- Canonical worklist: implementation plan pending from
-  `docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md`
-- Active work package: P1-P7 native detachment planning. Native P7 is the
-  implementation anchor; P1-P6 Prime-backed execution is historical evidence,
-  not native closure. Full benchmarking and production promotion remain
-  separately authorized work.
+- Canonical worklist:
+  `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
+  — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
+  task level. Phases 3-9 receive their own plans when reached.
+- Active work package: Phase 1 — legacy Prime Agent release-surface removal and
+  the semantic source-detachment gate. Native P7 is the implementation anchor;
+  P1-P6 Prime-backed execution is historical evidence, not native closure. P1-P6
+  are unavailable until their native selectors return. Full benchmarking and
+  production promotion remain separately authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
   W2 public extension reference, W3a cross-package evidence, W3b

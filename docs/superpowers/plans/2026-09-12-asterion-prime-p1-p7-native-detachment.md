@@ -1,0 +1,995 @@
+# Asterion Prime P1-P7 Native Detachment — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Remove every legacy Prime Agent execution edge from the Asterion
+distribution, and replace the narrow source-detachment gate with a semantic
+release-surface gate that proves the removal is complete.
+
+**Architecture:** The gate is written first and becomes the executable
+definition of "removal complete". Legacy surfaces are then deleted until the
+gate is green. This ordering means the plan never enumerates the removal in
+prose — the gate's scan roots and forbidden-edge rules are the specification,
+and the gate's own tests pin the semantics.
+
+**Tech Stack:** Python 3.12+ (`unittest`), `uv`, hatchling, GNU Make,
+TypeScript (npm workspaces), Rust (untouched by this phase).
+
+**Spec:** `docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md`
+**Decision:** `docs/status/DECISIONS.md` D-2026-09-12-01
+
+---
+
+## Global Constraints
+
+Copied verbatim from the spec; every task's requirements implicitly include
+these.
+
+- Formal P1-P7 paths must contain **none** of: a Prime checkout locator or
+  source-root environment variable; imports or dynamic imports from Prime Agent
+  packages or build output; Prime SDK session/daemon/child-agent/model-registry/
+  settings/resource/auth/compaction/tool implementation; Prime Gateway bridges
+  that execute an application through those internals; preparation or setup
+  commands for Prime Agent; artifact or source locks whose subject is Prime
+  Agent; package data or entry points for a Prime-backed provider/runtime; or
+  tests that require a Prime checkout to pass.
+- **The rule is semantic, not string-specific.** Renaming or relocating a
+  checkout does not make it an allowed dependency.
+- The distributed application provider is `prime-applications`. The formal agent
+  runtime is `asterion.prime`.
+- Legacy release surfaces are **removed rather than retained as fallbacks**.
+  Missing native capability returns an explicit unavailable result and never
+  falls back to Prime Agent.
+- Before an application is migrated, its selector is **omitted** from
+  `prime-applications` and from `asterion.application_index`, so metadata lookup
+  rejects it before importing a runtime or starting a process. No executable
+  unavailable stub is added.
+- Prime Agent may exist only outside the trust boundary as a black-box
+  historical baseline. A neutral comparison tool may read an **exported log**;
+  it may not accept a Prime checkout locator or start a Prime process.
+- Public output must not include prompts, model prose, generated code, worker
+  output, credentials, provider bodies, private paths, source locations, or raw
+  external logs.
+- `3th-party/prime-agent.git` is strictly off-limits: never read, listed,
+  launched, locked, or retargeted through configuration. `../external-prime/` is
+  a separate external resource and is **not** covered by that prohibition.
+- **Verification is research-weight.** This is research development, not a
+  production release exercise. Do not revive the multi-thousand-test promotion
+  suite as a P1-P7 gate.
+
+---
+
+## Program roadmap
+
+Nine phases, in the spec's mandated order. Phase 1 is detailed in this plan.
+Phases 3-9 receive their own plans when reached — each is an independently
+testable deliverable and must not be pre-choreographed here.
+
+| # | Phase | Depends on | Acceptance (spec-derived) | Plan |
+|---|---|---|---|---|
+| 1 | Legacy release-surface removal + expanded detachment gate | — | Gate scans the complete release surface and fails on representative forbidden references; no legacy execution edge remains | **this plan** |
+| 2 | Conversion of research presets to installed-wheel invocation | 1 | `asterion-prime-p7-solve` runs from a wheel, no `PYTHONPATH=<src>` | pending |
+| 3 | P7 native revalidation (anchor) | 2 | Expanded detachment + wheel + installed-route + focused native regression pass with no Prime checkout | pending |
+| 4 | P1 rebuild (`prime.ipython-coding`) | 3 | Spec P1 witness: two model-driven cells share one restricted worker; stage-one file bytes survive Asterion-owned compaction and host reconstruction; oracle passes; cleanup precedes public terminal | pending |
+| 5 | P2 rebuild (`prime.programmatic-long-context`) | 4 | Source material stays outside the prompt; ≥1 bounded programmatic retrieval/transform through an injected service; answer oracle passes within caps | pending |
+| 6 | P4 rebuild (`prime.long-session-continuity`) | 5 | Committed checkpoint detached, controlling process replaced, new host attaches at higher generation, continuation completes without replaying a committed effect | pending |
+| 7 | P3 rebuild (`prime.recursive-workflow`) | 6 | One root run starts an admitted child via `prime.child-runner`; child result joined; depth/concurrency/budget limits reject further spawning | pending |
+| 8 | P5 rebuild (`prime.bounded-autonomy`) | 7 | Finite propose/verify/repair with ≥1 failed verification and ≥1 bounded repair; stops on success or exact cap; no autonomous continuation | pending |
+| 9 | P6 rebuild (`prime.continual-improvement`) | 8 | Candidate evaluated against fixed baseline; non-improving rejected without promotion; improving requires explicit admitted promotion | pending |
+
+P7 is the implementation anchor. Its application logic is **not** rewritten —
+only revalidated after the legacy release surfaces are gone. P1-P6 are rebuilt
+on the shared substrate; they do not create a parallel agent/runtime.
+
+Shared-substrate changes run only the relevant application witness plus the P7
+provider-free native anchor. They do not trigger every live preset.
+
+---
+
+## Phase 1: Legacy release-surface removal + detachment gate
+
+### Verified starting inventory (evidence-backed, 2026-09-13)
+
+Recorded so the implementer does not re-derive it. Line numbers are pre-change.
+
+**`pyproject.toml`**
+- `:24-25` `[project.scripts]` — both KEEP.
+- `:30` `asterion.applications` → `prime-applications` KEEP; `:31` `prime-agent` **REMOVE**.
+- `:33-46` `asterion.application_index`, 13 rows. **REMOVE 8**: `:38` `prime.capability-program`, `:39` `prime.arc-agi-3`, `:41` `prime.bounded-autonomy`, `:42` `prime.continual-improvement`, `:44` `prime.programmatic-long-context`, `:45` `prime.recursive-workflow`, `:46` `prime.long-session-continuity` — all → `prime_agent.provider`. **REMOVE 1 more**: `:43` `prime.ipython-coding__1.0.0` → `asterion.applications.prime` — its assembly requires five host services (`prime.ipython`, `prime.p1-oracle`, `prime.pi-extension`, `prime.private-trace`, `prime.session-backend`) that have **no entry point**; only the forbidden legacy `prime.ipython-production` supplies P1 today. **KEEP**: `:40` `prime.arc-agi-3-solving__1.0.0` (native P7) and the four `code.quality`/`dci.*` rows.
+- `:48-58` `asterion.host_services`. **REMOVE 8**: `:51` `model.bounded-session`, `:52` `prime.ipython-production`, `:53-58` the six `prime.*-development` rows. **KEEP** `:49-50`.
+- `:16` optional-dependency extra `prime` — consumed only by the legacy Make targets; becomes dead. Confirm no other consumer before removing.
+- `:62-74` wheel `artifacts` — **REMOVE** `:65-66` (`applications/prime_agent/operator/resources/*.json|*.txt`), `:71-73` (`control/providers/prime/resources/control-plane.json` + `skills/asterion-control/**`). **KEEP** `:63-64` (native prime + p7 run_story), `:67-68` (dci pi), `:69-70` (native/asterion_prime control-plane).
+- `:78-90` wheel `force-include` — **REMOVE** all of `:81-90` (`prime-gateway/resources/*` → `control/providers/prime/resources/*`, including `:90` which ships a **test fixture** into the wheel). **KEEP** `:79-80` (`pi-compaction-lock.json`, `pi-compaction-verifier.mjs` — native).
+- `:91+` schema force-includes — see Task 9 (audit-gated).
+
+**`Makefile`**
+- **REMOVE variables** `:5` `ASTERION_PRIME_SOURCE_ROOT ?= 3th-party/prime-agent`, `:6` `ASTERION_PRIME_AUTHORITY`, `:7` `ASTERION_PRIME_MAX_COST_MICROS`.
+- **KEEP variables** `:8` `ASTERION_PRIME_NODE` (npm-resolved node 22 executable path — not a Prime locator), `:9` `ASTERION_PROMOTION_NPM_CACHE`, `:10` `PRIME_ORB_MACHINE`, `:2` `ASTERION_PROVIDER`.
+- **REMOVE targets** `:200-201` `prime-check`, `:203-204` `prime-setup`, `:209-219` `prime-p1-run`, `:221-231` `prime-p2-run`, `:233-243` `prime-p3-run`, `:245-255` `prime-p4-run`, `:257-267` `prime-p5-run`, `:269-279` `prime-p6-run`, `:281-291` `prime-p7-run`, `:304-305` `prime-apps-preflight`, `:497-498` `prime-verify-bounded`, `:500-501` `prime-verify-native-rlm-bounded`, `:336-337` `test.prime-long-running.bounded`, `:346-350` `test.prime-continual-harness.bounded` (note `:349` hardcodes `3th-party/prime-agent`, bypassing the variable).
+- **`promotion-check` `:115-116`** currently forwards `ASTERION_PRIME_SOURCE_ROOT` into `tools/check_promotion.py` — it is the only KEEP target that must have the variable stripped from its recipe.
+- **`help` `:48-68`** advertises 9 REMOVE targets at `:62-66`.
+- **Breakage** (KEEP targets whose recipes die when REMOVE artifacts go): `:113` `check` → `:186-191` `test-typescript` → prime-gateway build; `:307-314`, `:320-323`, `:327-332`, `:339-344`, `:358-360`, `:362-367`, `:369-373`, `:405-410`, `:412-418`, `:420-425`, `:427-432`, `:434-439`, `:441-447`, `:449-455`, `:396-403`, `:457-464` (all invoke `prime-gateway test` or `--provider asterion.prime-gateway`); `:509-510` `prime-parity-inventory`, `:512-513` `prime-verify-system-parity`.
+- **Python-only, survive cleanly**: `:352-356`, `:375-378`, `:380-383`, `:385-389`, `:391-394`.
+- **Presets**: `:293-295` `asterion-prime-p7-solve` uses `export PYTHONPATH="$(CURDIR)/src"` + `../external-prime/arc-agi-3/venv/bin/python tools/run_asterion_prime_p7.py` → **source-tree invocation, must convert** (Task 2 of the program roadmap). `:297-302` `asterion-prime-p1-run` is already an installed-wheel invocation (`uv build --wheel` → `uv run --isolated --with <wheel>`), and `src/asterion/applications/prime/p1/operator.py:987-991` already refuses source execution of the *asterion* package.
+
+**Native P1 operator (`src/asterion/applications/prime/p1/operator.py`)** — the
+split-brain that motivates the gate. It runs installed-wheel, yet reaches into
+Prime source at runtime:
+- `:918` field `source_root: Path`
+- `:934-935` dynamic `import(pathToFileURL(root + '/packages/coding-agent/dist/config.js'))` and `.../core/compaction/compaction.js`
+- `:963` launches `<source>/packages/coding-agent/dist/main.js`
+- `:1019` defaults `ASTERION_PRIME_SOURCE_ROOT` to `root / "3th-party/prime-agent"`
+- `:1035` locks `package_resources.files("asterion.control.providers.prime")`
+- `:1154` threads `source_root` downstream
+
+**Existing gate (`src/asterion/agents/prime/detachment.py`)** scans only
+`src/asterion/agents/prime/` and `src/asterion/runtimes/asterion_prime.py`
+against 5 literal tokens. It is green today **while `applications/prime/p1/operator.py`
+carries six forbidden edges** — this is the coverage gap Phase 1 closes.
+
+**Test suite** — 428 modules; ~180 reference a legacy surface
+(`asterion.applications.prime_agent`, `asterion.capabilities.prime_agent`,
+`asterion.runtimes.prime_agent`, `asterion.control.providers.prime`, the
+`prime-agent`/`prime.agent` selector, or a `3th-party/prime-agent` default).
+`tests/fixtures/` trees `prime_gateway/` and `prime-parity/` are legacy-coupled;
+`asterion_prime/`, `asterion_prime_p1/`, `operation/`, `session_context/`,
+`agent_client/` need the Task 9 audit.
+
+**Baseline before Phase 1:** `make docs-check` PASS (207 markdown files, 57
+local links). Working tree clean; `main == origin/main == f1d28b9e`.
+
+---
+
+### Task 1: Expand the detachment gate into a semantic release-surface scanner
+
+**Files:**
+- Modify: `src/asterion/agents/prime/detachment.py`
+- Create: `tests/test_prime_source_detachment.py`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `assert_asterion_prime_source_detached(root: Path) -> None` — raises
+  `AssertionError` with a message naming the offending `path:line` and the rule
+  that fired. Also `find_source_detachment_violations(root: Path) -> list[Violation]`
+  where `Violation` is a frozen dataclass with fields `path: str`, `line: int`,
+  `rule: str`. Later tasks and the Make target call these.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_prime_source_detachment.py
+"""Boundary tests for the semantic source-detachment gate.
+
+Every forbidden token below is assembled from parts. The gate scans this file
+too, so a literal token here would make the gate flag its own test suite.
+"""
+
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from asterion.agents.prime.detachment import (
+    find_source_detachment_violations,
+)
+
+
+def _t(*parts: str) -> str:
+    """Assemble a forbidden token without writing it literally."""
+    return "".join(parts)
+
+
+CHECKOUT = _t("3th-party/", "prime-agent")
+CODING_AGENT_DIST = _t("packages/", "coding-agent/dist")
+LEGACY_PROVIDER = _t("asterion.applications.", "prime_agent")
+SOURCE_ROOT_ENV = _t("ASTERION_PRIME_", "SOURCE_ROOT")
+
+
+class TestDetachmentGate(unittest.TestCase):
+    def _scan(self, files: dict[str, str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel, body in files.items():
+                target = root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(body, encoding="utf-8")
+            return [v.rule for v in find_source_detachment_violations(root)]
+
+    def test_flags_prime_checkout_locator(self) -> None:
+        rules = self._scan(
+            {"src/asterion/applications/prime/p1/operator.py": f'PRIME = "{CHECKOUT}"\n'}
+        )
+        self.assertIn("prime-source-locator", rules)
+
+    def test_flags_source_root_environment_variable(self) -> None:
+        rules = self._scan(
+            {"src/asterion/x.py": f'root = environment["{SOURCE_ROOT_ENV}"]\n'}
+        )
+        self.assertIn("prime-source-locator", rules)
+
+    def test_flags_legacy_package_import(self) -> None:
+        rules = self._scan({"src/asterion/x.py": f"from {LEGACY_PROVIDER} import provider\n"})
+        self.assertIn("legacy-prime-import", rules)
+
+    def test_flags_prime_coding_agent_launch(self) -> None:
+        rules = self._scan(
+            {"src/asterion/x.py": f'MAIN = root + "/{CODING_AGENT_DIST}/main.js"\n'}
+        )
+        self.assertIn("prime-source-locator", rules)
+
+    def test_allows_asterion_owned_operator_root(self) -> None:
+        # ASTERION_PRIME_OPERATOR_ROOT resolves to the Asterion repo/install
+        # root and ASTERION_PRIME_NODE to a node executable path. Neither is a
+        # Prime checkout, so a substring rule would false-positive here.
+        rules = self._scan(
+            {
+                "src/asterion/applications/prime/p1/operator.py": (
+                    'root = Path(environment["ASTERION_PRIME_OPERATOR_ROOT"])\n'
+                    'node = Path(environment["ASTERION_PRIME_NODE"])\n'
+                )
+            }
+        )
+        self.assertEqual(rules, [])
+
+    def test_flags_makefile_source_root_variable(self) -> None:
+        rules = self._scan({"Makefile": f"{SOURCE_ROOT_ENV} ?= {CHECKOUT}\n"})
+        self.assertIn("prime-source-locator", rules)
+
+    def test_flags_pyproject_legacy_entry_point(self) -> None:
+        rules = self._scan(
+            {
+                "pyproject.toml": (
+                    f'"prime-agent" = "{LEGACY_PROVIDER}.provider:create_provider"\n'
+                )
+            }
+        )
+        self.assertIn("legacy-prime-import", rules)
+
+    def test_reports_line_number(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f"ok = 1\nBAD = '{CHECKOUT}'\n", encoding="utf-8")
+            violations = find_source_detachment_violations(root)
+            self.assertEqual(len(violations), 1)
+            self.assertEqual(violations[0].line, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+> Every test here scans a temporary tree, so all 8 pass on the unmodified
+> repository. The real-tree assertion lives in Task 2.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `uv run python -m unittest -v tests.test_prime_source_detachment`
+Expected: FAIL — `ImportError: cannot import name 'find_source_detachment_violations'`.
+
+- [ ] **Step 3: Write the implementation**
+
+```python
+# src/asterion/agents/prime/detachment.py
+"""Semantic source-detachment gate for the Asterion Prime release path.
+
+Rejects Prime Agent checkout locators, source-root environment variables, and
+Prime Agent execution edges anywhere in an Asterion-owned release surface.
+
+The rule is semantic, not string-specific. Renaming or relocating a checkout
+does not make it an allowed dependency, and an allowed Asterion-owned root must
+not be rejected merely for containing the word "prime".
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+
+SCAN_ROOTS = (
+    "src/asterion",
+    "packages/typescript",
+    "tools",
+    "tests",
+    "Makefile",
+    "pyproject.toml",
+)
+
+SKIP_DIRS = frozenset({"node_modules", "dist", "build", "__pycache__", ".venv"})
+SCAN_SUFFIXES = frozenset({".py", ".ts", ".mjs", ".json", ".toml", ".mk", ".txt"})
+SCAN_NAMES = frozenset({"Makefile"})
+
+def _joined(*parts: str) -> str:
+    """Assemble a forbidden token without writing it literally.
+
+    This module lives under a scanned root, so a literal token here would make
+    the gate flag its own source and never pass.
+    """
+    return "".join(parts)
+
+
+# Paths/locators that identify a Prime Agent checkout or its build output.
+FORBIDDEN_LOCATORS = (
+    _joined("3th-party/", "prime-agent"),
+    _joined("packages/", "coding-agent/dist"),
+    _joined("prime-gateway/resources/", "prime-"),
+)
+
+# Environment variables whose value is a Prime source root.
+FORBIDDEN_ENV_VARS = (
+    _joined("ASTERION_PRIME_", "SOURCE_ROOT"),
+    _joined("ASTERION_OPERATIONAL_PRIME_", "SOURCE_ROOT"),
+    _joined("PRIME_AGENT_", "CODING_AGENT_DIR"),
+    _joined("PRIME_AGENT_", "KERNEL_PYTHON"),
+    _joined("PRIME_AGENT_", "KERNEL_VENV"),
+)
+
+# Modules that carry a Prime Agent execution edge.
+FORBIDDEN_IMPORTS = (
+    _joined("asterion.applications.", "prime_agent"),
+    _joined("asterion.capabilities.", "prime_agent"),
+    _joined("asterion.runtimes.", "prime_agent"),
+    _joined("asterion.control.providers.", "prime"),
+)
+
+# Asterion-owned values that legitimately contain "prime" and must never be
+# rejected: ASTERION_PRIME_OPERATOR_ROOT is the Asterion repo/install root and
+# ASTERION_PRIME_NODE is a resolved node executable path.
+ALLOWED_ENV_VARS = ("ASTERION_PRIME_OPERATOR_ROOT", "ASTERION_PRIME_NODE")
+
+
+@dataclass(frozen=True)
+class Violation:
+    path: str
+    line: int
+    rule: str
+
+
+def _iter_surface_files(root: Path):
+    for rel in SCAN_ROOTS:
+        base = root / rel
+        if not base.exists():
+            continue
+        if base.is_file():
+            yield base
+            continue
+        for child in base.rglob("*"):
+            if not child.is_file():
+                continue
+            if SKIP_DIRS.intersection(child.parts):
+                continue
+            if child.suffix in SCAN_SUFFIXES or child.name in SCAN_NAMES:
+                yield child
+
+
+def find_source_detachment_violations(root: Path) -> list[Violation]:
+    """Return every forbidden Prime Agent execution edge under ``root``."""
+    violations: list[Violation] = []
+    for path in _iter_surface_files(root):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except UnicodeDecodeError:
+            continue
+        rel = path.relative_to(root).as_posix()
+        for number, body in enumerate(lines, start=1):
+            scrubbed = body
+            for allowed in ALLOWED_ENV_VARS:
+                scrubbed = scrubbed.replace(allowed, "")
+            if any(token in scrubbed for token in FORBIDDEN_LOCATORS):
+                violations.append(Violation(rel, number, "prime-source-locator"))
+                continue
+            if any(name in scrubbed for name in FORBIDDEN_ENV_VARS):
+                violations.append(Violation(rel, number, "prime-source-locator"))
+                continue
+            if any(name in scrubbed for name in FORBIDDEN_IMPORTS):
+                violations.append(Violation(rel, number, "legacy-prime-import"))
+    return violations
+
+
+def assert_asterion_prime_source_detached(root: Path) -> None:
+    """Reject Prime Agent execution edges in any Asterion release surface."""
+    violations = find_source_detachment_violations(root)
+    if violations:
+        detail = ", ".join(f"{v.path}:{v.line} ({v.rule})" for v in violations[:10])
+        raise AssertionError(f"Asterion-prime source dependency is forbidden: {detail}")
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `uv run python -m unittest -v tests.test_prime_source_detachment`
+Expected: PASS, 8 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/asterion/agents/prime/detachment.py tests/test_prime_source_detachment.py
+git commit -m "feat(prime): replace literal detachment check with semantic release-surface gate"
+```
+
+---
+
+### Task 2: Establish the red baseline on the real tree
+
+**Files:**
+- Test: `tests/test_prime_source_detachment_real_tree.py`
+
+**Interfaces:**
+- Consumes: `assert_asterion_prime_source_detached` and
+  `find_source_detachment_violations` from Task 1.
+- Produces: nothing. This task exists to prove the gate detects the known
+  violations, so Task 5's green run is meaningful rather than vacuous.
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_prime_source_detachment_real_tree.py
+"""Proves the gate fails on the real tree until Phase 1 removal completes."""
+
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+from asterion.agents.prime.detachment import (
+    assert_asterion_prime_source_detached,
+    find_source_detachment_violations,
+)
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class TestRealTreeDetachment(unittest.TestCase):
+    def test_release_surface_is_source_detached(self) -> None:
+        assert_asterion_prime_source_detached(ROOT)
+
+    def test_gate_does_not_flag_its_own_source(self) -> None:
+        # The gate module and this test both live under a scanned root. If the
+        # gate's own literals are not assembled from parts, it flags itself and
+        # can never pass.
+        rules = [v.rule for v in find_source_detachment_violations(ROOT)]
+        self.assertEqual(rules, [])
+
+    def test_gate_detects_the_known_p1_operator_edges(self) -> None:
+        paths = {v.path for v in find_source_detachment_violations(ROOT)}
+        self.assertIn("src/asterion/applications/prime/p1/operator.py", paths)
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+- [ ] **Step 2: Run it and record the red baseline**
+
+Run: `uv run python -m unittest -v tests.test_prime_source_detachment_real_tree`
+Expected: FAIL on `test_release_surface_is_source_detached`,
+`test_gate_does_not_flag_its_own_source`, and
+`test_gate_detects_the_known_p1_operator_edges` — the last of these is the
+meaningful one. If `test_gate_detects_the_known_p1_operator_edges` does **not**
+fail, the gate has a coverage hole: fix Task 1 before continuing. Do not proceed
+on a gate that misses the documented P1 edges.
+
+All three are expected red here: the release surface still carries legacy edges,
+and the legacy test modules that assert them are still present. They turn green
+at Task 11 Step 3.
+
+- [ ] **Step 3: Commit the red test**
+
+```bash
+git add tests/test_prime_source_detachment_real_tree.py
+git commit -m "test(prime): assert release surface is source-detached (red baseline)"
+```
+
+---
+
+### Task 3: Remove the legacy packaging surface
+
+**Files:**
+- Modify: `pyproject.toml` (lines listed in the verified inventory)
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: the `prime-agent` provider, the eight legacy `application_index`
+  rows, the `prime.ipython-coding__1.0.0` row, and the eight legacy
+  `host_services` rows are gone. Task 9's gates depend on this.
+
+- [ ] **Step 1: Delete the legacy entry points**
+
+Remove from `pyproject.toml`:
+- the `"prime-agent"` key under `[project.entry-points."asterion.applications"]`;
+- under `[project.entry-points."asterion.application_index"]`:
+  `prime.capability-program__1.0.0`, `prime.arc-agi-3__1.0.0`,
+  `prime.bounded-autonomy__1.0.0`, `prime.continual-improvement__1.0.0`,
+  `prime.ipython-coding__1.0.0`, `prime.programmatic-long-context__1.0.0`,
+  `prime.recursive-workflow__1.0.0`, `prime.long-session-continuity__1.0.0`;
+- under `[project.entry-points."asterion.host_services"]`:
+  `model.bounded-session`, `prime.ipython-production`, and the six
+  `prime.*-development` rows.
+
+Do **not** touch `prime-applications`, `prime.arc-agi-3-solving__1.0.0`,
+`corpus.local-root`, `evaluation.answer-judge`, or the `dci.*` / `code.quality`
+rows.
+
+- [ ] **Step 2: Delete the legacy wheel content mappings**
+
+- from `[tool.hatch.build.targets.wheel] artifacts`: the two
+  `applications/prime_agent/operator/resources/*` entries and the three
+  `control/providers/prime/resources/...` entries;
+- from `[tool.hatch.build.targets.wheel.force-include]`: the nine
+  `packages/typescript/prime-gateway/resources/...` entries and the
+  `tests/fixtures/prime_gateway/v1/real-prime-operations.mjs` entry.
+
+Keep the native `pi-compaction-lock.json` / `pi-compaction-verifier.mjs`
+entries and the `dci` / `native` / `asterion_prime` control-plane entries.
+
+- [ ] **Step 3: Verify the metadata is still coherent**
+
+Run: `uv run python -c "import tomllib,pathlib; d=tomllib.loads(pathlib.Path('pyproject.toml').read_text()); eps=d['project']['entry-points']; print({k: len(v) for k, v in eps.items()})"`
+Expected: `asterion.applications` has 3 keys; `asterion.application_index` has
+5; `asterion.host_services` has 2.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add pyproject.toml
+git commit -m "refactor(prime): remove legacy Prime Agent packaging surface"
+```
+
+---
+
+### Task 4: Remove the legacy Make surface
+
+**Files:**
+- Modify: `Makefile`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: no Make target locates or propagates a Prime source root. Task 9
+  depends on this.
+
+- [ ] **Step 1: Delete the variables and targets**
+
+Delete variables `ASTERION_PRIME_SOURCE_ROOT`, `ASTERION_PRIME_AUTHORITY`,
+`ASTERION_PRIME_MAX_COST_MICROS`; and targets `prime-check`, `prime-setup`,
+`prime-p1-run` … `prime-p7-run`, `prime-apps-preflight`, `prime-verify-bounded`,
+`prime-verify-native-rlm-bounded`, `test.prime-long-running.bounded`,
+`test.prime-continual-harness.bounded`.
+
+Keep `ASTERION_PRIME_NODE`, `ASTERION_PROMOTION_NPM_CACHE`, `PRIME_ORB_MACHINE`,
+`ASTERION_PROVIDER`.
+
+- [ ] **Step 2: Strip the variable from the surviving recipe**
+
+In the `promotion-check` recipe (`:115-116`), remove the
+`ASTERION_PRIME_SOURCE_ROOT="$(ASTERION_PRIME_SOURCE_ROOT)"` prefix so it no
+longer forwards a source root.
+
+- [ ] **Step 3: Update `.PHONY` and `help`**
+
+Remove the deleted target names from the `.PHONY` lines (`:27-32`) and from the
+`help` text (`:62-66`). `make help` must not advertise a target that no longer
+exists.
+
+- [ ] **Step 4: Verify no dangling references**
+
+Run: `grep -nE 'ASTERION_PRIME_SOURCE_ROOT|ASTERION_PRIME_AUTHORITY|ASTERION_PRIME_MAX_COST_MICROS|prime-p[1-7]-run|prime-apps-preflight|prime-check|prime-setup' Makefile`
+Expected: no output.
+
+Run: `make help`
+Expected: exits 0, lists no `prime-pN-run` / `prime-check` / `prime-setup`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Makefile
+git commit -m "refactor(prime): remove legacy Prime Agent make surface"
+```
+
+---
+
+### Task 5: Excise the Prime execution edges from the native P1 operator
+
+**Files:**
+- Modify: `src/asterion/applications/prime/p1/operator.py:918,934-935,963,1019,1035,1154`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `applications/prime/p1/operator.py` no longer resolves a Prime
+  source root, imports Prime build output, launches Prime's coding agent, or
+  locks a Prime Gateway artifact. Task 2's test turns green for this file.
+
+- [ ] **Step 1: Remove the source-root field and its threading**
+
+Delete the `source_root: Path` field at `:918` and its use at `:1154`. Delete
+the `ASTERION_PRIME_SOURCE_ROOT` default at `:1019`.
+
+- [ ] **Step 2: Remove the Prime dynamic imports and launch**
+
+Delete the dynamic imports at `:934-935` (`coding-agent/dist/config.js`,
+`core/compaction/compaction.js`) and the `main.js` launch at `:963`. Session
+compaction semantics come from the Asterion-owned compaction verifier already
+shipped as `applications/prime/resources/pi-compaction-verifier.mjs`
+(`pyproject.toml:80`) — do **not** substitute a Prime internal module.
+
+- [ ] **Step 3: Remove the Prime Gateway artifact lock**
+
+Delete the `package_resources.files("asterion.control.providers.prime")` lock at
+`:1035`.
+
+- [ ] **Step 4: Verify the file is clean and the package still imports**
+
+Run: `grep -nE 'source_root|SOURCE_ROOT|coding-agent/dist|control\.providers\.prime|3th-party' src/asterion/applications/prime/p1/operator.py`
+Expected: no output.
+
+Run: `uv run python -c "import asterion.applications.prime.p1.operator"`
+Expected: exits 0.
+
+Run: `uv run python -m unittest -v tests.test_asterion_prime_p1_operator`
+Expected: the tests that asserted Prime-source behavior now fail. **Rewrite or
+delete those specific tests** in this task — an assertion that the operator
+resolves a Prime checkout is itself a forbidden edge. Commit the test change
+with the implementation.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/asterion/applications/prime/p1/operator.py tests/test_asterion_prime_p1_operator.py
+git commit -m "refactor(prime): remove Prime source execution from native P1 operator"
+```
+
+---
+
+### Task 6: Remove the legacy Python packages
+
+**Files:**
+- Delete: `src/asterion/applications/prime_agent/`,
+  `src/asterion/capabilities/prime_agent/`, `src/asterion/runtimes/prime_agent.py`,
+  `src/asterion/control/providers/prime/`
+- Modify: `src/asterion/applications/first_party_packages.py`
+
+**Interfaces:**
+- Consumes: Tasks 3-5 (nothing may still reference these).
+- Produces: no importable legacy Prime execution edge.
+
+- [ ] **Step 1: Confirm nothing outside the deletion set still imports them**
+
+Run: `grep -rn -E 'asterion\.(applications\.prime_agent|capabilities\.prime_agent|runtimes\.prime_agent|control\.providers\.prime)' src/ asterion/ tools/ --include='*.py' 2>/dev/null | grep -vE 'src/asterion/(applications/prime_agent|capabilities/prime_agent|runtimes/prime_agent\.py|control/providers/prime)/'`
+Expected: no output. Any hit must be resolved before deleting.
+
+- [ ] **Step 2: Remove the first-party registration**
+
+In `src/asterion/applications/first_party_packages.py`, delete the
+`PRIME_AGENT_PACKAGE` registration and its factory. Leave every other
+registration in that module untouched.
+
+- [ ] **Step 3: Delete the trees**
+
+```bash
+git rm -r src/asterion/applications/prime_agent src/asterion/capabilities/prime_agent src/asterion/control/providers/prime
+git rm src/asterion/runtimes/prime_agent.py
+```
+
+- [ ] **Step 4: Verify the framework still imports**
+
+Run: `uv run python -c "import asterion; import asterion.applications.prime; import asterion.runtimes.asterion_prime"`
+Expected: exits 0.
+
+Run: `uv run python -m unittest -v tests.test_project_boundary tests.test_default_runtime_factory`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add -A src/asterion
+git commit -m "refactor(prime): delete legacy Prime Agent provider, runtime, capability and control packages"
+```
+
+---
+
+### Task 7: Remove the Prime Gateway TypeScript surface
+
+**Files:**
+- Delete: `packages/typescript/prime-gateway/`
+- Modify: any workspace manifest that lists it.
+
+**Interfaces:**
+- Consumes: Task 3 (force-includes already removed).
+- Produces: `make test-typescript` builds only surviving packages.
+
+- [ ] **Step 1: Confirm the consumer set**
+
+Run: `grep -rn 'prime-gateway' --include='package.json' --include='*.mk' --include='Makefile' --include='*.toml' . 2>/dev/null | grep -v node_modules | grep -v '^./3th-party'`
+Expected: only `Makefile` targets already slated for rework (Task 9) and
+possibly a workspace manifest line.
+
+- [ ] **Step 2: Delete the package and de-list it**
+
+```bash
+git rm -r packages/typescript/prime-gateway
+```
+
+Remove its entry from the npm workspace list in the root `package.json` if
+present.
+
+- [ ] **Step 3: Verify the surviving TypeScript still builds**
+
+Run: `npm ci --prefix packages/typescript && npm run build --prefix packages/typescript/asterion-prime-extension`
+Expected: exits 0.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A packages/typescript package.json
+git commit -m "refactor(prime): remove Prime Gateway TypeScript execution surface"
+```
+
+---
+
+### Task 8: Remove or rewrite the coupled tests and fixtures
+
+**Files:**
+- Delete / rewrite: the ~180 modules and the `tests/fixtures/prime_gateway/`,
+  `tests/fixtures/prime-parity/` trees identified in the verified inventory.
+- Modify: `tests/prime_release_test_support.py`, `tests/core_module_allowlist.py`
+
+**Interfaces:**
+- Consumes: Tasks 3-7.
+- Produces: a test suite that collects and passes with no Prime checkout.
+
+- [ ] **Step 1: Delete the tests whose subject is a removed surface**
+
+Enumerate the coupled set (this is the authoritative list; do not work from
+memory):
+
+```bash
+# Modules importing a removed package.
+grep -rln -E 'asterion\.(applications\.prime_agent|capabilities\.prime_agent|runtimes\.prime_agent|control\.providers\.prime)' tests/ | sort > /tmp/coupled_imports.txt
+# Modules asserting the legacy selector.
+grep -rln -E '"prime-agent"|prime\.agent["\x27]|prime\.arc-agi-3@' tests/ | sort > /tmp/coupled_selector.txt
+# Modules defaulting to a Prime checkout.
+grep -rln '3th-party/prime-agent' tests/ | sort > /tmp/coupled_checkout.txt
+cat /tmp/coupled_imports.txt /tmp/coupled_selector.txt /tmp/coupled_checkout.txt | sort -u
+```
+
+As of 2026-09-13 that is ~180 of 428 modules. Delete every module whose
+*subject under test* is a removed surface (the `test_prime_p1..p7_*_development_*`,
+`*_cli_host`, `*_development_gateway`, `*_development_sdk_provider`,
+`*_authority_*`, `test_prime_source_lock`, `test_prime_development_preparation`,
+`test_setup_prime_agent`, and the `prime_gateway` fixture consumers), plus
+`tests/fixtures/prime_gateway/` and `tests/fixtures/prime-parity/`.
+
+Modules in that list whose subject is *native* are not deleted here — they go to
+Step 2. Sort each grep hit into one bucket deliberately; do not bulk-delete by
+filename prefix.
+
+- [ ] **Step 2: Rewrite the tests that are native in subject but coupled by default**
+
+These keep their subject and drop the Prime default:
+- `tests/test_native_prime_differential.py` — spec rule: the neutral comparison
+  reads an **exported log**. It must take a log path, never a checkout locator,
+  and must not start a Prime process.
+- `tests/test_prime_client_core.py`, `test_prime_client_interactive.py`,
+  `test_prime_client_protocols.py`, `test_prime_client_export_share.py`,
+  `test_pi_runtime_extensions.py`, `test_pi_extension_loader.mjs` — replace the
+  `3th-party/prime-agent` default with an explicitly injected Asterion-owned
+  resource root, or mark the Prime-dependent variant skipped with a named
+  reason.
+- `tests/test_distribution.py`, `test_check_promotion.py`,
+  `test_standalone_repository.py`, `test_prime_make_presets.py` — update to the
+  post-removal distribution and the new preset set.
+
+- [ ] **Step 3: Verify collection is clean**
+
+Run: `uv run python -m unittest discover -s tests -t . 2>&1 | tail -5`
+Expected: no ImportError / ModuleNotFoundError. Residual failures must be named
+in the task's report, not silently skipped.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A tests
+git commit -m "test(prime): remove Prime-coupled suites and rewrite native suites without source defaults"
+```
+
+---
+
+### Task 9: Audit the retained-but-ambiguous surfaces
+
+**Files:**
+- Audit: schema force-includes `pyproject.toml:91+`; `tools/`;
+  `tests/fixtures/{operation,session_context,agent_client}/`
+- Modify: `pyproject.toml`, `tools/`, `tests/fixtures/` per audit outcome.
+
+**Interfaces:**
+- Consumes: Tasks 3-8.
+- Produces: a written retention decision per surface.
+
+**Rule (spec):** source-independent schemas, generic control protocols, and
+neutral log comparison code are retained **only after** an import and
+package-data audit proves they have no execution edge to the removed surfaces.
+
+- [ ] **Step 1: Audit the non-core v1 schemas**
+
+The four closed contracts are `agent-runtime/v1`, `capability/v1`,
+`capability-package/v1`, `application-assembly/v1`; those are retained
+unconditionally (D-2026-09-06-02). For each of `agent-client/v1`,
+`agent-control/v1`, `agent-system/v1`, `control-plane/v1`, `session-context/v1`,
+`operation/v1`, `benchmark-suite/v1`, determine whether any **surviving** module
+consumes it:
+
+Run: `grep -rn '<schema-name>' src/ tests/ tools/ schemas/ --include='*.py' --include='*.ts' --include='*.json' | grep -v '^tests/fixtures/'`
+
+Retain if a surviving consumer exists; otherwise remove the force-include and
+its `schemas/` source. Record the verdict per schema in the task report.
+
+**Watch item:** `agent-client/v1` is described in `CURRENT-STATE.md` as an
+approved projection above `ControlHost`. Its *evidence* was Prime Gateway-backed
+(H-035) but the contract itself may be framework-level. If the audit finds a
+surviving non-Prime consumer, retain; if it does not, removal is correct and the
+`CURRENT-STATE.md` sentence must be corrected in Task 10. Flag this one
+explicitly rather than deciding silently.
+
+- [ ] **Step 2: Audit `tools/`**
+
+Per file: REMOVE if it locates, prepares, locks, or launches a Prime checkout,
+or if it is a Prime-backed smoke/experiment/loop runner; RETAIN if it is a
+neutral reducer or verifier over recorded receipts; otherwise AUDIT-LATER with a
+named reason. `tools/check_prime_parity.py` is the neutral reducer candidate —
+retain it only if it reads recorded evidence and starts no process. Record the
+table in the task report.
+
+- [ ] **Step 3: Verify the wheel contains no legacy resource**
+
+Run: `uv build --wheel --out-dir /tmp/detach-wheel && uv run python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('/tmp/detach-wheel/*.whl')[0]); print([n for n in z.namelist() if 'prime_gateway' in n or 'prime_agent' in n or 'providers/prime/resources' in n])"`
+Expected: `[]`.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A pyproject.toml tools tests/fixtures schemas
+git commit -m "refactor(prime): retain only audited source-independent resources"
+```
+
+---
+
+### Task 10: Repair the surviving gates
+
+**Files:**
+- Modify: `Makefile` (`test-typescript`, `check`, `promotion-check`, and the
+  `test.prime-*.provider-free` targets that invoked `prime-gateway`)
+
+**Interfaces:**
+- Consumes: Tasks 3-9.
+- Produces: `make check` and `make promotion-check` run against the post-removal
+  distribution without touching a removed surface.
+
+- [ ] **Step 1: Retarget `test-typescript`**
+
+Point it at the surviving TypeScript packages only.
+
+- [ ] **Step 2: Resolve the `prime-gateway`-executing test targets**
+
+For each of the ~17 targets that invoked `prime-gateway test` or
+`--provider asterion.prime-gateway`: if a surviving Python-only equivalent
+covers the same boundary, fold it in; otherwise delete the target and remove it
+from `.PHONY` and `help`. Record which survived and which were deleted.
+
+- [ ] **Step 3: Handle the legacy evidence reducers**
+
+`prime-parity-inventory` and `prime-verify-system-parity` reduce Prime Gateway
+parity evidence (H-035…H-037). Per the spec's Evidence correction section this
+evidence is historical, so these targets are removed. **Do not** rename or
+reclassify their output as native evidence.
+
+- [ ] **Step 4: Verify**
+
+Run: `make docs-check`
+Expected: PASS (count will drop from 207; that is expected).
+
+Run: `make test-typescript`
+Expected: exits 0.
+
+Run: `make promotion-check`
+Expected: exits 0 and reports no Prime source root.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Makefile
+git commit -m "refactor(prime): retarget surviving gates at the detached distribution"
+```
+
+---
+
+### Task 11: Evidence correction
+
+**Files:**
+- Modify: `docs/status/CURRENT-STATE.md`, `docs/status/INDEX.md`,
+  `docs/status/DECISIONS.md`, `docs/status/PRIME-PARITY-LEDGER.md`,
+  `docs/status/PRIME-TYPICAL-APPLICATIONS.md`,
+  `docs/status/FRAMEWORK-PUBLIC-INVENTORY.md`
+
+**Interfaces:**
+- Consumes: Tasks 3-10.
+- Produces: status documents that distinguish the four evidence classes the spec
+  names.
+
+- [ ] **Step 1: Reclassify**
+
+Per spec §Evidence correction, every affected claim becomes exactly one of:
+P7 native verified evidence; P1-P6 historical Prime-backed compatibility
+evidence; implemented-but-not-yet-live native components; unavailable
+applications awaiting native replacement.
+
+Specifically:
+- `CURRENT-STATE.md` "Verified Boundary": the H-035, H-036, H-037,
+  `interfaces.operations` 15/15, and system-parity 61-passed claims are
+  Prime Gateway-backed → move to historical. Also correct the now-false
+  "`origin/main` remains unchanged" sentence (`main == origin/main == f1d28b9e`).
+- `CURRENT-STATE.md` "Current Architecture": the `agent-client/v1` sentence is
+  corrected per Task 9's audit outcome.
+- `INDEX.md`: add rows for the new plan and mark `PRIME-TYPICAL-APPLICATIONS.md`
+  / `FRAMEWORK-INTEGRATION-WORKLIST.md` consistently with their role.
+- `PRIME-PARITY-LEDGER.md` / `PRIME-TYPICAL-APPLICATIONS.md`: state the
+  historical boundary explicitly.
+
+- [ ] **Step 2: Verify documentation links**
+
+Run: `make docs-check`
+Expected: PASS.
+
+- [ ] **Step 3: Run the phase acceptance gate**
+
+Run: `uv run python -m unittest -v tests.test_prime_source_detachment_real_tree`
+Expected: PASS — the red baseline from Task 2 is now green.
+
+Run: `uv run python -m unittest -v tests.test_prime_source_detachment`
+Expected: PASS.
+
+- [ ] **Step 4: Journal and commit**
+
+```bash
+git add -A docs
+git commit -m "docs: correct evidence classification after native detachment"
+```
+
+Then: `project-state journal "Phase 1 完成：legacy Prime 执行面移除，语义 detachment 门禁转绿"`
+
+---
+
+## Phase 1 completion criteria
+
+Phase 1 is complete only when all of these hold:
+
+- `assert_asterion_prime_source_detached` scans the complete release surface
+  (`src/asterion`, `packages/typescript`, `tools`, `tests`, `Makefile`,
+  `pyproject.toml`) and fails on representative forbidden references (Task 1
+  tests) while not false-positiving on `ASTERION_PRIME_OPERATOR_ROOT` /
+  `ASTERION_PRIME_NODE`.
+- The real-tree test passes with no Prime checkout present.
+- `pyproject.toml`, `Makefile`, and the wheel contain no Prime-backed provider,
+  runtime, host-service, preset, or packaged Prime resource.
+- `make check`, `make promotion-check`, `make docs-check`, and
+  `make test-typescript` pass against the detached distribution.
+- P1 and P2-P6 are **unavailable** by metadata lookup, with no fallback path and
+  no executable stub.
+- No historical Prime-backed result is reclassified as native evidence.
+
+Phase 1 does **not** deliver: P7 revalidation, any rebuilt P1-P6 application, or
+any new live run. Those are Phases 2-9.
+
+---
+
+## Open questions carried forward
+
+1. **`agent-client/v1` retention** — resolved by Task 9's audit, flagged for
+   explicit reporting rather than silent decision.
+2. **`../external-prime/arc-agi-3/venv/bin/python`** in `asterion-prime-p7-solve`
+   (`Makefile:295`) — an external venv path outside the repo. It is not
+   `3th-party/prime-agent.git` and is not covered by that prohibition, but
+   Phase 2 must decide whether the ARC broker is injected as a host service
+   rather than referenced as a sibling venv path.
+3. **Rust surface** — this plan does not touch `executor.controlled`; confirm in
+   Phase 2 that no Rust path references a Prime surface.
