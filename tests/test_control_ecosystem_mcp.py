@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import multiprocessing
+import os
 import stat
+import subprocess
 import tempfile
 import time
 import unittest
@@ -14,7 +16,6 @@ from asterion.control.ecosystem_mcp import (
     EcosystemMcpError,
     OwnedMcpFixtureService,
 )
-from tests.test_prime_ecosystem_real_process import _node_22
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,56 @@ BODY_SENTINELS = (
     "opaque-mcp-refresh-token",
     str(LOCAL_SERVER),
 )
+
+
+def _node_22() -> Path | None:
+    """Resolve an offline Node 22 executable, or return None when unavailable."""
+    configured = os.environ.get("ASTERION_PRIME_NODE")
+    candidates = [Path(configured)] if configured else []
+    npm_environment = {
+        key: value
+        for key in ("HOME", "PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR")
+        if (value := os.environ.get(key)) is not None
+    }
+    try:
+        completed = subprocess.run(
+            (
+                "npm",
+                "exec",
+                "--offline",
+                "--yes",
+                "--package=node@22",
+                "--",
+                "which",
+                "node",
+            ),
+            cwd=ROOT,
+            env=npm_environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if completed.returncode == 0 and completed.stdout.strip():
+            candidates.append(Path(completed.stdout.strip()))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for candidate in candidates:
+        try:
+            version = subprocess.run(
+                (str(candidate), "--version"),
+                cwd=ROOT,
+                env=npm_environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if version.returncode == 0 and version.stdout.startswith("v22."):
+                return candidate.resolve()
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return None
 
 
 class _FlipAfterChallengeCancellation:

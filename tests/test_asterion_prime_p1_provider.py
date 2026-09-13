@@ -297,23 +297,8 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
         entry_points = pyproject["project"]["entry-points"]
 
         self.assertEqual(
-            entry_points["asterion.application_index"]["prime.ipython-coding__1.0.0"],
-            "asterion.applications.prime:create_provider",
-        )
-        self.assertEqual(
-            select_application_provider_id("prime.ipython-coding@1.0.0"),
-            "prime-applications",
-        )
-        self.assertEqual(
             select_application_provider_id("prime.arc-agi-3-solving@1.0.0"),
             "prime-applications",
-        )
-        self.assertEqual(
-            entry_points["asterion.applications"]["prime-agent"],
-            "asterion.applications.prime_agent.provider:create_provider",
-        )
-        self.assertIn(
-            "prime.ipython-production", entry_points["asterion.host_services"]
         )
 
 

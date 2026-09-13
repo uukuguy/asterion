@@ -28,6 +28,10 @@ class TestAsterionPrimePiContract(unittest.TestCase):
 
         return compaction_budget
 
+    @unittest.skip(
+        "Prime checkout and its compaction contract are removed; "
+        "contract evidence awaits an Asterion-owned replacement resource"
+    )
     def test_locked_compaction_contract_and_bound_match_evidence(self) -> None:
         self.assertTrue(PROBE.is_file(), "the locked provider-free probe is missing")
         source = Path(
@@ -73,6 +77,10 @@ class TestAsterionPrimePiContract(unittest.TestCase):
         self.assertIn("packages/coding-agent/dist/core/compaction/compaction.js", closure["files"])
         self.assertIn("packages/coding-agent/dist/core/session-manager.js", closure["files"])
 
+    @unittest.skip(
+        "Prime checkout and its compaction lock are removed; "
+        "closure drift evidence awaits an Asterion-owned replacement resource"
+    )
     def test_closure_matches_metafile_and_rejects_drift_before_import(self) -> None:
         source = Path(
             os.environ.get("ASTERION_PRIME_SOURCE_ROOT", ROOT / "3th-party/prime-agent")

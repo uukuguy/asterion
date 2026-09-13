@@ -485,6 +485,10 @@ class TestPersistentIpythonHost(unittest.IsolatedAsyncioTestCase):
         duplicate = await accepted.execute("same", "value = 2", _Signal())
         self.assertEqual(duplicate.status, "error")
 
+    @unittest.skip(
+        "legacy P7SolvingDockerWorker was removed; the existing-worker adapter "
+        "now binds native workers only and this docker-path test awaits a native worker replacement"
+    )
     async def test_production_factory_adapts_existing_restricted_worker(self) -> None:
         from asterion.applications.prime.p7.ipython_host import (
             create_restricted_persistent_ipython_host,

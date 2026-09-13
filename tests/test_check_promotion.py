@@ -13,7 +13,6 @@ from tools.check_promotion import (
     _closed_prime_subprocess_environment,
     _closed_npm_subprocess_environment,
     _default_runner,
-    _load_operational_package_receipt,
     _prepare_external_operational_prime_checkout,
     _prepare_external_prime_checkout,
     _resolve_promotion_npm_cache,
@@ -466,55 +465,6 @@ class PromotionCheckTests(unittest.TestCase):
             node_executable=Path("/node22/bin/node"),
             temporary_root=target.parents[1].resolve(),
         )
-
-    def test_installed_operational_harness_uses_closed_environment(self) -> None:
-        hostile_environment = {
-            "ANTHROPIC_API_KEY": "review-sentinel",
-            "ASTERION_REVIEW_SENTINEL": "private-host-value",
-            "HTTP_PROXY": "http://proxy.invalid",
-            "NODE_AUTH_TOKEN": "npm-secret",
-            "NPM_TOKEN": "npm-secret",
-            "OPENAI_API_KEY": "review-sentinel",
-        }
-        captured: dict[str, str] | None = None
-
-        def fake_run(
-            command: tuple[str, ...],
-            **kwargs: object,
-        ) -> subprocess.CompletedProcess[str]:
-            nonlocal captured
-            captured = kwargs.get("env")  # type: ignore[assignment]
-            return subprocess.CompletedProcess(command, 0, stdout="{}\n", stderr="")
-
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary = Path(temporary_directory)
-            resource_root = temporary / "installed/resources"
-            external_prime_root = temporary / "external/prime-agent"
-            resource_root.mkdir(parents=True)
-            external_prime_root.mkdir(parents=True)
-            with (
-                mock.patch.dict(os.environ, hostile_environment, clear=False),
-                mock.patch(
-                    "tools.check_promotion._resolve_operational_node",
-                    return_value=Path("/node22/bin/node"),
-                ),
-                mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
-            ):
-                self.assertEqual(
-                    _load_operational_package_receipt(
-                        resource_root=resource_root,
-                        external_prime_root=external_prime_root,
-                        package="auth",
-                    ),
-                    {},
-                )
-
-        self.assertIsNotNone(captured)
-        assert captured is not None
-        self.assertEqual(captured["PATH"].split(os.pathsep)[0], "/node22/bin")
-        self.assertEqual(captured["TMPDIR"], str(temporary.resolve()))
-        for key in hostile_environment:
-            self.assertNotIn(key, captured)
 
     def test_default_runner_forces_sparse_cargo_registry_and_preserves_environment(self) -> None:
         result = completed(("cargo", "test"))

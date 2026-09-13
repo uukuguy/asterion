@@ -16,7 +16,6 @@ from asterion.capabilities.builtin import (
     CONTROLLED_CODE_PACKAGE,
     CONTROLLED_CODE_SOURCE_ID,
     DCI_PACKAGE,
-    PRIME_AGENT_PACKAGE,
 )
 from asterion.capability_packages.model import InstalledCapabilityPackage
 from asterion.capability_packages.protocol import CapabilityPackageRef
@@ -31,7 +30,6 @@ from asterion.capability_sdk import run_capability_conformance
 
 CONTROLLED_CODE = CapabilityPackageRef("controlled-code", "1.0.0")
 DCI = CapabilityPackageRef("dci", "1.0.0")
-PRIME_AGENT = CapabilityPackageRef("prime-agent", "1.0.0")
 PRIME_ARC_AGI_3_SOLVER = CapabilityPackageRef("prime-arc-agi-3-solver", "1.0.0")
 PRIME_IPYTHON_CODING_NATIVE = CapabilityPackageRef("prime-ipython-coding-native", "1.0.0")
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "extensions" / "minimal" / "payload"
@@ -82,7 +80,6 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
         self.assertEqual(CONTROLLED_CODE_PACKAGE, CONTROLLED_CODE)
         self.assertEqual(CONTROLLED_CODE_SOURCE_ID, "controlled-code.builtin")
         self.assertEqual(DCI_PACKAGE, DCI)
-        self.assertEqual(PRIME_AGENT_PACKAGE, PRIME_AGENT)
 
     def test_registration_snapshot_failure_is_redacted(self) -> None:
         sentinel = "SECRET-REGISTRATION-ITERATOR-/private/registrations"
@@ -111,7 +108,6 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
             (
                 CONTROLLED_CODE,
                 DCI,
-                PRIME_AGENT,
                 PRIME_ARC_AGI_3_SOLVER,
                 PRIME_IPYTHON_CODING_NATIVE,
             ),
@@ -259,7 +255,6 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
         declared_conformance = {
             CONTROLLED_CODE: ("externalization.json",),
             DCI: ("externalization.json",),
-            PRIME_AGENT: ("externalization.json",),
             PRIME_ARC_AGI_3_SOLVER: (),
             PRIME_IPYTHON_CODING_NATIVE: (),
         }

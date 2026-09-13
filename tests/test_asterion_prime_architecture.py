@@ -61,11 +61,7 @@ class TestAsterionPrimeArchitecture(unittest.TestCase):
 
         pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
         makefile = Path("Makefile").read_text(encoding="utf-8")
-        provider = Path(
-            "src/asterion/applications/prime_agent/provider.py"
-        ).read_text(encoding="utf-8")
         self.assertNotIn("prime-gateway/dist/src/p7-solving", pyproject)
         self.assertNotIn("p7_solving_cli_host", pyproject)
         self.assertNotRegex(makefile, r"(?m)^prime-p7-solve:")
         self.assertNotRegex(makefile, r"(?m)^prime-p7-seeded-run:")
-        self.assertNotIn('application_id="prime.arc-agi-3-solving"', provider)

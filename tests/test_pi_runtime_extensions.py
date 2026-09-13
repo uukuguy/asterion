@@ -162,6 +162,10 @@ class PiExtensionBindingTests(unittest.TestCase):
             dependencies=dependency,
         )
 
+    @unittest.skip(
+        "Prime checkout and its compaction/artifact locks are removed; "
+        "real-dependency load awaits an Asterion-owned replacement resource"
+    )
     def test_locked_provider_lease_loads_real_dependencies_in_child(self) -> None:
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:

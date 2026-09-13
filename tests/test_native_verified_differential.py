@@ -10,7 +10,6 @@ from asterion.control.providers.native.verified import (
     native_verified_record_id,
     reduce_verified_feature_records,
 )
-from tests.test_native_prime_differential import _validate_prime_oracle_lock_identity
 from tools.verify_native_verified_loop import PROVIDER_FREE_FEATURE_IDS
 
 
@@ -39,7 +38,6 @@ def _snapshot_digest() -> str:
 
 
 def run_native_verified_provider_free_observations() -> tuple[Mapping[str, object], ...]:
-    _validate_prime_oracle_lock_identity()
     session_id = "session-1"
     state = reduce_verified_feature_records(
         (

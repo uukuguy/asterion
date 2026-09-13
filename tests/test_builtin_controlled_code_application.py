@@ -21,7 +21,7 @@ class BuiltinControlledCodeApplicationTests(unittest.TestCase):
         values = list_application_providers(entry_points=entries)
         self.assertEqual(
             [value.provider_id for value in values],
-            ["controlled-code", "dci-agent-lite", "prime-agent", "prime-applications"],
+            ["controlled-code", "dci-agent-lite", "prime-applications"],
         )
 
     def test_controlled_code_provider_binds_exact_application_and_packages(self) -> None:

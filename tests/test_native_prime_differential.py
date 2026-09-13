@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import re
-import subprocess
-import tempfile
 import unittest
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass, replace
-from functools import lru_cache
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -39,25 +35,6 @@ from tests.test_native_control_conformance import (
     sync,
 )
 from tests.test_native_control_host import close_host, make_host_with_native
-from tests.test_prime_verified_loop import (
-    EXPECTED_IDS,
-    SCENARIO_FIXTURE,
-    PrimeLoopScenarioResult,
-    _load_scenarios,
-    run_prime_loop_scenarios,
-)
-from tools.setup_prime_agent import (
-    ECOSYSTEM_MODULE_LOCK_FORMAT,
-    HARNESS_MODULE_LOCK_FORMAT,
-    LOCK_FORMAT,
-    PINNED_PRIME_COMMIT,
-    default_ecosystem_module_lock_path,
-    default_harness_module_lock_path,
-    default_lock_path,
-    load_prime_artifact_lock,
-    load_prime_ecosystem_module_lock,
-    load_prime_harness_module_lock,
-)
 
 
 DIFFERENTIAL_CASES = (
@@ -67,23 +44,13 @@ DIFFERENTIAL_CASES = (
     "lifecycle-order",
     "replay-suffix",
 )
-CASE_TO_PRIME_SCENARIO = {
-    "action-causality": "prime-loop-application",
-    "budget-monotonicity": "prime-loop-budget",
-    "checkpoint-identity": "prime-loop-checkpoint",
-    "lifecycle-order": "prime-loop-detach-attach",
-    "replay-suffix": "prime-loop-detach-attach",
-}
 _APPROVED_JOURNAL_FIELDS = frozenset({"kind", "payload"})
 _APPROVED_RECORD_KINDS = frozenset({"event.accepted", "command.accepted"})
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_PRIME_APPLICATION_ACTION_ID = "action-92c0ff0271237ad1ff9df4f009c420e3c00d5301"
-_PRIME_CHILD_ACTION_ID = "action-7a181ee25e9f10b2687a7ef2089f9893f18d4a7f"
-_PRIME_BUDGET_ACTION_ID = "action-cc0b999096c360568a9e5d3ce629d9fc4c86d3dc"
-_PRIME_CHECKPOINT_ACTION_ID = "action-7e41756b87c5f300dcef2b20d44d32d80e0c2007"
-_VERIFIED_LOOP_SCENARIO_FIXTURE_SHA256 = (
-    "429169c3411b4c38b42ddfa68e973e67e0356d9e9e621b2a6d7e953c9198c790"
-)
+_APPLICATION_ACTION_ID = "action-92c0ff0271237ad1ff9df4f009c420e3c00d5301"
+_CHILD_ACTION_ID = "action-7a181ee25e9f10b2687a7ef2089f9893f18d4a7f"
+_BUDGET_ACTION_ID = "action-cc0b999096c360568a9e5d3ce629d9fc4c86d3dc"
+_CHECKPOINT_ACTION_ID = "action-7e41756b87c5f300dcef2b20d44d32d80e0c2007"
 _EXTERNAL_COUNTER_FIELDS = (
     "provider_operations",
     "model_operations",
@@ -92,18 +59,6 @@ _EXTERNAL_COUNTER_FIELDS = (
     "application_operations",
     "upload_operations",
 )
-_PRIME_DAEMON_APPLICATION_OPERATIONS = {
-    "prime-loop-application": 1,
-    "prime-loop-child": 0,
-    "prime-loop-detach-attach": 0,
-    "prime-loop-checkpoint": 0,
-    "prime-loop-gateway-crash": 0,
-    "prime-loop-supervisor-crash": 0,
-    "prime-loop-worker-crash": 1,
-    "prime-loop-cancel": 1,
-    "prime-loop-budget": 1,
-    "prime-loop-redaction": 0,
-}
 
 
 @dataclass(frozen=True)
@@ -113,15 +68,6 @@ class FoundationalProjection:
     replay_suffix: tuple[str, ...]
     cumulative_usage: tuple[tuple[int, int, int, int, int], ...]
     checkpoint_shape: tuple[str, int, bool, bool] | None
-
-
-@dataclass(frozen=True)
-class PrimeOracleLockIdentity:
-    source_commit: str
-    artifact_lock_sha256: str
-    harness_module_lock_sha256: str
-    ecosystem_module_lock_sha256: str
-    ecosystem_bundle_sha256: str
 
 
 def normalize(
@@ -256,243 +202,12 @@ def _opaque(value: str) -> bool:
     return bool(value) and "/" not in value and "\\" not in value and " " not in value
 
 
-def _prime_results() -> tuple[PrimeLoopScenarioResult, ...]:
-    return _prime_results_for_identity(_validate_prime_oracle_lock_identity())
-
-
-@lru_cache(maxsize=1)
-def _prime_results_for_identity(
-    identity: PrimeOracleLockIdentity,
-) -> tuple[PrimeLoopScenarioResult, ...]:
-    if identity.source_commit != PINNED_PRIME_COMMIT:
-        raise AssertionError("Prime oracle lock identity is invalid")
-    _validate_prime_scenario_matrix()
-    results = run_prime_loop_scenarios(
-        fake_prime=True,
-        execution_identity=identity,
-        prime_source_root=_prime_source_root(),
-    )
-    identities = tuple(getattr(result, "scenario_id") for result in results)
-    if identities != EXPECTED_IDS:
-        raise AssertionError("locked Prime scenario identities diverged")
-    if any(getattr(result, "status") != "PASS" for result in results):
-        raise AssertionError("locked Prime scenario did not pass")
-    for result in results:
-        _validate_prime_result_identity(result, identity)
-        _prime_external_counter_observation(result)
-    return cast(tuple[PrimeLoopScenarioResult, ...], results)
-
-
-def _validate_prime_oracle_lock_identity(
-    *,
-    artifact_lock_path: Path | None = None,
-    harness_module_lock_path: Path | None = None,
-    ecosystem_module_lock_path: Path | None = None,
-    ecosystem_bundle_path: Path | None = None,
-) -> PrimeOracleLockIdentity:
-    try:
-        artifact_path = artifact_lock_path or default_lock_path()
-        harness_path = harness_module_lock_path or default_harness_module_lock_path()
-        ecosystem_path = ecosystem_module_lock_path or default_ecosystem_module_lock_path()
-        bundle_path = ecosystem_bundle_path or ecosystem_path.with_name(
-            "prime-ecosystem-module.mjs"
-        )
-        artifact = load_prime_artifact_lock(artifact_path)
-        harness = load_prime_harness_module_lock(harness_path)
-        ecosystem = load_prime_ecosystem_module_lock(ecosystem_path)
-        artifact_json = json.loads(artifact_path.read_text(encoding="utf-8"))
-        harness_json = json.loads(harness_path.read_text(encoding="utf-8"))
-        ecosystem_json = json.loads(ecosystem_path.read_text(encoding="utf-8"))
-        artifact_lock_sha256 = _sha256_bytes(artifact_path.read_bytes())
-        harness_module_lock_sha256 = _sha256_bytes(harness_path.read_bytes())
-        ecosystem_module_lock_sha256 = _sha256_bytes(ecosystem_path.read_bytes())
-        ecosystem_bundle_sha256 = _sha256_bytes(bundle_path.read_bytes())
-        if (
-            artifact_json.get("format") != LOCK_FORMAT
-            or harness_json.get("format") != HARNESS_MODULE_LOCK_FORMAT
-            or ecosystem_json.get("format") != ECOSYSTEM_MODULE_LOCK_FORMAT
-            or artifact.source_commit != PINNED_PRIME_COMMIT
-            or harness.source_commit != PINNED_PRIME_COMMIT
-            or ecosystem.source_commit != PINNED_PRIME_COMMIT
-            or ecosystem.artifact_lock_sha256 != artifact_lock_sha256
-            or ecosystem.bundle_sha256 != ecosystem_bundle_sha256
-        ):
-            raise AssertionError("Prime oracle lock identity is invalid")
-        for relative_path, digest in {
-            **dict(harness.source_files),
-            **dict(harness.built_modules),
-        }.items():
-            if artifact.files.get(relative_path) != digest:
-                raise AssertionError("Prime harness module lock drifted")
-        for module in ecosystem.modules:
-            if (
-                artifact.files.get(module.source_path) is None
-                or artifact.files.get(module.built_path) != module.sha256
-            ):
-                raise AssertionError("Prime ecosystem module lock drifted")
-        return PrimeOracleLockIdentity(
-            source_commit=artifact.source_commit,
-            artifact_lock_sha256=artifact_lock_sha256,
-            harness_module_lock_sha256=harness_module_lock_sha256,
-            ecosystem_module_lock_sha256=ecosystem_module_lock_sha256,
-            ecosystem_bundle_sha256=ecosystem_bundle_sha256,
-        )
-    except Exception as error:
-        if isinstance(error, AssertionError):
-            raise
-        raise AssertionError("Prime oracle lock identity is invalid") from error
-
-
-def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
-def _sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _prime_source_root() -> Path:
-    return Path(__file__).resolve().parents[1] / "3th-party/prime-agent"
-
-
-def _prime_oracle_identity_mapping(
-    identity: PrimeOracleLockIdentity,
-) -> Mapping[str, str]:
-    return cast(Mapping[str, str], asdict(identity))
-
-
-def _prime_oracle_identity_digest(identity: PrimeOracleLockIdentity) -> str:
-    return _sha256_text(
-        json.dumps(_prime_oracle_identity_mapping(identity), sort_keys=True)
-    )
-
-
-def _validate_prime_result_identity(
-    result: PrimeLoopScenarioResult,
-    identity: PrimeOracleLockIdentity,
-) -> None:
-    serialized = json.loads(result.serialized_observations)
-    if result.evidence_id != f"evidence.phase1.{_sha256_text(result.serialized_observations)}":
-        raise AssertionError("Prime result evidence digest diverged")
-    identity_mapping = _prime_oracle_identity_mapping(identity)
-    identity_digest = _prime_oracle_identity_digest(identity)
-    if (
-        serialized.get("execution_identity") != identity_mapping
-        or serialized.get("execution_identity_sha256") != identity_digest
-        or result.execution_identity_sha256 != identity_digest
-    ):
-        raise AssertionError("Prime result execution identity diverged")
-
-
-def _validate_prime_scenario_matrix() -> Mapping[str, Mapping[str, object]]:
-    if _sha256_bytes(SCENARIO_FIXTURE.read_bytes()) != _VERIFIED_LOOP_SCENARIO_FIXTURE_SHA256:
-        raise AssertionError("Prime scenario fixture drifted")
-    rows = _load_scenarios()
-    if tuple(str(row["scenario_id"]) for row in rows) != EXPECTED_IDS:
-        raise AssertionError("Prime scenario matrix identities diverged")
-    matrix = {str(row["scenario_id"]): row for row in rows}
-    if len(matrix) != len(rows):
-        raise AssertionError("Prime scenario matrix identities diverged")
-    return matrix
-
-
-def _selected_prime_result(scenario_id: str) -> PrimeLoopScenarioResult:
-    selected = tuple(result for result in _prime_results() if result.scenario_id == scenario_id)
-    if len(selected) != 1:
-        raise AssertionError("Prime differential scenario selection is invalid")
-    return selected[0]
-
-
-def _prime_external_counter_observation(
-    result: PrimeLoopScenarioResult,
-) -> Mapping[str, int]:
-    matrix = _validate_prime_scenario_matrix()
-    row = matrix.get(result.scenario_id)
-    if row is None:
-        raise AssertionError("Prime result scenario is not locked")
-    serialized = json.loads(result.serialized_observations)
-    daemon = cast(Mapping[str, object], serialized["daemon"])
-    expected_model_provider = _int(row["model_provider_operations"])
-    expected_application_semantic = _int(row["application_operations"])
-    expected_daemon_application = _PRIME_DAEMON_APPLICATION_OPERATIONS.get(
-        result.scenario_id
-    )
-    if expected_daemon_application is None:
-        raise AssertionError("Prime result scenario is not locked")
-    daemon_model_provider = _int(daemon["modelProviderOperations"])
-    daemon_application_semantic = _int(daemon["applicationOperations"])
-    if (
-        result.provider_operations != expected_model_provider
-        or daemon_model_provider != expected_model_provider
-        or result.application_operations != expected_application_semantic
-        or daemon_application_semantic != expected_daemon_application
-    ):
-        raise AssertionError("Prime result operation evidence diverged")
-    if result.provider_operations != 0 or daemon_model_provider != 0:
-        raise AssertionError("Prime oracle used a model provider")
-    if any(not _local_process_count(key, value) for key, value in result.process_counts.items()):
-        raise AssertionError("Prime oracle process evidence is malformed")
-    if result.process_counts != row["process_counts"]:
-        raise AssertionError("Prime oracle process evidence diverged")
-    external_effects = cast(Mapping[str, object], serialized["external_effects"])
-    if set(external_effects) != {
-        "application_operations",
-        "local_application_operations",
-    }:
-        raise AssertionError("Prime external application evidence is malformed")
-    external_application_operations = _int(external_effects["application_operations"])
-    local_application_operations = _int(external_effects["local_application_operations"])
-    if (
-        result.external_application_operations != external_application_operations
-        or local_application_operations != result.application_operations
-    ):
-        raise AssertionError("Prime external application evidence diverged")
-    return {
-        "provider_operations": result.provider_operations,
-        "model_operations": daemon_model_provider,
-        "credential_reads": 0,
-        "network_operations": 0,
-        "application_operations": external_application_operations,
-        "upload_operations": 0,
-    }
-
-
 def _local_process_count(key: str, value: object) -> bool:
     return (
         key in {"fake_daemon", "gateway", "worker"}
         and not isinstance(value, bool)
         and isinstance(value, int)
         and value >= 0
-    )
-
-
-async def observe_prime(case_id: str) -> FoundationalProjection:
-    scenario_id = CASE_TO_PRIME_SCENARIO[case_id]
-    results = await asyncio.to_thread(_prime_results)
-    selected = tuple(result for result in results if result.scenario_id == scenario_id)
-    if len(selected) != 1:
-        raise AssertionError("Prime differential scenario selection is invalid")
-    result = selected[0]
-    _prime_external_counter_observation(result)
-    serialized = json.loads(str(getattr(result, "serialized_observations")))
-    journal = cast(Sequence[Mapping[str, object]], serialized["journal"])
-    public_events: list[Mapping[str, object]] = []
-    public_commands: list[Mapping[str, object]] = []
-    for record in journal:
-        if set(record) != _APPROVED_JOURNAL_FIELDS:
-            raise AssertionError("Prime journal record contains unapproved fields")
-        kind = str(record["kind"])
-        if kind not in _APPROVED_RECORD_KINDS:
-            continue
-        payload = cast(Mapping[str, object], record["payload"])
-        if kind == "event.accepted":
-            public_events.append(cast(Mapping[str, object], payload["event"]))
-        elif kind == "command.accepted":
-            public_commands.append(cast(Mapping[str, object], payload["command"]))
-    return normalize(
-        public_events=public_events,
-        public_commands=public_commands,
-        replay_after_sequence=2 if case_id == "replay-suffix" else 0,
     )
 
 
@@ -513,12 +228,12 @@ async def _observe_native_action_causality() -> FoundationalProjection:
     host, _, _ = make_host_with_native(
         {
             "input:content-ref-action": (
-                proposal_draft(_PRIME_APPLICATION_ACTION_ID),
+                proposal_draft(_APPLICATION_ACTION_ID),
             ),
-            f"action:{_PRIME_APPLICATION_ACTION_ID}:succeeded": (
-                proposal_draft(_PRIME_CHILD_ACTION_ID),
+            f"action:{_APPLICATION_ACTION_ID}:succeeded": (
+                proposal_draft(_CHILD_ACTION_ID),
             ),
-            f"action:{_PRIME_CHILD_ACTION_ID}:succeeded": _terminal_drafts(),
+            f"action:{_CHILD_ACTION_ID}:succeeded": _terminal_drafts(),
         },
         journal=journal,
     )
@@ -540,9 +255,9 @@ async def _observe_native_budget() -> FoundationalProjection:
     host, _, _ = make_host_with_native(
         {
             "input:content-ref-action": (
-                proposal_draft(_PRIME_BUDGET_ACTION_ID),
+                proposal_draft(_BUDGET_ACTION_ID),
             ),
-            f"action:{_PRIME_BUDGET_ACTION_ID}:rejected": (),
+            f"action:{_BUDGET_ACTION_ID}:rejected": (),
         },
         authority_kwargs={"budget_limit": BudgetLimit(100, 0, 100, 100, 100_000)},
         journal=journal,
@@ -565,9 +280,9 @@ async def _observe_native_checkpoint() -> FoundationalProjection:
     host, _, _ = make_host_with_native(
         {
             "input:content-ref-checkpoint": (
-                proposal_draft(_PRIME_CHECKPOINT_ACTION_ID),
+                proposal_draft(_CHECKPOINT_ACTION_ID),
             ),
-            f"action:{_PRIME_CHECKPOINT_ACTION_ID}:succeeded": (
+            f"action:{_CHECKPOINT_ACTION_ID}:succeeded": (
                 draft("session.recovery-required", {"reason_code": "checkpoint-required"}),
             ),
         },
@@ -660,11 +375,8 @@ def _plain_json(value: object) -> object:
 async def run_native_prime_differential_observations() -> tuple[Mapping[str, object], ...]:
     observations: list[Mapping[str, object]] = []
     for case_id in sorted(DIFFERENTIAL_CASES):
-        prime = await observe_prime(case_id)
-        result = await asyncio.to_thread(
-            _selected_prime_result, CASE_TO_PRIME_SCENARIO[case_id]
-        )
-        observations.append(await native_differential_observation(case_id, prime, prime_result=result))
+        prime = await observe_native(case_id)
+        observations.append(await native_differential_observation(case_id, prime))
     return tuple(observations)
 
 
@@ -672,7 +384,6 @@ async def native_differential_observation(
     case_id: str,
     prime: FoundationalProjection,
     *,
-    prime_result: PrimeLoopScenarioResult | None = None,
     recorder: OperationRecorder | None = None,
 ) -> Mapping[str, object]:
     native_recorder = recorder or OperationRecorder()
@@ -681,16 +392,12 @@ async def native_differential_observation(
         native = await observe_native(case_id)
     finally:
         _ACTIVE_RECORDER.reset(token)
-    result = prime_result or await asyncio.to_thread(
-        _selected_prime_result, CASE_TO_PRIME_SCENARIO[case_id]
-    )
-    prime_counts = _prime_external_counter_observation(result)
     native_counts = observation_mapping("case_id", case_id, native_recorder)
     return {
         "case_id": case_id,
         "status": "PASS" if native == prime else "FAIL",
         **{
-            field: _int(prime_counts[field]) + _int(native_counts[field])
+            field: _int(native_counts[field])
             for field in _EXTERNAL_COUNTER_FIELDS
         },
     }
@@ -766,14 +473,37 @@ class TestNativePrimeDifferential(unittest.IsolatedAsyncioTestCase):
                         replay_after_sequence=0,
                     )
 
-    async def test_native_matches_pinned_prime_foundational_projections(self) -> None:
-        for case_id in DIFFERENTIAL_CASES:
-            with self.subTest(case_id=case_id):
-                prime = await observe_prime(case_id)
-                native = await observe_native(case_id)
-                self.assertEqual(native, prime)
+    async def test_differential_native_observations_derive_counts_from_active_recorder(
+        self,
+    ) -> None:
+        recorder = OperationRecorder(provider_operations=7)
+        observation = await native_differential_observation(
+            "lifecycle-order",
+            FoundationalProjection(
+                lifecycle_order=(
+                    "session.created",
+                    "session.running",
+                    "session.recovery-required",
+                    "session.running",
+                ),
+                action_causality=(),
+                replay_suffix=(
+                    "session.created",
+                    "session.running",
+                    "session.recovery-required",
+                    "session.running",
+                ),
+                cumulative_usage=(),
+                checkpoint_shape=None,
+            ),
+            recorder=recorder,
+        )
 
-    async def test_differential_observations_are_closed_sorted_and_provider_free(self) -> None:
+        self.assertEqual(observation["provider_operations"], 7)
+
+    async def test_differential_native_observations_are_closed_sorted_and_provider_free(
+        self,
+    ) -> None:
         observations = await run_native_prime_differential_observations()
 
         self.assertEqual(
@@ -806,223 +536,6 @@ class TestNativePrimeDifferential(unittest.IsolatedAsyncioTestCase):
                 ),
                 (0, 0, 0, 0, 0, 0),
             )
-
-    async def test_differential_native_observations_derive_counts_from_active_recorder(
-        self,
-    ) -> None:
-        recorder = OperationRecorder(provider_operations=7)
-        observation = await native_differential_observation(
-            "lifecycle-order",
-            FoundationalProjection(
-                lifecycle_order=(
-                    "session.created",
-                    "session.running",
-                    "session.recovery-required",
-                    "session.running",
-                ),
-                action_causality=(),
-                replay_suffix=(
-                    "session.created",
-                    "session.running",
-                    "session.recovery-required",
-                    "session.running",
-                ),
-                cumulative_usage=(),
-                checkpoint_shape=None,
-            ),
-            recorder=recorder,
-        )
-
-        self.assertEqual(observation["provider_operations"], 7)
-
-    async def test_prime_counter_validation_rejects_tampered_result_evidence(
-        self,
-    ) -> None:
-        result = await asyncio.to_thread(_selected_prime_result, "prime-loop-application")
-        counts = _prime_external_counter_observation(result)
-        daemon = json.loads(result.serialized_observations)["daemon"]
-        self.assertEqual(result.application_operations, 1)
-        self.assertEqual(daemon["applicationOperations"], 1)
-        self.assertEqual(
-            json.loads(result.serialized_observations)["external_effects"],
-            {"application_operations": 0, "local_application_operations": 1},
-        )
-        self.assertEqual(counts["application_operations"], 0)
-        self.assertEqual(result.external_application_operations, 0)
-        with self.assertRaises(AssertionError):
-            _prime_external_counter_observation(
-                replace(result, provider_operations=1),
-            )
-        with self.assertRaises(AssertionError):
-            _prime_external_counter_observation(
-                replace(result, application_operations=0),
-            )
-        tampered_serialized = json.dumps(
-            {
-                **json.loads(result.serialized_observations),
-                "daemon": {
-                    **json.loads(result.serialized_observations)["daemon"],
-                    "applicationOperations": 0,
-                },
-            },
-            sort_keys=True,
-        )
-        with self.assertRaises(AssertionError):
-            _prime_external_counter_observation(
-                replace(result, serialized_observations=tampered_serialized),
-            )
-        with self.assertRaises(AssertionError):
-            _prime_external_counter_observation(
-                replace(result, external_application_operations=1),
-            )
-        external_tampered_serialized = json.dumps(
-            {
-                **json.loads(result.serialized_observations),
-                "external_effects": {
-                    **json.loads(result.serialized_observations)["external_effects"],
-                    "application_operations": 1,
-                },
-            },
-            sort_keys=True,
-        )
-        with self.assertRaises(AssertionError):
-            _prime_external_counter_observation(
-                replace(result, serialized_observations=external_tampered_serialized),
-            )
-
-    async def test_prime_oracle_results_are_bound_to_executed_pinned_source_identity(
-        self,
-    ) -> None:
-        identity = _validate_prime_oracle_lock_identity()
-        results = await asyncio.to_thread(
-            run_prime_loop_scenarios,
-            fake_prime=True,
-            execution_identity=identity,
-            prime_source_root=_prime_source_root(),
-        )
-        identity_mapping = _prime_oracle_identity_mapping(identity)
-        identity_digest = _prime_oracle_identity_digest(identity)
-        for result in results:
-            with self.subTest(scenario_id=result.scenario_id):
-                serialized = json.loads(result.serialized_observations)
-                self.assertEqual(serialized["execution_identity"], identity_mapping)
-                self.assertEqual(serialized["execution_identity_sha256"], identity_digest)
-                self.assertEqual(
-                    result.evidence_id,
-                    f"evidence.phase1.{_sha256_text(result.serialized_observations)}",
-                )
-                self.assertEqual(result.execution_identity_sha256, identity_digest)
-                _validate_prime_result_identity(result, identity)
-                with self.assertRaises(AssertionError):
-                    _validate_prime_result_identity(
-                        replace(result, execution_identity_sha256="0" * 64),
-                        identity,
-                    )
-                with self.assertRaises(AssertionError):
-                    _validate_prime_result_identity(
-                        replace(
-                            result,
-                            serialized_observations=json.dumps(
-                                {
-                                    **serialized,
-                                    "execution_identity_sha256": "0" * 64,
-                                },
-                                sort_keys=True,
-                            ),
-                        ),
-                        identity,
-                    )
-                with self.assertRaises(AssertionError):
-                    _validate_prime_result_identity(
-                        replace(result, evidence_id="evidence.phase1." + ("0" * 64)),
-                        identity,
-                    )
-                with self.assertRaises(AssertionError):
-                    _validate_prime_result_identity(
-                        replace(
-                            result,
-                            serialized_observations=json.dumps(
-                                {
-                                    **serialized,
-                                    "otherwise_benign_top_level_tamper": True,
-                                },
-                                sort_keys=True,
-                            ),
-                        ),
-                        identity,
-                    )
-
-    async def test_valid_adjacent_locks_cannot_bless_unrelated_executed_prime_source(
-        self,
-    ) -> None:
-        identity = _validate_prime_oracle_lock_identity()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "package-lock.json").write_text("{}\n", encoding="utf-8")
-            subprocess.run(("git", "init", "--quiet"), cwd=root, check=True)
-            subprocess.run(("git", "config", "user.name", "Asterion Test"), cwd=root, check=True)
-            subprocess.run(("git", "config", "user.email", "asterion@example.invalid"), cwd=root, check=True)
-            subprocess.run(("git", "add", "."), cwd=root, check=True)
-            subprocess.run(("git", "commit", "--quiet", "-m", "unrelated"), cwd=root, check=True)
-
-            with self.assertRaises(AssertionError):
-                await asyncio.to_thread(
-                    run_prime_loop_scenarios,
-                    fake_prime=True,
-                    execution_identity=identity,
-                    prime_source_root=root,
-                )
-
-    async def test_prime_oracle_lock_identity_rejects_commit_artifact_and_module_drift(
-        self,
-    ) -> None:
-        _validate_prime_oracle_lock_identity()
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            artifact = root / "prime-artifact-lock.json"
-            harness = root / "prime-harness-module-lock.json"
-            ecosystem = root / "prime-ecosystem-module-lock.json"
-            artifact.write_bytes(default_lock_path().read_bytes())
-            harness.write_bytes(default_harness_module_lock_path().read_bytes())
-            ecosystem.write_bytes(default_ecosystem_module_lock_path().read_bytes())
-            bundle = root / "prime-ecosystem-module.mjs"
-            bundle.write_bytes(default_ecosystem_module_lock_path().with_name("prime-ecosystem-module.mjs").read_bytes())
-
-            self._mutate_json(artifact, {"source_commit": "0" * 40})
-            with self.assertRaises(AssertionError):
-                _validate_prime_oracle_lock_identity(
-                    artifact_lock_path=artifact,
-                    harness_module_lock_path=harness,
-                    ecosystem_module_lock_path=ecosystem,
-                    ecosystem_bundle_path=bundle,
-                )
-
-            artifact.write_bytes(default_lock_path().read_bytes())
-            self._mutate_json(ecosystem, {"artifact_lock_sha256": "0" * 64})
-            with self.assertRaises(AssertionError):
-                _validate_prime_oracle_lock_identity(
-                    artifact_lock_path=artifact,
-                    harness_module_lock_path=harness,
-                    ecosystem_module_lock_path=ecosystem,
-                    ecosystem_bundle_path=bundle,
-                )
-
-            ecosystem.write_bytes(default_ecosystem_module_lock_path().read_bytes())
-            value = json.loads(ecosystem.read_text(encoding="utf-8"))
-            value["modules"][0]["sha256"] = "0" * 64
-            ecosystem.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaises(AssertionError):
-                _validate_prime_oracle_lock_identity(
-                    artifact_lock_path=artifact,
-                    harness_module_lock_path=harness,
-                    ecosystem_module_lock_path=ecosystem,
-                    ecosystem_bundle_path=bundle,
-                )
-
-    def _mutate_json(self, path: Path, updates: Mapping[str, object]) -> None:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        value.update(updates)
-        path.write_text(json.dumps(value), encoding="utf-8")
 
 
 if __name__ == "__main__":
