@@ -59,6 +59,30 @@ these.
 
 ---
 
+## Execution discipline (multi-agent, learned the hard way)
+
+The gate reads the **entire** release surface on every run. Two rules follow:
+
+- **Serialize agents.** Never run a gate scan while another agent holds an
+  uncommitted edit anywhere in the tree. "Parallel on disjoint files" is not
+  safe here even when the file sets genuinely do not overlap, because the scan
+  reads all of them. One writer at a time for the duration of Phase 1.
+- **Never attribute a gate failure to concurrency or flakiness.** A scan that
+  raises, or names a file unexpectedly, is reporting a real property of the
+  tree at that instant. Diagnose it. Re-running until it passes converts a
+  deterministic bug into a permanent blind spot.
+
+Recorded after a real incident: a broken in-flight edit in one agent's window
+made a second agent's scan abort on `src/asterion/immutable.py`. The second
+agent reported it as "a transient read during concurrent write activity". It
+was deterministic — `immutable.py` is index 0 in
+`Path("src/asterion").rglob("*.py")`, i.e. simply the first `.py` the gate
+tried, refused by a probe that was true for every codec. The evidence was in
+hand (a raise naming a file that decodes cleanly in isolation) and was
+explained away instead of followed.
+
+---
+
 ## Program roadmap
 
 Nine phases, in the spec's mandated order. Phase 1 is detailed in this plan.
