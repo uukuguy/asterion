@@ -419,14 +419,30 @@ def _read_surface_text(path: Path) -> str:
     Returning "" for an undecodable file would treat it as clean, which is a
     fail-open in a trust-boundary gate: a forbidden token would only have to be
     placed in a file with one bad byte.
+
+    Do NOT fall back to UTF-16 unless a BOM actually declares it. Decoding a
+    non-UTF-16 file as UTF-16 pairs the bytes, so ASCII tokens are split by NULs
+    and evade the scan - the same fail-open in a different disguise.
     """
+    raw = path.read_bytes()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return raw.decode("utf-16")
+        except UnicodeDecodeError as exc:
+            raise AssertionError(f"undecodable release-surface file: {path}") from exc
+    encoding = "utf-8"
+    if path.suffix == ".py":
+        # Honour a PEP 263 declared source encoding.
+        import tokenize
+
+        try:
+            with path.open("rb") as handle:
+                encoding, _ = tokenize.detect_encoding(handle.readline)
+        except (SyntaxError, UnicodeDecodeError) as exc:
+            raise AssertionError(f"undecodable release-surface file: {path}") from exc
     try:
-        return path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        pass
-    try:
-        return path.read_text(encoding="utf-16")
-    except UnicodeDecodeError as exc:
+        return raw.decode(encoding)
+    except (UnicodeDecodeError, LookupError) as exc:
         raise AssertionError(f"undecodable release-surface file: {path}") from exc
 
 
@@ -579,6 +595,16 @@ Remove from `pyproject.toml`:
 Do **not** touch `prime-applications`, `prime.arc-agi-3-solving__1.0.0`,
 `corpus.local-root`, `evaluation.answer-judge`, or the `dci.*` / `code.quality`
 rows.
+
+- [ ] **Step 1b: Read the rest of the packaging block before editing**
+
+Beyond the ranges already listed, `pyproject.toml` carries:
+- `:91-108` schema force-includes — audited in Task 9, **not** deleted here;
+- `:110-115` `[tool.hatch.build.targets.sdist] artifacts` —
+  `.asterion-prime-extension-build.json`,
+  `src/asterion/applications/prime/resources/ipython-extension.mjs`,
+  `src/asterion/applications/prime/p7/run_story/assets/*`. All three are
+  **native; KEEP**. Do not delete the sdist block.
 
 - [ ] **Step 2: Delete the legacy wheel content mappings**
 
@@ -863,8 +889,14 @@ possibly a workspace manifest line.
 git rm -r packages/typescript/prime-gateway
 ```
 
-Remove its entry from the npm workspace list in the root `package.json` if
-present.
+There is **no npm workspace list** — this repo declares no `workspaces` in any
+`package.json`; each package is built standalone via `--prefix`. Nothing to
+prune.
+
+`packages/typescript/asterion-runtime/` and `packages/typescript/dci-context-extension/`
+survive and are depended on by surviving Make targets (`asterion-runtime` at
+`:96-97`, `:187-188`, `:313`; `dci-context-extension` at `:189`). Do not remove
+them.
 
 - [ ] **Step 3: Verify the surviving TypeScript still builds**
 
@@ -910,8 +942,14 @@ As of 2026-09-13 that is ~180 of 428 modules. Delete every module whose
 *subject under test* is a removed surface (the `test_prime_p1..p7_*_development_*`,
 `*_cli_host`, `*_development_gateway`, `*_development_sdk_provider`,
 `*_authority_*`, `test_prime_source_lock`, `test_prime_development_preparation`,
-`test_setup_prime_agent`, and the `prime_gateway` fixture consumers), plus
-`tests/fixtures/prime_gateway/` and `tests/fixtures/prime-parity/`.
+`test_setup_prime_agent`, and the `prime_gateway` fixture consumers).
+
+Of the 26 fixture trees under `tests/fixtures/`, **only two are coupled**:
+`prime_gateway/` (31 hits, force-included at `pyproject.toml:90`) and
+`prime-parity/` (5 hits, `ledger_id: "prime-agent-0.7.1"` in every `v1/*.json`).
+Delete those two. The other 23 survive — including `prime_ecosystem/`, whose
+*content is clean* (0 hits); only `test_prime_ecosystem_real_process.py:11,15`
+couples it, so keep the fixture tree and delete the test.
 
 Modules in that list whose subject is *native* are not deleted here — they go to
 Step 2. Sort each grep hit into one bucket deliberately; do not bulk-delete by
@@ -1139,7 +1177,7 @@ time with a misleading message rather than at import:
 
 | Surface | Anchor | Action |
 |---|---|---|
-| `.github/workflows/ci.yml` | `hashFiles(...)` names `packages/typescript/prime-gateway/package-lock.json` and `.../resources/prime-artifact-lock.json` | drop the stale Prime paths from the cache key |
+| `.github/workflows/ci.yml` | `:26` `hashFiles(...)` names `packages/typescript/prime-gateway/package-lock.json` and `.../resources/prime-artifact-lock.json`; `:27-29` **exits 1 when the cache key misses** | must be edited, and the CI npm cache repopulated, or the job hard-fails. Also `:33-34` runs `make first-run-check` + `make promotion-check`, which consume the rewritten targets |
 | `tests/test_standalone_repository.py` | `:436-450` asserts those ci.yml paths; `:174-197` asserts Makefile `prime-pN-run` recipes contain `--provider prime-agent --runtime prime.agent` | rewrite both assertions to the post-removal distribution |
 | `tools/climb/cycle.sh` | step list runs the prime-gateway build/test and `check_prime_parity.py --provider asterion.prime-gateway` | drop those steps; the remaining climb steps are Prime-free |
 | `docs/guides/prime-control-operator-guide.md` | `:46,52,84,103,129` document `make prime-check` / `prime-setup` / `prime-verify-*` and `3th-party/prime-agent` | its link target `docs/README.md:29` must not dangle — rewrite or remove the guide and its link together |
