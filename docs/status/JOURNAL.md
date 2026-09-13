@@ -2281,3 +2281,5 @@
 - 23:44 复审发现门禁漏 createAgentSession/loadPrimeSdk 且两处 fail-open，修复契约定稿 [786ffca2]
 - 23:47 计划折入链式导入、CI/docs 破坏面与 wheel 内容扫描 [c9a3dcfc]
 - 23:56 二轮安全复审否掉 UTF-16 回落（非 BOM 会拆散 ASCII token），改为 BOM 门控 + PEP263 [b4f00e96]
+- 00:00 门禁修复落地：补 prime-sdk-edge 规则，真实树违规 1744 → 1881 [8c41f2cb]
+- 00:06 计划停止字面写出 SDK token（注释也扫描），并记录门禁 5 条已知局限 [180d1b8f]
