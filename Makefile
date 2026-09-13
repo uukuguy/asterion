@@ -2,9 +2,6 @@ UV_BIN ?= uv
 ASTERION_PROVIDER ?= dci-agent-lite
 ASTERION_ARGS ?=
 DCI_ARGS ?=
-ASTERION_PRIME_SOURCE_ROOT ?= 3th-party/prime-agent
-ASTERION_PRIME_AUTHORITY ?=
-ASTERION_PRIME_MAX_COST_MICROS ?=
 ASTERION_PRIME_NODE ?= $(shell npm exec --offline --yes --package=node@22 -- node -p 'process.execPath' 2>/dev/null)
 ASTERION_PROMOTION_NPM_CACHE ?=
 PRIME_ORB_MACHINE ?= ubuntu
@@ -24,14 +21,13 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: dci-run dci-benchmark
 .PHONY: dci-basic-example dci-runtime-context-example
 .PHONY: test-typescript test-rust check-rust
-.PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded prime-readme-rlm-smoke prime-smoke-core
+.PHONY: prime-verify-provider-free prime-readme-rlm-smoke prime-smoke-core
 .PHONY: prime-parity-inventory prime-verify-system-parity
-.PHONY: prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run asterion-prime-p7-solve prime-apps-preflight
+.PHONY: asterion-prime-p7-solve
 .PHONY: asterion-prime-p1-run
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
-.PHONY: test.prime-long-running.provider-free test.prime-long-running.bounded
+.PHONY: test.prime-long-running.provider-free
 .PHONY: test.prime-continual-harness.provider-free
-.PHONY: test.prime-continual-harness.bounded
 .PHONY: test.prime-ecosystem-resources.provider-free
 .PHONY: test.prime-ecosystem-extensions.provider-free
 .PHONY: test.prime-ecosystem-packages.provider-free
@@ -49,7 +45,7 @@ help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
 	@echo "provider-free checks: check-pi check-resources-basic check-resources-benchmark doctor first-run-check"
 	@echo "layered provider-free: test.framework-core test.cross-language-contracts test.extension-wheels test.provider-integration test.framework-provider-free"
-	@echo "bounded presets: asterion-verify-basic asterion-verify-complete dci-basic dci-complete prime-verify-bounded prime-p1-run ... prime-p7-run"
+	@echo "bounded presets: asterion-verify-basic asterion-verify-complete dci-basic dci-complete"
 	@echo "operator-authorized run/benchmark: asterion-run dci-run dci-benchmark"
 	@echo "full regression: check promotion-check"
 	@echo "provider-free lifecycle: sync build test lint docs-check"
@@ -59,11 +55,9 @@ help:
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
-	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-readme-rlm-smoke prime-smoke-core prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free test.prime-long-running.bounded"
-	@echo "Prime development execution (Orb Ubuntu): prime-p1-run prime-p2-run prime-p3-run prime-p4-run prime-p5-run prime-p6-run prime-p7-run"
+	@echo "Prime Gateway: prime-verify-provider-free prime-readme-rlm-smoke prime-smoke-core prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free"
 	@echo "Asterion Prime live research: asterion-prime-p7-solve"
 	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
-	@echo "Prime development host preflight (Orb Ubuntu): prime-apps-preflight"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
 
@@ -113,7 +107,7 @@ docs-check:
 check: test-typescript test lint docs-check check-rust build
 
 promotion-check:
-	ASTERION_PRIME_SOURCE_ROOT="$(ASTERION_PRIME_SOURCE_ROOT)" $(UV_BIN) run python tools/check_promotion.py --npm-cache "$(ASTERION_PROMOTION_NPM_CACHE)" --node-executable "$(ASTERION_PRIME_NODE)"
+	$(UV_BIN) run python tools/check_promotion.py --npm-cache "$(ASTERION_PROMOTION_NPM_CACHE)" --node-executable "$(ASTERION_PRIME_NODE)"
 
 first-run-check:
 	$(UV_BIN) run python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification
@@ -197,98 +191,8 @@ check-rust: test-rust
 	cargo fmt --manifest-path packages/rust/controlled-executor/Cargo.toml -- --check
 	cargo clippy --manifest-path packages/rust/controlled-executor/Cargo.toml -- -D warnings
 
-prime-check:
-	ASTERION_PRIME_NODE="$(ASTERION_PRIME_NODE)" $(UV_BIN) run python tools/setup_prime_agent.py --check --node-executable "$(ASTERION_PRIME_NODE)" --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
-
-prime-setup:
-	ASTERION_PRIME_NODE="$(ASTERION_PRIME_NODE)" $(UV_BIN) run python tools/setup_prime_agent.py --node-executable "$(ASTERION_PRIME_NODE)" --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
-
 prime-verify-provider-free:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level provider-free
-
-prime-p1-run:
-	@run_id="$${PRIME_RUN_ID:-prime-p1-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		printf '%s\n' '[prime-p1] IPython coding: preserve state across two cells and validate the generated solution' >&2; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p1 --status-stream stderr; \
-			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
-				--provider prime-agent \
-				--application prime.ipython-coding@1.0.0 \
-				--runtime prime.agent \
-				--run-id "$$1" \
-				--input fixed-small-verification' prime-p1-run "$$run_id"
-
-prime-p2-run:
-	@run_id="$${PRIME_RUN_ID:-prime-p2-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		printf '%s\n' '[prime-p2] Programmatic long context: use the fixed corpus, execute one cell, and validate the answer' >&2; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p2 --status-stream stderr; \
-			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
-				--provider prime-agent \
-				--application prime.programmatic-long-context@1.0.0 \
-				--runtime prime.agent \
-				--run-id "$$1" \
-				--input fixed-small-verification' prime-p2-run "$$run_id"
-
-prime-p3-run:
-	@run_id="$${PRIME_RUN_ID:-prime-p3-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		printf '%s\n' '[prime-p3] Recursive workflow: coordinate two child roles and validate the combined result' >&2; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p3 --status-stream stderr; \
-			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
-				--provider prime-agent \
-				--application prime.recursive-workflow@1.0.0 \
-				--runtime prime.agent \
-				--run-id "$$1" \
-				--input fixed-small-verification' prime-p3-run "$$run_id"
-
-prime-p4-run:
-	@run_id="$${PRIME_RUN_ID:-prime-p4-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		printf '%s\n' '[prime-p4] Long session continuity: detach, reattach, and validate the preserved session' >&2; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p4 --status-stream stderr; \
-			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
-				--provider prime-agent \
-				--application prime.long-session-continuity@1.0.0 \
-				--runtime prime.agent \
-				--run-id "$$1" \
-				--input fixed-small-verification' prime-p4-run "$$run_id"
-
-prime-p5-run:
-	@run_id="$${PRIME_RUN_ID:-prime-p5-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		printf '%s\n' '[prime-p5] Bounded autonomy: diagnose, repair, and validate the fixed clamp task' >&2; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p5 --status-stream stderr; \
-			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
-			--provider prime-agent \
-			--application prime.bounded-autonomy@1.0.0 \
-			--runtime prime.agent \
-			--run-id "$$1" \
-			--input fixed-small-verification' prime-p5-run "$$run_id"
-
-prime-p6-run:
-	@run_id="$${PRIME_RUN_ID:-prime-p6-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		printf '%s\n' '[prime-p6] Continual improvement: evaluate, refine, holdout-test, then activate or roll back' >&2; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p6 --status-stream stderr; \
-			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
-			--provider prime-agent \
-			--application prime.continual-improvement@1.0.0 \
-			--runtime prime.agent \
-			--run-id "$$1" \
-			--input fixed-small-verification' prime-p6-run "$$run_id"
-
-prime-p7-run:
-	@run_id="$${PRIME_RUN_ID:-prime-p7-$$(date -u +%Y%m%d%H%M%S)-$$$$}"; \
-		printf '%s\n' '[prime-p7] ARC-AGI-3: run one offline episode capped at four actions and replay its score' >&2; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; \
-			/root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/prepare_prime_development.py --scenario p7 --status-stream stderr; \
-			exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated asterion run --progress \
-			--provider prime-agent \
-			--application prime.arc-agi-3@1.0.0 \
-			--runtime prime.agent \
-			--run-id "$$1" \
-			--input fixed-small-verification' prime-p7-run "$$run_id"
 
 asterion-prime-p7-solve:
 	@printf '%s\n' '[asterion-prime-p7-solve] ARC-AGI-3: native Asterion-prime fixed live solve' >&2; \
@@ -300,9 +204,6 @@ asterion-prime-p1-run:
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		printf '\''%s\n'\'' '\''[asterion-prime-p1-run] native Asterion-prime fixed small verification'\'' >&2; \
 		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p1.operator'\'' asterion-prime-p1-run "$$1" "$(CURDIR)"'
-
-prime-apps-preflight:
-	@exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'export PRIME_ORB_MACHINE="$(PRIME_ORB_MACHINE)"; exec /root/.local/bin/uv run --quiet --extra prime --python /usr/bin/python3 --isolated python tools/preflight_prime_apps.py'
 
 test.prime-session-context-parity.provider-free:
 	$(UV_BIN) run python -m unittest -v \
@@ -331,23 +232,12 @@ test.prime-long-running.provider-free:
 		tests.test_prime_long_running_parity
 	npm --prefix packages/typescript/prime-gateway test -- test/long-running.test.mjs
 
-test.prime-long-running.bounded:
-	$(UV_BIN) run python tools/prime_long_running_experiment.py \
-		--authorized-bounded-provider \
-		--source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
-
 test.prime-continual-harness.provider-free:
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_control_harness \
 		tests.test_prime_continual_harness \
 		tests.test_prime_continual_harness_parity
 	npm --prefix packages/typescript/prime-gateway test -- test/continual-harness.test.mjs
-
-test.prime-continual-harness.bounded:
-	$(UV_BIN) run python tools/prime_continual_harness_experiment.py \
-		--authorized-bounded-provider \
-		--source-root 3th-party/prime-agent \
-		--private-evidence-root .asterion-private/prime-continual-harness
 
 test.prime-ecosystem-resources.provider-free:
 	$(UV_BIN) run python -m unittest -v \
@@ -493,12 +383,6 @@ verify.native-verified-loop.bounded:
 .PHONY: verify.native-verified-loop.small
 verify.native-verified-loop.small:
 	$(UV_BIN) run python tools/verify_native_verified_loop.py --level small-verification
-
-prime-verify-bounded:
-	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" $(if $(ASTERION_PRIME_AUTHORITY),--authority "$(ASTERION_PRIME_AUTHORITY)") $(if $(ASTERION_PRIME_MAX_COST_MICROS),--max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)")
-
-prime-verify-native-rlm-bounded:
-	$(UV_BIN) run python tools/verify_prime_loop.py --level native-rlm-bounded --native-rlm-experiment --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
 
 prime-readme-rlm-smoke:
 	$(UV_BIN) run python -m tools.run_prime_readme_smoke
