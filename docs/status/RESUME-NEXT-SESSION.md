@@ -1,12 +1,13 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-14 01:20. **Session remains active — not a final handoff.**
+> Updated: 2026-09-14 01:40. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Phase 1 is **6 of 11 tasks done**; Task 5 is executing.
-- Gate is complete: **23 tests**, real tree **1925** (1105 `legacy-prime-import`, 607 `prime-source-locator`, 76 `prime-gateway-reference`, 137 `prime-sdk-edge`).
+- Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Phase 1 is **7 of 11 tasks done**; Task 6 is executing.
+- Gate is complete: **23 tests**, real tree **1908** (1102 `legacy-prime-import`, 593 `prime-source-locator`, 76 `prime-gateway-reference`, 137 `prime-sdk-edge`).
 - **Phase 1 runs one writer at a time.** The gate walks the whole tree, so a scan is never valid while anything anywhere is uncommitted.
+- **P1 is now genuinely unavailable** — `_preflight` raises `P1OperatorError()` and `main()` exits 2. That is the spec's required intermediate state, not a regression.
 
 ## 已验证事实
 
@@ -16,6 +17,8 @@
 - **Round 5** `8291f192` — 15 → 23 tests. Closed the silent-skip class: `os.walk` per root, `followlinks=False`, prune `SKIP_DIRS` then record `symlinked-directory`, `ENOENT` = absent, case-insensitive suffixes, `.github/` + `.yml`, and a new `prime-gateway-reference` rule (**+76**). Delta: `legacy-prime-import` +0, `prime-sdk-edge` +0, `prime-source-locator` +1 (the newly visible `ci.yml`).
 - **`#1` confirmed in the strongest form:** all four structural rules are 0 on the real tree and *the set of disappeared findings is empty* — swapping `rglob` for `os.walk` lost nothing.
 - **The gateway rule found a plan gap on a retained file.** `tools/check_promotion.py` has six sites, not the two the plan enumerated: `:240,242` assembly paths and `:1090,1372,1374,1450` gateway paths. `:1090` copied the deleted package's `prime-artifact-lock.json` into the distribution. All six now specified in Task 10.
+- **T5** `ba89a4de` — the six Prime execution edges excised from `applications/prime/p1/operator.py`. Gate 1925 → 1908. `_preflight` keeps only its native source-execution guard and then raises `P1OperatorError()`; `main()` prints `preflight-rejected` and exits 2. `_Preflight`, `_pi_command`, `_PRICE_PROBE`, `_build_resources` and twelve unused imports are fully deleted — no stub, no fallback, no vestigial field.
+- **Six native functions are now unreachable from `main()` and deliberately retained:** `P1OperatorResources`, `run_fixed_small_verification`, `_P1Bridge`, `_force_close_pi`, `_run_operator`, `_public_progress`. They carry no Prime edge, 18 passing tests pin their contracts, and Phase 4 rebuilds on them. **A type checker reports all six as unaccessed — do not delete them as dead code.** Recorded in the plan as a Task 5 post-condition.
 - **Six gate defects, all introduced by the plan, all caught before shipping.** The three worst: dropped Prime SDK tokens (137 real hits); undecodable files treated as clean; and a codec probe `info.encode(...) != b"..."` where `CodecInfo.encode` returns a `(bytes, length)` **tuple**, making it true for every codec and refusing every `.py` file.
 - **`pyproject.toml:79-80` shipped a Prime checkout lock** (`pi-compaction-lock.json`, `source_commit a18809e0…`, entry points under `packages/coding-agent/dist/*`) mislabelled native. Both the spec inventory and the manual inventory had it as native; the gate caught it on its first run.
 
@@ -27,7 +30,7 @@
 
 ## 未完成边界
 
-- Tasks 5-11 open. No legacy Python package, TypeScript surface, tool, or test has been deleted yet — only `pyproject.toml` and `Makefile` references.
+- Tasks 6-11 open. No legacy Python package, TypeScript surface, tool, or test has been deleted yet — only `pyproject.toml` and `Makefile` references, plus the P1 operator's inner couplings.
 - P7 not revalidated; no P1-P6 rebuilt.
 - Open: `agent-client/v1` retention (Task 9 audit, explicit report required).
 - Open: `../external-prime/arc-agi-3/venv/bin/python` — Phase 2 decides whether the ARC broker becomes an injected host service.
@@ -40,8 +43,8 @@
 
 ## 下一动作
 
-1. Task 5 — excise the six Prime couplings from `src/asterion/applications/prime/p1/operator.py`. **Breaks the dependency; builds no replacement** — P1 goes unavailable and stays that way until Phase 4.
-2. Tasks 6-11 in order, one writer at a time. Task 11 Step 3 is the green-gate acceptance.
+1. Task 6 — delete `applications/prime_agent/`, `capabilities/prime_agent/`, `runtimes/prime_agent.py`, `runtimes/prime_agent_host.py`, `control/providers/prime/`; edit `first_party_packages.py` (preserving the two native packages) and `tests/core_module_allowlist.py` (dropping legacy prefixes only). Its Step 1 external-importer grep is a gate: any hit means stop.
+2. Tasks 7-11 in order, one writer at a time. Task 11 Step 3 is the green-gate acceptance.
 
 ## Ready-to-paste commands
 
