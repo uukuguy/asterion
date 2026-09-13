@@ -602,30 +602,49 @@ git commit -m "feat(prime): replace literal detachment check with semantic relea
 
 ---
 
-### Gate limitations — deliberate, and to be stated rather than implied
+### Gate limitations — verified, not assumed
 
-The gate is a release-surface scanner, not a proof of detachment. Its known
-limits, recorded so later phases do not mistake a green gate for a stronger
-claim than it is:
+**The gate is lexical, not semantic.** It matches a contiguous literal token
+inside a single line. It does *not* implement the spec's "the rule is semantic,
+not string-specific" clause, and the module docstring must not claim that it
+does. A green gate therefore supports exactly this claim, and no more:
 
-1. **Line-local, literal matching.** A forbidden token assembled at runtime
-   (the same `_joined` technique the gate itself uses) is invisible. The gate
-   catches spelled-out references only; actual enforcement is the removal work
-   in Tasks 3-9.
-2. **`SCAN_ROOTS` is an allowlist.** `docs/`, `scripts/`, `schemas/`, and
-   top-level `*.py` are not scanned, so a checkout path written into a plan or
-   guide passes untouched. This is intentional — `docs/` is history and is not
-   shipped in the wheel — but it means the gate does not cover the docs corpus.
-   If a future phase ships docs, add them to `SCAN_ROOTS`.
-3. **`ALLOWED_ENV_VARS` scrubbing can manufacture a false positive.** The
-   scrub runs before matching, so a line containing an allowed name spliced
-   into a forbidden one could be reported. Contrived, but if it fires, fix the
-   scrub rather than deleting the rule.
-4. **No line-continuation awareness.** A token split across two source lines is
-   invisible. Accepted; Python and TypeScript both permit it, but the removal
-   tasks verify by deletion, not by scan.
-5. **The scan skips `node_modules`/`dist`/`build`.** Task 9 Step 3b closes the
-   shipping half of this by scanning the built wheel with the same rule set.
+> No forbidden token appears as a contiguous literal on one line of a file
+> under a scanned root with a scanned suffix.
+
+That is a regression guard. Enforcement is the deletion work in Tasks 3-10.
+
+The residual classes, each verified rather than reasoned about:
+
+| # | Input | Effect | Needs filesystem trickery |
+|---|---|---|---|
+| 1 | Unreadable **directory** | whole subtree silently skipped — demonstrated with `chmod 000`; the scan completes and reports `[]` | yes |
+| 2 | Suffix allowlist (`.py .ts .mjs .json .toml .mk .txt`, `Makefile`) | `.yml`, `.md`, `.sh`, `.js`, `.cfg`, `.rs`, `.lock` and **uppercase** variants never scanned (comparison is case-sensitive) | no |
+| 3 | Root allowlist | `docs/`, `schemas/`, `.github/`, top-level `*.py` unscanned — which is why this plan can name checkout paths freely | no |
+| 4 | `SKIP_DIRS` | anything under `dist/`, `build/`, `node_modules`, `.venv`, `__pycache__` invisible — so `prime-gateway/dist` is unwatched and a *reintroduction* after removal would be too | no |
+| 5 | Line-local lexical matching | `"ASTERION_PRIME_" "SOURCE_ROOT"` **is** the env var name at runtime; likewise `"prime" + "SourceRoot"`, `importlib.import_module("asterion.applications." + "prime_agent")`, or a token split across a newline | **no — the realistic bypass** |
+| 6 | Directory symlinks not traversed | content behind a symlinked directory unscanned; deliberate per spec, but silent | yes |
+
+Consequences worth acting on rather than merely recording:
+
+- **#1 is a fail-open and must be closed.** Replace `rglob` with an error-aware
+  walk (`os.walk(..., onerror=...)`) that records an unreadable directory as a
+  violation. "The scan completed" must not be able to mean "the walk gave up
+  quietly".
+- **#3 × #2 make `.github/workflows/ci.yml` invisible twice over** (wrong root
+  *and* wrong suffix). That file carries a recorded Phase 1 risk and Task 10
+  edits it, so add `.github/` to `SCAN_ROOTS` and `.yml`/`.yaml` to
+  `SCAN_SUFFIXES`.
+- **No rule forbids the `prime-gateway` package path itself.** `ci.yml`,
+  `Makefile` and several tests reference `packages/typescript/prime-gateway/…`,
+  and nothing matches it. After Task 7 deletes the package, a dangling
+  reference would go unnoticed. Add a locator rule for the package path.
+- **#5 is accepted, not closed.** Closing it needs AST-level analysis
+  (concatenation, `importlib`, f-strings) and is out of proportion for a
+  research-phase regression guard. It is why the removal tasks verify by
+  deletion and by the built-wheel scan, not by the scan alone.
+- `os.*` errors: a permission-denied file must be *recorded*, not abort. The
+  implementing agent already closed this (`OSError` → `None` → violation).
 
 ### Task 2: Establish the red baseline on the real tree
 
