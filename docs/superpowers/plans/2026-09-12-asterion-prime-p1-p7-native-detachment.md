@@ -646,8 +646,10 @@ git commit -m "refactor(prime): remove Prime source execution from native P1 ope
 **Files:**
 - Delete: `src/asterion/applications/prime_agent/`,
   `src/asterion/capabilities/prime_agent/`, `src/asterion/runtimes/prime_agent.py`,
+  `src/asterion/runtimes/prime_agent_host.py`,
   `src/asterion/control/providers/prime/`
-- Modify: `src/asterion/applications/first_party_packages.py`
+- Modify: `src/asterion/applications/first_party_packages.py`,
+  `tests/core_module_allowlist.py`
 
 **Interfaces:**
 - Consumes: Tasks 3-5 (nothing may still reference these).
@@ -655,23 +657,53 @@ git commit -m "refactor(prime): remove Prime source execution from native P1 ope
 
 - [ ] **Step 1: Confirm nothing outside the deletion set still imports them**
 
-Run: `grep -rn -E 'asterion\.(applications\.prime_agent|capabilities\.prime_agent|runtimes\.prime_agent|control\.providers\.prime)' src/ asterion/ tools/ --include='*.py' 2>/dev/null | grep -vE 'src/asterion/(applications/prime_agent|capabilities/prime_agent|runtimes/prime_agent\.py|control/providers/prime)/'`
+Run: `grep -rn -E 'asterion\.(applications\.prime_agent|capabilities\.prime_agent|runtimes\.prime_agent|control\.providers\.prime)' src/ tools/ --include='*.py' 2>/dev/null | grep -vE 'src/asterion/(applications/prime_agent|capabilities/prime_agent|runtimes/prime_agent|control/providers/prime)'`
 Expected: no output. Any hit must be resolved before deleting.
 
-- [ ] **Step 2: Remove the first-party registration**
+- [ ] **Step 2: Remove the first-party registration — precisely**
 
-In `src/asterion/applications/first_party_packages.py`, delete the
-`PRIME_AGENT_PACKAGE` registration and its factory. Leave every other
-registration in that module untouched.
+In `src/asterion/applications/first_party_packages.py` delete only:
+`:21` `PRIME_AGENT_PACKAGE = CapabilityPackageRef("prime-agent", "1.0.0")`,
+the registration tuple entry at `:43-47`, the factory
+`create_prime_agent_package()` at `:99-104`, and the two `__all__` names at
+`:131` and `:137`.
 
-- [ ] **Step 3: Delete the trees**
+**Preserve** `CONTROLLED_CODE_PACKAGE` (`:18`, `:33-37`, factory `:61-88`),
+`DCI_PACKAGE` (`:20`, `:38-42`, factory `:91-96`),
+`builtin_capability_registrations()` itself (`:28`), **and critically**
+`PRIME_ARC_AGI_3_SOLVER_PACKAGE` (`:22`) and
+`PRIME_IPYTHON_CODING_NATIVE_PACKAGE` (`:23-25`) — those two bind *native*
+payloads (`capabilities/prime_arc_agi_3_solver`,
+`capabilities/prime_ipython_coding_native`) whose assemblies set
+`runtime_id: asterion.prime`. They are not Prime Agent execution edges. Verify
+each of the two has `runtime_id: asterion.prime` in its assembly before leaving
+it in place.
+
+- [ ] **Step 3: Drop the modules from the core allowlist**
+
+`tests/core_module_allowlist.py:182-183` lists `asterion.runtimes.prime_agent`
+and `asterion.runtimes.prime_agent_host`. Remove both entries in the same
+commit, or the core-only import gate fails on a module that no longer exists.
+
+- [ ] **Step 4: Delete the trees**
 
 ```bash
 git rm -r src/asterion/applications/prime_agent src/asterion/capabilities/prime_agent src/asterion/control/providers/prime
-git rm src/asterion/runtimes/prime_agent.py
+git rm src/asterion/runtimes/prime_agent.py src/asterion/runtimes/prime_agent_host.py
 ```
 
-- [ ] **Step 4: Verify the framework still imports**
+> `prime_agent_host.py` is removable because **every** consumer of its seam
+> names (`PrimeSmallVerification*`, `PrimePresetExecution*`,
+> `PrimeP7DevelopmentHostService`) is either legacy source
+> (`applications/prime_agent/runtime_binding.py`, `operator/p1..p7_cli_host.py`)
+> or a legacy test (`test_prime_p*_cli_host.py`,
+> `test_prime_p*_installed_route.py`, `test_prime_package_runtime_closure.py`,
+> `test_prime_preset_runtime.py`). No native module under
+> `applications/prime/` or `agents/prime/` references them. Re-verify with
+> `grep -rn 'PrimeSmallVerification\|PrimePresetExecution\|PrimeP7DevelopmentHostService' src/asterion tools/ --include='*.py'`
+> before deleting; if a native hit appears, keep the module and report it.
+
+- [ ] **Step 5: Verify the framework still imports**
 
 Run: `uv run python -c "import asterion; import asterion.applications.prime; import asterion.runtimes.asterion_prime"`
 Expected: exits 0.
@@ -679,10 +711,10 @@ Expected: exits 0.
 Run: `uv run python -m unittest -v tests.test_project_boundary tests.test_default_runtime_factory`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add -A src/asterion
+git add -A src/asterion tests/core_module_allowlist.py
 git commit -m "refactor(prime): delete legacy Prime Agent provider, runtime, capability and control packages"
 ```
 
@@ -833,12 +865,38 @@ explicitly rather than deciding silently.
 
 - [ ] **Step 2: Audit `tools/`**
 
-Per file: REMOVE if it locates, prepares, locks, or launches a Prime checkout,
-or if it is a Prime-backed smoke/experiment/loop runner; RETAIN if it is a
-neutral reducer or verifier over recorded receipts; otherwise AUDIT-LATER with a
-named reason. `tools/check_prime_parity.py` is the neutral reducer candidate —
-retain it only if it reads recorded evidence and starts no process. Record the
-table in the task report.
+The classification rule: REMOVE if the tool locates, prepares, locks, or
+launches a Prime checkout, or is a Prime-backed smoke/experiment/loop runner;
+RETAIN if it is a neutral reducer over *recorded* evidence that starts no
+process; otherwise AUDIT-LATER with a named reason.
+
+Already resolved by evidence — do not re-litigate, just verify:
+
+| File | Verdict | Evidence |
+|---|---|---|
+| `tools/setup_prime_agent.py` | REMOVE | locates/verifies/installs the pinned checkout (`--source-root`, `verify_prime_source`) |
+| `tools/verify_prime_loop.py` | REMOVE | imports `setup_prime_agent`; drives `prime-agent.daemon` |
+| `tools/check_prime_parity.py` | **REMOVE** | `:21,27` import `verify_prime_checkout`; `:74,84,322,330` take `--source-root` and call it. It **requires a checkout to run**, so it does not qualify for the neutral-reducer allowance |
+| `tools/run_asterion_prime_p7.py` | REMOVE | `Popen`-driven P7 launcher (its replacement is the Phase 2 installed-wheel preset) |
+| `tools/prime_core_smoke.py`, `tools/run_prime_core_smoke.py`, `tools/run_prime_readme_smoke.py` | REMOVE | Prime-backed smoke runners |
+| `tools/prime_bounded_loop_experiment.py` | REMOVE | Prime-backed experiment |
+| `tools/prime_continual_harness_experiment.py` | REMOVE | `:26` imports `control.providers.prime.harness_parity_testing` |
+| `tools/prime_long_running_experiment.py` | REMOVE | `:20` imports `control.providers.prime.parity_testing` |
+| `tools/prime_native_rlm_experiment.py` | REMOVE | `:38-44` imports six modules from `control.providers.prime` |
+| `tools/build_prime_ipython_image.py` | REMOVE | `:21` imports `applications.prime_agent.source_lock`; builds from `operator/image` |
+| `tools/materialize_prime_ipython_inputs.py` | REMOVE | `:14,19,26` import three `applications.prime_agent.operator.*` |
+| `tools/generate_prime_ipython_release_spec.py` | REMOVE | `:13` imports `operator.release_spec_generation` |
+| `tools/generate_prime_development_lock.py` | REMOVE | generates a Prime development lock |
+| `tools/prepare_prime_development.py` | REMOVE | invoked by every `prime-pN-run` target |
+| `tools/check_promotion.py` | **RETAIN, re-point** | `:240,242` reference legacy assembly paths as string literals only — no import edge. Re-point at the post-removal distribution; do not delete |
+| `tools/compare_prime_p7_runs.py` | RETAIN if neutral | the spec explicitly permits neutral external-log normalization. Keep only if it reads an exported log and starts no process |
+| `tools/preflight_prime_apps.py` | AUDIT | read it; it selects a legacy application set (also a REMOVE Make target) |
+| `tools/check_docs.py` | RETAIN | 0 hits; survives |
+
+Also check `tools/climb/` and `tools/build_asterion_prime_compaction_lock.mjs`.
+The latter is force-included into the wheel as the **native** compaction
+verifier (`pyproject.toml:80`) — RETAIN. Record the final table in the task
+report, including any file not listed here.
 
 - [ ] **Step 3: Verify the wheel contains no legacy resource**
 
