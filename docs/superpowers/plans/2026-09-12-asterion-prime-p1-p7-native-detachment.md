@@ -591,7 +591,7 @@ def assert_asterion_prime_source_detached(root: Path) -> None:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run python -m unittest -v tests.test_prime_source_detachment`
-Expected: PASS, 16 tests.
+Expected: PASS, 15 tests.
 
 - [ ] **Step 5: Commit**
 
