@@ -480,9 +480,22 @@ def _read_surface_text(path: Path) -> str:
             with path.open("rb") as handle:
                 encoding, _ = tokenize.detect_encoding(handle.readline)
             info = codecs.lookup(encoding)
-        except (SyntaxError, UnicodeDecodeError, LookupError) as exc:
+            # CodecInfo.encode is the stateless encoder and returns
+            # (bytes, length), NOT bytes. Unpack it. Comparing the tuple
+            # against b"..." is True for every codec, including utf-8, which
+            # would refuse every .py file in the tree.
+            probe = "AZaz09/._"
+            encoded, _ = info.encode(probe)
+            transparent = (
+                encoded == probe.encode("ascii")
+                and probe.encode("ascii").decode(encoding) == probe
+            )
+        except (SyntaxError, TypeError, ValueError, UnicodeError, LookupError) as exc:
+            # Several stdlib codecs (base64, hex, zlib, uu, quopri, bz2,
+            # undefined and aliases) raise from encode(); fail closed rather
+            # than leaking their exception type.
             raise AssertionError(f"undecodable release-surface file: {path}") from exc
-        if info.encode("AZaz09/._") != b"AZaz09/._":
+        if not transparent:
             raise AssertionError(f"undecodable release-surface file: {path}")
     try:
         return raw.decode(encoding)
