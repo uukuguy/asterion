@@ -2292,5 +2292,6 @@
 - 00:32 定执行纪律：门禁读取整树，Phase 1 单写者串行，禁止把门禁失败归因并发 [9eb76511]
 - 00:40 Task 3b 落地：不可读文件记录为 violation 而非中止扫描 [d57f7808]
 - 00:49 实验证伪"扫描可信"：残余六类静默漏检；门禁是词法非语义，docstring 声明已纠正 [13dfd662]
+- 00:56 round 5 裁决：符号链接记录（先剪 SKIP_DIRS）、ENOENT 视为缺席、followlinks=False 保留 [807d1253]
 - 00:27 红基线测试落 True 树（三测绿/红断言），真实树违规 1881 记录在案 [6fadf9b]
 - 00:28 移除 legacy Prime 打包面：entry-points 收至 3/5/2，force-include/artifacts 清 Prime 资源 [bb6e23e]
