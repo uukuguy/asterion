@@ -105,63 +105,85 @@ def _iter_surface_files(root: Path):
                 yield child
 
 
-def _read_surface_text(path: Path) -> str:
-    """Decode a release-surface file, failing closed on ambiguity.
+def _read_surface_text(path: Path) -> str | None:
+    """Decode a release-surface file, or return None if it cannot be read safely.
 
-    Returning "" for an undecodable file would treat it as clean, which is a
-    fail-open in a trust-boundary gate: a forbidden token would only have to be
-    placed in a file with one bad byte.
+    Returning "" would treat an unreadable file as clean, which is a fail-open:
+    a forbidden token would only have to sit in a file with one bad byte.
+
+    Returning None instead of raising is deliberate. The caller records the file
+    as a violation, which still fails closed at the assertion boundary but does
+    not abort the scan - raising here would let one unreadable file mask every
+    other finding, which is exactly the wrong property while a phase is deleting
+    thousands of files.
 
     Only ASCII-compatible codecs are accepted. A codec that pairs bytes (utf-16,
     utf-32) splits ASCII tokens behind NULs and hides them from the scan, so it
     is refused unless a real BOM declares it.
     """
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        # Unreadable: permissions, a racing delete, or an I/O error. The
+        # contract above is that a file which cannot be read safely is
+        # reported, not that it aborts the scan.
+        return None
     # Explicit BOMs are the only byte-pairing encodings we accept.
     if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
         try:
             return raw.decode("utf-16")
-        except UnicodeDecodeError as exc:
-            raise AssertionError(f"undecodable release-surface file: {path}") from exc
+        except UnicodeDecodeError:
+            return None
     if raw.startswith(b"\xef\xbb\xbf"):
-        return raw.decode("utf-8-sig")
+        try:
+            return raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return None
     encoding = "utf-8"
     if path.suffix == ".py":
         # Honour a PEP 263 declared source encoding, but only when it is
-        # ASCII-compatible: the probe must be byte-transparent in BOTH
-        # directions, so a codec that pairs bytes cannot be admitted. A codec
-        # that cannot encode the probe at all fails closed rather than leaking
-        # its own exception.
+        # ASCII-compatible.
         import codecs
         import tokenize
 
-        probe_text = "AZaz09/._"
-        probe_bytes = probe_text.encode("ascii")
         try:
             with path.open("rb") as handle:
                 encoding, _ = tokenize.detect_encoding(handle.readline)
-            # CodecInfo.encode returns (bytes, length), hence the [0].
-            ascii_transparent = (
-                codecs.lookup(encoding).encode(probe_text)[0] == probe_bytes
-                and probe_bytes.decode(encoding) == probe_text
+            info = codecs.lookup(encoding)
+            # CodecInfo.encode is the stateless encoder and returns
+            # (bytes, length), NOT bytes. Unpack it. Comparing the tuple
+            # against b"..." is True for every codec, including utf-8, which
+            # would refuse every .py file in the tree.
+            probe = "AZaz09/._"
+            encoded, _ = info.encode(probe)
+            transparent = (
+                encoded == probe.encode("ascii")
+                and probe.encode("ascii").decode(encoding) == probe
             )
-        except (SyntaxError, LookupError, UnicodeError, TypeError) as exc:
-            raise AssertionError(f"undecodable release-surface file: {path}") from exc
-        if not ascii_transparent:
-            raise AssertionError(f"undecodable release-surface file: {path}")
+        except (SyntaxError, TypeError, ValueError, UnicodeError, LookupError, OSError):
+            # Several stdlib codecs (base64, hex, zlib, uu, quopri, bz2,
+            # undefined and aliases) raise from encode(); refuse rather than
+            # leaking their exception type. OSError covers a racing delete
+            # between read_bytes and open.
+            return None
+        if not transparent:
+            return None
     try:
         return raw.decode(encoding)
-    except (UnicodeDecodeError, LookupError) as exc:
-        raise AssertionError(f"undecodable release-surface file: {path}") from exc
+    except (UnicodeDecodeError, LookupError):
+        return None
 
 
 def find_source_detachment_violations(root: Path) -> list[Violation]:
     """Return every forbidden Prime Agent execution edge under ``root``."""
     violations: list[Violation] = []
     for path in _iter_surface_files(root):
-        lines = _read_surface_text(path).splitlines()
+        text = _read_surface_text(path)
         rel = path.relative_to(root).as_posix()
-        for number, body in enumerate(lines, start=1):
+        if text is None:
+            violations.append(Violation(rel, 0, "undecodable-surface-file"))
+            continue
+        for number, body in enumerate(text.splitlines(), start=1):
             scrubbed = body
             for allowed in ALLOWED_ENV_VARS:
                 scrubbed = scrubbed.replace(allowed, "")

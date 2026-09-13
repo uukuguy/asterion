@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 
 from asterion.agents.prime.detachment import (
+    assert_asterion_prime_source_detached,
     find_source_detachment_violations,
 )
 
@@ -101,18 +102,33 @@ class TestDetachmentGate(unittest.TestCase):
                 rules = self._scan({"src/asterion/x.py": f"await {token}\n"})
                 self.assertIn("prime-sdk-edge", rules)
 
-    def test_undecodable_file_fails_closed(self) -> None:
-        # Returning "" for an undecodable file would treat it as clean. A
-        # trust-boundary gate must fail closed instead.
+    def test_undecodable_file_is_recorded_not_treated_as_clean(self) -> None:
+        # Returning "" for an undecodable file would treat it as clean. It must
+        # be reported instead, and the assertion boundary must still reject.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target = root / "src/asterion/x.py"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"\xff\xff\xff")
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("undecodable-surface-file", rules)
             with self.assertRaises(AssertionError):
-                find_source_detachment_violations(root)
+                assert_asterion_prime_source_detached(root)
 
-    def test_bom_less_invalid_utf8_fails_closed(self) -> None:
+    def test_undecodable_file_does_not_mask_other_findings(self) -> None:
+        # One unreadable file must not abort the scan and hide everything else.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bad = root / "src/asterion/bad.txt"
+            bad.parent.mkdir(parents=True, exist_ok=True)
+            bad.write_bytes(b"\xff\xff\xff")
+            good = root / "src/asterion/x.py"
+            good.write_text(f'BAD = "{CHECKOUT}"\n', encoding="utf-8")
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("undecodable-surface-file", rules)
+            self.assertIn("prime-source-locator", rules)
+
+    def test_bom_less_invalid_utf8_is_refused(self) -> None:
         # Not a BOM-gated UTF-16 file, so it must not be decoded as UTF-16;
         # a lossy misread would hide ASCII tokens behind NUL bytes.
         with tempfile.TemporaryDirectory() as tmp:
@@ -120,8 +136,8 @@ class TestDetachmentGate(unittest.TestCase):
             target = root / "src/asterion/x.py"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"ok = 1\nBAD = 'caf\xe9'\n")
-            with self.assertRaises(AssertionError):
-                find_source_detachment_violations(root)
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("undecodable-surface-file", rules)
 
     def test_utf16_bom_file_is_scanned_not_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -132,7 +148,7 @@ class TestDetachmentGate(unittest.TestCase):
             rules = [v.rule for v in find_source_detachment_violations(root)]
             self.assertIn("prime-source-locator", rules)
 
-    def test_declared_non_ascii_compatible_encoding_fails_closed(self) -> None:
+    def test_declared_non_ascii_compatible_encoding_is_refused(self) -> None:
         # A .py declaring a byte-pairing codec without a BOM must be refused,
         # not decoded into mojibake that hides the token behind NULs.
         with tempfile.TemporaryDirectory() as tmp:
@@ -140,8 +156,8 @@ class TestDetachmentGate(unittest.TestCase):
             target = root / "src/asterion/x.py"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"# -*- coding: utf-16 -*-\nBAD = 1\n")
-            with self.assertRaises(AssertionError):
-                find_source_detachment_violations(root)
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("undecodable-surface-file", rules)
 
     def test_scan_is_not_silenced_by_an_ancestor_directory_name(self) -> None:
         # A checkout under a directory named build/ must still be scanned.
