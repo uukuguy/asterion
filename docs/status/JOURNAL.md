@@ -2301,5 +2301,8 @@
 - 01:34 记录 Task 5 后置状态：6 个原生函数不可达但刻意保留（Phase 4 基底），禁止当死代码删 [8d5b681f]
 - 01:55 Task 6 前置门禁拦下真实阻塞：check_promotion.py:17 顶层导入待删包，存活 promotion-check 会 import 炸 [de759834]
 - 01:55 拆为 6a（先脱钩存活面）/6b（再删包）；修正计划"无导入边"的错误分类 [de759834]
+- 02:20 Task 6a 落地：删 9 个 legacy tool，check_promotion 脱离待删包 [9bb16435]
+- 02:40 Task 6b 落地：删 5 个 legacy 包路径，242 文件/−55606 行，门禁 1908→1662 [6df54d3]
+- 02:40 隐藏依赖命中：capabilities/builtin.py re-export shim 因删符号而 import 炸，已修 [6df54d3]
 - 00:27 红基线测试落 True 树（三测绿/红断言），真实树违规 1881 记录在案 [6fadf9b]
 - 00:28 移除 legacy Prime 打包面：entry-points 收至 3/5/2，force-include/artifacts 清 Prime 资源 [bb6e23e]
