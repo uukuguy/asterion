@@ -61,6 +61,17 @@ FORBIDDEN_IMPORTS = (
     _joined("asterion.control.providers.", "prime"),
 )
 
+# Prime SDK identifiers. These three were enforced by the gate this one
+# replaces; dropping any of them is a coverage regression, because the Prime
+# SDK session factory and the SDK loader are exactly the execution edge the
+# design forbids, and the source-root getter is a checkout locator under
+# another name.
+FORBIDDEN_SDK_TOKENS = (
+    _joined("prime", "SourceRoot"),
+    _joined("createAgent", "Session"),
+    _joined("loadPrime", "Sdk"),
+)
+
 # Asterion-owned values that legitimately contain "prime" and must never be
 # rejected: ASTERION_PRIME_OPERATOR_ROOT is the Asterion repo/install root and
 # ASTERION_PRIME_NODE is a resolved node executable path.
@@ -85,20 +96,37 @@ def _iter_surface_files(root: Path):
         for child in base.rglob("*"):
             if not child.is_file():
                 continue
-            if SKIP_DIRS.intersection(child.parts):
+            # Skip decisions must use the path RELATIVE to root. Using absolute
+            # parts means a checkout under a directory named build/, dist/ or
+            # .venv/ silences the entire scan.
+            if SKIP_DIRS.intersection(child.relative_to(root).parts):
                 continue
             if child.suffix in SCAN_SUFFIXES or child.name in SCAN_NAMES:
                 yield child
+
+
+def _read_surface_text(path: Path) -> str:
+    """Decode a release-surface file, failing closed on ambiguity.
+
+    Returning "" for an undecodable file would treat it as clean, which is a
+    fail-open in a trust-boundary gate: a forbidden token would only have to be
+    placed in a file with one bad byte.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return path.read_text(encoding="utf-16")
+    except UnicodeDecodeError as exc:
+        raise AssertionError(f"undecodable release-surface file: {path}") from exc
 
 
 def find_source_detachment_violations(root: Path) -> list[Violation]:
     """Return every forbidden Prime Agent execution edge under ``root``."""
     violations: list[Violation] = []
     for path in _iter_surface_files(root):
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except UnicodeDecodeError:
-            continue
+        lines = _read_surface_text(path).splitlines()
         rel = path.relative_to(root).as_posix()
         for number, body in enumerate(lines, start=1):
             scrubbed = body
@@ -112,6 +140,9 @@ def find_source_detachment_violations(root: Path) -> list[Violation]:
                 continue
             if any(name in scrubbed for name in FORBIDDEN_IMPORTS):
                 violations.append(Violation(rel, number, "legacy-prime-import"))
+                continue
+            if any(token in scrubbed for token in FORBIDDEN_SDK_TOKENS):
+                violations.append(Violation(rel, number, "prime-sdk-edge"))
     return violations
 
 
@@ -119,5 +150,8 @@ def assert_asterion_prime_source_detached(root: Path) -> None:
     """Reject Prime Agent execution edges in any Asterion release surface."""
     violations = find_source_detachment_violations(root)
     if violations:
-        detail = ", ".join(f"{v.path}:{v.line} ({v.rule})" for v in violations[:10])
-        raise AssertionError(f"Asterion-prime source dependency is forbidden: {detail}")
+        shown = ", ".join(f"{v.path}:{v.line} ({v.rule})" for v in violations[:10])
+        extra = f", and {len(violations) - 10} more" if len(violations) > 10 else ""
+        raise AssertionError(
+            f"Asterion-prime source dependency is forbidden: {shown}{extra}"
+        )

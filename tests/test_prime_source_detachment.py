@@ -86,6 +86,42 @@ class TestDetachmentGate(unittest.TestCase):
         )
         self.assertIn("legacy-prime-import", rules)
 
+    def test_flags_prime_sdk_identifiers(self) -> None:
+        # The gate this one replaces enforced these three tokens. Dropping any
+        # of them is a coverage regression: the Prime SDK session factory and
+        # SDK loader are precisely the "Prime SDK session" execution edge the
+        # design forbids, and the source-root getter is a checkout locator
+        # under another name.
+        for token in (
+            _t("createAgent", "Session"),
+            _t("loadPrime", "Sdk"),
+            _t("prime", "SourceRoot"),
+        ):
+            with self.subTest(token=token):
+                rules = self._scan({"src/asterion/x.py": f"await {token}\n"})
+                self.assertIn("prime-sdk-edge", rules)
+
+    def test_undecodable_file_fails_closed(self) -> None:
+        # Returning "" for an undecodable file would treat it as clean. A
+        # trust-boundary gate must fail closed instead.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"\xff\xff\xff")
+            with self.assertRaises(AssertionError):
+                find_source_detachment_violations(root)
+
+    def test_scan_is_not_silenced_by_an_ancestor_directory_name(self) -> None:
+        # A checkout under a directory named build/ must still be scanned.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "build" / "asterion"
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f'BAD = "{CHECKOUT}"\n', encoding="utf-8")
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("prime-source-locator", rules)
+
     def test_reports_line_number(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
