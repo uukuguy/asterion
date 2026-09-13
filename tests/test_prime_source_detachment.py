@@ -132,6 +132,17 @@ class TestDetachmentGate(unittest.TestCase):
             rules = [v.rule for v in find_source_detachment_violations(root)]
             self.assertIn("prime-source-locator", rules)
 
+    def test_declared_non_ascii_compatible_encoding_fails_closed(self) -> None:
+        # A .py declaring a byte-pairing codec without a BOM must be refused,
+        # not decoded into mojibake that hides the token behind NULs.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"# -*- coding: utf-16 -*-\nBAD = 1\n")
+            with self.assertRaises(AssertionError):
+                find_source_detachment_violations(root)
+
     def test_scan_is_not_silenced_by_an_ancestor_directory_name(self) -> None:
         # A checkout under a directory named build/ must still be scanned.
         with tempfile.TemporaryDirectory() as tmp:

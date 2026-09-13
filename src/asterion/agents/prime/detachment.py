@@ -112,26 +112,43 @@ def _read_surface_text(path: Path) -> str:
     fail-open in a trust-boundary gate: a forbidden token would only have to be
     placed in a file with one bad byte.
 
-    Do NOT fall back to UTF-16 unless a BOM actually declares it. Decoding a
-    non-UTF-16 file as UTF-16 pairs the bytes, so ASCII tokens are split by NULs
-    and evade the scan - the same fail-open in a different disguise.
+    Only ASCII-compatible codecs are accepted. A codec that pairs bytes (utf-16,
+    utf-32) splits ASCII tokens behind NULs and hides them from the scan, so it
+    is refused unless a real BOM declares it.
     """
     raw = path.read_bytes()
+    # Explicit BOMs are the only byte-pairing encodings we accept.
     if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
         try:
             return raw.decode("utf-16")
         except UnicodeDecodeError as exc:
             raise AssertionError(f"undecodable release-surface file: {path}") from exc
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig")
     encoding = "utf-8"
     if path.suffix == ".py":
-        # Honour a PEP 263 declared source encoding.
+        # Honour a PEP 263 declared source encoding, but only when it is
+        # ASCII-compatible: the probe must be byte-transparent in BOTH
+        # directions, so a codec that pairs bytes cannot be admitted. A codec
+        # that cannot encode the probe at all fails closed rather than leaking
+        # its own exception.
+        import codecs
         import tokenize
 
+        probe_text = "AZaz09/._"
+        probe_bytes = probe_text.encode("ascii")
         try:
             with path.open("rb") as handle:
                 encoding, _ = tokenize.detect_encoding(handle.readline)
-        except (SyntaxError, UnicodeDecodeError) as exc:
+            # CodecInfo.encode returns (bytes, length), hence the [0].
+            ascii_transparent = (
+                codecs.lookup(encoding).encode(probe_text)[0] == probe_bytes
+                and probe_bytes.decode(encoding) == probe_text
+            )
+        except (SyntaxError, LookupError, UnicodeError, TypeError) as exc:
             raise AssertionError(f"undecodable release-surface file: {path}") from exc
+        if not ascii_transparent:
+            raise AssertionError(f"undecodable release-surface file: {path}")
     try:
         return raw.decode(encoding)
     except (UnicodeDecodeError, LookupError) as exc:
