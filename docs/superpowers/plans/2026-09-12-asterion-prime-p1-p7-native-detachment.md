@@ -1014,7 +1014,71 @@ not:
 > Asterion-owned components precisely so the rebuild does not start from
 > nothing. If Phase 4 replaces one, it should replace it deliberately.
 
-### Task 6: Remove the legacy Python packages
+### Task 6a: Detach the surviving surfaces from the legacy packages
+
+Landed as a split out of Task 6 after Task 6's own pre-flight gate caught a real
+sequencing bug: `tools/check_promotion.py` imports a to-be-deleted package at
+module level, and it is consumed by the **surviving** `make promotion-check`
+(`Makefile:110`). Deleting the packages first would have broken the release gate
+at import, silently, for the rest of the phase.
+
+**Files:**
+- Delete: `tools/preflight_prime_apps.py` (dead — its Make target went in Task 4
+  and nothing references it), plus the eight legacy tools already classified
+  REMOVE: `prime_continual_harness_experiment.py`,
+  `materialize_prime_ipython_inputs.py`, `prime_native_rlm_experiment.py`,
+  `prime_long_running_experiment.py`,
+  `generate_prime_ipython_release_spec.py`,
+  `generate_prime_development_lock.py`, `prepare_prime_development.py`,
+  `build_prime_ipython_image.py`
+- Modify: `tools/check_promotion.py`
+
+- [ ] **Step 1: Delete the dead and legacy tools**
+
+The eight legacy tools are already on the REMOVE list; their Make targets were
+removed in Task 4, so deleting them here costs nothing and clears most of the
+gate's external hits.
+
+- [ ] **Step 2: Remove the legacy import and its dependent verification**
+
+`tools/check_promotion.py:17` is a **top-level, unconditional** import:
+
+```python
+from asterion.control.providers.prime.operational_parity_testing import (
+    PRIME_OPERATION_FEATURES,
+    build_prime_operational_observations,
+)
+```
+
+Remove it and the operational-parity verification that depends on it —
+`:345-347`, `:372`, `:395`, `:1207-1209`.
+
+> **Judgment, with its uncertainty stated.** The operational-parity check is
+> *removed* rather than relocated, because its subject is on the spec's explicit
+> removal list, its evidence (H-036) is reclassified historical in Task 11, and
+> `register_prime_operational_scenarios` with an `async def executor` reads as
+> machinery that produces evidence by executing operations rather than a pure
+> reducer over recorded receipts. If that inference is wrong — if the module is
+> a neutral reducer — the correct fix is to restore it from git into a neutral
+> location. The implementer must report which conclusion they reached; neither
+> silently preserving nor silently deleting is acceptable.
+
+- [ ] **Step 3: Verify the gate is clean for Task 6b**
+
+Run the Task 6 Step 1 grep again. Expected: only
+`src/asterion/applications/first_party_packages.py:102`, which Task 6b's own edit
+removes. Anything else means another surviving importer exists — stop and report.
+
+Run: `uv run python -c "import tools.check_promotion"` → exit 0.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A tools
+git commit -m "refactor(prime): detach surviving promotion and tooling from legacy Prime packages"
+```
+
+### Task 6b: Remove the legacy Python packages
 
 **Files:**
 - Delete: `src/asterion/applications/prime_agent/`,
@@ -1326,7 +1390,7 @@ Already resolved by evidence — do not re-litigate, just verify:
 | `tools/generate_prime_ipython_release_spec.py` | REMOVE | `:13` imports `operator.release_spec_generation` |
 | `tools/generate_prime_development_lock.py` | REMOVE | generates a Prime development lock |
 | `tools/prepare_prime_development.py` | REMOVE | invoked by every `prime-pN-run` target |
-| `tools/check_promotion.py` | **RETAIN, re-point** | `:240,242` are legacy assembly paths as string literals — no import edge. Re-point; do not delete. **Six sites total, all of them** (see below) |
+| `tools/check_promotion.py` | **RETAIN, re-point** | **Correction:** an earlier pass recorded this as "string literals only — no import edge". That was false. `:17` is a top-level unconditional import of `asterion.control.providers.prime.operational_parity_testing`, used again at `:345-347`, `:372`, `:395`, `:1207-1209`. The import half moved forward to **Task 6a**, because Task 6b deletes the module and the surviving `make promotion-check` (`Makefile:110`) would break at import. Re-point; do not delete |
 | `tools/compare_prime_p7_runs.py` | RETAIN if neutral | the spec explicitly permits neutral external-log normalization. Keep only if it reads an exported log and starts no process |
 | `tools/preflight_prime_apps.py` | AUDIT | read it; it selects a legacy application set (also a REMOVE Make target) |
 | `tools/check_docs.py` | RETAIN | 0 hits; survives |
@@ -1431,7 +1495,7 @@ time with a misleading message rather than at import:
 `docs/superpowers/specs` from *import* checks but **not** from link checks, so a
 dangling link fails `make docs-check`.
 
-**`tools/check_promotion.py` — six sites, not two.** The plan originally
+**`tools/check_promotion.py` — six string-literal sites, plus an import edge.** The plan originally
 enumerated only `:240,242`. The gate's `prime-gateway-reference` rule found four
 more on this *retained* file, and they are real work rather than rule noise:
 
