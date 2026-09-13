@@ -99,7 +99,7 @@ Recorded so the implementer does not re-derive it. Line numbers are pre-change.
 - `:48-58` `asterion.host_services`. **REMOVE 8**: `:51` `model.bounded-session`, `:52` `prime.ipython-production`, `:53-58` the six `prime.*-development` rows. **KEEP** `:49-50`.
 - `:16` optional-dependency extra `prime` — consumed only by the legacy Make targets; becomes dead. Confirm no other consumer before removing.
 - `:62-74` wheel `artifacts` — **REMOVE** `:65-66` (`applications/prime_agent/operator/resources/*.json|*.txt`), `:71-73` (`control/providers/prime/resources/control-plane.json` + `skills/asterion-control/**`). **KEEP** `:63-64` (native prime + p7 run_story), `:67-68` (dci pi), `:69-70` (native/asterion_prime control-plane).
-- `:78-90` wheel `force-include` — **REMOVE** all of `:81-90` (`prime-gateway/resources/*` → `control/providers/prime/resources/*`, including `:90` which ships a **test fixture** into the wheel). **KEEP** `:79-80` (`pi-compaction-lock.json`, `pi-compaction-verifier.mjs` — native).
+- `:78-90` wheel `force-include` — **REMOVE all of `:79-90`**. `:81-90` are `prime-gateway/resources/*` → `control/providers/prime/resources/*`, including `:90` which ships a **test fixture** into the wheel. `:79-80` (`pi-compaction-lock.json`, `pi-compaction-verifier.mjs`) were initially marked KEEP as native but are a **Prime Agent checkout lock** — see Task 3 Step 2 for the evidence.
 - `:91+` schema force-includes — see Task 9 (audit-gated).
 
 **`Makefile`**
@@ -518,11 +518,33 @@ rows.
   `applications/prime_agent/operator/resources/*` entries and the three
   `control/providers/prime/resources/...` entries;
 - from `[tool.hatch.build.targets.wheel.force-include]`: the nine
-  `packages/typescript/prime-gateway/resources/...` entries and the
-  `tests/fixtures/prime_gateway/v1/real-prime-operations.mjs` entry.
+  `packages/typescript/prime-gateway/resources/...` entries, the
+  `tests/fixtures/prime_gateway/v1/real-prime-operations.mjs` entry, **and the
+  two compaction entries at `:79-80`**.
 
-Keep the native `pi-compaction-lock.json` / `pi-compaction-verifier.mjs`
-entries and the `dci` / `native` / `asterion_prime` control-plane entries.
+**Correcting an earlier misclassification.** `:79-80` were initially marked
+KEEP because their filenames say "asterion"/"pi". They are a Prime Agent source
+lock. Evidence:
+
+- `packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json`
+  is 394 KB / 2891 file digests with `format: asterion.pi-compaction-lock/v1`,
+  `package_name: @earendil-works/pi-coding-agent`, `package_version: 0.7.1`,
+  `source_commit: a18809e00ea30638584d87b3afea7285a9d7296c`, and `entry_points`
+  under `packages/coding-agent/dist/*`.
+- `CURRENT-STATE.md` calls that same commit "the pinned Prime source".
+- `docs/superpowers/plans/2026-09-10-asterion-prime-native-p1-shared-kernel.md:48`
+  resolves `@earendil-works/pi-coding-agent@0.7.1` **beneath
+  `ASTERION_PRIME_SOURCE_ROOT`**.
+- `tools/check_promotion.py:963-966` maps `pi-coding-agent`, `pi-ai`,
+  `pi-agent-core`, `pi-tui` to `external_prime_root/packages/*`.
+- `docs/superpowers/specs/2026-08-10-asterion-prime-gateway-daemon-delta.md:62`
+  records `npm view @earendil-works/pi-coding-agent@0.7.1` → `E404`: the package
+  is not published, so the checkout is its only source.
+
+The detachment spec anticipates exactly this relabeling: "A Prime Agent checkout
+is not the Pi runtime and cannot be reintroduced under a Pi label."
+
+Keep the `dci` / `native` / `asterion_prime` control-plane entries.
 
 - [ ] **Step 3: Verify the metadata is still coherent**
 
@@ -616,7 +638,20 @@ shipped as `applications/prime/resources/pi-compaction-verifier.mjs`
 - [ ] **Step 3: Remove the Prime Gateway artifact lock**
 
 Delete the `package_resources.files("asterion.control.providers.prime")` lock at
-`:1035`.
+`:1035`, and the compaction-lock resolution that feeds the `:934-935` imports —
+the shipped `asterion/applications/prime/resources/pi-compaction-lock.json` is a
+Prime checkout lock (see Task 3), so the operator must not resolve or verify it.
+
+> **This is the compaction-detachment step the spec requires.** The spec states
+> "No Prime internal module may supply compaction semantics" and lists "Prime
+> compaction imports" for removal. Both the import (`:934-935`) and the lock it
+> verifies must go together: removing one without the other leaves a verifier
+> checking a lock no longer produced, or an import with nothing to validate.
+
+Compaction semantics for the rebuilt P1 come from an Asterion-owned
+implementation. Phase 4 owns building it; Phase 1 only removes the Prime
+dependency and leaves P1 unavailable, which is the spec's required intermediate
+state.
 
 - [ ] **Step 4: Verify the file is clean and the package still imports**
 
@@ -724,11 +759,21 @@ git commit -m "refactor(prime): delete legacy Prime Agent provider, runtime, cap
 
 **Files:**
 - Delete: `packages/typescript/prime-gateway/`
-- Modify: any workspace manifest that lists it.
+- Delete: `packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json`
+  and `packages/typescript/asterion-prime-extension/test/context-witness-harness.mjs`
+- Modify: any workspace manifest that lists them.
 
 **Interfaces:**
 - Consumes: Task 3 (force-includes already removed).
-- Produces: `make test-typescript` builds only surviving packages.
+- Produces: `make test-typescript` builds only surviving packages, and no
+  surviving TypeScript package carries a Prime checkout reference.
+
+> `asterion-prime-extension/src/*` (`context-projection.ts`, `context-witness.ts`,
+> `context-counter.ts`, `ipython-extension.ts`) is Asterion-owned and is **not**
+> in scope here — only its Prime-checkout lock resource and the harness that
+> imports `packages/coding-agent/dist/core/*` are. Confirm with the gate after
+> the deletion: `packages/typescript/asterion-prime-extension` must drop from
+> 262 violations to 0.
 
 - [ ] **Step 1: Confirm the consumer set**
 
@@ -1039,6 +1084,23 @@ Phase 1 does **not** deliver: P7 revalidation, any rebuilt P1-P6 application, or
 any new live run. Those are Phases 2-9.
 
 ---
+
+## Risks carried into later phases
+
+1. **P7 may currently depend on the Prime checkout lock.** The
+   `pi-compaction-lock.json` identified in Task 3 is verified by
+   `tools/check_promotion.py:167-187` against `external_prime_root`, and the
+   native P7 preset (`Makefile:293-295`) runs from a source tree. If the native
+   `asterion.prime` path resolves compaction through the same lock, Phase 3
+   (P7 revalidation) will fail until an Asterion-owned replacement exists.
+   **This is expected, not a regression**: the spec's migration order places P7
+   revalidation after removal precisely to surface this. Do not restore the
+   Prime lock to make P7 pass.
+2. **The "separately pinned Pi runtime" the spec calls an allowed foundation
+   has not been shown to exist in detached form.** Every artifact inspected so
+   far that is named "pi" resolves under `ASTERION_PRIME_SOURCE_ROOT`. Phase 3
+   must either name the genuinely detached Pi artifact or report that one does
+   not exist — this is an evidence question, not a relabeling exercise.
 
 ## Open questions carried forward
 
