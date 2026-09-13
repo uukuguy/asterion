@@ -261,16 +261,31 @@ class TestDetachmentGate(unittest.TestCase):
                 rules = self._scan({"src/asterion/x.py": f"await {token}\n"})
                 self.assertIn("prime-sdk-edge", rules)
 
-    def test_undecodable_file_fails_closed(self) -> None:
-        # Returning "" for an undecodable file would treat it as clean. A
-        # trust-boundary gate must fail closed instead.
+    def test_undecodable_file_is_recorded_not_treated_as_clean(self) -> None:
+        # Returning "" for an undecodable file would treat it as clean. It must
+        # be reported instead, and the assertion boundary must still reject.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             target = root / "src/asterion/x.py"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"\xff\xff\xff")
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("undecodable-surface-file", rules)
             with self.assertRaises(AssertionError):
-                find_source_detachment_violations(root)
+                assert_asterion_prime_source_detached(root)
+
+    def test_undecodable_file_does_not_mask_other_findings(self) -> None:
+        # One unreadable file must not abort the scan and hide everything else.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bad = root / "src/asterion/bad.txt"
+            bad.parent.mkdir(parents=True, exist_ok=True)
+            bad.write_bytes(b"\xff\xff\xff")
+            good = root / "src/asterion/x.py"
+            good.write_text(f'BAD = "{CHECKOUT}"\n', encoding="utf-8")
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("undecodable-surface-file", rules)
+            self.assertIn("prime-source-locator", rules)
 
     def test_scan_is_not_silenced_by_an_ancestor_directory_name(self) -> None:
         # A checkout under a directory named build/ must still be scanned.
@@ -282,7 +297,7 @@ class TestDetachmentGate(unittest.TestCase):
             rules = [v.rule for v in find_source_detachment_violations(root)]
             self.assertIn("prime-source-locator", rules)
 
-    def test_bom_less_invalid_utf8_fails_closed(self) -> None:
+    def test_bom_less_invalid_utf8_is_refused(self) -> None:
         # Not a BOM-gated UTF-16 file, so it must not be decoded as UTF-16;
         # a lossy misread would hide ASCII tokens behind NUL bytes.
         with tempfile.TemporaryDirectory() as tmp:
@@ -290,8 +305,8 @@ class TestDetachmentGate(unittest.TestCase):
             target = root / "src/asterion/x.py"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"ok = 1\nBAD = 'caf\xe9'\n")
-            with self.assertRaises(AssertionError):
-                find_source_detachment_violations(root)
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("undecodable-surface-file", rules)
 
     def test_utf16_bom_file_is_scanned_not_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -302,7 +317,7 @@ class TestDetachmentGate(unittest.TestCase):
             rules = [v.rule for v in find_source_detachment_violations(root)]
             self.assertIn("prime-source-locator", rules)
 
-    def test_declared_non_ascii_compatible_encoding_fails_closed(self) -> None:
+    def test_declared_non_ascii_compatible_encoding_is_refused(self) -> None:
         # A .py declaring a byte-pairing codec without a BOM must be refused,
         # not decoded into mojibake that hides the token behind NULs.
         with tempfile.TemporaryDirectory() as tmp:
@@ -310,8 +325,8 @@ class TestDetachmentGate(unittest.TestCase):
             target = root / "src/asterion/x.py"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(b"# -*- coding: utf-16 -*-\nBAD = 1\n")
-            with self.assertRaises(AssertionError):
-                find_source_detachment_violations(root)
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("undecodable-surface-file", rules)
 
     def test_reports_line_number(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -449,12 +464,17 @@ def _iter_surface_files(root: Path):
                 yield child
 
 
-def _read_surface_text(path: Path) -> str:
-    """Decode a release-surface file, failing closed on ambiguity.
+def _read_surface_text(path: Path) -> str | None:
+    """Decode a release-surface file, or return None if it cannot be read safely.
 
-    Returning "" for an undecodable file would treat it as clean, which is a
-    fail-open in a trust-boundary gate: a forbidden token would only have to be
-    placed in a file with one bad byte.
+    Returning "" would treat an unreadable file as clean, which is a fail-open:
+    a forbidden token would only have to sit in a file with one bad byte.
+
+    Returning None instead of raising is deliberate. The caller records the file
+    as a violation, which still fails closed at the assertion boundary but does
+    not abort the scan - raising here would let one unreadable file mask every
+    other finding, which is exactly the wrong property while a phase is deleting
+    thousands of files.
 
     Only ASCII-compatible codecs are accepted. A codec that pairs bytes (utf-16,
     utf-32) splits ASCII tokens behind NULs and hides them from the scan, so it
@@ -465,10 +485,13 @@ def _read_surface_text(path: Path) -> str:
     if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
         try:
             return raw.decode("utf-16")
-        except UnicodeDecodeError as exc:
-            raise AssertionError(f"undecodable release-surface file: {path}") from exc
+        except UnicodeDecodeError:
+            return None
     if raw.startswith(b"\xef\xbb\xbf"):
-        return raw.decode("utf-8-sig")
+        try:
+            return raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return None
     encoding = "utf-8"
     if path.suffix == ".py":
         # Honour a PEP 263 declared source encoding, but only when it is
@@ -490,26 +513,29 @@ def _read_surface_text(path: Path) -> str:
                 encoded == probe.encode("ascii")
                 and probe.encode("ascii").decode(encoding) == probe
             )
-        except (SyntaxError, TypeError, ValueError, UnicodeError, LookupError) as exc:
+        except (SyntaxError, TypeError, ValueError, UnicodeError, LookupError):
             # Several stdlib codecs (base64, hex, zlib, uu, quopri, bz2,
-            # undefined and aliases) raise from encode(); fail closed rather
-            # than leaking their exception type.
-            raise AssertionError(f"undecodable release-surface file: {path}") from exc
+            # undefined and aliases) raise from encode(); refuse rather than
+            # leaking their exception type.
+            return None
         if not transparent:
-            raise AssertionError(f"undecodable release-surface file: {path}")
+            return None
     try:
         return raw.decode(encoding)
-    except (UnicodeDecodeError, LookupError) as exc:
-        raise AssertionError(f"undecodable release-surface file: {path}") from exc
+    except (UnicodeDecodeError, LookupError):
+        return None
 
 
 def find_source_detachment_violations(root: Path) -> list[Violation]:
     """Return every forbidden Prime Agent execution edge under ``root``."""
     violations: list[Violation] = []
     for path in _iter_surface_files(root):
-        lines = _read_surface_text(path).splitlines()
+        text = _read_surface_text(path)
         rel = path.relative_to(root).as_posix()
-        for number, body in enumerate(lines, start=1):
+        if text is None:
+            violations.append(Violation(rel, 0, "undecodable-surface-file"))
+            continue
+        for number, body in enumerate(text.splitlines(), start=1):
             scrubbed = body
             for allowed in ALLOWED_ENV_VARS:
                 scrubbed = scrubbed.replace(allowed, "")
@@ -541,7 +567,7 @@ def assert_asterion_prime_source_detached(root: Path) -> None:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run python -m unittest -v tests.test_prime_source_detachment`
-Expected: PASS, 14 tests.
+Expected: PASS, 16 tests.
 
 - [ ] **Step 5: Commit**
 
