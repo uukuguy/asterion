@@ -895,11 +895,25 @@ exists.
 
 - [ ] **Step 4: Verify no dangling references**
 
-Run: `grep -nE 'ASTERION_PRIME_SOURCE_ROOT|ASTERION_PRIME_AUTHORITY|ASTERION_PRIME_MAX_COST_MICROS|prime-p[1-7]-run|prime-apps-preflight|prime-check|prime-setup' Makefile`
+An unanchored grep is wrong here: the **retained** native preset
+`asterion-prime-p1-run` contains the substring `prime-p1-run`, so a naive
+pattern always emits five lines and the check can never pass. Anchor it:
+
+Run:
+```bash
+grep -nE '(^|[^-])prime-p[1-7]-run|(^|[^-])prime-check|(^|[^-])prime-setup|(^|[^-])prime-apps-preflight|prime-verify-bounded|prime-verify-native-rlm-bounded|test\.prime-long-running\.bounded|test\.prime-continual-harness\.bounded|ASTERION_PRIME_SOURCE_ROOT|ASTERION_PRIME_AUTHORITY|ASTERION_PRIME_MAX_COST_MICROS' Makefile
+```
 Expected: no output.
 
-Run: `make help`
-Expected: exits 0, lists no `prime-pN-run` / `prime-check` / `prime-setup`.
+Run: `make help` → exits 0, lists no `prime-pN-run` / `prime-check` /
+`prime-setup` / `prime-verify-*` / `test.prime-*.bounded`.
+
+Run: `make -n test.framework-core` → exits 0 (the file still parses and a
+surviving target still resolves).
+
+> String greps are a rough check here, not the authority — `asterion-prime-p1-run`
+> is a legitimate substring collision. The gate is the semantic authority; this
+> grep exists only to catch a dangling reference early.
 
 - [ ] **Step 5: Commit**
 
