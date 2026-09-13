@@ -170,17 +170,12 @@ NON_CORE_MODULE_PREFIXES = (
     "asterion.applications.first_party_cli",
     "asterion.applications.first_party_packages",
     "asterion.applications.prime",
-    "asterion.applications.prime_agent",
     "asterion.capabilities.builtin",
     "asterion.capabilities.controlled_code",
     "asterion.capabilities.dci",
-    "asterion.capabilities.prime_agent",
     "asterion.capabilities.prime_arc_agi_3_solver",
     "asterion.capabilities.prime_ipython_coding_native",
     "asterion.control.providers.native",
-    "asterion.control.providers.prime",
-    "asterion.runtimes.prime_agent",
-    "asterion.runtimes.prime_agent_host",
 )
 
 FORBIDDEN_CORE_IMPORT_PREFIXES = NON_CORE_MODULE_PREFIXES
