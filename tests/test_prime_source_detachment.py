@@ -6,6 +6,8 @@ too, so a literal token here would make the gate flag its own test suite.
 
 from __future__ import annotations
 
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +27,7 @@ CHECKOUT = _t("3th-party/", "prime-agent")
 CODING_AGENT_DIST = _t("packages/", "coding-agent/dist")
 LEGACY_PROVIDER = _t("asterion.applications.", "prime_agent")
 SOURCE_ROOT_ENV = _t("ASTERION_PRIME_", "SOURCE_ROOT")
+PRIME_GATEWAY_PATH = _t("packages/typescript/", "prime-gateway")
 
 
 class TestDetachmentGate(unittest.TestCase):
@@ -168,6 +171,84 @@ class TestDetachmentGate(unittest.TestCase):
             target.write_text(f'BAD = "{CHECKOUT}"\n', encoding="utf-8")
             rules = [v.rule for v in find_source_detachment_violations(root)]
             self.assertIn("prime-source-locator", rules)
+
+    def test_unreadable_directory_is_recorded_not_silently_skipped(self) -> None:
+        # The predecessor walker let a permission error drop the whole subtree
+        # in silence, so the scan completed and reported nothing for a
+        # directory it never entered.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            locked = root / "src/asterion/locked"
+            locked.mkdir(parents=True)
+            (locked / "edge.py").write_text(f'BAD = "{CHECKOUT}"\n', encoding="utf-8")
+            os.chmod(locked, 0o000)
+            try:
+                rules = [v.rule for v in find_source_detachment_violations(root)]
+            finally:
+                os.chmod(locked, stat.S_IRWXU)
+            self.assertIn("unreadable-surface-directory", rules)
+
+    def test_unreadable_root_is_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            locked = root / "tests"
+            locked.mkdir(parents=True)
+            (locked / "edge.py").write_text(f'BAD = "{CHECKOUT}"\n', encoding="utf-8")
+            os.chmod(locked, 0o000)
+            try:
+                rules = [v.rule for v in find_source_detachment_violations(root)]
+            finally:
+                os.chmod(locked, stat.S_IRWXU)
+            self.assertIn("unreadable-surface-directory", rules)
+
+    def test_symlinked_directory_is_recorded_and_not_double_counted(self) -> None:
+        # A symlinked directory raises nothing at all, unlike a permission
+        # error, so only an explicit check catches it. It must be recorded and
+        # not followed: the real directory is already in the surface.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real = root / "src/asterion/real"
+            real.mkdir(parents=True)
+            (real / "edge.py").write_text(f'BAD = "{CHECKOUT}"\n', encoding="utf-8")
+            (root / "src/asterion/alias").symlink_to(real, target_is_directory=True)
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("symlinked-directory", rules)
+            self.assertEqual(rules.count("prime-source-locator"), 1)
+
+    def test_absent_root_is_not_a_violation(self) -> None:
+        # A built-wheel-only surface has no packages/typescript. Absent is not
+        # the same thing as unreadable.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("ok = 1\n", encoding="utf-8")
+            self.assertEqual(find_source_detachment_violations(root), [])
+
+    def test_uppercase_suffix_is_scanned(self) -> None:
+        # A Windows-authored .YML file is release surface.
+        rules = self._scan({"tools/ci.YML": f'BAD = "{CHECKOUT}"\n'})
+        self.assertIn("prime-source-locator", rules)
+
+    def test_workflow_file_is_scanned_despite_two_prior_blind_spots(self) -> None:
+        # .github/workflows/ci.yml was invisible twice over: wrong root and
+        # wrong suffix.
+        rules = self._scan({".github/workflows/ci.yml": f'BAD = "{CHECKOUT}"\n'})
+        self.assertIn("prime-source-locator", rules)
+
+    def test_makefile_name_variants_are_scanned(self) -> None:
+        for name in ("tools/GNUmakefile", "tools/makefile"):
+            with self.subTest(name=name):
+                rules = self._scan({name: f'BAD = "{CHECKOUT}"\n'})
+                self.assertIn("prime-source-locator", rules)
+
+    def test_flags_prime_gateway_package_reference(self) -> None:
+        # The package is a removal target; a surviving path reference is a
+        # dangling build input even though it carries no execution edge.
+        rules = self._scan(
+            {"tools/x.py": f'WHEEL = "{PRIME_GATEWAY_PATH}/dist/main.js"\n'}
+        )
+        self.assertIn("prime-gateway-reference", rules)
 
     def test_reports_line_number(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
