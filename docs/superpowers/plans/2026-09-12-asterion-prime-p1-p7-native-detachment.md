@@ -784,9 +784,17 @@ it in place.
 
 - [ ] **Step 3: Drop the modules from the core allowlist**
 
-`tests/core_module_allowlist.py:182-183` lists `asterion.runtimes.prime_agent`
-and `asterion.runtimes.prime_agent_host`. Remove both entries in the same
-commit, or the core-only import gate fails on a module that no longer exists.
+`tests/core_module_allowlist.py:172-183` lists nine legacy prefixes
+(`applications.prime_agent`, `capabilities.prime_agent`,
+`control.providers.prime`, `runtimes.prime_agent`, `runtimes.prime_agent_host`,
+and others) consumed only by `tests/test_core_only_install.py:14-15`.
+
+Remove the legacy prefixes in the same commit, or the core-only import gate
+fails on a module that no longer exists. **Do not delete the file, and do not
+drop** `capabilities.prime_arc_agi_3_solver` or
+`capabilities.prime_ipython_coding_native` — those name retained native
+packages (design's exact native application map). The edit is "drop legacy
+prefixes, keep native ones", not "delete the list".
 
 - [ ] **Step 4: Delete the trees**
 
@@ -925,6 +933,41 @@ These keep their subject and drop the Prime default:
   `test_standalone_repository.py`, `test_prime_make_presets.py` — update to the
   post-removal distribution and the new preset set.
 
+- [ ] **Step 2b: Resolve the chained imports before deleting anything**
+
+Several modules in the SURVIVES bucket import modules in the REMOVE bucket.
+Deleted-but-imported modules break collection for the *surviving* file, so the
+damage is silent until the suite runs:
+
+- `tests/test_native_prime_differential.py` → imports `tests.test_prime_verified_loop` (REMOVE)
+- `tests/test_native_verified_differential.py` → imports `test_native_prime_differential`
+- `tests/test_control_ecosystem_mcp.py:17,21` → imports `_node_22` from `test_prime_ecosystem_real_process` (REMOVE)
+- `tests/test_prime_recursive_workflow_compat.py`, `tests/test_prime_rlm_messaging_parity.py` → import `test_prime_session_context_parity` and `test_prime_verified_loop` (both REMOVE)
+
+Resolve each by inlining the helper, promoting it to a shared neutral module, or
+reclassifying the importer as REMOVE — decide per file and record which. Do not
+leave a SURVIVES module importing a deleted one.
+
+Expect the buckets to be roughly **192 REMOVE / 10 REWRITE-NATIVE / ~205
+SURVIVES**, plus these must be handled explicitly or they stay red:
+
+- `tests/test_asterion_prime_architecture.py` — the gate-assertion half is
+  repaired in Task 1; `test_distribution_and_commands_have_no_p7_sdk_wrapper`
+  reads `applications/prime_agent/provider.py` and seven
+  `packages/typescript/prime-gateway/src/p7-solving-*.ts`, so it **crashes**
+  once those are deleted. Rewrite it against the detached distribution.
+- `tests/test_setup_pi.py:36,193` — uses `packages/coding-agent/dist/cli.js`,
+  which is a live `FORBIDDEN_LOCATORS` entry. It is a Pi-path test, so decide
+  whether the string is a real Prime edge (then it is REMOVE) or a stale path
+  (then rewrite it). Do not silence it by weakening the gate.
+- `tests/test_builtin_capability_source.py`, `test_builtin_controlled_code_application.py`,
+  `test_default_runtime_factory.py`, `test_asterion_dci_verification.py` — drop
+  the `prime-agent` / `prime.agent` expectations, keep the native ones.
+- `tests/test_asterion_prime_pi_contract.py:10` and
+  `tests/test_prime_operational_packaging.py:19` import
+  `tools.setup_prime_agent` helpers. Move the helper to a neutral module or
+  reclassify; a Prime-commit pin is itself a forbidden source-lock subject.
+
 - [ ] **Step 3: Verify collection is clean**
 
 Run: `uv run python -m unittest discover -s tests -t . 2>&1 | tail -5`
@@ -1016,6 +1059,41 @@ report, including any file not listed here.
 Run: `uv build --wheel --out-dir /tmp/detach-wheel && uv run python -c "import zipfile,glob; z=zipfile.ZipFile(glob.glob('/tmp/detach-wheel/*.whl')[0]); print([n for n in z.namelist() if 'prime_gateway' in n or 'prime_agent' in n or 'providers/prime/resources' in n])"`
 Expected: `[]`.
 
+- [ ] **Step 3b: Scan the built wheel, not only the source tree**
+
+The source scan skips `node_modules`/`dist`/`build`. A force-include that
+sources a file from one of those directories would therefore be shipped
+unscanned. Close that gap by running the same rule set over the wheel's own
+contents:
+
+```bash
+uv run python - <<'PY'
+import glob, zipfile
+from asterion.agents.prime.detachment import (
+    FORBIDDEN_LOCATORS, FORBIDDEN_ENV_VARS, FORBIDDEN_IMPORTS,
+    FORBIDDEN_SDK_TOKENS,
+)
+wheel = glob.glob("/tmp/detach-wheel/*.whl")[0]
+rules = FORBIDDEN_LOCATORS + FORBIDDEN_ENV_VARS + FORBIDDEN_IMPORTS + FORBIDDEN_SDK_TOKENS
+hits = []
+with zipfile.ZipFile(wheel) as z:
+    for name in z.namelist():
+        try:
+            body = z.read(name).decode("utf-8", errors="replace")
+        except Exception:
+            continue
+        for line_no, line in enumerate(body.splitlines(), 1):
+            if any(tok in line for tok in rules):
+                hits.append(f"{name}:{line_no}")
+print(f"{len(hits)} wheel hits")
+for h in hits[:20]:
+    print(" ", h)
+PY
+```
+
+Expected: `0 wheel hits`. Any hit means a forbidden reference is shipping inside
+the distribution even though the source tree scanned clean.
+
 - [ ] **Step 4: Commit**
 
 ```bash
@@ -1053,6 +1131,23 @@ from `.PHONY` and `help`. Record which survived and which were deleted.
 parity evidence (H-035…H-037). Per the spec's Evidence correction section this
 evidence is historical, so these targets are removed. **Do not** rename or
 reclassify their output as native evidence.
+
+- [ ] **Step 3b: Repair the surfaces that hard-fail on removed text**
+
+These assert the text of files this phase deletes, so they fail at assertion
+time with a misleading message rather than at import:
+
+| Surface | Anchor | Action |
+|---|---|---|
+| `.github/workflows/ci.yml` | `hashFiles(...)` names `packages/typescript/prime-gateway/package-lock.json` and `.../resources/prime-artifact-lock.json` | drop the stale Prime paths from the cache key |
+| `tests/test_standalone_repository.py` | `:436-450` asserts those ci.yml paths; `:174-197` asserts Makefile `prime-pN-run` recipes contain `--provider prime-agent --runtime prime.agent` | rewrite both assertions to the post-removal distribution |
+| `tools/climb/cycle.sh` | step list runs the prime-gateway build/test and `check_prime_parity.py --provider asterion.prime-gateway` | drop those steps; the remaining climb steps are Prime-free |
+| `docs/guides/prime-control-operator-guide.md` | `:46,52,84,103,129` document `make prime-check` / `prime-setup` / `prime-verify-*` and `3th-party/prime-agent` | its link target `docs/README.md:29` must not dangle — rewrite or remove the guide and its link together |
+| `docs/architecture/runtime-provider-boundaries.md`, `docs/architecture/core-only-boundary.md` | `:29,78` and `:67-68` document `prime.agent` / `prime_agent` as live | correct to the detached distribution |
+
+`tools/check_docs.py` exempts `docs/status`, `docs/superpowers/plans` and
+`docs/superpowers/specs` from *import* checks but **not** from link checks, so a
+dangling link fails `make docs-check`.
 
 - [ ] **Step 4: Verify**
 
