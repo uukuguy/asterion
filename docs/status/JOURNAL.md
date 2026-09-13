@@ -2297,5 +2297,7 @@
 - 01:00 修正 Task 4 验证 grep 需锚词边界（asterion-prime-p1-run 子串冲突致永不通过）[702b9312]
 - 01:14 round 5 落地：tests 15→23，新增 prime-gateway 规则 +76；#1 类修复确认零丢失 [8291f192]
 - 01:17 该规则暴露计划缺口：check_promotion.py 六处 gateway 引用（:1090 把已删包的锁拷进发行物）[cd6d2048]
+- 01:30 Task 5 落地：P1 operator 六处 Prime 耦合切除，门禁 1925→1908，P1 进入 unavailable [ba89a4de]
+- 01:34 记录 Task 5 后置状态：6 个原生函数不可达但刻意保留（Phase 4 基底），禁止当死代码删 [8d5b681f]
 - 00:27 红基线测试落 True 树（三测绿/红断言），真实树违规 1881 记录在案 [6fadf9b]
 - 00:28 移除 legacy Prime 打包面：entry-points 收至 3/5/2，force-include/artifacts 清 Prime 资源 [bb6e23e]
