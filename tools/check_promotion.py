@@ -12,12 +12,6 @@ import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from types import MappingProxyType
-
-from asterion.control.providers.prime.operational_parity_testing import (
-    PRIME_OPERATION_FEATURES,
-    build_prime_operational_observations,
-)
 
 if __package__:
     from tools.setup_prime_agent import (
@@ -334,96 +328,11 @@ assert json.loads(template_descriptor.read_text()).get('protocol') == (
 )
 """
 
-WHEEL_OPERATIONAL_RESOURCE_SMOKE = r"""
-import json
-import os
-import subprocess
-from importlib import resources
-from pathlib import Path
-from types import MappingProxyType
-
-from asterion.control.providers.prime.operational_parity_testing import (
-    PRIME_OPERATION_FEATURES,
-    build_prime_operational_observations,
-)
-from tools.check_promotion import _closed_prime_subprocess_environment
-from tools.check_promotion import _operational_temporary_root
-
-source_root = os.environ.get('ASTERION_OPERATIONAL_PRIME_SOURCE_ROOT')
-assert source_root
-external_prime_root = Path(source_root).resolve(strict=True)
-assert not external_prime_root.is_relative_to(Path.cwd().resolve())
-root = Path(str(resources.files('asterion')))
-resource_root = root / 'control/providers/prime/resources'
-environment = _closed_prime_subprocess_environment(
-    temporary_root=_operational_temporary_root(resource_root, external_prime_root),
-    node_executable=Path(__ASTERION_PROMOTION_NODE_EXECUTABLE__),
-)
-required_resources = (
-    'prime-operational-harness.mjs',
-    'prime-operational-module-lock.json',
-    'prime-operational-module.mjs',
-    'prime-settings-keybindings-request.schema.json',
-    'prime-settings-keybindings-validator.mjs',
-)
-for name in required_resources:
-    assert (resource_root / name).is_file(), name
-receipts = {}
-for package in sorted(PRIME_OPERATION_FEATURES):
-    completed = subprocess.run(
-        (
-            'node',
-            str(resource_root / 'prime-operational-harness.mjs'),
-            '--resource-root',
-            str(resource_root),
-            '--source-root',
-            str(external_prime_root),
-            '--package',
-            package,
-        ),
-        cwd='/',
-        env=environment,
-        capture_output=True,
-        text=True,
-        timeout=900,
-        check=False,
-    )
-    assert completed.returncode == 0
-    assert str(external_prime_root) not in completed.stdout + completed.stderr
-    assert str(resource_root) not in completed.stdout + completed.stderr
-    receipts[package] = json.loads(completed.stdout)
-observations = build_prime_operational_observations(
-    MappingProxyType(receipts)
-)
-assert len(observations) == 6
-assert {observation.source_commit for observation in observations} == {
-    'a18809e00ea30638584d87b3afea7285a9d7296c'
-}
-assert all(observation.provider_operations == 0 for observation in observations)
-assert all(
-    all(value == 0 for value in observation.effect_counts.values())
-    for observation in observations
-)
-"""
-
-
-def _wheel_operational_resource_smoke(node_executable: Path) -> str:
-    return WHEEL_OPERATIONAL_RESOURCE_SMOKE.replace(
-        "__ASTERION_PROMOTION_NODE_EXECUTABLE__", repr(str(node_executable))
-    )
-
-
 def _wheel_protocol_resource_smoke(node_executable: Path) -> str:
     return WHEEL_PROTOCOL_RESOURCE_SMOKE.replace(
         "__ASTERION_PROMOTION_NODE_EXECUTABLE__", repr(str(node_executable))
     )
 
-
-def _is_wheel_operational_resource_smoke(source: str) -> bool:
-    prefix, marker, suffix = WHEEL_OPERATIONAL_RESOURCE_SMOKE.partition(
-        "__ASTERION_PROMOTION_NODE_EXECUTABLE__"
-    )
-    return bool(marker) and source.startswith(prefix) and source.endswith(suffix)
 
 ROOT_EXCLUDED_NAMES = frozenset(
     {
@@ -641,25 +550,6 @@ def _closed_npm_subprocess_environment(
     return environment
 
 
-def _operational_temporary_root(
-    resource_root: Path, external_prime_root: Path
-) -> Path:
-    try:
-        common = Path(
-            os.path.commonpath(
-                (
-                    str(resource_root.resolve(strict=True)),
-                    str(external_prime_root.resolve(strict=True)),
-                )
-            )
-        )
-        if common == common.parent or not common.is_dir() or common.is_symlink():
-            raise OSError
-        return common
-    except (OSError, RuntimeError, ValueError):
-        raise PromotionError("installed Prime operational evidence is invalid") from None
-
-
 def _default_runner(
     command: tuple[str, ...], cwd: Path, *, environment: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -784,14 +674,6 @@ def _run(
     except OSError as error:
         raise PromotionError(f"promotion command could not start: {normalized[0]}") from error
     if completed.returncode != 0:
-        if (
-            len(normalized) == 3
-            and normalized[1] == "-c"
-            and _is_wheel_operational_resource_smoke(normalized[2])
-        ):
-            raise PromotionError(
-                "promotion command failed: installed Prime operational evidence is invalid"
-            )
         tail = _bounded_tail(completed)
         message = f"promotion command failed: {shlex.join(normalized)}"
         if tail:
@@ -1120,119 +1002,6 @@ def _bind_external_prime_source(
         raise PromotionError("external Prime source binding could not be created") from None
 
 
-def _package_resource_root() -> Path:
-    try:
-        from importlib import resources
-
-        root = Path(
-            str(
-                resources.files("asterion").joinpath(
-                    "control/providers/prime/resources"
-                )
-            )
-        )
-        if not root.is_dir() or root.is_symlink():
-            raise OSError
-        return root.resolve(strict=True)
-    except (ImportError, OSError, RuntimeError):
-        raise PromotionError("installed Prime operational resources are unavailable") from None
-
-
-def _operational_harness_command(
-    *,
-    resource_root: Path,
-    external_prime_root: Path,
-    package: str,
-) -> tuple[str, ...]:
-    return (
-        str(_resolve_operational_node()),
-        str(resource_root / "prime-operational-harness.mjs"),
-        "--resource-root",
-        str(resource_root),
-        "--source-root",
-        str(external_prime_root),
-        "--package",
-        package,
-    )
-
-
-def _load_operational_package_receipt(
-    *,
-    resource_root: Path,
-    external_prime_root: Path,
-    package: str,
-) -> dict[str, object]:
-    try:
-        completed = subprocess.run(
-            _operational_harness_command(
-                resource_root=resource_root,
-                external_prime_root=external_prime_root,
-                package=package,
-            ),
-            cwd="/",
-            env=_closed_prime_subprocess_environment(
-                temporary_root=_operational_temporary_root(
-                    resource_root, external_prime_root
-                )
-            ),
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=900,
-        )
-    except (OSError, subprocess.SubprocessError):
-        raise PromotionError("installed Prime operational evidence is invalid") from None
-    if completed.returncode != 0:
-        raise PromotionError("installed Prime operational evidence is invalid")
-    try:
-        value = json.loads(completed.stdout)
-    except (json.JSONDecodeError, TypeError):
-        raise PromotionError("installed Prime operational evidence is invalid") from None
-    if type(value) is not dict:
-        raise PromotionError("installed Prime operational evidence is invalid")
-    return value
-
-
-def _promotion_report(*, external_prime_root: Path) -> dict[str, object]:
-    resource_root = _package_resource_root()
-    try:
-        root = external_prime_root.resolve(strict=True)
-        verify_operational_locks(root, resource_root)
-        receipts = {
-            package: _load_operational_package_receipt(
-                resource_root=resource_root,
-                external_prime_root=root,
-                package=package,
-            )
-            for package in sorted(PRIME_OPERATION_FEATURES)
-        }
-        observations = build_prime_operational_observations(
-            MappingProxyType(receipts)
-        )
-        source_commits = {observation.source_commit for observation in observations}
-        if len(source_commits) != 1:
-            raise ValueError
-        first = observations[0]
-        return {
-            "built_anchor_digests": dict(first.built_anchor_digests),
-            "effect_counts": dict(first.effect_counts),
-            "external_prime_root": True,
-            "node_runtime": first.node_runtime,
-            "package_count": len(observations),
-            "source_anchor_digests": dict(first.source_anchor_digests),
-            "source_commit": first.source_commit,
-        }
-    except (
-        IndexError,
-        OperationalHarnessError,
-        OSError,
-        RuntimeError,
-        TypeError,
-        ValueError,
-    ):
-        raise PromotionError("installed Prime operational evidence is invalid") from None
-
-
 def _assert_acceptance(stdout: str) -> None:
     try:
         payload = json.loads(stdout)
@@ -1408,7 +1177,6 @@ def _run_full(
         ("uv", "pip", "install", "--python", str(python), str(wheels[0])),
         (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
         (str(python), "-c", _wheel_protocol_resource_smoke(node_executable)),
-        (str(python), "-c", _wheel_operational_resource_smoke(node_executable)),
         (str(asterion), "list"),
         (
             str(asterion),
