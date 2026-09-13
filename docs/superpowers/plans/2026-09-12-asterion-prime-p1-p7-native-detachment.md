@@ -248,9 +248,10 @@ class TestDetachmentGate(unittest.TestCase):
 
     def test_flags_prime_sdk_identifiers(self) -> None:
         # The gate this one replaces enforced these three tokens. Dropping any
-        # of them is a coverage regression: createAgentSession and loadPrimeSdk
-        # are precisely the "Prime SDK session" execution edge the design
-        # forbids, and primeSourceRoot is a checkout locator under another name.
+        # of them is a coverage regression: the Prime SDK session factory and
+        # loader are precisely the "Prime SDK session" execution edge the
+        # design forbids, and the camel-case source-root getter is a checkout
+        # locator under another name. Never spell them literally here.
         for token in (
             _t("createAgent", "Session"),
             _t("loadPrime", "Sdk"),
@@ -371,9 +372,13 @@ FORBIDDEN_IMPORTS = (
 )
 
 # Prime SDK identifiers. These three were enforced by the gate this one
-# replaces; dropping them would be a coverage regression, because
-# createAgentSession and loadPrimeSdk are exactly the "Prime SDK session"
+# replaces; dropping them would be a coverage regression, because the Prime
+# SDK session factory and SDK loader are exactly the "Prime SDK session"
 # execution edge the design forbids.
+#
+# NOTE: comments are scanned too. Never spell these tokens literally anywhere
+# in this module or its test - a literal in a comment makes the gate flag its
+# own source, and Task 2's self-consistency test can then never pass.
 FORBIDDEN_SDK_TOKENS = (
     _joined("prime", "SourceRoot"),
     _joined("createAgent", "Session"),
@@ -494,6 +499,31 @@ git commit -m "feat(prime): replace literal detachment check with semantic relea
 ```
 
 ---
+
+### Gate limitations — deliberate, and to be stated rather than implied
+
+The gate is a release-surface scanner, not a proof of detachment. Its known
+limits, recorded so later phases do not mistake a green gate for a stronger
+claim than it is:
+
+1. **Line-local, literal matching.** A forbidden token assembled at runtime
+   (the same `_joined` technique the gate itself uses) is invisible. The gate
+   catches spelled-out references only; actual enforcement is the removal work
+   in Tasks 3-9.
+2. **`SCAN_ROOTS` is an allowlist.** `docs/`, `scripts/`, `schemas/`, and
+   top-level `*.py` are not scanned, so a checkout path written into a plan or
+   guide passes untouched. This is intentional — `docs/` is history and is not
+   shipped in the wheel — but it means the gate does not cover the docs corpus.
+   If a future phase ships docs, add them to `SCAN_ROOTS`.
+3. **`ALLOWED_ENV_VARS` scrubbing can manufacture a false positive.** The
+   scrub runs before matching, so a line containing an allowed name spliced
+   into a forbidden one could be reported. Contrived, but if it fires, fix the
+   scrub rather than deleting the rule.
+4. **No line-continuation awareness.** A token split across two source lines is
+   invisible. Accepted; Python and TypeScript both permit it, but the removal
+   tasks verify by deletion, not by scan.
+5. **The scan skips `node_modules`/`dist`/`build`.** Task 9 Step 3b closes the
+   shipping half of this by scanning the built wheel with the same rule set.
 
 ### Task 2: Establish the red baseline on the real tree
 
