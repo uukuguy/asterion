@@ -282,6 +282,37 @@ class TestDetachmentGate(unittest.TestCase):
             rules = [v.rule for v in find_source_detachment_violations(root)]
             self.assertIn("prime-source-locator", rules)
 
+    def test_bom_less_invalid_utf8_fails_closed(self) -> None:
+        # Not a BOM-gated UTF-16 file, so it must not be decoded as UTF-16;
+        # a lossy misread would hide ASCII tokens behind NUL bytes.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"ok = 1\nBAD = 'caf\xe9'\n")
+            with self.assertRaises(AssertionError):
+                find_source_detachment_violations(root)
+
+    def test_utf16_bom_file_is_scanned_not_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(f'BAD = "{CHECKOUT}"\n'.encode("utf-16"))
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("prime-source-locator", rules)
+
+    def test_declared_non_ascii_compatible_encoding_fails_closed(self) -> None:
+        # A .py declaring a byte-pairing codec without a BOM must be refused,
+        # not decoded into mojibake that hides the token behind NULs.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"# -*- coding: utf-16 -*-\nBAD = 1\n")
+            with self.assertRaises(AssertionError):
+                find_source_detachment_violations(root)
+
     def test_reports_line_number(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -425,26 +456,34 @@ def _read_surface_text(path: Path) -> str:
     fail-open in a trust-boundary gate: a forbidden token would only have to be
     placed in a file with one bad byte.
 
-    Do NOT fall back to UTF-16 unless a BOM actually declares it. Decoding a
-    non-UTF-16 file as UTF-16 pairs the bytes, so ASCII tokens are split by NULs
-    and evade the scan - the same fail-open in a different disguise.
+    Only ASCII-compatible codecs are accepted. A codec that pairs bytes (utf-16,
+    utf-32) splits ASCII tokens behind NULs and hides them from the scan, so it
+    is refused unless a real BOM declares it.
     """
     raw = path.read_bytes()
+    # Explicit BOMs are the only byte-pairing encodings we accept.
     if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
         try:
             return raw.decode("utf-16")
         except UnicodeDecodeError as exc:
             raise AssertionError(f"undecodable release-surface file: {path}") from exc
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig")
     encoding = "utf-8"
     if path.suffix == ".py":
-        # Honour a PEP 263 declared source encoding.
+        # Honour a PEP 263 declared source encoding, but only when it is
+        # ASCII-compatible.
+        import codecs
         import tokenize
 
         try:
             with path.open("rb") as handle:
                 encoding, _ = tokenize.detect_encoding(handle.readline)
-        except (SyntaxError, UnicodeDecodeError) as exc:
+            info = codecs.lookup(encoding)
+        except (SyntaxError, UnicodeDecodeError, LookupError) as exc:
             raise AssertionError(f"undecodable release-surface file: {path}") from exc
+        if info.encode("AZaz09/._") != b"AZaz09/._":
+            raise AssertionError(f"undecodable release-surface file: {path}")
     try:
         return raw.decode(encoding)
     except (UnicodeDecodeError, LookupError) as exc:
@@ -489,7 +528,7 @@ def assert_asterion_prime_source_detached(root: Path) -> None:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run python -m unittest -v tests.test_prime_source_detachment`
-Expected: PASS, 11 tests.
+Expected: PASS, 14 tests.
 
 - [ ] **Step 5: Commit**
 
