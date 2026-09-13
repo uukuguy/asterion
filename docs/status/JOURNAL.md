@@ -2275,3 +2275,6 @@
 ## 2026-09-13
 
 - 23:11 写出 P1-P7 原生脱钩 canonical worklist：9 阶段路线图 + Phase 1 任务级，门禁先行 [1c9d2a67]
+- 23:20 计划补入取证边界：prime_agent_host 可删、core allowlist 连带、check_prime_parity 定性 REMOVE [20f11120]
+- 23:31 语义 detachment 门禁落地，8 测试通过；真实树报 1744 处，含 P1 operator 6 处耦合 [206dc04c]
+- 23:35 门禁首跑抓出 pi-compaction-lock 实为 Prime checkout 锁，纠正 native-KEEP 误判 [b1e48abe]
