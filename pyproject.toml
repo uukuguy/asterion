@@ -28,66 +28,32 @@ asterion-dci = "asterion.applications.dci_agent_lite.cli:main"
 controlled-code = "asterion.applications.controlled_code:create_provider"
 dci-agent-lite = "asterion.applications.dci_agent_lite:create_provider"
 prime-applications = "asterion.applications.prime:create_provider"
-prime-agent = "asterion.applications.prime_agent.provider:create_provider"
 
 [project.entry-points."asterion.application_index"]
 "code.quality__1.0.0" = "asterion.applications.controlled_code:create_provider"
 "dci.complete-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 "dci.local-benchmark-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 "dci.research-capability__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
-"prime.capability-program__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
-"prime.arc-agi-3__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
 "prime.arc-agi-3-solving__1.0.0" = "asterion.applications.prime:create_provider"
-"prime.bounded-autonomy__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
-"prime.continual-improvement__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
-"prime.ipython-coding__1.0.0" = "asterion.applications.prime:create_provider"
-"prime.programmatic-long-context__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
-"prime.recursive-workflow__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
-"prime.long-session-continuity__1.0.0" = "asterion.applications.prime_agent.provider:create_provider"
 
 [project.entry-points."asterion.host_services"]
 "corpus.local-root" = "asterion.capabilities.dci.implementation.services:create_local_corpus_service_factory"
 "evaluation.answer-judge" = "asterion.capabilities.dci.implementation.services:create_answer_judge_service_factory"
-"model.bounded-session" = "asterion.applications.prime_agent.operator.model_session_host:create_host_service_factory"
-"prime.ipython-production" = "asterion.applications.prime_agent.operator.p1_cli_host:create_host_service_factory"
-"prime.programmatic-long-context-development" = "asterion.applications.prime_agent.operator.p2_cli_host:create_host_service_factory"
-"prime.recursive-workflow-development" = "asterion.applications.prime_agent.operator.p3_cli_host:create_host_service_factory"
-"prime.long-session-continuity-development" = "asterion.applications.prime_agent.operator.p4_cli_host:create_host_service_factory"
-"prime.bounded-autonomy-development" = "asterion.applications.prime_agent.operator.p5_cli_host:create_host_service_factory"
-"prime.continual-improvement-development" = "asterion.applications.prime_agent.operator.p6_cli_host:create_host_service_factory"
-"prime.arc-agi-3-development" = "asterion.applications.prime_agent.operator.p7_cli_host:create_host_service_factory"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/asterion"]
 artifacts = [
     "src/asterion/applications/prime/resources/*.mjs",
     "src/asterion/applications/prime/p7/run_story/assets/*",
-    "src/asterion/applications/prime_agent/operator/resources/*.json",
-    "src/asterion/applications/prime_agent/operator/resources/*.txt",
     "src/asterion/capabilities/dci/resources/pi/*.ts",
     "src/asterion/capabilities/dci/resources/pi/*.mjs",
     "src/asterion/control/providers/native/resources/control-plane.json",
     "src/asterion/control/providers/asterion_prime/resources/control-plane.json",
-    "src/asterion/control/providers/prime/resources/control-plane.json",
-    "src/asterion/control/providers/prime/resources/skills/asterion-control/pyproject.toml",
-    "src/asterion/control/providers/prime/resources/skills/asterion-control/src/asterion_control/*.py",
 ]
 
 [tool.hatch.build.hooks.custom]
 
 [tool.hatch.build.targets.wheel.force-include]
-"packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json" = "asterion/applications/prime/resources/pi-compaction-lock.json"
-"tools/build_asterion_prime_compaction_lock.mjs" = "asterion/applications/prime/resources/pi-compaction-verifier.mjs"
-"packages/typescript/prime-gateway/resources/prime-artifact-lock.json" = "asterion/control/providers/prime/resources/prime-artifact-lock.json"
-"packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json" = "asterion/control/providers/prime/resources/prime-ecosystem-module-lock.json"
-"packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs" = "asterion/control/providers/prime/resources/prime-ecosystem-module.mjs"
-"packages/typescript/prime-gateway/resources/prime-client-module-lock.json" = "asterion/control/providers/prime/resources/prime-client-module-lock.json"
-"packages/typescript/prime-gateway/resources/prime-client-module.mjs" = "asterion/control/providers/prime/resources/prime-client-module.mjs"
-"packages/typescript/prime-gateway/resources/prime-operational-module-lock.json" = "asterion/control/providers/prime/resources/prime-operational-module-lock.json"
-"packages/typescript/prime-gateway/resources/prime-operational-module.mjs" = "asterion/control/providers/prime/resources/prime-operational-module.mjs"
-"packages/typescript/prime-gateway/resources/prime-settings-keybindings-request.schema.json" = "asterion/control/providers/prime/resources/prime-settings-keybindings-request.schema.json"
-"packages/typescript/prime-gateway/resources/prime-settings-keybindings-validator.mjs" = "asterion/control/providers/prime/resources/prime-settings-keybindings-validator.mjs"
-"tests/fixtures/prime_gateway/v1/real-prime-operations.mjs" = "asterion/control/providers/prime/resources/prime-operational-harness.mjs"
 "schemas/benchmark-suite/v1/benchmark-suite.schema.json" = "asterion/schemas/benchmark-suite/v1/benchmark-suite.schema.json"
 "schemas/agent-system/v1/agent-system.schema.json" = "asterion/schemas/agent-system/v1/agent-system.schema.json"
 "schemas/control-plane/v1/control-plane-manifest.schema.json" = "asterion/schemas/control-plane/v1/control-plane-manifest.schema.json"
