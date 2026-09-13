@@ -1,55 +1,60 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-13 23:14. **Session remains active — not a final handoff.**
+> Updated: 2026-09-14 00:05. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Canonical worklist exists now: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md` (commit `1c9d2a67`). It supersedes the previous handoff's "no unified implementation plan has been written" boundary.
-- Phase 1 is **gate-first**: the semantic source-detachment gate is implemented *before* any deletion, and becomes the executable definition of "removal complete". The plan therefore does not enumerate the removal in prose.
-- Currently executing **Task 1** (expand the gate + its tests) via subagent.
+- Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. 9-phase roadmap + task-level Phase 1.
+- **Phase 1 Task 1 landed, was reviewed, and was reopened.** The gate now covers the full release surface and reports **1881 violations** on the real tree. A second defect round (BOM-gating the UTF-16 fallback) is dispatched and not yet committed.
+- The gate is the right thing to have built first: on its first two runs it caught a Prime source lock that both the spec inventory and the manual inventory had classified as native.
 
 ## 已验证事实
 
-- The design spec was read in full and is consistent with `DECISIONS.md` D-2026-09-12-01 — no conflict, no supersession needed.
-- Pre-change baseline: `make docs-check` PASS (207 markdown files, 57 local links). Working tree clean at `f1d28b9e`; `main == origin/main`.
-- **The existing gate's coverage gap is proven, not assumed.** `src/asterion/agents/prime/detachment.py` scans only `src/asterion/agents/prime/` + `src/asterion/runtimes/asterion_prime.py` against 5 literal tokens, and is **green today** while `src/asterion/applications/prime/p1/operator.py` carries six Prime execution edges at `:918` (`source_root` field), `:934-935` (dynamic import of `packages/coding-agent/dist/config.js` and `.../core/compaction/compaction.js`), `:963` (launches `coding-agent/dist/main.js`), `:1019` (`ASTERION_PRIME_SOURCE_ROOT` default `3th-party/prime-agent`), `:1035` (locks `asterion.control.providers.prime`), `:1154` (threads `source_root`).
-- `ASTERION_PRIME_OPERATOR_ROOT` is **not** a Prime checkout locator: `Makefile:302` sets it from `$(CURDIR)` (the Asterion repo root) and `operator.py:987` consumes it. `ASTERION_PRIME_NODE` is a resolved node-22 executable path. Both are legitimate; the gate must not reject them. A substring rule on `PRIME.*ROOT` would false-positive — this is why the gate must be semantic.
-- `asterion-prime-p1-run` (`Makefile:297-302`) is already an installed-wheel invocation, and `operator.py:987-991` actively refuses source execution of the *asterion* package. `asterion-prime-p7-solve` (`Makefile:293-295`) is **not** — it exports `PYTHONPATH="$(CURDIR)/src"` and uses `../external-prime/arc-agi-3/venv/bin/python`.
-- `prime.ipython-coding__1.0.0` already resolves to the native provider `asterion.applications.prime`, but its assembly requires five host services (`prime.ipython`, `prime.p1-oracle`, `prime.pi-extension`, `prime.private-trace`, `prime.session-backend`) that have **no entry point**; only the forbidden legacy `prime.ipython-production` supplies P1 today. Its index row must therefore be omitted in Phase 1.
-- Scale: ~180 of 428 test modules are coupled to a legacy surface.
-- Breakage radius of the removal (KEEP targets that die): `check`, `promotion-check`, `test-typescript`, `help`, ~17 `test.prime-*.provider-free` targets, `prime-parity-inventory`, `prime-verify-system-parity`. Five `test.prime-*.provider-free` targets are Python-only and survive.
+- Gate landed at `206dc04c`, defects fixed at `8c41f2cb`. 11 tests pass. Real-tree total **1881**: `legacy-prime-import` 1121, `prime-source-locator` 623, `prime-sdk-edge` 137.
+- **The gate this one replaced was green while `src/asterion/applications/prime/p1/operator.py` carried six Prime execution edges** (`:934, :935, :963, :1019, :1035, :1083`). The old gate scanned only two paths against five literals.
+- **`pyproject.toml:79-80` ship a Prime checkout lock.** `packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json` is 394 KB / 2891 digests, `format: asterion.pi-compaction-lock/v1`, `package_name: @earendil-works/pi-coding-agent`, `version 0.7.1`, `source_commit: a18809e00ea30638584d87b3afea7285a9d7296c` — the commit `CURRENT-STATE.md` calls "the pinned Prime source". Confirmations: the P1 shared-kernel plan resolves that package beneath `ASTERION_PRIME_SOURCE_ROOT`; `check_promotion.py:963-966` maps `pi-ai`/`pi-agent-core`/`pi-tui` to `external_prime_root/packages`; `npm view` returns E404 for the version. The detachment spec anticipates the relabeling. → REMOVE, corrected from an earlier native-KEEP call.
+- **Three gate defects were introduced by the plan and found by independent review** (implementing agent, then a background security review): a coverage regression that dropped `primeSourceRoot`/`createAgentSession`/`loadPrimeSdk`; a fail-open that treated undecodable files as clean; and a fail-open where `SKIP_DIRS` matched absolute path parts, so a checkout under `build/`/`dist/`/`.venv/` silenced the whole scan. All fixed. A fourth (blind UTF-16 fallback) is dispatched.
+- `ASTERION_PRIME_OPERATOR_ROOT` resolves to the Asterion repo root (`Makefile:302` passes `$(CURDIR)`, consumed at `operator.py:987`) and `ASTERION_PRIME_NODE` to a node executable — both legitimate, and a substring rule would false-positive on them.
+- `asterion-prime-p1-run` is already installed-wheel and `operator.py:987-991` refuses source execution. `asterion-prime-p7-solve` is not (`PYTHONPATH=$(CURDIR)/src` + `../external-prime/arc-agi-3/venv/bin/python`).
+- Scale: 429 test modules → **192 REMOVE / 10 REWRITE / ~205 SURVIVES** / 6 with-edit / 6 ambiguous. `prime-gateway` is 469 raw files but only **95 hand-written**.
+- Only two fixture trees are coupled (`prime_gateway/`, `prime-parity/`); `prime_ecosystem/` content is clean.
+- There are **no npm workspaces** in this repo.
 
 ## 当前判断
 
-- **Delete-first order**, per the spec's mandated migration order. P1-P6 become unavailable; the spec explicitly prefers intermediate unavailability to a legacy fallback or a false native claim.
-- The Prime Gateway stack leaves the distribution, so the H-035 / H-036 / H-037 evidence machinery goes with it and its evidence is reclassified **historical** in Task 11. `CURRENT-STATE.md`'s "Verified Boundary" section leans on those claims today and will be corrected there.
-- Phases 3-9 get their own plans when reached; they are not pre-choreographed in the current plan.
+- Delete-first, per the spec's migration order. P1-P6 become unavailable; the spec prefers intermediate unavailability to a legacy fallback.
+- Prime Gateway leaves, so H-035/H-036/H-037 evidence becomes historical and is reclassified in Task 11.
 
 ## 未完成边界
 
-- Phase 1 Tasks 1-11 are **not** complete. No legacy surface has been removed yet.
-- P7 has **not** been revalidated after detachment. No P1-P6 application has been rebuilt.
-- Open decision (Task 9, audit-gated): retention of the non-core v1 schemas, especially `agent-client/v1`. Its evidence was Prime Gateway-backed but the contract may be framework-level; flagged for explicit reporting rather than a silent call.
-- Open decision (Phase 2): whether the ARC broker is injected as a host service rather than referenced as `../external-prime/arc-agi-3/venv/bin/python`.
-- The Rust `executor.controlled` surface has not been checked for Prime references.
+- Phase 1 Tasks 2-11 not started. No legacy surface removed yet.
+- P7 not revalidated; no P1-P6 rebuilt.
+- Open: `agent-client/v1` retention (Task 9 audit, explicit report required).
+- Open: `../external-prime/arc-agi-3/venv/bin/python` — Phase 2 decides whether the ARC broker becomes an injected host service.
+
+## Risks carried into later phases
+
+1. **Native P7 may resolve compaction through the Prime checkout lock.** Expected, not a regression: the migration order places P7 revalidation after removal to surface exactly this. Do not restore the lock to make P7 pass.
+2. **No detached Pi artifact has been shown to exist.** Every "pi"-named artifact inspected resolves under `ASTERION_PRIME_SOURCE_ROOT`. Phase 3 must name a genuinely detached one or report that none exists. If confirmed, P7's "already detached" premise needs re-evaluation.
+3. **CI hard-fails on cache-key change.** `.github/workflows/ci.yml:26` hashFiles names prime-gateway lockfiles and `:27-29` exits 1 on a cache miss, so editing it fails the job until the npm cache is repopulated.
 
 ## 下一动作
 
-1. Land Task 1 (expanded gate + 8 tests). Confirm the real-tree test from Task 2 fails and **names `src/asterion/applications/prime/p1/operator.py`** — a gate that misses the documented P1 edges must be fixed before proceeding.
-2. Execute Phase 1 Tasks 2-11 in order. Task 11 Step 3 is the green-gate acceptance.
+1. Land the BOM-gating fix; confirm 13 tests and unchanged real-tree totals (1881 / `prime-sdk-edge` 137).
+2. Task 2: pin the red baseline.
+3. Tasks 3-11 in order. Task 11 Step 3 is the green-gate acceptance.
 
 ## Ready-to-paste commands
 
 ```bash
 project-state resume
-sed -n '1,120p' docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md
 uv run python -m unittest -v tests.test_prime_source_detachment
-git log --oneline -5
+uv run python -c "from pathlib import Path; from asterion.agents.prime.detachment import find_source_detachment_violations as f; print(len(f(Path('.'))))"
+git log --oneline -8
 ```
 
 ## Workspace boundary
 
-- Do not inspect or invoke `3th-party/prime-agent.git`.
-- `../external-prime/` is a separate external resource and is **not** covered by that prohibition.
-- Do not restore Prime checkout dependencies to satisfy old tests.
-- Do not push unless explicitly requested. Do not revive the multi-thousand-test promotion suite as a P1-P7 gate.
+- Do not inspect or invoke `3th-party/prime-agent.git`. `../external-prime/` is a separate external resource and is not covered by that prohibition.
+- Do not restore Prime checkout dependencies to satisfy old tests, and do not weaken the gate to silence a red.
+- Do not revive the multi-thousand-test promotion suite as a P1-P7 gate.
