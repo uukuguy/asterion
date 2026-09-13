@@ -111,14 +111,30 @@ def _read_surface_text(path: Path) -> str:
     Returning "" for an undecodable file would treat it as clean, which is a
     fail-open in a trust-boundary gate: a forbidden token would only have to be
     placed in a file with one bad byte.
+
+    Do NOT fall back to UTF-16 unless a BOM actually declares it. Decoding a
+    non-UTF-16 file as UTF-16 pairs the bytes, so ASCII tokens are split by NULs
+    and evade the scan - the same fail-open in a different disguise.
     """
+    raw = path.read_bytes()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return raw.decode("utf-16")
+        except UnicodeDecodeError as exc:
+            raise AssertionError(f"undecodable release-surface file: {path}") from exc
+    encoding = "utf-8"
+    if path.suffix == ".py":
+        # Honour a PEP 263 declared source encoding.
+        import tokenize
+
+        try:
+            with path.open("rb") as handle:
+                encoding, _ = tokenize.detect_encoding(handle.readline)
+        except (SyntaxError, UnicodeDecodeError) as exc:
+            raise AssertionError(f"undecodable release-surface file: {path}") from exc
     try:
-        return path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        pass
-    try:
-        return path.read_text(encoding="utf-16")
-    except UnicodeDecodeError as exc:
+        return raw.decode(encoding)
+    except (UnicodeDecodeError, LookupError) as exc:
         raise AssertionError(f"undecodable release-surface file: {path}") from exc
 
 

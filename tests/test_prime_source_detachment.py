@@ -112,6 +112,26 @@ class TestDetachmentGate(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 find_source_detachment_violations(root)
 
+    def test_bom_less_invalid_utf8_fails_closed(self) -> None:
+        # Not a BOM-gated UTF-16 file, so it must not be decoded as UTF-16;
+        # a lossy misread would hide ASCII tokens behind NUL bytes.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"ok = 1\nBAD = 'caf\xe9'\n")
+            with self.assertRaises(AssertionError):
+                find_source_detachment_violations(root)
+
+    def test_utf16_bom_file_is_scanned_not_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "src/asterion/x.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(f'BAD = "{CHECKOUT}"\n'.encode("utf-16"))
+            rules = [v.rule for v in find_source_detachment_violations(root)]
+            self.assertIn("prime-source-locator", rules)
+
     def test_scan_is_not_silenced_by_an_ancestor_directory_name(self) -> None:
         # A checkout under a directory named build/ must still be scanned.
         with tempfile.TemporaryDirectory() as tmp:
