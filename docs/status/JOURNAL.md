@@ -2312,3 +2312,5 @@
 - 10:14 Task 9/10 合并提交：清剩余 Prime 工具、重指向 check_promotion、修复 Makefile/ci/docs [47a839dc]
 - 10:15 Task 11 证据重分类：H-035/036/037 转历史，agent-client/v1 确认保留 [f4fbc250]
 - 10:15 门禁 1881 → 0；Phase 1 完成（11/11）
+- 11:40 诊断 runtime 缝：prime.pi-extension 以实现命名且载荷带 Pi 类型，阻断框架可替换性
+- 12:48 缝中性化落地：prime.pi-extension → prime.launch，移除 PiRpcSession/PiExtensionBinding；保留 PiExtensionLease（fd 钉住唯一属主，防 TOCTOU）[d89e48dd]
