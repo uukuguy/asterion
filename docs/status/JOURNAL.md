@@ -2314,3 +2314,5 @@
 - 10:15 门禁 1881 → 0；Phase 1 完成（11/11）
 - 11:40 诊断 runtime 缝：prime.pi-extension 以实现命名且载荷带 Pi 类型，阻断框架可替换性
 - 12:48 缝中性化落地：prime.pi-extension → prime.launch，移除 PiRpcSession/PiExtensionBinding；保留 PiExtensionLease（fd 钉住唯一属主，防 TOCTOU）[d89e48dd]
+- 13:10 查实 DeepSeek 兼容层把任何 claude-* 模型名映射到最贵的 deepseek-v4-pro；subagent 传 model 别名 = 选最贵档
+- 13:35 AGENTS.md 定 DeepSeek 规则：不传 model 给 subagent、统一 deepseek-flash、须设 ANTHROPIC_SMALL_FAST_MODEL [7fecc1a0]
