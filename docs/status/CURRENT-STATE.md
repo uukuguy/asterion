@@ -213,6 +213,17 @@
   **not** evidence of a Phase 2 regression and **not** evidence of health —
   its last-green date is unknown. This is Phase 3's first diagnostic, not a
   pre-cleared item.
+- **`create_provider()` publishes both P7 and P1, and the composition closure
+  resolves for every published application.** Resolving a P7 run therefore
+  requires the P1 package to be present, even though only P7 executes; Phase 2
+  supplies both and says so in a comment at
+  `src/asterion/applications/prime/p7/operator.py:535`. Phase 1's stated
+  criterion was that an unmigrated application's selector is *omitted* from
+  `prime-applications` so metadata lookup rejects it. It was not omitted.
+  Supplying both packages is a documented workaround, not a resolution: it
+  couples two applications that are meant to migrate independently, and it will
+  distort Phase 4's P1 rebuild boundary. Decide the selector question before
+  Phase 4.
 - Revalidate P7 without a Prime checkout (Phase 3), then rebuild P1, P2, P4, P3,
   P5, and P6 on the shared native `asterion.prime` path (Phases 4-9).
 - Keep every compound Asterion-native row missing until Phase 3.2+ evidence
