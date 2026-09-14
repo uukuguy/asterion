@@ -13,7 +13,14 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: **Phase 4** — rebuild P1 (`prime.ipython-coding`).
+- Active work package: **Phase 4** — rebuild P1's *launch path*
+  (`prime.ipython-coding`). P1 is not missing an implementation: its operator,
+  ipython host, coordination, oracle, receipt, runtime binding, worker and
+  worker_main all exist, as does the native substrate. What is gone is the
+  wiring — `p1/operator.py::_preflight` still raises the Phase 1 "unavailable"
+  stub, because the Prime-coupled launch was removed with no replacement built.
+  **Phase 4 is also where plan risk 1 (compaction) is finally tested**, since
+  P1's witness requires compaction and the Phase 3 run never reached it.
   **Phase 3 is complete: native P7 is revalidated end to end.** Run
   `p7-live-20260914141314` solved Level 1 of `ls20-9607627b` in 20 primitive
   actions and 40 persistent IPython cells, `partial_game_score` 3.571429,

@@ -2353,3 +2353,4 @@
 - 02:05 查实那个 compaction 红测试：它驱动一个 Node harness，而该 harness 直连禁止的 Prime Agent checkout、验其 compaction 锁、导 Prime compaction 内部——Phase 1 Task 7 删它是对的，Spec 明禁"需要 Prime checkout 才能过的测试"，故删测试而非恢复 [711714c8]
 - 02:05 这是同一失效模式的第三例：Phase 1 留下的测试依赖已删面、又只在全量套件里，无人看见。prime 全集现 207 tests OK / 34 skipped，两个基线红全清，门禁 0
 - 02:05 教训：门禁连注释一起扫，我在说明性注释里拼出了禁用路径字面量，当场把门禁从 0 变成 1；已改为不拼字面量
+- 05:40 handoff 收口：Phase 2/3 完成、Phase 4 计划就绪；RESUME 重写为最终交接稿；MEMORY.md 补两条反馈（先搜环境再断言缺失、窄缺陷按窄缺陷报）；INDEX/CURRENT-STATE/DECISIONS 一致性已核

@@ -13,6 +13,8 @@
 | feedback | ✅ verified-active | Preserve approved architecture across sessions; P7 is the native base for rebuilding P1-P6 |
 | feedback | ✅ verified-active | Research intensity — review changed code, not the whole gate |
 | feedback | ✅ verified-active | Judge a subagent by whether the work is done, not by whether it has reported |
+| feedback | ✅ verified-active | Search `PATH` and the real environment before declaring a resource absent |
+| feedback | ✅ verified-active | Report a narrow defect as narrow; do not inflate it into an architecture decision |
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
 
 ## ✅ Verified Active
@@ -51,6 +53,31 @@
   and two review passes — several hours — while no application had been rebuilt.
   The deliverable is the rebuilt application; the guard around it is support
   work. AGENTS.md already said this; the failure was inverting it.
+
+### feedback — search the environment before declaring something absent
+
+- Before reporting that a resource does not exist, search where it would
+  actually live: `PATH`, package-manager global roots, the user's own install
+  locations. One `ls` of the obvious directory is not a search.
+- Given 2026-09-14, after concluding "the only Pi on this machine is `./pi/`"
+  from a single directory listing — and pausing the work on that conclusion.
+  The user's reply was "没有 Pi 吗？你看看 PATH 中有没有？不知道找找吗？".
+  `/opt/homebrew/bin/pi` was on `PATH` all along, symlinked into the npm global
+  root, and it was the genuinely detached artifact the phase needed.
+- **Why:** a wrong absence claim is not a neutral gap. It stops work, or pushes
+  the session toward a workaround for a constraint that never existed.
+
+### feedback — report a narrow defect as narrow
+
+- When the defect is one line in one file, say so, fix it, and stop. Do not
+  present it as an architectural choice with trade-offs, and do not open a
+  decision point that the evidence has already closed.
+- Given 2026-09-15, after framing "`create_provider()` publishes an unfinished
+  P1" as a "closure coupling" needing a resolver-semantics decision. The user's
+  reply was "什么乱七八糟的。这个绑在一起的 provider 是你设计的吧". The real fix
+  was removing one published entry.
+- **Why:** inflating a small defect wastes the user's attention, delays the
+  fix, and obscures who caused what. Name the actual scope, then act.
 
 ### feedback — judge a subagent by the work, not the report
 
