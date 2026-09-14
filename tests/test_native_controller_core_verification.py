@@ -332,7 +332,7 @@ class TestNativeControllerCoreVerification(unittest.TestCase):
         self.assertEqual(report["status"], "BLOCKED")
         self.assertEqual(report["blocking_feature_count"], 61)
         self.assertEqual(report["passed_feature_count"], 0)
-        self.assertEqual(report["excluded_feature_count"], 2)
+        self.assertEqual(report["excluded_feature_count"], 0)
         self.assertEqual(len(report["blocking_feature_ids"]), 61)
         self.assertEqual(report["provider_operations"], 0)
         self.assertEqual(report["application_operations"], 0)

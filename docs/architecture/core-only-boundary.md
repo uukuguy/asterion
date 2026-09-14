@@ -64,8 +64,8 @@ in the allowlist, and the static import-boundary check walks that same list.
 
 Static boundary checks reject imports from framework-owned modules into:
 
-- `asterion.applications.controlled_code`, `dci_agent_lite`, or `prime_agent`;
-- `asterion.capabilities.controlled_code`, `dci`, or `prime_agent`;
+- `asterion.applications.controlled_code` or `dci_agent_lite`;
+- `asterion.capabilities.controlled_code` or `dci`;
 - product control providers or the first-party integration wrapper.
 
 The check covers framework runtime defaults, capability-package sources,

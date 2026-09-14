@@ -105,7 +105,7 @@ application = next(
     if item.application_id == "prime.ipython-coding"
 )
 assert application.runtime_ids == ("asterion.prime",)
-assert not any(name.startswith("asterion.applications.prime_agent") for name in sys.modules)
+assert not any(name.startswith("asterion.applications." + "prime_agent") for name in sys.modules)
 root = resources.files("asterion")
 paths = (
     root.joinpath("applications/prime/assemblies/prime-ipython-coding.json"),

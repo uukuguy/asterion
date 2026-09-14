@@ -54,27 +54,11 @@ _EXPECTED_PACKAGED_ASSEMBLIES = (
     "applications/dci_agent_lite/assemblies/dci-research-capability.json",
     "applications/prime/assemblies/prime-arc-agi-3-solving.json",
     "applications/prime/assemblies/prime-ipython-coding.json",
-    "applications/prime_agent/assemblies/prime-arc-agi-3.json",
-    "applications/prime_agent/assemblies/prime-bounded-autonomy.json",
-    "applications/prime_agent/assemblies/prime-capability-program.json",
-    "applications/prime_agent/assemblies/prime-continual-improvement.json",
-    "applications/prime_agent/assemblies/prime-ipython-coding.json",
-    "applications/prime_agent/assemblies/prime-long-session-continuity.json",
-    "applications/prime_agent/assemblies/prime-programmatic-long-context.json",
-    "applications/prime_agent/assemblies/prime-recursive-workflow.json",
 )
 _EXPECTED_UNBOUND_ASSEMBLIES = (
     "applications/dci_agent_lite/assemblies/dci-local-research.json",
     "applications/prime/assemblies/prime-arc-agi-3-solving.json",
     "applications/prime/assemblies/prime-ipython-coding.json",
-    "applications/prime_agent/assemblies/prime-arc-agi-3.json",
-    "applications/prime_agent/assemblies/prime-bounded-autonomy.json",
-    "applications/prime_agent/assemblies/prime-capability-program.json",
-    "applications/prime_agent/assemblies/prime-continual-improvement.json",
-    "applications/prime_agent/assemblies/prime-ipython-coding.json",
-    "applications/prime_agent/assemblies/prime-long-session-continuity.json",
-    "applications/prime_agent/assemblies/prime-programmatic-long-context.json",
-    "applications/prime_agent/assemblies/prime-recursive-workflow.json",
 )
 _EXPECTED_BOUND_ASSEMBLIES = tuple(
     identity

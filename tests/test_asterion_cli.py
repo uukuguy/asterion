@@ -1263,16 +1263,6 @@ class AsterionCliTests(unittest.TestCase):
                 "applications/dci_agent_lite/assemblies/dci-local-research.json",
                 "applications/prime/assemblies/prime-arc-agi-3-solving.json",
                 "applications/prime/assemblies/prime-ipython-coding.json",
-                "applications/prime_agent/assemblies/prime-arc-agi-3.json",
-                "applications/prime_agent/assemblies/prime-bounded-autonomy.json",
-                "applications/prime_agent/assemblies/prime-capability-program.json",
-                "applications/prime_agent/assemblies/prime-continual-improvement.json",
-                "applications/prime_agent/assemblies/prime-ipython-coding.json",
-                "applications/prime_agent/assemblies/"
-                "prime-long-session-continuity.json",
-                "applications/prime_agent/assemblies/"
-                "prime-programmatic-long-context.json",
-                "applications/prime_agent/assemblies/prime-recursive-workflow.json",
             ],
         )
 
@@ -1324,54 +1314,6 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(
             json.loads(isolated.getvalue()), json.loads(baseline.getvalue())
         )
-
-    def test_prime_product_verification_is_provider_free_and_basic_is_unavailable(
-        self,
-    ) -> None:
-        from asterion.applications.prime_agent.provider import (
-            create_provider as create_prime_provider,
-        )
-
-        entry = FakeEntryPoint(name="prime-agent", factory=create_prime_provider)
-        for level, expected_status, expected_check in (
-            ("preflight", "PASS", "fixture-contract"),
-            ("acceptance", "PASS", "coding-fixture"),
-            ("basic", "NOT RUN", "authority"),
-        ):
-            with self.subTest(level=level):
-                stdout = io.StringIO()
-                stderr = io.StringIO()
-                code = main(
-                    [
-                        "verify",
-                        "--provider",
-                        "prime-agent",
-                        "--level",
-                        level,
-                        "--env-file",
-                        "/private/SENTINEL_SECRET.env",
-                        "--corpus-root",
-                        "/private/SENTINEL_SECRET-corpus",
-                        "--output-root",
-                        "/private/SENTINEL_SECRET-output",
-                        "--acceptance-root",
-                        "/private/SENTINEL_SECRET-acceptance",
-                        "--json",
-                    ],
-                    entry_points=(entry,),
-                    stdout=stdout,
-                    stderr=stderr,
-                )
-                payload = json.loads(stdout.getvalue())
-                self.assertEqual(code, 0 if expected_status == "PASS" else 1)
-                self.assertEqual(payload["product_id"], "prime.ipython-coding")
-                self.assertEqual(payload["level"], level)
-                self.assertEqual(payload["status"], expected_status)
-                self.assertEqual(payload["checks"][0]["check_id"], expected_check)
-                self.assertEqual(payload["provider_backed_operation_count"], 0)
-                self.assertFalse(payload["full_dataset_ran"])
-                self.assertNotIn("SENTINEL_SECRET", stdout.getvalue())
-                self.assertEqual(stderr.getvalue(), "")
 
     def test_list_reports_metadata_without_loading_provider(self) -> None:
         entry = FakeEntryPoint(name="example-app", factory=lambda: None)

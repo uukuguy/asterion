@@ -13,14 +13,11 @@ from tools.check_promotion import (
     _closed_prime_subprocess_environment,
     _closed_npm_subprocess_environment,
     _default_runner,
-    _prepare_external_operational_prime_checkout,
-    _prepare_external_prime_checkout,
     _resolve_promotion_npm_cache,
     _run,
     main,
     run_promotion,
 )
-from tools.setup_prime_agent import PrimeSetupError
 
 
 REQUIRED_FIXTURE_ASSETS = (
@@ -53,43 +50,12 @@ def make_source(parent: Path) -> Path:
     return source
 
 
-def make_git_source(parent: Path) -> tuple[Path, str]:
-    source = parent / "external-prime"
-    source.mkdir()
-    (source / "tracked.txt").write_text("tracked\n", encoding="utf-8")
-    subprocess.run(("git", "init", "-q"), cwd=source, check=True)
-    subprocess.run(("git", "add", "tracked.txt"), cwd=source, check=True)
-    subprocess.run(
-        (
-            "git",
-            "-c",
-            "user.name=Promotion Test",
-            "-c",
-            "user.email=promotion@example.invalid",
-            "commit",
-            "-qm",
-            "fixture",
-        ),
-        cwd=source,
-        check=True,
-    )
-    head = subprocess.run(
-        ("git", "rev-parse", "HEAD"),
-        cwd=source,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    return source, head
-
-
 def completed(
     command: tuple[str, ...], stdout: str = ""
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
 
-@mock.patch.dict(os.environ, {"ASTERION_PRIME_SOURCE_ROOT": ""})
 class PromotionCheckTests(unittest.TestCase):
     def test_main_uses_only_the_declared_node_executable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -100,10 +66,6 @@ class PromotionCheckTests(unittest.TestCase):
             node.write_text("node\n", encoding="utf-8")
             node.chmod(0o700)
             with (
-                mock.patch(
-                    "tools.check_promotion._resolve_operational_node",
-                    side_effect=AssertionError("promotion used ambient Node resolver"),
-                ) as ambient_resolver,
                 mock.patch(
                     "tools.check_promotion.subprocess.run",
                     return_value=subprocess.CompletedProcess(
@@ -125,7 +87,6 @@ class PromotionCheckTests(unittest.TestCase):
                     0,
                 )
 
-        ambient_resolver.assert_not_called()
         self.assertEqual(run.call_args.args[0], (str(node.resolve()), "--version"))
         self.assertEqual(
             run.call_args.kwargs["env"],
@@ -179,12 +140,6 @@ class PromotionCheckTests(unittest.TestCase):
             for raw, version in cases:
                 with self.subTest(raw=raw, version=version):
                     with (
-                        mock.patch(
-                            "tools.check_promotion._resolve_operational_node",
-                            side_effect=AssertionError(
-                                "promotion used ambient Node resolver"
-                            ),
-                        ) as ambient_resolver,
                         mock.patch("tools.check_promotion.run_promotion") as promotion,
                         mock.patch(
                             "tools.check_promotion.subprocess.run",
@@ -207,7 +162,6 @@ class PromotionCheckTests(unittest.TestCase):
                             ),
                             1,
                         )
-                        ambient_resolver.assert_not_called()
                         promotion.assert_not_called()
 
     def test_promotion_npm_cache_rejects_invalid_roots_before_commands(self) -> None:
@@ -257,10 +211,6 @@ class PromotionCheckTests(unittest.TestCase):
             cache.mkdir()
             with (
                 mock.patch.dict(os.environ, hostile_environment, clear=False),
-                mock.patch(
-                    "tools.check_promotion._resolve_operational_node",
-                    return_value=Path("/node22/bin/node"),
-                ),
             ):
                 environment = _closed_npm_subprocess_environment(
                     workspace, _resolve_promotion_npm_cache(str(cache))
@@ -308,163 +258,13 @@ class PromotionCheckTests(unittest.TestCase):
             workspace.mkdir()
             cache = temporary / "cache"
             cache.mkdir()
-            with mock.patch(
-                "tools.check_promotion._resolve_operational_node",
-                side_effect=AssertionError("sealed promotion environment resolved Node"),
-            ):
-                environment = _closed_npm_subprocess_environment(
-                    workspace,
-                    _resolve_promotion_npm_cache(str(cache)),
-                    node_executable=Path("/node22/bin/node"),
-                )
+            environment = _closed_npm_subprocess_environment(
+                workspace,
+                _resolve_promotion_npm_cache(str(cache)),
+                node_executable=Path("/node22/bin/node"),
+            )
 
         self.assertEqual(environment["PATH"].split(os.pathsep)[0], "/node22/bin")
-
-    def test_wheel_resource_smoke_requires_the_locked_client_module(self) -> None:
-        from tools.check_promotion import (
-            WHEEL_OPERATIONAL_RESOURCE_SMOKE,
-            WHEEL_PROTOCOL_RESOURCE_SMOKE,
-            _wheel_protocol_resource_smoke,
-        )
-
-        self.assertIn("prime-client-module-lock.json", WHEEL_PROTOCOL_RESOURCE_SMOKE)
-        self.assertIn("prime-client-module.mjs", WHEEL_PROTOCOL_RESOURCE_SMOKE)
-        self.assertIn("runClientPackage", WHEEL_PROTOCOL_RESOURCE_SMOKE)
-        self.assertIn("external_prime_root", WHEEL_PROTOCOL_RESOURCE_SMOKE)
-        rendered_protocol_smoke = _wheel_protocol_resource_smoke(
-            Path("/sealed/node22/bin/node")
-        )
-        self.assertIn("'/sealed/node22/bin/node'", rendered_protocol_smoke)
-        self.assertNotIn("('node',", rendered_protocol_smoke)
-        self.assertIn("prime-operational-harness.mjs", WHEEL_OPERATIONAL_RESOURCE_SMOKE)
-        self.assertIn(
-            "prime-operational-module-lock.json", WHEEL_OPERATIONAL_RESOURCE_SMOKE
-        )
-        self.assertIn(
-            "prime-settings-keybindings-validator.mjs",
-            WHEEL_OPERATIONAL_RESOURCE_SMOKE,
-        )
-        self.assertIn(
-            "ASTERION_OPERATIONAL_PRIME_SOURCE_ROOT",
-            WHEEL_OPERATIONAL_RESOURCE_SMOKE,
-        )
-
-    def test_operational_wheel_smoke_failure_is_redacted(self) -> None:
-        from tools.check_promotion import WHEEL_OPERATIONAL_RESOURCE_SMOKE
-
-        hostile_environment = {
-            "ANTHROPIC_API_KEY": "review-sentinel",
-            "ASTERION_REVIEW_SENTINEL": "private-host-value",
-            "NPM_TOKEN": "npm-secret",
-            "OPENAI_API_KEY": "review-sentinel",
-        }
-
-        def runner(
-            command: tuple[str, ...], _copy_root: Path
-        ) -> subprocess.CompletedProcess[str]:
-            return subprocess.CompletedProcess(
-                command,
-                1,
-                stdout=(
-                    "/private/tmp/asterion-promotion/external-prime/prime-agent "
-                    "private-host-value"
-                ),
-                stderr="raw operational harness traceback review-sentinel npm-secret",
-            )
-
-        with (
-            mock.patch.dict(os.environ, hostile_environment, clear=False),
-            self.assertRaises(PromotionError) as raised,
-        ):
-            _run(
-                runner,
-                ("/venv/bin/python", "-c", WHEEL_OPERATIONAL_RESOURCE_SMOKE),
-                Path("/tmp/copy"),
-            )
-
-        message = str(raised.exception)
-        self.assertIn("installed Prime operational evidence is invalid", message)
-        self.assertNotIn("external-prime", message)
-        self.assertNotIn("raw operational harness traceback", message)
-        self.assertNotIn("prime-operational-harness.mjs", message)
-        self.assertNotIn("npm-secret", message)
-        self.assertNotIn("private-host-value", message)
-        self.assertNotIn("review-sentinel", message)
-
-    def test_operational_checkout_and_prepare_use_closed_environment(self) -> None:
-        hostile_environment = {
-            "ANTHROPIC_API_KEY": "review-sentinel",
-            "ASTERION_REVIEW_SENTINEL": "private-host-value",
-            "HTTPS_PROXY": "http://proxy.invalid",
-            "NODE_AUTH_TOKEN": "npm-secret",
-            "NPM_TOKEN": "npm-secret",
-            "OPENAI_API_KEY": "review-sentinel",
-        }
-        subprocess_environments: list[dict[str, str] | None] = []
-        subprocess_commands: list[tuple[str, ...]] = []
-
-        def fake_run(
-            command: tuple[str, ...],
-            **kwargs: object,
-        ) -> subprocess.CompletedProcess[str]:
-            subprocess_commands.append(command)
-            subprocess_environments.append(kwargs.get("env"))  # type: ignore[arg-type]
-            return completed(command)
-
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary = Path(temporary_directory)
-            resource_root = temporary / "resources"
-            resource_root.mkdir()
-            cache = temporary / "npm-cache"
-            cache.mkdir()
-            target = temporary / "external-prime/prime-agent"
-            with (
-                mock.patch.dict(os.environ, hostile_environment, clear=False),
-                mock.patch(
-                    "tools.check_promotion._resolve_operational_node",
-                    return_value=Path("/node22/bin/node"),
-                ),
-                mock.patch(
-                    "tools.check_promotion.subprocess.run",
-                    side_effect=fake_run,
-                ),
-                mock.patch(
-                    "tools.check_promotion._materialize_operational_dependency_tree"
-                ),
-                mock.patch(
-                    "tools.check_promotion.verify_operational_locks"
-                ) as verifier,
-            ):
-                _prepare_external_operational_prime_checkout(
-                    Path("/external/prime-source"),
-                    target,
-                    "a" * 40,
-                    resource_root,
-                    cache.resolve(),
-                    node_executable=Path("/node22/bin/node"),
-                )
-
-        self.assertEqual(len(subprocess_environments), 7)
-        for index, environment in enumerate(subprocess_environments):
-            with self.subTest(call=index):
-                self.assertIsNotNone(environment)
-                assert environment is not None
-                self.assertEqual(environment["PATH"].split(os.pathsep)[0], "/node22/bin")
-                self.assertNotEqual(
-                    environment["NPM_CONFIG_GLOBALCONFIG"],
-                    environment["NPM_CONFIG_USERCONFIG"],
-                )
-                for key in hostile_environment:
-                    self.assertNotIn(key, environment)
-                if subprocess_commands[index][0] == "npm":
-                    self.assertEqual(environment["NPM_CONFIG_CACHE"], str(cache.resolve()))
-                    self.assertEqual(environment["NPM_CONFIG_OFFLINE"], "true")
-        verifier.assert_called_once_with(
-            target,
-            resource_root,
-            node_executable=Path("/node22/bin/node"),
-            temporary_root=target.parents[1].resolve(),
-        )
 
     def test_default_runner_forces_sparse_cargo_registry_and_preserves_environment(self) -> None:
         result = completed(("cargo", "test"))
@@ -482,7 +282,6 @@ class PromotionCheckTests(unittest.TestCase):
                 os.environ,
                 {
                     "ASTERION_PROMOTION_TEST_MARKER": "preserved",
-                    "ASTERION_PRIME_SOURCE_ROOT": "/external/prime",
                     "CARGO_HOME": "/untrusted-cargo-home",
                     **injected_project_environment,
                 },
@@ -501,45 +300,9 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertEqual(environment["CARGO_REGISTRIES_CRATES_IO_PROTOCOL"], "sparse")
         self.assertEqual(environment["CARGO_HOME"], "/promotion-workspace/cargo-home")
         self.assertEqual(environment["ASTERION_PROMOTION_TEST_MARKER"], "preserved")
-        self.assertNotIn("ASTERION_PRIME_SOURCE_ROOT", environment)
         for name in injected_project_environment:
             with self.subTest(name=name):
                 self.assertFalse(name in environment, name)
-
-    def test_default_runner_binds_only_the_isolated_prime_checkout(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            project = Path(temporary_directory) / "project"
-            isolated_prime = project / "3th-party/prime-agent"
-            isolated_prime.mkdir(parents=True)
-            operational_prime = (
-                Path(temporary_directory) / "external-prime/prime-agent"
-            )
-            operational_prime.mkdir(parents=True)
-            result = completed(("uv", "run", "python"))
-            with (
-                mock.patch.dict(
-                    os.environ,
-                    {"ASTERION_PRIME_SOURCE_ROOT": "/external/prime"},
-                    clear=False,
-                ),
-                mock.patch(
-                    "tools.check_promotion.subprocess.run",
-                    return_value=result,
-                ) as run,
-            ):
-                self.assertIs(
-                    _default_runner(("uv", "run", "python"), project),
-                    result,
-                )
-
-        self.assertEqual(
-            run.call_args.kwargs["env"]["ASTERION_PRIME_SOURCE_ROOT"],
-            str(isolated_prime.resolve()),
-        )
-        self.assertEqual(
-            run.call_args.kwargs["env"]["ASTERION_OPERATIONAL_PRIME_SOURCE_ROOT"],
-            str(operational_prime.resolve()),
-        )
 
     def test_quick_copy_excludes_external_generated_and_cache_paths(self) -> None:
         excluded = (
@@ -609,11 +372,6 @@ class PromotionCheckTests(unittest.TestCase):
                 self.assertFalse((cwd / ".superpowers/sdd").exists())
                 self.assertTrue((cwd / ".superpowers/keep.md").is_file())
                 for name in excluded:
-                    if name == "3th-party" and (cwd / name).exists():
-                        self.assertTrue((cwd / "3th-party/prime-agent").is_dir())
-                        self.assertFalse((cwd / "3th-party/prime-agent").is_symlink())
-                        self.assertFalse((cwd / "3th-party/excluded.txt").exists())
-                        continue
                     self.assertFalse((cwd / name).exists(), name)
                 return completed(command, acceptance_stdout(command))
 
@@ -702,44 +460,27 @@ class PromotionCheckTests(unittest.TestCase):
                     (dist / "asterion-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
                 return completed(command, acceptance_stdout(command))
 
-            with mock.patch(
-                "tools.check_promotion._resolve_operational_node",
-                side_effect=AssertionError("full promotion resolved ambient Node"),
-            ) as ambient_resolver:
-                run_promotion(
-                    source_root=source,
-                    npm_cache=source,
-                    quick=False,
-                    runner=runner,
-                    node_executable=node,
-                )
-
-        ambient_resolver.assert_not_called()
+            run_promotion(
+                source_root=source,
+                npm_cache=source,
+                quick=False,
+                runner=runner,
+                node_executable=node,
+            )
 
         rendered = tuple(" ".join(command) for command in commands)
-        gateway_build = "npm run build --prefix packages/typescript/prime-gateway"
-        full_sync = "uv sync --frozen --extra dci --extra prime"
-        self.assertIn(gateway_build, rendered)
-        self.assertIn(full_sync, rendered)
-        self.assertLess(
-            rendered.index(gateway_build),
-            rendered.index(full_sync),
-        )
         for expected in (
-            "uv sync --frozen --extra dci --extra prime",
-            "uv run --extra dci --extra prime python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification",
-            "uv run --extra dci --extra prime python -m unittest discover -s tests -v",
+            "uv sync --frozen --extra dci",
+            "uv run --extra dci python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification",
+            "uv run --extra dci python -m unittest discover -s tests -v",
             "uv run python -m compileall -q src tests tools",
             "uv run ruff check src tests tools",
             "uv build .",
             "uv run python tools/check_docs.py",
             "npm ci --offline --ignore-scripts --no-audit --no-fund --prefix packages/typescript/asterion-runtime",
+            "npm run build --prefix packages/typescript/asterion-prime-extension",
             "npm test --prefix packages/typescript/asterion-runtime",
             "npm test --prefix packages/typescript/dci-context-extension",
-            "npm ci --offline --ignore-scripts --no-audit --no-fund --prefix packages/typescript/prime-gateway",
-            "npm run build --prefix packages/typescript/prime-gateway",
-            "npm test --prefix packages/typescript/prime-gateway",
-            "uv run python tools/verify_prime_loop.py --level provider-free",
             "cargo test --manifest-path packages/rust/controlled-executor/Cargo.toml",
             "cargo fmt --manifest-path packages/rust/controlled-executor/Cargo.toml -- --check",
             "cargo clippy --manifest-path packages/rust/controlled-executor/Cargo.toml -- -D warnings",
@@ -775,22 +516,7 @@ class PromotionCheckTests(unittest.TestCase):
             and "asterion.capability/v1" in command[2]
         )
         self.assertEqual(len(protocol_smokes), 1)
-        operational_smokes = tuple(
-            command
-            for command in commands
-            if len(command) == 3
-            and command[1] == "-c"
-            and "prime-operational-harness.mjs" in command[2]
-        )
-        self.assertEqual(len(operational_smokes), 1)
-        operational_smoke_source = operational_smokes[0][2]
-        self.assertIn(
-            "node_executable=Path('/sealed/node22/bin/node')",
-            operational_smoke_source,
-        )
         smoke_source = protocol_smokes[0][2]
-        self.assertIn("'/sealed/node22/bin/node'", smoke_source)
-        self.assertNotIn("('node',", smoke_source)
         self.assertIn("'applications/*/assemblies/*.json'", smoke_source)
         self.assertIn("'capabilities/*/capability-package.json'", smoke_source)
         self.assertIn("'capabilities/*/manifests/*.json'", smoke_source)
@@ -827,8 +553,6 @@ class PromotionCheckTests(unittest.TestCase):
             "applications/dci_agent_lite/assemblies/dci-local-research.json",
             "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
             "applications/dci_agent_lite/assemblies/dci-research-capability.json",
-            "applications/prime_agent/assemblies/prime-capability-program.json",
-            "applications/prime_agent/assemblies/prime-ipython-coding.json",
             "capabilities/controlled_code/capability-package.json",
             "capabilities/controlled_code/manifests/code-quality-evaluation.json",
             "capabilities/controlled_code/manifests/code-quality-workflow.json",
@@ -901,12 +625,6 @@ class PromotionCheckTests(unittest.TestCase):
             cache = temporary / "operator-npm-cache"
             cache.mkdir()
             with (
-                mock.patch(
-                    "tools.check_promotion._resolve_operational_node",
-                    side_effect=AssertionError(
-                        "sealed promotion npm execution resolved Node"
-                    ),
-                ),
                 mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
             ):
                 run_promotion(
@@ -965,10 +683,6 @@ class PromotionCheckTests(unittest.TestCase):
             cache.mkdir()
             with (
                 mock.patch.dict(os.environ, ambient, clear=False),
-                mock.patch(
-                    "tools.check_promotion._resolve_operational_node",
-                    side_effect=AssertionError("full promotion resolved ambient Node"),
-                ),
                 mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
             ):
                 run_promotion(
@@ -1014,10 +728,6 @@ class PromotionCheckTests(unittest.TestCase):
             cache = temporary / "operator-npm-cache"
             cache.mkdir()
             with (
-                mock.patch(
-                    "tools.check_promotion._resolve_operational_node",
-                    side_effect=AssertionError("promotion used ambient Node resolver"),
-                ),
                 mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
                 self.assertRaises(PromotionError),
             ):
@@ -1058,10 +768,6 @@ class PromotionCheckTests(unittest.TestCase):
             cache.mkdir()
             _cache_path = str(cache.resolve())
             with (
-                mock.patch(
-                    "tools.check_promotion._resolve_operational_node",
-                    side_effect=AssertionError("promotion used ambient Node resolver"),
-                ),
                 mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
                 self.assertRaises(PromotionError) as raised,
             ):
@@ -1130,10 +836,6 @@ class PromotionCheckTests(unittest.TestCase):
                         "npm_config_offline": "false",
                     },
                     clear=False,
-                ),
-                mock.patch(
-                    "tools.check_promotion._resolve_operational_node",
-                    side_effect=AssertionError("full promotion resolved ambient Node"),
                 ),
                 mock.patch("tools.check_promotion.subprocess.run", side_effect=fake_run),
             ):
@@ -1213,257 +915,6 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertNotEqual(completed_process.returncode, 0)
         self.assertIn("ENOTCACHED", completed_process.stderr + completed_process.stdout)
         self.assertEqual(requests, 0)
-
-    def test_prime_operational_harness_rebuild_inherits_offline_npm_environment(
-        self,
-    ) -> None:
-        from tests import test_prime_operational_harness as harness
-
-        calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
-
-        def fake_run(
-            command: tuple[str, ...], **kwargs: object
-        ) -> subprocess.CompletedProcess[str]:
-            environment = kwargs["env"]
-            assert isinstance(environment, dict)
-            calls.append((command, environment))
-            return completed(command)
-
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary = Path(temporary_directory)
-            root = temporary / "prime-agent"
-            root.mkdir()
-            cache = temporary / "promotion-npm-cache"
-            cache.mkdir()
-            with (
-                mock.patch.dict(
-                    os.environ,
-                    {
-                        "NPM_CONFIG_CACHE": str(cache.resolve()),
-                        "NPM_CONFIG_OFFLINE": "true",
-                    },
-                    clear=True,
-                ),
-                mock.patch.object(
-                    harness,
-                    "_resolve_operational_node",
-                    return_value=Path("/node22/bin/node"),
-                ),
-                mock.patch.object(harness.subprocess, "run", side_effect=fake_run),
-                mock.patch.object(harness, "_materialize_operational_dependency_tree"),
-            ):
-                harness._rebuild_locked_workspaces(root)
-
-        npm_calls = tuple(call for call in calls if call[0][0] == "npm")
-        self.assertTrue(npm_calls)
-        first_command, first_environment = npm_calls[0]
-        self.assertEqual(
-            first_command,
-            ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
-        )
-        self.assertEqual(first_environment["NPM_CONFIG_CACHE"], str(cache.resolve()))
-        self.assertEqual(first_environment["NPM_CONFIG_OFFLINE"], "true")
-
-    def test_full_plan_builds_prime_gateway_before_python_discovery(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            source = make_source(Path(temporary_directory))
-            commands: list[tuple[str, ...]] = []
-
-            def runner(
-                command: tuple[str, ...], cwd: Path
-            ) -> subprocess.CompletedProcess[str]:
-                commands.append(command)
-                if command == ("uv", "build", "."):
-                    dist = cwd / "dist"
-                    dist.mkdir()
-                    (dist / "asterion-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
-                return completed(command, acceptance_stdout(command))
-
-            run_promotion(
-                source_root=source,
-                npm_cache=source,
-                quick=False,
-                runner=runner,
-                node_executable=Path("/node22/bin/node"),
-            )
-
-        gateway_build = (
-            "npm",
-            "run",
-            "build",
-            "--prefix",
-            "packages/typescript/prime-gateway",
-        )
-        full_discovery = (
-            "uv",
-            "run",
-            "--extra",
-            "dci",
-            "--extra",
-            "prime",
-            "python",
-            "-m",
-            "unittest",
-            "discover",
-            "-s",
-            "tests",
-            "-v",
-        )
-        self.assertIn(gateway_build, commands)
-        self.assertIn(full_discovery, commands)
-        self.assertLess(
-            commands.index(gateway_build),
-            commands.index(full_discovery),
-        )
-
-    def test_external_prime_source_root_is_bound_into_isolated_copy(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary = Path(temporary_directory)
-            source = make_source(temporary)
-            external, head = make_git_source(temporary)
-            roots: list[Path] = []
-
-            def runner(
-                command: tuple[str, ...], cwd: Path
-            ) -> subprocess.CompletedProcess[str]:
-                roots.append(cwd)
-                binding = cwd / "3th-party" / "prime-agent"
-                self.assertTrue(binding.is_dir())
-                self.assertFalse(binding.is_symlink())
-                bound_head = subprocess.run(
-                    ("git", "rev-parse", "HEAD"),
-                    cwd=binding,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                ).stdout.strip()
-                self.assertEqual(bound_head, head)
-                return completed(command, acceptance_stdout(command))
-
-            with (
-                mock.patch.dict(
-                    os.environ,
-                    {"ASTERION_PRIME_SOURCE_ROOT": str(external)},
-                    clear=False,
-                ),
-                mock.patch(
-                    "tools.check_promotion.resolve_prime_ecosystem_module"
-                ) as resolver,
-                mock.patch("tools.check_promotion.verify_prime_checkout") as verifier,
-                mock.patch(
-                    "tools.check_promotion.load_prime_artifact_lock",
-                    return_value=mock.Mock(
-                        source_commit=head,
-                        files={},
-                        rlm_runtime=None,
-                    ),
-                ),
-                mock.patch("tools.check_promotion.PRIME_PREPARE_COMMANDS", ()),
-            ):
-                run_promotion(
-                    source_root=source,
-                    npm_cache=source,
-                    quick=True,
-                    runner=runner,
-                    node_executable=Path("/node22/bin/node"),
-                )
-
-        resolver.assert_called_once()
-        self.assertEqual(verifier.call_count, 2)
-        self.assertEqual(verifier.call_args_list[0].args[0], external.resolve())
-        self.assertTrue(roots)
-
-    def test_external_prime_checkout_rebuilds_every_locked_workspace(self) -> None:
-        commands: list[tuple[tuple[str, ...], Path]] = []
-        with mock.patch(
-            "tools.check_promotion._run_prime_binding_command",
-            side_effect=lambda command, cwd, _cache, **_kwargs: commands.append(
-                (command, cwd)
-            ),
-        ):
-            _prepare_external_prime_checkout(
-                Path("/external/prime"),
-                Path("/copy/3th-party/prime-agent"),
-                "1" * 40,
-                Path("/operator/npm-cache"),
-            )
-
-        self.assertEqual(
-            tuple(command for command, _ in commands[2:]),
-            (
-                (
-                    "npm",
-                    "ci",
-                    "--offline",
-                    "--ignore-scripts",
-                    "--no-audit",
-                    "--no-fund",
-                ),
-                ("npm", "--prefix", "packages/tui", "run", "build"),
-                (
-                    "node_modules/.bin/tsgo",
-                    "-p",
-                    "packages/ai/tsconfig.build.json",
-                ),
-                ("npm", "--prefix", "packages/agent", "run", "build"),
-                ("npm", "--prefix", "packages/coding-agent", "run", "build"),
-            ),
-        )
-
-    def test_external_prime_source_root_rejects_failed_exact_resolver(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary = Path(temporary_directory)
-            source = make_source(temporary)
-            external = temporary / "external-prime"
-            external.mkdir()
-            calls: list[tuple[str, ...]] = []
-
-            with (
-                mock.patch.dict(
-                    os.environ,
-                    {"ASTERION_PRIME_SOURCE_ROOT": str(external)},
-                    clear=False,
-                ),
-                mock.patch(
-                    "tools.check_promotion.resolve_prime_ecosystem_module",
-                    side_effect=PrimeSetupError("Prime ecosystem module is invalid"),
-                ),
-                mock.patch("tools.check_promotion.verify_prime_checkout"),
-                self.assertRaises(PromotionError),
-            ):
-                run_promotion(
-                    source_root=source,
-                    npm_cache=source,
-                    quick=True,
-                    runner=lambda command, cwd: calls.append(command)
-                    or completed(command),
-                )
-
-        self.assertEqual(calls, [])
-
-    def test_external_prime_source_root_rejects_missing_explicit_root(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            temporary = Path(temporary_directory)
-            source = make_source(temporary)
-            calls: list[tuple[str, ...]] = []
-
-            with (
-                mock.patch.dict(
-                    os.environ,
-                    {"ASTERION_PRIME_SOURCE_ROOT": str(temporary / "missing-prime")},
-                    clear=False,
-                ),
-                self.assertRaises(PromotionError),
-            ):
-                run_promotion(
-                    source_root=source,
-                    npm_cache=source,
-                    quick=True,
-                    runner=lambda command, cwd: calls.append(command)
-                    or completed(command),
-                )
-
-        self.assertEqual(calls, [])
 
     def test_quick_plan_uses_valid_discovery_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

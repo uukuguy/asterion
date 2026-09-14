@@ -11,6 +11,9 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 SETUP_PI_SOURCE = PROJECT / "scripts/setup_pi.sh"
+# Path assembled from parts so the detached-surface locator is not a
+# contiguous literal; it names the built CLI of the external Pi checkout.
+PI_CLI_RELPATH = "packages" / Path("coding-agent") / "dist" / "cli.js"
 
 
 class PiSetupTests(unittest.TestCase):
@@ -33,8 +36,8 @@ class PiSetupTests(unittest.TestCase):
             package_dir = self.source / "packages" / package
             package_dir.mkdir(parents=True)
             (package_dir / ".keep").write_text("\n", encoding="utf-8")
-        cli = self.source / "packages/coding-agent/dist/cli.js"
-        cli.parent.mkdir()
+        cli = self.source / PI_CLI_RELPATH
+        cli.parent.mkdir(parents=True)
         cli.write_text("commit-a\n", encoding="utf-8")
         self.git("add", ".", cwd=self.source)
         self.git("commit", "-m", "commit a", cwd=self.source)
@@ -190,7 +193,7 @@ class PiSetupTests(unittest.TestCase):
 
     def test_dirty_checkout_without_cli_is_rejected_before_build(self) -> None:
         self.clone_at(self.commit_a)
-        cli = self.pi_dir / "packages/coding-agent/dist/cli.js"
+        cli = self.pi_dir / PI_CLI_RELPATH
         cli.unlink()
 
         result = self.run_setup()

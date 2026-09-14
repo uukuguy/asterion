@@ -162,68 +162,6 @@ class PiExtensionBindingTests(unittest.TestCase):
             dependencies=dependency,
         )
 
-    @unittest.skip(
-        "Prime checkout and its compaction/artifact locks are removed; "
-        "real-dependency load awaits an Asterion-owned replacement resource"
-    )
-    def test_locked_provider_lease_loads_real_dependencies_in_child(self) -> None:
-        root = Path(__file__).resolve().parents[1]
-        with tempfile.TemporaryDirectory() as temporary:
-            extension = Path(temporary).resolve() / "extension.mjs"
-            extension.write_text(
-                "export default (pi, dependencies) => pi.registerTool({name: dependencies.prepareCompaction.name});\n"
-            )
-            dependency = pi_extensions.PiExtensionDependencies(
-                provider_path=root / "tools/build_asterion_prime_compaction_lock.mjs",
-                source_root=(root / "3th-party/prime-agent").resolve(strict=True),
-                closure_lock_path=root
-                / "packages/typescript/asterion-prime-extension/resources/pi-compaction-lock.json",
-                artifact_lock_path=root
-                / "packages/typescript/prime-gateway/resources/prime-artifact-lock.json",
-                node_executable=Path(shutil.which("node")).resolve(),
-                exports={
-                    "buildSessionContext": "function",
-                    "prepareCompaction": "function",
-                    "convertToLlm": "function",
-                    "serializeConversation": "function",
-                    "buildSummarizationPrompt": "function",
-                    "summarizationSystemPrompt": "string",
-                    "turnPrefixPrompt": "string",
-                },
-            )
-            binding = PiExtensionBinding(
-                extension_id="example.test",
-                path=extension,
-                capabilities=("example.test",),
-                inherited_fds=(),
-                environment={},
-                dependencies=dependency,
-            )
-            lease = binding.preflight()
-            self.addCleanup(lease.close)
-            lease.validate_launch()
-            result = subprocess.run(
-                [
-                    str(dependency.node_executable),
-                    "--input-type=module",
-                    "-e",
-                    'import {pathToFileURL} from "node:url";'
-                    "const loader=await import(pathToFileURL(process.argv[1]));"
-                    "const hooks=[]; const names=[];"
-                    "await loader.default({registerTool(tool) {names.push(tool.name);}, on(name,callback) {hooks.push(callback);}});"
-                    "for (const hook of hooks) await hook(); console.log(JSON.stringify(names));",
-                    str(lease.loader_path),
-                ],
-                env={"PATH": os.environ["PATH"], **lease.environment},
-                pass_fds=lease.inherited_fds,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout), ["prepareCompaction"])
-            self.assertEqual(result.stderr, "")
-
     def test_locked_dependencies_are_bound_verified_and_rechecked_before_launch(
         self,
     ) -> None:

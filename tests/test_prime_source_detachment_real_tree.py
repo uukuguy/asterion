@@ -1,4 +1,4 @@
-"""Proves the gate fails on the real tree until Phase 1 removal completes."""
+"""Asserts the real release surface is Prime-source detached."""
 
 from __future__ import annotations
 
@@ -24,9 +24,12 @@ class TestRealTreeDetachment(unittest.TestCase):
         rules = [v.rule for v in find_source_detachment_violations(ROOT)]
         self.assertEqual(rules, [])
 
-    def test_gate_detects_the_known_p1_operator_edges(self) -> None:
+    def test_gate_detects_an_introduced_p1_operator_edge(self) -> None:
+        # Detection is proven by the unit tests scanning synthetic trees; here
+        # we assert only that the real P1 operator carries no Prime edge left
+        # over from Phase 1 removal.
         paths = {v.path for v in find_source_detachment_violations(ROOT)}
-        self.assertIn("src/asterion/applications/prime/p1/operator.py", paths)
+        self.assertNotIn("src/asterion/applications/prime/p1/operator.py", paths)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,2212 @@
+{
+  "format": "asterion.parity-ledger/v1",
+  "ledger_id": "asterion-native-1.0.0",
+  "baseline": {
+    "artifact_lock": "asterion.native-lock/v1",
+    "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c"
+  },
+  "providers": [
+    "asterion.native"
+  ],
+  "features": [
+    {
+      "feature_id": "ecosystem.collision-diagnostics",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.collision-diagnostics.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.collision-diagnostics",
+      "primary_scenario_id": "prime-parity.ecosystem.collision-diagnostics",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.context-files",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.context-files.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.context-files",
+      "primary_scenario_id": "prime-parity.ecosystem.context-files",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.custom-providers-models",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.custom-providers-models.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.custom-providers-models",
+      "primary_scenario_id": "prime-parity.ecosystem.custom-providers-models",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.extension-state-commands",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.extension-state-commands.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.extension-state-commands",
+      "primary_scenario_id": "prime-parity.ecosystem.extension-state-commands",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.extensions-lifecycle",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.extensions-lifecycle.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.extensions-lifecycle",
+      "primary_scenario_id": "prime-parity.ecosystem.extensions-lifecycle",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.mcp",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.mcp.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.mcp",
+      "primary_scenario_id": "prime-parity.ecosystem.mcp",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.packages",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.packages.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.packages",
+      "primary_scenario_id": "prime-parity.ecosystem.packages",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.prompt-templates",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.prompt-templates.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.prompt-templates",
+      "primary_scenario_id": "prime-parity.ecosystem.prompt-templates",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.skills",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.skills.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.skills",
+      "primary_scenario_id": "prime-parity.ecosystem.skills",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.tools",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Native parity row for ecosystem.tools.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.ecosystem.tools",
+      "primary_scenario_id": "prime-parity.ecosystem.tools",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.evidence-refinement",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Native parity row for harness.evidence-refinement.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.harness.evidence-refinement",
+      "primary_scenario_id": "prime-parity.harness.evidence-refinement",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.history-snapshots",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Native parity row for harness.history-snapshots.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.harness.history-snapshots",
+      "primary_scenario_id": "prime-parity.harness.history-snapshots",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.memory-entries",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Native parity row for harness.memory-entries.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.harness.memory-entries",
+      "primary_scenario_id": "prime-parity.harness.memory-entries",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.prompt-entries",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Native parity row for harness.prompt-entries.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.harness.prompt-entries",
+      "primary_scenario_id": "prime-parity.harness.prompt-entries",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.rollback",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Native parity row for harness.rollback.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.harness.rollback",
+      "primary_scenario_id": "prime-parity.harness.rollback",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.scope-isolation",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Native parity row for harness.scope-isolation.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.harness.scope-isolation",
+      "primary_scenario_id": "prime-parity.harness.scope-isolation",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.skill-descriptions",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Native parity row for harness.skill-descriptions.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.harness.skill-descriptions",
+      "primary_scenario_id": "prime-parity.harness.skill-descriptions",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.subagent-specifications",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Native parity row for harness.subagent-specifications.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.harness.subagent-specifications",
+      "primary_scenario_id": "prime-parity.harness.subagent-specifications",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.acp",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for interface.acp.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.interface.acp",
+      "primary_scenario_id": "prime-parity.interface.acp",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.cli-interactive",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for interface.cli-interactive.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.interface.cli-interactive",
+      "primary_scenario_id": "prime-parity.interface.cli-interactive",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.export-share",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for interface.export-share.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.interface.export-share",
+      "primary_scenario_id": "prime-parity.interface.export-share",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.headless-print",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for interface.headless-print.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.interface.headless-print",
+      "primary_scenario_id": "prime-parity.interface.headless-print",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.json-stream",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for interface.json-stream.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.interface.json-stream",
+      "primary_scenario_id": "prime-parity.interface.json-stream",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.rpc",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for interface.rpc.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.interface.rpc",
+      "primary_scenario_id": "prime-parity.interface.rpc",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.sdk",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for interface.sdk.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.interface.sdk",
+      "primary_scenario_id": "prime-parity.interface.sdk",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.tui-commands",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for interface.tui-commands.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.interface.tui-commands",
+      "primary_scenario_id": "prime-parity.interface.tui-commands",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.tui-extension-ui",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for interface.tui-extension-ui.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.interface.tui-extension-ui",
+      "primary_scenario_id": "prime-parity.interface.tui-extension-ui",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.auth",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.auth.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.auth",
+      "primary_scenario_id": "prime-parity.operation.auth",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.autonomous-quality",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.autonomous-quality.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.autonomous-quality",
+      "primary_scenario_id": "prime-parity.operation.autonomous-quality",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.controlled-update-restart",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.controlled-update-restart.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.controlled-update-restart",
+      "primary_scenario_id": "prime-parity.operation.controlled-update-restart",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.detach-attach-replay",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.detach-attach-replay.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.detach-attach-replay",
+      "primary_scenario_id": "prime-parity.operation.detach-attach-replay",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.doctor",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.doctor.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.doctor",
+      "primary_scenario_id": "prime-parity.operation.doctor",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.goals",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.goals.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.goals",
+      "primary_scenario_id": "prime-parity.operation.goals",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.heartbeat-agent",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.heartbeat-agent.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.heartbeat-agent",
+      "primary_scenario_id": "prime-parity.operation.heartbeat-agent",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.heartbeat-user",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.heartbeat-user.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.heartbeat-user",
+      "primary_scenario_id": "prime-parity.operation.heartbeat-user",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.model-selection",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.model-selection.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.model-selection",
+      "primary_scenario_id": "prime-parity.operation.model-selection",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.orphan-cleanup",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.orphan-cleanup.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.orphan-cleanup",
+      "primary_scenario_id": "prime-parity.operation.orphan-cleanup",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.resident-workers",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.resident-workers.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.resident-workers",
+      "primary_scenario_id": "prime-parity.operation.resident-workers",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.restart-update-recovery",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.restart-update-recovery.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.restart-update-recovery",
+      "primary_scenario_id": "prime-parity.operation.restart-update-recovery",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.schedule-once-cron",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.schedule-once-cron.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.schedule-once-cron",
+      "primary_scenario_id": "prime-parity.operation.schedule-once-cron",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.settings-keybindings",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.settings-keybindings.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.settings-keybindings",
+      "primary_scenario_id": "prime-parity.operation.settings-keybindings",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.telemetry-usage",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.telemetry-usage.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.telemetry-usage",
+      "primary_scenario_id": "prime-parity.operation.telemetry-usage",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.worker-residency-eviction",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Native parity row for operation.worker-residency-eviction.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.operation.worker-residency-eviction",
+      "primary_scenario_id": "prime-parity.operation.worker-residency-eviction",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.cancellation-teardown",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Native parity row for rlm.cancellation-teardown.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.rlm.cancellation-teardown",
+      "primary_scenario_id": "prime-parity.rlm.cancellation-teardown",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.child-model",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Native parity row for rlm.child-model.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.rlm.child-model",
+      "primary_scenario_id": "prime-parity.rlm.child-model",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.environment",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Native parity row for rlm.environment.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.rlm.environment",
+      "primary_scenario_id": "prime-parity.rlm.environment",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.generated-program",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Native parity row for rlm.generated-program.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.rlm.generated-program",
+      "primary_scenario_id": "prime-parity.rlm.generated-program",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.messaging",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Native parity row for rlm.messaging.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.rlm.messaging",
+      "primary_scenario_id": "prime-parity.rlm.messaging",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.recovery",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Native parity row for rlm.recovery.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.rlm.recovery",
+      "primary_scenario_id": "prime-parity.rlm.recovery",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.recursion-depth",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Native parity row for rlm.recursion-depth.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.rlm.recursion-depth",
+      "primary_scenario_id": "prime-parity.rlm.recursion-depth",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.registry-lifecycle",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Native parity row for rlm.registry-lifecycle.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.rlm.registry-lifecycle",
+      "primary_scenario_id": "prime-parity.rlm.registry-lifecycle",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.usage-cost",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Native parity row for rlm.usage-cost.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.rlm.usage-cost",
+      "primary_scenario_id": "prime-parity.rlm.usage-cost",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.branch-summaries-labels",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Native parity row for session.branch-summaries-labels.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.session.branch-summaries-labels",
+      "primary_scenario_id": "prime-parity.session.branch-summaries-labels",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.compaction",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Native parity row for session.compaction.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.session.compaction",
+      "primary_scenario_id": "prime-parity.session.compaction",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.delivery",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Native parity row for session.delivery.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.session.delivery",
+      "primary_scenario_id": "prime-parity.session.delivery",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.fork-clone",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Native parity row for session.fork-clone.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.session.fork-clone",
+      "primary_scenario_id": "prime-parity.session.fork-clone",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.persistence-naming",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Native parity row for session.persistence-naming.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.session.persistence-naming",
+      "primary_scenario_id": "prime-parity.session.persistence-naming",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.resume-delete",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Native parity row for session.resume-delete.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.session.resume-delete",
+      "primary_scenario_id": "prime-parity.session.resume-delete",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.rich-attachments",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Native parity row for session.rich-attachments.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.session.rich-attachments",
+      "primary_scenario_id": "prime-parity.session.rich-attachments",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.tree-navigation",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Native parity row for session.tree-navigation.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.session.tree-navigation",
+      "primary_scenario_id": "prime-parity.session.tree-navigation",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.usage-status",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Native parity row for session.usage-status.",
+      "prime_evidence": [
+        {
+          "path": "packages/asterion-native/native-parity.txt",
+          "anchors": [
+            "asterion-native"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "native.session.usage-status",
+      "primary_scenario_id": "prime-parity.session.usage-status",
+      "compatibility_impacts": [],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "prime-parity.ecosystem.collision-diagnostics",
+      "feature_ids": [
+        "ecosystem.collision-diagnostics"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.context-files",
+      "feature_ids": [
+        "ecosystem.context-files"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.custom-providers-models",
+      "feature_ids": [
+        "ecosystem.custom-providers-models"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.extension-state-commands",
+      "feature_ids": [
+        "ecosystem.extension-state-commands"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.extensions-lifecycle",
+      "feature_ids": [
+        "ecosystem.extensions-lifecycle"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.mcp",
+      "feature_ids": [
+        "ecosystem.mcp"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.packages",
+      "feature_ids": [
+        "ecosystem.packages"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.prompt-templates",
+      "feature_ids": [
+        "ecosystem.prompt-templates"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.skills",
+      "feature_ids": [
+        "ecosystem.skills"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.tools",
+      "feature_ids": [
+        "ecosystem.tools"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.evidence-refinement",
+      "feature_ids": [
+        "harness.evidence-refinement"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.history-snapshots",
+      "feature_ids": [
+        "harness.history-snapshots"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.memory-entries",
+      "feature_ids": [
+        "harness.memory-entries"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.prompt-entries",
+      "feature_ids": [
+        "harness.prompt-entries"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.rollback",
+      "feature_ids": [
+        "harness.rollback"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.scope-isolation",
+      "feature_ids": [
+        "harness.scope-isolation"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.skill-descriptions",
+      "feature_ids": [
+        "harness.skill-descriptions"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.subagent-specifications",
+      "feature_ids": [
+        "harness.subagent-specifications"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.acp",
+      "feature_ids": [
+        "interface.acp"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.cli-interactive",
+      "feature_ids": [
+        "interface.cli-interactive"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.export-share",
+      "feature_ids": [
+        "interface.export-share"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.headless-print",
+      "feature_ids": [
+        "interface.headless-print"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.json-stream",
+      "feature_ids": [
+        "interface.json-stream"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.rpc",
+      "feature_ids": [
+        "interface.rpc"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.sdk",
+      "feature_ids": [
+        "interface.sdk"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.tui-commands",
+      "feature_ids": [
+        "interface.tui-commands"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.tui-extension-ui",
+      "feature_ids": [
+        "interface.tui-extension-ui"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.auth",
+      "feature_ids": [
+        "operation.auth"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.autonomous-quality",
+      "feature_ids": [
+        "operation.autonomous-quality"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.controlled-update-restart",
+      "feature_ids": [
+        "operation.controlled-update-restart"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.detach-attach-replay",
+      "feature_ids": [
+        "operation.detach-attach-replay"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.doctor",
+      "feature_ids": [
+        "operation.doctor"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.goals",
+      "feature_ids": [
+        "operation.goals"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.heartbeat-agent",
+      "feature_ids": [
+        "operation.heartbeat-agent"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.heartbeat-user",
+      "feature_ids": [
+        "operation.heartbeat-user"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.model-selection",
+      "feature_ids": [
+        "operation.model-selection"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.orphan-cleanup",
+      "feature_ids": [
+        "operation.orphan-cleanup"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.resident-workers",
+      "feature_ids": [
+        "operation.resident-workers"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.restart-update-recovery",
+      "feature_ids": [
+        "operation.restart-update-recovery"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.schedule-once-cron",
+      "feature_ids": [
+        "operation.schedule-once-cron"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.settings-keybindings",
+      "feature_ids": [
+        "operation.settings-keybindings"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.telemetry-usage",
+      "feature_ids": [
+        "operation.telemetry-usage"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.worker-residency-eviction",
+      "feature_ids": [
+        "operation.worker-residency-eviction"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.cancellation-teardown",
+      "feature_ids": [
+        "rlm.cancellation-teardown"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.child-model",
+      "feature_ids": [
+        "rlm.child-model"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.environment",
+      "feature_ids": [
+        "rlm.environment"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.generated-program",
+      "feature_ids": [
+        "rlm.generated-program"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.messaging",
+      "feature_ids": [
+        "rlm.messaging"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.recovery",
+      "feature_ids": [
+        "rlm.recovery"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.recursion-depth",
+      "feature_ids": [
+        "rlm.recursion-depth"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.registry-lifecycle",
+      "feature_ids": [
+        "rlm.registry-lifecycle"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.usage-cost",
+      "feature_ids": [
+        "rlm.usage-cost"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.branch-summaries-labels",
+      "feature_ids": [
+        "session.branch-summaries-labels"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.compaction",
+      "feature_ids": [
+        "session.compaction"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.delivery",
+      "feature_ids": [
+        "session.delivery"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.fork-clone",
+      "feature_ids": [
+        "session.fork-clone"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.persistence-naming",
+      "feature_ids": [
+        "session.persistence-naming"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.resume-delete",
+      "feature_ids": [
+        "session.resume-delete"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.rich-attachments",
+      "feature_ids": [
+        "session.rich-attachments"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.tree-navigation",
+      "feature_ids": [
+        "session.tree-navigation"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.usage-status",
+      "feature_ids": [
+        "session.usage-status"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [],
+      "assertion_ids": [
+        "native-parity-core"
+      ]
+    }
+  ],
+  "evidence": []
+}

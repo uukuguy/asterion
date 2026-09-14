@@ -26,14 +26,15 @@ from the host-supplied base registry plus the selected provider's bindings.
 snapshot and fails closed on every duplicate runtime ID; providers cannot
 override host bindings through precedence.
 
-Historical Prime Gateway compatibility code owns the `prime.agent` binding, its
-application-to-profile table, and its exact host-service requirements. It is
-not `asterion-prime`, and its evidence is historical and non-native. The peer
-agent implementations are `asterion.prime` and `asterion.native`; both consume
-the same Asterion framework contracts. `asterion-prime` must remain detached
-from Prime Agent source and SDK code. P1 through P7 are applications of
-`asterion-prime`, not runtime identities or agent implementations. The
-framework default registry has no Prime imports or routes.
+The former Prime Gateway compatibility code carried the `prime.agent` binding,
+its application-to-profile table, and its exact host-service requirements. It
+has been removed from the distribution; its evidence is historical and
+non-native. The peer agent implementations are `asterion.prime` and
+`asterion.native`; both consume the same Asterion framework contracts.
+`asterion-prime` must remain detached from Prime Agent source and SDK code. P1
+through P7 are applications of `asterion-prime`, not runtime identities or
+agent implementations. The framework default registry has no Prime imports or
+routes.
 
 ## Selection and execution
 
@@ -75,11 +76,13 @@ and an AgentRuntime adapter may use an external session service. Neither fact
 makes one contract an implementation of the other. They use separate manifests,
 factory registries, contexts, and lifecycle validation.
 
-Prime currently supplies both the `prime.agent` AgentRuntime integration and
-the separate `prime.gateway` control provider. Native currently supplies only
-the `asterion.native` control provider. Native must not be added to the runtime
-registry until a separate AgentRuntime adapter, exact binding, compatible
-assembly, and application provider route exist.
+No Prime Agent runtime or control provider remains in the distribution. The
+former `prime.agent` AgentRuntime integration and `prime.gateway` control
+provider have been removed; `asterion.prime` is the formal native agent
+runtime. Native currently supplies the `asterion.native` control provider.
+Native must not be added to the runtime registry until a separate AgentRuntime
+adapter, exact binding, compatible assembly, and application provider route
+exist.
 
 ## Compatibility boundary
 

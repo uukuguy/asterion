@@ -9,12 +9,6 @@ from pathlib import Path
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from tools.compare_prime_p7_runs import build_parser as build_compare_parser
 from tools.compare_prime_p7_runs import main as compare_main
-from tools.run_asterion_prime_p7 import (
-    LiveSolveError,
-    P7LiveExecution,
-    build_parser,
-    classify_live_result,
-)
 
 
 def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
@@ -39,48 +33,6 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
-    def test_live_command_exposes_no_tuning_knobs(self) -> None:
-        parser = build_parser()
-
-        self.assertEqual(type(parser), argparse.ArgumentParser)
-        self.assertEqual(sorted(action.dest for action in parser._actions), ["help"])
-
-    def test_success_requires_authoritative_level_transition(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            result = P7LiveExecution(
-                run_id="p7-live-test",
-                completed_level_count=0,
-                primitive_action_count=13,
-                replay_verified=True,
-                sealed_trace=True,
-                cleanup_complete=True,
-                trace_root=Path(directory),
-                receipt={},
-                comparison_report=None,
-            )
-
-            with self.assertRaisesRegex(LiveSolveError, "level transition"):
-                classify_live_result(result)
-
-    def test_success_requires_replay_trace_and_cleanup(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            for field in ("replay_verified", "sealed_trace", "cleanup_complete"):
-                values = {
-                    "run_id": "p7-live-test",
-                    "completed_level_count": 1,
-                    "primitive_action_count": 13,
-                    "replay_verified": True,
-                    "sealed_trace": True,
-                    "cleanup_complete": True,
-                    "trace_root": Path(directory),
-                    "receipt": {},
-                    "comparison_report": None,
-                }
-                values[field] = False
-                with self.subTest(field=field):
-                    with self.assertRaises(LiveSolveError):
-                        classify_live_result(P7LiveExecution(**values))
-
     def test_compare_cli_labels_operator_stopped_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

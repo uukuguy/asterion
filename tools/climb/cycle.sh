@@ -84,28 +84,20 @@ case "${1-}" in
     python3 tools/climb/regen-tree.py H-013 passed H-014 test.control-long-running.provider-free
     ;;
   H-014)
-    npm --prefix packages/typescript/prime-gateway test -- test/daemon-wire.test.mjs
-    npm --prefix packages/typescript/prime-gateway run build
     python3 tools/climb/regen-tree.py H-014 passed H-015 test.prime-heartbeat-wire.provider-free
     ;;
   H-015)
-    npm --prefix packages/typescript/prime-gateway test -- test/long-running.test.mjs
-    npm --prefix packages/typescript/prime-gateway run build
     python3 tools/climb/regen-tree.py H-015 passed H-016 test.prime-heartbeat-fencing.provider-free
     ;;
   H-016)
-    npm --prefix packages/typescript/prime-gateway test -- test/long-running.test.mjs
-    npm --prefix packages/typescript/prime-gateway run build
     python3 tools/climb/regen-tree.py H-016 passed H-017 test.prime-heartbeat-ipc.provider-free
     ;;
   H-017)
     uv run python -m unittest -v tests.test_control_long_running tests.test_prime_long_running_parity
-    npm --prefix packages/typescript/prime-gateway test -- test/long-running.test.mjs
     python3 tools/climb/regen-tree.py H-017 passed H-018 test.prime-long-running-binding.provider-free
     ;;
   H-018)
     uv run python -m unittest -v tests.test_control_long_running tests.test_control_journal tests.test_prime_long_running_parity
-    npm --prefix packages/typescript/prime-gateway test -- test/long-running.test.mjs
     python3 tools/climb/regen-tree.py H-018 passed H-019 test.prime-residency-recovery.provider-free
     ;;
   H-019)
@@ -155,7 +147,6 @@ case "${1-}" in
     python3 tools/climb/regen-tree.py H-027 passed H-028 test.prime-ecosystem-adapter.provider-free
     ;;
   H-028)
-    npm --prefix packages/typescript/prime-gateway test -- test/ecosystem.test.mjs test/main.test.mjs
     python3 tools/climb/regen-tree.py H-028 passed H-029 test.prime-ecosystem-gateway.provider-free
     ;;
   H-029)
@@ -218,7 +209,6 @@ case "${1-}" in
   H-037)
     require_h037_tree
     require_node22
-    npm --prefix packages/typescript/prime-gateway run build
     uv run python -m unittest -v tests.test_prime_operation_real_process
     uv run python tools/check_prime_parity.py --claim verified-system-parity --provider asterion.prime-gateway
     make check

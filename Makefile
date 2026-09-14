@@ -21,24 +21,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: dci-run dci-benchmark
 .PHONY: dci-basic-example dci-runtime-context-example
 .PHONY: test-typescript test-rust check-rust
-.PHONY: prime-verify-provider-free prime-readme-rlm-smoke prime-smoke-core
-.PHONY: prime-parity-inventory prime-verify-system-parity
-.PHONY: asterion-prime-p7-solve
 .PHONY: asterion-prime-p1-run
-.PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
-.PHONY: test.prime-long-running.provider-free
-.PHONY: test.prime-continual-harness.provider-free
-.PHONY: test.prime-ecosystem-resources.provider-free
-.PHONY: test.prime-ecosystem-extensions.provider-free
-.PHONY: test.prime-ecosystem-packages.provider-free
-.PHONY: test.prime-ecosystem-mcp.provider-free
-.PHONY: test.prime-client-core.provider-free
-.PHONY: test.prime-client-protocols.provider-free
-.PHONY: test.prime-client-interactive.provider-free
-.PHONY: test.prime-client-export-share.provider-free
-.PHONY: test.prime-client-parity.provider-free
-.PHONY: test.prime-operational-auth.provider-free test.prime-operational-telemetry-usage.provider-free test.prime-operational-doctor.provider-free test.prime-operational-controlled-update-restart.provider-free
-.PHONY: test.prime-operational-harness.provider-free test.prime-operational-parity.provider-free
 .PHONY: test.native-controller-core.provider-free
 
 help:
@@ -55,8 +38,6 @@ help:
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
-	@echo "Prime Gateway: prime-verify-provider-free prime-readme-rlm-smoke prime-smoke-core prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free test.prime-long-running.provider-free"
-	@echo "Asterion Prime live research: asterion-prime-p7-solve"
 	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
@@ -181,8 +162,6 @@ test-typescript:
 	npm ci --prefix packages/typescript/asterion-runtime
 	npm test --prefix packages/typescript/asterion-runtime
 	npm test --prefix packages/typescript/dci-context-extension
-	npm ci --prefix packages/typescript/prime-gateway
-	npm --prefix packages/typescript/prime-gateway run build
 
 test-rust:
 	cargo test --manifest-path packages/rust/controlled-executor/Cargo.toml
@@ -191,167 +170,12 @@ check-rust: test-rust
 	cargo fmt --manifest-path packages/rust/controlled-executor/Cargo.toml -- --check
 	cargo clippy --manifest-path packages/rust/controlled-executor/Cargo.toml -- -D warnings
 
-prime-verify-provider-free:
-	$(UV_BIN) run python tools/verify_prime_loop.py --level provider-free
-
-asterion-prime-p7-solve:
-	@printf '%s\n' '[asterion-prime-p7-solve] ARC-AGI-3: native Asterion-prime fixed live solve' >&2; \
-		exec orb -m "$(PRIME_ORB_MACHINE)" -u root -w "$(CURDIR)" /bin/sh -ec 'unset ASTERION_PRIME_NODE; export PYTHONPATH="$(CURDIR)/src"; exec ../external-prime/arc-agi-3/venv/bin/python tools/run_asterion_prime_p7.py'
-
 asterion-prime-p1-run:
 	@exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p1-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		printf '\''%s\n'\'' '\''[asterion-prime-p1-run] native Asterion-prime fixed small verification'\'' >&2; \
 		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p1.operator'\'' asterion-prime-p1-run "$$1" "$(CURDIR)"'
-
-test.prime-session-context-parity.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_session_context_protocol \
-		tests.test_session_context_manager \
-		tests.test_prime_session_context_parity \
-		tests.test_prime_parity_conformance
-	npm --prefix packages/typescript/asterion-runtime test
-	npm --prefix packages/typescript/prime-gateway test
-
-test.prime-session-context-parity.bounded:
-	ASTERION_PRIME_SESSION_CONTEXT_BOUNDED=1 $(UV_BIN) run python -m unittest -v \
-		tests.test_prime_session_context_parity.TestPrimeSessionContextParity.test_real_prime_provider_free_scenarios_match_committed_evidence
-
-test.prime-rlm-spawn-admission.provider-free:
-	npm --prefix packages/typescript/prime-gateway test -- \
-		test/daemon-wire.test.mjs \
-		test/rlm-host-shim.test.mjs
-	$(UV_BIN) run python -m unittest -v \
-		 tests.test_prime_rlm_messaging_parity
-
-test.prime-long-running.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_control_long_running \
-		tests.test_prime_long_running_experiment \
-		tests.test_prime_long_running_parity
-	npm --prefix packages/typescript/prime-gateway test -- test/long-running.test.mjs
-
-test.prime-continual-harness.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_control_harness \
-		tests.test_prime_continual_harness \
-		tests.test_prime_continual_harness_parity
-	npm --prefix packages/typescript/prime-gateway test -- test/continual-harness.test.mjs
-
-test.prime-ecosystem-resources.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_control_ecosystem \
-		tests.test_control_ecosystem_materialization \
-		tests.test_prime_ecosystem_resources
-
-test.prime-ecosystem-extensions.provider-free:
-	$(UV_BIN) run python -m unittest -v tests.test_prime_ecosystem_extensions
-	npm --prefix packages/typescript/prime-gateway test -- test/ecosystem.test.mjs
-
-test.prime-ecosystem-packages.provider-free:
-	npm --prefix packages/typescript/prime-gateway run build
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_prime_ecosystem_packages \
-		tests.test_local_capability_source \
-		tests.test_distribution_capability_source
-
-test.prime-ecosystem-mcp.provider-free:
-	npm --prefix packages/typescript/prime-gateway run build
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_control_ecosystem_mcp \
-		tests.test_prime_ecosystem_mcp
-
-test.prime-client-core.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_client_sdk_jsonl \
-		tests.test_prime_client_core
-
-test.prime-client-protocols.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_client_rpc_acp \
-		tests.test_prime_client_protocols
-
-test.prime-client-interactive.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_client_interactive \
-		tests.test_asterion_cli \
-		tests.test_prime_client_interactive
-
-test.prime-client-export-share.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_client_export_share \
-		tests.test_prime_client_export_share
-
-test.prime-client-parity.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_prime_client_parity \
-		tests.test_prime_parity_ledger \
-		tests.test_check_prime_parity
-	$(UV_BIN) run python tools/check_prime_parity.py \
-		--features interface.sdk,interface.cli-interactive,interface.rpc,interface.acp,interface.json-stream,interface.headless-print,interface.tui-commands,interface.tui-extension-ui,interface.export-share \
-		--provider asterion.prime-gateway
-
-test.prime-operational-auth.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_operation_auth \
-		tests.test_prime_operational_auth
-	npm --prefix packages/typescript/asterion-runtime test
-	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
-
-test.prime-operational-harness.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_prime_operation_bridge \
-		tests.test_prime_operational_harness
-	npm --prefix packages/typescript/prime-gateway test -- \
-		test/operational-interface.test.mjs \
-		test/main.test.mjs
-
-test.prime-operational-telemetry-usage.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_operation_telemetry \
-		tests.test_prime_operational_telemetry
-	npm --prefix packages/typescript/asterion-runtime test
-	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
-
-test.prime-operational-doctor.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_operation_doctor \
-		tests.test_prime_operational_doctor
-	npm --prefix packages/typescript/asterion-runtime test
-	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
-
-test.prime-operational-controlled-update-restart.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_operation_update_restart \
-		tests.test_prime_operational_update_restart
-	npm --prefix packages/typescript/asterion-runtime test
-	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
-
-.PHONY: test.prime-operational-model-selection.provider-free
-test.prime-operational-model-selection.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_operation_model_selection \
-		tests.test_prime_operational_model_selection
-	npm --prefix packages/typescript/asterion-runtime test
-	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
-
-.PHONY: test.prime-operational-settings-keybindings.provider-free
-test.prime-operational-settings-keybindings.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_operation_settings \
-		tests.test_prime_operational_settings
-	npm --prefix packages/typescript/asterion-runtime test
-	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
-
-test.prime-operational-parity.provider-free:
-	$(UV_BIN) run python -m unittest -v \
-		tests.test_prime_operational_parity \
-		tests.test_prime_parity_ledger \
-		tests.test_check_prime_parity
-	$(UV_BIN) run python tools/check_prime_parity.py \
-		--features operation.auth,operation.model-selection,operation.settings-keybindings,operation.telemetry-usage,operation.doctor,operation.controlled-update-restart \
-		--provider asterion.prime-gateway
 
 test.native-controller-core.provider-free:
 	$(UV_BIN) run python -m unittest -v \
@@ -383,18 +207,6 @@ verify.native-verified-loop.bounded:
 .PHONY: verify.native-verified-loop.small
 verify.native-verified-loop.small:
 	$(UV_BIN) run python tools/verify_native_verified_loop.py --level small-verification
-
-prime-readme-rlm-smoke:
-	$(UV_BIN) run python -m tools.run_prime_readme_smoke
-
-prime-smoke-core:
-	ASTERION_PRIME_NODE="$(ASTERION_PRIME_NODE)" $(UV_BIN) run python -m tools.run_prime_core_smoke
-
-prime-parity-inventory:
-	$(UV_BIN) run python tools/check_prime_parity.py --claim inventory
-
-prime-verify-system-parity:
-	$(UV_BIN) run python tools/check_prime_parity.py --claim verified-system-parity
 
 dci-basic-example:
 	bash examples/asterion_dci_basic_example.sh

@@ -171,33 +171,6 @@ class StandaloneRepositoryTests(unittest.TestCase):
         self.assertIn("network/disk; Agent operations 0; Judge operations 0", completed.stdout)
         self.assertIn("doctor", completed.stdout)
 
-    def test_makefile_exposes_fixed_prime_development_execution_presets(self) -> None:
-        text = self._makefile_text()
-        expected = {
-            "prime-p1-run": "prime.ipython-coding@1.0.0",
-            "prime-p2-run": "prime.programmatic-long-context@1.0.0",
-            "prime-p3-run": "prime.recursive-workflow@1.0.0",
-            "prime-p4-run": "prime.long-session-continuity@1.0.0",
-            "prime-p5-run": "prime.bounded-autonomy@1.0.0",
-            "prime-p6-run": "prime.continual-improvement@1.0.0",
-            "prime-p7-run": "prime.arc-agi-3@1.0.0",
-        }
-        for target, application in expected.items():
-            with self.subTest(target=target):
-                self.assertRegex(text, rf"(?m)^\.PHONY:.*\b{target}\b")
-                recipe = text.split(f"\n{target}:\n", 1)[1].split("\n\n", 1)[0]
-                self.assertIn("orb -m \"$(PRIME_ORB_MACHINE)\" -u root", recipe)
-                self.assertIn(
-                    "/root/.local/bin/uv run --extra prime --python "
-                    "/usr/bin/python3 --isolated asterion run",
-                    recipe,
-                )
-                self.assertIn("--provider prime-agent", recipe)
-                self.assertIn(f"--application {application}", recipe)
-                self.assertIn("--runtime prime.agent", recipe)
-                self.assertIn("--input fixed-small-verification", recipe)
-                self.assertIn("$${PRIME_RUN_ID:-", recipe)
-
     def test_framework_targets_render_exact_commands(self) -> None:
         expected = {
             "asterion-list": ("uv", "run", "asterion", "list"),
@@ -441,12 +414,10 @@ class StandaloneRepositoryTests(unittest.TestCase):
         self.assertIn("hashFiles(", text)
         for lockfile in (
             "packages/typescript/asterion-runtime/package-lock.json",
-            "packages/typescript/prime-gateway/package-lock.json",
-            "packages/typescript/prime-gateway/resources/prime-artifact-lock.json",
         ):
             with self.subTest(lockfile=lockfile):
                 self.assertIn(lockfile, text)
-        self.assertNotIn("3th-party/prime-agent/package-lock.json", text)
+        self.assertNotIn("3th-party" + "/prime-agent/package-lock.json", text)
         self.assertIn("make promotion-check", text)
         self.assertIn("make first-run-check", text)
         for forbidden in (

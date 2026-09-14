@@ -4,11 +4,9 @@ import hashlib
 import io
 import json
 import re
-import subprocess
 import unittest
 from collections.abc import AsyncIterator, Mapping
 from typing import TypedDict, cast
-from pathlib import Path
 
 from asterion.client import AgentClient, ClientCursor, ClientEvent
 from asterion.client.interactive import (
@@ -42,17 +40,6 @@ _FORBIDDEN_TERMS = ("answer", "body", "credential", "destination", "output", "pa
 _SENTINEL = "SENTINEL_PRIVATE_VALUE"
 _EXPECTED_PRIVATE_SERVICE_CONTRACT_DIGEST = "2698bba4cdb115363cc5cb0af1b45b52f4e17a20f890a9afec7478270913b403"
 _EXPECTED_STREAM_CONTRACT_DIGEST = "b4727b9bbedfa05b9bba658462562f6c5e61bde8a8608d7b2277620c6d134c72"
-_PROJECT = Path(__file__).resolve().parents[1]
-
-
-def _real_prime_receipt(package: str) -> dict[str, object]:
-    completed = subprocess.run(
-        ("node", str(_PROJECT / "tests/fixtures/prime_gateway/v1/real-prime-clients.mjs"),
-         "--package", package, "--resource-root", str(_PROJECT / "packages/typescript/prime-gateway/resources"),
-         "--prime-root", str(_PROJECT / "3th-party/prime-agent")),
-        cwd=_PROJECT, check=True, capture_output=True, text=True,
-    )
-    return cast(dict[str, object], json.loads(completed.stdout))
 
 
 class _Receipt(TypedDict):
@@ -231,35 +218,6 @@ def _validate_public_evidence(value: object) -> None:
 
 
 class TestPrimeClientInteractiveReceipt(unittest.IsolatedAsyncioTestCase):
-    async def test_locked_real_prime_harness_proves_exact_interactive_package(self) -> None:
-        receipt = _real_prime_receipt("interactive")
-        self.assertEqual(
-            set(receipt),
-            {
-                "artifact_lock_digest", "credential_reads", "feature_count", "feature_ids",
-                "module_digest", "module_lock_digest", "package", "private_reads",
-                "provider_operations", "retained_processes", "scenario_count",
-                "scenario_evidence", "scenario_ids", "source_commit", "stdout_writes",
-                "unauthorized_uploads",
-            },
-        )
-        for field, filename in (
-            ("artifact_lock_digest", "prime-artifact-lock.json"),
-            ("module_lock_digest", "prime-client-module-lock.json"),
-            ("module_digest", "prime-client-module.mjs"),
-        ):
-            with self.subTest(field=field):
-                self.assertEqual(
-                    receipt[field],
-                    hashlib.sha256(
-                        (_PROJECT / "packages/typescript/prime-gateway/resources" / filename).read_bytes()
-                    ).hexdigest(),
-                )
-        self.assertEqual(receipt["source_commit"], "a18809e00ea30638584d87b3afea7285a9d7296c")
-        self.assertEqual((receipt["package"], receipt["feature_count"], receipt["scenario_count"]), ("interactive", 4, 4))
-        self.assertEqual((receipt["provider_operations"], receipt["credential_reads"], receipt["retained_processes"]), (0, 0, 0))
-        self.assertNotIn(_SENTINEL, json.dumps(receipt, sort_keys=True))
-
     async def test_provider_free_receipt_executes_exact_interactive_boundary(self) -> None:
         receipt = await _provider_free_receipt()
         _validate_receipt(receipt)

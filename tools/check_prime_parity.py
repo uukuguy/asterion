@@ -4,32 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import stat
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from asterion.control.parity import (
     ParityLedgerError,
     evaluate_parity_claim,
     validate_parity_ledger,
 )
-try:
-    from tools.setup_prime_agent import (
-        LOCK_FORMAT,
-        PrimeSetupError,
-        verify_prime_checkout,
-    )
-except ModuleNotFoundError:  # Direct ``python tools/check_prime_parity.py``.
-    from setup_prime_agent import (  # type: ignore[no-redef]
-        LOCK_FORMAT,
-        PrimeSetupError,
-        verify_prime_checkout,
-    )
-
-
-PRIME_PROVIDER_ID = "asterion.prime-gateway"
-MAX_EVIDENCE_FILE_BYTES = 2 * 1024 * 1024
 
 
 class PrimeParityCheckError(RuntimeError):
@@ -40,19 +22,10 @@ class PrimeParitySelectionError(RuntimeError):
     """Raised without rendering invalid command-line selection values."""
 
 
-@dataclass(frozen=True, repr=False)
-class PrimeSourceEvidenceReport:
-    source_commit: str
-    feature_count: int
-    evidence_record_count: int
-    file_count: int
-    anchor_count: int
-
-
 def default_ledger_path() -> Path:
     return (
         Path(__file__).resolve().parents[1]
-        / "tests/fixtures/prime-parity/v1/prime-agent-0.7.1.json"
+        / "tests/fixtures/prime-parity/v1/native-only.json"
     )
 
 
@@ -66,108 +39,6 @@ def load_prime_parity_ledger(
         return validate_parity_ledger(value)
     except (OSError, json.JSONDecodeError, ParityLedgerError):
         raise PrimeParityCheckError("Prime parity inventory is invalid") from None
-
-
-def verify_prime_source_evidence(
-    ledger: Mapping[str, object],
-    *,
-    source_root: Path,
-) -> PrimeSourceEvidenceReport:
-    """Verify only explicitly declared source files at the pinned clean revision."""
-
-    snapshot = validate_parity_ledger(ledger)
-    baseline = _mapping(snapshot.get("baseline"))
-    if baseline.get("artifact_lock") != LOCK_FORMAT:
-        raise PrimeParityCheckError("Prime parity baseline is invalid")
-
-    try:
-        setup_report = verify_prime_checkout(source_root)
-    except PrimeSetupError:
-        raise PrimeParityCheckError(
-            "Prime parity source checkout is invalid"
-        ) from None
-    if setup_report.source_commit != baseline.get("source_commit"):
-        raise PrimeParityCheckError("Prime parity source revision is invalid")
-
-    root = _exact_directory(source_root)
-    features = _mapping_sequence(snapshot.get("features"))
-    evidence_record_count = 0
-    anchor_count = 0
-    declared_paths: set[str] = set()
-    for feature in features:
-        evidence_records = _mapping_sequence(feature.get("prime_evidence"))
-        evidence_record_count += len(evidence_records)
-        for record in evidence_records:
-            relative = record.get("path")
-            anchors = record.get("anchors")
-            if not isinstance(relative, str):
-                raise PrimeParityCheckError("Prime parity source evidence is invalid")
-            content = _read_declared_file(root, relative)
-            if not isinstance(anchors, tuple) or any(
-                not isinstance(anchor, str) or anchor not in content
-                for anchor in anchors
-            ):
-                raise PrimeParityCheckError("Prime parity source evidence is invalid")
-            declared_paths.add(relative)
-            anchor_count += len(anchors)
-
-    return PrimeSourceEvidenceReport(
-        source_commit=setup_report.source_commit,
-        feature_count=len(features),
-        evidence_record_count=evidence_record_count,
-        file_count=len(declared_paths),
-        anchor_count=anchor_count,
-    )
-
-
-def _exact_directory(value: Path) -> Path:
-    try:
-        if not isinstance(value, Path) or value.is_symlink():
-            raise OSError
-        root = value.resolve(strict=True)
-        if not root.is_dir():
-            raise OSError
-        return root
-    except (OSError, RuntimeError):
-        raise PrimeParityCheckError(
-            "Prime parity source checkout is invalid"
-        ) from None
-
-
-def _read_declared_file(root: Path, relative: str) -> str:
-    try:
-        source_path = PurePosixPath(relative)
-        if (
-            source_path.is_absolute()
-            or source_path.parts[:1] != ("packages",)
-            or any(part in {"", ".", ".."} for part in source_path.parts)
-        ):
-            raise OSError
-        candidate = root
-        for index, part in enumerate(source_path.parts):
-            candidate /= part
-            metadata = candidate.stat(follow_symlinks=False)
-            if stat.S_ISLNK(metadata.st_mode):
-                raise OSError
-            if index < len(source_path.parts) - 1 and not stat.S_ISDIR(
-                metadata.st_mode
-            ):
-                raise OSError
-        metadata = candidate.stat(follow_symlinks=False)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_size > MAX_EVIDENCE_FILE_BYTES
-        ):
-            raise OSError
-        return candidate.read_text(encoding="utf-8")
-    except (OSError, RuntimeError, UnicodeError):
-        raise PrimeParityCheckError("Prime parity source evidence is invalid") from None
-
-
-def _mapping(value: object) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        raise PrimeParityCheckError("Prime parity inventory is invalid")
-    return value
 
 
 def _mapping_sequence(value: object) -> tuple[Mapping[str, object], ...]:
@@ -319,20 +190,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--claim",
         choices=("inventory", "verified-system-parity"),
     )
-    parser.add_argument("--source-root", type=Path)
     parser.add_argument("--domain")
     parser.add_argument("--features")
-    parser.add_argument("--provider", default=PRIME_PROVIDER_ID)
+    parser.add_argument("--provider", default="asterion.native")
     arguments = parser.parse_args(argv)
     try:
         ledger = load_prime_parity_ledger()
         source_verified = False
-        if arguments.source_root is not None:
-            verify_prime_source_evidence(
-                ledger,
-                source_root=arguments.source_root,
-            )
-            source_verified = True
         if arguments.claim == "inventory":
             if arguments.domain is not None or arguments.features is not None:
                 raise PrimeParitySelectionError(

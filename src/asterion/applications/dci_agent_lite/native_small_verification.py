@@ -5,12 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
-import json
 from pathlib import Path
 import os
 import secrets
-import subprocess
-import sys
 
 from dotenv import dotenv_values
 
@@ -38,12 +35,22 @@ class NativeSmallVerificationApplicationError(ValueError):
         self.__context__ = None
 
 
+def _unavailable_prime_runner() -> Mapping[str, object]:
+    """Return an explicit unavailable result instead of a Prime fallback."""
+
+    raise NativeSmallVerificationApplicationError
+
+
 @dataclass(frozen=True, repr=False)
 class PrimeNativeSmallVerificationHost:
-    """Project one controlled Prime run into a bounded Native turn."""
+    """Project one controlled run into a bounded Native turn.
+
+    The runner is injected by the operator. It must never fall back to a Prime
+    checkout, so the default returns the explicit unavailable result.
+    """
 
     runner: Callable[[], Mapping[str, object]] = field(
-        default=lambda: _run_prime_native_small_verification(Path.cwd()), repr=False
+        default=_unavailable_prime_runner, repr=False
     )
 
     async def execute(
@@ -123,36 +130,6 @@ def _load_private_backend_environment(repo_root: Path) -> Mapping[str, str]:
             raise ValueError
         return {key: value for key, value in environment.items() if isinstance(value, str)}
     except (OSError, TypeError, ValueError):
-        raise NativeSmallVerificationApplicationError from None
-
-
-def _run_prime_native_small_verification(repo_root: Path) -> Mapping[str, object]:
-    """Invoke the existing explicit bounded runner without returning its output."""
-
-    try:
-        completed = subprocess.run(
-            (
-                sys.executable,
-                "tools/verify_prime_loop.py",
-                "--level",
-                "native-rlm-bounded",
-                "--native-rlm-experiment",
-                "--source-root",
-                "3th-party/prime-agent",
-            ),
-            cwd=repo_root,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=660,
-        )
-        if completed.returncode != 0:
-            raise ValueError
-        report = json.loads(completed.stdout)
-        if not isinstance(report, Mapping):
-            raise ValueError
-        return report
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, ValueError):
         raise NativeSmallVerificationApplicationError from None
 
 
