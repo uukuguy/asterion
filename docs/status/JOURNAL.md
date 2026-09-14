@@ -2316,3 +2316,5 @@
 - 12:48 缝中性化落地：prime.pi-extension → prime.launch，移除 PiRpcSession/PiExtensionBinding；保留 PiExtensionLease（fd 钉住唯一属主，防 TOCTOU）[d89e48dd]
 - 13:10 查实 DeepSeek 兼容层把任何 claude-* 模型名映射到最贵的 deepseek-v4-pro；subagent 传 model 别名 = 选最贵档
 - 13:35 AGENTS.md 定 DeepSeek 规则：不传 model 给 subagent、统一 deepseek-flash、须设 ANTHROPIC_SMALL_FAST_MODEL [7fecc1a0]
+- 14:08 应用层去 Pi 落地：30 处引用 → 0，pinned_extension 迁入框架层，gate 仍 0 [94bfe017]
+- 14:20 handoff 收口：Phase 1 完成记录、D-2026-09-14-01、CURRENT-STATE 转 Phase 2、RESUME 重写为交接稿 [8c4e8978]
