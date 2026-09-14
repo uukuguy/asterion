@@ -93,7 +93,7 @@ testable deliverable and must not be pre-choreographed here.
 |---|---|---|---|---|
 | 1 | Legacy release-surface removal + expanded detachment gate | — | Gate scans the complete release surface and fails on representative forbidden references; no legacy execution edge remains | **this plan** |
 | 2 | Conversion of research presets to installed-wheel invocation | 1 | `asterion-prime-p7-solve` runs from a wheel, no `PYTHONPATH=<src>` | **this plan, Phase 2** |
-| 3 | P7 native revalidation (anchor) | 2 | Expanded detachment + wheel + installed-route + focused native regression pass with no Prime checkout | pending |
+| 3 | P7 native revalidation (anchor) | 2 | Expanded detachment + wheel + installed-route + focused native regression pass with no Prime checkout | **complete 2026-09-14** — see below |
 | 4 | P1 rebuild (`prime.ipython-coding`) | 3 | Spec P1 witness: two model-driven cells share one restricted worker; stage-one file bytes survive Asterion-owned compaction and host reconstruction; oracle passes; cleanup precedes public terminal | pending |
 | 5 | P2 rebuild (`prime.programmatic-long-context`) | 4 | Source material stays outside the prompt; ≥1 bounded programmatic retrieval/transform through an injected service; answer oracle passes within caps | pending |
 | 6 | P4 rebuild (`prime.long-session-continuity`) | 5 | Committed checkpoint detached, controlling process replaced, new host attaches at higher generation, continuation completes without replaying a committed effect | pending |
@@ -1714,3 +1714,42 @@ Resolves open question 3: closed clean, see above.
 Unchanged from Phase 1, and it binds here: the gate scans the entire release
 surface on every run, so **one writer at a time**. No concurrent agent may hold
 an uncommitted edit while a scan runs.
+
+---
+
+## Phase 3 completion record (2026-09-14)
+
+**Status: complete.** All four spec acceptance items hold, and the anchor was
+additionally proven by a live run.
+
+- **Expanded detachment** — gate 0 before and after every Phase 3 change.
+- **Wheel** — the Phase 2 preset built and installed `asterion-0.1.0`.
+- **Installed route** — `tests/test_prime_p7_native_installed` passes. It had
+  been red since 2026-09-11: commit `26519254` made `agent_end` the native round
+  terminal and stopped recognizing `agent_settled`, updating five test files but
+  not the shared fixture, which kept emitting the old terminal. Fixed in
+  `tests/fixtures/asterion_prime/fake_pi_rpc.py`.
+- **Focused native regression** — the P7 set passes (47 tests).
+- **Live anchor** — run `p7-live-20260914141314` PASSED: Level 1 of
+  `ls20-9607627b` in 20 primitive actions and 40 persistent IPython cells,
+  `partial_game_score` 3.571429, terminal reason `level-completed`, trace
+  sealed, replay verified, cleanup complete, `promotion: unpromoted`. Driven by
+  the independently installed upstream Pi, with no Prime Agent and no Prime
+  checkout in the path.
+
+**Risk 2 from "Risks carried into later phases" is resolved in the
+affirmative:** a genuinely detached Pi artifact exists —
+`@earendil-works/pi-coding-agent`, published upstream, no prime-agent
+dependency, and a different build from the `./pi/` checkout. See
+D-2026-09-14-03 for the injection shape and the two environment traps
+(Orb reaches the Mac only at `/mnt/mac`; Orb's system node v20 predates
+`node:fs.globSync`).
+
+**Risk 1 was not exercised.** Whether P7 resolves compaction through the removed
+Prime checkout lock is a long-session property, and this run completed in ~4.5
+minutes without reaching compaction. It remains untested and must not be
+recorded as cleared.
+
+**Boundary.** This proves P7's installed route and Level-1 solving on
+`ls20-9607627b` at seed 0 with `deepseek-v4-flash`. It is not a full-game,
+multi-seed, or multi-game result, and nothing is promoted.

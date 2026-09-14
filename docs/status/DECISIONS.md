@@ -17,6 +17,7 @@
 | D-2026-09-12-01 | 🟢 active | Use native P7 as the sole Asterion Prime base and rebuild P1-P6 without Prime Agent |
 | D-2026-09-14-01 | 🟢 active | Keep the application layer free of implementation references; the runtime seam carries plain data |
 | D-2026-09-14-02 | 🟢 active | Supply research-preset external engines as operator-owned roots plus wheels, never as checkout-relative paths |
+| D-2026-09-14-03 | 🟢 active | Inject the Pi runtime as an operator-owned entry path, satisfied by an independently installed upstream Pi |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -261,3 +262,33 @@
   `PYTHONPATH` unset; `tests/test_prime_make_presets` pins the shape and forbids
   `PYTHONPATH=src`, `ASTERION_PRIME_WORKER_PYTHON`, `external-prime` and
   `venv/bin/python` literals; detachment gate 0 before and after.
+
+## D-2026-09-14-03 — Pi runtime injection
+
+- Status: 🟢 active
+- Context: the removed `run_asterion_prime_p7.py` reached into
+  `pi/packages/coding-agent/dist/rpc-entry.js` — Prime Agent's modified Pi
+  checkout, gitignored and off-limits to Asterion code. Its removal left the
+  question the detachment spec had deferred: is there a *separately pinned* Pi
+  runtime, or does none exist in detached form?
+- Decision: the Pi runtime is an **operator-owned entry path**
+  (`ASTERION_PRIME_PI_ENTRY`, paired with `ASTERION_PRIME_NODE`), and the
+  operator satisfies it with the independently installed upstream package
+  `@earendil-works/pi-coding-agent` from the npm global root. Asterion owns the
+  fixed RPC flag set; the operator owns only where the binary lives.
+- Rationale: the upstream package is a genuinely separate artifact — MIT,
+  published from `github.com/earendil-works/pi`, with no prime-agent dependency
+  in its manifest and a different build hash from the `./pi/` checkout. The
+  spec's "separately pinned Pi runtime" is therefore real, not a relabeling.
+- Consequence, and the parts that are easy to get wrong:
+  - The installed Pi lives outside the repository, and the preset runs inside an
+    Orb Linux VM. It is reachable there **only** through OrbStack's Mac mount,
+    i.e. `/mnt/mac/opt/homebrew/...`; the host path `/opt/homebrew/...` does not
+    exist inside the VM.
+  - Orb's system node is v20 and the Pi imports `node:fs.globSync` (Node 22+),
+    so the preset's own `npm exec --package=node@22` resolution is load-bearing
+    and must not be "simplified" to the system node.
+- Evidence: run `p7-live-20260914141314` PASSED — Level 1 of `ls20-9607627b` in
+  20 primitive actions and 40 cells, trace sealed, replay verified, cleanup
+  complete, `promotion: unpromoted`; detachment gate 0; the Pi answers
+  `--version` with 0.85.1 inside Orb under node v22.23.2.

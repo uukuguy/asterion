@@ -13,8 +13,14 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: **Phase 3** — revalidate native P7 with no Prime
-  checkout, against the wheel preset Phase 2 built. Phases 1 and 2 are complete.
+- Active work package: **Phase 4** — rebuild P1 (`prime.ipython-coding`).
+  **Phase 3 is complete: native P7 is revalidated end to end.** Run
+  `p7-live-20260914141314` solved Level 1 of `ls20-9607627b` in 20 primitive
+  actions and 40 persistent IPython cells, `partial_game_score` 3.571429,
+  terminal reason `level-completed`, with the trace sealed, replay verified and
+  cleanup complete — driven by the **independently installed upstream Pi**,
+  with no Prime Agent and no Prime checkout anywhere in the path. Phases 1-3 are
+  complete.
   Phase 1 (legacy release-surface removal and the semantic source-detachment
   gate): 11/11 tasks, gate 1881 → 0, entry points 3/5/2. Phase 2 (P7 research
   preset as an installed-wheel invocation, D-2026-09-14-02): the preset builds a
@@ -265,14 +271,24 @@
 - **Confirmed by running:** inside Orb, under the preset's node@22, the named Pi
   answers `--version` with **0.85.1**. The Pi dependency is therefore no longer
   an open question; only the live solve itself remains unrun.
-- **No live P7 run has been made.** The preset reads four operator-owned values
-  (`ASTERION_PRIME_OPERATOR_ROOT`, `ASTERION_PRIME_ARC_ROOT`,
-  `ASTERION_PRIME_NODE`, `ASTERION_PRIME_PI_ENTRY`, plus `DEEPSEEK_API_KEY`);
-  all are unset in the current shell, so the preset correctly fails closed at
-  preflight with status 2. Every prerequisite now exists on this machine — the
-  ARC wheels and `environment_files/ls20/` under `../external-prime/arc-agi-3/`,
-  and the named Pi above — so a live run is a wiring and authorization step, not
-  a missing-resource blocker.
+- **The live P7 run PASSED (2026-09-14, operator-authorized).** Receipt
+  `receipt_sha256=c00e3263cb2842dbe854cd4950ea2d2ec75859c21189f2bb101e66efed05c554`,
+  replay
+  `sha256:5b469c2ab7acfcb61d643d885453f744ef201d2a7765bcac1e04b0ac7afaea1b`,
+  `promotion: unpromoted`. Private artifact at
+  `.asterion-private/prime-p7-live/p7-live-20260914141314/` (mode 0700, gitignored).
+  Compare the earlier Prime-Agent-era run `p7-live-20260909065351`: 23 primitive
+  actions, 43 cells, score 3.267621. The detached route reached the same level
+  in fewer actions and cells.
+- The preset reads four operator-owned values (`ASTERION_PRIME_OPERATOR_ROOT`,
+  `ASTERION_PRIME_ARC_ROOT`, `ASTERION_PRIME_NODE`, `ASTERION_PRIME_PI_ENTRY`,
+  plus `DEEPSEEK_API_KEY`). Unset, it fails closed at preflight with status 2;
+  the passing run supplied all four.
+- **Phase 3 completion is bounded to what was run.** It revalidates P7's
+  installed route and Level-1 solving on `ls20-9607627b` at seed 0 with
+  `deepseek-v4-flash`. It is not a full-game, multi-seed, or multi-game result,
+  and `promotion` stays `unpromoted`. Full benchmarks remain separately
+  authorized work.
 - Revalidate P7 without a Prime checkout (Phase 3), then rebuild P1, P2, P4, P3,
   P5, and P6 on the shared native `asterion.prime` path (Phases 4-9).
 - Keep every compound Asterion-native row missing until Phase 3.2+ evidence

@@ -2343,3 +2343,7 @@
 - 18:20 实跑确认：Orb 内 node@22 下 Pi 报 0.85.1——Pi 依赖不再是开放问题，只剩 live solve 本身未跑
 - 22:15 更正本日 17:40/17:50/17:52/18:05/18:20 五条时间戳：系我估算而非实测，违反实时时间规则；真值取提交时间 18:18/18:26/18:26/18:34/18:42，内容不受影响
 - 22:12 起跑 live P7 solve（operator 授权）：wheel 构建成功、arc_agi 引擎加载、preflight 通过、live-run 已开始
+- 22:18 live P7 solve PASS：ls20-9607627b Level 1，20 primitive actions、40 cells、score 3.571429、level-completed、trace 密封、replay 验证、cleanup 完成、unpromoted；全程用独立上游 Pi，无 Prime Agent、无 Prime checkout
+- 22:18 产物 .asterion-private/prime-p7-live/p7-live-20260914141314/（0700，已 ignore）；求解窗口 22:13:17→22:17:46 约 4.5 分钟
+- 22:20 Phase 3 完成：四项验收全绿 + live 锚点证实；风险 #2 解决为肯定，风险 #1（compaction 锁）本run未触及仍属未测
+- 22:20 记 D-2026-09-14-03：Pi 以 operator 自有入口路径注入，由独立上游包满足；含两个环境陷阱（Orb 仅经 /mnt/mac 可达 Mac、系统 node v20 过旧）
