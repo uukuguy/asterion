@@ -6,24 +6,42 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import socket
+import sys
 import threading
 from types import MappingProxyType
 from typing import cast
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
-from asterion.applications.prime.p7.broker import ArcBroker
+from asterion.applications.prime import create_provider
+from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt
+from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.ipython_host import (
     PersistentIpythonHost,
     RestrictedPersistentIpythonWorker,
     p7_client_facade,
 )
+from asterion.applications.prime.p7 import live
 from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
     P7_TRACE_IDENTITIES,
 )
+from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 from asterion.applications.prime.runtime_binding import PrimeLaunch
+from asterion.applications.provider import resolve_installed_provider
+from asterion.capabilities.prime_arc_agi_3_solver.provider import (
+    CAPABILITY_REF,
+    PACKAGE_REF,
+    create_prime_arc_agi_3_solver_package,
+)
+from asterion.capabilities.prime_ipython_coding_native.provider import (
+    create_prime_ipython_coding_native_package,
+)
+from asterion.runner.composed import run_composed_application
+from asterion.runtime.defaults import default_runtime_factory_registry
+from asterion.runtime.factory import RuntimeFactoryContext
 from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 
 
@@ -427,12 +445,335 @@ def build_p7_operator_resources(
         raise P7OperatorError("P7 host services are unavailable") from None
 
 
+@dataclass(frozen=True, slots=True)
+class P7Invocation:
+    """Every operator-owned value one preset invocation resolves to."""
+
+    operator_root: Path
+    environment: Mapping[str, str]
+    arc_root: Path
+    pi_base_command: tuple[str, ...]
+    extension_path: Path
+
+
+def _preflight(environment: Mapping[str, str]) -> P7Invocation:
+    """Refuse source execution, then resolve every operator-owned input.
+
+    Mirrors the P1 operator contract: the operator root is the mounted
+    checkout, and the running distribution must be installed outside it so a
+    source tree can never be executed in its place. The ARC root, node
+    executable and Pi entry are operator-owned values the preset exports, so
+    nothing here derives a path from a sibling checkout layout.
+    """
+
+    import asterion
+
+    root = Path(environment[live.OPERATOR_ROOT_ENV]).resolve(strict=True)
+    package = Path(str(asterion.__file__)).resolve(strict=True)
+    if package.is_relative_to(root) or "site-packages" not in package.parts:
+        raise P7OperatorError("P7 operator root is invalid")
+    if not root.is_dir():
+        raise P7OperatorError("P7 operator root is invalid")
+    try:
+        resolved = live.load_operator_environment(root)
+        return P7Invocation(
+            operator_root=root,
+            environment=resolved,
+            arc_root=live.resolve_arc_root(resolved),
+            pi_base_command=live.pi_base_command(
+                node=live.resolve_node(resolved),
+                pi_entry=live.resolve_pi_entry(resolved),
+            ),
+            extension_path=live.extension_path(),
+        )
+    except live.P7LiveSolveError as error:
+        raise P7OperatorError(str(error)) from None
+
+
+async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecution:
+    """Run the one fixed solve and seal its private evidence.
+
+    Recovered from the removed driver's live body, with the orchestration order
+    unchanged: preflight every host service, run the composed application, seal
+    and replay the broker, verify the sealed trace, then compare, and always
+    release. Only the value sources differ; see
+    :mod:`asterion.applications.prime.p7.live`.
+    """
+
+    root = invocation.operator_root
+    private = live.private_root(root, run_id)
+    trace_root = private / "trace"
+    trace_root.mkdir(mode=0o700)
+    worker = live.SubprocessPythonWorker(root=private)
+    engine = live.ArcadeEngine(
+        arc_root=invocation.arc_root, recordings_dir=private / "recordings"
+    )
+    print("[asterion-prime-p7] preflight", file=sys.stderr, flush=True)
+    resources_ = build_p7_operator_resources(
+        environment=invocation.environment,
+        pi_base_command=invocation.pi_base_command,
+        extension_path=invocation.extension_path,
+        working_directory=root,
+        worker=worker,
+        engine=engine,
+        private_trace_root=trace_root,
+    )
+    receipt: Mapping[str, object] = {}
+    broker_receipt: ArcRunReceipt | None = None
+    replay_verified = False
+    sealed_trace = False
+    cleanup_complete = False
+    comparison_report: Path | None = None
+    reason: str | None = None
+    failure: BaseException | None = None
+    diagnostics: dict[str, object] = {}
+    try:
+        print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
+        provider = resolve_installed_provider(
+            create_provider(),
+            runtime_factories=default_runtime_factory_registry(),
+            # The provider publishes every installed Prime application, and the
+            # composition closure is resolved for all of them, so the P1
+            # package must be present even though this run executes P7 only.
+            installed_packages=(
+                create_prime_arc_agi_3_solver_package(),
+                create_prime_ipython_coding_native_package(),
+            ),
+        )
+        application = provider.applications[0]
+        assembly = application.assemblies[0]
+        runtime = assembly.runtime_binding.factory(
+            RuntimeFactoryContext(
+                provider_id="prime-applications",
+                application_id="prime.arc-agi-3-solving",
+                application_version="1.0.0",
+                runtime_id="asterion.prime",
+                assembly_path=assembly.path,
+                options=resources_.runtime_options,
+                host_services=resources_.host_services,
+            )
+        )
+        result = await run_composed_application(
+            assembly.plan,
+            implementations=application.implementations,
+            runtime=runtime,
+            run_id=run_id,
+            input_text=P7_SOLVE_PROMPT,
+            host_services=resources_.host_services,
+            implementation_packages={CAPABILITY_REF: PACKAGE_REF},
+            signal=live.NeverCancelled(),
+        )
+        receipt = live.receipt_value(result.artifacts)
+        broker = resources_.host_services["prime.arc-broker"]
+        if not isinstance(broker, ArcBroker):
+            raise live.P7LiveSolveError("P7 broker is unavailable")
+        broker_receipt = broker.seal()
+        broker.replay(
+            lambda: live.ArcadeEngine(
+                arc_root=invocation.arc_root,
+                recordings_dir=private / "replay-recordings",
+            )
+        )
+        replay_verified = True
+        analyze_trace(live.read_trace_entries(trace_root))
+        sealed_trace = True
+        comparison_report = live.compare_if_available(root, trace_root, private)
+    except Exception as error:
+        failure = error
+        reason = (
+            str(error)
+            if isinstance(error, live.P7LiveSolveError)
+            else "P7 live solve unsuccessful"
+        )
+        raise
+    finally:
+        try:
+            broker_value = resources_.host_services.get("prime.arc-broker")
+            if isinstance(broker_value, ArcBroker):
+                try:
+                    status = broker_value.status()
+                    diagnostics["broker_status"] = {
+                        "actions_remaining": status.actions_remaining,
+                        "levels_completed": status.levels_completed,
+                        "primitive_actions": status.primitive_actions,
+                        "terminal_reason": status.terminal_reason,
+                    }
+                except Exception:
+                    pass
+            # The launch seam carries plain data only, so there is no live Pi
+            # session object left to read a failure or an stderr tail from.
+            diagnostics["worker_cell_count"] = live.worker_cell_count(private)
+            await resources_.close()
+            engine.close()
+            cleanup_complete = worker.closed
+        finally:
+            live.write_summary(
+                root,
+                private,
+                run_id=run_id,
+                receipt=receipt,
+                broker_receipt=broker_receipt,
+                replay_verified=replay_verified,
+                sealed_trace=sealed_trace,
+                cleanup_complete=cleanup_complete,
+                comparison_report=comparison_report,
+                reason=reason,
+                failure=failure,
+                diagnostics=diagnostics,
+            )
+    return live.P7LiveExecution(
+        run_id=run_id,
+        completed_level_count=int(receipt.get("completed_level_count", 0)),
+        primitive_action_count=int(receipt.get("primitive_action_count", 0)),
+        replay_verified=replay_verified,
+        sealed_trace=sealed_trace,
+        cleanup_complete=cleanup_complete,
+        trace_root=trace_root,
+        receipt=receipt,
+        comparison_report=comparison_report,
+    )
+
+
+def classify_live_result(result: live.P7LiveExecution) -> Mapping[str, object]:
+    """Project one completed solve into the public receipt, or fail closed."""
+
+    if result.completed_level_count != 1:
+        raise live.P7LiveSolveError("authoritative level transition was not observed")
+    if not 1 <= result.primitive_action_count <= _MAX_ACTIONS:
+        raise live.P7LiveSolveError("primitive action count is invalid")
+    if not result.replay_verified:
+        raise live.P7LiveSolveError("replay verification did not pass")
+    if not result.sealed_trace:
+        raise live.P7LiveSolveError("sealed trace was not verified")
+    if not result.cleanup_complete:
+        raise live.P7LiveSolveError("cleanup did not complete")
+    return _public_receipt(
+        "PASS",
+        result.run_id,
+        receipt=result.receipt,
+        completed_level_count=result.completed_level_count,
+        primitive_action_count=result.primitive_action_count,
+        replay_verified=result.replay_verified,
+        sealed_trace=result.sealed_trace,
+        cleanup_complete=result.cleanup_complete,
+        comparison_report=result.comparison_report,
+    )
+
+
+def _public_receipt(
+    status: str,
+    run_id: str,
+    *,
+    receipt: Mapping[str, object] | None = None,
+    completed_level_count: int = 0,
+    primitive_action_count: int = 0,
+    replay_verified: bool = False,
+    sealed_trace: bool = False,
+    cleanup_complete: bool = False,
+    comparison_report: Path | None = None,
+    reason: str | None = None,
+) -> Mapping[str, object]:
+    """Build the one public receipt; private evidence never crosses this line."""
+
+    source = {} if receipt is None else receipt
+    safe: dict[str, object] = {
+        "schema": "asterion.prime.p7-live-receipt/v1",
+        "application_id": "prime.arc-agi-3-solving",
+        "runtime_id": "asterion.prime",
+        "provider": _PROVIDER,
+        "model": _MODEL,
+        "game_id": live.GAME_ID,
+        "seed": live.SEED,
+        "status": status,
+        "run_id": run_id,
+        "completed_level_count": completed_level_count,
+        "primitive_action_count": primitive_action_count,
+        "replay_verified": replay_verified,
+        "sealed_trace": sealed_trace,
+        "cleanup_complete": cleanup_complete,
+    }
+    for name in ("partial_game_score", "receipt_sha256", "promotion", "scope"):
+        if name in source:
+            safe[name] = source[name]
+    if comparison_report is not None:
+        safe["comparison_report"] = "available"
+    if reason is not None:
+        safe["reason"] = reason
+    return safe
+
+
+def _reject() -> int:
+    print('{"status":"preflight-rejected"}')
+    return 2
+
+
+def main(argv: list[str] | None = None) -> int:
+    """The only external input is the literal Make preset invocation."""
+
+    invocation: P7Invocation | None = None
+    try:
+        if sys.argv[1:] if argv is None else argv:
+            raise P7OperatorError("P7 operator arguments are rejected")
+        invocation = _preflight(os.environ)
+    except BaseException:
+        pass
+    if invocation is None:
+        return _reject()
+    run_id = live.safe_run_id()
+    try:
+        result = classify_live_result(asyncio.run(run_live(invocation, run_id)))
+    except KeyboardInterrupt:
+        return 130
+    except Exception as error:
+        reason = (
+            str(error)
+            if isinstance(error, live.P7LiveSolveError)
+            else "P7 live solve unsuccessful"
+        )
+        print(
+            json.dumps(
+                _public_receipt("unsuccessful", run_id, reason=reason),
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+        print("[asterion-prime-p7] unsuccessful", file=sys.stderr, flush=True)
+        return 1
+    print(
+        json.dumps(
+            result, allow_nan=False, separators=(",", ":"), sort_keys=True
+        )
+    )
+    print("[asterion-prime-p7] PASS", file=sys.stderr, flush=True)
+    return 0
+
+
+def _entrypoint() -> None:
+    status = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    if status == 1:
+        # Python joins default-executor threads again during interpreter exit.
+        # A failed owner cannot regain an unbounded wait after public failure.
+        os._exit(status)
+    raise SystemExit(status)
+
+
+if __name__ == "__main__":
+    _entrypoint()
+
+
 __all__ = (
     "P7OperatorError",
     "P7OperatorResources",
     "P7RuntimeSelection",
+    "P7Invocation",
     "build_p7_operator_resources",
+    "classify_live_result",
+    "main",
     "p7_runtime_options",
     "resolve_p7_runtime",
     "resolve_pi_provider",
+    "run_live",
 )
