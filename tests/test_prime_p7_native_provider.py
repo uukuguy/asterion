@@ -230,9 +230,11 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-applications")
+        # P7 only. prime.ipython-coding is not published until it has a native
+        # package and an installed-route witness, per the detachment spec.
         self.assertEqual(
             tuple(application.application_id for application in provider.applications),
-            ("prime.arc-agi-3-solving", "prime.ipython-coding"),
+            ("prime.arc-agi-3-solving",),
         )
         application = provider.applications[0]
         self.assertEqual(

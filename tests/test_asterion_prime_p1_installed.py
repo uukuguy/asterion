@@ -1,4 +1,10 @@
-"""Installed-wheel metadata and selected-only proof for native P1."""
+"""Installed-wheel proof that unpublished P1 is packaged but not reachable.
+
+P1 has no native package and no installed-route witness yet, so its selector is
+omitted from the index and metadata lookup rejects it before importing a runtime.
+Its resources stay packaged, ready for Phase 4, which will replace this with the
+full installed-route witness.
+"""
 
 from __future__ import annotations
 
@@ -58,7 +64,12 @@ class TestAsterionPrimeP1Installed(unittest.TestCase):
                         if name.endswith(".dist-info/entry_points.txt")
                     )
                 ).decode("utf-8")
-                self.assertIn(
+                # P1 is not published: no native package, no installed-route
+                # witness. The spec requires an unmigrated selector to be
+                # omitted from the index so metadata lookup rejects it before
+                # importing a runtime. Its resources stay packaged above, ready
+                # for Phase 4, but the selector must not be reachable.
+                self.assertNotIn(
                     "prime.ipython-coding__1.0.0 = asterion.applications.prime:create_provider",
                     entry_points,
                 )
@@ -89,23 +100,17 @@ class TestAsterionPrimeP1Installed(unittest.TestCase):
             script.write_text(
                 """
 import json
-import sys
-from importlib import metadata, resources
+from importlib import resources
 from asterion.applications.discovery import select_application_provider_id
+from asterion.applications.provider import ApplicationProviderError
 
-selected = select_application_provider_id("prime.ipython-coding@1.0.0")
-assert selected == "prime-applications"
-entry = next(
-    item for item in metadata.entry_points(group="asterion.applications")
-    if item.name == selected
-)
-provider = entry.load()()
-application = next(
-    item for item in provider.applications
-    if item.application_id == "prime.ipython-coding"
-)
-assert application.runtime_ids == ("asterion.prime",)
-assert not any(name.startswith("asterion.applications." + "prime_agent") for name in sys.modules)
+# The unpublished selector is rejected before any runtime is imported.
+try:
+    select_application_provider_id("prime.ipython-coding@1.0.0")
+except ApplicationProviderError:
+    pass
+else:
+    raise AssertionError("unpublished P1 selector was not rejected")
 root = resources.files("asterion")
 paths = (
     root.joinpath("applications/prime/assemblies/prime-ipython-coding.json"),
@@ -113,7 +118,7 @@ paths = (
     root.joinpath("capabilities/prime_ipython_coding_native/payload/capabilities/prime-ipython-coding.json"),
 )
 assert all(path.is_file() for path in paths)
-print(json.dumps({"application": application.application_id, "provider": selected}, sort_keys=True))
+print(json.dumps({"selector": "rejected", "resources": "present"}, sort_keys=True))
 """.strip()
                 + "\n",
                 encoding="utf-8",
@@ -124,10 +129,7 @@ print(json.dumps({"application": application.application_id, "provider": selecte
             self.assertEqual(probed.returncode, 0, probed.stderr)
             self.assertEqual(
                 json.loads(probed.stdout),
-                {
-                    "application": "prime.ipython-coding",
-                    "provider": "prime-applications",
-                },
+                {"selector": "rejected", "resources": "present"},
             )
 
 

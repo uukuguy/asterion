@@ -7,7 +7,6 @@ from pathlib import Path
 
 from asterion.applications.first_party_packages import (
     PRIME_ARC_AGI_3_SOLVER_PACKAGE,
-    PRIME_IPYTHON_CODING_NATIVE_PACKAGE,
 )
 from asterion.applications.provider import (
     APPLICATION_PROVIDER_PROTOCOL,
@@ -37,15 +36,14 @@ def create_provider() -> InstalledApplicationProvider:
                 capability_packages=(PRIME_ARC_AGI_3_SOLVER_PACKAGE,),
                 runtime_ids=("asterion.prime",),
             ),
-            InstalledApplication(
-                application_id="prime.ipython-coding",
-                version="1.0.0",
-                assembly_paths=(
-                    root / "applications/prime/assemblies/prime-ipython-coding.json",
-                ),
-                capability_packages=(PRIME_IPYTHON_CODING_NATIVE_PACKAGE,),
-                runtime_ids=("asterion.prime",),
-            ),
+            # prime.ipython-coding is deliberately NOT published. It has no
+            # native package and no installed-route witness yet, and the
+            # detachment spec requires an unmigrated selector to be omitted so
+            # metadata lookup rejects it before importing a runtime or starting
+            # a process. Publishing it here also made resolution impossible for
+            # the P7 route: the closure is validated for every published
+            # application, so a P7 run failed unless P1's package was supplied
+            # too. It returns when Phase 4 supplies its witness.
         ),
         runtime_factory_bindings=(asterion_prime_runtime_binding(),),
     )

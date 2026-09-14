@@ -15,7 +15,6 @@ from asterion.applications.first_party_packages import (
     create_prime_ipython_coding_native_package,
 )
 from asterion.applications.prime import create_provider
-from asterion.applications.provider import compose_installed_provider
 from asterion.capability_packages import CapabilityPackageRef
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.capabilities.execution import (
@@ -23,7 +22,6 @@ from asterion.capabilities.execution import (
     CapabilityInvocation,
 )
 from asterion.capabilities.prime_ipython_coding_native.provider import CAPABILITY_REF
-from asterion.runtime.factory import RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 
 
@@ -166,7 +164,11 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                 )
             )
 
-    def test_provider_publishes_exact_sorted_p1_and_p7_applications(self) -> None:
+    def test_provider_publishes_only_p7_until_p1_has_a_witness(self) -> None:
+        # prime.ipython-coding is not published: it has no native package and no
+        # installed-route witness yet, and the detachment spec requires an
+        # unmigrated selector to be omitted so metadata lookup rejects it before
+        # importing a runtime or starting a process. Phase 4 restores it.
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-applications")
@@ -175,23 +177,14 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                 (application.application_id, application.version)
                 for application in provider.applications
             ),
-            (
-                ("prime.arc-agi-3-solving", "1.0.0"),
-                ("prime.ipython-coding", "1.0.0"),
-            ),
+            (("prime.arc-agi-3-solving", "1.0.0"),),
         )
-        application = provider.applications[1]
-        self.assertEqual(
-            application.capability_packages,
-            (CapabilityPackageRef("prime-ipython-coding-native", "1.0.0"),),
-        )
-        self.assertEqual(application.runtime_ids, ("asterion.prime",))
         self.assertEqual(
             tuple(binding.runtime_id for binding in provider.runtime_factory_bindings),
             ("asterion.prime",),
         )
 
-    def test_p1_package_is_explicitly_registered_and_composes(self) -> None:
+    def test_p1_package_is_explicitly_registered(self) -> None:
         source = BuiltinCapabilitySource(builtin_capability_registrations())
         candidates = tuple(source.discover_metadata())
         matching = tuple(
@@ -205,34 +198,12 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
             source.load_provider(matching[0]).package_ref, matching[0].package_ref
         )
 
-        composed = compose_installed_provider(
-            create_provider(),
-            runtime_factories=RuntimeFactoryRegistry(()),
-            installed_packages=(
-                create_prime_ipython_coding_native_package(),
-                # The provider owns P7 as well, so its exact closure stays available.
-                next(
-                    registration.provider_factory()
-                    for registration in builtin_capability_registrations()
-                    if registration.package_ref.package_id == "prime-arc-agi-3-solver"
-                ),
-            ),
-        )
-        application = next(
-            item
-            for item in composed.applications
-            if item.application_id == "prime.ipython-coding"
-        )
-        self.assertEqual(
-            application.assemblies[0].plan.host_capabilities, P1_HOST_CAPABILITIES
-        )
-        self.assertEqual(
-            tuple(
-                ref.capability_id
-                for ref in application.assemblies[0].plan.capability_refs
-            ),
-            ("prime.ipython-coding",),
-        )
+        # Composition through the provider is gone by design while the
+        # application is unpublished. The retained assembly's exact
+        # host_capabilities are asserted in
+        # test_closed_metadata_is_exact_sorted_and_contains_no_authority, which
+        # reads the JSON directly. Phase 4 restores provider composition along
+        # with the witness.
 
     def test_closed_metadata_is_exact_sorted_and_contains_no_authority(self) -> None:
         assembly = json.loads(ASSEMBLY.read_text(encoding="utf-8"))

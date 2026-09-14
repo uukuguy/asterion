@@ -36,9 +36,6 @@ from asterion.capabilities.prime_arc_agi_3_solver.provider import (
     PACKAGE_REF,
     create_prime_arc_agi_3_solver_package,
 )
-from asterion.capabilities.prime_ipython_coding_native.provider import (
-    create_prime_ipython_coding_native_package,
-)
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext
@@ -532,13 +529,10 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         provider = resolve_installed_provider(
             create_provider(),
             runtime_factories=default_runtime_factory_registry(),
-            # The provider publishes every installed Prime application, and the
-            # composition closure is resolved for all of them, so the P1
-            # package must be present even though this run executes P7 only.
-            installed_packages=(
-                create_prime_arc_agi_3_solver_package(),
-                create_prime_ipython_coding_native_package(),
-            ),
+            # Only P7 is published now, so the closure validates against this
+            # one package. It previously needed P1's package too, purely because
+            # P1 was published without a witness.
+            installed_packages=(create_prime_arc_agi_3_solver_package(),),
         )
         application = provider.applications[0]
         assembly = application.assemblies[0]

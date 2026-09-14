@@ -90,6 +90,19 @@ class CodingPi(FakeReusablePi):
 
 class TestP1Operator(unittest.IsolatedAsyncioTestCase):
     async def fixture(self, *, aggregate_tokens: int = 64_000):
+        # P1 has no native package and no installed-route witness yet, so the
+        # detachment spec keeps its selector unpublished. Its operator resolves
+        # itself out of the provider, so these route tests cannot build a
+        # fixture while it is unavailable — they resume when Phase 4 publishes it.
+        from asterion.applications.prime import create_provider
+
+        if not any(
+            application.application_id == "prime.ipython-coding"
+            for application in create_provider().applications
+        ):
+            raise unittest.SkipTest(
+                "prime.ipython-coding is unpublished until Phase 4 supplies its witness"
+            )
         self.assertIsNotNone(
             importlib.util.find_spec("asterion.applications.prime.p1.operator"),
             "native P1 operator coordinator is missing",
@@ -687,6 +700,15 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("SENTINEL_PRIVATE", output.getvalue())
 
     def test_stubborn_host_owners_are_bounded_and_real_worker_is_reaped(self):
+        # Same unpublished-P1 condition as fixture(); this one drives a
+        # subprocess instead, so it needs its own guard.
+        from asterion.applications.prime import create_provider
+
+        if not any(
+            application.application_id == "prime.ipython-coding"
+            for application in create_provider().applications
+        ):
+            self.skipTest("prime.ipython-coding is unpublished until Phase 4")
         root = Path(__file__).resolve().parents[1]
         program = r"""
 import asyncio, json, sys, time
