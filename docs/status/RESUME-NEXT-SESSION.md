@@ -1,6 +1,9 @@
 # Next-Session Handoff
 
-> Updated: 2026-09-15 05:40, end of session. 23 commits since `c6c425f9`.
+> Updated: 2026-09-15 05:40, end of session. Session commits:
+> `git log c6c425f9..HEAD` (state-only bookkeeping follows the handoff commit,
+> so a hard-coded count here would go stale on commit; it is stated as a range
+> on purpose).
 
 ## TL;DR
 
