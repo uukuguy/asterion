@@ -13,11 +13,15 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: Phase 1 — legacy Prime Agent release-surface removal and
-  the semantic source-detachment gate. Native P7 is the implementation anchor;
-  P1-P6 Prime-backed execution is historical evidence, not native closure. P1-P6
-  are unavailable until their native selectors return. Full benchmarking and
-  production promotion remain separately authorized work.
+- Active work package: **Phase 2** — convert the P7 research preset to an
+  installed-wheel invocation with an injected Pi command. Phase 1 (legacy
+  release-surface removal and the semantic source-detachment gate) is complete:
+  11/11 tasks, gate 1881 → 0, entry points 3/5/2. Native P7 remains the
+  implementation anchor. **P1-P7 native implementations: 0 of 7 — all
+  unavailable by design.** P1-P6 never had native implementations; P7 did, but
+  its route reached into Prime Agent's Pi dependency, so it too is unavailable
+  until Phases 2-3. Full benchmarking and production promotion remain separately
+  authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
   W2 public extension reference, W3a cross-package evidence, W3b
@@ -56,6 +60,25 @@
   shared Asterion framework. P1–P7 are applications, not the base agent kernel.
   Neither integration may authorize itself or bypass runners and injected host
   services.
+- **P1-P7 are application-level: nothing Pi-related may appear there.** The
+  application layer names only Asterion abstractions; the Pi implementation
+  lives below it. Enforced by
+  `grep -rnE 'Pi[A-Z]|pi_extension|pi_rpc|runtimes\.pi' src/asterion/applications/prime/`
+  returning nothing.
+- **The runtime seam is `prime.launch`** — plain data only (approved argv,
+  environment, extension resource identity and its already-acquired pinned file
+  descriptors). It replaced `prime.pi-extension`, which was named after an
+  implementation and carried live Pi objects across the seam. Neutral
+  abstractions live in `asterion.runtime` (`pinned_extension`, `native_rpc`);
+  `runtimes/pi_*` remains the Pi implementation.
+- **Runtime selection is a configuration decision, not application logic.** The
+  CLI resolves `runtime_id` from `--runtime` or the application's single
+  declared runtime, then selects the matching assembly. Upper layers execute
+  runtime-level semantics (`RunRequest`/`RunEvent`/`RuntimeManifest`) and must
+  not construct a specific kernel invocation.
+- **`./pi/` is Prime Agent's modified Pi**, gitignored and untracked. Asterion
+  never depended on it: `runtimes/pi_rpc.py` takes its Pi command by injection.
+  Asterion's own Pi extension resources live at `capabilities/dci/resources/pi/`.
 - The selected P7 solving route uses native `asterion.prime` plus Asterion's Pi
   integration. It does not import Prime Agent source or SDK. The former P7 SDK
   provider, gateway, CLI host, TypeScript bridge, seeded command, and package

@@ -15,6 +15,7 @@
 | D-2026-09-06-02 | 🟢 active | Retain closed v1 contracts after W2/W3 integration evidence |
 | D-2026-09-06-03 | 🟢 active | Separate provider-free framework gates from release regression |
 | D-2026-09-12-01 | 🟢 active | Use native P7 as the sole Asterion Prime base and rebuild P1-P6 without Prime Agent |
+| D-2026-09-14-01 | 🟢 active | Keep the application layer free of implementation references; the runtime seam carries plain data |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -191,3 +192,38 @@
 - Evidence: explicit user decisions on 2026-09-11 and 2026-09-12;
   `docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md`;
   commit `49dad716`.
+
+## D-2026-09-14-01 — Application layer free of implementation references
+
+- Status: 🟢 active
+- Decision: P1-P7 are application-level and must name only Asterion
+  abstractions. No Pi reference — type, import, module path or capability name
+  — may appear in `src/asterion/applications/prime/**`. The runtime seam carries
+  **plain data**: approved argv, environment, and the extension resource's
+  identity plus its already-acquired pinned file descriptors. Implementation
+  types stay below the seam in `runtimes/`; neutral abstractions live in
+  `asterion.runtime/`.
+- Rationale: `prime.pi-extension` was a host capability named after an
+  implementation whose payload carried live Pi objects (`PiRpcSession`,
+  `PiExtensionBinding`, `PiExtensionLease`) behind exact-type assertions. The
+  `agent-runtime/v1` envelope was framework-neutral, but that seam made any
+  non-Pi runtime unable to satisfy a P1 or P7 assembly — substitutability was
+  blocked at the capability vocabulary rather than at the protocol. The fault
+  was building P1/P7 host-first and pushing the *implementation* across the
+  seam, not merely the *authorization*.
+- Consequence: the seam is `prime.launch`. The pinned-resource lease machinery
+  moved to `asterion.runtime.pinned_extension` (it was already generic — stdlib
+  plus `asterion.immutable` only), and `asterion.runtime.native_rpc` re-exports
+  the RPC session under a neutral name. **Known limit:** the RPC half is neutral
+  by name, not by type — `RpcSession` *is* `PiRpcSession`, so a second runtime
+  would still require editing that module. Abstracting further is deferred until
+  a second runtime actually exists, because abstracting against no second
+  implementation tends to pick the wrong shape.
+- Preserved deliberately: the extension resource stays pinned by inherited file
+  descriptor and validated by `st_dev/st_ino/st_mode/st_rdev` plus loader digest,
+  **never re-resolved by path**. `ExtensionLease` crosses the seam as the single
+  owner of those descriptors; replacing it with a plain snapshot would either
+  re-open by path (TOCTOU) or create a second descriptor owner.
+- Evidence: commits `d89e48dd`, `94bfe017`;
+  `grep -rnE 'Pi[A-Z]|pi_extension|pi_rpc|runtimes\.pi' src/asterion/applications/prime/`
+  returns nothing; 70 targeted tests pass; detachment gate 0.
