@@ -236,6 +236,23 @@
   couples two applications that are meant to migrate independently, and it will
   distort Phase 4's P1 rebuild boundary. Decide the selector question before
   Phase 4.
+- **Phase 3's central question is now evidence-backed and unresolved: does a
+  detached Pi artifact exist?** The P7 preset takes the Pi command as an
+  operator value (`ASTERION_PRIME_PI_ENTRY`). The only Pi on this machine is
+  `./pi/` — a Pi monorepo checkout whose built entry is
+  `pi/packages/coding-agent/dist/rpc-entry.js`, which is the *same* artifact the
+  removed `run_asterion_prime_p7.py` reached into. `./pi/` is Prime Agent's
+  modified Pi by the operator's own statement, is gitignored, and is off-limits
+  to Asterion code. So code-level detachment is complete (gate 0, no reference),
+  but if the operator injects that path, the *runtime* executes Prime Agent's Pi.
+  Phase 3 must either name a genuinely independent Pi distribution or report
+  that none exists. This is an evidence question and an operator decision, not a
+  relabeling exercise. See the plan's "Risks carried into later phases" #2.
+- **No live P7 run is possible until four operator-owned values are set**:
+  `ASTERION_PRIME_OPERATOR_ROOT`, `ASTERION_PRIME_ARC_ROOT`,
+  `ASTERION_PRIME_NODE`, `ASTERION_PRIME_PI_ENTRY` (plus `DEEPSEEK_API_KEY`).
+  All are currently unset, so the preset fails closed at preflight with status
+  2 — correct behavior, but it means the anchor claim is untested.
 - Revalidate P7 without a Prime checkout (Phase 3), then rebuild P1, P2, P4, P3,
   P5, and P6 on the shared native `asterion.prime` path (Phases 4-9).
 - Keep every compound Asterion-native row missing until Phase 3.2+ evidence

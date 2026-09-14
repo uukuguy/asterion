@@ -2333,3 +2333,6 @@
 - 17:40 Phase 3 首要诊断完成：红测试根因是 26519254 翻转终态契约（agent_end 取代 agent_settled）却漏改共享 fixture；改 fixture 一处后测试转绿，gate 仍 0
 - 17:40 更正 17:06 的过度断言：该测试并非"不在任何门禁"，make test 的 discover 会收它；实为不在定向门禁且全量套件按研究强度未常跑
 - 17:40 记录可诊断性缺口：capability 失败只公开分类，异常被 from None 丢弃且无私下捕获，定位此行缺陷须临时探针；脱敏本身正确，缺的是私有捕获路径
+- 17:50 P7 聚焦原生回归 47 tests 全绿；Phase 3 四项验收（门禁/轮/安装路由/focused regression）均绿
+- 17:52 但锚点未证：四个 operator 自有值全未设，preset 失败关闭于 preflight，live 运行无法起
+- 17:52 风险 #2 有证据了：本机唯一 Pi 是 ./pi/（Prime Agent 改版），其构建入口正是被删 driver 曾伸手的 rpc-entry.js——代码层已脱离，运行层仍会执行 Prime Agent 的 Pi
