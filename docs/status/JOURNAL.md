@@ -2341,3 +2341,5 @@
 - 18:20 验证 P7 四个 operator 值在 Orb 内的正确形态：Pi 须走 /mnt/mac 挂载路径（Orb 看不到 /opt/homebrew 原路径），ARC 根同路径可见
 - 18:20 Orb 系统 node v20.19.4 过旧（Pi 用 node:fs.globSync，Node 22 才有）；preset 自带的 node@22 解析得 v22.23.2 可用
 - 18:20 实跑确认：Orb 内 node@22 下 Pi 报 0.85.1——Pi 依赖不再是开放问题，只剩 live solve 本身未跑
+- 22:15 更正本日 17:40/17:50/17:52/18:05/18:20 五条时间戳：系我估算而非实测，违反实时时间规则；真值取提交时间 18:18/18:26/18:26/18:34/18:42，内容不受影响
+- 22:12 起跑 live P7 solve（operator 授权）：wheel 构建成功、arc_agi 引擎加载、preflight 通过、live-run 已开始
