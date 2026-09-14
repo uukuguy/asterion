@@ -20,7 +20,8 @@ For Claude:
 - 裸别名直接报错：`opus` → `The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed opus`。
 - `Agent` 工具的 `model` 参数**只接受 `sonnet/opus/haiku/fable` 别名**，无法传 `deepseek-flash`。所以"按难度选模型"在这套后端上是不可能实现的——传任何别名都等于选最贵模型，且与意图相反（本想派 Haiku 省钱，实际跑 pro）。
 - 因此唯一安全的做法是**完全不传 model**。上面的 Fable/Opus/Sonnet/Haiku 分工仅在非 DeepSeek 后端（原生 Anthropic 端点）下适用。
-- 同理 `ANTHROPIC_SMALL_FAST_MODEL` 必须显式设为 `deepseek-flash`；未设置时，后台任务（文件摘要、标题生成、后台安全复审）会使用 Claude 的 haiku 模型名，**同样被映射到 `deepseek-v4-pro`**。
+- 同理 `ANTHROPIC_SMALL_FAST_MODEL` **必须保持**为 `deepseek-flash[1m]`——它已由启动脚本 `~/openai-coding-deepseek.sh` 正确设置，后台任务（文件摘要、标题生成、安全复审）因此已在 flash 上。**不要删除该行**；一旦缺失，后台任务会退回 Claude 的 haiku 模型名并被映射到 `deepseek-v4-pro`。
+- **本次费用事件的实际单一原因**：全部 `deepseek-v4-pro` 开销来自 Agent 调用里传入的 `model:` 别名（`~/openai-coding-deepseek.sh` 的后台模型设置一直是正确的）。即"禁止给 subagent 指定 model"这一条是解决方案，不是预防措施。
 - 解题研究而非发布产品，测试不需要过于严苛极端，保证边界控制断言即可。不要在测试环节花费的过多时间
 - 研发阶段复审和测试的重点应该是变更后代码实现的评审
 - 及时完整提交，不要积累大量未跟踪、未提交的文件
