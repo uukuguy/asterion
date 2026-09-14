@@ -92,7 +92,7 @@ testable deliverable and must not be pre-choreographed here.
 | # | Phase | Depends on | Acceptance (spec-derived) | Plan |
 |---|---|---|---|---|
 | 1 | Legacy release-surface removal + expanded detachment gate | — | Gate scans the complete release surface and fails on representative forbidden references; no legacy execution edge remains | **this plan** |
-| 2 | Conversion of research presets to installed-wheel invocation | 1 | `asterion-prime-p7-solve` runs from a wheel, no `PYTHONPATH=<src>` | pending |
+| 2 | Conversion of research presets to installed-wheel invocation | 1 | `asterion-prime-p7-solve` runs from a wheel, no `PYTHONPATH=<src>` | **this plan, Phase 2** |
 | 3 | P7 native revalidation (anchor) | 2 | Expanded detachment + wheel + installed-route + focused native regression pass with no Prime checkout | pending |
 | 4 | P1 rebuild (`prime.ipython-coding`) | 3 | Spec P1 witness: two model-driven cells share one restricted worker; stage-one file bytes survive Asterion-owned compaction and host reconstruction; oracle passes; cleanup precedes public terminal | pending |
 | 5 | P2 rebuild (`prime.programmatic-long-context`) | 4 | Source material stays outside the prompt; ≥1 bounded programmatic retrieval/transform through an injected service; answer oracle passes within caps | pending |
@@ -1636,5 +1636,81 @@ any new live run. Those are Phases 2-9.
    `3th-party/prime-agent.git` and is not covered by that prohibition, but
    Phase 2 must decide whether the ARC broker is injected as a host service
    rather than referenced as a sibling venv path.
+   **RESOLVED (2026-09-14, Phase 2):** neither. See D1 in Phase 2 below.
 3. **Rust surface** — this plan does not touch `executor.controlled`; confirm in
    Phase 2 that no Rust path references a Prime surface.
+   **RESOLVED (2026-09-14, Phase 2):** closed clean —
+   `grep -rniE 'prime|pi_rpc|pi_extension' packages/rust/` returns nothing.
+
+---
+
+## Phase 2: Research presets to installed-wheel invocation
+
+**Status:** planned 2026-09-14. Depends on Phase 1 (complete).
+
+**Scope correction.** This phase was described as a *conversion*, but Phase 1
+Task 4 already deleted the target and its driver (`tools/run_asterion_prime_p7.py`,
+1006 lines). What remains in the Makefile is one Prime target,
+`asterion-prime-p1-run`, which is already the installed-wheel shape. Phase 2
+therefore **rebuilds** the P7 preset to that shape; it does not edit an existing
+one.
+
+**What Phase 2 delivers.** `asterion-prime-p7-solve` builds a wheel, runs the P7
+operator from it with `PYTHONPATH` unset, and reaches the P7 installed route.
+**What it does not deliver:** a live solve. That is Phase 3, which is
+provider-backed and needs its own operator authorization.
+
+### D1 — ARC engine dependency: operator-injected root, wheels via `--with`
+
+Resolves open question 2. Neither sibling-venv reference nor a cross-process
+host service.
+
+- **Evidence the mechanism exists.** `../external-prime/arc-agi-3/wheels/`
+  holds `arc_agi-0.9.9-py3-none-any.whl` and
+  `arcengine-0.9.3-py3-none-any.whl` — both pure-Python, so they install into
+  an isolated environment. `environment_files/ls20/` holds the game data the
+  engine reads.
+- **Mechanism.** Mirror the surviving P1 preset exactly:
+  `uv run --isolated --with <asterion.whl> --with <arc_agi.whl>
+  --with <arcengine.whl> --with "python-dotenv>=1.0.0" python -I -m
+  asterion.applications.prime.p7.operator`. The ARC root reaches the preset as
+  an **operator-owned value** (`ASTERION_PRIME_ARC_ROOT`), the same pattern as
+  the existing `ASTERION_PRIME_OPERATOR_ROOT` and `ASTERION_PRIME_NODE`. No
+  operator is asked for a provider, model, cost or deadline knob.
+- **The IPython worker** runs on the isolated environment's own interpreter.
+  The old `external_root/venv/bin/python` resolution disappears, because
+  `ipython` is already supplied by `--with`.
+- **Rejected — sibling-relative resolution.** `root.parent / "external-prime"`
+  baked a checkout layout into application code. That is what the Phase 1 gate
+  was written to catch.
+- **Rejected — a cross-process ARC host service.** `ArcBroker` already takes
+  its engine as the `_ArcEngine` Protocol, so this is architecturally
+  reachable, but it rewrites P7 application logic, which the spec forbids.
+  Revisit only if a second consumer of the ARC engine appears.
+
+### D2 — Rust surface
+
+Resolves open question 3: closed clean, see above.
+
+### Tasks
+
+1. **P7 operator entrypoint.** Give the P7 operator a `main` matching the P1
+   operator's entry contract, reconstructed from the deleted driver's
+   `_run_live` / `main`. Drop the `sys.path.insert` hack and all sibling-relative
+   resolution; take the ARC root from the injected operator value. Public
+   output stays the single receipt JSON plus one status line.
+2. **Makefile preset.** Add `asterion-prime-p7-solve` in the P1 preset's shape:
+   temp build dir with `trap` cleanup, `uv build --wheel`, single-wheel
+   assertion, Orb execution, `unset PYTHONPATH`, isolated `--with` set.
+3. **Preset contract test.** Extend `tests/test_prime_make_presets.py` to pin
+   the P7 preset's required literals and to forbid `PYTHONPATH=src`,
+   `ASTERION_PRIME_WORKER_PYTHON`, an external `venv/bin/python` reference, and
+   any `external-prime` path literal.
+4. **Gate stays 0.** The detachment gate reads the whole tree, so the new
+   preset, entrypoint and test are all in its scan roots.
+
+### Execution discipline
+
+Unchanged from Phase 1, and it binds here: the gate scans the entire release
+surface on every run, so **one writer at a time**. No concurrent agent may hold
+an uncommitted edit while a scan runs.

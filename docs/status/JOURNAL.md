@@ -2324,3 +2324,6 @@
 ## 2026-09-14
 
 - 16:44 Phase 2 落地：P7 preset 重建为装轮调用（新 p7/live.py + operator.main），ARC/Pi 走 operator-owned 值，gate 前 0 后 0 [9a38405a]
+- 17:05 独立复核 Phase 2：gate 0、preset 契约测试 2 通过、make -n 形状正确；p7/ 仅新增 live.py，无瞒报文件
+- 17:06 查实 test_prime_p7_native_installed 在 pristine HEAD 即红，且不在任何门禁（Makefile/CI/tools 零引用）——非 Phase 2 回归，亦非健康证据，最后变绿日期未知
+- 17:06 其失败被 execution.py:471 catch-all 吞掉异常，根因未定；已记为 Phase 3 首要诊断项而非可预清项

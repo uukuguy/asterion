@@ -16,6 +16,7 @@
 | D-2026-09-06-03 | 🟢 active | Separate provider-free framework gates from release regression |
 | D-2026-09-12-01 | 🟢 active | Use native P7 as the sole Asterion Prime base and rebuild P1-P6 without Prime Agent |
 | D-2026-09-14-01 | 🟢 active | Keep the application layer free of implementation references; the runtime seam carries plain data |
+| D-2026-09-14-02 | 🟢 active | Supply research-preset external engines as operator-owned roots plus wheels, never as checkout-relative paths |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -227,3 +228,36 @@
 - Evidence: commits `d89e48dd`, `94bfe017`;
   `grep -rnE 'Pi[A-Z]|pi_extension|pi_rpc|runtimes\.pi' src/asterion/applications/prime/`
   returns nothing; 70 targeted tests pass; detachment gate 0.
+
+## D-2026-09-14-02 — Research-preset external engines
+
+- Status: 🟢 active
+- Context: the removed `asterion-prime-p7-solve` preset reached its ARC engine
+  by running `../external-prime/arc-agi-3/venv/bin/python` over Asterion
+  *source* (`PYTHONPATH=$(CURDIR)/src tools/run_asterion_prime_p7.py`). The
+  driver resolved its engine root as `root.parent / "external-prime" / ...` — a
+  checkout layout baked into application code — and resolved the IPython
+  worker's interpreter from that same sibling venv.
+- Decision: a research preset supplies an external engine as **two separate
+  operator-owned things** — a root value in the environment, and pure-Python
+  wheels through the isolated environment's `--with` set. P7 uses
+  `ASTERION_PRIME_ARC_ROOT` plus the `arc_agi`/`arcengine` wheels, mirroring the
+  existing `ASTERION_PRIME_OPERATOR_ROOT` and `ASTERION_PRIME_NODE` scalars. The
+  IPython worker runs on the isolated environment's own interpreter.
+- Rationale: the preset is a public surface. An operator-owned root keeps the
+  external resource a configuration input rather than a compiled-in layout, and
+  the `--with` set keeps the invocation installed-wheel-shaped. Baking a
+  `root.parent` traversal into application code is exactly the coupling the
+  Phase 1 gate exists to catch; a sibling venv interpreter additionally made the
+  worker's provenance depend on a directory Asterion does not own.
+- Consequence: the preset asks the operator for no provider, model, cost or
+  deadline knob — only for where the external engine lives. An unset root fails
+  closed at preflight (status 2) before any build or Orb entry.
+- Rejected: a cross-process ARC host service. `ArcBroker` already takes its
+  engine as the `_ArcEngine` Protocol, so it is architecturally reachable, but
+  it rewrites P7 application logic, which the detachment spec forbids. Revisit
+  only if a second consumer of the ARC engine appears.
+- Evidence: commit `9a38405a`; `make -n asterion-prime-p7-solve` expands with
+  `PYTHONPATH` unset; `tests/test_prime_make_presets` pins the shape and forbids
+  `PYTHONPATH=src`, `ASTERION_PRIME_WORKER_PYTHON`, `external-prime` and
+  `venv/bin/python` literals; detachment gate 0 before and after.

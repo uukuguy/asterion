@@ -13,14 +13,17 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: **Phase 2** — convert the P7 research preset to an
-  installed-wheel invocation with an injected Pi command. Phase 1 (legacy
-  release-surface removal and the semantic source-detachment gate) is complete:
-  11/11 tasks, gate 1881 → 0, entry points 3/5/2. Native P7 remains the
-  implementation anchor. **P1-P7 native implementations: 0 of 7 — all
-  unavailable by design.** P1-P6 never had native implementations; P7 did, but
-  its route reached into Prime Agent's Pi dependency, so it too is unavailable
-  until Phases 2-3. Full benchmarking and production promotion remain separately
+- Active work package: **Phase 3** — revalidate native P7 with no Prime
+  checkout, against the wheel preset Phase 2 built. Phases 1 and 2 are complete.
+  Phase 1 (legacy release-surface removal and the semantic source-detachment
+  gate): 11/11 tasks, gate 1881 → 0, entry points 3/5/2. Phase 2 (P7 research
+  preset as an installed-wheel invocation, D-2026-09-14-02): the preset builds a
+  wheel, unsets `PYTHONPATH`, and supplies the ARC engine as an operator-owned
+  root plus pure-Python wheels. Native P7 remains the implementation anchor.
+  **P1-P7 native implementations: 0 of 7 — all unavailable by design.** P1-P6
+  never had native implementations; P7 does, but it is not yet proven to run
+  end-to-end from the installed route, so it too stays unavailable until Phase 3
+  closes. Full benchmarking and production promotion remain separately
   authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
@@ -198,9 +201,18 @@
 
 ## Open Problems
 
-- Phase 1 (legacy release-surface removal + detachment gate) is complete: the
-  Prime Agent provider/runtime/SDK/Gateway execution surface is removed from
-  entry points, package data, Make targets, tools, and acceptance tests.
+- Phases 1 and 2 are complete: the Prime Agent provider/runtime/SDK/Gateway
+  execution surface is removed from entry points, package data, Make targets,
+  tools, and acceptance tests, and the P7 research preset is an installed-wheel
+  invocation.
+- **`tests/test_prime_p7_native_installed` fails on the pristine tree and is in
+  no gate.** Verified 2026-09-14 on a clean HEAD. It is excluded from the
+  Makefile, CI and `tools/`, so no gate can observe it. Its cause is not yet
+  located: it fails through a catch-all in
+  `src/asterion/agents/prime/execution.py` that discards the exception. It is
+  **not** evidence of a Phase 2 regression and **not** evidence of health —
+  its last-green date is unknown. This is Phase 3's first diagnostic, not a
+  pre-cleared item.
 - Revalidate P7 without a Prime checkout (Phase 3), then rebuild P1, P2, P4, P3,
   P5, and P6 on the shared native `asterion.prime` path (Phases 4-9).
 - Keep every compound Asterion-native row missing until Phase 3.2+ evidence
