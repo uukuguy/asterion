@@ -2308,3 +2308,7 @@
 - 00:28 移除 legacy Prime 打包面：entry-points 收至 3/5/2，force-include/artifacts 清 Prime 资源 [bb6e23e]
 - Task 7 落地：删 prime-gateway TS 包（97 文件/−52131 行）与 prime 锁/haress，asterion-prime-extension 门禁 266→0 [019e2c48]
 - Task 8 落地：删 204 个 Prime 耦合测试模块 + 2 fixture 树，重写 8 个 native 测试去 Prime 默认，collection 0 ImportError [663a0dab]
+- 10:12 澄清 pi/ 性质：prime-agent 依赖的修改版 Pi，Asterion 从构建起无此前提；pi_rpc.py 命令为注入式
+- 10:14 Task 9/10 合并提交：清剩余 Prime 工具、重指向 check_promotion、修复 Makefile/ci/docs [47a839dc]
+- 10:15 Task 11 证据重分类：H-035/036/037 转历史，agent-client/v1 确认保留 [f4fbc250]
+- 10:15 门禁 1881 → 0；Phase 1 完成（11/11）
