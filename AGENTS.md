@@ -12,6 +12,8 @@ For Claude:
 
 **DeepSeek 后端硬规则**：当 `ANTHROPIC_BASE_URL` 指向 DeepSeek（如 `https://api.deepseek.com/anthropic`）时，**禁止给任何 subagent 指定 model**——一律继承会话的 `ANTHROPIC_MODEL`，只使用该变量指定的模型。
 
+**决定（2026-09-14，用户）**：本后端统一使用 `deepseek-flash`（即 `deepseek-v4.1-flash`），**不做分档**。该模型能力已足够，无需按任务难度切换，"最难契约用 pro"的旧分工在此后端取消。
+
 原因（2026-09-14 实测，勿凭直觉推翻）：
 
 - DeepSeek 的 Anthropic 兼容层把**任何 `claude-*` 模型名静默映射到 `deepseek-v4-pro`（最贵档）**。实测：`claude-opus-4-7` → 返回 `deepseek-v4-pro`。
