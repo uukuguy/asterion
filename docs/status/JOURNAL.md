@@ -2338,3 +2338,6 @@
 - 17:52 风险 #2 有证据了：本机唯一 Pi 是 ./pi/（Prime Agent 改版），其构建入口正是被删 driver 曾伸手的 rpc-entry.js——代码层已脱离，运行层仍会执行 Prime Agent 的 Pi
 - 18:05 更正 17:52 的错误结论：独立 Pi 存在且可指名 @earendil-works/pi-coding-agent@0.85.1（npm 上游，无 prime-agent 依赖，与 ./pi/ 构建哈希不同）；我此前只 ls 了 ./pi/ 就断言"唯一 Pi"，已撤回
 - 18:05 来源是 PATH：/opt/homebrew/bin/pi 软链到 npm global root；计划风险 #2 转为"已解决（肯定）"
+- 18:20 验证 P7 四个 operator 值在 Orb 内的正确形态：Pi 须走 /mnt/mac 挂载路径（Orb 看不到 /opt/homebrew 原路径），ARC 根同路径可见
+- 18:20 Orb 系统 node v20.19.4 过旧（Pi 用 node:fs.globSync，Node 22 才有）；preset 自带的 node@22 解析得 v22.23.2 可用
+- 18:20 实跑确认：Orb 内 node@22 下 Pi 报 0.85.1——Pi 依赖不再是开放问题，只剩 live solve 本身未跑

@@ -248,10 +248,23 @@
   after inspecting only `./pi/`; that conclusion was drawn from one `ls` and is
   withdrawn.** Discovered by searching `PATH` (`/opt/homebrew/bin/pi` symlinks
   into the npm global root), which is where an installed Pi actually lives.
-- The operator-owned value for the P7 preset is therefore
-  `ASTERION_PRIME_PI_ENTRY=/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js`,
-  with `ASTERION_PRIME_NODE` resolved the way the P1 preset resolves it.
-  **No live run has yet been made** to confirm the route end to end.
+- **Verified wiring for the P7 preset (all four values, checked in Orb).**
+  OrbStack mounts the Mac at `/mnt/mac` and `/Users` at the same path, so the
+  installed Pi is reachable *inside* Orb only via the `/mnt/mac` form:
+  `ASTERION_PRIME_PI_ENTRY=/mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js`.
+  `ASTERION_PRIME_ARC_ROOT=/Users/sujiangwen/sandbox/agentic-2026/external-prime/arc-agi-3`
+  (visible in Orb at the same path, with both wheels and `environment_files/ls20/`).
+  `ASTERION_PRIME_OPERATOR_ROOT` is the mounted checkout. `DEEPSEEK_API_KEY` is
+  present in `.env`.
+- **Orb's system node is v20.19.4 and is too old** — the Pi imports
+  `node:fs.globSync`, which Node 22 added, so running it under `/usr/bin/node`
+  fails with `SyntaxError: ... does not provide an export named 'globSync'`.
+  The preset's own `npm exec --offline --yes --package=node@22` resolution
+  returns v22.23.2 and works. Do not "simplify" the preset to use the system
+  node.
+- **Confirmed by running:** inside Orb, under the preset's node@22, the named Pi
+  answers `--version` with **0.85.1**. The Pi dependency is therefore no longer
+  an open question; only the live solve itself remains unrun.
 - **No live P7 run has been made.** The preset reads four operator-owned values
   (`ASTERION_PRIME_OPERATOR_ROOT`, `ASTERION_PRIME_ARC_ROOT`,
   `ASTERION_PRIME_NODE`, `ASTERION_PRIME_PI_ENTRY`, plus `DEEPSEEK_API_KEY`);
