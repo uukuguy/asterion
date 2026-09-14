@@ -1753,3 +1753,75 @@ recorded as cleared.
 **Boundary.** This proves P7's installed route and Level-1 solving on
 `ls20-9607627b` at seed 0 with `deepseek-v4-flash`. It is not a full-game,
 multi-seed, or multi-game result, and nothing is promoted.
+
+---
+
+## Phase 4: P1 rebuild (`prime.ipython-coding`)
+
+**Status:** planned 2026-09-15. Depends on Phase 3 (complete).
+
+### The actual gap
+
+P1 is not missing an implementation — it is missing a **launch path**. The
+package already carries `operator`, `ipython_host`, `coordination`, `oracle`,
+`receipt`, `runtime_binding`, `task`, `worker` and `worker_main`, and the native
+substrate below it (`asterion.agents.prime.backend` including `_compact`,
+`context` with `PrimeCompactionEvidence` / `validate_compaction_witness`,
+`compaction_budget`, `session`, `store`, `state`, `trace`) is present.
+
+What is absent is the wiring between them. `p1/operator.py::_preflight` raises
+unconditionally and says so:
+
+```
+"""Refuse source execution, then report P1 unavailable.
+
+The native P1 launch path was removed before a replacement exists, so there
+is no Asterion-owned worker command or compaction backend to construct.
+"""
+```
+
+Phase 1 Task 5 removed the Prime-coupled launch and the replacement was never
+built, which is why P1 is unpublished (D-2026-09-12-01; the 2026-09-15 provider
+change). **Phase 4 builds that launch path.** It does not rewrite the
+application logic above it.
+
+### Acceptance — the spec's P1 witness, verbatim
+
+> two model-driven cells share one restricted worker; immutable stage-one file
+> bytes survive Asterion-owned context compaction and host reconstruction; the
+> final oracle passes and cleanup precedes the public terminal.
+
+### Tasks
+
+1. **Native launch path.** Construct the worker command, the Pi command and the
+   compaction backend from Asterion-owned values only. Reuse the P7 shape
+   (D-2026-09-14-03): the Pi runtime is an operator-owned entry path satisfied by
+   the independently installed upstream package, not a checkout. No Prime
+   internal module may supply compaction semantics.
+2. **Wire the existing components** — `runtime_binding` → assembly → runner,
+   with the retained `oracle`, `coordination`, `receipt` and `worker` unchanged.
+3. **Live witness run.** The P1 preset must execute the witness end to end. Like
+   P7's, this is provider-backed and needs operator authorization; it also needs
+   the same Orb wiring traps to be respected (`/mnt/mac` path form; the preset's
+   own `node@22`, not Orb's v20).
+4. **Republish P1 and remove the guards.** P1 returns to `create_provider()` and
+   to the packaging index *together with its witness*, per the spec's "the exact
+   selector is added back only with its native package and installed-route
+   witness". The 15 skip guards added on 2026-09-15 in
+   `tests/test_asterion_prime_p1_operator.py` and the retargeted assertions in
+   `tests/test_asterion_prime_p1_installed.py` / `tests/test_asterion_prime_p1_provider.py`
+   are reverted to full witnesses in the same change.
+
+### Do not
+
+- Rebuild P1 by restoring any Prime launch, Prime lock, or Prime compaction
+  import. The removed surface is the reason the phase exists.
+- Publish P1 before its witness run passes. Unpublished is the correct state
+  until then.
+
+### Carried risk
+
+Plan risk 1 (compaction through a removed Prime lock) was never exercised — the
+Phase 3 run finished in ~4.5 minutes and never reached compaction. P1's witness
+*requires* compaction, so **Phase 4 is where that risk is actually tested**. If
+the Asterion-owned compaction backend is incomplete, this phase surfaces it.
