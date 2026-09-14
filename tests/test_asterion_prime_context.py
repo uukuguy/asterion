@@ -6,9 +6,7 @@ from dataclasses import asdict
 import hashlib
 import importlib.util
 import json
-import os
 from pathlib import Path
-import shutil
 import socket
 import struct
 import time
@@ -561,67 +559,15 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
         await asyncio.gather(sending, return_exceptions=True)
 
 
-class TestPrimeContextWitnessIntegration(
-    ContextMixin, unittest.IsolatedAsyncioTestCase
-):
-    async def test_python_admits_and_privately_persists_real_locked_pi_compaction(self):
-        context = self.module()
-        node = shutil.which("node")
-        self.assertIsNotNone(node)
-        harness = (
-            ROOT
-            / "packages/typescript/asterion-prime-extension/test/context-witness-harness.mjs"
-        )
-        host, peer = socket.socketpair()
-        uncertain, stored, reserved = [], [], []
-        session = context.PrimeContextWitnessSession(
-            host,
-            launch_nonce=LAUNCH,
-            timeout_seconds=5,
-            mark_uncertain=lambda: uncertain.append(True),
-        )
-        child = await asyncio.create_subprocess_exec(
-            node,
-            str(harness),
-            json.dumps({"descriptor": peer.fileno(), "timeoutMs": 5000}),
-            cwd=ROOT,
-            pass_fds=(peer.fileno(),),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={"PATH": os.environ["PATH"], "LANG": "C.UTF-8"},
-        )
-        peer.close()
-        try:
-            await session.arm(command_nonce=COMMAND, authority_sha256=AUTHORITY)
-            self.assertTrue(
-                await session.receive_proposal_and_decide(
-                    price=ModelPrice(2_000_000, 4_000_000),
-                    remaining_callbacks=2,
-                    deadline=time.monotonic() + 30,
-                    reserve=reserved.append,
-                )
-            )
-            evidence = await session.receive_persisted(persist=stored.append)
-            stdout, stderr = await asyncio.wait_for(child.communicate(), 10)
-            self.assertEqual(child.returncode, 0)
-            self.assertEqual(stderr, b"")
-            result = json.loads(stdout)
-            self.assertEqual(
-                (result["calls"], result["appends"], result["error"]), (2, 1, None)
-            )
-            self.assertEqual(len(reserved), 1)
-            self.assertEqual(len(stored), 1)
-            checkpoint = json.loads(stored[0])
-            self.assertEqual(
-                checkpoint["compaction_entry"]["summary"], checkpoint["summary"]
-            )
-            self.assertLess(
-                evidence.after_context_tokens, evidence.before_context_tokens
-            )
-            self.assertFalse(uncertain)
-            self.assertNotIn("checkpoint", json.dumps(asdict(evidence)))
-        finally:
-            session.close()
-            if child.returncode is None:
-                child.kill()
-                await child.communicate()
+# Removed 2026-09-15 (Phase 4): TestPrimeContextWitnessIntegration drove
+# packages/typescript/asterion-prime-extension/test/context-witness-harness.mjs.
+# That harness resolved the off-limits Prime Agent checkout, verified its
+# compaction lock against it, and imported Prime's compaction internals. (The
+# checkout path is spelled nowhere here on purpose: the detachment gate scans
+# comments too, so a literal would flag this file.) Phase 1 Task 7 deleted the
+# harness as a forbidden execution edge,
+# leaving this test red and unobserved because it sat in no targeted gate. The
+# detachment spec forbids tests that require a Prime checkout to pass, so the
+# test is removed rather than restored. P1's compaction-admission coverage is
+# rebuilt against Asterion-owned semantics in Phase 4; the 20 tests above cover
+# the same session's framing, timing and fencing behaviour without a checkout.
