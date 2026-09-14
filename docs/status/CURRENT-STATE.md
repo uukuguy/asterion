@@ -231,17 +231,28 @@
   than captured privately, and locating this one-line fixture defect required a
   temporary probe. The suppression is consistent with the redaction rules and
   should not be loosened; the missing half is a private capture path.
-- **`create_provider()` publishes both P7 and P1, and the composition closure
-  resolves for every published application.** Resolving a P7 run therefore
-  requires the P1 package to be present, even though only P7 executes; Phase 2
-  supplies both and says so in a comment at
-  `src/asterion/applications/prime/p7/operator.py:535`. Phase 1's stated
-  criterion was that an unmigrated application's selector is *omitted* from
-  `prime-applications` so metadata lookup rejects it. It was not omitted.
-  Supplying both packages is a documented workaround, not a resolution: it
-  couples two applications that are meant to migrate independently, and it will
-  distort Phase 4's P1 rebuild boundary. Decide the selector question before
-  Phase 4.
+- **The P7/P1 coupling is RESOLVED (2026-09-15).** The resolver was never at
+  fault: validating every published application and failing closed is a
+  deliberate integrity rule — a published application must be executable. The
+  defect was that `create_provider()` published P1, which has no native package
+  and no installed-route witness, breaching the spec's omit-unmigrated rule.
+  P1 is no longer published and P7 supplies only its own package. Measured
+  against a stashed baseline over the 208-test prime set: **zero new breakage,
+  one pre-existing failure fixed**. This enforced D-2026-09-12-01; it decided
+  nothing new, so it adds no DECISIONS entry.
+- **P1's operator resolves itself out of the provider** (it filters
+  `create_provider()` down to P1, `p1/operator.py:238`), so while P1 is
+  unpublished 15 route tests in `test_asterion_prime_p1_operator.py` **skip with
+  an explicit reason** and the 3 that avoid that fixture still run. Phase 4
+  restores publication and removes both guards. Note the shared shape: *both*
+  operators filter the global provider rather than declaring their own
+  application metadata, which is why publication state reaches so far.
+- **A pre-existing red test points at the compaction area.**
+  `test_python_admits_and_privately_persists_real_locked_pi_compaction`
+  (`tests/test_asterion_prime_context.py`) fails on the pristine tree with
+  `PrimeContextError: invalid Prime context witness`. Not investigated; its name
+  places it in plan risk 1's family, which remains untested.
+
 - **Plan risk #2 is RESOLVED in the affirmative: a detached Pi artifact exists
   and is named.** `@earendil-works/pi-coding-agent@0.85.1`, an MIT npm package
   from the upstream `github.com/earendil-works/pi` project, installed at

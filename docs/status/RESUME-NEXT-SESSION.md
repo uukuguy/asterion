@@ -64,11 +64,14 @@ Must not be inferred as complete from local code or unit tests.
 - **Plan risk 1 is NOT cleared.** Whether P7 resolves compaction through the
   removed Prime checkout lock is a long-session property; a 4.5-minute run never
   reached compaction. Do not record it as tested, and do not restore the lock.
-- **The P7/P1 composition-closure coupling is unresolved.** `create_provider()`
-  publishes both applications and the closure is resolved for all of them, so a
-  P7 run requires the P1 package present (`p7/operator.py:535` says so). Phase 1's
-  criterion said an unmigrated selector should be omitted; it was not. **Settle
-  this before Phase 4**, which is where it will distort the boundary.
+- **The P7/P1 coupling is resolved (2026-09-15).** The resolver was never at
+  fault; the defect was `create_provider()` publishing P1 without a witness. P1
+  is now unpublished and P7 supplies only its own package. 15 P1 route tests
+  skip explicitly until Phase 4. See CURRENT-STATE for the measured baseline.
+- **A pre-existing red test sits in the compaction family.**
+  `test_python_admits_and_privately_persists_real_locked_pi_compaction`
+  (`tests/test_asterion_prime_context.py`) fails on the pristine tree. Not
+  investigated; it may be plan risk 1 surfacing.
 - **Diagnosability gap.** A capability failure is reported as a classified
   `failure_class` only; the cause is discarded (`composed.py` re-raises
   `from None`) and not captured privately either. Locating the fixture defect
