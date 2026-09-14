@@ -2350,3 +2350,6 @@
 - 01:20 裁决 P7/P1 耦合：真因不是闭包语义（resolver 行为正确，fail-closed 完整性），而是 create_provider 发布了没有 witness 的 P1；撤下 P1 后 P7 只需自己的包 [cc9072fb]
 - 01:20 影响面实测（stash 基线对比 208 测试）：零新增破坏，修复 1 个自 Phase 1 起就红的 P1 installed 测试；P1 operator 的 15 个路由测试改为显式 skip（其 operator 自行从 provider 解析，未发布即构造不出）
 - 01:20 另发现一个基线即红的测试 test_python_admits_and_privately_persists_real_locked_pi_compaction，名字指向 locked pi compaction——疑与计划风险 #1 同族，未查
+- 02:05 查实那个 compaction 红测试：它驱动一个 Node harness，而该 harness 直连禁止的 Prime Agent checkout、验其 compaction 锁、导 Prime compaction 内部——Phase 1 Task 7 删它是对的，Spec 明禁"需要 Prime checkout 才能过的测试"，故删测试而非恢复 [711714c8]
+- 02:05 这是同一失效模式的第三例：Phase 1 留下的测试依赖已删面、又只在全量套件里，无人看见。prime 全集现 207 tests OK / 34 skipped，两个基线红全清，门禁 0
+- 02:05 教训：门禁连注释一起扫，我在说明性注释里拼出了禁用路径字面量，当场把门禁从 0 变成 1；已改为不拼字面量
