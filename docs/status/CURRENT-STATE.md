@@ -4,7 +4,8 @@
 
 - Project: Asterion
 - Active branch: local `main`; implementation verification is scoped to its
-  named boundaries, and `origin/main` remains unchanged
+  named boundaries. Phase 1 removal work advances local `main` ahead of
+  `origin/main`; the remote is no longer the canonical head for this work.
 - Theme-level focus: remove every Prime Agent execution edge from the Asterion
   distribution, revalidate native P7, then rebuild P1-P6 on that implementation.
 - Project route: managed
@@ -40,7 +41,7 @@
 - Git recovery closure: one clean local `main` branch and one primary worktree
   remain. A verified complete-history bundle preserves every audited committed
   head, and separate patches/archive preserve accepted uncommitted source
-  state. `origin/main` remains unchanged.
+  state. Phase 1 detachment work advances local `main` beyond `origin/main`.
 
 ## Current Architecture
 
@@ -49,8 +50,8 @@
 - Python owns orchestration, exact resolution, authority, admission, budgets,
   canonical journal/state, application execution, and public-safe evidence.
 - TypeScript validates shared contracts and may own Asterion Pi extension or
-  Node integration code. Prime Gateway execution is legacy and must leave the
-  distribution. Rust remains limited to controlled execution.
+  Node integration code. The Prime Gateway execution surface has been removed
+  from the distribution. Rust remains limited to controlled execution.
 - `asterion.prime` and `asterion.native` are peer agent integrations over the
   shared Asterion framework. P1–P7 are applications, not the base agent kernel.
   Neither integration may authorize itself or bypass runners and injected host
@@ -66,7 +67,9 @@
   private-value service. They may not introduce alternate composers or runners.
 - The approved design places a new closed `asterion.agent-client/v1`
   projection above `ControlHost`; existing control/runtime v1 contracts remain
-  unchanged.
+  unchanged. `agent-client/v1` is a framework-level contract consumed by the
+  surviving `asterion.client` surface, not a Prime-Gateway-backed projection;
+  its schema is retained unconditionally.
 - Prime Agent may exist only as an external black-box baseline whose exported
   neutral logs are read outside execution. Credentials, provider configuration,
   private content, and generated evidence remain operator-owned.
@@ -107,30 +110,21 @@
   tests and 95 related runtime, provider, Prime, DCI, and core boundary tests
   passed; Sol approved the implementation with no remaining material findings.
 
-- Prime Gateway `ecosystem.capabilities` remains PASS at 10/10 provider-free.
-- H-035 is PASS exactly once: its four provider-free client receipts cover nine
-  `interface.*` rows (9/9 selected/passed, zero blocking) with zero
-  provider/model/credential/network/upload operations.
-- H-036 is PASS exactly once: its six provider-free operational receipts cover
-  `operation.auth`, `operation.model-selection`,
-  `operation.settings-keybindings`, `operation.telemetry-usage`,
-  `operation.doctor`, and `operation.controlled-update-restart` (6/6
-  selected/passed, zero blocking) with zero provider/application operations.
-- The clean canonical H-036 closure used the pinned Prime source at
-  `a18809e00ea30638584d87b3afea7285a9d7296c`, rebuilt locked workspaces under
-  Node 22.23.2, then passed `make check`, `make promotion-check`, and
-  `git diff --check`. Promotion reported `commands=28`, zero provider
-  operations, and `full_dataset=no`.
-- Climb cycles 35 through 38 each occur exactly once:
-  `check.client-interfaces-closure`, `check.operational-parity-closure`,
-  `prime-system-parity-operation-host-callback`, and
-  `check.native-controller-core-provider-free`.
-  `next_action` is `phase-3.2-native-small-verification-sidecar`.
-- `interfaces.operations` is PASS at exactly 15/15 Prime Gateway rows after
-  H-035 plus H-036.
-- Prime Gateway canonical `Verified-system-parity` remains PASS at H-037: the
-  exact checker reports 61 passed, zero ledger blockers, and two excluded rows
-  with zero provider/application operations.
+- **Historical (Prime Gateway-backed, pre-detachment).** The following were
+  PASS against the now-removed Prime Gateway execution surface and are recorded
+  as historical compatibility evidence, not native Asterion closure:
+  - Prime Gateway `ecosystem.capabilities` 10/10 provider-free;
+  - H-035 client-interface parity (nine `interface.*` rows 9/9);
+  - H-036 operational parity (`operation.*` six rows 6/6), closed at the pinned
+    Prime source `a18809e00ea30638584d87b3afea7285a9d7296c`;
+  - `interfaces.operations` 15/15 Prime Gateway rows;
+  - H-037 `Verified-system-parity` 61 passed, zero ledger blockers, two excluded
+    rows.
+  - Climb cycles 35 through 38 (`check.client-interfaces-closure`,
+    `check.operational-parity-closure`,
+    `prime-system-parity-operation-host-callback`,
+    `check.native-controller-core-provider-free`) each occurred once under the
+    removed Prime Gateway surface.
 - Native controller core is PASS at H-038. The exact provider-free receipt
   reports 10 common scenarios, five differential cases, eight crash points, all
   six prohibited operation counters at zero, and `promoted_feature_ids=[]`.
@@ -181,10 +175,11 @@
 
 ## Open Problems
 
-- Remove legacy Prime Agent provider/runtime/SDK/Gateway execution from all
-  formal entry points, package data, Make targets, tools, and acceptance tests.
-- Revalidate P7 without a Prime checkout, then rebuild P1, P2, P4, P3, P5, and
-  P6 on the shared native `asterion.prime` path.
+- Phase 1 (legacy release-surface removal + detachment gate) is complete: the
+  Prime Agent provider/runtime/SDK/Gateway execution surface is removed from
+  entry points, package data, Make targets, tools, and acceptance tests.
+- Revalidate P7 without a Prime checkout (Phase 3), then rebuild P1, P2, P4, P3,
+  P5, and P6 on the shared native `asterion.prime` path (Phases 4-9).
 - Keep every compound Asterion-native row missing until Phase 3.2+ evidence
   proves the exact mandatory scenarios.
 - Prove pinned/next-build compatibility only with separate exact locks and
@@ -235,18 +230,16 @@
   and source-detachment boundary
 - `src/asterion/applications/prime/` — native Asterion Prime application
   provider and P7 operator integration
-- `tools/run_asterion_prime_p7.py` — fixed native ARC-AGI-3 live research
-  entry point
-- `src/asterion/control/providers/prime/ecosystem_parity_testing.py` — exact
-  reduction from four ecosystem receipts to ten observations
-- `src/asterion/control/providers/prime/parity_testing.py` — provider scenario
-  registry
-- `packages/typescript/prime-gateway/` — legacy Prime execution surface pending
-  removal from the distribution; not a native implementation reference
-- `tools/check_prime_parity.py` — exact domain and system claim reducer
 - `tools/verify_native_controller_core.py` — exact provider-free Native
   controller-core receipt verifier
+- `tools/verify_native_verified_loop.py` — exact provider-free/operator-bounded
+  Native verified-loop verifier
+- `tools/check_prime_parity.py` — neutral parity-ledger reducer; its Prime
+  Gateway `--source-root`/`--provider asterion.prime-gateway` paths are removed
 - `tools/check_promotion.py` — isolated source/wheel/promotion verification
+  against the detached (native/DCI) distribution
+- `tools/compare_prime_p7_runs.py` — neutral exported-log comparison; starts no
+  process
 
 ## Resume Instructions
 

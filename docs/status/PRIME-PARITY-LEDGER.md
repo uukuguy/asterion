@@ -1,5 +1,13 @@
 # Prime Parity Ledger
 
+> **Historical boundary (2026-09-14).** This ledger records Prime-Gateway-backed
+> parity evidence that predates native detachment. The Prime Gateway execution
+> surface, its `make prime-verify-*` / `check_prime_parity --provider
+> asterion.prime-gateway` gates, and the `prime.agent` runtime binding have been
+> removed. The rows below are historical compatibility evidence, not native
+> Asterion closure; `asterion.native` rows remain Missing until Phase 3.2+
+> evidence.
+
 ## Baseline and claim rules
 
 - Prime baseline: external `3th-party/prime-agent` commit

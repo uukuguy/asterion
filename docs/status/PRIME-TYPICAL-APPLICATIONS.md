@@ -1,6 +1,10 @@
 # Prime Seven-Scenario Closure Worklist
 
-> Updated: 2026-09-06. Canonical active worklist for the Prime capability program.
+> **Historical boundary (2026-09-14).** This worklist records Prime-Gateway-
+> backed P1-P7 behavior and traces that predate native detachment. The Prime
+> Gateway execution surface has been removed; these scenarios are historical
+> compatibility evidence, not native Asterion Prime closure. P1-P6 remain
+> unavailable until their native selectors return (Phases 4-9).
 
 ## Goal and authority
 
