@@ -2330,3 +2330,6 @@
 - 17:10 记录 Phase 2 计划与 D-2026-09-14-02；CURRENT-STATE 转 Phase 3；RESUME 重写为活跃会话检查点 [081d5196] [ecce5e8f]
 - 17:15 查实创见：create_provider 发布 P7+P1，组合闭包对全部已发布应用求值，故只跑 P7 也须供 P1 包；Phase 1"未迁移 selector 应省略"判据未达成，Phase 4 前须裁决
 - 17:25 复核安全扫描对 live.py 的空发现：worker 子进程仅传 LANG/PYTHONPATH（凭证不外泄），run_id 取自 date 非可控，无遍历；cell exec 属设计内，与被删 driver 逐字相同，无需改动
+- 17:40 Phase 3 首要诊断完成：红测试根因是 26519254 翻转终态契约（agent_end 取代 agent_settled）却漏改共享 fixture；改 fixture 一处后测试转绿，gate 仍 0
+- 17:40 更正 17:06 的过度断言：该测试并非"不在任何门禁"，make test 的 discover 会收它；实为不在定向门禁且全量套件按研究强度未常跑
+- 17:40 记录可诊断性缺口：capability 失败只公开分类，异常被 from None 丢弃且无私下捕获，定位此行缺陷须临时探针；脱敏本身正确，缺的是私有捕获路径

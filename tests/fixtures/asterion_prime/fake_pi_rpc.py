@@ -77,7 +77,9 @@ def main() -> int:
                 }
             )
             _emit({"type": "turn_end"})
-            _emit({"type": "agent_settled"})
+            # The native prime contract made agent_end the round terminal;
+            # agent_settled is no longer a recognized type on this path.
+            _emit({"type": "agent_end"})
             return 0
         if request.get("type") == "abort":
             return 0

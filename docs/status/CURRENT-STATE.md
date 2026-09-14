@@ -205,14 +205,26 @@
   execution surface is removed from entry points, package data, Make targets,
   tools, and acceptance tests, and the P7 research preset is an installed-wheel
   invocation.
-- **`tests/test_prime_p7_native_installed` fails on the pristine tree and is in
-  no gate.** Verified 2026-09-14 on a clean HEAD. It is excluded from the
-  Makefile, CI and `tools/`, so no gate can observe it. Its cause is not yet
-  located: it fails through a catch-all in
-  `src/asterion/agents/prime/execution.py` that discards the exception. It is
-  **not** evidence of a Phase 2 regression and **not** evidence of health —
-  its last-green date is unknown. This is Phase 3's first diagnostic, not a
-  pre-cleared item.
+- **`tests/test_prime_p7_native_installed` was red and is now fixed** (Phase 3,
+  2026-09-14). Root cause, found by capturing the exception that two catch-alls
+  discarded: commit `26519254` (2026-09-11) made `agent_end` the native prime
+  round terminal and stopped recognizing `agent_settled`, and it updated five
+  test files but not the shared fixture. The fixture kept emitting the old
+  terminal, so the validator rejected it as an invalid event type. Fixed at
+  `tests/fixtures/asterion_prime/fake_pi_rpc.py` (only user of that fixture).
+- **Why the rot went unseen — stated precisely.** The test is *not* excluded
+  from discovery: `make test` runs `unittest discover -s tests`, whose default
+  `test*.py` pattern collects it. It is absent from every *targeted* gate, and
+  the full suite is not run routinely under this project's research-intensity
+  rule, so no focused run after 2026-09-11 executed it. An earlier note here
+  said it was "in no gate"; that was an overstatement and is corrected.
+- **Diagnosability gap, recorded not fixed.** A capability failure is reported
+  publicly as the classified `failure_class` only — `runner/composed.py` raises
+  `ApplicationRunError(...) from None` and `lifecycle.fail_capability` records
+  just `capability-execution-failed`. The cause is therefore discarded rather
+  than captured privately, and locating this one-line fixture defect required a
+  temporary probe. The suppression is consistent with the redaction rules and
+  should not be loosened; the missing half is a private capture path.
 - **`create_provider()` publishes both P7 and P1, and the composition closure
   resolves for every published application.** Resolving a P7 run therefore
   requires the P1 package to be present, even though only P7 executes; Phase 2
