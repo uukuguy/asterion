@@ -10,6 +10,10 @@ For Claude:
 积极使用 subagent完成具体任务，合理选择Fable, Opus, Sonnet, Haiku 模型完成各项具体工作。根 Opus 做集成调度，机械检查简单处理等重复性工作交给 Haiku；日常独立脚本代码编写修复等工作交给 Sonnet 完成；主力编程等工作交给 Opus，一直出错则该任务切换成 Fable 编写；最复杂的契约设计、恢复合同、训练架
 构、复杂故障和最终关键复审等由 Fable 处理，必要时安排 Opus 独立复审
 
+- 解题研究而非发布产品，测试不需要过于严苛极端，保证边界控制断言即可。不要在测试环节花费的过多时间
+- 研发阶段复审和测试的重点应该是变更后代码实现的评审
+- 及时完整提交，不要积累大量未跟踪、未提交的文件
+
 **DeepSeek 后端规则**（`ANTHROPIC_BASE_URL` 指向 DeepSeek 时）：
 
 - **一律不传 `model` 给 subagent**，只用会话的 `ANTHROPIC_MODEL`。
@@ -17,9 +21,6 @@ For Claude:
 - `ANTHROPIC_SMALL_FAST_MODEL` 必须设置（`~/openai-coding-deepseek.sh` 已有），否则后台任务也走最贵档。
 
 原因：该兼容层把**任何 `claude-*` 模型名映射到最贵的 `deepseek-v4-pro`**（实测 `claude-opus-4-7` → `deepseek-v4-pro`；裸别名 `opus` 直接报错）。`Agent` 的 `model` 参数只收 `sonnet/opus/haiku/fable` 别名，传不出 `deepseek-flash`，所以传任何别名都等于选最贵档——与"派 Haiku 省钱"的意图正好相反。
-- 解题研究而非发布产品，测试不需要过于严苛极端，保证边界控制断言即可。不要在测试环节花费的过多时间
-- 研发阶段复审和测试的重点应该是变更后代码实现的评审
-- 及时完整提交，不要积累大量未跟踪、未提交的文件
 
 ## Handoff 跨会话收口合同
 
