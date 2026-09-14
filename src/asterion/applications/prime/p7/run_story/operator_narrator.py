@@ -1,4 +1,4 @@
-"""Application-owned Pi narration adapter for normalized ARC evidence."""
+"""Application-owned narration adapter for normalized ARC evidence."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
+from asterion.runtime.native_rpc import build_rpc_session
 
 from .analysis import RunStoryNarrationRequest
 from .model import RunStoryError, canonical_json
@@ -83,7 +83,7 @@ def _normalize_candidate(value: Mapping[str, object]) -> Mapping[str, object]:
     return candidate
 
 
-class PiRunStoryNarrator:
+class RunStoryNarrator:
     """One-call structured narrator; private invocation details stay host-side."""
 
     __slots__ = ("model_id", "_invoke")
@@ -95,7 +95,7 @@ class PiRunStoryNarrator:
         self._invoke = invoke
 
     def __repr__(self) -> str:
-        return "<PiRunStoryNarrator redacted>"
+        return "<RunStoryNarrator redacted>"
 
     def generate(self, request: RunStoryNarrationRequest) -> Mapping[str, object]:
         action_count = len(request.actions)
@@ -136,7 +136,7 @@ class PiRunStoryNarrator:
         return _normalize_candidate(_parse_object(self._invoke(prompt)))
 
 
-def load_operator_narrator(repo_root: Path) -> PiRunStoryNarrator:
+def load_operator_narrator(repo_root: Path) -> RunStoryNarrator:
     """Resolve the fixed application preset from operator-owned configuration."""
 
     root = repo_root.resolve(strict=True)
@@ -169,20 +169,18 @@ def load_operator_narrator(repo_root: Path) -> PiRunStoryNarrator:
     )
 
     def invoke(prompt: str) -> str:
-        session = PiRpcSession(
-            PiRpcConfig(
-                command=command,
-                cwd=root,
-                environment=environment,
-                deadline_seconds=_DEADLINE_SECONDS,
-                compact_events=True,
-            )
+        session = build_rpc_session(
+            command=command,
+            cwd=root,
+            environment=environment,
+            deadline_seconds=_DEADLINE_SECONDS,
+            compact_events=True,
         )
         return asyncio.run(
             session.run(prompt, signal=_NeverCancelled(), on_event=lambda _event: None)
         ).final_text
 
-    return PiRunStoryNarrator(model_id=model, invoke=invoke)
+    return RunStoryNarrator(model_id=model, invoke=invoke)
 
 
-__all__ = ("PiRunStoryNarrator", "load_operator_narrator")
+__all__ = ("RunStoryNarrator", "load_operator_narrator")

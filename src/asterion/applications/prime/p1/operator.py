@@ -88,8 +88,8 @@ from asterion.runner.application import ApplicationRunResult
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
 from asterion.runtime.host import CancellationSignal
-from asterion.runtimes.pi_extensions import PiExtensionLease
-from asterion.runtimes.pi_rpc import PiRpcSession, normalize_pi_usage
+from asterion.runtime.native_rpc import RpcSession, normalize_usage
+from asterion.runtime.pinned_extension import ExtensionLease
 
 _CLEANUP_SECONDS = 5.0
 
@@ -162,7 +162,7 @@ class P1OperatorResources:
         store: FilePrimeSessionStore,
         worker: P1WorkerProcess,
         worker_owner: P1WorkerOwnerAdapter,
-        extension_lease: PiExtensionLease,
+        extension_lease: ExtensionLease,
         private_root: Path,
         journal_root: Path,
         run_id: str,
@@ -311,13 +311,13 @@ class P1OperatorResources:
         *,
         ipython: object,
         oracle: object,
-        pi_extension: object,
+        extension: object,
         private_trace: object,
     ) -> None:
         if (
             ipython is not self.worker
             or oracle is not self.oracle
-            or pi_extension is not self.extension_lease
+            or extension is not self.extension_lease
             or private_trace is not self.store
         ):
             raise P1OperatorError()
@@ -443,7 +443,7 @@ class P1OperatorResources:
             if turn["command_id"] == command_id:
                 for event in turn["events"]:
                     if event["type"] == "message_end":
-                        usage = normalize_pi_usage(event["payload"])
+                        usage = normalize_usage(event["payload"])
                         if usage is not None:
                             incoming += usage["input_tokens"]
                             outgoing += usage["output_tokens"]
@@ -910,7 +910,7 @@ def _preflight(environment: Mapping[str, str]) -> None:
     raise P1OperatorError()
 
 
-async def _force_close_pi(rpc: PiRpcSession) -> None:
+async def _force_close_pi(rpc: RpcSession) -> None:
     """Use the retained process owner, never an active RPC command lock."""
     process = rpc.process
     if process is not None and process.poll() is None:

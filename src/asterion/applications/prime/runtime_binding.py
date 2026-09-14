@@ -21,12 +21,9 @@ from asterion.runtime.factory import (
     RuntimeFactoryError,
 )
 from asterion.runtime.host import AgentRuntimeClient, RunEvent, RunRequest
+from asterion.runtime.native_rpc import build_rpc_session
+from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
-from asterion.runtimes.pi_extensions import (
-    PiExtensionBinding,
-    PiExtensionLease,
-)
-from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
 from asterion.immutable import RedactedImmutableMapping
 
 
@@ -66,10 +63,10 @@ class PrimeLaunch:
 
     Carries only operator-owned authorization (command argv, environment) and
     the extension resource's plain identity plus its already-acquired pinned
-    file descriptors. The only live object is the transferable ``PiExtensionLease``
+    file descriptors. The only live object is the transferable ``ExtensionLease``
     itself: it is the single owner of the pinned descriptors, and dropping it in
     favour of a plain snapshot would force a path re-resolution (TOCTOU) or a
-    second descriptor owner. See ``runtimes/pi_extensions.py``.
+    second descriptor owner. See ``runtime/pinned_extension.py``.
     """
 
     approved_command: tuple[str, ...]
@@ -79,7 +76,7 @@ class PrimeLaunch:
     extension_capabilities: tuple[str, ...]
     binding_inherited_fds: tuple[int, ...]
     binding_environment: Mapping[str, str]
-    extension_lease: PiExtensionLease
+    extension_lease: ExtensionLease
     deadline_seconds: float
     compact_events: bool = True
     approved_environment: Mapping[str, str] | None = None
@@ -87,7 +84,7 @@ class PrimeLaunch:
     def __post_init__(self) -> None:
         lease = self.extension_lease
         valid = (
-            type(lease) is PiExtensionLease
+            type(lease) is ExtensionLease
             and type(self.approved_command) is tuple
             and bool(self.approved_command)
             and all(type(part) is str and part for part in self.approved_command)
@@ -105,7 +102,7 @@ class PrimeLaunch:
             and not lease.closed
         )
         if not valid:
-            if type(lease) is PiExtensionLease:
+            if type(lease) is ExtensionLease:
                 lease.close()
             raise RuntimeFactoryError(_ERROR)
         try:
@@ -282,7 +279,7 @@ def build_p7_runtime(
         # pinned extension is already acquired (fd + digest) by the operator;
         # this factory consumes those exact descriptors without re-resolving
         # the extension source by path.
-        binding = PiExtensionBinding(
+        binding = ExtensionBinding(
             extension_id=launch.extension_id,
             path=launch.extension_path,
             capabilities=launch.extension_capabilities,
@@ -291,15 +288,13 @@ def build_p7_runtime(
         )
         if binding.binding_fingerprint != launch.extension_lease.binding_fingerprint:
             raise RuntimeFactoryError(_ERROR)
-        rpc_session = PiRpcSession(
-            PiRpcConfig(
-                command=launch.approved_command,
-                cwd=launch.working_directory,
-                environment=dict(launch.approved_environment),
-                deadline_seconds=launch.deadline_seconds,
-                inherited_fds=launch.extension_lease.inherited_fds,
-                compact_events=launch.compact_events,
-            )
+        rpc_session = build_rpc_session(
+            command=launch.approved_command,
+            cwd=launch.working_directory,
+            environment=dict(launch.approved_environment),
+            deadline_seconds=launch.deadline_seconds,
+            inherited_fds=launch.extension_lease.inherited_fds,
+            compact_events=launch.compact_events,
         )
         session = AsterionPrimeSession(
             rpc_session=rpc_session,

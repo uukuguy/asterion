@@ -48,7 +48,7 @@ class _Service(P1RuntimeHost):
         *,
         ipython: object,
         oracle: object,
-        pi_extension: object,
+        extension: object,
         private_trace: object,
     ) -> None:
         self.calls.append(
@@ -56,7 +56,7 @@ class _Service(P1RuntimeHost):
                 "validate-runtime-services",
                 ipython,
                 oracle,
-                pi_extension,
+                extension,
                 private_trace,
             )
         )

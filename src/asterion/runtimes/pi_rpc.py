@@ -36,9 +36,19 @@ _PROMPT_DRIVER_EXIT_SECONDS = 1.0
 _STDOUT_EOF = object()
 
 
+def normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
+    """Translate one native assistant usage payload to the runtime contract."""
+
+    return _normalize_usage(payload)
+
+
 def normalize_pi_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
     """Translate one native Pi assistant usage payload to the runtime contract."""
 
+    return _normalize_usage(payload)
+
+
+def _normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
     message = payload.get("message")
     if not isinstance(message, Mapping) or message.get("role") != "assistant":
         return None
@@ -1218,6 +1228,29 @@ class PiRpcSession:
                 self._run_active = False
 
 
+def build_rpc_session(
+    *,
+    command: tuple[str, ...],
+    cwd: Path,
+    environment: Mapping[str, str],
+    deadline_seconds: float,
+    inherited_fds: tuple[int, ...] = (),
+    compact_events: bool = False,
+) -> PiRpcSession:
+    """Construct one session from neutral launch material, Pi-side."""
+
+    return PiRpcSession(
+        PiRpcConfig(
+            command=command,
+            cwd=cwd,
+            environment=environment,
+            deadline_seconds=deadline_seconds,
+            inherited_fds=inherited_fds,
+            compact_events=compact_events,
+        )
+    )
+
+
 __all__ = (
     "PiRpcConfig",
     "PiRpcCompactResult",
@@ -1226,6 +1259,8 @@ __all__ = (
     "PiRpcPromptControl",
     "PiRpcResult",
     "PiRpcSession",
+    "build_rpc_session",
     "normalize_pi_usage",
+    "normalize_usage",
     "validate_pi_compact_result",
 )

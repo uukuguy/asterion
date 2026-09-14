@@ -24,7 +24,7 @@ from asterion.applications.prime.p7.private_trace import (
     P7_TRACE_IDENTITIES,
 )
 from asterion.applications.prime.runtime_binding import PrimeLaunch
-from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
+from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 
 
 _RUNTIME_ID = "asterion.prime"
@@ -321,7 +321,7 @@ def build_p7_operator_resources(
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
-    lease: PiExtensionLease | None = None
+    lease: ExtensionLease | None = None
     parent: socket.socket | None = None
     child: socket.socket | None = None
     trace: PrimeTraceRecorder | None = None
@@ -360,7 +360,7 @@ def build_p7_operator_resources(
             raise ValueError
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         descriptor = child.fileno()
-        binding = PiExtensionBinding(
+        binding = ExtensionBinding(
             extension_id="prime.ipython",
             path=extension_path,
             capabilities=("prime.tool.ipython",),

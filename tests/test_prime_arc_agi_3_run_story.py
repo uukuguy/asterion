@@ -24,7 +24,7 @@ from asterion.applications.prime.p7.run_story import (
     export_standalone,
 )
 from asterion.applications.prime.p7.run_story.operator_narrator import (
-    PiRunStoryNarrator,
+    RunStoryNarrator,
 )
 
 
@@ -352,7 +352,7 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
 
     def test_pi_narrator_accepts_one_json_response_without_exposing_config(self) -> None:
         calls: list[str] = []
-        narrator = PiRunStoryNarrator(
+        narrator = RunStoryNarrator(
             model_id="fixture-model",
             invoke=lambda prompt: calls.append(prompt) or json.dumps(_valid_story()),
         )

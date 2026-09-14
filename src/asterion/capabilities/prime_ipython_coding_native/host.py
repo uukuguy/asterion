@@ -113,7 +113,7 @@ class P1RuntimeHost(Protocol):
         *,
         ipython: object,
         oracle: object,
-        pi_extension: object,
+        extension: object,
         private_trace: object,
     ) -> None: ...
 

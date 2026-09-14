@@ -50,9 +50,9 @@ class PiExtensionBindingTests(unittest.TestCase):
             self.assertNotEqual(
                 binding.binding_fingerprint, changed.binding_fingerprint
             )
-            with patch("asterion.runtimes.pi_extensions.subprocess.run") as launch:
+            with patch("asterion.runtime.pinned_extension.subprocess.run") as launch:
                 with self.assertRaisesRegex(
-                    ValueError, "Pi extension binding is unavailable"
+                    ValueError, "extension binding is unavailable"
                 ):
                     binding.preflight()
             launch.assert_not_called()
@@ -74,7 +74,7 @@ class PiExtensionBindingTests(unittest.TestCase):
                 return original_run(command, **kwargs)
 
             with patch(
-                "asterion.runtimes.pi_extensions.subprocess.run",
+                "asterion.runtime.pinned_extension.subprocess.run",
                 side_effect=replace_original,
             ):
                 lease = binding.preflight()
@@ -104,10 +104,10 @@ class PiExtensionBindingTests(unittest.TestCase):
                 return original_run(command, **kwargs)
 
             with patch(
-                "asterion.runtimes.pi_extensions.subprocess.run", side_effect=observe
+                "asterion.runtime.pinned_extension.subprocess.run", side_effect=observe
             ):
                 with self.assertRaisesRegex(
-                    ValueError, "^Pi extension binding is unavailable$"
+                    ValueError, "^extension binding is unavailable$"
                 ):
                     binding.preflight()
             self.assertEqual(len(calls), 1)
@@ -217,7 +217,7 @@ class PiExtensionBindingTests(unittest.TestCase):
             root.rename(moved_root)
             try:
                 with self.assertRaisesRegex(
-                    ValueError, "Pi extension lease is unavailable"
+                    ValueError, "extension lease is unavailable"
                 ):
                     lease.validate_launch()
             finally:
@@ -228,7 +228,7 @@ class PiExtensionBindingTests(unittest.TestCase):
             )["provider"]["fd"]
             os.pwrite(descriptor, b"X", 0)
             with self.assertRaisesRegex(
-                ValueError, "Pi extension lease is unavailable"
+                ValueError, "extension lease is unavailable"
             ):
                 lease.validate_launch()
             lease.close()
@@ -414,8 +414,8 @@ class PiExtensionBindingTests(unittest.TestCase):
             for extension_id in ("pi", "pi.extension"):
                 with (
                     self.subTest(extension_id=extension_id),
-                    patch("asterion.runtimes.pi_extensions.os.open") as opened,
-                    patch("asterion.runtimes.pi_extensions.os.dup") as duplicated,
+                    patch("asterion.runtime.pinned_extension.os.open") as opened,
+                    patch("asterion.runtime.pinned_extension.os.dup") as duplicated,
                     self.assertRaises(ValueError),
                 ):
                     PiExtensionBinding(
@@ -693,7 +693,7 @@ class PiExtensionFactoryTests(unittest.TestCase):
                 with (
                     self.subTest(label=label),
                     patch(
-                        "asterion.runtimes.pi_extensions.os.dup", wraps=os.dup
+                        "asterion.runtime.pinned_extension.os.dup", wraps=os.dup
                     ) as duplicated,
                     patch(
                         "asterion.runtime.defaults.PiRuntimeClient",
@@ -797,7 +797,7 @@ export default function registerPrimeIpython(pi) {
                 with (
                     self.subTest(label=label),
                     patch(
-                        "asterion.runtimes.pi_extensions.os.dup", wraps=os.dup
+                        "asterion.runtime.pinned_extension.os.dup", wraps=os.dup
                     ) as duplicated,
                     patch(
                         "asterion.runtime.defaults.PiRuntimeClient",
