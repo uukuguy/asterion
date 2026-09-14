@@ -2327,3 +2327,4 @@
 - 17:05 独立复核 Phase 2：gate 0、preset 契约测试 2 通过、make -n 形状正确；p7/ 仅新增 live.py，无瞒报文件
 - 17:06 查实 test_prime_p7_native_installed 在 pristine HEAD 即红，且不在任何门禁（Makefile/CI/tools 零引用）——非 Phase 2 回归，亦非健康证据，最后变绿日期未知
 - 17:06 其失败被 execution.py:471 catch-all 吞掉异常，根因未定；已记为 Phase 3 首要诊断项而非可预清项
+- 17:10 记录 Phase 2 计划与 D-2026-09-14-02；CURRENT-STATE 转 Phase 3；RESUME 重写为活跃会话检查点 [081d5196] [ecce5e8f]
