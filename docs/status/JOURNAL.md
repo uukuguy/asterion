@@ -2320,3 +2320,7 @@
 - 14:20 handoff 收口：Phase 1 完成记录、D-2026-09-14-01、CURRENT-STATE 转 Phase 2、RESUME 重写为交接稿 [8c4e8978]
 - 14:58 resume 复核：gate 仍 0；RESUME 的去 Pi grep 字面返回 5 条，全为未跟踪 __pycache__/.pyc 与 header-art.png 二进制撞串，源码 0 处 [1cab4943]
 - 15:02 更正上条哈希：amend 后为 4249bfa5，事实不变（本行不注自身哈希，避免 amend 自指）
+
+## 2026-09-14
+
+- 16:44 Phase 2 落地：P7 preset 重建为装轮调用（新 p7/live.py + operator.main），ARC/Pi 走 operator-owned 值，gate 前 0 后 0 [9a38405a]
