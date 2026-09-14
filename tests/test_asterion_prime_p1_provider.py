@@ -39,8 +39,8 @@ CAPABILITY = (
 )
 P1_HOST_CAPABILITIES = (
     "prime.ipython",
+    "prime.launch",
     "prime.p1-oracle",
-    "prime.pi-extension",
     "prime.private-trace",
     "prime.session-backend",
 )

@@ -260,7 +260,7 @@ class P1OperatorResources:
             {
                 "prime.ipython": worker,
                 "prime.p1-oracle": self.oracle,
-                "prime.pi-extension": extension_lease,
+                "prime.launch": extension_lease,
                 "prime.private-trace": store,
                 "prime.session-backend": self,
             }

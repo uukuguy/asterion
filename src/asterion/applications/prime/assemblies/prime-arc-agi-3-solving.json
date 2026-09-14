@@ -18,7 +18,7 @@
   "host_capabilities": [
     "prime.arc-broker",
     "prime.ipython",
-    "prime.pi-extension",
+    "prime.launch",
     "prime.private-trace"
   ],
   "host_policies": [],

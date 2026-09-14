@@ -32,8 +32,8 @@ from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
 
 P1_HOST_CAPABILITIES = (
     "prime.ipython",
+    "prime.launch",
     "prime.p1-oracle",
-    "prime.pi-extension",
     "prime.private-trace",
     "prime.session-backend",
 )
@@ -321,7 +321,7 @@ def build_p1_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
         validated = service.validate_runtime_services(
             ipython=host_services["prime.ipython"],
             oracle=host_services["prime.p1-oracle"],
-            pi_extension=host_services["prime.pi-extension"],
+            pi_extension=host_services["prime.launch"],
             private_trace=host_services["prime.private-trace"],
         )
         if validated is not None:

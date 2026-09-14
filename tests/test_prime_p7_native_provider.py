@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import asyncio
 import tempfile
 import tomllib
@@ -49,7 +48,7 @@ from asterion.capabilities.prime_ipython_coding_native.provider import (
     create_prime_ipython_coding_native_package,
 )
 from asterion.applications.prime.runtime_binding import (
-    PreflightedPrimeLaunch,
+    PrimeLaunch,
     _P7SolveEventProjector,
     asterion_prime_runtime_binding,
 )
@@ -68,7 +67,6 @@ from asterion.runtime.host import (
 )
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
 from asterion.runtimes.pi_extensions import PiExtensionBinding
-from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -271,7 +269,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             (
                 "prime.arc-broker",
                 "prime.ipython",
-                "prime.pi-extension",
+                "prime.launch",
                 "prime.private-trace",
             ),
         )
@@ -317,7 +315,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 "host_capabilities": [
                     "prime.arc-broker",
                     "prime.ipython",
-                    "prime.pi-extension",
+                    "prime.launch",
                     "prime.private-trace",
                 ],
                 "host_policies": [],
@@ -428,7 +426,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 host_services={
                     "prime.arc-broker": broker,
                     "prime.ipython": ipython,
-                    "prime.pi-extension": launch,
+                    "prime.launch": launch,
                     "prime.private-trace": trace,
                 },
             )
@@ -457,13 +455,6 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             trace_root = root / "trace"
             trace_root.mkdir()
             worker = _Worker()
-            process_starts: list[object] = []
-
-            def forbidden_popen(
-                *args: object, **kwargs: object
-            ) -> subprocess.Popen[bytes]:
-                process_starts.append((args, kwargs))
-                raise AssertionError("Pi process must remain inert")
 
             resources = build_p7_operator_resources(
                 environment={"DEEPSEEK_API_KEY": "private-token"},
@@ -473,7 +464,6 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 worker=worker,
                 engine=_CompletingEngine(),
                 private_trace_root=trace_root,
-                popen=forbidden_popen,
             )
             composed = compose_installed_provider(
                 create_provider(),
@@ -498,8 +488,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             )
 
             launch = cast(
-                PreflightedPrimeLaunch,
-                resources.host_services["prime.pi-extension"],
+                PrimeLaunch,
+                resources.host_services["prime.launch"],
             )
             self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
             self.assertEqual(
@@ -516,11 +506,10 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 ),
             )
             self.assertEqual(
-                launch.rpc_session.config.environment["DEEPSEEK_API_KEY"],
+                launch.approved_environment["DEEPSEEK_API_KEY"],
                 "private-token",
             )
             self.assertEqual(worker.starts, 0)
-            self.assertEqual(process_starts, [])
             self.assertNotIn("private-token", repr(resources))
             fake_runtime = _CompletingRuntime(
                 cast(ArcBroker, resources.host_services["prime.arc-broker"])
@@ -564,7 +553,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                         worker=_Worker(),
                         p7_client=p7_client_facade(ArcBroker(engine=_Engine())),
                     ),
-                    "prime.pi-extension": launch,
+                    "prime.launch": launch,
                     "prime.private-trace": trace,
                 },
             )
@@ -625,7 +614,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
     @staticmethod
     def _launch(
         root: Path, broker: ArcBroker
-    ) -> tuple[PreflightedPrimeLaunch, P7PrivateTraceReceipt]:
+    ) -> tuple[PrimeLaunch, P7PrivateTraceReceipt]:
         source = root / "prime_ipython.mjs"
         source.write_text("export default function extension() {}\n", encoding="utf-8")
         binding = PiExtensionBinding(
@@ -637,23 +626,19 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         )
         lease = binding.preflight()
         command = ("pi", "--mode", "rpc", *lease.command_args())
-        rpc = PiRpcSession(
-            PiRpcConfig(
-                command=command,
-                cwd=root,
-                environment=dict(lease.environment),
-                deadline_seconds=ASTERION_PRIME_LIMITS.deadline_ms / 1000,
-                inherited_fds=lease.inherited_fds,
-            )
-        )
         trace_root = root / "trace"
         trace_root.mkdir()
         return (
-            PreflightedPrimeLaunch(
-                rpc_session=rpc,
-                extension_binding=binding,
-                extension_lease=lease,
+            PrimeLaunch(
                 approved_command=command,
+                working_directory=root,
+                extension_id=binding.extension_id,
+                extension_path=source,
+                extension_capabilities=binding.capabilities,
+                binding_inherited_fds=binding.inherited_fds,
+                binding_environment=dict(binding.environment),
+                extension_lease=lease,
+                deadline_seconds=ASTERION_PRIME_LIMITS.deadline_ms / 1000,
             ),
             P7PrivateTraceReceipt(broker, PrimeTraceRecorder(trace_root)),
         )

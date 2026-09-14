@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import cast
 
 from asterion.agents.prime.session import AsterionPrimeSession
@@ -21,8 +22,11 @@ from asterion.runtime.factory import (
 )
 from asterion.runtime.host import AgentRuntimeClient, RunEvent, RunRequest
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
-from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
-from asterion.runtimes.pi_rpc import PiRpcSession
+from asterion.runtimes.pi_extensions import (
+    PiExtensionBinding,
+    PiExtensionLease,
+)
+from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
 from asterion.immutable import RedactedImmutableMapping
 
 
@@ -30,7 +34,7 @@ _HOST_CAPABILITIES = frozenset(
     {
         "prime.arc-broker",
         "prime.ipython",
-        "prime.pi-extension",
+        "prime.launch",
         "prime.private-trace",
     }
 )
@@ -57,31 +61,50 @@ def _p7_level_completed(broker: ArcBroker) -> bool:
 
 
 @dataclass(frozen=True, repr=False, slots=True)
-class PreflightedPrimeLaunch:
-    """Exact already-acquired Pi launch material transferred to one session."""
+class PrimeLaunch:
+    """Plain-data launch material crossing the application-runtime seam.
 
-    rpc_session: PiRpcSession
-    extension_binding: PiExtensionBinding
-    extension_lease: PiExtensionLease
+    Carries only operator-owned authorization (command argv, environment) and
+    the extension resource's plain identity plus its already-acquired pinned
+    file descriptors. The only live object is the transferable ``PiExtensionLease``
+    itself: it is the single owner of the pinned descriptors, and dropping it in
+    favour of a plain snapshot would force a path re-resolution (TOCTOU) or a
+    second descriptor owner. See ``runtimes/pi_extensions.py``.
+    """
+
     approved_command: tuple[str, ...]
+    working_directory: Path
+    extension_id: str
+    extension_path: Path
+    extension_capabilities: tuple[str, ...]
+    binding_inherited_fds: tuple[int, ...]
+    binding_environment: Mapping[str, str]
+    extension_lease: PiExtensionLease
+    deadline_seconds: float
+    compact_events: bool = True
     approved_environment: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         lease = self.extension_lease
-        if (
-            type(self.rpc_session) is not PiRpcSession
-            or type(self.extension_binding) is not PiExtensionBinding
-            or type(lease) is not PiExtensionLease
-            or type(self.approved_command) is not tuple
-            or not self.approved_command
-            or any(type(part) is not str or not part for part in self.approved_command)
-            or lease.closed
-            or self.extension_binding.extension_id != "prime.ipython"
-            or self.extension_binding.capabilities != ("prime.tool.ipython",)
-            or self.extension_binding.binding_fingerprint != lease.binding_fingerprint
-            or self.rpc_session.process is not None
-            or getattr(self.rpc_session, "_run_active", True)
-        ):
+        valid = (
+            type(lease) is PiExtensionLease
+            and type(self.approved_command) is tuple
+            and bool(self.approved_command)
+            and all(type(part) is str and part for part in self.approved_command)
+            and isinstance(self.working_directory, Path)
+            and type(self.extension_id) is str
+            and self.extension_id == "prime.ipython"
+            and isinstance(self.extension_path, Path)
+            and type(self.extension_capabilities) is tuple
+            and self.extension_capabilities == ("prime.tool.ipython",)
+            and type(self.binding_inherited_fds) is tuple
+            and isinstance(self.binding_environment, Mapping)
+            and type(self.deadline_seconds) is float
+            and self.deadline_seconds > 0
+            and type(self.compact_events) is bool
+            and not lease.closed
+        )
+        if not valid:
             if type(lease) is PiExtensionLease:
                 lease.close()
             raise RuntimeFactoryError(_ERROR)
@@ -94,7 +117,7 @@ class PreflightedPrimeLaunch:
         except (TypeError, ValueError):
             lease.close()
             raise RuntimeFactoryError(_ERROR) from None
-        if dict(self.rpc_session.config.environment) != environment or any(
+        if any(
             environment.get(name) != value for name, value in lease.environment.items()
         ):
             lease.close()
@@ -104,7 +127,7 @@ class PreflightedPrimeLaunch:
         )
 
     def __repr__(self) -> str:
-        return "<PreflightedPrimeLaunch redacted>"
+        return "<PrimeLaunch redacted>"
 
 
 def asterion_prime_runtime_binding() -> RuntimeFactoryBinding:
@@ -224,8 +247,8 @@ def build_p7_runtime(
 
     if type(context) is not RuntimeFactoryContext:
         raise RuntimeFactoryError(_ERROR)
-    launch_value = context.host_services.get("prime.pi-extension")
-    launch = launch_value if type(launch_value) is PreflightedPrimeLaunch else None
+    launch_value = context.host_services.get("prime.launch")
+    launch = launch_value if type(launch_value) is PrimeLaunch else None
     try:
         ipython = context.host_services.get("prime.ipython")
         broker = context.host_services.get("prime.arc-broker")
@@ -255,9 +278,32 @@ def build_p7_runtime(
             or trace._trace_fd is None
         ):
             raise RuntimeFactoryError(_ERROR)
+        # Reconstruct the framework-owned launch objects from plain data. The
+        # pinned extension is already acquired (fd + digest) by the operator;
+        # this factory consumes those exact descriptors without re-resolving
+        # the extension source by path.
+        binding = PiExtensionBinding(
+            extension_id=launch.extension_id,
+            path=launch.extension_path,
+            capabilities=launch.extension_capabilities,
+            inherited_fds=launch.binding_inherited_fds,
+            environment=launch.binding_environment,
+        )
+        if binding.binding_fingerprint != launch.extension_lease.binding_fingerprint:
+            raise RuntimeFactoryError(_ERROR)
+        rpc_session = PiRpcSession(
+            PiRpcConfig(
+                command=launch.approved_command,
+                cwd=launch.working_directory,
+                environment=dict(launch.approved_environment),
+                deadline_seconds=launch.deadline_seconds,
+                inherited_fds=launch.extension_lease.inherited_fds,
+                compact_events=launch.compact_events,
+            )
+        )
         session = AsterionPrimeSession(
-            rpc_session=launch.rpc_session,
-            extension_binding=launch.extension_binding,
+            rpc_session=rpc_session,
+            extension_binding=binding,
             extension_lease=launch.extension_lease,
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
@@ -294,7 +340,7 @@ def build_asterion_prime_runtime(
 
 
 __all__ = (
-    "PreflightedPrimeLaunch",
+    "PrimeLaunch",
     "asterion_prime_runtime_binding",
     "build_asterion_prime_runtime",
     "build_p7_runtime",

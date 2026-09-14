@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 from pathlib import Path
 import socket
-import subprocess
 import threading
 from types import MappingProxyType
 from typing import cast
@@ -24,9 +23,8 @@ from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
     P7_TRACE_IDENTITIES,
 )
-from asterion.applications.prime.runtime_binding import PreflightedPrimeLaunch
+from asterion.applications.prime.runtime_binding import PrimeLaunch
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
-from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
 
 
 _RUNTIME_ID = "asterion.prime"
@@ -258,7 +256,7 @@ class P7OperatorResources:
         await ipython.close()
         trace = cast(P7PrivateTraceReceipt, self.host_services["prime.private-trace"])
         trace.close()
-        launch = cast(PreflightedPrimeLaunch, self.host_services["prime.pi-extension"])
+        launch = cast(PrimeLaunch, self.host_services["prime.launch"])
         launch.extension_lease.close()
 
 
@@ -320,7 +318,6 @@ def build_p7_operator_resources(
     worker: RestrictedPersistentIpythonWorker,
     engine: object,
     private_trace_root: Path,
-    popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -384,22 +381,17 @@ def build_p7_operator_resources(
             selection.model,
             *lease.command_args(),
         )
-        rpc_session = PiRpcSession(
-            PiRpcConfig(
-                command=command,
-                cwd=working_directory,
-                environment=approved_environment,
-                deadline_seconds=selection.deadline_ms / 1000,
-                inherited_fds=lease.inherited_fds,
-                compact_events=True,
-            ),
-            _popen=popen,
-        )
-        launch = PreflightedPrimeLaunch(
-            rpc_session=rpc_session,
-            extension_binding=binding,
-            extension_lease=lease,
+        launch = PrimeLaunch(
             approved_command=command,
+            working_directory=working_directory,
+            extension_id=binding.extension_id,
+            extension_path=extension_path,
+            extension_capabilities=binding.capabilities,
+            binding_inherited_fds=binding.inherited_fds,
+            binding_environment=dict(binding.environment),
+            extension_lease=lease,
+            deadline_seconds=selection.deadline_ms / 1000,
+            compact_events=True,
             approved_environment=approved_environment,
         )
         trace = PrimeTraceRecorder(private_trace_root)
@@ -415,7 +407,7 @@ def build_p7_operator_resources(
             host_services={
                 "prime.arc-broker": broker,
                 "prime.ipython": ipython,
-                "prime.pi-extension": launch,
+                "prime.launch": launch,
                 "prime.private-trace": private_trace,
             },
             runtime_options=p7_runtime_options(selection),

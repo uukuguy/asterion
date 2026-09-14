@@ -116,7 +116,7 @@ def _context(service: object, **changes: object) -> RuntimeFactoryContext:
         "host_services": {
             "prime.ipython": object(),
             "prime.p1-oracle": object(),
-            "prime.pi-extension": object(),
+            "prime.launch": object(),
             "prime.private-trace": object(),
             "prime.session-backend": service,
         },
