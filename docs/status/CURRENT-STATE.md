@@ -236,23 +236,30 @@
   couples two applications that are meant to migrate independently, and it will
   distort Phase 4's P1 rebuild boundary. Decide the selector question before
   Phase 4.
-- **Phase 3's central question is now evidence-backed and unresolved: does a
-  detached Pi artifact exist?** The P7 preset takes the Pi command as an
-  operator value (`ASTERION_PRIME_PI_ENTRY`). The only Pi on this machine is
-  `./pi/` — a Pi monorepo checkout whose built entry is
-  `pi/packages/coding-agent/dist/rpc-entry.js`, which is the *same* artifact the
-  removed `run_asterion_prime_p7.py` reached into. `./pi/` is Prime Agent's
-  modified Pi by the operator's own statement, is gitignored, and is off-limits
-  to Asterion code. So code-level detachment is complete (gate 0, no reference),
-  but if the operator injects that path, the *runtime* executes Prime Agent's Pi.
-  Phase 3 must either name a genuinely independent Pi distribution or report
-  that none exists. This is an evidence question and an operator decision, not a
-  relabeling exercise. See the plan's "Risks carried into later phases" #2.
-- **No live P7 run is possible until four operator-owned values are set**:
-  `ASTERION_PRIME_OPERATOR_ROOT`, `ASTERION_PRIME_ARC_ROOT`,
-  `ASTERION_PRIME_NODE`, `ASTERION_PRIME_PI_ENTRY` (plus `DEEPSEEK_API_KEY`).
-  All are currently unset, so the preset fails closed at preflight with status
-  2 — correct behavior, but it means the anchor claim is untested.
+- **Plan risk #2 is RESOLVED in the affirmative: a detached Pi artifact exists
+  and is named.** `@earendil-works/pi-coding-agent@0.85.1`, an MIT npm package
+  from the upstream `github.com/earendil-works/pi` project, installed at
+  `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/`. Its RPC
+  entry is `dist/bundle/rpc-entry.js`, and its `package.json` names no
+  prime-agent dependency. It is a **different build** from the `./pi/` checkout
+  the removed driver reached into (distinct SHA-256), so the two are not the
+  same artifact and injecting the installed one does not reach into Prime
+  Agent's tree. **A first pass here wrongly concluded no detached Pi existed
+  after inspecting only `./pi/`; that conclusion was drawn from one `ls` and is
+  withdrawn.** Discovered by searching `PATH` (`/opt/homebrew/bin/pi` symlinks
+  into the npm global root), which is where an installed Pi actually lives.
+- The operator-owned value for the P7 preset is therefore
+  `ASTERION_PRIME_PI_ENTRY=/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js`,
+  with `ASTERION_PRIME_NODE` resolved the way the P1 preset resolves it.
+  **No live run has yet been made** to confirm the route end to end.
+- **No live P7 run has been made.** The preset reads four operator-owned values
+  (`ASTERION_PRIME_OPERATOR_ROOT`, `ASTERION_PRIME_ARC_ROOT`,
+  `ASTERION_PRIME_NODE`, `ASTERION_PRIME_PI_ENTRY`, plus `DEEPSEEK_API_KEY`);
+  all are unset in the current shell, so the preset correctly fails closed at
+  preflight with status 2. Every prerequisite now exists on this machine — the
+  ARC wheels and `environment_files/ls20/` under `../external-prime/arc-agi-3/`,
+  and the named Pi above — so a live run is a wiring and authorization step, not
+  a missing-resource blocker.
 - Revalidate P7 without a Prime checkout (Phase 3), then rebuild P1, P2, P4, P3,
   P5, and P6 on the shared native `asterion.prime` path (Phases 4-9).
 - Keep every compound Asterion-native row missing until Phase 3.2+ evidence

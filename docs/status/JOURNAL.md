@@ -2336,3 +2336,5 @@
 - 17:50 P7 聚焦原生回归 47 tests 全绿；Phase 3 四项验收（门禁/轮/安装路由/focused regression）均绿
 - 17:52 但锚点未证：四个 operator 自有值全未设，preset 失败关闭于 preflight，live 运行无法起
 - 17:52 风险 #2 有证据了：本机唯一 Pi 是 ./pi/（Prime Agent 改版），其构建入口正是被删 driver 曾伸手的 rpc-entry.js——代码层已脱离，运行层仍会执行 Prime Agent 的 Pi
+- 18:05 更正 17:52 的错误结论：独立 Pi 存在且可指名 @earendil-works/pi-coding-agent@0.85.1（npm 上游，无 prime-agent 依赖，与 ./pi/ 构建哈希不同）；我此前只 ls 了 ./pi/ 就断言"唯一 Pi"，已撤回
+- 18:05 来源是 PATH：/opt/homebrew/bin/pi 软链到 npm global root；计划风险 #2 转为"已解决（肯定）"
