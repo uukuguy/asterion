@@ -10,18 +10,13 @@ For Claude:
 积极使用 subagent完成具体任务，合理选择Fable, Opus, Sonnet, Haiku 模型完成各项具体工作。根 Opus 做集成调度，机械检查简单处理等重复性工作交给 Haiku；日常独立脚本代码编写修复等工作交给 Sonnet 完成；主力编程等工作交给 Opus，一直出错则该任务切换成 Fable 编写；最复杂的契约设计、恢复合同、训练架
 构、复杂故障和最终关键复审等由 Fable 处理，必要时安排 Opus 独立复审
 
-**DeepSeek 后端硬规则**：当 `ANTHROPIC_BASE_URL` 指向 DeepSeek（如 `https://api.deepseek.com/anthropic`）时，**禁止给任何 subagent 指定 model**——一律继承会话的 `ANTHROPIC_MODEL`，只使用该变量指定的模型。
+**DeepSeek 后端规则**（`ANTHROPIC_BASE_URL` 指向 DeepSeek 时）：
 
-**决定（2026-09-14，用户）**：本后端统一使用 `deepseek-flash`（即 `deepseek-v4.1-flash`），**不做分档**。该模型能力已足够，无需按任务难度切换，"最难契约用 pro"的旧分工在此后端取消。
+- **一律不传 `model` 给 subagent**，只用会话的 `ANTHROPIC_MODEL`。
+- 本后端统一 `deepseek-flash`，不做难度分档；上面的 Fable/Opus/Sonnet/Haiku 分工仅适用于原生 Anthropic 端点。
+- `ANTHROPIC_SMALL_FAST_MODEL` 必须设置（`~/openai-coding-deepseek.sh` 已有），否则后台任务也走最贵档。
 
-原因（2026-09-14 实测，勿凭直觉推翻）：
-
-- DeepSeek 的 Anthropic 兼容层把**任何 `claude-*` 模型名静默映射到 `deepseek-v4-pro`（最贵档）**。实测：`claude-opus-4-7` → 返回 `deepseek-v4-pro`。
-- 裸别名直接报错：`opus` → `The supported API model names are deepseek-flash, deepseek-v4-pro, but you passed opus`。
-- `Agent` 工具的 `model` 参数**只接受 `sonnet/opus/haiku/fable` 别名**，无法传 `deepseek-flash`。所以"按难度选模型"在这套后端上是不可能实现的——传任何别名都等于选最贵模型，且与意图相反（本想派 Haiku 省钱，实际跑 pro）。
-- 因此唯一安全的做法是**完全不传 model**。上面的 Fable/Opus/Sonnet/Haiku 分工仅在非 DeepSeek 后端（原生 Anthropic 端点）下适用。
-- 同理 `ANTHROPIC_SMALL_FAST_MODEL` **必须保持**为 `deepseek-flash[1m]`（启动脚本 `~/openai-coding-deepseek.sh`）。该行是 2026-09-14 调查此事时**才加上**的；**在此之前它并不存在**，因此后台任务（文件摘要、标题生成、安全复审）当时使用 Claude 的 haiku 模型名，同样被映射到 `deepseek-v4-pro`。**不要删除该行。**
-- **本次 `deepseek-v4-pro` 费用有两个来源，均已堵上**：① Agent 调用传入的 `model:` 别名（本规则禁止，是主因）；② 缺失的 `ANTHROPIC_SMALL_FAST_MODEL`（2026-09-14 已补）。两者同源——Claude 模型名在本兼容层一律映射到最贵档。
+原因：该兼容层把**任何 `claude-*` 模型名映射到最贵的 `deepseek-v4-pro`**（实测 `claude-opus-4-7` → `deepseek-v4-pro`；裸别名 `opus` 直接报错）。`Agent` 的 `model` 参数只收 `sonnet/opus/haiku/fable` 别名，传不出 `deepseek-flash`，所以传任何别名都等于选最贵档——与"派 Haiku 省钱"的意图正好相反。
 - 解题研究而非发布产品，测试不需要过于严苛极端，保证边界控制断言即可。不要在测试环节花费的过多时间
 - 研发阶段复审和测试的重点应该是变更后代码实现的评审
 - 及时完整提交，不要积累大量未跟踪、未提交的文件
