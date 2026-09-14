@@ -2318,3 +2318,4 @@
 - 13:35 AGENTS.md 定 DeepSeek 规则：不传 model 给 subagent、统一 deepseek-flash、须设 ANTHROPIC_SMALL_FAST_MODEL [7fecc1a0]
 - 14:08 应用层去 Pi 落地：30 处引用 → 0，pinned_extension 迁入框架层，gate 仍 0 [94bfe017]
 - 14:20 handoff 收口：Phase 1 完成记录、D-2026-09-14-01、CURRENT-STATE 转 Phase 2、RESUME 重写为交接稿 [8c4e8978]
+- 14:58 resume 复核：gate 仍 0；RESUME 的去 Pi grep 字面返回 5 条，全为未跟踪 __pycache__/.pyc 与 header-art.png 二进制撞串，源码 0 处 [1cab4943]
