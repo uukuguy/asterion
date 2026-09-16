@@ -17,7 +17,8 @@ the bytes). Do not redefine the class/object/file or create final_result.
 Continuation: after host compaction and control reconstruction, read the same
 file, call the same accumulator on input_tuple[3], and set final_result to that
 result plus the setup_value loaded from the file. Do not replace earlier state.
-Use only builtins and json/hashlib/math. Open relative files inside your assigned
+Import only json, hashlib and math, each with its own import statement; use
+builtins otherwise. Open relative files inside your assigned
 directory. No shell, system/environment access, introspection, or other imports.
 Each file write is limited to 4096 UTF-8 bytes, each cell to 16384 written bytes,
 and all regular files together to 32768 bytes (at most 32 regular files).
