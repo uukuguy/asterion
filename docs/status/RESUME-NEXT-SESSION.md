@@ -9,7 +9,9 @@
 
 1. **The underscore defect is fixed, committed and verified.** A P1 cell may
    now name its own locals `_f`; that was killing whole runs on otherwise
-   correct cells. `afb2f3b1`.
+   correct cells. `afb2f3b1`, then corrected at `b096e589` after an automated
+   security review found the first exemption was tree-wide rather than
+   order- and scope-aware.
 2. **The compact failure is located to one exact link.** `_compact` waits for
    a proposal frame from the Pi extension and times out, because the extension
    only sends one when Pi fires `session_before_compact` — and it never fired.
@@ -26,11 +28,22 @@
   bound or not; single-underscore denied only when the cell never binds it.
   The `.attr` underscore rule and the underscore function-name rule are
   untouched.
+- **Commit `b096e589` corrects that exemption.** The first version collected
+  binding targets tree-wide, so a name was admitted whenever it appeared as a
+  target *somewhere*, even when the read came first or the binding sat in an
+  `if False`, an empty loop or a comprehension — each leaving the read to fall
+  through to the IPython namespace, which is what the rule exists to stop. An
+  automated security review of `afb2f3b1` flagged it; all four shapes were
+  reproduced before anything changed. Admission now requires the binding to
+  provably precede the read in the read's own scope, and no binding escapes an
+  `if`, a `try`, a loop body or a comprehension. The walk is conservative in
+  the fail-closed direction.
 - **Verified:** 25 P1 worker tests pass, including every fail-closed security
   test (`test_forbidden_cells_fail_closed_and_poison`,
   `test_format_string_cannot_traverse_private_attributes`,
-  `test_pattern_matching_cannot_extract_worker_closures`); detachment gate 0;
-  30 operator/installed/provider tests pass; ruff clean.
+  `test_pattern_matching_cannot_extract_worker_closures`); a 19-case boundary
+  check passes (6 admitted, 13 denied); detachment gate 0; 30
+  operator/installed/provider tests pass; ruff clean.
 - **Why the defect survived every test:** the existing test cells name their
   locals `stream`, `accumulator`, `verified_bytes` — none with a leading
   underscore. The new tests add a positive case and a six-entry security

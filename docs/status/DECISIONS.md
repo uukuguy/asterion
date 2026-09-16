@@ -355,11 +355,14 @@
   correct. The existing tests never caught it because their cells name their
   locals `stream`, `accumulator` and `verified_bytes`.
 - Decision: narrow the rule rather than remove it. Dunder names stay denied in
-  every position, bound or not. A single-underscore name is denied only when the
-  cell never binds it. `_bound_names` collects binding sites — assignment and
-  loop targets, `with ... as`, parameters, comprehension targets and
-  `except ... as`. `forbidden_names`, the `.attr` underscore rule and the
-  underscore function-name rule are unchanged.
+  every position, bound or not. A single-underscore name is admitted only where
+  the cell provably bound it first, in the scope where the read happens: a plain
+  bind-then-use in the same block, a `with ... as` name inside its own body, a
+  loop target inside its own body, a parameter inside its own function. A
+  binding inside an `if`, a `try`, a loop body or a comprehension never counts
+  for code outside it, and a read before the binding is not admitted either.
+  `forbidden_names`, the `.attr` underscore rule and the underscore
+  function-name rule are unchanged.
 - Rationale: the rule exists to stop a cell reaching interpreter state, and that
   part is worth keeping — an unbound `_ih` reads IPython history, and
   `__builtins__`, `__import__` and `__loader__` reach interpreter internals
@@ -368,8 +371,16 @@
   ordinary Python with no reach beyond the cell's own namespace.
 - Consequence: the fail-closed property is unchanged for every case the rule was
   written for; only cell-local naming is freed. The cost is that the rule is now
-  two-part and needs its own regression matrix — a six-entry one was added
-  alongside the positive case.
+  two-part and needs its own boundary matrix — a nineteen-case check was built
+  (six admitted, thirteen denied). An automated security review then found that
+  the first implementation's exemption was tree-wide rather than order- and
+  scope-aware, admitting four shapes whose binding never runs: `if False: _ih =
+  1` then reading `_ih`, `for _ih in (): pass` then reading `_ih`, a
+  comprehension target, and a read placed before the binding. Each left the read
+  falling through to the IPython namespace, which is exactly what the rule
+  exists to stop. Fixed at `b096e589`, and the four shapes are now regression
+  cases. The finding is why the rule reads "provably bound first" rather than
+  "binds it somewhere".
 - Rejected — removing the underscore rule: it would admit `_ih`, `_oh` and the
   rest of the IPython surface outright.
 - Rejected — fixing it in the task statement instead: the model would still be

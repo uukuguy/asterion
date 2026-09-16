@@ -2452,3 +2452,8 @@
 - 20:41 **compact 链真因取到**（新 `_receipt` hook 读 `sys.exc_info()` 的首次命中）：`_compact`(backend.py:990) → `witness.receive_proposal_and_decide`(context.py:734) → `_receive()` 等**扩展发来的 proposal 帧** → `asyncio.wait_for` 超时（`__context__` 为 TimeoutError，socket recv 被取消）→ `_fail()`(context.py:93) 抛 `PrimeContextError: invalid Prime context witness` → 被 `except Exception` 吞成兜底 receipt
 - 20:41 定位下一环：扩展 `packages/typescript/asterion-prime-extension/context-witness.ts:361` **确实会发 proposal**，但只在 Pi 的 `session_before_compact` 钩子（:423）触发时才发。**超时 ⇒ 该钩子没被触发**
 - 20:41 未查明（下一回合）：Pi 为何不发 `session_before_compact`——是 Asterion 主动发 `session.compact` RPC 不触发该钩子，还是扩展的 witness 未注册上。**这是 D-2026-09-16-01 的实质**
+- 20:59 **自动安全复查打回 [afb2f3b1]**：`_bound_names` 是**树级扁平集合**，「某处出现过 Store」≠「读取点已绑定」。四种子形状被放行且运行时都不绑定：`if False: _ih=1` 后读、`for _ih in (): pass` 后读（空循环不绑定）、py3 推导式目标（自有作用域不外泄）、先读后绑。四者都让读取**回落到 IPython 命名空间**——正是下划线规则要挡的
+- 20:59 先在 `.asterion-private/p1-validate-check.py` 用零成本探针复现四例（全部 FAIL=被放行）**再动手**，未凭推断改安全代码
+- 20:59 修复 [b096e589]：`_bound_names` → `_safe_underscore_names`，改为**顺序 + 作用域感知**——只承认「读取点之前、同作用域内确已绑定」：同块内先绑后用、`with ... as` 在本体内、循环目标在本体内、参数在本函数内；`if`/`try`/循环体/推导式内的绑定**一律不外泄**；同块内先读后绑不承认。**保守方向（宁可误拒不可误放）**
+- 20:59 验证：边界矩阵 19 例全过（6 放行 / 13 拒绝，含上述四例）；P1 worker 25 测试过；门禁 0；ruff 干净；四例已入正式回归矩阵
+- 20:59 D-2026-09-16-02 的 Decision/Consequence 已同步修正（否则决策记录会把已废弃的 tree-wide 实现当成现行规则，误导下一会话）
