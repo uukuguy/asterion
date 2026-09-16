@@ -18,8 +18,10 @@ from asterion.agents.prime.context import PROJECTION, encode_prime_context_v1
 from asterion.agents.prime.summarization import (
     MATERIAL_KEYS,
     MATERIAL_VERSION,
+    SUMMARY_KERNEL_NOTE,
     build_instruction,
     build_summarization_material,
+    compaction_custom_instructions,
     compose_request_text,
     main_completion_tokens,
     turn_prefix_completion_tokens,
@@ -84,6 +86,17 @@ class TestPrimeSummarization(unittest.TestCase):
         # The operator's reservation cap for both branches is the main bound.
         self.assertEqual(main_completion_tokens(4_096), 3_276)
         self.assertEqual(turn_prefix_completion_tokens(4_096), 2_048)
+
+    def test_custom_instructions_are_the_kernel_note_only(self) -> None:
+        """A host that summarizes for itself gets the kernel note, not templates.
+
+        Pi builds the summary prompt, so Asterion's section format would only
+        duplicate inside the focus it appends. What the host cannot know about
+        is the kernel, and that is exactly what must survive compaction.
+        """
+
+        self.assertEqual(compaction_custom_instructions(), SUMMARY_KERNEL_NOTE)
+        self.assertNotIn("## Goal", compaction_custom_instructions())
 
     def test_templates_never_rescan_inserted_private_text(self) -> None:
         """A conversation carrying another template's marker must stay inert."""

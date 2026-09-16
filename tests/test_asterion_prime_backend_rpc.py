@@ -80,6 +80,8 @@ for line in sys.stdin:
         })
         emit({"type": "agent_end"})
     elif request["type"] == "compact":
+        with open(material_path + ".request", "a", encoding="utf-8") as stream:
+            stream.write(json.dumps(request, sort_keys=True, separators=(",", ":")) + "\n")
         emit({"type": "compaction_start", "reason": "manual"})
         arm = receive_frame()
         proposal = dict(proposal_template)
@@ -235,6 +237,7 @@ class TestPrimeBackendRealRpc(unittest.IsolatedAsyncioTestCase):
             model_price=ModelPrice(1000000, 1000000),
             witness=witness,
             tool_executor=FakeToolExecutor(),
+            compaction_instructions={"note-1": "KERNEL-NOTE-TEXT"},
             authority_id="authority-1",
         )
         self.addAsyncCleanup(backend.close)
@@ -263,7 +266,7 @@ class TestPrimeBackendRealRpc(unittest.IsolatedAsyncioTestCase):
         return PrimePromptRequest(command_id, "session-1", 1, text)
 
     @staticmethod
-    def _compact(*, tokens: int) -> SessionContextCommand:
+    def _compact(*, tokens: int, instructions_ref=None) -> SessionContextCommand:
         return SessionContextCommand(
             "compact-1",
             "session-1",
@@ -273,7 +276,7 @@ class TestPrimeBackendRealRpc(unittest.IsolatedAsyncioTestCase):
             "session.compact",
             {
                 "continuation_id": "continuation-1",
-                "instructions_ref": None,
+                "instructions_ref": instructions_ref,
                 "budget": {
                     "controller_tokens": tokens,
                     "application_tokens": 0,
@@ -293,13 +296,23 @@ class TestPrimeBackendRealRpc(unittest.IsolatedAsyncioTestCase):
         process = rpc.process
         pid = process.pid
 
-        compact = await attachment.execute_context(self._compact(tokens=16000))
+        compact = await attachment.execute_context(
+            self._compact(tokens=16000, instructions_ref="note-1")
+        )
         second = await attachment.execute_prompt(self._prompt("prompt-2", "stage-two"))
 
         self.assertEqual(
             (first.status, compact.status, second.status),
             ("completed", "succeeded", "completed"),
         )
+        # The reference reached the running Pi as its own custom focus, and the
+        # text is what left this process; the command carried only the handle.
+        recorded = json.loads(
+            (self.root / "witness-completed.json.request").read_text(encoding="utf-8")
+        )
+        self.assertEqual(set(recorded), {"id", "type", "customInstructions"})
+        self.assertEqual((recorded["type"], recorded["customInstructions"]), ("compact", "KERNEL-NOTE-TEXT"))
+        self.assertNotIn("KERNEL-NOTE-TEXT", json.dumps(compact.to_mapping()))
         self.assertIs(rpc.process, process)
         self.assertEqual(rpc.process.pid, pid)
         events = attachment.replay_events()

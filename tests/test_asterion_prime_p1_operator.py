@@ -19,7 +19,10 @@ import unittest
 from unittest.mock import patch
 
 from asterion.agents.prime.backend import PrimeSessionBackend
-from asterion.agents.prime.compaction_budget import ModelPrice
+from asterion.agents.prime.compaction_budget import (
+    ModelPrice,
+    quote_compaction_reservation,
+)
 from asterion.agents.prime.context import PrimeContextWitnessSession
 from asterion.agents.prime.session import AsterionPrimeLimits
 from asterion.agents.prime.state import PrimeBackendIdentity
@@ -79,9 +82,14 @@ class CodingPi(FakeReusablePi):
         emit("agent_end", {})
         return PiRpcResult("SENTINEL_PRIVATE_MODEL_ANSWER", tuple(events), b"")
 
-    async def compact(self, *, signal, on_event):
+    async def compact(self, *, signal, on_event, custom_instructions=None):
         cast(Any, self).trace.append("compact.provider-call")
-        return await super().compact(signal=signal, on_event=on_event)
+        cast(Any, self).compact_instructions = custom_instructions
+        return await super().compact(
+            signal=signal,
+            on_event=on_event,
+            custom_instructions=custom_instructions,
+        )
 
     async def close(self):
         await super().close()
@@ -90,24 +98,14 @@ class CodingPi(FakeReusablePi):
 
 class TestP1Operator(unittest.IsolatedAsyncioTestCase):
     async def fixture(self, *, aggregate_tokens: int = 64_000):
-        # P1 has no native package and no installed-route witness yet, so the
-        # detachment spec keeps its selector unpublished. Its operator resolves
-        # itself out of the provider, so these route tests cannot build a
-        # fixture while it is unavailable — they resume when Phase 4 publishes it.
-        from asterion.applications.prime import create_provider
-
-        if not any(
-            application.application_id == "prime.ipython-coding"
-            for application in create_provider().applications
-        ):
-            raise unittest.SkipTest(
-                "prime.ipython-coding is unpublished until Phase 4 supplies its witness"
-            )
         self.assertIsNotNone(
             importlib.util.find_spec("asterion.applications.prime.p1.operator"),
             "native P1 operator coordinator is missing",
         )
-        from asterion.applications.prime.p1.operator import P1OperatorResources
+        from asterion.applications.prime.p1.operator import (
+            P1OperatorResources,
+            _COMPACTION_INSTRUCTIONS,
+        )
 
         temporary = tempfile.TemporaryDirectory(prefix="asterion-p1-operator-test-")
         self.addCleanup(temporary.cleanup)
@@ -180,6 +178,9 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
             model_price=ModelPrice(1_000_000, 1_000_000),
             witness=witness,
             tool_executor=owner,
+            # The operator's own private table, so a test backend resolves the
+            # same reference the preset application sends.
+            compaction_instructions=_COMPACTION_INSTRUCTIONS,
             authority_id="authority-1",
         )
         self.addAsyncCleanup(backend.close)
@@ -250,6 +251,11 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual((rpc.calls, rpc.compacts, rpc.closes), (3, 1, 1))
+        # The application's own instruction reached the RPC, and it is the
+        # kernel note rather than a restatement of it anywhere in the operator.
+        from asterion.agents.prime.summarization import SUMMARY_KERNEL_NOTE
+
+        self.assertEqual(rpc.compact_instructions, SUMMARY_KERNEL_NOTE)
         self.assertFalse(resources.private_root.exists())
         assert resources.worker.cleanup_receipt is not None
         self.assertEqual(resources.worker.cleanup_receipt.reap_count, 1)
@@ -700,15 +706,6 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("SENTINEL_PRIVATE", output.getvalue())
 
     def test_stubborn_host_owners_are_bounded_and_real_worker_is_reaped(self):
-        # Same unpublished-P1 condition as fixture(); this one drives a
-        # subprocess instead, so it needs its own guard.
-        from asterion.applications.prime import create_provider
-
-        if not any(
-            application.application_id == "prime.ipython-coding"
-            for application in create_provider().applications
-        ):
-            self.skipTest("prime.ipython-coding is unpublished until Phase 4")
         root = Path(__file__).resolve().parents[1]
         program = r"""
 import asyncio, json, sys, time
@@ -790,6 +787,116 @@ raise SystemExit(1)
                             os.killpg(int(pid_file.read_text()), signal.SIGKILL)
                         except ProcessLookupError:
                             pass
+
+class TestP1LaunchPreflight(unittest.TestCase):
+    """The rebuilt native launch path fails closed on every operator input.
+
+    The resource tests above construct the owners directly, so they cannot see
+    this edge. These assertions cover the operator-owned boundary only: which
+    values the preset must supply, and that a rejected preflight reports the
+    fixed public status without starting a process.
+    """
+
+    def test_fixed_preset_values_agree_with_the_runtime_factory(self) -> None:
+        from asterion.applications.prime.p1 import operator
+        from asterion.applications.prime.p1.runtime_binding import P1_RUNTIME_OPTIONS
+
+        # The launch path builds the exact budget and limits the runtime factory
+        # re-validates, so a drift between the two would reject every run at the
+        # factory before it could start.
+        self.assertEqual(
+            P1_RUNTIME_OPTIONS["aggregate_tokens"], str(operator._AGGREGATE_TOKENS)
+        )
+        self.assertEqual(P1_RUNTIME_OPTIONS["cost_micros"], str(operator._COST_MICROS))
+        self.assertEqual(
+            P1_RUNTIME_OPTIONS["deadline_ms"],
+            str(int(operator._DEADLINE_SECONDS * 1000)),
+        )
+        self.assertEqual(
+            P1_RUNTIME_OPTIONS["max_callbacks"], str(operator._LIMITS.model_callbacks)
+        )
+        self.assertEqual(
+            P1_RUNTIME_OPTIONS["max_tool_callbacks"],
+            str(operator._LIMITS.tool_callbacks),
+        )
+
+    def test_fixed_price_reservation_stays_inside_the_public_cap(self) -> None:
+        from asterion.applications.prime.p1 import operator
+
+        self.assertIs(type(operator._PRICE), ModelPrice)
+        quote = quote_compaction_reservation(
+            branch_input_caps=operator._COMPACTION_INPUT_CAPS,
+            branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
+            price=operator._PRICE,
+        )
+        self.assertLessEqual(quote.reserved_tokens, 16_000)
+        self.assertLessEqual(quote.cost_micro_units, 125_000)
+
+    def test_source_tree_operator_root_is_refused_before_any_process(self) -> None:
+        from asterion.applications.prime.p1 import operator
+
+        repository = Path(__file__).resolve().parents[1]
+        # An absent operator root and a source-tree operator root must both
+        # fail closed: the second is the case where the running distribution is
+        # installed inside the root and a source tree could execute in its place.
+        for environment in ({}, {operator.live.OPERATOR_ROOT_ENV: str(repository)}):
+            with self.subTest(keys=sorted(environment)):
+                with self.assertRaises(operator.P1OperatorError):
+                    operator._preflight(environment)
+
+    def test_failed_interpreter_probe_is_reported_as_the_module_error(self) -> None:
+        import asterion
+
+        from asterion.applications.prime.p1 import operator
+
+        # A probe that cannot run, or times out, must fail closed as the module's
+        # own error rather than leaking the subprocess exception type.
+        #
+        # The source-execution guard rejects any operator root that does not hold
+        # an installed distribution, so the running package must be made to look
+        # installed under ``site-packages`` outside the root. Without that, the
+        # guard rejects first, the patched probe is never called, and the
+        # assertion below would pass for an unrelated reason. The call-count
+        # assertion is what keeps this test from silently degrading that way.
+        with tempfile.TemporaryDirectory(prefix="asterion-p1-preflight-") as temporary:
+            base = Path(temporary)
+            installed = base / "install" / "site-packages" / "asterion" / "__init__.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_text("", encoding="utf-8")
+            operator_root = base / "operator"
+            operator_root.mkdir()
+            environment = {operator.live.OPERATOR_ROOT_ENV: str(operator_root)}
+            for error in (
+                subprocess.CalledProcessError(1, "probe"),
+                subprocess.TimeoutExpired("probe", 10),
+            ):
+                with self.subTest(error=type(error).__name__):
+                    with (
+                        patch.object(asterion, "__file__", str(installed)),
+                        patch.object(
+                            operator.subprocess, "run", side_effect=error
+                        ) as probe,
+                        self.assertRaises(operator.P1OperatorError),
+                    ):
+                        operator._preflight(environment)
+                    probe.assert_called_once()
+
+    def test_rejected_preflight_reports_the_fixed_public_status(self) -> None:
+        from asterion.applications.prime.p1 import operator
+
+        repository = Path(__file__).resolve().parents[1]
+        stream = io.StringIO()
+        with (
+            patch.dict(
+                os.environ,
+                {operator.live.OPERATOR_ROOT_ENV: str(repository)},
+                clear=False,
+            ),
+            patch("sys.stdout", stream),
+        ):
+            self.assertEqual(operator.main([]), 2)
+        self.assertEqual(json.loads(stream.getvalue()), {"status": "preflight-rejected"})
+
 
 if __name__ == "__main__":
     unittest.main()

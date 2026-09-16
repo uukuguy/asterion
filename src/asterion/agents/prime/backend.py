@@ -261,6 +261,7 @@ class PrimeSessionBackend:
         model_price: ModelPrice | None = None,
         witness: PrimeContextWitnessSession | None = None,
         tool_executor: PrimeToolExecutor | None = None,
+        compaction_instructions: Mapping[str, str] | None = None,
     ) -> None:
         try:
             if type(identity) is not PrimeBackendIdentity or store.identity != identity:
@@ -286,6 +287,19 @@ class PrimeSessionBackend:
                 raise ValueError
             if authority_id is not None:
                 _id(authority_id)
+            # The operator's private text, keyed by the opaque handle that is the
+            # only thing the canonical command journal ever sees.
+            if compaction_instructions is not None and (
+                not isinstance(compaction_instructions, Mapping)
+                or any(
+                    type(key) is not str
+                    or OPAQUE_ID.fullmatch(key) is None
+                    or type(text) is not str
+                    or not text
+                    for key, text in compaction_instructions.items()
+                )
+            ):
+                raise ValueError
             self._worker_lifecycle = (
                 None if tool_executor is None else tool_executor.validate_lifecycle()
             )
@@ -318,6 +332,7 @@ class PrimeSessionBackend:
             witness,
             tool_executor,
         )
+        self._compaction_instructions = dict(compaction_instructions or {})
         self._authority_id = authority_id
         self._authority_revision = 0
         self._budget: RemainingBudget | None = None
@@ -893,12 +908,27 @@ class PrimeSessionBackend:
             )
         budget = command.payload["budget"]
         assert isinstance(budget, Mapping)
-        if command.payload["instructions_ref"] is not None:
-            return self._commit_context(
-                command,
-                digest,
-                self._receipt(command, "rejected", None, "instructions-unavailable"),
+        # The protocol keeps the reference opaque so the operator's private text
+        # never reaches the canonical control journal. Resolving it here is the
+        # only place the text exists, and a reference this owner cannot resolve
+        # is refused before any effect starts.
+        reference = command.payload["instructions_ref"]
+        custom_instructions: str | None = None
+        if reference is not None:
+            supplied = (
+                self._compaction_instructions.get(reference)
+                if type(reference) is str
+                else None
             )
+            if type(supplied) is not str or not supplied:
+                return self._commit_context(
+                    command,
+                    digest,
+                    self._receipt(
+                        command, "rejected", None, "instructions-unavailable"
+                    ),
+                )
+            custom_instructions = supplied
         deadline = min(
             time.monotonic() + self._remaining_seconds(),
             time.monotonic() + int(budget["deadline_ms"]) / 1000,
@@ -926,6 +956,7 @@ class PrimeSessionBackend:
                 self._rpc.compact(
                     signal=_Signal(self, None, deadline=deadline),
                     on_event=native.append,
+                    custom_instructions=custom_instructions,
                 )
             )
 

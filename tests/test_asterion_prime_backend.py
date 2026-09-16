@@ -50,6 +50,7 @@ class FakeReusablePi:
         self.failure: Exception | None = None
         self.peer = None
         self.compacts = 0
+        self.compact_instructions = None
         self.corrupt_compact = False
         self.acked = False
         self.acknowledged = asyncio.Event()
@@ -99,8 +100,9 @@ class FakeReusablePi:
     async def close(self):
         self.closes += 1
 
-    async def compact(self, *, signal, on_event):
+    async def compact(self, *, signal, on_event, custom_instructions=None):
         self.compact_signal = signal
+        self.compact_instructions = custom_instructions
         self.compacts += 1
         arm = await receive(self.peer)
         proposal, persisted = material()
@@ -236,6 +238,7 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
             model_price=ModelPrice(1000000, 1000000),
             witness=witness,
             tool_executor=self.worker,
+            compaction_instructions={"note-1": "KERNEL-NOTE-TEXT"},
             authority_id="authority-1",
         )
         self.backend.sync_authority_snapshot(
@@ -655,6 +658,26 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         receipt = await self.backend.execute_context(self.compact_command())
         self.assertEqual(receipt.status, "succeeded")
 
+    async def test_compact_resolves_the_instruction_reference_for_the_rpc(self):
+        await self.backend.execute_prompt(self.request())
+        receipt = await self.backend.execute_context(
+            self.compact_command(instructions_ref="note-1")
+        )
+        self.assertEqual(receipt.status, "succeeded")
+        self.assertEqual(self.rpc.compact_instructions, "KERNEL-NOTE-TEXT")
+        # The reference is what the canonical command carries; the text is not.
+        self.assertNotIn("KERNEL-NOTE-TEXT", json.dumps(receipt.to_mapping()))
+
+    async def test_unresolvable_instruction_reference_is_refused(self):
+        await self.backend.execute_prompt(self.request())
+        receipt = await self.backend.execute_context(
+            self.compact_command(instructions_ref="note-absent")
+        )
+        self.assertEqual(receipt.status, "rejected")
+        self.assertEqual(receipt.reason_code, "instructions-unavailable")
+        self.assertEqual(self.rpc.compacts, 0)
+        self.assertIsNone(self.rpc.compact_instructions)
+
     async def test_cancellation_fences_and_cleanup_is_idempotent(self):
         self.rpc.release = asyncio.Event()
         task = asyncio.create_task(self.backend.execute_prompt(self.request()))
@@ -669,7 +692,9 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rpc.closes, 1)
         self.assertTrue(self.lease.closed)
 
-    def compact_command(self, command_id="compact-1", tokens=16000):
+    def compact_command(
+        self, command_id="compact-1", tokens=16000, instructions_ref=None
+    ):
         return SessionContextCommand(
             command_id,
             "session-1",
@@ -679,7 +704,7 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
             "session.compact",
             {
                 "continuation_id": "continuation-1",
-                "instructions_ref": None,
+                "instructions_ref": instructions_ref,
                 "budget": {
                     "controller_tokens": tokens,
                     "application_tokens": 0,

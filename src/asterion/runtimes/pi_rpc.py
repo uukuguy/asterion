@@ -1089,9 +1089,20 @@ class PiRpcSession:
         *,
         signal: CancellationSignal,
         on_event: Callable[[PiRpcEvent], None],
+        custom_instructions: str | None = None,
     ) -> PiRpcCompactResult:
-        """Request native compaction on the currently open child."""
+        """Request native compaction on the currently open child.
 
+        ``custom_instructions`` is the host's own additional focus for the
+        summary it generates; Pi appends it to its own prompt and stays the
+        summarizer, so the compaction terminal is unaffected. It is optional
+        and absent from the request when there is none.
+        """
+
+        if custom_instructions is not None and (
+            type(custom_instructions) is not str or not custom_instructions
+        ):
+            raise RuntimeError("Pi RPC compact instructions are invalid")
         self._check_run_ownership()
         if self._command_lock.locked():
             raise RuntimeError("Pi RPC session already has an active command")
@@ -1119,7 +1130,10 @@ class PiRpcSession:
                 )
                 control.check_before_prompt()
                 request_written.set()
-                self.send({"id": request_id, "type": "compact"})
+                request: dict[str, object] = {"id": request_id, "type": "compact"}
+                if custom_instructions is not None:
+                    request["customInstructions"] = custom_instructions
+                self.send(request)
                 while True:
                     raw = control.read_event()
                     delivered: concurrent.futures.Future[PiRpcEvent] = (

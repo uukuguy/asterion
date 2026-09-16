@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass
 import json
 import os
 from pathlib import Path
+import secrets
 import shutil
 import signal
 import socket
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 from types import MappingProxyType
@@ -21,11 +24,19 @@ from asterion.agents.prime.backend import (
     PrimePromptRequest,
     PrimeSessionBackend,
 )
+from asterion.agents.prime.compaction_budget import (
+    ModelPrice,
+    quote_compaction_reservation,
+)
+from asterion.agents.prime.context import PrimeContextWitnessSession
+from asterion.agents.prime.execution import AsterionPrimeLimits
+from asterion.agents.prime.state import PrimeBackendIdentity
 from asterion.agents.prime.store import FilePrimeSessionStore, private_root_identity
+from asterion.agents.prime.summarization import compaction_custom_instructions
 from asterion.applications.first_party_packages import (
     create_prime_ipython_coding_native_package,
 )
-from asterion.applications.prime import create_provider
+from asterion.applications.prime import create_prime_ipython_coding_provider
 from asterion.applications.provider import compose_installed_provider
 from asterion.applications.prime.p1.coordination import (
     P1Coordination,
@@ -84,12 +95,13 @@ from asterion.control.session_context import (
     SessionContextReceipt,
 )
 from asterion.control.system import resolve_agent_system
+from asterion.applications.prime.p7 import live
 from asterion.runner.application import ApplicationRunResult
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
 from asterion.runtime.host import CancellationSignal
-from asterion.runtime.native_rpc import RpcSession, normalize_usage
-from asterion.runtime.pinned_extension import ExtensionLease
+from asterion.runtime.native_rpc import RpcSession, build_rpc_session, normalize_usage
+from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 
 _CLEANUP_SECONDS = 5.0
 
@@ -235,18 +247,14 @@ class P1OperatorResources:
             host_service_grants=("prime.session-backend",),
         )
         package = create_prime_ipython_coding_native_package()
-        provider = create_provider()
-        # Resolve only the selected application's exact package closure.
-        provider = replace(
-            provider,
-            applications=tuple(
-                app
-                for app in provider.applications
-                if app.application_id == "prime.ipython-coding"
-            ),
-        )
+        # Compose from this application's own record, never by looking itself
+        # up in the published provider list. Publication is an advertisement
+        # decision that is gated on this application's installed-route witness;
+        # if running also depended on it, that witness could only be produced
+        # after publication and the application's own route could never be
+        # exercised at all.
         provider = compose_installed_provider(
-            provider,
+            create_prime_ipython_coding_provider(),
             runtime_factories=RuntimeFactoryRegistry(()),
             installed_packages=(package,),
         )
@@ -531,7 +539,7 @@ class P1OperatorResources:
             "session.compact",
             {
                 "continuation_id": self.identity.continuation_id,
-                "instructions_ref": None,
+                "instructions_ref": _COMPACTION_INSTRUCTION_REF,
                 "budget": {
                     "controller_tokens": 16_000,
                     "application_tokens": 0,
@@ -895,18 +903,269 @@ class _P1Bridge:
             raise P1OperatorError()
 
 
-def _preflight(environment: Mapping[str, str]) -> None:
-    """Refuse source execution, then report P1 unavailable.
+# The one fixed model host this preset runs against. Provider, model, deadline,
+# budget and price are preset values rather than invocation knobs: a user-facing
+# small verification must not ask for provider, model, cost or deadline
+# selection, so the integration fixes them here and exposes only public status.
+_PROVIDER = "deepseek"
+_MODEL = "deepseek-v4-flash"
+_DEADLINE_SECONDS = 600.0
+_AGGREGATE_TOKENS = 64_000
+_COST_MICROS = 500_000
+_LIMITS = AsterionPrimeLimits(8, 4, 600_000)
+# Micro-units per million tokens for the fixed model, taken from the
+# operator-owned Pi distribution's own cost entry for it (0.14 and 0.28 USD per
+# million). It bounds the compaction reservation and is charged against the run
+# budget, and must never be re-derived from a model registry inside a checkout:
+# that is the coupling this phase removes, and the Pi exposes no public
+# queryable price (its model listing carries no cost column, and its registry
+# lives in content-hashed bundle chunks).
+#
+# This is therefore a preset constant with no runtime cross-check. Its only
+# failure mode is a silent drift in the private ledger's ``cost_micros`` --
+# bounded and small, because ``_AGGREGATE_TOKENS``, ``_DEADLINE_SECONDS`` and
+# ``_LIMITS`` bind the run independently of price, and it reaches no public
+# surface. Re-read the operator's Pi registry whenever the Pi distribution or
+# ``_MODEL`` changes.
+_PRICE = ModelPrice(140_000, 280_000)
+# The two compaction callbacks this application reserves, capped exactly as the
+# reservation arithmetic requires.
+_COMPACTION_INPUT_CAPS = (4096, 4096)
+_COMPACTION_OUTPUT_CAPS = (3276, 3276)
+# The one private instruction this application sends with a compaction. Pi owns
+# the summary and its prompt, so what has to reach the model is the note that
+# keeps the live IPython kernel names in it -- the reason a persistent-kernel
+# application exists at all. The protocol carries only the handle below, so the
+# text stays out of the canonical control journal, and the text itself is owned
+# by ``agents/prime/summarization.py`` rather than restated here.
+_COMPACTION_INSTRUCTION_REF = "prime-kernel-note-v1"
+_COMPACTION_INSTRUCTIONS = {
+    _COMPACTION_INSTRUCTION_REF: compaction_custom_instructions()
+}
+# The installed Pi distribution names its agent directory through this variable
+# and reads its settings from ``settings.json`` inside it.
+_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR"
+_AGENT_SETTINGS = {
+    "compaction": {"enabled": False, "reserveTokens": 4096, "keepRecentTokens": 256},
+    "retry": {"enabled": False},
+}
+_IPYTHON_VERSION = "8.39.0" if sys.version_info[:2] == (3, 10) else "9.17.1"
 
-    The native P1 launch path was removed before a replacement exists, so there
-    is no Asterion-owned worker command or compaction backend to construct.
+
+@dataclass(frozen=True, slots=True)
+class _Preflight:
+    """Every operator-owned value one P1 preset invocation resolves to."""
+
+    operator_root: Path
+    environment: Mapping[str, str]
+    worker_python: Path
+    pi_base_command: tuple[str, ...]
+    extension_path: Path
+
+
+def _preflight(environment: Mapping[str, str]) -> _Preflight:
+    """Refuse source execution, then resolve every operator-owned input.
+
+    Mirrors the P7 operator contract: the operator root is the mounted
+    checkout, and the running distribution must be installed outside it so a
+    source tree can never be executed in its place. The node executable, Pi
+    entry and extension are operator-owned values the preset exports, so
+    nothing here derives a path from a sibling checkout layout, and no module
+    inside a checkout supplies compaction semantics.
     """
     import asterion
 
-    root = Path(environment["ASTERION_PRIME_OPERATOR_ROOT"]).resolve(strict=True)
+    configured = environment.get(live.OPERATOR_ROOT_ENV, "").strip()
+    if not configured:
+        raise P1OperatorError()
+    try:
+        root = Path(configured).resolve(strict=True)
+    except OSError:
+        raise P1OperatorError() from None
     package = Path(str(asterion.__file__)).resolve(strict=True)
     if package.is_relative_to(root) or "site-packages" not in package.parts:
         raise P1OperatorError()
+    if not root.is_dir():
+        raise P1OperatorError()
+    # Preserve the isolated environment's interpreter path. Resolving its
+    # symlink would escape the environment and lose the installed extras.
+    worker = Path(sys.executable).absolute()
+    if not worker.is_file():
+        raise P1OperatorError()
+    # A probe imports IPython but starts no worker and no Pi session.
+    try:
+        probe = subprocess.run(
+            (
+                str(worker),
+                "-I",
+                "-c",
+                f"import IPython,sys; assert IPython.__version__ == {_IPYTHON_VERSION!r}",
+            ),
+            check=True,
+            capture_output=True,
+            timeout=10,
+            env={"LANG": "C.UTF-8"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise P1OperatorError() from None
+    if probe.stdout or probe.stderr:
+        raise P1OperatorError()
+    try:
+        resolved = live.load_operator_environment(root)
+        pi_base_command = live.pi_base_command(
+            node=live.resolve_node(resolved), pi_entry=live.resolve_pi_entry(resolved)
+        )
+        extension = live.extension_path()
+    except live.P7LiveSolveError:
+        raise P1OperatorError() from None
+    # Bound the two compaction callbacks before any model process can start.
+    try:
+        quote_compaction_reservation(
+            branch_input_caps=_COMPACTION_INPUT_CAPS,
+            branch_output_caps=_COMPACTION_OUTPUT_CAPS,
+            price=_PRICE,
+        )
+    except (TypeError, ValueError):
+        raise P1OperatorError() from None
+    return _Preflight(root, resolved, worker, pi_base_command, extension)
+
+
+async def _build_resources(preflight: _Preflight) -> P1OperatorResources:
+    """Preflight every host service before the first worker or model process."""
+    temporary = tempfile.TemporaryDirectory(prefix="asterion-native-p1-")
+    root = Path(temporary.name).resolve()
+    bridge_owner, bridge_pi = socket.socketpair()
+    witness_owner, witness_pi = socket.socketpair()
+    lease = None
+    worker = backend = store = bridge = witness = None
+    try:
+        nonce = secrets.token_hex(32)
+        descriptors = tuple(sorted((bridge_pi.fileno(), witness_pi.fileno())))
+        binding = ExtensionBinding(
+            "prime.ipython",
+            preflight.extension_path,
+            ("prime.tool.ipython",),
+            descriptors,
+            {
+                "ASTERION_PRIME_IPYTHON_FD": str(bridge_pi.fileno()),
+                "ASTERION_PRIME_IPYTHON_CONTEXT_FD": str(witness_pi.fileno()),
+                "ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE": nonce,
+            },
+        )
+        lease = binding.preflight()
+        bridge_pi.close()
+        witness_pi.close()
+        agent_root = root / "agent"
+        agent_root.mkdir(mode=0o700)
+        (agent_root / "settings.json").write_text(
+            json.dumps(_AGENT_SETTINGS), encoding="utf-8"
+        )
+        environment = dict(preflight.environment)
+        environment[_AGENT_DIR_ENV] = str(agent_root)
+        environment.update(lease.environment)
+        command = (
+            *preflight.pi_base_command,
+            "--provider",
+            _PROVIDER,
+            "--model",
+            _MODEL,
+            *lease.command_args(),
+        )
+        deadline = time.monotonic() + _DEADLINE_SECONDS
+        worker = P1WorkerProcess(
+            deadline=deadline, interpreter=str(preflight.worker_python)
+        )
+        await worker.start()
+        owner = P1WorkerOwnerAdapter(worker)
+        private = root / "backend"
+        private.mkdir(mode=0o700)
+        run_id = "p1-" + secrets.token_hex(12)
+        identity = PrimeBackendIdentity(
+            run_id,
+            1,
+            "prime-applications",
+            "prime.ipython-coding",
+            "1.0.0",
+            "asterion.prime",
+            digest(command),
+            binding.binding_fingerprint,
+            worker.identity_sha256,
+            "p1-continuation",
+            private_root_identity(private),
+            digest(
+                {
+                    **asdict(_LIMITS),
+                    "aggregate_tokens": _AGGREGATE_TOKENS,
+                    "cost_micros": _COST_MICROS,
+                }
+            ),
+        )
+        store = FilePrimeSessionStore(private, identity)
+        rpc = build_rpc_session(
+            command=command,
+            cwd=root,
+            environment=environment,
+            inherited_fds=lease.inherited_fds,
+            deadline_seconds=_DEADLINE_SECONDS,
+            compact_events=True,
+        )
+        witness = PrimeContextWitnessSession(
+            witness_owner,
+            launch_nonce=nonce,
+            timeout_seconds=60,
+            mark_uncertain=lambda: None,
+        )
+        backend = PrimeSessionBackend(
+            identity=identity,
+            store=store,
+            rpc_session=rpc,
+            extension_binding=binding,
+            extension_lease=lease,
+            approved_command=command,
+            approved_environment=environment,
+            limits=_LIMITS,
+            aggregate_tokens=_AGGREGATE_TOKENS,
+            cost_micros=_COST_MICROS,
+            model_price=_PRICE,
+            witness=witness,
+            tool_executor=owner,
+            compaction_instructions=_COMPACTION_INSTRUCTIONS,
+            authority_id="authority-1",
+        )
+        resources = P1OperatorResources(
+            backend=backend,
+            store=store,
+            worker=worker,
+            worker_owner=owner,
+            extension_lease=lease,
+            private_root=private,
+            journal_root=root / "journal",
+            run_id=run_id,
+            deadline=deadline,
+            cleanup_root=temporary.cleanup,
+            close_pi=lambda: _force_close_pi(rpc),
+            close_witness=witness.close,
+        )
+        bridge = _P1Bridge(bridge_owner, resources)
+        resources._close_bridge = bridge.close
+        return resources
+    except BaseException:
+        if bridge is not None:
+            await bridge.close()
+        if backend is not None:
+            await backend.close()
+        else:
+            if worker is not None:
+                await worker.close()
+            if witness is not None:
+                witness.close()
+            if store is not None:
+                store.close()
+            if lease is not None:
+                lease.close()
+        for channel in (bridge_owner, bridge_pi, witness_owner, witness_pi):
+            channel.close()
+        temporary.cleanup()
     raise P1OperatorError()
 
 
@@ -991,7 +1250,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if sys.argv[1:] if argv is None else argv:
             raise P1OperatorError()
-        _preflight(os.environ)
+        preflight = _preflight(os.environ)
+
+        async def invoke() -> P1PublicResult:
+            resources = await _build_resources(preflight)
+            resources.observe = _public_progress
+            return await run_fixed_small_verification(resources)
+
+        result = _run_operator(invoke)
     except BaseException:
         pass
     if result is None:

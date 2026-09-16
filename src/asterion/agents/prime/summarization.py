@@ -214,6 +214,20 @@ def _positive_integer(value: object) -> int:
     return value
 
 
+def compaction_custom_instructions() -> str:
+    """The custom focus Asterion prime sends to a host that summarizes for it.
+
+    The host builds the summary prompt itself, so the templates above never
+    reach the model on that path; what has to reach it is the kernel note, and
+    this function names that role instead of exporting the constant bare. It is
+    the whole reason a persistent-IPython application needs its own
+    summarization text, and a host's prompt has no way to know about a kernel
+    that outlives it.
+    """
+
+    return SUMMARY_KERNEL_NOTE
+
+
 def main_completion_tokens(reserve_tokens: int) -> int:
     """The main summarization completion bound, floored so it never exceeds it."""
 
@@ -346,6 +360,7 @@ __all__ = (
     "assert_material_shape",
     "build_instruction",
     "build_summarization_material",
+    "compaction_custom_instructions",
     "compose_request_text",
     "main_completion_tokens",
     "turn_prefix_completion_tokens",
