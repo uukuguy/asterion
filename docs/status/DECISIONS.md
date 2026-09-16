@@ -386,3 +386,39 @@
 - Rejected — fixing it in the task statement instead: the model would still be
   free to name a local `_x`, and the failure mode is a whole run lost to a
   naming choice, not a cell that misbehaves.
+
+## D-2026-09-16-03 — Poison the worker only for a cell that actually ran
+
+- Status: 🟢 active (decided 2026-09-16; implemented at `e4fbb1ea` and verified)
+- Context: `_validate` refuses a cell before `run_code` is ever called, so a
+  refused cell has executed nothing. A bare `except BaseException` merged that
+  case with a failure inside `run_code`, and any failed cell poisons the
+  worker, whose close path SIGTERMs its own process group. One exploratory
+  cell therefore ended the entire run — including when that turn's work was
+  already finished. A live run did exactly that: the setup cell wrote the
+  file, a second cell opened with `import os` to check its size, was correctly
+  refused, and killed the session. Five consecutive witness runs died this way
+  or by one of the three sibling defects, none of them reaching compaction.
+- Decision: the frame carries `executed`, true only once the cell has been
+  handed to `run_code`. The host poisons when a cell that ran failed or was
+  cancelled, and keeps the poison when the frame's shape was rejected outright
+  (`observation is None`). A cell refused before execution is still denied,
+  still reported `uncertain`, and still counts its audit denial; the worker
+  simply stays usable. `P1CellObservation.executed` defaults to True so an
+  older shape is treated conservatively, and it is included in the observation
+  digest so a frame cannot understate it without detection.
+- Rationale: the poison protects against continuing on a worker whose state is
+  unknown, and that reason only applies once a cell has run. A cell stopped at
+  the AST stage leaves the namespace, the file root and the accumulator object
+  exactly as they were, so there is nothing to protect. Applying the same
+  penalty to both cases buys no safety and costs the entire run.
+- Consequence: the fail-closed property is unchanged for every case the poison
+  was written for — anything that executed may have left a side effect and
+  remains fatal. The cost is a second cell state to reason about, and the
+  boundary is now asserted from both sides in the worker tests.
+- Rejected — keep poisoning on every failure: it makes the witness fragile to
+  any model mistake, refused or not, and an AST refusal is provably
+  side-effect-free.
+- Rejected — isolate failures at the turn level: the next turn could then
+  build on an unfinished predecessor, and stage one's whole point is the
+  cross-turn object surviving intact.

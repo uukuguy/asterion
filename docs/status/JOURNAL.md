@@ -2475,3 +2475,10 @@
 - 22:17 **不是模型的错**：`newline=""` 是精确控制字节的标准写法，而任务陈述正要求「canonical JSON plus one newline」。**同类问题第三次出现**（下划线命名 / cell 数量 / 现在的 newline）——模式一致：模型写完全正确的 Python，受限环境因签名更窄而拒绝，代价是整个运行
 - 22:17 用户裁决：**补齐 safe_open 签名**。落地 [0911d846]：接受 `newline` 并按内建取值校验（`{None,"","\n","\r","\r\n"}`），二进制模式带 `newline` 按内建同样拒绝；路径/权限/编码校验完全不动
 - 22:17 验证：worker **27 测试全过**（新增「用 `encoding=`+`newline=` 写读回」正面用例 + 拒绝矩阵）；门禁 0；ruff 干净
+- 22:42 实跑（`p1-35cea6f9…`）**又未到 compact**，但暴露**第五个发现，且是 witness 一直通不过的根因**：模型在 setup turn 写了两个 cell（违反刚加的一条规则），第二个是探索性的 `import os`——被**正确拒绝**（只允许 json/hashlib/math），但**整个运行死亡**
+- 22:42 机制：`_validate` 在 `run_code` **之前**运行，故它拒绝的 cell **一行代码都没执行、零副作用**；但 cell 循环的 `except BaseException` 把「AST 阶段被拒」与「执行中途失败」合并成一个 `failed` → `poisoned` → 自毁。**代价与安全性完全不成比例**
+- 22:42 用户裁决：**只在执行中途失败时 poison**。落地 [e4fbb1ea]：frame 新增 `executed`（仅在 cell 交给 `run_code` 后为真）；host 侧 `executed` 为真且失败/取消才 poison，frame 形状被拒（`observation is None`）仍 poison；AST 阶段被拒的 cell 仍拒绝、仍报 `uncertain`、仍计入 `audit_denials`，仅 worker 存活
+- 22:42 设计细节：`P1CellObservation.executed` 默认 `True`（旧形状按"已执行"保守处理，fail-closed 方向）；且**纳入 observation digest**，使 frame 无法不被检测地低报该字段。核实无 golden digest 依赖，故可安全纳入
+- 22:42 既有安全测试按新语义拆分：`test_cells_that_ran_and_failed_still_poison`（`open('../sentinel-secret')`/`open('/etc/passwd')` 在执行期被 `safe_open` 拒 → 仍 poison）与 `test_cells_refused_before_execution_leave_the_worker_usable`（9 个 `_validate` 拒绝用例仍被拒、仍 `uncertain`、仍计入 denials，但 worker 存活）。**原测试的隐患正是把两类混在一个循环里，断言同一种后果**
+- 22:42 验证：worker **28 测试全过**；operator/oracle/installed/runtime **49 测试全过**；门禁 0；ruff 干净。**已记入 DECISIONS 为 D-2026-09-16-03**（含两条 Rejected）
+- 22:42 至此本会话共五个独立故障，四个已修（下划线命名 / cell 数量 / safe_open newline / poison 粒度），第五个（compact 不触发钩子）仍为**推断**、运行时证据未取到

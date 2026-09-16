@@ -7,19 +7,21 @@
 
 ## TL;DR
 
-1. **Three of four defects are fixed.** The underscore rule (`afb2f3b1`,
+1. **Four of five defects are fixed.** The underscore rule (`afb2f3b1`,
    corrected at `b096e589` after a security review), the missing
-   one-cell-per-turn rule (`acc5ad1f`), and `safe_open`'s missing `newline`
-   (`0911d846`). All verified by tests; the first also by a live run.
-2. **The fourth is a reading, not yet a fact.** The compaction failure is
+   one-cell-per-turn rule (`acc5ad1f`), `safe_open`'s missing `newline`
+   (`0911d846`), and the poison granularity (`e4fbb1ea`). All verified by
+   tests; the first also by a live run.
+2. **The fifth is a reading, not yet a fact.** The compaction failure is
    consistent with Pi refusing to compact *before* it emits
    `session_before_compact` — the session sitting below `keepRecentTokens` —
    but that holds only if the first session entry is a turn-start entry. That
-   has not been verified, and Pi's own error text has not been captured. Three
-   live runs since the hook was installed all died earlier.
-3. **The pattern is the real finding.** Three of the four were a model writing
-   ordinary, correct Python that a narrower restricted environment refused,
-   at the cost of the entire run.
+   has not been verified, and Pi's own error text has not been captured. Every
+   live run since the hook was installed died earlier.
+3. **The pattern was the real finding, and it is now addressed.** Four of the
+   five were a model writing ordinary, correct Python that a narrower
+   restricted environment refused, and the last of them made even a correct
+   refusal fatal to the whole run.
 
 ## 已验证事实
 
@@ -45,6 +47,14 @@
   `file_write_calls` 0. `newline` is now accepted and validated against the
   builtin's values, and rejected in binary mode as the builtin does. Path,
   permission and encoding checks unchanged. 27 worker tests.
+- **Fixed — poison granularity (`e4fbb1ea`, D-2026-09-16-03).** `_validate`
+  runs before `run_code`, so a cell it refuses has executed nothing, yet a
+  bare `except BaseException` merged that with a failure inside `run_code` and
+  poisoned the worker either way. The frame now carries `executed`; the host
+  poisons only when a cell that ran failed or was cancelled, and still for a
+  frame it rejected outright. A refused cell is still denied, still
+  `uncertain`, still counts its audit denial. This was the reason five
+  consecutive witness runs never reached compaction.
 - **Root-caused — compaction, statically.** `agent-session.js:1474` documents
   `compact()` as the shared entry for `/compact`, RPC and extensions, and it
   does emit `session_before_compact` at `:1496`. So "RPC does not fire the
