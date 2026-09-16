@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,8 +14,29 @@ from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError
 from asterion.runtimes.pi_extensions import PiExtensionBinding
-from asterion.runtimes import pi_extensions
 
+
+# The loader resolves the host package through the host's own extension
+# resolver, and Pi supplies it with jiti aliases. Running the loader outside Pi
+# therefore needs the same mapping, which this resolve hook supplies.
+NODE_PI_HOST_HOOK = r"""
+const HOST = "@earendil-works/pi-coding-agent";
+export async function resolve(specifier, context, next) {
+  if (specifier === HOST) return { url: HOST_STUB_URL, shortCircuit: true };
+  return next(specifier, context);
+}
+"""
+
+NODE_PI_HOST_REGISTER = r"""
+import { register } from "node:module";
+register(new URL("./asterion_pi_host_hook.mjs", import.meta.url).href);
+"""
+
+NODE_PI_HOST_STUB = r"""
+export const buildSessionContext = () => ({ messages: [] });
+export const convertToLlm = (messages) => messages;
+export const serializeConversation = () => "";
+"""
 
 NODE_PI_HARNESS = r"""
 import { pathToFileURL } from "node:url";
@@ -40,202 +60,6 @@ for (const event of [
 
 
 class PiExtensionBindingTests(unittest.TestCase):
-    def test_dependency_executable_identity_is_bound_before_preflight(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            binding = self._executable_binding(root)
-            executable = binding.dependencies.node_executable
-            executable.write_text("#!/bin/sh\nexit 0\n")
-            changed = self._executable_binding(root, copy_executable=False)
-            self.assertNotEqual(
-                binding.binding_fingerprint, changed.binding_fingerprint
-            )
-            with patch("asterion.runtime.pinned_extension.subprocess.run") as launch:
-                with self.assertRaisesRegex(
-                    ValueError, "extension binding is unavailable"
-                ):
-                    binding.preflight()
-            launch.assert_not_called()
-
-    def test_dependency_verifier_executes_owned_snapshot_and_cleans_it(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            binding = self._executable_binding(root)
-            executable = binding.dependencies.node_executable
-            calls = []
-            original_run = subprocess.run
-
-            def replace_original(command, **kwargs):
-                executable.write_text("#!/bin/sh\nexit 41\n")
-                calls.append(Path(command[0]))
-                self.assertNotEqual(Path(command[0]), executable)
-                self.assertEqual(Path(command[0]).stat().st_mode & 0o777, 0o500)
-                self.assertEqual(Path(command[0]).parent.stat().st_mode & 0o777, 0o500)
-                return original_run(command, **kwargs)
-
-            with patch(
-                "asterion.runtime.pinned_extension.subprocess.run",
-                side_effect=replace_original,
-            ):
-                lease = binding.preflight()
-                self.addCleanup(lease.close)
-                lease.validate_launch()
-            self.assertEqual(len(calls), 2)
-            self.assertEqual(calls[0], calls[1])
-            lease.close()
-            self.assertFalse(calls[0].exists())
-            self.assertFalse(calls[0].parent.exists())
-
-    def test_failed_dependency_verification_removes_executable_snapshot(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            binding = self._executable_binding(
-                root,
-                provider_source=(
-                    'export function verifyDependencies() {throw Error("private-sentinel");} '
-                    "export function createDependencies() {}\n"
-                ),
-            )
-            calls = []
-            original_run = subprocess.run
-
-            def observe(command, **kwargs):
-                calls.append(Path(command[0]))
-                return original_run(command, **kwargs)
-
-            with patch(
-                "asterion.runtime.pinned_extension.subprocess.run", side_effect=observe
-            ):
-                with self.assertRaisesRegex(
-                    ValueError, "^extension binding is unavailable$"
-                ):
-                    binding.preflight()
-            self.assertEqual(len(calls), 1)
-            self.assertFalse(calls[0].parent.exists())
-
-    def test_executable_cleanup_drift_does_not_leak_remaining_lease_descriptors(
-        self,
-    ) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            binding = self._executable_binding(Path(temporary).resolve())
-            lease = binding.preflight()
-            self.addCleanup(lease.close)
-            snapshot = lease._dependency_executable
-            descriptors = (*lease.inherited_fds, lease._loader_fd, snapshot._descriptor)
-            snapshot.path.parent.chmod(0o700)
-            snapshot.path.unlink()
-            snapshot.path.parent.rmdir()
-            lease.close()
-            for descriptor in descriptors:
-                with self.assertRaises(OSError):
-                    os.fstat(descriptor)
-
-    @staticmethod
-    def _executable_binding(root, *, copy_executable=True, provider_source=None):
-        executable = root / "node"
-        if copy_executable:
-            shutil.copyfile(Path(shutil.which("node")).resolve(), executable)
-            executable.chmod(0o700)
-        source = root / "extension.mjs"
-        source.write_text("export default () => {};\n")
-        provider = root / "provider.mjs"
-        provider.write_text(
-            provider_source
-            or "export function verifyDependencies() {} export function createDependencies() {}\n"
-        )
-        lock = root / "lock.json"
-        lock.write_text("{}")
-        dependency = pi_extensions.PiExtensionDependencies(
-            provider_path=provider,
-            source_root=root,
-            closure_lock_path=lock,
-            artifact_lock_path=lock,
-            node_executable=executable,
-            exports={"value": "string"},
-        )
-        return PiExtensionBinding(
-            extension_id="example.test",
-            path=source,
-            capabilities=("example.test",),
-            inherited_fds=(),
-            environment={},
-            dependencies=dependency,
-        )
-
-    def test_locked_dependencies_are_bound_verified_and_rechecked_before_launch(
-        self,
-    ) -> None:
-        dependency_type = getattr(pi_extensions, "PiExtensionDependencies", None)
-        self.assertIsNotNone(dependency_type, "generic locked dependencies are missing")
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            extension = root / "extension.mjs"
-            extension.write_text("export default () => {};\n")
-            provider = root / "provider.mjs"
-            provider.write_text(
-                "export function verifyDependencies(context) {\n"
-                ' if (context.lockBytes.toString() !== "locked") throw Error("secret");\n'
-                '}\nexport function createDependencies() { return {dependencies: {value: "ok"}, close() {}}; }\n'
-            )
-            lock = root / "closure.json"
-            lock.write_text("locked")
-            artifact = root / "artifact.json"
-            artifact.write_text("artifact")
-            node = Path(shutil.which("node")).resolve()
-            dependency = dependency_type(
-                provider_path=provider,
-                source_root=root,
-                closure_lock_path=lock,
-                artifact_lock_path=artifact,
-                node_executable=node,
-                exports={"value": "string"},
-            )
-            binding = PiExtensionBinding(
-                extension_id="example.test",
-                path=extension,
-                capabilities=("example.test",),
-                inherited_fds=(),
-                environment={},
-                dependencies=dependency,
-            )
-            lease = binding.preflight()
-            self.addCleanup(lease.close)
-            lease.validate_launch()
-            self.assertNotIn(str(root), repr(dependency))
-            self.assertNotIn(str(root), repr(lease.environment))
-            plain = PiExtensionBinding(
-                extension_id="example.test",
-                path=extension,
-                capabilities=("example.test",),
-                inherited_fds=(),
-                environment={},
-            )
-            self.assertNotEqual(plain.binding_fingerprint, binding.binding_fingerprint)
-            with self.assertRaises(TypeError):
-                dependency.exports["extra"] = "string"
-            moved_root = root.with_name(root.name + "-moved")
-            root.rename(moved_root)
-            try:
-                with self.assertRaisesRegex(
-                    ValueError, "extension lease is unavailable"
-                ):
-                    lease.validate_launch()
-            finally:
-                moved_root.rename(root)
-            lease.validate_launch()
-            descriptor = json.loads(
-                lease.environment["ASTERION_PI_EXTENSION_DEPENDENCIES"]
-            )["provider"]["fd"]
-            os.pwrite(descriptor, b"X", 0)
-            with self.assertRaisesRegex(
-                ValueError, "extension lease is unavailable"
-            ):
-                lease.validate_launch()
-            lease.close()
-            for fd in lease.inherited_fds:
-                with self.assertRaises(OSError):
-                    os.fstat(fd)
-
     def test_preflight_carries_immutable_canonical_binding_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
@@ -1358,12 +1182,26 @@ print(json.dumps({"type": "agent_end"}), flush=True)
 
     @staticmethod
     def _node_runtime(root: Path, binding: PiExtensionBinding):
+        host_stub = root / "asterion_pi_host_stub.mjs"
+        host_stub.write_text(NODE_PI_HOST_STUB, encoding="utf-8")
+        hook = root / "asterion_pi_host_hook.mjs"
+        hook.write_text(
+            "const HOST_STUB_URL = "
+            + json.dumps(host_stub.as_uri())
+            + ";\n"
+            + NODE_PI_HOST_HOOK,
+            encoding="utf-8",
+        )
+        register = root / "asterion_pi_host_register.mjs"
+        register.write_text(NODE_PI_HOST_REGISTER, encoding="utf-8")
         context = PiExtensionFactoryTests._context(
             root,
             host_services={"prime.ipython": binding},
             command=json.dumps(
                 [
                     str(Path(shutil.which("node") or "node").resolve()),
+                    "--import",
+                    register.as_uri(),
                     "--input-type=module",
                     "-e",
                     NODE_PI_HARNESS,

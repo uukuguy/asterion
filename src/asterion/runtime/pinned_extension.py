@@ -7,7 +7,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -22,98 +21,10 @@ _NODE_SPECIFIER = re.compile(r"node:[A-Za-z0-9][A-Za-z0-9_./-]*")
 _SOURCE_FD = "ASTERION_PI_EXTENSION_SOURCE_FD"
 _SOURCE_NAME_ENV = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
-_DEPENDENCIES_ENV = "ASTERION_PI_EXTENSION_DEPENDENCIES"
 _RESERVED_ENVIRONMENT_PREFIX = "ASTERION_PI_EXTENSION_"
 _LOADER_FILENAME = "asterion_pi_extension_loader.mjs"
 _MAX_SOURCE_BYTES = 4 * 1024 * 1024
-_MAX_EXECUTABLE_BYTES = 256 * 1024 * 1024
 _BINDING_FINGERPRINT_DOMAIN = b"asterion.pi-extension-binding/v1\0"
-
-
-@dataclass(frozen=True, repr=False, slots=True)
-class ExtensionDependencies:
-    """Operator-selected verifier/factory and its exact private resource closure."""
-
-    provider_path: Path
-    source_root: Path
-    closure_lock_path: Path
-    artifact_lock_path: Path
-    node_executable: Path
-    exports: Mapping[str, str]
-    _fingerprint: str = field(init=False, repr=False)
-    _digests: tuple[str, ...] = field(init=False, repr=False)
-    _root_identity: tuple[int, int, int, int] = field(init=False, repr=False)
-    _node_identity: tuple[int, ...] = field(init=False, repr=False)
-    _node_digest: str = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        try:
-            paths = (
-                self.provider_path,
-                self.closure_lock_path,
-                self.artifact_lock_path,
-            )
-            for path in (*paths, self.source_root, self.node_executable):
-                if (
-                    not isinstance(path, Path)
-                    or not path.is_absolute()
-                    or path.resolve(strict=True) != path
-                ):
-                    raise ValueError
-            if (
-                not self.source_root.is_dir()
-                or not self.node_executable.is_file()
-                or not os.access(self.node_executable, os.X_OK)
-            ):
-                raise ValueError
-            if (
-                not isinstance(self.exports, Mapping)
-                or not self.exports
-                or any(
-                    type(name) is not str
-                    or re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", name) is None
-                    or kind not in ("function", "string")
-                    for name, kind in self.exports.items()
-                )
-            ):
-                raise ValueError
-            digests = tuple(
-                hashlib.sha256(_read_exact_source(path)).hexdigest() for path in paths
-            )
-            executable, node_identity = _read_executable(self.node_executable)
-            node_digest = hashlib.sha256(executable).hexdigest()
-            root_identity = _stat_identity(
-                os.stat(self.source_root, follow_symlinks=False)
-            )
-            exports = dict(sorted(self.exports.items()))
-            canonical = json.dumps(
-                {
-                    "paths": [
-                        str(path)
-                        for path in (*paths, self.source_root, self.node_executable)
-                    ],
-                    "digests": digests,
-                    "root_identity": root_identity,
-                    "exports": exports,
-                    "node_identity": node_identity,
-                    "node_digest": node_digest,
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-            object.__setattr__(self, "exports", RedactedImmutableMapping(exports))
-            object.__setattr__(self, "_digests", digests)
-            object.__setattr__(self, "_root_identity", root_identity)
-            object.__setattr__(self, "_node_identity", node_identity)
-            object.__setattr__(self, "_node_digest", node_digest)
-            object.__setattr__(
-                self, "_fingerprint", hashlib.sha256(canonical).hexdigest()
-            )
-        except (OSError, TypeError, ValueError):
-            raise ValueError("extension dependencies are invalid") from None
-
-    def __repr__(self) -> str:
-        return "<ExtensionDependencies redacted>"
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +46,6 @@ class ExtensionBinding:
     capabilities: tuple[str, ...]
     inherited_fds: tuple[int, ...]
     environment: Mapping[str, str]
-    dependencies: ExtensionDependencies | None = None
     _binding_fingerprint: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -194,11 +104,6 @@ class ExtensionBinding:
         if tuple(sorted(declared_fds)) != self.inherited_fds:
             raise ValueError("extension binding is invalid")
         object.__setattr__(self, "environment", RedactedImmutableMapping(environment))
-        if (
-            self.dependencies is not None
-            and type(self.dependencies) is not ExtensionDependencies
-        ):
-            raise ValueError("extension binding is invalid")
         canonical = json.dumps(
             {
                 "capabilities": list(self.capabilities),
@@ -206,11 +111,6 @@ class ExtensionBinding:
                 "extension_id": self.extension_id,
                 "inherited_fds": list(self.inherited_fds),
                 "path": str(self.path),
-                **(
-                    {"dependencies": self.dependencies._fingerprint}
-                    if self.dependencies is not None
-                    else {}
-                ),
             },
             ensure_ascii=True,
             separators=(",", ":"),
@@ -254,8 +154,6 @@ class ExtensionLease:
         "_initialized",
         "_loader_digest",
         "_loader_fd",
-        "_dependencies",
-        "_dependency_executable",
     )
 
     def __init__(
@@ -269,8 +167,6 @@ class ExtensionLease:
         fd_identities: Mapping[int, tuple[int, int, int, int]],
         loader_digest: str,
         loader_fd: int,
-        dependencies: ExtensionDependencies | None = None,
-        dependency_executable: _ExecutableSnapshot | None = None,
     ) -> None:
         self.environment = RedactedImmutableMapping(environment)
         self.inherited_fds = inherited_fds
@@ -280,8 +176,6 @@ class ExtensionLease:
         self._fd_identities = dict(fd_identities)
         self._loader_digest = loader_digest
         self._loader_fd = loader_fd
-        self._dependencies = dependencies
-        self._dependency_executable = dependency_executable
         self._closed = False
         self._initialized = True
 
@@ -296,7 +190,6 @@ class ExtensionLease:
     @classmethod
     def open(cls, binding: ExtensionBinding, loader_path: Path) -> ExtensionLease:
         owned: list[int] = []
-        dependency_executable: _ExecutableSnapshot | None = None
         try:
             source = _read_exact_source(binding.path)
             _validate_source(binding.path.name, source)
@@ -336,55 +229,9 @@ class ExtensionLease:
                     _SOURCE_SHA256: source_digest,
                 }
             )
-            dependency_fds: list[int] = []
-            if binding.dependencies is not None:
-                dependency = binding.dependencies
-                metadata: dict[str, object] = {"exports": dict(dependency.exports)}
-                for name, path, expected_digest in zip(
-                    ("provider", "closureLock", "artifactLock"),
-                    (
-                        dependency.provider_path,
-                        dependency.closure_lock_path,
-                        dependency.artifact_lock_path,
-                    ),
-                    dependency._digests,
-                    strict=True,
-                ):
-                    contents = _read_exact_source(path)
-                    if hashlib.sha256(contents).hexdigest() != expected_digest:
-                        raise ValueError
-                    pinned_fd = _snapshot_source(contents)
-                    owned.append(pinned_fd)
-                    dependency_fds.append(pinned_fd)
-                    metadata[name] = {"fd": pinned_fd, "digest": expected_digest}
-                root_fd = os.open(
-                    dependency.source_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-                )
-                owned.append(root_fd)
-                dependency_fds.append(root_fd)
-                root_details = os.fstat(root_fd)
-                if _stat_identity(root_details) != dependency._root_identity:
-                    raise ValueError
-                metadata["sourceRoot"] = {
-                    "path": str(dependency.source_root),
-                    "fd": root_fd,
-                    "dev": str(root_details.st_dev),
-                    "ino": str(root_details.st_ino),
-                }
-                environment[_DEPENDENCIES_ENV] = json.dumps(
-                    metadata, sort_keys=True, separators=(",", ":")
-                )
             process_fds = tuple(
-                sorted((source_fd, *replacements.values(), *dependency_fds))
+                sorted((source_fd, *replacements.values()))
             )
-            if binding.dependencies is not None:
-                dependency_executable = _ExecutableSnapshot.open(binding.dependencies)
-                _verify_dependencies(
-                    dependency_executable,
-                    environment[_DEPENDENCIES_ENV],
-                    process_fds,
-                    loader_fd,
-                )
             identities = {fd: _fd_identity(fd) for fd in process_fds}
             sensitive = tuple(
                 sorted(
@@ -395,28 +242,6 @@ class ExtensionLease:
                         *binding.environment.values(),
                         *environment.keys(),
                         *environment.values(),
-                        *(
-                            ()
-                            if dependency_executable is None
-                            else (
-                                str(dependency_executable.path),
-                                str(dependency_executable.path.parent),
-                            )
-                        ),
-                        *(
-                            ()
-                            if binding.dependencies is None
-                            else (
-                                str(path)
-                                for path in (
-                                    binding.dependencies.provider_path,
-                                    binding.dependencies.source_root,
-                                    binding.dependencies.closure_lock_path,
-                                    binding.dependencies.artifact_lock_path,
-                                    binding.dependencies.node_executable,
-                                )
-                            )
-                        ),
                     },
                     key=len,
                     reverse=True,
@@ -438,12 +263,8 @@ class ExtensionLease:
                 fd_identities=identities,
                 loader_digest=loader_digest,
                 loader_fd=loader_fd,
-                dependencies=binding.dependencies,
-                dependency_executable=dependency_executable,
             )
         except (OSError, TypeError, ValueError, UnicodeError):
-            if dependency_executable is not None:
-                dependency_executable.close()
             for descriptor in reversed(owned):
                 try:
                     os.close(descriptor)
@@ -484,15 +305,6 @@ class ExtensionLease:
                     raise OSError
             source_fd = int(self.environment[_SOURCE_FD])
             os.lseek(source_fd, 0, os.SEEK_SET)
-            if self._dependencies is not None:
-                if self._dependency_executable is None:
-                    raise ValueError
-                _verify_dependencies(
-                    self._dependency_executable,
-                    self.environment[_DEPENDENCIES_ENV],
-                    self.inherited_fds,
-                    self._loader_fd,
-                )
         except (OSError, ValueError):
             raise ValueError("extension lease is unavailable") from None
 
@@ -500,188 +312,11 @@ class ExtensionLease:
         if self._closed:
             return
         object.__setattr__(self, "_closed", True)
-        try:
-            if self._dependency_executable is not None:
-                self._dependency_executable.close()
-        finally:
-            for descriptor in (*self.inherited_fds, self._loader_fd):
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
-
-
-def _verify_dependencies(
-    executable: _ExecutableSnapshot,
-    metadata: str,
-    descriptors: tuple[int, ...],
-    loader_fd: int,
-) -> None:
-    """Use the pinned provider's verifier before launch, without loading dependencies."""
-
-    script = (
-        'import {readFileSync} from "node:fs";'
-        'const loader = await import("data:text/javascript;base64," + '
-        'readFileSync(Number(process.argv[1])).toString("base64"));'
-        'try {await loader.verifyPinnedDependencies(readFileSync(0,"utf8"));}'
-        "catch {process.exitCode=1;}"
-    )
-    try:
-        executable.validate()
-        os.lseek(loader_fd, 0, os.SEEK_SET)
-        result = subprocess.run(
-            [
-                str(executable.path),
-                "--input-type=module",
-                "-e",
-                script,
-                str(loader_fd),
-            ],
-            input=metadata.encode(),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env={"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8"},
-            pass_fds=(*descriptors, loader_fd),
-            timeout=30,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise ValueError
-    except (OSError, subprocess.SubprocessError, ValueError):
-        raise ValueError("extension dependencies are unavailable") from None
-    finally:
-        os.lseek(loader_fd, 0, os.SEEK_SET)
-
-
-def _read_executable(path: Path) -> tuple[bytes, tuple[int, ...]]:
-    descriptor = _open_regular(path)
-    try:
-        if path.resolve(strict=True) != path:
-            raise ValueError
-        before = os.fstat(descriptor)
-        contents = _read_fd(descriptor, _MAX_EXECUTABLE_BYTES)
-        after = os.fstat(descriptor)
-
-        def identity(value):
-            return (
-                *_stat_identity(value),
-                value.st_size,
-                value.st_mtime_ns,
-                value.st_ctime_ns,
-            )
-
-        if (
-            not contents
-            or identity(before) != identity(after)
-            or identity(after) != identity(os.stat(path, follow_symlinks=False))
-        ):
-            raise ValueError
-        return contents, identity(after)
-    finally:
-        os.close(descriptor)
-
-
-class _ExecutableSnapshot:
-    """Lease-owned exact executable bytes; never invoke the operator's mutable path.
-
-    Darwin rejects executing /dev/fd/N. A private read/execute-only snapshot is
-    used on supported hosts, with no write descriptors retained after sealing.
-    Like other host resources, this is not a sandbox against its owning OS user.
-    """
-
-    def __init__(self, path: Path, descriptor: int, digest: str) -> None:
-        self.path = path
-        self._descriptor = descriptor
-        self._digest = digest
-        self._identity = _fd_identity(descriptor)
-        self._directory_identity = _stat_identity(
-            os.stat(path.parent, follow_symlinks=False)
-        )
-        self._closed = False
-
-    @classmethod
-    def open(cls, dependency: ExtensionDependencies) -> _ExecutableSnapshot:
-        contents, identity = _read_executable(dependency.node_executable)
-        if (
-            identity != dependency._node_identity
-            or hashlib.sha256(contents).hexdigest() != dependency._node_digest
-        ):
-            raise ValueError
-        directory = Path(tempfile.mkdtemp(prefix="asterion-pi-executable-")).resolve()
-        directory_identity = _stat_identity(os.stat(directory, follow_symlinks=False))
-        path = directory / "node"
-        descriptor = None
-        try:
-            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-            with os.fdopen(os.open(path, flags, 0o700), "wb") as target:
-                target.write(contents)
-                target.flush()
-                os.fsync(target.fileno())
-            path.chmod(0o500)
-            directory.chmod(0o500)
-            descriptor = _open_regular(path)
-            snapshot = cls(path, descriptor, dependency._node_digest)
-            snapshot.validate()
-            return snapshot
-        except (OSError, ValueError):
-            if descriptor is not None:
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
-            _remove_executable_snapshot(path, directory_identity)
-            raise
-
-    def validate(self) -> None:
-        if self._closed or self.path.resolve(strict=True) != self.path:
-            raise ValueError
-        if (
-            _stat_identity(os.stat(self.path, follow_symlinks=False)) != self._identity
-            or _fd_identity(self._descriptor) != self._identity
-            or _stat_identity(os.stat(self.path.parent, follow_symlinks=False))
-            != self._directory_identity
-            or hashlib.sha256(
-                _read_fd(self._descriptor, _MAX_EXECUTABLE_BYTES)
-            ).hexdigest()
-            != self._digest
-        ):
-            raise ValueError
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            os.close(self._descriptor)
-        except OSError:
-            pass
-        _remove_executable_snapshot(self.path, self._directory_identity)
-
-
-def _remove_executable_snapshot(
-    path: Path, directory_identity: tuple[int, ...]
-) -> None:
-    """Best-effort exact-target cleanup; failure must not hide a redacted error."""
-    descriptor = None
-    try:
-        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        if _fd_identity(descriptor)[:2] != directory_identity[:2]:
-            return
-        os.fchmod(descriptor, 0o700)
-        try:
-            os.unlink(path.name, dir_fd=descriptor)
-        except FileNotFoundError:
-            pass
-        if (
-            _stat_identity(os.stat(path.parent, follow_symlinks=False))[:2]
-            == directory_identity[:2]
-        ):
-            path.parent.rmdir()
-    except OSError:
-        pass
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
+        for descriptor in (*self.inherited_fds, self._loader_fd):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 def _open_regular(path: Path) -> int:
@@ -963,7 +598,6 @@ def _stat_identity(details: os.stat_result) -> tuple[int, int, int, int]:
 
 __all__ = (
     "ExtensionBinding",
-    "ExtensionDependencies",
     "ExtensionLease",
     "extension_loader_path",
 )

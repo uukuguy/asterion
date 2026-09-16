@@ -10,14 +10,12 @@ from __future__ import annotations
 
 from asterion.runtime.pinned_extension import (
     ExtensionBinding as PiExtensionBinding,
-    ExtensionDependencies as PiExtensionDependencies,
     ExtensionLease as PiExtensionLease,
     extension_loader_path as pi_extension_loader_path,
 )
 
 __all__ = (
     "PiExtensionBinding",
-    "PiExtensionDependencies",
     "PiExtensionLease",
     "pi_extension_loader_path",
 )
