@@ -292,3 +292,53 @@
   20 primitive actions and 40 cells, trace sealed, replay verified, cleanup
   complete, `promotion: unpromoted`; detachment gate 0; the Pi answers
   `--version` with 0.85.1 inside Orb under node v22.23.2.
+
+## D-2026-09-16-01 — Asterion owns compaction summarization through Pi's extension hook
+
+- Status: 🟢 active (decided 2026-09-16; implementation pending)
+- Context: P1 (`prime.ipython-coding`) exists so an IPython kernel survives context
+  compaction. That only holds if the summarization prompt actually tells the model
+  to record the live names, because the cells that defined them disappear from the
+  context. Prime Agent achieved this by **owning a forked Pi**: its
+  `buildSummarizationPrompt` appends a kernel-persistence note unconditionally, and
+  its runtime's `generateSummary` calls it. Upstream
+  `@earendil-works/pi-coding-agent` never published that version (there is no 0.7.x
+  release at all; earliest is 0.74.0), so the note is Prime's own modification of
+  the runtime. Asterion's Pi is operator-owned upstream (D-2026-09-14-03) and must
+  not be forked, so it cannot modify Pi's prompt function.
+- Decision: Asterion owns the summarization semantics by using Pi's sanctioned
+  extension point. The extension registered on `session_before_compact` returns
+  `{compaction: CompactionResult}` — producing the compaction itself — and makes
+  the out-of-band model call through `ctx.modelRegistry.runtime.complete()`, which
+  is Pi's own runtime, so provider routing and auth stay Pi's. Pi continues to
+  supply `preparation` (what to compact, the turn-prefix split, `firstKeptEntryId`).
+- Rationale: this is the mechanism Pi designed for the purpose, not a workaround.
+  Upstream exposes `customInstructions`/`replaceInstructions` ("customInstructions
+  replaces the default prompt") on the **tree/branch-summarization** path only; the
+  compaction path has no instruction override, which is why Prime needed a fork and
+  why takeover is the only route that keeps Asterion on upstream Pi.
+- Consequence: `validate_compaction_witness`'s `entry.get("fromHook") is not False`
+  requirement must be relaxed — it was written when Prime's Pi already carried the
+  semantics and Asterion only witnessed. Under takeover the producer and the
+  validator are both Asterion, so the property that check protected ("the runtime
+  summarized with the prompt Asterion authorised") becomes true by construction
+  rather than by verification. Structural verification is unchanged: Pi still
+  chooses the range, and the native side still validates the entry, digests and
+  projection reduction.
+- Open costs, recorded rather than resolved: the summarization call is out of band,
+  so Pi's session token accounting does not see it and Asterion must settle it
+  against its own budget (two ledgers); retry, abort and failure paths on that call
+  become Asterion's.
+- Rejected — appending via `customInstructions`: automatic threshold and overflow
+  compaction pass no instructions, and upstream's wrapper is a one-line
+  `Additional focus: X`. Retained only as an interim step for P1, which drives
+  compaction explicitly over RPC.
+- Rejected — forking Pi: D-2026-09-14-03 makes the runtime operator-owned; a fork
+  would reintroduce exactly the self-built runtime Phase 1 removed.
+- Evidence verified 2026-09-16: `SessionBeforeCompactResult` is
+  `{cancel?: boolean; compaction?: CompactionResult}`; `TreePreparation` and
+  `SessionBeforeTreeResult` carry `customInstructions` + `replaceInstructions` and
+  the compaction path does not; `npm view` shows no 0.7.x release and latest 0.85.1;
+  `@ar-llm/pi-custom-compaction` is a published third-party extension doing this via
+  `ctx.modelRegistry.runtime.complete()`. **Not yet verified:** Asterion's own
+  implementation, and a passing P1 witness.

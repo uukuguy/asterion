@@ -2354,3 +2354,71 @@
 - 02:05 这是同一失效模式的第三例：Phase 1 留下的测试依赖已删面、又只在全量套件里，无人看见。prime 全集现 207 tests OK / 34 skipped，两个基线红全清，门禁 0
 - 02:05 教训：门禁连注释一起扫，我在说明性注释里拼出了禁用路径字面量，当场把门禁从 0 变成 1；已改为不拼字面量
 - 05:40 handoff 收口：Phase 2/3 完成、Phase 4 计划就绪；RESUME 重写为最终交接稿；MEMORY.md 补两条反馈（先搜环境再断言缺失、窄缺陷按窄缺陷报）；INDEX/CURRENT-STATE/DECISIONS 一致性已核
+
+## 2026-09-15
+
+- 12:19 Phase 4 启动路径落地：重建 `_Preflight`/`_preflight`/`_build_resources` 与 `main` invoke 体，全部用 Asterion 自有值；门禁前 0 后 0，P1 定向集 76 OK/34 skip
+- 12:19 关键取值：Pi 命令走 operator 自有 `ASTERION_PRIME_PI_ENTRY`（复用 P7 形状 D-2026-09-14-03）；扩展为打包 ipython-extension.mjs（构建期由 hatch hook 从 TS 生成，非缺失文件）；compaction 用 Asterion 自有 `PrimeContextWitnessSession` + 打包 context-witness，未恢复任何 Prime 锁或 verifier
+- 12:19 `_PRICE` 定为 `ModelPrice(140000, 280000)`：取自 operator 自有 Pi 分发自带的 deepseek-v4-flash 成本项（0.14/0.28 USD per M），非从任何 checkout 内注册表推导
+- 12:19 `ExtensionDependencies` 未使用（其 provider/closure/artifact 三锁全属 Prime，Phase 1 已删）；代价是扩展对 Pi 内部导出的依赖不再预检，属覆盖缺口已记
+- 12:19 修一处真实边界缺陷：空环境时 `_preflight` 泄漏 `KeyError` 而非 `P1OperatorError`（P7 同形），已收紧为 get+显式拒绝
+- 12:19 Makefile `asterion-prime-p1-run` 补 `ASTERION_PRIME_PI_ENTRY` 导出——原 preset 缺此值，preflight 必然失败
+- 13:28 独立复审（Opus 子代理）回：确认 2 条 + 存疑 5 条。确认①=我已上报的发布阻塞（复审独立复现，实跑同证）；确认②=我的探针测试空转——`_preflight` 在更早守卫就拒，`subprocess.run` 实测 0 次调用，删掉被测防护仍全绿
+- 13:28 修②：让包看似装在 root 之外的 site-packages，并加 `probe.assert_called_once()`；随后变异测试（摘掉防护）实测转红再恢复，现测试有牙齿
+- 13:28 复审对价格常量的裁决：保留常量、不要重新推导。依据——Pi 无公开可查询价格（`pi --list-models` 无价格列，注册表在内容哈希分块里），唯一推导路径要读 Pi 内部模块，正是本阶段要消除的耦合；失效有界（token/deadline/limits 与价格无关地绑定）且不触公开面
+- 13:28 按裁落地：`_PRICE` 注释补失效模式与「Pi 分发或 `_MODEL` 变更时须重读 registry」的重读义务
+- 13:28 复审未判为本变更缺陷但记录的继承项：全量进程环境交给 Pi 子进程（与 P7 已验证路径同形，作明示决定而非副作用）、清理分支首步抛错会放弃后续清理（与原版及 P7 同形）、`_IPYTHON_VERSION` 与 Makefile 装 ipython 的假设不一致
+- 13:31 复审收口（7 项全裁决）：第 7 项判 non-finding——P1 未复刻 P7 的保留参数筛查，但该筛查只防 operator 自身笔误而非独立威胁主体（node/pi-entry 同经 `_resolved_file` 严格校验，`.env` 无法覆盖这两个键），且每条可达路径均失败关闭；不建议补代码
+- 13:31 复审覆盖清单（实跑核验为正确）：fd 归属与 binding 一致性、witness socket 归属、12 个构造参数对齐、host_services 恰为 P1_HOST_CAPABILITIES、压缩报价用法与上限、`PI_CODING_AGENT_DIR` 对已装 Pi 正确
+- 13:31 复审独立确认修复版测试有牙：5/5 绿，且与旧态「spy 测到调用 0 次」构成对照
+- 13:31 未办：Phase 4 task 3（live witness）需 operator 授权，且实测需先在工作树临时放回 P1——task 3/4 互为前提，已上报待裁决（A 跑 / B 先只提交启动路径）；工作树当前 4 个文件 modified，未提交
+- 08:49 用户指出真因：P1 operator 是「去公开目录里查自己」来组装自己——把「运行」和「对外告知」搅在一起才产生死结。核实：P1/P7 两个 operator 同形（p7/operator.py:530 同法，且靠 applications[0] 位置假设）
+- 08:49 解耦落地：`provider.py` 新增具名记录 `prime_ipython_coding_application()` 与 `create_prime_ipython_coding_provider()`；P1 operator 改为从**自己的记录**组装，不再过滤 `create_provider()`。公开列表不变（仍只有 P7）
+- 08:49 效果实测：P1 未发布即可自组装（assembly 载入、1 个 implementation 绑定）；拆掉测试里两处发布 guard 后 `test_asterion_prime_p1_operator` 23 通过**零跳过**（此前整组被跳过）
+- 08:49 P1 定向集 83 通过/0 跳过（此前 38 通过/34 跳过）；P7 定向集 24 通过未受影响；门禁 0；lint 无新增
+- 08:49 意义：「发布」回归为独立的、以 witness 为门的对外告知动作；witness 不再需要「工作树临时放回 P1」的脏操作。RESUME 早记过此形状问题待 Phase 4 处理，本次补上
+- 10:07 P1 witness 实跑**失败**：run `p1-debe34e5b246017abaae2e27`，`status=recovery-required`，死在 `stage1.setup.start` 后的第一个模型回合（约 30-60s，未达 worker cell）。注意 make 实际 Error 1
+- 10:07 按链路优先定位（未改任何生产代码）：写临时探针 `.asterion-private/p1-diagnose.py` 在 Orb 内跑真实路径，钩 `_prompt`/`execute_prompt` 打出被丢弃的异常与 Pi 子进程 stderr
+- 10:07 实据：Pi 子进程 stderr = `Failed to load extension ".../asterion_pi_extension_loader.mjs": Asterion pinned Pi extension is invalid`；Python 侧 = `PrimeBackendError: Prime backend recovery required`（backend.py:784）
+- 10:07 根因链（逐环核实）：① P1 设了 `ASTERION_PRIME_IPYTHON_CONTEXT_FD`+nonce（压缩见证需要）；② 但**未给 `ExtensionBinding` 传 dependencies**（我的决定：`ExtensionDependencies` 三把锁属 Prime，Phase 1 已删且 spec 禁止）；③ 扩展 `register(pi, undefined)` 走 `registerContextWitnessFromEnvironment`；④ 该函数只在三者全 undefined 时早返回，P1 有 fd+nonce 故进 `registerContextWitness(pi, undefined, ...)`；⑤ `new ContextWitness(undefined, ...)` → `dependencies(undefined)` → `object(undefined)` → `fail()`；⑥ loader 的 catch-all 把它掩盖成「pinned extension is invalid」
+- 10:07 对照：P7 能跑是因为其 binding 无 context fd/nonce 且无 deps，第 370 行直接早返回**跳过见证**——同一条链，P1 走了见证分支才暴露
+- 10:07 结论：**这正是计划风险 1（compaction）如期浮现**——Asterion 自有的压缩后端不完整：见证必须注入 Pi 自身的压缩内部（prepareCompaction/serializeConversation 等），而现存注入机制 `ExtensionDependencies` 结构上是 Prime 形状（要求 provider/closureLock/artifactLock 三个已删的锁文件），loader 亦硬要求这四个 metadata 键
+- 10:07 未决：修法属架构选择（改 loader+注入机制走 Asterion 自有 Pi 分发 / 让扩展自行 import Pi 内部 / 暂时只落启动路径并记录缺口），待用户裁决
+- 11:22 用户要求查清注入机制归属。核实结论：**机制是 Asterion 自有的通用缝，但 P1 见证的依赖契约绑死在 Prime Agent 的 compaction 实现上**
+- 11:22 机制层：`runtime/pinned_extension.py` + `runtimes/resources/asterion_pi_extension_loader.mjs` 属框架层，`native-p1-task-2-dependency-report.md` 明载「No application-specific name or export appears in runtime implementation」——loader 通用，7 个名字由应用层 provider 提供
+- 11:22 取证：三个 prompt 名（`buildSummarizationPrompt`/`summarizationSystemPrompt`/`turnPrefixPrompt`）**上游 Pi 0.85.1 均无 export**，只存在于 Prime Agent 源码树 `packages/coding-agent/src/core/compaction/compaction.ts`；另 4 个（`prepareCompaction`/`serializeConversation`/`buildSessionContext`/`convertToLlm`）上游 Pi 有（分别在 compaction.js / utils.js / session-manager.js / messages.js）
+- 11:22 加重情节：报告载明 `turnPrefixPrompt` 在 Prime 那边**也不是 export**，是 provider 从 digest 校验过的源码里按字面量提取的——契约与 Prime 源码文本强绑定
+- 11:22 技术结论：Asterion 上下文见证**按现有设计无法在上游 Pi 上运行**；先前设想的「让扩展自行 import Pi 内部」不可行（函数上游不存在），该选项作废
+- 11:22 剩余路径收窄为二：A=把依赖契约重建到上游 Pi 能力上（4 个机制函数取自 Pi，summarization 提示词改由 Asterion 自己拥有——与 spec「No Prime internal module may supply compaction semantics」同向）；C=暂缓并记录缺口
+- 11:22 边界备注：上述 Prime 侧证据来自仓库级 grep 的命中行，未进一步打开该源码树
+- 11:48 用户纠偏原则：Asterion prime 是对 prime-agent 能力的**复现**，不依赖更不 import 其任何内容；但 prime-agent 的核心内核在 Asterion prime 中要有一套**原理一致**的实现——不是功能层另搞一套。我上一轮「提示词改由 Asterion 自己拥有」的框定是错的
+- 11:48 决定性取证：`npm view @earendil-works/pi-coding-agent versions` 显示上游**从无 0.7.x 版本**（最早 0.74.0），而 `prime-artifact-lock.json` 记 `package_version: 0.7.1` + `source_commit a18809e0`——故当年锁定的 Pi 树是 **Prime Agent 自建版**，非上游发行版
+- 11:48 由此定论：那三个名字（`buildSummarizationPrompt`/`summarizationSystemPrompt`/`turnPrefixPrompt`）连同「`prepareCompaction` 不公开导出」（fixture 记 `public_prepare_compaction_exported: false`）**都是 Prime Agent 对 Pi compaction 的改造，属其内核**；上游 0.85.1 反而公开导出了 prepareCompaction，并在 `dist/core/compaction/branch-summarization.js` 另有一套自己的摘要机制（命名与结构均不同）
+- 11:48 缺口定位（精确）：Asterion 原生侧 `context.py` 有**协议与校验**（`PrimeCompactionEvidence`/`validate_compaction_witness`/投影计数），缺的是**摘要请求的构造**（提示词设计）。按用户原则，这一块须由 Asterion prime 原理一致地自行实现
+- 11:48 顺带验证重建正确性：fixture 的 `worst_case_reserved_tokens: 14744` 与复审独立算出的预留值完全一致；fixture 的 `settings`（autoCompact false / reserve 4096 / keepRecent 256）与我写的 `_AGENT_SETTINGS` 对应
+- 11:48 冲突待裁决：原理一致地复现需要研究该内核，而 RESUME 工作区边界写着「不得检查 3th-party Prime Agent 仓库」
+- 11:52 用户裁决原则：整套 Asterion prime 都要求「原理一致的复现」，不许 import prime-agent；并点破注入机制本身就是那个伪装成依赖注入的进口通道。此前我打算把该机制换源重建 = 重建一个本不该存在的通道，作废
+- 11:52 已提取 Prime 压缩内核原理（只读）：`buildSummarizationPrompt` = 初版/更新版模板二选一 + 可选 `<user-instructions>` 块 + 结尾 `KERNEL_PERSIST_SUMMARY_NOTE`；请求体 = `<conversation>` 包裹的序列化对话 + 可选 `<previous-summary>` + 模板；`maxTokens = floor(0.8 * reserveTokens)`；固定章节格式 Goal/Constraints/Progress(Done,In Progress,Blocked)/Key Decisions/Next Steps/Critical Context
+- 11:52 关键：`KERNEL_PERSIST_SUMMARY_NOTE` 正是 P1 的存在意义——要求摘要记下 IPython 内核里存活的名字，避免重定义；这是 P1 特有的设计要素
+- 11:52 另发现：`ExtensionBinding(dependencies=...)` **在 src 全树无任何使用者**，`ExtensionDependencies` 仅被自身定义、`runtimes/pi_extensions.py` 转出、及其测试引用——即该 Prime 时代注入机制已无生产用户，P7 与 P1 都不用，可整体移除
+- 11:52 方向：Asterion prime 自持压缩语义（协议+校验已有；摘要请求构造按上述原理自实现），P1 启动路径不接注入链
+- 12:26 协议读通后范围收窄：`main_summary_request`/`turn_prefix_summary_request` **本就在协议帧内**，由原生侧 `_validate_proposal` 校验（canonical 编码 + ≤4096 单位）——Asterion 早已拥有请求的「形状」，缺的只是构造用的提示词文本。修法=文本归原生侧所有并由协议供给扩展，而非重写整个压缩
+- 12:26 原理全集（只读提取自 Prime 内核）：`SUMMARIZATION_SYSTEM_PROMPT`（在 `compaction/utils.ts`）+ 初版模板 + 更新版模板（含 6 条合并规则）+ `KERNEL_PERSIST_SUMMARY_NOTE`（P1 存在理由：内核存活但定义变量的 cell 消失，故须记下名字）+ `TURN_PREFIX_SUMMARIZATION_PROMPT`；拼装=`<conversation>`+可选`<previous-summary>`+模板；`maxTokens=floor(0.8*reserveTokens)`
+- 12:26 校验旁证：`0.8*4096=3276` 与 fixture 记的 `output_cap` 一致
+- 12:26 注意：扩展声明的导出键名（`summarizationSystemPrompt`/`turnPrefixPrompt`）**在 Prime 源码里并非标识符**，真名是 `SUMMARIZATION_SYSTEM_PROMPT`/`TURN_PREFIX_SUMMARIZATION_PROMPT`，当年 provider 是从源码字面量提取的
+- 12:26 下一步：把实现派给子代理（原生侧构造 + 协议供给 + 扩展适配上游 Pi 0.85.1 的 API 差异），我负责审
+- 14:46 子代理交付两提交，我已独立复跑核实：[fd962a66] 删掉 pinned-dependency 通道（686 行）——即那个伪装成依赖注入的 prime-agent 进口通道，连同 `ExtensionDependencies`/`_ExecutableSnapshot`/`_verify_dependencies` 与测试；loader 改为静态取宿主 Pi 的机制函数（实测动态 import 拿不到，jiti 不拦截）
+- 14:46 [c21d0dae] 新增 `agents/prime/summarization.py`（Asterion 自有提示词与拼装，按原理重写非搬运）；witness `arm` 帧新增 summarization 素材并由 `_validate_summarization` 关闭形状；扩展自行组装请求；跨语言 canonical 编码逐字节一致
+- 14:46 我的复核：门禁 0；`uv run python -m unittest` 六模块 **112 pass / 0 fail**（复跑，与声称一致）；扩展 `node --test` **16 pass / 0 fail**；上游 Pi compaction 模块**零次**提及 kernel、无任何内核存活措辞
+- 14:46 子代理提出一条我框定不完整的设计分叉（它未擅自改）：现行设计是 **Pi 自己生成摘要**，扩展只放行/否决（`context.py:476` 硬要求 `fromHook is not False`，我已核实）。故协议里的 `main_summary_request` 只是**对 Pi 将发请求的预测**（用于预留与计费），**不是模型实际看到的文本**——Asterion 的内核笔记到不了模型，P1 跨压缩保内核名字这一核心性质当前不成立
+- 14:46 我另查到第三条路：Pi 0.85.1 的 `generateSummary` 支持 `customInstructions` 且它**确实进模型提示词**（拼成 `\n\nAdditional focus: ${customInstructions}`），而 Asterion 协议里本就流转 `custom_instructions` 并被校验——内核笔记或可走这条既有通道，无需改 `fromHook` 校验
+- 14:46 待裁决：内核笔记走 custom-instructions 既有通道（小改）／改为扩展自产 compaction 并放开 `fromHook`（真 Asterion-owned compaction，但要改硬校验）／接受 Pi 拥有摘要并修正 P1 验收口径
+- 14:46 子代理自陈未验证项：`test/context-witness.test.mjs` 本就跑不起来（其 harness 随 Prime Gateway 在 019e2c48 删除，原测试直连 Prime 版 Pi 内部，本机无法重建）；`tests/test_core_only_install.py` 在 HEAD 即红（缺两条既有模块），它只补了自己新增的条目
+- 17:43 查实「上游 Pi 有无版本支持替换压缩提示词」：**没有**。最新 0.85.1（仅 latest/legacy-node20 两 tag）；`customInstructions`+`replaceInstructions`（"replaces the default prompt"）**只在 tree/分支摘要那一路暴露**，compact 那一路的 result 仅 `{cancel?, compaction?}`。这正是 Prime 必须 fork 才能拿到那个开关的原因
+- 17:43 但生态有正派先例：第三方扩展 `@ar-llm/pi-custom-compaction` 走 `session_before_compact` 接管实现同一目的；其 README 载明带外模型调用用 **`ctx.modelRegistry.runtime.complete()`**（Pi 自己的 ModelRuntime，provider 路由与鉴权由 Pi 处理）——即扩展做此项工作有一等公民接口，Asterion 无需自造 retry/headers/provider 那套
+- 17:43 用户裁决：**用 Pi 的扩展（接管）是正派方案**，同意。记为 D-2026-09-16-01（含 Context/Decision/Rationale/Consequence/两条 Rejected/Evidence，并如实标注「实现与 witness 通过尚未验证」）
+- 17:43 执行顺序：先让已派出的「追加」路线跑完（它直接回答「P1 能否跑通 witness」这个更重要的问题），再按 D-2026-09-16-01 升级为接管（用 `runtime.complete()`）
+- 17:43 接管要动的一处硬校验（已记入 D-2026-09-16-01）：`validate_compaction_witness` 的 `entry.get("fromHook") is not False` —— 该条写于「Prime 的 Pi 已带语义、Asterion 只需旁证」的前提，接管后前提已变；但结构/范围/digest/投影缩减的核验不受影响（范围仍由 Pi 的 `preparation` 决定）
+- 17:58 Phase 4 首批落地并提交 [f1b08c1f]：P1 启动路径重建 + P1 不再从公开 provider 解析自己（定向集 83 通过/0 跳过，此前 38/34）+ Asterion 自持摘要文本经 RPC `customInstructions` 送入 Pi 压缩（私有文本按不透明句柄解析，不进控制流水账）
+- 17:58 提交前复核：门禁 0；六模块 115 通过；lint 仍是既有 4 条；P7 定向集 24 通过未受影响。**live witness 尚未重跑**
+- 17:58 停掉运行 1h22m 的实现子代理（判据是工作已完成且树是绿的，不等其叙述）；冻结后复验通过才提交
