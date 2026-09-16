@@ -18,6 +18,7 @@ CORE_MODULES = (
     "asterion.agents.prime.session",
     "asterion.agents.prime.state",
     "asterion.agents.prime.store",
+    "asterion.agents.prime.summarization",
     "asterion.agents.prime.tools",
     "asterion.agents.prime.trace",
     "asterion.applications",

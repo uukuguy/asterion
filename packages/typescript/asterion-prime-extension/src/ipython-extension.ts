@@ -1,7 +1,7 @@
 import { closeSync, read, write } from "node:fs";
 import { TextDecoder } from "node:util";
 import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment, type ContextWitness } from "./context-witness.js";
-export { registerContextWitness, ContextWitness } from "./context-witness.js";
+export { registerContextWitness, ContextWitness, composeSummarizationRequest, summarizeInstruction } from "./context-witness.js";
 export { canonicalJson, projectPrimeContext, countRebuiltContext } from "./context-counter.js";
 import {
   Object as TypeObject,

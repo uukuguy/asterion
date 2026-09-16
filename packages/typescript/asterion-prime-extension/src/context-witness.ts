@@ -6,23 +6,49 @@ import { canonicalJson, projectPrimeContext, type PrimeContextProjectionV1 } fro
 import { countRebuiltContext } from "./context-counter.js";
 
 export const CONTEXT_WITNESS_PROTOCOL = "asterion.prime-context-witness/v1";
+export const SUMMARIZATION_MATERIAL_VERSION = "asterion.prime-summarization/v1";
 const MAX_FRAME = 1024 * 1024;
 const NONCE = /^[0-9a-f]{64}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SETTINGS = Object.freeze({ enabled: false, reserveTokens: 4096, keepRecentTokens: 256 });
 const BASE_KEYS = ["authority_sha256", "command_nonce", "launch_nonce", "phase", "protocol"];
-const DEPENDENCY_KEYS = ["buildSessionContext", "buildSummarizationPrompt", "convertToLlm", "prepareCompaction",
-  "serializeConversation", "summarizationSystemPrompt", "turnPrefixPrompt"];
+const ARM_KEYS = [...BASE_KEYS, "summarization"];
+// Pi host mechanics this pinned source may not import for itself: the source is
+// validated to contain only `node:` specifiers and is loaded from a data: URL,
+// where the host package cannot resolve. The Asterion loader is a real module in
+// the host's own resolution scope and supplies exactly these three.
+const DEPENDENCY_KEYS = ["buildSessionContext", "convertToLlm", "serializeConversation"];
+const SUMMARIZATION_KEYS = ["conversation_block", "initial_instruction", "previous_summary_block",
+  "system_prompt", "turn_prefix_instruction", "update_instruction", "user_instructions_template", "version"];
+const CONVERSATION_MARKER = "{conversation}";
+const PREVIOUS_MARKER = "{previous_summary}";
+const INSTRUCTIONS_MARKER = "{instructions}";
+// Each template carries exactly one marker of its own and no other template's
+// marker, so a substitution can never rescan text it just inserted.
+const MARKERS: Record<string, readonly string[]> = Object.freeze({
+  conversation_block: [CONVERSATION_MARKER],
+  previous_summary_block: [PREVIOUS_MARKER],
+  user_instructions_template: [INSTRUCTIONS_MARKER],
+});
+const ALL_MARKERS = [CONVERSATION_MARKER, PREVIOUS_MARKER, INSTRUCTIONS_MARKER];
+const MAX_MATERIAL_BYTES = 8192;
 
 type RecordValue = Record<string, unknown>;
 export interface ContextDependencies {
   buildSessionContext(entries: unknown[]): { messages: unknown[] };
-  prepareCompaction(entries: unknown[], settings: typeof SETTINGS): unknown;
   convertToLlm(messages: unknown[]): unknown;
   serializeConversation(messages: unknown): string;
-  buildSummarizationPrompt(instructions?: string, previousSummary?: string): string;
-  summarizationSystemPrompt: string;
-  turnPrefixPrompt: string;
+}
+
+export interface SummarizationMaterial {
+  readonly version: string;
+  readonly system_prompt: string;
+  readonly conversation_block: string;
+  readonly previous_summary_block: string;
+  readonly initial_instruction: string;
+  readonly update_instruction: string;
+  readonly user_instructions_template: string;
+  readonly turn_prefix_instruction: string;
 }
 
 export interface ContextExtensionApi {
@@ -67,12 +93,65 @@ function dependencies(value: unknown): ContextDependencies {
   keys(selected, DEPENDENCY_KEYS);
   if (!Object.isFrozen(selected)) fail();
   for (const key of DEPENDENCY_KEYS) {
-    if (key.endsWith("Prompt")) {
-      if (key === "buildSummarizationPrompt") { if (typeof selected[key] !== "function") fail(); }
-      else if (!string(selected[key])) fail();
-    } else if (typeof selected[key] !== "function") fail();
+    if (typeof selected[key] !== "function") fail();
   }
   return selected as unknown as ContextDependencies;
+}
+
+/** Validate the Asterion-owned prompt material the native side is authoritative for. */
+function summarization(value: unknown): SummarizationMaterial {
+  const material = object(value);
+  keys(material, SUMMARIZATION_KEYS);
+  if (material.version !== SUMMARIZATION_MATERIAL_VERSION) fail();
+  for (const key of SUMMARIZATION_KEYS) {
+    if (string(material[key]).length === 0) fail();
+  }
+  const size = Buffer.byteLength(canonicalJson(material), "utf8");
+  if (size === 0 || size > MAX_MATERIAL_BYTES) fail();
+  for (const key of SUMMARIZATION_KEYS) {
+    const text = material[key] as string;
+    const expected = MARKERS[key] ?? [];
+    for (const marker of ALL_MARKERS) {
+      const head = text.indexOf(marker);
+      const present = head >= 0;
+      if (present !== expected.includes(marker)) fail();
+      if (present && text.indexOf(marker, head + marker.length) >= 0) fail();
+    }
+  }
+  return Object.freeze({
+    version: material.version as string,
+    system_prompt: material.system_prompt as string,
+    conversation_block: material.conversation_block as string,
+    previous_summary_block: material.previous_summary_block as string,
+    initial_instruction: material.initial_instruction as string,
+    update_instruction: material.update_instruction as string,
+    user_instructions_template: material.user_instructions_template as string,
+    turn_prefix_instruction: material.turn_prefix_instruction as string,
+  });
+}
+
+/** Substitute once, never rescanning the inserted value: `replace` semantics would. */
+function fill(template: string, marker: string, value: string): string {
+  const head = template.indexOf(marker);
+  if (head < 0 || template.indexOf(marker, head + marker.length) >= 0) fail();
+  return template.slice(0, head) + value + template.slice(head + marker.length);
+}
+
+/** Select the initial or update instruction and append the optional user block. */
+export function summarizeInstruction(material: SummarizationMaterial, customInstructions: string | null,
+                                     previousSummary: string | null): string {
+  let instruction = previousSummary ? material.update_instruction : material.initial_instruction;
+  if (customInstructions) instruction += fill(material.user_instructions_template, INSTRUCTIONS_MARKER, customInstructions);
+  return instruction;
+}
+
+/** Apply the one assembly rule over an already serialized conversation. */
+export function composeSummarizationRequest(material: SummarizationMaterial, conversation: string,
+                                            instruction: string, previousSummary: string | null): string {
+  let text = fill(material.conversation_block, CONVERSATION_MARKER, conversation);
+  if (previousSummary) text += fill(material.previous_summary_block, PREVIOUS_MARKER, previousSummary);
+  return canonicalJson(projectPrimeContext([{ role: "user", content: [{ type: "text", text: text + instruction }] }],
+    material.system_prompt));
 }
 
 class FramedSocket {
@@ -175,23 +254,23 @@ function realSource(projection: PrimeContextProjectionV1): boolean {
   });
 }
 
-function requests(preparation: RecordValue, instructions: string | null, deps: ContextDependencies): [string, string | null] {
-  const request = (conversation: unknown[], instruction: string, previous: string | null): string => {
-    let text = "<conversation>\n" + deps.serializeConversation(deps.convertToLlm(conversation)) + "\n</conversation>\n\n";
-    if (previous) text += "<previous-summary>\n" + previous + "\n</previous-summary>\n\n";
-    text += instruction;
-    return canonicalJson(projectPrimeContext([{ role: "user", content: [{ type: "text", text }] }], deps.summarizationSystemPrompt));
-  };
+function requests(preparation: RecordValue, instructions: string | null, deps: ContextDependencies,
+                  material: SummarizationMaterial): [string, string | null] {
   const previous = optionalString(preparation.previousSummary);
+  const history = (conversation: unknown[]): string => composeSummarizationRequest(material,
+    deps.serializeConversation(deps.convertToLlm(conversation)),
+    summarizeInstruction(material, instructions, previous), previous);
   return [
-    request(array(preparation.messagesToSummarize), deps.buildSummarizationPrompt(instructions ?? undefined, previous ?? undefined), previous),
+    history(array(preparation.messagesToSummarize)),
     preparation.isSplitTurn === true && array(preparation.turnPrefixMessages).length > 0
-      ? request(array(preparation.turnPrefixMessages), deps.turnPrefixPrompt, null) : null,
+      ? composeSummarizationRequest(material,
+          deps.serializeConversation(deps.convertToLlm(array(preparation.turnPrefixMessages))),
+          material.turn_prefix_instruction, null) : null,
   ];
 }
 
-function material(preparation: RecordValue, branch: unknown[], systemPrompt: string, instructions: string | null,
-                  deps: ContextDependencies): RecordValue {
+function preparedMaterial(preparation: RecordValue, branch: unknown[], systemPrompt: string, instructions: string | null,
+                          deps: ContextDependencies): RecordValue {
   const firstKept = identifier(preparation.firstKeptEntryId);
   if (!branch.length || branch.filter(raw => object(raw).id === firstKept).length !== 1) fail();
   const covered = identifier(object(branch.at(-1)).id);
@@ -247,7 +326,8 @@ export class ContextWitness {
       if (this.closed || this.#active || this.#proposal) fail();
       this.#active = true;
       const arm = await this.#channel.read();
-      this.#authenticate(arm, "arm", BASE_KEYS);
+      this.#authenticate(arm, "arm", ARM_KEYS);
+      const summaryMaterial = summarization(arm.summarization);
       if (this.#seen.has(string(arm.command_nonce))) fail();
       this.#seen.add(string(arm.command_nonce));
       this.#identity = { protocol: CONTEXT_WITNESS_PROTOCOL, launch_nonce: this.#launch,
@@ -264,12 +344,11 @@ export class ContextWitness {
       if (typeof context.getSystemPrompt !== "function") fail();
       const systemPrompt = string(context.getSystemPrompt());
       const instructions = optionalString(event.customInstructions);
-      const reconstructed = object(this.#deps.prepareCompaction(branch, SETTINGS));
-      const proposed = material(preparation, branch, systemPrompt, instructions, this.#deps);
-      if (digest(proposed) !== digest(material(reconstructed, branch, systemPrompt, instructions, this.#deps))) fail();
-      if (integer(preparation.tokensBefore) !== integer(reconstructed.tokensBefore)) fail();
+      const tokensBefore = integer(preparation.tokensBefore);
+      if (tokensBefore === 0) fail();
+      const proposed = preparedMaterial(preparation, branch, systemPrompt, instructions, this.#deps);
       const pre = projectPrimeContext(this.#deps.buildSessionContext(branch).messages, systemPrompt);
-      const [main, prefix] = requests(preparation, instructions, this.#deps);
+      const [main, prefix] = requests(preparation, instructions, this.#deps, summaryMaterial);
       if (Buffer.byteLength(main) > 4096 || (prefix !== null && Buffer.byteLength(prefix) > 4096)) fail();
       const preJson = canonicalJson(pre);
       this.#proposal = { ...this.#identity, phase: "proposal", first_kept_entry_id: proposed.first_kept_entry_id,
@@ -277,7 +356,7 @@ export class ContextWitness {
         source_kind: array(object(proposed.messages_to_summarize).messages).length ? "messages" : "turn-prefix",
         pre_context_projection: pre, pre_context_json: preJson, pre_context_sha256: sha(preJson),
         main_summary_request: main, turn_prefix_summary_request: prefix, pre_units: countRebuiltContext(pre),
-        private_diagnostics: { tokensBefore: preparation.tokensBefore } };
+        private_diagnostics: { tokensBefore } };
       this.#branch = JSON.parse(JSON.stringify(branch)) as unknown[];
       await this.#channel.write(this.#proposal);
       const decision = await this.#channel.read();
@@ -367,7 +446,10 @@ export function registerContextWitnessFromEnvironment(pi: unknown, deps: unknown
   const launch = process.env.ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE;
   delete process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD;
   delete process.env.ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE;
-  if (fd === undefined && launch === undefined && deps === undefined) return;
+  // The host-injected existing extension binding decides whether this extension
+  // witnesses compaction at all. The Pi mechanics are supplied by the loader on
+  // every launch, so their presence says nothing about that binding.
+  if (fd === undefined && launch === undefined) return;
   if (fd === undefined || !/^[1-9][0-9]*$/.test(fd) || launch === undefined) {
     try { if (fd !== undefined && /^[1-9][0-9]*$/.test(fd) && Number.isSafeInteger(Number(fd)) && Number(fd) >= 3) closeSync(Number(fd)); } catch {}
     fail();

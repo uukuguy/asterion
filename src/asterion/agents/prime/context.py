@@ -22,6 +22,12 @@ import time
 from typing import Literal, NoReturn, cast
 
 from .compaction_budget import ModelPrice, quote_compaction_reservation
+from .summarization import (
+    MATERIAL_KEYS,
+    MATERIAL_VERSION,
+    MAX_MATERIAL_BYTES,
+    build_summarization_material,
+)
 
 
 PROTOCOL = "asterion.prime-context-witness/v1"
@@ -32,6 +38,14 @@ _MAX_FRAME = 1024 * 1024
 _HEX = re.compile(r"[0-9a-f]{64}")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}")
 _BASE = {"protocol", "launch_nonce", "command_nonce", "authority_sha256", "phase"}
+# Each template must carry exactly one marker of its own and no other template's
+# marker, so a substitution can never rescan private text it just inserted.
+_MARKERS = {
+    "conversation_block": ("{conversation}",),
+    "previous_summary_block": ("{previous_summary}",),
+    "user_instructions_template": ("{instructions}",),
+}
+_OTHER_MARKERS = ("{conversation}", "{previous_summary}", "{instructions}")
 _PROPOSAL = _BASE | {
     "first_kept_entry_id",
     "covered_leaf_id",
@@ -250,6 +264,38 @@ def _validate_projection(value: object) -> dict:
         else:
             _fail()
     return projection
+
+
+def _validate_summarization(value: object) -> dict:
+    """Validate the Asterion-owned summarization material the extension composes from.
+
+    The native side is the authority for the prompt text: the extension holds no
+    prompt of its own, and every request body it reports back is assembled from
+    exactly these strings. The shape is closed here as tightly as the projection
+    format is.
+    """
+
+    material = _record(value, set(MATERIAL_KEYS))
+    _domain(material)
+    if material["version"] != MATERIAL_VERSION:
+        _fail()
+    for key in MATERIAL_KEYS:
+        _string(material[key])
+        if not material[key]:
+            _fail()
+    encoded = _encode(material)
+    if not 0 < len(encoded) <= MAX_MATERIAL_BYTES:
+        _fail()
+    for key in MATERIAL_KEYS:
+        text = material[key]
+        expected = _MARKERS.get(key, ())
+        for marker in _OTHER_MARKERS:
+            present = marker in text
+            if present != (marker in expected):
+                _fail()
+            if present and text.count(marker) != 1:
+                _fail()
+    return material
 
 
 def encode_prime_context_v1(projection: Mapping[str, object]) -> bytes:
@@ -660,7 +706,14 @@ class PrimeContextWitnessSession:
             if self._nonce in self._seen:
                 _fail()
             self._seen.add(self._nonce)
-            await self._send(self._base("arm"))
+            await self._send(
+                {
+                    **self._base("arm"),
+                    "summarization": _validate_summarization(
+                        build_summarization_material()
+                    ),
+                }
+            )
             self._state = "armed"
         except BaseException:
             self._fence()

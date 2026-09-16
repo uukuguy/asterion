@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -18,11 +19,19 @@ import { IsSchema } from "typebox";
 
 import register, {
   PROTOCOL,
+  canonicalJson,
+  composeSummarizationRequest,
   createIpythonBridge,
+  registerContextWitness,
+  summarizeInstruction,
   toolNames,
 } from "../dist/ipython-extension.mjs";
 
 const artifactPath = resolve("dist/ipython-extension.mjs");
+// The native side owns the prompt material and delivers it on the arm frame.
+// The shared fixture is the same record both languages are held to.
+const material = JSON.parse(readFileSync(
+  resolve("../../../tests/fixtures/asterion_prime_p1/v1/summarization-parity.json"))).material;
 const loaderPath = resolve(
   "../../../src/asterion/runtimes/resources/asterion_pi_extension_loader.mjs",
 );
@@ -402,10 +411,201 @@ test("built artifact is comment-free and loads through the pinned loader", async
   process.env.ASTERION_PRIME_IPYTHON_FD = "7";
   const registered = [];
   try {
-    const loader = await import(`${new URL(`file://${loaderPath}`).href}?task5`);
+    // The loader takes the host package from the host's own resolver. Copying
+    // the loader beside a stub package supplies that resolver outside Pi.
+    const host = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
+    mkdirSync(host, { recursive: true });
+    writeFileSync(
+      join(host, "package.json"),
+      JSON.stringify({
+        name: "@earendil-works/pi-coding-agent",
+        version: "0.0.0",
+        type: "module",
+        main: "index.js",
+        exports: { ".": "./index.js" },
+      }),
+    );
+    writeFileSync(
+      join(host, "index.js"),
+      'export const buildSessionContext = () => ({ messages: [] });\n'
+        + "export const convertToLlm = (messages) => messages;\n"
+        + 'export const serializeConversation = () => "";\n',
+    );
+    const loaderCopy = join(root, "asterion_pi_extension_loader.mjs");
+    writeFileSync(loaderCopy, readFileSync(loaderPath));
+    const loader = await import(`${pathToFileURL(loaderCopy).href}?task5`);
     await loader.default({ registerTool: (tool) => registered.push(tool) });
     assert.deepEqual(registered.map((tool) => tool.name), ["ipython"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Asterion-owned summarization material reproduces the shared parity fixture", () => {
+  const fixture = JSON.parse(
+    readFileSync(
+      resolve("../../../tests/fixtures/asterion_prime_p1/v1/summarization-parity.json"),
+    ),
+  );
+  const material = Object.freeze(fixture.material);
+  for (const testCase of fixture.cases) {
+    const instruction = summarizeInstruction(
+      material, testCase.custom_instructions, testCase.previous_summary);
+    assert.equal(instruction, testCase.instruction, testCase.name);
+    const encoded = composeSummarizationRequest(
+      material, testCase.conversation, instruction, testCase.previous_summary);
+    assert.equal(encoded, testCase.request_canonical_json, testCase.name);
+    assert.equal(
+      createHash("sha256").update(encoded, "utf8").digest("hex"),
+      testCase.sha256,
+      testCase.name,
+    );
+  }
+  // The turn prefix reuses the same conversation wrapping with its own template.
+  const turnPrefix = composeSummarizationRequest(
+    material, "prefix body", material.turn_prefix_instruction, null);
+  const initialHistory = composeSummarizationRequest(
+    material, "prefix body", material.initial_instruction, null);
+  assert.notEqual(turnPrefix, initialHistory);
+  assert.equal(turnPrefix.includes("<previous-summary>"), false);
+  assert.equal(
+    JSON.parse(turnPrefix).messages[0].content[0].text.endsWith(material.turn_prefix_instruction),
+    true,
+  );
+});
+
+const WITNESS_PAYLOAD = {
+  event: {
+    type: "session_before_compact",
+    preparation: {
+      settings: { enabled: false, reserveTokens: 4096, keepRecentTokens: 256 },
+      firstKeptEntryId: "entry-2",
+      messagesToSummarize: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+      turnPrefixMessages: [],
+      isSplitTurn: false,
+      tokensBefore: 12,
+    },
+    branchEntries: [
+      { id: "entry-1", parentId: null, type: "message" },
+      { id: "entry-2", parentId: "entry-1", type: "message" },
+    ],
+  },
+};
+
+function runInheritedWitness(pair, payload) {
+  const source = `
+    import { registerContextWitness } from ${JSON.stringify(pathToFileURL(artifactPath).href)};
+    const payload = JSON.parse(process.argv[1]);
+    const deps = Object.freeze({
+      buildSessionContext: (entries) => ({ messages: entries.at(-1)?.type === "compaction"
+        ? [{ role: "compactionSummary", retainedMessageCount: 0 }] : [] }),
+      convertToLlm: (messages) => messages,
+      serializeConversation: () => "SERIALIZED-CONVERSATION",
+    });
+    const hooks = new Map();
+    const witness = registerContextWitness({ on: (event, hook) => hooks.set(event, hook) }, deps,
+      { descriptor: 3, launchNonce: payload.launch, timeoutMs: 2000 });
+    let outcome;
+    try { outcome = await hooks.get("session_before_compact")(payload.event, { getSystemPrompt: () => "SYSTEM-PROMPT" }); }
+    catch { outcome = "threw"; }
+    process.stdout.write(JSON.stringify({ outcome: outcome ?? null, closed: witness.closed }));
+    process.exit(0);
+  `;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", source, JSON.stringify(payload)], {
+    stdio: ["ignore", "pipe", "pipe", pair.client],
+  });
+  let stdout = "", stderr = "";
+  child.stdout.on("data", (value) => { stdout += value; });
+  child.stderr.on("data", (value) => { stderr += value; });
+  return {
+    result: new Promise((resolveResult, reject) => {
+      child.once("error", reject);
+      child.once("exit", (code) => {
+        if (code !== 0 || stderr !== "") { reject(new Error("witness child failed")); return; }
+        resolveResult(JSON.parse(stdout));
+      });
+    }),
+  };
+}
+
+function witnessFrame(value) {
+  const raw = Buffer.from(canonicalJson(value));
+  const header = Buffer.alloc(4);
+  header.writeUInt32BE(raw.length);
+  return Buffer.concat([header, raw]);
+}
+
+function readWitnessFrame(socket, timeoutMs = 5000) {
+  return new Promise((resolveFrame, reject) => {
+    let pending = Buffer.alloc(0);
+    const timer = setTimeout(() => reject(new Error("witness peer timed out")), timeoutMs);
+    const onData = (chunk) => {
+      pending = Buffer.concat([pending, chunk]);
+      if (pending.length < 4 || pending.length < 4 + pending.readUInt32BE(0)) return;
+      socket.off("data", onData);
+      clearTimeout(timer);
+      resolveFrame(JSON.parse(pending.subarray(4).toString("utf8")));
+    };
+    socket.on("data", onData);
+    socket.once("end", () => { clearTimeout(timer); reject(new Error("witness peer closed")); });
+    socket.once("close", () => { clearTimeout(timer); reject(new Error("witness peer closed")); });
+  });
+}
+
+test("the arm frame's native material drives the request the witness proposes", async () => {
+  const launch = "a".repeat(64);
+  const pair = await socketPair();
+  try {
+    const running = runInheritedWitness(pair, { ...WITNESS_PAYLOAD, launch, material });
+    pair.peer.write(witnessFrame({
+      protocol: "asterion.prime-context-witness/v1",
+      launch_nonce: launch, command_nonce: "b".repeat(64), authority_sha256: "c".repeat(64),
+      phase: "arm", summarization: material,
+    }));
+    const proposal = await readWitnessFrame(pair.peer);
+    assert.equal(proposal.phase, "proposal");
+    assert.equal(proposal.first_kept_entry_id, "entry-2");
+    assert.equal(proposal.covered_leaf_id, "entry-2");
+    assert.equal(proposal.source_kind, "messages");
+    assert.equal(proposal.turn_prefix_summary_request, null);
+    assert.equal(proposal.private_diagnostics.tokensBefore, 12);
+    // The body is assembled from the material the native side sent, not from
+    // any prompt this extension carries.
+    assert.equal(
+      proposal.main_summary_request,
+      composeSummarizationRequest(material, "SERIALIZED-CONVERSATION", material.initial_instruction, null),
+    );
+    pair.peer.write(witnessFrame({
+      protocol: "asterion.prime-context-witness/v1",
+      launch_nonce: launch, command_nonce: "b".repeat(64), authority_sha256: "c".repeat(64),
+      phase: "decision", status: "reject",
+    }));
+    assert.deepEqual(await running.result, { outcome: { cancel: true }, closed: false });
+  } finally {
+    pair.close();
+  }
+});
+
+test("tampered arm material is rejected before any proposal", async () => {
+  const launch = "a".repeat(64);
+  for (const tampered of [
+    { ...material, version: "other" },
+    { ...material, initial_instruction: material.initial_instruction + " {conversation}" },
+    { ...material, previous_summary_block: "no marker here" },
+    (({ system_prompt, ...rest }) => rest)(material),
+  ]) {
+    const pair = await socketPair();
+    try {
+      const running = runInheritedWitness(pair, { ...WITNESS_PAYLOAD, launch, material: tampered });
+      pair.peer.write(witnessFrame({
+        protocol: "asterion.prime-context-witness/v1",
+        launch_nonce: launch, command_nonce: "b".repeat(64), authority_sha256: "c".repeat(64),
+        phase: "arm", summarization: tampered,
+      }));
+      await assert.rejects(readWitnessFrame(pair.peer, 400));
+      assert.deepEqual(await running.result, { outcome: { cancel: true }, closed: true });
+    } finally {
+      pair.close();
+    }
   }
 });

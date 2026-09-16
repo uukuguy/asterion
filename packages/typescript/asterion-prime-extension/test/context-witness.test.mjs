@@ -14,6 +14,11 @@ const command = "b".repeat(64);
 const authority = "c".repeat(64);
 const base = { protocol: "asterion.prime-context-witness/v1", launch_nonce: launch, command_nonce: command, authority_sha256: authority };
 const artifact = pathToFileURL(resolve("dist/ipython-extension.mjs")).href;
+// The native side is authoritative for the prompt material and delivers it on
+// the arm frame, so the shared fixture supplies it here too.
+const material = JSON.parse(readFileSync(
+  resolve("../../../tests/fixtures/asterion_prime_p1/v1/summarization-parity.json"))).material;
+const arm = {...base, phase: "arm", summarization: material};
 const secret = "private-sentinel-prompt-and-summary";
 
 async function pair() {
@@ -84,7 +89,7 @@ test("reject cancels before either real built-in summary callback or appendCompa
   const sockets=await pair();
   try {
     const running=run(sockets);
-    sockets.peer.write(frame({...base,phase:"arm"}));
+    sockets.peer.write(frame(arm));
     const proposal=await readFrame(sockets.peer);
     assert.equal(proposal.phase,"proposal");
     assert(proposal.private_diagnostics.tokensBefore>0);
@@ -103,7 +108,7 @@ test("approve permits only Pi built-in summary then one persisted frame and ack"
   const sockets=await pair();
   try {
     const running=run(sockets);
-    sockets.peer.write(frame({...base,phase:"arm"}));
+    sockets.peer.write(frame(arm));
     const proposal=await readFrame(sockets.peer);
     assert.equal(proposal.phase,"proposal");
     sockets.peer.write(frame({...base,phase:"decision",status:"approve"}));
@@ -129,7 +134,7 @@ test("bad decision frames cancel and permanently fence before mutation", async t
       const sockets=await pair();
       try{
         const running=run(sockets,{timeoutMs:150});
-        sockets.peer.write(frame({...base,phase:"arm"}));
+        sockets.peer.write(frame(arm));
         await readFrame(sockets.peer);
         let reply={...base,phase:"decision",status:"approve"};
         if(kind==="wrong-command")reply.command_nonce="d".repeat(64);
@@ -164,8 +169,7 @@ test("failed environment or tool registration closes the context descriptor", as
           import register from ${JSON.stringify(artifact)};
           import {fstatSync} from 'node:fs';
           const kind=process.argv[1];
-          const deps=Object.freeze({buildSessionContext(){},prepareCompaction(){},convertToLlm(){},serializeConversation(){},
-            buildSummarizationPrompt(){},summarizationSystemPrompt:'system',turnPrefixPrompt:'prefix'});
+          const deps=Object.freeze({buildSessionContext(){return {messages:[]};},convertToLlm(){return [];},serializeConversation(){return "";}});
           if(kind!=='missing-ipython-fd')process.env.ASTERION_PRIME_IPYTHON_FD='999998';
           process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD=kind==='closed-descriptor'?'999999':'3';
           if(kind!=='missing-nonce')process.env.ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE=${JSON.stringify(launch)};
@@ -191,7 +195,7 @@ test("proposal backpressure times out before summary or append",async()=>{
   try{
     sockets.peer.pause();
     const running=run(sockets,{backpressure:true,timeoutMs:100});
-    sockets.peer.write(frame({...base,phase:"arm"}));
+    sockets.peer.write(frame(arm));
     const result=await running;
     assert.equal(result.fenced,true);assert.equal(result.calls,0);assert.equal(result.appends,0);
   }finally{sockets.close();}
@@ -201,7 +205,7 @@ test("missing post-mutation ack fences the observer",async()=>{
   const sockets=await pair();
   try{
     const running=run(sockets,{timeoutMs:150});
-    sockets.peer.write(frame({...base,phase:"arm"}));
+    sockets.peer.write(frame(arm));
     await readFrame(sockets.peer);
     sockets.peer.write(frame({...base,phase:"decision",status:"approve"}));
     await readFrame(sockets.peer);
