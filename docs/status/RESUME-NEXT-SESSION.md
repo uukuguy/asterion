@@ -1,116 +1,106 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-16 12:30. **Session remains active — not a final handoff.**
-> Supersedes the 2026-09-15 05:40 handoff for Phase 4 state; Phase 1–3 records
-> in that handoff remain accurate.
+> Updated: 2026-09-16 18:40. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-1. **Phase 4's launch path is built and verified** (gate 0, P1 targeted set 83
-   pass / 0 skip). P1 no longer resolves itself out of the published provider,
-   so it composes while still unpublished.
-2. **The live witness run FAILED**, and the failure is fully located: the
-   context witness required compaction functions that only exist in Prime
-   Agent's own Pi build. This is plan risk 1 surfacing, exactly as predicted.
-3. **The fix is in flight.** An implementation subagent (`p1-compaction-native`)
-   is giving Asterion prime its own summarization construction and supplying it
-   over the witness protocol, replacing the Prime-coupled injection.
+1. **Phase 4's P1 launch path is committed and green.** P1 runs further every
+   time: the live witness now completes **stage one end to end** (setup, verify,
+   oracle, `stage1.complete`) and reaches `compact.admit`.
+2. **Two real defects were found and fixed** on the way: the Prime-coupled
+   extension dependency (deleted), and a Pi event-vocabulary gap that had been
+   latent since 2026-09-11 and only a multi-round application could hit.
+3. **The current blocker is in the compaction step** and points at the IPython
+   worker going invalid after the first turn. That is where the next session
+   should start, with the probe described below.
 
 ## 已验证事实
 
-- **P1 launch path rebuilt** in `src/asterion/applications/prime/p1/operator.py`:
-  `_Preflight`, `_preflight`, `_build_resources`, and `main`'s invoke body. All
-  values Asterion-owned: Pi from the operator-owned `ASTERION_PRIME_PI_ENTRY`
-  (P7 shape, D-2026-09-14-03), extension from the packaged
-  `resources/ipython-extension.mjs` (generated at build time by `hatch_build.py`
-  into a staging dir — never written to the source tree), compaction from
-  Asterion's `PrimeContextWitnessSession`.
-- **Makefile `asterion-prime-p1-run` now exports `ASTERION_PRIME_PI_ENTRY`**; it
-  was missing, so preflight could never have passed.
-- **The provider coupling is removed.** `provider.py` gained
-  `prime_ipython_coding_application()` and `create_prime_ipython_coding_provider()`;
-  P1's operator composes from its own record. The public list is unchanged (P7
-  only) — P1 is still unpublished. This is why the 34 test skips dropped to 0.
-- **P1 targeted set: 83 pass, 0 skip** (was 38 pass / 34 skip). P7 set: 24 pass,
-  unaffected. Lint: same 4 pre-existing errors, none in changed files.
-- **Live run `p1-debe34e5b246017abaae2e27` FAILED** with `status=recovery-required`
-  ~30-60s in, at the first model turn after `stage1.setup.start`.
-- **Root cause, traced link by link:** the Pi child refused to load the
-  extension (`Asterion pinned Pi extension is invalid`), because the extension's
-  `register()` called `registerContextWitnessFromEnvironment` with
-  `deps === undefined`, and `new ContextWitness(undefined, ...)` fails its
-  `dependencies()` validator. The loader's catch-all masked the real error.
-  P7 passes the same chain only because its binding carries no context fd, so
-  the witness branch returns early.
-- **The missing three names are Prime Agent's own.** `npm view` shows upstream
-  `@earendil-works/pi-coding-agent` has **no 0.7.x release at all** (earliest is
-  0.74.0), while `prime-artifact-lock.json` records `package_version: "0.7.1"`
-  with `source_commit a18809e0`. The locked tree was therefore Prime Agent's own
-  modified Pi build. The deleted `PiExtensionDependencies` seam was a disguised
-  runtime import of it.
-- **Nothing uses the injection mechanism any more.** `ExtensionBinding(dependencies=...)`
-  has no caller anywhere in `src/`; `ExtensionDependencies` is referenced only by
-  its own module, a re-export, and its tests. It is removable Prime-era scaffolding.
-- **The protocol already carries the summary requests.** `_validate_proposal`
-  validates `main_summary_request` / `turn_prefix_summary_request` as canonical
-  Asterion-encoded bodies bounded to 4096 units. Asterion owns the shape; only
-  the prompt text was Prime's.
+- **Commits this session** (all pushed to local `main`, tree clean):
+  - `fd962a66` delete the pinned Pi dependency channel (−686 lines) — the
+    disguised runtime import of Prime Agent's modified Pi
+  - `c21d0dae` Asterion's own compaction summarization module
+  - `f1b08c1f` rebuild the native P1 launch path + decouple P1 from the published
+    provider + carry the summarization instruction into Pi's compaction
+  - `774ae137` docs
+  - `540283b8` accept Pi's trailing `agent_settled` event
+- **P1 no longer resolves itself out of the published provider.** It composes
+  from its own record via `create_prime_ipython_coding_provider()`. The public
+  list is unchanged (P7 only). This removed the cause of 34 skipped tests: the
+  P1 set went from 38 passed / 34 skipped to **83 passed / 0 skipped**.
+- **Detachment gate 0** throughout; targeted set **162 passed**; lint unchanged
+  at its 4 pre-existing findings.
+- **Live witness progression** (each run is model-driven and therefore
+  non-deterministic in where it stops):
+  - run 1 `p1-debe34e5…`: died at the first turn — the Pi child refused the
+    extension because the context witness needed Prime's compaction internals
+  - run 2 `p1-bb85dc5e…`: first turn passed, died on the second — `agent_settled`
+  - run 3 `p1-f6f4d6e4…`: **stage one complete**, died at `compact.admit`
+- **`agent_settled` root cause:** commit `26519254` swapped the round terminal
+  from `agent_settled` to `agent_end` and dropped `agent_settled` from the
+  accepted vocabulary entirely. Pi emits `agent_end` then `agent_settled`; the
+  round driver stops at its terminal, so the trailing event lands on the *next*
+  round. Single-round P7 never sees it; P1 is the first multi-round application.
 
 ## 当前判断
 
-- **The remaining Phase 4 work is small and well-scoped**: Asterion owns the
-  summarization text (native constants), the extension gets it over the
-  protocol, and the extension adapts to upstream Pi 0.85.1's actual API.
-- **Upstream Pi 0.85.1 does export** `prepareCompaction`
-  (`dist/core/compaction/compaction.js`), `serializeConversation`
-  (`dist/core/compaction/utils.js`), `buildSessionContext`
-  (`dist/core/session-manager.js`), `convertToLlm` (`dist/core/messages.js`) —
-  and it has its own summarization machinery in
-  `dist/core/compaction/branch-summarization.js` under different names.
-- **The extracted principle** (for the implementation): a summarization system
-  prompt; initial and update user templates sharing one fixed section format
-  (Goal / Constraints & Preferences / Progress{Done, In Progress, Blocked} /
-  Key Decisions / Next Steps / Critical Context) with "preserve exact file
-  paths, function names, and error messages"; a kernel-persistence note that is
-  the reason P1 exists; a turn-prefix template; assembly as
-  `<conversation>…</conversation>` + optional `<previous-summary>` + template;
-  `maxTokens = floor(0.8 * reserveTokens)`. Cross-check: `0.8 * 4096 = 3276`,
-  matching the fixture's `output_cap`.
+- **The compaction blocker most likely is the IPython worker, not the
+  summarization wiring.** The probe's last reading before the failure is
+  `tool_executor.validate_lifecycle()` raising
+  `RuntimeFactoryError('Asterion-prime runtime configuration is invalid')`, and
+  `P1WorkerOwnerAdapter.validate_lifecycle` compares the worker's lifecycle token
+  by identity — so either the worker's `validate_lifecycle()` raised, or it
+  returned a different object. Not yet narrowed further.
+- **Method that worked and should be reused:** `PrimeBackendError` is raised
+  `from None`, which suppresses the display but leaves the original in
+  `__context__`; walking it recovered the real cause every time. The probe also
+  logs every Pi event type, which is how the `agent_settled` gap was found —
+  the diagnostic only said "event type is invalid" and named nothing.
 
 ## 未完成边界
 
-- **Phases 4-9 unstarted. P1-P6 have no native implementation reachable.
-  P1-P7 native implementations: 1 of 7** — P7 only.
 - **The P1 witness has NOT passed.** P1 stays unpublished. Do not publish it
-  without the witness.
-- **No commit yet for this session's work.** 6 files are modified in the working
-  tree (`Makefile`, `docs/status/JOURNAL.md`,
-  `src/asterion/applications/prime/__init__.py`,
-  `src/asterion/applications/prime/p1/operator.py`,
-  `src/asterion/applications/prime/provider.py`,
-  `tests/test_asterion_prime_p1_operator.py`).
-- **The in-flight subagent's result is unreviewed.** Review it before treating
-  any of it as verified.
-- `.asterion-private/p1-diagnose.py` is a temporary diagnostic probe (gitignored).
-  Remove it when the diagnosis is no longer needed.
+  without a passing witness.
+- **Phases 4-9 unstarted; P1-P7 native implementations: 1 of 7** — P7 only.
+- **D-2026-09-16-01 is decided but not implemented:** Asterion should own
+  compaction summarization via Pi's `session_before_compact` takeover using
+  `ctx.modelRegistry.runtime.complete()`. The interim step now in the tree is the
+  `customInstructions` append, which reaches the model only on compaction
+  Asterion drives itself.
+- **Plan risk 1 is now being exercised for the first time** — the run reaches
+  compaction. Nothing about it is proven yet.
 
 ## 下一动作
 
-1. Review the `p1-compaction-native` subagent's work when it reports.
-2. Then re-run the witness:
-   `make asterion-prime-p1-run ASTERION_PRIME_PI_ENTRY=/mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js`
-3. Then, and only if it passes, publish P1 and remove the unpublished-state
-   assertions in `tests/test_asterion_prime_p1_installed.py`.
+1. Narrow why the worker's lifecycle token goes invalid after the first turn.
+   Start from `P1WorkerProcess.validate_lifecycle` (`p1/ipython_host.py`) and
+   `P1WorkerOwnerAdapter.validate_lifecycle` (`p1/runtime_binding.py`).
+2. Re-run with the probe (it is already written and working):
+   `.asterion-private/p1-diagnose.py` — it hooks `_validate_recovery`, `_compact`
+   and `PiRpcSession.prompt`, and walks `__context__`.
+
+## Ready-to-paste
+
+```bash
+# The live witness (operator-authorized; provider-backed; ~2 min):
+make asterion-prime-p1-run \
+  ASTERION_PRIME_PI_ENTRY=/mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js
+
+# Detachment gate (expect 0):
+uv run python -c "from pathlib import Path; from asterion.agents.prime.detachment import find_source_detachment_violations as f; print(len(f(Path('.'))))"
+```
+
+Note the two Orb traps: Orb reaches the Mac only at `/mnt/mac/...`, and its
+system node v20 is too old for the Pi — the preset's own `npm exec
+--package=node@22` is load-bearing.
 
 ## Workspace boundary
 
 - **Asterion prime must never import or depend on Prime Agent.** Reading
   `3th-party/prime-agent.git` read-only to extract a design principle is the
-  authorised exception (given 2026-09-16); every shipped line must be Asterion's
-  own. The detachment gate must stay 0.
+  authorised exception (2026-09-16); every shipped line must be Asterion's own.
 - Do not restore Prime launch, Prime locks, or Prime compaction imports.
-- On the DeepSeek backend, pass no `model` to any subagent (see AGENTS.md).
+- On the DeepSeek backend, pass no `model` to any subagent.
 - **Run `date` — never estimate a timestamp.**
-- **Search `PATH` and the real environment before concluding a resource is absent.**
 - **Research intensity:** review changed code plus boundary assertions, run small
   targeted regressions. Do not re-run full suites or harden tooling.

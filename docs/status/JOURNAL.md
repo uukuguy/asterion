@@ -2422,3 +2422,10 @@
 - 17:58 Phase 4 首批落地并提交 [f1b08c1f]：P1 启动路径重建 + P1 不再从公开 provider 解析自己（定向集 83 通过/0 跳过，此前 38/34）+ Asterion 自持摘要文本经 RPC `customInstructions` 送入 Pi 压缩（私有文本按不透明句柄解析，不进控制流水账）
 - 17:58 提交前复核：门禁 0；六模块 115 通过；lint 仍是既有 4 条；P7 定向集 24 通过未受影响。**live witness 尚未重跑**
 - 17:58 停掉运行 1h22m 的实现子代理（判据是工作已完成且树是绿的，不等其叙述）；冻结后复验通过才提交
+- 18:37 P1 witness 第二次实跑：**扩展加载修复生效**——第一回合跑通（stage1.setup.complete），失败点推进到第二回合
+- 18:37 用 `__context__` 取回被 `from None` 丢弃的真因（项目记录的「可诊断性缺口」）：`ProtocolError: Asterion-prime native event type is invalid`；探针记录事件流发现第二回合首个事件是 **`agent_settled`**
+- 18:37 根因：`26519254` 把回合终态从 `agent_settled` 换成 `agent_end`，但**没把 `agent_settled` 放进良性集合**，它变成两者都不是 → 掉进 EVENT_TYPE_INVALID。Pi 是先 `agent_end` 再 `agent_settled`（被删的旧注释自己写着），终态一到驱动停止读取，故它落到**下一回合**——单回合的 P7 永远碰不到，**P1 是第一个多回合应用**
+- 18:37 修复并提交 [540283b8]：把 `agent_settled` 放回良性无操作集合。门禁 0、定向集 162 通过
+- 18:37 P1 witness 第三次实跑：**stage one 全程通过**（setup/verify/oracle/stage1.complete），推进到 `compact.admit`，在压缩环节失败——已进入计划风险 1 的地界
+- 18:37 压缩环节的新失败（另一次探针运行，非确定性）：`_validate_recovery` 的 `tool_executor.validate_lifecycle()` 抛 `RuntimeFactoryError('Asterion-prime runtime configuration is invalid')`，而该检查是**身份比较**（`current is not self._lifecycle`）——指向 **IPython worker 在第一回合之后失效**，待查
+- 18:37 重要方法学：`__context__` 是取回被 `from None` 丢弃原因的有效手段；探针 + 事件流记录能把「类型无效」这类无值诊断变成确定的根因
