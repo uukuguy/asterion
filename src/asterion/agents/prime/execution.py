@@ -356,6 +356,14 @@ class PrimeExecutionKernel:
                 "message_start",
                 "turn_end",
                 "tool_execution_update",
+                # Pi emits agent_end and then agent_settled when the agent goes
+                # idle. agent_end terminates the round, so this trailing event
+                # belongs to the round that just finished; a round driver stops
+                # reading at the terminal, so it reaches the next round's
+                # callback. It is benign there, not a second terminal — treating
+                # it as unknown is what broke the second round of a multi-round
+                # application.
+                "agent_settled",
             }:
                 # Streaming tool updates carry private partial output and have
                 # no public projection.
