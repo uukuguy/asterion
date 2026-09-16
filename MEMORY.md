@@ -15,6 +15,8 @@
 | feedback | ✅ verified-active | Judge a subagent by whether the work is done, not by whether it has reported |
 | feedback | ✅ verified-active | Search `PATH` and the real environment before declaring a resource absent |
 | feedback | ✅ verified-active | Report a narrow defect as narrow; do not inflate it into an architecture decision |
+| feedback | ✅ verified-active | Delete a seam whose only purpose was the forbidden dependency; do not retarget it |
+| feedback | ✅ verified-active | A classification is not a cause; recover the value before changing anything |
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
 
 ## ✅ Verified Active
@@ -88,13 +90,46 @@
   zero and then spent hours before committing. A second agent was stopped at the
   same point (goal met, 70 tests green) and its work committed directly.
 
+### feedback — delete a seam whose only purpose was the forbidden dependency
+
+- When a mechanism exists only to reach into something the project forbids,
+  remove it. Do not look for a different source to feed it. The tell is that the
+  seam presents itself as generic scaffolding: the framework half really is
+  generic, and only its *consumer* was illegitimate, so retargeting feels
+  conservative when it is actually rebuilding the forbidden edge.
+- Given 2026-09-16, after treating the pinned Pi dependency channel as a seam to
+  repair. Its whole purpose was to inject Prime Agent's modified-Pi compaction
+  internals by another name; the user's reply was "谁让你偷偷导入prime-agent的，
+  我不如直接用 prime-agent 好了". Deleting it outright (−686 lines) was correct and
+  unblocked the work.
+- **Why:** retargeting preserves the dependency the project spent a whole phase
+  removing, and it leaves the next session unable to tell a legitimate seam from
+  a disguised import.
+
+### feedback — a classification is not a cause; recover the value
+
+- When a failure surfaces as a classification with no detail, instrument the
+  check that produced it and read the actual values before changing anything.
+  `raise ... from None` suppresses the display but leaves the original in
+  `__context__`, so the cause is recoverable without touching production code.
+- Given 2026-09-16, diagnosing the P1 live run: "Prime backend recovery required"
+  and "native event type is invalid" each named nothing. Walking `__context__`
+  and logging every event type turned both into exact findings — a SIGTERM'd
+  worker, and `agent_settled` missing from the accepted vocabulary.
+- **Why:** two of this session's three real defects were invisible at the
+  classification level. Guessing at them would have produced speculative edits
+  in a runtime that other applications share.
+
 ## 🟠 Current Judgments
 
 - Phase 1 (legacy Prime Agent detachment) is complete and the application layer
   is free of Pi references; the remaining work is construction, not removal.
-  P1-P7 native implementations stand at 0 of 7 and are all unavailable by
-  design. Current technical status and next actions live in
-  `docs/status/CURRENT-STATE.md` and `docs/status/RESUME-NEXT-SESSION.md`.
+  **P1-P7 native implementations stand at 1 of 7** — P7 only, at its proven
+  boundary. P1's launch path was rebuilt on 2026-09-16 and its live witness now
+  completes stage one and reaches compaction, but the witness has not passed, so
+  P1 stays unpublished; P2-P6 remain unbuilt. Current technical status and next
+  actions live in `docs/status/CURRENT-STATE.md` and
+  `docs/status/RESUME-NEXT-SESSION.md`.
 
 ## 🔴 Superseded but Worth Remembering
 

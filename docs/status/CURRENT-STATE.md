@@ -16,11 +16,17 @@
 - Active work package: **Phase 4** — rebuild P1's *launch path*
   (`prime.ipython-coding`). P1 is not missing an implementation: its operator,
   ipython host, coordination, oracle, receipt, runtime binding, worker and
-  worker_main all exist, as does the native substrate. What is gone is the
-  wiring — `p1/operator.py::_preflight` still raises the Phase 1 "unavailable"
-  stub, because the Prime-coupled launch was removed with no replacement built.
-  **Phase 4 is also where plan risk 1 (compaction) is finally tested**, since
-  P1's witness requires compaction and the Phase 3 run never reached it.
+  worker_main all exist, as does the native substrate. What was gone was the
+  wiring — `p1/operator.py::_preflight` used to raise the Phase 1 "unavailable"
+  stub. **That launch path is rebuilt and committed** (`f1b08c1f`): Pi comes from
+  the operator-owned `ASTERION_PRIME_PI_ENTRY`, the extension from Asterion's
+  packaged resource, and compaction from Asterion's own
+  `PrimeContextWitnessSession`. P1 also no longer resolves itself out of the
+  published provider, so it composes while unpublished.
+  **The live witness now completes stage one end to end and reaches
+  `compact.admit`; it does not pass, and P1 stays unpublished.**
+  **Phase 4 is also where plan risk 1 (compaction) is finally tested**, and it
+  is being exercised for the first time.
   **Phase 3 is complete: native P7 is revalidated end to end.** Run
   `p7-live-20260914141314` solved Level 1 of `ls20-9607627b` in 20 primitive
   actions and 40 persistent IPython cells, `partial_game_score` 3.571429,
@@ -33,11 +39,10 @@
   preset as an installed-wheel invocation, D-2026-09-14-02): the preset builds a
   wheel, unsets `PYTHONPATH`, and supplies the ARC engine as an operator-owned
   root plus pure-Python wheels. Native P7 remains the implementation anchor.
-  **P1-P7 native implementations: 0 of 7 — all unavailable by design.** P1-P6
-  never had native implementations; P7 does, but it is not yet proven to run
-  end-to-end from the installed route, so it too stays unavailable until Phase 3
-  closes. Full benchmarking and production promotion remain separately
-  authorized work.
+  **P1-P7 native implementations: 1 of 7** — P7 only, at its proven boundary.
+  P1's launch path exists and runs through stage one, but its witness has not
+  passed, so it stays unpublished. P2-P6 remain unbuilt. Full benchmarking and
+  production promotion remain separately authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
   W2 public extension reference, W3a cross-package evidence, W3b
@@ -247,13 +252,17 @@
   against a stashed baseline over the 208-test prime set: **zero new breakage,
   one pre-existing failure fixed**. This enforced D-2026-09-12-01; it decided
   nothing new, so it adds no DECISIONS entry.
-- **P1's operator resolves itself out of the provider** (it filters
-  `create_provider()` down to P1, `p1/operator.py:238`), so while P1 is
-  unpublished 15 route tests in `test_asterion_prime_p1_operator.py` **skip with
-  an explicit reason** and the 3 that avoid that fixture still run. Phase 4
-  restores publication and removes both guards. Note the shared shape: *both*
-  operators filter the global provider rather than declaring their own
-  application metadata, which is why publication state reaches so far.
+- **P1 no longer resolves itself out of the provider — RESOLVED (2026-09-16).**
+  It used to filter `create_provider()` down to itself, which made *running* an
+  application depend on whether it was *advertised*; the two could not both be
+  satisfied, because the installed-route witness needs P1 published while
+  publication is gated on that witness. `provider.py` now exposes
+  `prime_ipython_coding_application()` and `create_prime_ipython_coding_provider()`,
+  and P1 composes from those. The public list is unchanged (P7 only) and P1 stays
+  unpublished. The 34 tests that skipped because of the coupling now run: the P1
+  set went from 38 passed / 34 skipped to **83 passed / 0 skipped**. P7's
+  operator still takes `provider.applications[0]` positionally; that shape is
+  unchanged and unaddressed.
 - **A pre-existing red test points at the compaction area.**
   `test_python_admits_and_privately_persists_real_locked_pi_compaction`
   (`tests/test_asterion_prime_context.py`) fails on the pristine tree with
