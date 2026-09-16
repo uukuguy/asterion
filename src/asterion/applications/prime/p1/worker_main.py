@@ -429,12 +429,15 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
             deny()
         return module_surfaces[name]
 
-    def safe_open(path, mode="r", *, encoding=None):
+    def safe_open(path, mode="r", *, encoding=None, newline=None):
         if (
             type(path) is not str
             or type(mode) is not str
             or mode not in {"r", "rb", "w", "wb", "a", "ab", "x", "xb"}
             or encoding not in {None, "utf-8"}
+            or newline not in {None, "", "\n", "\r", "\r\n"}
+            # Standard `open` rejects newline in binary mode; so do we.
+            or ("b" in mode and newline is not None)
         ):
             deny()
         parts = Path(path).parts
@@ -475,9 +478,12 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
             if not stat.S_ISREG(file_info.st_mode):
                 os.close(fd)
                 deny()
-            stream = os.fdopen(
-                fd, mode, encoding=None if "b" in mode else (encoding or "utf-8")
-            )
+            if "b" in mode:
+                stream = os.fdopen(fd, mode)
+            else:
+                stream = os.fdopen(
+                    fd, mode, encoding=encoding or "utf-8", newline=newline
+                )
             state["root_sizes"][(file_info.st_dev, file_info.st_ino)] = (
                 file_info.st_size
             )

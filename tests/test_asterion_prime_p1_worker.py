@@ -191,6 +191,43 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt.status, "ok")
         self.assertEqual(self.worker.snapshot().cells[-1].audit_denials, 0)
 
+    async def test_open_accepts_the_standard_text_keywords(self) -> None:
+        # The task asks for canonical JSON plus one newline. Writing those exact
+        # bytes uses `encoding=` and `newline=`, and a signature narrower than
+        # the builtin turned a correct cell into a failed run.
+        receipt = await self.cell(
+            "import json\n"
+            "with open('stage-one.json', 'w', encoding='utf-8', newline='') as _f:\n"
+            "    _f.write(json.dumps({'input': list(input_tuple)}, sort_keys=True) + '\\n')\n"
+            "with open('stage-one.json', 'r', encoding='utf-8') as _g:\n"
+            "    stage_one_text = _g.read()\n"
+        )
+        self.assertEqual(receipt.status, "ok")
+        self.assertEqual(self.worker.snapshot().cells[-1].audit_denials, 0)
+
+    async def test_open_rejects_what_the_builtin_would_reject(self) -> None:
+        from asterion.applications.prime.p1.ipython_host import P1WorkerProcess
+        from asterion.applications.prime.p1.worker import P1CellRequest
+
+        for code in (
+            "open('stage-one.json', 'w', newline='x')",
+            # The builtin rejects newline in binary mode too.
+            "open('stage-one.json', 'wb', newline='')",
+            "open('stage-one.json', 'w', encoding='latin-1')",
+        ):
+            with self.subTest(code=code):
+                worker = P1WorkerProcess(deadline=time.monotonic() + 10)
+                await worker.start()
+                try:
+                    receipt = await worker.execute_cell(
+                        P1CellRequest("cell", "turn", code)
+                    )
+                    self.assertEqual(receipt.status, "uncertain")
+                    self.assertGreater(worker.snapshot().cells[-1].audit_denials, 0)
+                finally:
+                    cleanup = await worker.close()
+                    self.assertTrue(cleanup.reaped)
+
     async def test_underscore_reads_that_are_not_cell_locals_stay_denied(self) -> None:
         from asterion.applications.prime.p1.ipython_host import P1WorkerProcess
         from asterion.applications.prime.p1.worker import P1CellRequest
