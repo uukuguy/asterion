@@ -7,23 +7,19 @@
 
 ## TL;DR
 
-1. **Five of six defects are fixed.** The underscore rule (`afb2f3b1`,
-   corrected at `b096e589` after a security review), the missing
-   one-cell-per-turn rule (`acc5ad1f`), `safe_open`'s missing `newline`
-   (`0911d846`), the poison granularity (`e4fbb1ea`), and `with`-body bindings
-   (`98937ac0`). The first four are confirmed by tests, the poison one also on
-   the real path.
-2. **The sixth is a reading, not yet a fact.** The compaction failure is
-   consistent with Pi refusing to compact *before* it emits
-   `session_before_compact` — the session sitting below `keepRecentTokens` —
-   but that holds only if the first session entry is a turn-start entry. That
-   has not been verified, and Pi's own error text has not been captured. Every
-   live run since the hook was installed died earlier; the last one got as far
-   as the oracle.
-3. **One open question is about the task statement, not the code.** The last
-   verify cell used `hashlib` without importing it. The statement says "use
-   only builtins and json/hashlib/math", which may not read as "import them
-   yourself".
+1. **Stage one now passes end to end and compaction actually runs.** Run
+   `p1-a4c9d893d2d7998a878abf87` completed setup, verify and the oracle, then
+   reached `compact.admit` where Pi emitted
+   `["agent_settled","compaction_start","compaction_end","response"]`.
+2. **The "session too small" reading was WRONG and is withdrawn.** Pi did
+   compact; there was no "Nothing to compact". The decision to lower
+   `keepRecentTokens` was taken on that wrong reading and must not be
+   implemented. The real failure is in Asterion's own RPC layer:
+   `ValueError('Pi RPC compact terminal is invalid')`, swallowed by
+   `_compact`'s `except`.
+3. **The next question is narrow:** why Asterion's terminal-event check
+   rejects the sequence Pi actually sends. Six defects are fixed; this is the
+   seventh and the first one that is not about the cell environment.
 
 ## 已验证事实
 
@@ -67,18 +63,21 @@
 - **The poison fix is confirmed on the real path.** That same run is the first
   where a refused cell left the worker usable (`poisoned: false`), which is
   what let it continue far enough to expose the `with` defect.
-- **Root-caused — compaction, statically.** `agent-session.js:1474` documents
-  `compact()` as the shared entry for `/compact`, RPC and extensions, and it
-  does emit `session_before_compact` at `:1496`. So "RPC does not fire the
-  hook" is **ruled out**. But `prepareCompaction` returning falsy throws at
-  `:1488-1493`, before the hook. `compaction.js:537-565` returns undefined
-  when there is nothing to summarize, and `findCutPoint` (`:308-333`) only
-  moves the cut once the accumulated tail reaches `keepRecentTokens`
-  (default 20000, `compaction.js:77`). The P1 witness session is orders of
-  magnitude below that, so the kept region covers the whole session.
-- **Consequence of that reading:** the extension is not at fault and is not
-  unregistered. `context-witness.ts:361` sends a proposal correctly from
-  `before()`, which Pi simply never calls for this session.
+- **Compaction runs; Asterion rejects its terminal.** Run `p1-a4c9d893…`
+  reached `compact.admit` and Pi emitted
+  `["agent_settled","compaction_start","compaction_end","response"]`. Asterion
+  then raised `ValueError('Pi RPC compact terminal is invalid')`, which
+  `_compact`'s `except` turned into the bottom-out receipt. **The terminal
+  check is the thing to read next** — `PiRpcSession.compact` decides which
+  event sequence counts as a terminal, and Pi's sequence clearly is not what
+  it expects. The witness hook fired and the summarization instruction reached
+  Pi, so the witness side of the protocol is working.
+- **WITHDRAWN — the earlier "session too small" reading.** It said
+  `prepareCompaction` would return undefined because the session sits below
+  `keepRecentTokens`, so the extension hook would never fire. Pi compacted,
+  so that is disproven, and the decision to lower `keepRecentTokens` must not
+  be implemented. The reasoning was static only; no value was ever captured
+  for it, and it was reported as "root-caused" too early.
 - **Every live run this session had cells complete cleanly once the naming fix
   landed** — three `ok`, unpoisoned, `audit_denials: 0` in the last one. The
   worker is not the problem in any current failure.
@@ -138,12 +137,12 @@
 
 ## 下一动作
 
-1. **Capture Pi's own compact error before acting on the sizing theory.** The
-   `PiRpcSession.compact` hook is installed and has not yet fired; three runs
-   died earlier. `findValidCutPoints` starts at `startIndex`, so the theory
-   holds only if the first session entry produces context messages — if it is
-   a header, `cutPoints[0]` is 1 and the session compacts fine. One captured
-   value settles it either way.
+1. **Read `PiRpcSession.compact`'s terminal check.** It raised
+   `Pi RPC compact terminal is invalid` for
+   `["agent_settled","compaction_start","compaction_end","response"]`. Find
+   which sequence it accepts and why `compaction_end` is not it — that is the
+   whole remaining gap on this path. The probe hook already records the event
+   list, so a second run is only needed if the sequence varies.
 2. **Independently, make `_compact` await the RPC result and the witness
    proposal concurrently**, so Pi's own failure surfaces instead of a bare
    timeout. This is a diagnosability fix worth having either way.

@@ -2488,3 +2488,11 @@
 - 23:16 判据修正：**`with` 体是无条件执行的**——若它抛异常，cell 当即中止，后面语句根本不会运行，故「读到未绑定名」的风险在 `with` 处不存在，而在 `if`/循环/`try` 处确实存在。修法 [98937ac0]：`with` 结束时把体内绑定合并回外层，其余三类保持不外泄
 - 23:16 验证：worker **29 测试全过**（新增 with-body 用例）；边界矩阵扩到 **21 例全过**（含模型那个真实 verify cell）；operator/oracle/installed 40 测试过；门禁 0；ruff 干净
 - 23:16 注：该 cell 另有模型自身问题——用了 `hashlib` 却未 `import hashlib`（任务陈述"Use only builtins and json/hashlib/math"未必让模型明白需要显式 import）。修 with 后该 cell 会执行到运行期 `NameError` 并（正确地）poison；**任务陈述措辞是否需澄清，待定**
+- 23:31 任务陈述措辞已澄清 [2998ee78]：「Use only builtins and json/hashlib/math」→「Import only json, hashlib and math, each with its own import statement; use builtins otherwise」（模型用了 hashlib 却没 import）。68 测试过；非代码缺陷，不改变 oracle 接受什么
+- 23:31 实跑（`p1-a4c9d893…`）**首次走完整个 stage one 并触发真实压缩**：setup/verify/oracle 全过、`stage1.complete`、两 cell `poisoned: false`
+- 23:31 **推翻「session too small」推断**：`RPC COMPACT EVENTS = ["agent_settled","compaction_start","compaction_end","response"]`——**Pi 确实执行了压缩**，没有任何 "Nothing to compact"。**我此前基于静态代码路径的推断是错的**，也因此**用户据此做的「配低 keepRecentTokens」裁决无需执行**
+- 23:31 compact 真因改判：失败在 **Asterion 自己的 RPC 层**——`ValueError('Pi RPC compact terminal is invalid')`（Asterion 期望的终态事件序列与 Pi 实际发的 `compaction_end` 不符），再被 `_compact` 的 `except` 吞成 uncertain receipt。**待查：Asterion 的终态判据为何不接受这个序列**
+- 23:31 **安全复查第二次打回**：我上一条 [98937ac0] 的 `with` body 绑定外泄是 **fail-open**——`__exit__` 返回真值可吞异常，故 body 抛异常中途退出后，其后读取「从未绑定的自造名」会回落到命名空间。复查判断正确
+- 23:31 用户裁决：**外泄保留 + 硬禁 IPython 保留名**。落地 [7c04f57b]：`_`/`_i`/`_ii`/`_iii`/`_ih`/`_oh`/`_dh`/`_exit_code` 加入 forbidden_names，`_i\d+` 由正则规则拒绝——**绑定与否都拒**。这样「自造名读不到东西（NameError），保留名读不到（被拒）」，外泄即安全
+- 23:31 **代价（已如实记入提交信息，不隐藏）**：`_i` 是极常见的循环变量，`for _i in range(n)` 现在会被拒
+- 23:31 验证：边界矩阵 **25 例全过**（含保留名用例）；worker 29 测试全过；门禁 0；ruff 干净
