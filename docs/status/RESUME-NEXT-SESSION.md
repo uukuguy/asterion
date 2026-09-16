@@ -1,98 +1,86 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-16 20:41. **Session remains active — not a final handoff.**
-> Supersedes the 19:46 checkpoint. This session captured the worker evidence
-> the last handoff asked for, root-caused both failures it found, and fixed
-> one of them.
+> Updated: 2026-09-16 21:34. **Session remains active — not a final handoff.**
+> Supersedes the 20:41 checkpoint. Three live runs plus upstream Pi sources
+> separated "the witness fails" into three independent defects; two are fixed,
+> and the third is root-caused and waiting on a decision.
 
 ## TL;DR
 
-1. **The underscore defect is fixed, committed and verified.** A P1 cell may
-   now name its own locals `_f`; that was killing whole runs on otherwise
-   correct cells. `afb2f3b1`, then corrected at `b096e589` after an automated
-   security review found the first exemption was tree-wide rather than
-   order- and scope-aware.
-2. **The compact failure is located to one exact link.** `_compact` waits for
-   a proposal frame from the Pi extension and times out, because the extension
-   only sends one when Pi fires `session_before_compact` — and it never fired.
-3. **Why Pi never fired it is the next question**, and it is the substance of
-   D-2026-09-16-01. Nothing else in the compact path needs investigation
-   first.
+1. **Two of three defects are fixed.** The underscore rule (`afb2f3b1`,
+   corrected at `b096e589` after a security review) and the missing
+   one-cell-per-turn rule (`acc5ad1f`). Both verified by tests; the first also
+   by a live run.
+2. **The compact failure is root-caused, and it is not a bug in Asterion's
+   compaction code.** Pi refuses to compact *before* it emits
+   `session_before_compact`: the witness session is far below
+   `keepRecentTokens` (20000), so `prepareCompaction` finds nothing to
+   summarize and throws "Nothing to compact (session too small)". The
+   extension therefore never sends the proposal frame, and the witness times
+   out.
+3. **The compact one needs a decision, not another patch.** P1 exists to prove
+   an object survives a real compaction. A session this small never triggers
+   one, so the witness cannot prove its own point as currently sized.
 
 ## 已验证事实
 
-- **Commit `afb2f3b1`** narrows the cell validator. `_bound_names` collects
-  what the cell binds (assignment and loop targets, `with ... as`, parameters,
-  comprehension targets, `except ... as`). The `ast.Name` rule is now three
-  parts: `forbidden_names` unchanged; `__`-prefixed denied in every position,
-  bound or not; single-underscore denied only when the cell never binds it.
-  The `.attr` underscore rule and the underscore function-name rule are
-  untouched.
-- **Commit `b096e589` corrects that exemption.** The first version collected
-  binding targets tree-wide, so a name was admitted whenever it appeared as a
-  target *somewhere*, even when the read came first or the binding sat in an
-  `if False`, an empty loop or a comprehension — each leaving the read to fall
-  through to the IPython namespace, which is what the rule exists to stop. An
-  automated security review of `afb2f3b1` flagged it; all four shapes were
-  reproduced before anything changed. Admission now requires the binding to
-  provably precede the read in the read's own scope, and no binding escapes an
-  `if`, a `try`, a loop body or a comprehension. The walk is conservative in
-  the fail-closed direction.
-- **Verified:** 25 P1 worker tests pass, including every fail-closed security
-  test (`test_forbidden_cells_fail_closed_and_poison`,
-  `test_format_string_cannot_traverse_private_attributes`,
-  `test_pattern_matching_cannot_extract_worker_closures`); a 19-case boundary
-  check passes (6 admitted, 13 denied); detachment gate 0; 30
-  operator/installed/provider tests pass; ruff clean.
-- **Why the defect survived every test:** the existing test cells name their
-  locals `stream`, `accumulator`, `verified_bytes` — none with a leading
-  underscore. The new tests add a positive case and a six-entry security
-  regression matrix.
-- **Live probe run `p1-cc5967b5103764bfbab82322`:** both cells complete,
-  `audit_denials: 0`, `WORKER CLOSE {poisoned: false, closed: false,
-  cells_recorded: 2}`. The fix works on the real path.
-- **The compact cause, read out for the first time** by the `_receipt` hook
-  reading `sys.exc_info()` inside the swallowing `except` block:
-  `_compact` (`backend.py:990`) → `witness.receive_proposal_and_decide`
-  (`context.py:734`) → `_receive()` waits for a proposal frame on the private
-  socket → `asyncio.wait_for` times out (its `__context__` is `TimeoutError`,
-  the socket recv having been cancelled) → `_fail()` (`context.py:93`) raises
-  `PrimeContextError: invalid Prime context witness` → swallowed into the
-  bottom-out receipt.
-- **The extension does send proposals.** `context-witness.ts:361` writes one,
-  but only from `before()`, which is registered on Pi's
-  `session_before_compact` (`:423`) and returns early unless
-  `event.type === "session_before_compact"` (`:336`). The timeout therefore
-  means that hook did not fire.
-- **The SIGTERM question from the previous handoff is closed.** Nothing kills
-  the worker from outside: a cell that is not `completed` poisons it, and the
-  close path SIGTERMs its own process group.
+- **Three defects, three different links.** They explain the run-to-run
+  variation the previous handoff recorded: a model that writes exactly two
+  cells passes the oracle and stalls at compaction; one that writes an
+  exploratory cell is rejected at the oracle instead.
+- **Fixed — cell naming (`afb2f3b1`, `b096e589`).** A cell may bind `_f`; the
+  exemption is order- and scope-aware, so a binding that never runs (`if
+  False`, an empty loop, a comprehension, a read before the binding) is still
+  denied. 19 boundary probes, 25 worker tests.
+- **Fixed — task statement (`acc5ad1f`).** `oracle.py:119-143` requires exactly
+  two cells with two distinct request ids and turn ids. The statement said
+  only "there are three independent turns". It now says "use exactly one cell
+  per turn, with no exploratory cells". The oracle and the worker's four-cell
+  ceiling are both unchanged; 65 tests pass.
+- **Root-caused — compaction, statically.** `agent-session.js:1474` documents
+  `compact()` as the shared entry for `/compact`, RPC and extensions, and it
+  does emit `session_before_compact` at `:1496`. So "RPC does not fire the
+  hook" is **ruled out**. But `prepareCompaction` returning falsy throws at
+  `:1488-1493`, before the hook. `compaction.js:537-565` returns undefined
+  when there is nothing to summarize, and `findCutPoint` (`:308-333`) only
+  moves the cut once the accumulated tail reaches `keepRecentTokens`
+  (default 20000, `compaction.js:77`). The P1 witness session is orders of
+  magnitude below that, so the kept region covers the whole session.
+- **Consequence of that reading:** the extension is not at fault and is not
+  unregistered. `context-witness.ts:361` sends a proposal correctly from
+  `before()`, which Pi simply never calls for this session.
+- **Every live run this session had cells complete cleanly once the naming fix
+  landed** — three `ok`, unpoisoned, `audit_denials: 0` in the last one. The
+  worker is not the problem in any current failure.
+- **The SIGTERM question stays closed:** nothing kills the worker from
+  outside; a cell that is not `completed` poisons it and the close path
+  SIGTERMs its own process group.
 
 ## 当前判断
 
-- **Two independent defects were blocking the witness; one is now cleared.**
-  A green run still requires the compact path to work, so the witness stays
-  unproven either way.
-- **The compact failure is a wiring question, not a summarization-quality
-  question.** The frame never arrives, so nothing about summary content has
-  been exercised yet.
-- **The two candidate explanations are distinguishable and cheap to test:**
-  either Asterion's own `session.compact` RPC does not make Pi fire
-  `session_before_compact`, or the extension's witness was never selected in
-  this run. Extension-side evidence decides it.
-- **This is the substance of D-2026-09-16-01**, which is decided but not
-  implemented.
+- **The compact defect is a witness-sizing problem, not a wiring problem.**
+  The extension, the hook, the RPC path and the witness protocol all behave as
+  designed; the session is simply too small for Pi to consider compaction.
+- **Candidate directions, none chosen:** make the witness accumulate enough
+  context to cross `keepRecentTokens` before asking to compact; configure a
+  smaller `keepRecentTokens` for this application; or have `_compact` await
+  the RPC result and the witness concurrently so Pi's own failure surfaces
+  instead of a timeout. The third is worth doing regardless — right now Pi's
+  reason is discarded and only a timeout is visible.
+- **D-2026-09-16-01 remains the right shape for summarization ownership**, but
+  it cannot be exercised until compaction actually happens.
 
 ## 历史归档
 
+- **"The extension never sends a proposal."** Wrong: it does, from Pi's hook.
+- **"Asterion's `session.compact` RPC does not fire the hook."** Wrong:
+  `compact()` is the shared entry point and emits it.
+- **"Something external kills the worker."** Wrong: the worker closes itself.
+- **"Capture worker stderr."** Both runs returned `b''`; read the frame.
 - **"Rejecting underscore identifiers is fine, the model will comply."** No —
-  nothing constrains how the model names locals, and one such name killed a
-  whole run.
-- **"Capture worker stderr to explain a failure."** Both runs returned `b''`;
-  cell output is redirected into an in-process buffer and discarded on
-  failure. Read the frame instead.
-- **"Something external is killing the worker."** Superseded: the worker
-  closes itself.
+  nothing constrains how the model names locals.
+- **"The oracle is stricter than the task."** No: its shape carries stage
+  one's meaning. The statement was incomplete.
 - Carried over: rebuilding the Prime compaction dependency against another
   source; letting the extension import Pi's compaction internals; treating
   `customInstructions` as sufficient; asking upstream for
@@ -102,8 +90,12 @@
 
 - **The P1 witness has NOT passed. P1 stays unpublished.**
 - **Phases 4-9 remain unstarted. P1-P7 native implementations: 1 of 7.**
-- **Run-to-run variation is real.** Earlier runs died at `stage1.oracle.start`
-  or on the second turn; a single green run would not prove those gone.
+- **The one-cell-per-turn fix has not been re-run against the live witness**,
+  and neither fix has been exercised together with a session that reaches
+  compaction.
+- **Pi's own error text has not been observed at run time.** The
+  `PiRpcSession.compact` hook is installed but has not yet fired. The reading
+  above is from upstream source, which is strong but is not a captured value.
 - `validate_compaction_witness` still requires `entry.get("fromHook") is not
   False`; relax only as part of D-2026-09-16-01.
 - Known-unverified carry-overs: `test/context-witness.test.mjs` cannot run;
@@ -116,14 +108,14 @@
 
 ## 下一动作
 
-1. **Find out why Pi did not fire `session_before_compact`.** Get
-   extension-side evidence: the extension's own stderr/stdout is not
-   currently collected by the probe, and that is where the answer is.
-   Distinguish "Asterion's `session.compact` RPC does not trigger the hook"
-   from "the witness was never selected in this run".
-2. Then implement D-2026-09-16-01 on whatever that shows.
-3. Re-run the witness only after both are addressed — it is model-driven and
-   costs a provider call per run.
+1. **Decide how the witness should reach a compactable size** — accumulate
+   context, lower `keepRecentTokens` for this application, or both.
+2. **Independently, make `_compact` await the RPC result and the witness
+   proposal concurrently**, so Pi's own failure surfaces instead of a bare
+   timeout. This is a diagnosability fix worth having either way.
+3. Then implement D-2026-09-16-01 on a compaction that actually happens.
+4. Re-run the witness only after that — it is model-driven and costs a
+   provider call per run.
 
 ## Ready-to-paste commands
 
@@ -131,10 +123,10 @@
 # Probe run (Orb, real path, probe entry instead of the operator module):
 sh .asterion-private/p1-probe.sh
 
-# Zero-cost validator boundary check (both sides):
+# Zero-cost boundary check (both sides of the underscore rule):
 uv run python .asterion-private/p1-validate-check.py
 
-# The worker contract, including the new underscore tests:
+# Prime P1 tests, including the underscore and oracle boundaries:
 uv run python -m unittest -v tests.test_asterion_prime_p1_worker
 
 # Detachment gate (expect 0):

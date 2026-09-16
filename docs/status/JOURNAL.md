@@ -2457,3 +2457,14 @@
 - 20:59 修复 [b096e589]：`_bound_names` → `_safe_underscore_names`，改为**顺序 + 作用域感知**——只承认「读取点之前、同作用域内确已绑定」：同块内先绑后用、`with ... as` 在本体内、循环目标在本体内、参数在本函数内；`if`/`try`/循环体/推导式内的绑定**一律不外泄**；同块内先读后绑不承认。**保守方向（宁可误拒不可误放）**
 - 20:59 验证：边界矩阵 19 例全过（6 放行 / 13 拒绝，含上述四例）；P1 worker 25 测试过；门禁 0；ruff 干净；四例已入正式回归矩阵
 - 20:59 D-2026-09-16-02 的 Decision/Consequence 已同步修正（否则决策记录会把已废弃的 tree-wide 实现当成现行规则，误导下一会话）
+- 21:21 compact 根因**静态确证**（读上游 Pi 0.85.1 源码，非推断）：`agent-session.js:1474 compact()` 是 manual/RPC/extension 的**共同入口且确实会 emit `session_before_compact`**（:1496）——故「RPC 不触发钩子」**排除**。但 `prepareCompaction()` 返回空时**在 emit 之前就 throw**（:1488-1493）。`compaction.js:537-565` 的第三条 `return undefined` 是关键：`findCutPoint` 从最新往回累加 token，**累计 ≥ `keepRecentTokens`（默认 20000）才移动切点**，否则 `cutIndex` 停在 `cutPoints[0]` → 保留区覆盖整个 session → `messagesToSummarize` 为空 → `return undefined` → Pi 抛 **"Nothing to compact (session too small)"**
+- 21:21 即 P1 witness 的 session（2 cell + 数个 turn，远小于 20000 token）**根本不足以让 Pi 认为有东西可压**，于是钩子永不触发、扩展永不发 proposal、Asterion 的 witness 必然超时。**不是扩展未注册，也不是 RPC 不触发钩子**
+- 21:21 为此给探针加了 `PiRpcSession.compact` hook（Asterion 只等 witness proposal，Pi 的 RPC 结果被丢弃，故原因不可见）；但本次实跑未走到 compact，**该 hook 尚未命中，运行时证据待补**
+- 21:21 本次实跑（`p1-9b883ba2…`）走了另一条路径，暴露**第三个独立故障**：模型写了 **3 个 cell**（3 个全 `status: ok`、`poisoned: false`——**下划线修复持续生效**），在 `stage1.oracle` 被拒
+- 21:21 判据在 `oracle.py:119-143`：要求**恰好 2 个 cell**且 **2 个不同 `request_id` 与 2 个不同 `turn_id`**（即 setup turn 一个、verify turn 一个）；worker 侧却允许最多 4 个 cell——两者不一致
+- 21:21 对照任务陈述 `task.py`：只说「There are three independent turns」，**从未要求「每个 turn 恰好一个 cell」**。故这是**任务陈述漏说 oracle 强制的形状**，不是 oracle 过严（其形状有语义理由：跨 turn 对象存活 + 文件字节读回）
+- 21:21 这同时解释了 RESUME 记的「失败点随运行而变」：模型恰好写 2 个 cell → 过 oracle → 卡 compact；多写一个 → oracle 直接拒。**三个故障相互独立**
+- 21:34 用户裁决 cell 数量问题：**补进任务陈述**（oracle 不动，worker 的 4-cell 上限也不动）
+- 21:34 落地 [acc5ad1f]：`task.py` 的 `P1_TASK_STATEMENT` 增加「Use exactly one cell per turn, with no exploratory cells.」。改前已核实无 golden/digest 依赖（仅 operator.py / ipython_host.py 使用，无测试断言其字面内容）
+- 21:34 验证：operator/oracle/worker/installed **65 测试全过**；门禁 0；ruff 干净。**尚未对 live witness 复跑**
+- 21:34 三个故障现状：① 下划线拒绝 **已修复并实跑复验**；② cell 数量 **已修复待实跑复验**；③ compact「session too small」**根因静态确证、运行时证据待补、修法未定**
