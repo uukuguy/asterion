@@ -1,9 +1,9 @@
 # Next-Session Handoff
 
 > Updated: 2026-09-16 19:04, end of session. This session's commits are
-> `git log 1d21ef05..HEAD` — nine commits from `fd962a66` through the docs
-> closeout. They are stated as a range on purpose: state-only bookkeeping lands
-> after this file, so a hard-coded count would go stale on commit.
+> `git log 1d21ef05..HEAD`, from the loader change through the docs closeout.
+> Stated as a range on purpose: state-only bookkeeping lands after this file, so
+> any hard-coded count here would go stale on commit.
 
 ## TL;DR
 
