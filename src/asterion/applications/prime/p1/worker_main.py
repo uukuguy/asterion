@@ -123,6 +123,33 @@ def _root_sizes(directory_fd: int) -> dict[tuple[int, int], int]:
     return result
 
 
+def _bound_names(tree: ast.AST) -> set[str]:
+    """Names the cell binds itself: ordinary locals, never interpreter state.
+
+    A cell is allowed to name its own locals whatever it likes, including with
+    a leading underscore. Only names it does *not* bind are treated as reads of
+    interpreter state.
+    """
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            arguments = node.args
+            for argument in (
+                *arguments.posonlyargs,
+                *arguments.args,
+                *arguments.kwonlyargs,
+            ):
+                bound.add(argument.arg)
+            for optional in (arguments.vararg, arguments.kwarg):
+                if optional is not None:
+                    bound.add(optional.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+            bound.add(node.name)
+    return bound
+
+
 def _validate(tree: ast.AST, state: dict) -> None:
     forbidden_names = {
         "eval",
@@ -146,6 +173,7 @@ def _validate(tree: ast.AST, state: dict) -> None:
         "oracle",
         "host",
     }
+    bound = _bound_names(tree)
     for node in ast.walk(tree):
         bad = isinstance(
             node,
@@ -159,7 +187,19 @@ def _validate(tree: ast.AST, state: dict) -> None:
             ),
         )
         if isinstance(node, ast.Name):
-            bad = bad or node.id.startswith("_") or node.id in forbidden_names
+            bad = (
+                bad
+                or node.id in forbidden_names
+                # Dunder names reach interpreter internals (`__builtins__`,
+                # `__import__`, `__loader__`) whether or not the cell binds
+                # one, so they stay denied in every position.
+                or node.id.startswith("__")
+                # A single-underscore name the cell binds is an ordinary local.
+                # One it never binds may read interpreter state, such as the
+                # IPython history buffers.
+                or node.id.startswith("_")
+                and node.id not in bound
+            )
         if isinstance(node, ast.Attribute):
             bad = (
                 bad

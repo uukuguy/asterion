@@ -177,6 +177,45 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(cleanup.reaped)
                     self.assertTrue(cleanup.root_removed)
 
+    async def test_cell_may_name_its_own_locals_with_a_leading_underscore(self) -> None:
+        # Nothing tells the model how to name its locals, and a leading
+        # underscore is ordinary Python. Rejecting it failed an entire live run
+        # whose cell was otherwise correct.
+        receipt = await self.cell(
+            "import json\n"
+            "_payload = {'input': list(input_tuple)}\n"
+            "_data = json.dumps(_payload, sort_keys=True).encode('utf-8') + b'\\n'\n"
+            "with open('stage-one.json', 'wb') as _stream:\n"
+            "    _stream.write(_data)\n"
+        )
+        self.assertEqual(receipt.status, "ok")
+        self.assertEqual(self.worker.snapshot().cells[-1].audit_denials, 0)
+
+    async def test_underscore_reads_that_are_not_cell_locals_stay_denied(self) -> None:
+        from asterion.applications.prime.p1.ipython_host import P1WorkerProcess
+        from asterion.applications.prime.p1.worker import P1CellRequest
+
+        for code in (
+            "x = _ih",
+            "x = _",
+            "x = __builtins__",
+            "__builtins__ = 1\ny = __builtins__",
+            "x = json.dumps.__globals__",
+            "def _helper(value):\n    return value\n",
+        ):
+            with self.subTest(code=code):
+                worker = P1WorkerProcess(deadline=time.monotonic() + 10)
+                await worker.start()
+                try:
+                    receipt = await worker.execute_cell(
+                        P1CellRequest("cell", "turn", code)
+                    )
+                    self.assertEqual(receipt.status, "uncertain")
+                    self.assertGreater(worker.snapshot().cells[-1].audit_denials, 0)
+                finally:
+                    cleanup = await worker.close()
+                    self.assertTrue(cleanup.reaped)
+
     async def test_output_cap_poisons_and_reaps(self) -> None:
         receipt = await self.cell("print('x' * 65537)")
         self.assertEqual(receipt.status, "uncertain")
