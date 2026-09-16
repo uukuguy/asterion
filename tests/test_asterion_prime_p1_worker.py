@@ -143,13 +143,43 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.worker.snapshot().cells), 1)
         self.worker.validate_lifecycle()
 
-    async def test_forbidden_cells_fail_closed_and_poison(self) -> None:
+    async def test_cells_that_ran_and_failed_still_poison(self) -> None:
         from asterion.applications.prime.p1.ipython_host import P1WorkerProcess
         from asterion.applications.prime.p1.worker import P1CellRequest, P1WorkerError
 
+        # These pass the cell validator and are refused while running, by
+        # `safe_open`'s own path checks. The cell ran, so its effect is unknown
+        # and the worker must not be reused.
         for code in (
             "open('../sentinel-secret')",
             "open('/etc/passwd')",
+        ):
+            with self.subTest(code=code):
+                worker = P1WorkerProcess(deadline=time.monotonic() + 10)
+                await worker.start()
+                try:
+                    receipt = await worker.execute_cell(
+                        P1CellRequest("cell", "turn", code)
+                    )
+                    self.assertEqual(receipt.status, "uncertain")
+                    self.assertNotIn("sentinel-secret", repr(receipt))
+                    self.assertGreater(worker.snapshot().cells[-1].audit_denials, 0)
+                    with self.assertRaises(P1WorkerError):
+                        worker.validate_lifecycle()
+                finally:
+                    cleanup = await worker.close()
+                    self.assertTrue(cleanup.reaped)
+                    self.assertTrue(cleanup.root_removed)
+
+    async def test_cells_refused_before_execution_leave_the_worker_usable(self) -> None:
+        from asterion.applications.prime.p1.ipython_host import P1WorkerProcess
+        from asterion.applications.prime.p1.worker import P1CellRequest
+
+        # The validator refuses these before a line runs, so nothing was
+        # executed and no side effect exists to protect. The cell is still
+        # denied and still reported `uncertain`; only the worker survives, so
+        # one exploratory cell no longer ends the run.
+        for code in (
             "import os",
             "import subprocess",
             "import socket",
@@ -168,10 +198,10 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
                         P1CellRequest("cell", "turn", code)
                     )
                     self.assertEqual(receipt.status, "uncertain")
-                    self.assertNotIn("sentinel-secret", repr(receipt))
+                    self.assertEqual(receipt.output, "")
                     self.assertGreater(worker.snapshot().cells[-1].audit_denials, 0)
-                    with self.assertRaises(P1WorkerError):
-                        worker.validate_lifecycle()
+                    self.assertFalse(worker.snapshot().cells[-1].executed)
+                    worker.validate_lifecycle()
                 finally:
                     cleanup = await worker.close()
                     self.assertTrue(cleanup.reaped)

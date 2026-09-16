@@ -614,6 +614,7 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
 
             buffer = _Output()
             failed = False
+            executed = False
             try:
                 tree = ast.parse(code, mode="exec")
                 _validate(tree, state)
@@ -621,6 +622,9 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
                 state["allowed_code"] = compiled
                 sys.setprofile(profile)
                 state["active"] = True
+                # Past this point the cell may have run. Before it, a refusal
+                # leaves no side effect behind and must not poison the worker.
+                executed = True
                 with redirect_stdout(buffer), redirect_stderr(buffer):
                     result = ExecutionResult(
                         ExecutionInfo(code, False, True, False, None)
@@ -678,6 +682,7 @@ async def _serve(root_fd: int, input_tuple: tuple, task_statement: str) -> None:
                     "turn_id": request["turn_id"],
                     "sequence": sequence,
                     "status": "uncertain" if failed else "completed",
+                    "executed": executed,
                     "output": "" if failed else buffer.getvalue(),
                     "accumulator_id": None if instance is None else id(instance),
                     "class_name": class_name,

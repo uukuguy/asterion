@@ -424,6 +424,7 @@ class P1WorkerProcess:
             "cell_write_bytes",
             "root_bytes",
             "audit_denials",
+            "executed",
         }
         if (
             set(frame) != expected
@@ -433,6 +434,7 @@ class P1WorkerProcess:
             or type(frame["sequence"]) is not int
             or frame["sequence"] != len(self.snapshot().cells) + 1
             or frame["status"] not in {"completed", "uncertain"}
+            or type(frame["executed"]) is not bool
         ):
             raise ValueError
         output = frame["output"]
@@ -525,6 +527,7 @@ class P1WorkerProcess:
             frame["file_write_opens"],
             frame["cell_write_bytes"],
             frame["root_bytes"],
+            frame["executed"],
         )
         return observation, output
 
@@ -568,9 +571,14 @@ class P1WorkerProcess:
             failed = True
         finally:
             self._active = False
+        # A cell refused before it ran (`executed` false) left no side effect, so
+        # the worker stays usable — a model's exploratory cell no longer ends
+        # the run. Anything else, including a frame rejected outright, keeps the
+        # fail-closed poison.
         if failed or cancelled:
-            self._poisoned = True
-            await self.close()
+            if observation is None or observation.executed:
+                self._poisoned = True
+                await self.close()
             if cancelled:
                 raise asyncio.CancelledError()
             return P1CellReceipt(

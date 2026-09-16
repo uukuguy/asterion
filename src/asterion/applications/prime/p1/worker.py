@@ -87,6 +87,10 @@ class P1CellObservation:
     file_write_opens: int = 0
     cell_write_bytes: int = 0
     root_bytes: int = 0
+    # Whether the cell reached execution. A cell refused by `_validate` never
+    # ran a line, so there is no side effect to protect and it does not poison
+    # the worker. Defaults to True so any older shape is treated conservatively.
+    executed: bool = True
 
     def __post_init__(self) -> None:
         if self.stage_one_verified is not None:
@@ -104,6 +108,7 @@ class P1CellObservation:
                 "turn_id": self.turn_id,
                 "code_sha256": self.code_sha256,
                 "status": self.status,
+                "executed": self.executed,
                 "file_sha256": self.file_sha256,
                 "state_sha256": digest(
                     (
