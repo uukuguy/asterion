@@ -362,7 +362,16 @@
   binding inside an `if`, a `try`, a loop body or a comprehension never counts
   for code outside it, and a read before the binding is not admitted either.
   `forbidden_names`, the `.attr` underscore rule and the underscore
-  function-name rule are unchanged.
+  function-name rule are unchanged. IPython's own names — `_`, `_i`, `_ii`,
+  `_iii`, `_ih`, `_oh`, `_dh`, `_exit_code`, and the per-cell `_i1`..`_iN` —
+  are denied outright, bound or not. That last part is what makes counting a
+  `with` body's bindings outside it sound instead of fail-open: a `with` body
+  can suppress its own exception through `__exit__`, so a name it never bound
+  can still be read afterwards, and the only thing such a read could reach is
+  precisely those names. A name the cell invents has nothing behind it, so an
+  unbound read of it is a `NameError`, not a disclosure. Cost, recorded
+  rather than hidden: `_i` is a common loop variable, so `for _i in range(n)`
+  is now refused.
 - Rationale: the rule exists to stop a cell reaching interpreter state, and that
   part is worth keeping — an unbound `_ih` reads IPython history, and
   `__builtins__`, `__import__` and `__loader__` reach interpreter internals
