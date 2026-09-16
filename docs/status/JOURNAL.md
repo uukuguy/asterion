@@ -2429,3 +2429,8 @@
 - 18:37 P1 witness 第三次实跑：**stage one 全程通过**（setup/verify/oracle/stage1.complete），推进到 `compact.admit`，在压缩环节失败——已进入计划风险 1 的地界
 - 18:37 压缩环节的新失败（另一次探针运行，非确定性）：`_validate_recovery` 的 `tool_executor.validate_lifecycle()` 抛 `RuntimeFactoryError('Asterion-prime runtime configuration is invalid')`，而该检查是**身份比较**（`current is not self._lifecycle`）——指向 **IPython worker 在第一回合之后失效**，待查
 - 18:37 重要方法学：`__context__` 是取回被 `from None` 丢弃原因的有效手段；探针 + 事件流记录能把「类型无效」这类无值诊断变成确定的根因
+- 18:48 继续追压缩环节的阻塞：多次探针运行显示**失败点随运行而变**（compact.admit / oracle.start / verify.start），说明失败随模型输出而变，不是单一确定性缺陷
+- 18:48 worker 生命周期的确切读数（一次运行）：`{"closed": true, "poisoned": true, "stdout_gone": true, "returncode": -15, "root_fd_is_none": true, "seconds_to_deadline": 590.3}`
+- 18:48 判读：**worker 进程被 SIGTERM 杀掉**（-15），且 `closed/poisoned` 已置位——即 `P1WorkerProcess._close()` 跑过；但**未查明是谁触发**。`_signal_owned_process(process, signal.SIGTERM)` 是唯一发 TERM 的地方（ipython_host.py:650），其调用者待查
+- 18:48 未验证的假设：模型第一回合的 cell 可能使 worker 退出（stdout 关闭 → 宿主 poison 并 reap）；需捕获 worker 侧 stderr / cell 日志才能判定，当前探针未采集
+- 18:48 本轮到此：context 已长，交由检查点接手，不再继续开放式追查
