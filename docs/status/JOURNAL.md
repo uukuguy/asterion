@@ -2434,3 +2434,4 @@
 - 18:48 判读：**worker 进程被 SIGTERM 杀掉**（-15），且 `closed/poisoned` 已置位——即 `P1WorkerProcess._close()` 跑过；但**未查明是谁触发**。`_signal_owned_process(process, signal.SIGTERM)` 是唯一发 TERM 的地方（ipython_host.py:650），其调用者待查
 - 18:48 未验证的假设：模型第一回合的 cell 可能使 worker 退出（stdout 关闭 → 宿主 poison 并 reap）；需捕获 worker 侧 stderr / cell 日志才能判定，当前探针未采集
 - 18:48 本轮到此：context 已长，交由检查点接手，不再继续开放式追查
+- 19:02 handoff 收口 [320f7b41]：RESUME 重写为最终交接稿（四类事实分类齐备）；CURRENT-STATE 修正两处过时（P1 的 `_preflight` stub 与「0/7」、P1 provider 耦合标为已解决）；MEMORY.md 修正 0/7 并新增两条 feedback（不得重定向「只为触达禁用依赖」的缝、分类不是原因须取回真值）；INDEX 核对完整；climb/ 休眠状态已注明；无遗留进程，工作树干净
