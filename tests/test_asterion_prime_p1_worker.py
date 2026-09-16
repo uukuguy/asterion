@@ -221,6 +221,20 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(receipt.status, "ok")
         self.assertEqual(self.worker.snapshot().cells[-1].audit_denials, 0)
 
+    async def test_bindings_made_inside_a_with_body_count_afterwards(self) -> None:
+        # A `with` body always runs — had it raised, the cell would have stopped
+        # there — so a name it binds is real afterwards, unlike one bound in an
+        # `if` or a loop body. Refusing this shape failed the verify turn of a
+        # live run whose cell was otherwise correct.
+        receipt = await self.cell(
+            "with open('notes.txt', 'w') as _f:\n"
+            "    _text = 'hello'\n"
+            "    _f.write(_text)\n"
+            "digest = len(_text)\n"
+        )
+        self.assertEqual(receipt.status, "ok")
+        self.assertEqual(self.worker.snapshot().cells[-1].audit_denials, 0)
+
     async def test_open_accepts_the_standard_text_keywords(self) -> None:
         # The task asks for canonical JSON plus one newline. Writing those exact
         # bytes uses `encoding=` and `newline=`, and a signature narrower than

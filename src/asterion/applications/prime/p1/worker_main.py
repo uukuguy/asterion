@@ -203,6 +203,10 @@ def _safe_underscore_names(tree: ast.AST) -> set[str]:
                 note_reads(item.context_expr, bound)
                 inner |= store_names(item.optional_vars)
             walk_body(statement.body, inner)
+            # A `with` body always runs: had it raised, the cell would have
+            # stopped there and no later statement could read an unbound name.
+            # So its bindings count outside, unlike an `if` or a loop body.
+            bound |= inner
             return
         if isinstance(statement, ast.Assign):
             note_reads(statement.value, bound)
