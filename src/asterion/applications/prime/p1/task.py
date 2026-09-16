@@ -3,7 +3,8 @@
 P1_INPUT_TUPLE = (3, 7, 11, 17)
 P1_TASK_STATEMENT = """Use only Python in the persistent ipython tool. The only
 task seeds are input_tuple and this task_statement. There are three independent
-turns; wait for the next instruction after each turn.
+turns; wait for the next instruction after each turn. Use exactly one cell per
+turn, with no exploratory cells.
 Setup: define AffineAccumulator(multiplier, offset) with __call__(value) returning
 multiplier * value + offset. Instantiate accumulator from input_tuple[:2]. Write
 stage-one.json as UTF-8 canonical JSON (sort_keys=True, separators=(',', ':')) plus
