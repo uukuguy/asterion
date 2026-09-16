@@ -2435,3 +2435,12 @@
 - 18:48 未验证的假设：模型第一回合的 cell 可能使 worker 退出（stdout 关闭 → 宿主 poison 并 reap）；需捕获 worker 侧 stderr / cell 日志才能判定，当前探针未采集
 - 18:48 本轮到此：context 已长，交由检查点接手，不再继续开放式追查
 - 19:02 handoff 收口 [320f7b41]：RESUME 重写为最终交接稿（四类事实分类齐备）；CURRENT-STATE 修正两处过时（P1 的 `_preflight` stub 与「0/7」、P1 provider 耦合标为已解决）；MEMORY.md 修正 0/7 并新增两条 feedback（不得重定向「只为触达禁用依赖」的缝、分类不是原因须取回真值）；INDEX 核对完整；climb/ 休眠状态已注明；无遗留进程，工作树干净
+- 19:46 Phase 4 取证：升级 `.asterion-private/p1-diagnose.py`（钩 `execute_cell`/`_observation`/`_close`/`_read_stderr`/`_receipt`），新增 `.asterion-private/p1-probe.sh` 镜像 `make asterion-prime-p1-run` 在 Orb 内跑真实路径、只换入口
+- 19:46 实跑 A（`p1-49a7bce7…`）：**两个 cell 全 `completed`**、`audit_denials: 0`、`WORKER CLOSE {poisoned:false, closed:false, cells:2}` = 正常收尾非自毁；失败唯一在 compact——`_compact` 内部异常被 `backend.py:1087-1096` 的 `except Exception:` 吞掉，返回兜底 receipt `uncertain/recovery-required`、`payload.result: null`。**「worker 被 SIGTERM 导致失败」对本次运行不成立**
+- 19:46 实跑 B（`p1-5bb9dc46…`）：**第一个 cell 即失败**——frame `audit_denials: 1`、`status: uncertain`、`accumulator_id: null`、`file_write_calls: 0`（cell 根本没执行）；worker 随即 `_poisoned → self.close()`，`returncode: -15`、`stdout_gone: true`、`root_fd_is_none: true`
+- 19:46 SIGTERM 来源查明：**不是外部杀死，是 worker 自毁**——`ipython_host.py:571-573`（cell 非 completed → poison + close）或 :375（start 失败）触发 `_reap_blocking` 向进程组发 TERM。RESUME 的「谁触发未知」已作答
+- 19:46 跑 B 的 cell 被拒根因（本地零成本确证）：`worker_main.py:162` `if isinstance(node, ast.Name): bad = bad or node.id.startswith("_")` —— **任何下划线开头的标识符一律拒绝**；模型写了 `_stage_one_payload`/`_stage_one_bytes`/`_f`。`__init__`/`__call__` 例外只对 FunctionDef/ClassDef 生效，对 `ast.Name` 无效
+- 19:46 确证方式 `.asterion-private/p1-validate-check.py` 直喂 `worker_main._validate`：原文 DENIED(denials=1)／仅重命名三个下划线名 ACCEPTED(denials=0)／最小探针 `x=1;_y=2` DENIED／对照 `x=1;y=2` ACCEPTED。**唯一变量就是下划线前缀**
+- 19:46 两次跑 worker stderr 均 `b''`：`showtraceback` 被禁、cell 输出被 `redirect_stderr(buffer)` 捕获且失败即丢弃、`_Denied` 被 `except BaseException` 吞——**可诊断性缺口在 worker 侧同样存在**，取证只能靠 host 侧 frame 字段
+- 19:46 待裁决（安全边界）：拒绝下划线是有意的（防 `_ih`/`__builtins__`/`obj.__dict__`），但把「模型给局部变量起名下划线」也一并拒了。放宽属安全边界决策，按 AGENTS.md 停下请示
+- 19:46 compact 链真因**未取到**（`_receipt` hook 已就位，但跑 B 未走到 compact）；需再跑一次才能捕获

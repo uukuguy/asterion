@@ -56,4 +56,7 @@ tmp/
 # One-shot private native-RLM experiment receipts
 .asterion-private/
 
+# CodeGraph index cache (generated, ~50MB)
+.codegraph/
+
 3th-party/

@@ -1,158 +1,152 @@
-# Next-Session Handoff
+# Live Session Checkpoint
 
-> Updated: 2026-09-16 19:04, end of session. This session's commits are
-> `git log 1d21ef05..HEAD`, from the loader change through the docs closeout.
-> Stated as a range on purpose: state-only bookkeeping lands after this file, so
-> any hard-coded count here would go stale on commit.
+> Updated: 2026-09-16 19:46. **Session remains active — not a final handoff.**
+> Supersedes the 19:04 handoff; the P1 witness session resumed and ran the
+> worker-evidence capture that the handoff named as its first next action.
 
 ## TL;DR
 
-1. **Phase 4's P1 launch path is rebuilt, committed and green.** P1 no longer
-   resolves itself out of the published provider, so it composes while
-   unpublished; the 34 tests that skipped because of that coupling now run.
-2. **The live witness now completes stage one end to end** — setup, verify,
-   oracle and `stage1.complete` — and reaches `compact.admit`. It does not pass.
-3. **The remaining failures track the model's output, not one broken link.**
-   Failure points differ run to run, and one run reached compaction. The next
-   step is to capture worker-side stderr and cell logs, not to keep patching.
+1. **The SIGTERM question is answered: nothing kills the worker from outside.**
+   The worker destroys itself — a cell that is not `completed` sets `_poisoned`
+   and calls `close()`, whose `_reap_blocking` SIGTERMs its own process group.
+2. **Two different failures were observed in two runs, and one is fully root-caused.**
+   A cell rejected by `worker_main.py:162` (any identifier starting with `_`)
+   fails the whole run. That check is deliberate but over-broad, and relaxing it
+   is a security-boundary decision that needs the operator.
+3. **The compact path's real cause is still uncaptured.** The probe hook that
+   retrieves it (`_receipt` + `sys.exc_info()`) is installed and verified to
+   work, but the run that reached compact happened before it was added.
 
 ## 已验证事实
 
-Evidence: commits, passing commands, live-run stage traces, measured values.
+Evidence: live probe runs, frame fields, and a local zero-cost reproduction.
 
-- **Commits this session** (`git log --oneline fd962a66^..HEAD`):
-  - `fd962a66` delete the pinned Pi dependency channel (−686 lines) — this was a
-    runtime import of Prime Agent's modified Pi wearing the name "dependency
-    injection"
-  - `c21d0dae` Asterion's own compaction summarization module
-  - `f1b08c1f` rebuild the native P1 launch path; decouple P1 from the published
-    provider; carry the summarization instruction into Pi's compaction
-  - `774ae137`, `540283b8`, `2ae1c652`, `74a092b5` docs and the `agent_settled` fix
-- **Detachment gate 0** throughout; targeted set **162 passed**; lint unchanged
-  at its 4 pre-existing findings; working tree clean.
-- **P1's provider coupling is gone.** `provider.py` exposes
-  `prime_ipython_coding_application()` and `create_prime_ipython_coding_provider()`;
-  the operator composes from those. The public list is unchanged (P7 only). The
-  P1 set went from 38 passed / 34 skipped to **83 passed / 0 skipped**.
-- **Two real defects were found and fixed:**
-  - The Pi child refused the extension because the context witness needed
-    compaction internals that exist only in Prime Agent's Pi build. Upstream
-    never published that version (`npm view` shows no 0.7.x; earliest is 0.74.0),
-    so the locked tree was Prime's own build.
-  - `26519254` swapped the round terminal from `agent_settled` to `agent_end`
-    and dropped `agent_settled` from the accepted vocabulary entirely. Pi emits
-    `agent_end` then `agent_settled`; the round driver stops at its terminal, so
-    the trailing event lands on the *next* round. Single-round P7 never sees it.
-- **Live-run progression** (model-driven, so the stopping point varies):
-  - `p1-debe34e5…` died at the first turn (extension refused to load)
-  - `p1-bb85dc5e…` first turn passed, died on the second (`agent_settled`)
-  - `p1-f6f4d6e4…` **stage one complete**, died at `compact.admit`
-  - `p1-e1101d8f…` died at `stage1.oracle.start`
-- **Worker-lifecycle readings** from one run:
-  `{"closed": true, "poisoned": true, "stdout_gone": true, "returncode": -15,
-  "root_fd_is_none": true, "seconds_to_deadline": 590.3}` — the worker was
-  SIGTERMed with 590 s of deadline left, and `_close()` had already run.
+- **Probe tooling (all gitignored, under `.asterion-private/`):**
+  - `p1-diagnose.py` — now hooks `execute_cell`, `_observation`, `_close`,
+    `_read_stderr` and `_receipt` in addition to its original hooks.
+  - `p1-probe.sh` — new host launcher. Mirrors `make asterion-prime-p1-run`
+    (build wheel, run in Orb under preset node@22, same operator root / Pi
+    entry) and changes only the entry point to the probe.
+  - `p1-validate-check.py` — new, feeds source directly to
+    `worker_main._validate`. No worker, no provider, no side effects.
+- **Run A, `p1-49a7bce76d73958cbac63e28`:** both cells `completed`,
+  `audit_denials: 0`, `WORKER CLOSE {poisoned: false, closed: false,
+  cells_recorded: 2}`. This is an orderly shutdown, not a self-destruct. The
+  only failure is `compact.admit` → `COMPACT RECEIPT {status: "uncertain",
+  reason_code: "recovery-required", payload: {"evidence_ref": null,
+  "result": null}}`.
+- **`_compact` swallows its own cause.** `backend.py:1087-1096` catches
+  `Exception`, and when the command id is not already recorded it *returns* a
+  bottom-out receipt (`uncertain` / `recovery-required`) instead of re-raising.
+  Nothing about the failure reaches the caller. Because `_receipt` is called
+  inside that `except` block, `sys.exc_info()` there still holds the cause —
+  that is what the new hook reads.
+- **Run B, `p1-5bb9dc46c8184f3b73ab4e4f`:** the first cell failed. Frame shows
+  `audit_denials: 1`, `status: "uncertain"`, `accumulator_id: null`,
+  `class_name: null`, `file_write_calls: 0`, empty `output`. The worker never
+  ran the cell.
+- **The rejection is `worker_main.py:162`.** `if isinstance(node, ast.Name):
+  bad = bad or node.id.startswith("_") or node.id in forbidden_names`, followed
+  by `state["audit_denials"] += 1` and `raise _Denied("P1 cell rejected")`. The
+  model wrote `_stage_one_payload`, `_stage_one_bytes` and `_f`. The
+  `__init__` / `__call__` exemption applies only to `FunctionDef` / `ClassDef`
+  names, not to `ast.Name`.
+- **Confirmed causally, not by inference** (`p1-validate-check.py`):
+  the model's cell as written → `DENIED (denials=1)`; the same cell with only
+  those three names renamed → `ACCEPTED (denials=0)`; minimal probe
+  `x = 1 / _y = 2` → `DENIED`; control `x = 1 / y = 2` → `ACCEPTED`. The only
+  variable is the leading underscore.
+- **Worker stderr is empty in both runs** (`b''`). `shell.showtraceback` is
+  disabled, cell output goes through `redirect_stderr(buffer)` and is discarded
+  when the cell fails, and `_Denied` is caught by a bare `except BaseException`.
+  The diagnosability gap exists on the worker side too; the frame fields are the
+  only worker-side evidence that survives.
+- Previous session's `returncode: -15` reading is explained: it is
+  `_reap_blocking` signaling its own process group from `_close()`.
 
 ## 当前判断
 
-Direction chosen on current evidence; not yet proven end-to-end.
+Direction chosen on current evidence; not yet proven end to end.
 
-- **The remaining failures are the application not yet working reliably, not an
-  unfixed link.** Failure points differ per run and one run reached compaction,
-  which is what a model-driven system looks like when the machinery is intact
-  but the model does not always produce what the oracle requires.
-- **The worker is being closed or terminated mid-run**, but **who triggers it is
-  not known.** `P1WorkerProcess._signal_owned_process(process, signal.SIGTERM)`
-  (`ipython_host.py:650`) is the only place that sends SIGTERM. The unverified
-  hypothesis is that a first-turn cell ends the worker, closing its stdout and
-  making the host poison and reap it — this needs worker stderr and cell logs to
-  settle, which the current probe does not collect.
-- **D-2026-09-16-01 is decided but not implemented.** Asterion should own
-  compaction summarization through Pi's `session_before_compact` takeover using
-  `ctx.modelRegistry.runtime.complete()`. What is in the tree now is the interim
-  `customInstructions` append, which reaches the model only on compaction
-  Asterion drives itself. This is a prerequisite for P1's kernel-persistence
-  property actually holding.
-- **Plan risk 1 is being exercised for the first time** and nothing about it is
-  proven.
+- **The witness is blocked by at least two independent defects, not one.** Run A
+  shows healthy cells and an orderly worker with the failure at compaction; run
+  B shows a cell rejected before execution. Both must clear before the witness
+  can pass.
+- **The underscore rejection is the clearer of the two, and it is a
+  usability defect with a security rationale.** Rejecting `_ih`,
+  `__builtins__`, `obj.__dict__` and friends is deliberate and must stay. What
+  is over-broad is that the same rule also rejects a model-defined local
+  variable named `_f`. The fix is a narrowing (e.g. exempt names the cell
+  itself binds), not a removal.
+- **This is a security-boundary change**, so per AGENTS.md it waits for the
+  operator rather than being decided here.
+- **The compact failure is expected to be the D-2026-09-16-01 area** — the
+  interim `customInstructions` append rather than Asterion-owned summarization
+  — but that is a hypothesis, not a finding. It has not been read out yet.
 
 ## 历史归档
 
 Rejected or superseded paths, recorded so they are not re-walked.
 
-- **"Rebuild the Prime compaction dependency against a different source."** Wrong.
-  The mechanism was itself the illegitimate import. Deleting it was correct.
-- **"Let the extension import Pi's compaction internals."** Dead: upstream Pi
-  does not export three of the seven names the witness required.
-- **"Append the kernel note via `customInstructions` and be done."** Only covers
-  compaction Asterion drives; automatic threshold and overflow compaction pass no
-  instructions, and upstream's wrapper is a one-line `Additional focus: X`.
-- **"Ask upstream for `replaceInstructions` on the compaction path."** No
-  published version has it (latest 0.85.1); it exists only on the tree/branch
-  summarization path. Prime had it only because it owned a forked Pi.
-- **"Two Pi instances restore independence."** No: both are Pi, and verifying one
-  summary with another is not verification — summaries have no unique answer.
-- **Estimating timestamps instead of running `date`.** Avoided this session.
-- **Reading a failure classification as the cause.** Every real cause this
-  session came from values: `__context__` behind `from None`, or instrumenting
-  the check that swallowed its own reason.
+- **"The worker is being closed or terminated mid-run by something unknown."**
+  Superseded: the worker closes itself, and the trigger is a failed cell
+  (`ipython_host.py:571-573`) or a failed start (`:375`).
+- **"Capture worker stderr to explain the failure."** Tried; both runs returned
+  `b''`. Cell output is redirected into an in-process buffer and discarded on
+  failure. Do not re-invest here — read the frame instead.
+- Carried over from the 19:04 handoff and still valid: rebuilding the Prime
+  compaction dependency against another source; letting the extension import
+  Pi's compaction internals; treating `customInstructions` as sufficient;
+  asking upstream for `replaceInstructions`; two Pi instances for independence.
 
 ## 未完成边界
 
 Must not be inferred as complete from local code or unit tests.
 
-- **The P1 witness has NOT passed. P1 stays unpublished.** Do not publish it
-  without a passing witness — that was the 2026-09-15 defect.
-- **Phases 4-9 remain unstarted. P1-P7 native implementations: 1 of 7** — P7
-  only, at its proven boundary.
-- **`validate_compaction_witness` still requires `entry.get("fromHook") is not
-  False`.** It must be relaxed only as part of D-2026-09-16-01, not before.
-- **Unverified from the subagent's work:** `test/context-witness.test.mjs` cannot
-  run (its harness was deleted with the Prime Gateway surface in `019e2c48`, and
-  the tests imported Prime's Pi internals directly); `tests/test_core_only_install.py`
-  was already red at HEAD for two pre-existing module-allowlist entries.
-- **`.asterion-private/p1-diagnose.py`** is a temporary diagnostic probe
-  (gitignored). It is working and worth keeping for the next session; delete it
-  when the diagnosis is done.
-- **Phase 3's completion stays bounded** to Level 1 of one game, seed 0,
+- **The P1 witness has NOT passed. P1 stays unpublished.**
+- **Phases 4-9 remain unstarted. P1-P7 native implementations: 1 of 7.**
+- **The compact path's cause is not yet read out.** The `_receipt` hook is in
+  place but has never fired on the compact path.
+- **Run-to-run variation is real**: run A reached compact, run B failed at the
+  first cell. A single green run would not prove the others fixed.
+- `validate_compaction_witness` still requires `entry.get("fromHook") is not
+  False`; relax only as part of D-2026-09-16-01.
+- Known-unverified carry-overs: `test/context-witness.test.mjs` cannot run;
+  `tests/test_core_only_install.py` was already red at HEAD.
+- `.asterion-private/p1-diagnose.py`, `p1-probe.sh` and `p1-validate-check.py`
+  are temporary diagnostics. Delete them when the diagnosis is done.
+- Phase 3's completion stays bounded to Level 1 of one game, seed 0,
   `deepseek-v4-flash`, `promotion: unpromoted`.
-- **The `climb/` verification loop is dormant and its state is stale.**
-  `climb/research-tree.md` ends at "Next: Phase 3.2" and
-  `climb/session-state.json` still says
-  `next_action: phase-3.2-native-small-verification-sidecar`, both last written
-  2026-09-01. The project has since moved to the Phase 4 native-detachment
-  program. This is a paused parallel loop, not a contradiction — do not read its
-  `next_action` as the project's next action.
+- The `climb/` loop is dormant and its `next_action` is stale — not the
+  project's next action.
 
 ## 下一动作
 
-1. **Capture worker-side evidence before changing anything.** Extend
-   `.asterion-private/p1-diagnose.py` to collect the worker's stderr and the
-   per-cell log so the SIGTERM question is answered with values, not inference.
-   Start from `P1WorkerProcess._signal_owned_process` (`ipython_host.py:626-660`)
-   and its callers.
-2. Then decide whether the remaining failures are the task statement / prompt not
-   eliciting the cells the oracle requires, or the oracle being stricter than the
-   task. Those are different fixes.
-3. Implement D-2026-09-16-01 once the witness is stable — it is what makes P1's
-   kernel-persistence property real.
+**Blocked on an operator decision** (security boundary, per AGENTS.md):
+
+1. Decide the underscore rule: narrow `worker_main.py:162` so a cell may bind
+   its own `_`-prefixed locals while `_ih` / `__builtins__` / private attribute
+   reads stay denied, or leave the rule and constrain the task statement /
+   prompt instead.
+2. Then re-run the probe to capture the compact path's cause with the `_receipt`
+   hook now installed.
+3. Implement D-2026-09-16-01 once the witness is stable.
 
 ## Ready-to-paste commands
 
 ```bash
-# The live witness (operator-authorized; provider-backed; ~2 min per run):
+# Probe run (Orb, real path, probe entry instead of the operator module):
+sh .asterion-private/p1-probe.sh
+
+# Zero-cost validator reproduction:
+uv run python .asterion-private/p1-validate-check.py
+
+# The official preset (expect the same failures until the above are fixed):
 make asterion-prime-p1-run \
   ASTERION_PRIME_PI_ENTRY=/mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js
 
 # Detachment gate (expect 0):
 uv run python -c "from pathlib import Path; from asterion.agents.prime.detachment import find_source_detachment_violations as f; print(len(f(Path('.'))))"
-
-# The targeted set used this session (expect all passed):
-uv run python -m unittest tests.test_asterion_prime_summarization \
-  tests.test_asterion_prime_context tests.test_asterion_prime_backend \
-  tests.test_asterion_prime_backend_rpc tests.test_asterion_prime_p1_operator \
-  tests.test_pi_runtime_extensions tests.test_asterion_prime_session \
-  tests.test_pi_rpc_reusable
 ```
 
 **Two Orb traps, both verified the hard way:** OrbStack mounts the Mac at
