@@ -2482,3 +2482,9 @@
 - 22:42 既有安全测试按新语义拆分：`test_cells_that_ran_and_failed_still_poison`（`open('../sentinel-secret')`/`open('/etc/passwd')` 在执行期被 `safe_open` 拒 → 仍 poison）与 `test_cells_refused_before_execution_leave_the_worker_usable`（9 个 `_validate` 拒绝用例仍被拒、仍 `uncertain`、仍计入 denials，但 worker 存活）。**原测试的隐患正是把两类混在一个循环里，断言同一种后果**
 - 22:42 验证：worker **28 测试全过**；operator/oracle/installed/runtime **49 测试全过**；门禁 0；ruff 干净。**已记入 DECISIONS 为 D-2026-09-16-03**（含两条 Rejected）
 - 22:42 至此本会话共五个独立故障，四个已修（下划线命名 / cell 数量 / safe_open newline / poison 粒度），第五个（compact 不触发钩子）仍为**推断**、运行时证据未取到
+- 23:16 实跑（`p1-16406be5…`）**首次走完 stage one**：setup/verify 全过、两 cell `poisoned: false`——**poison 修复确证生效**（cell 2 被拒但 worker 存活）。但仍未到 compact，在 `stage1.oracle` 被拒
+- 23:16 查明被拒原因 = **第六个发现，是我在 `b096e589` 作用域重写里引入的 bug**：`With` 被当成 `if`/`for`/`try` 一样「绑定不外泄」，于是
+  `with open(...) as _f:\n    _stage_one_bytes = _f.read()\n...\nhashlib.sha256(_stage_one_bytes)` 被判「未绑定」而拒绝（`executed: false`、`audit_denials: 1`）
+- 23:16 判据修正：**`with` 体是无条件执行的**——若它抛异常，cell 当即中止，后面语句根本不会运行，故「读到未绑定名」的风险在 `with` 处不存在，而在 `if`/循环/`try` 处确实存在。修法 [98937ac0]：`with` 结束时把体内绑定合并回外层，其余三类保持不外泄
+- 23:16 验证：worker **29 测试全过**（新增 with-body 用例）；边界矩阵扩到 **21 例全过**（含模型那个真实 verify cell）；operator/oracle/installed 40 测试过；门禁 0；ruff 干净
+- 23:16 注：该 cell 另有模型自身问题——用了 `hashlib` 却未 `import hashlib`（任务陈述"Use only builtins and json/hashlib/math"未必让模型明白需要显式 import）。修 with 后该 cell 会执行到运行期 `NameError` 并（正确地）poison；**任务陈述措辞是否需澄清，待定**

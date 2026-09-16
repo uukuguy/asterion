@@ -7,21 +7,23 @@
 
 ## TL;DR
 
-1. **Four of five defects are fixed.** The underscore rule (`afb2f3b1`,
+1. **Five of six defects are fixed.** The underscore rule (`afb2f3b1`,
    corrected at `b096e589` after a security review), the missing
    one-cell-per-turn rule (`acc5ad1f`), `safe_open`'s missing `newline`
-   (`0911d846`), and the poison granularity (`e4fbb1ea`). All verified by
-   tests; the first also by a live run.
-2. **The fifth is a reading, not yet a fact.** The compaction failure is
+   (`0911d846`), the poison granularity (`e4fbb1ea`), and `with`-body bindings
+   (`98937ac0`). The first four are confirmed by tests, the poison one also on
+   the real path.
+2. **The sixth is a reading, not yet a fact.** The compaction failure is
    consistent with Pi refusing to compact *before* it emits
    `session_before_compact` — the session sitting below `keepRecentTokens` —
    but that holds only if the first session entry is a turn-start entry. That
    has not been verified, and Pi's own error text has not been captured. Every
-   live run since the hook was installed died earlier.
-3. **The pattern was the real finding, and it is now addressed.** Four of the
-   five were a model writing ordinary, correct Python that a narrower
-   restricted environment refused, and the last of them made even a correct
-   refusal fatal to the whole run.
+   live run since the hook was installed died earlier; the last one got as far
+   as the oracle.
+3. **One open question is about the task statement, not the code.** The last
+   verify cell used `hashlib` without importing it. The statement says "use
+   only builtins and json/hashlib/math", which may not read as "import them
+   yourself".
 
 ## 已验证事实
 
@@ -55,6 +57,16 @@
   frame it rejected outright. A refused cell is still denied, still
   `uncertain`, still counts its audit denial. This was the reason five
   consecutive witness runs never reached compaction.
+- **Fixed — `with`-body bindings (`98937ac0`).** The scope-aware walk of
+  `b096e589` made a `with` behave like an `if` and let none of its bindings
+  escape, so a cell binding `_stage_one_bytes` inside the body and reading it
+  after was refused before running. But a `with` body always runs — had it
+  raised, the cell would have stopped there — so the risk does not exist
+  there, though it does for `if`, a loop body and `try`. This cost a live run
+  its verify cell. `if`/loop/`try` unchanged.
+- **The poison fix is confirmed on the real path.** That same run is the first
+  where a refused cell left the worker usable (`poisoned: false`), which is
+  what let it continue far enough to expose the `with` defect.
 - **Root-caused — compaction, statically.** `agent-session.js:1474` documents
   `compact()` as the shared entry for `/compact`, RPC and extensions, and it
   does emit `session_before_compact` at `:1496`. So "RPC does not fire the
