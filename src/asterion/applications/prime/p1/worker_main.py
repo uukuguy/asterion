@@ -123,31 +123,136 @@ def _root_sizes(directory_fd: int) -> dict[tuple[int, int], int]:
     return result
 
 
-def _bound_names(tree: ast.AST) -> set[str]:
-    """Names the cell binds itself: ordinary locals, never interpreter state.
+def _safe_underscore_names(tree: ast.AST) -> set[str]:
+    """Single-underscore names whose every read provably follows a binding.
 
-    A cell is allowed to name its own locals whatever it likes, including with
-    a leading underscore. Only names it does *not* bind are treated as reads of
-    interpreter state.
+    A cell may name its own locals whatever it likes, including with a leading
+    underscore, but only a binding that has actually happened makes it safe:
+    an unbound underscore name falls through to the IPython namespace. So the
+    walk is order-aware *and* scope-aware, and deliberately conservative.
+
+    Admitted: a plain "bind it, then use it" in the same block, a `with ... as`
+    name inside its own body, a loop target inside its own body, and a
+    parameter inside its own function.
+
+    Never admitted: a binding made inside an `if`, a `try`, a loop body or a
+    comprehension, for code outside it — nothing proves it ran. Reading before
+    the binding, in the same block, is not admitted either.
     """
-    bound: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            bound.add(node.id)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            arguments = node.args
+    safe: set[str] = set()
+
+    def guarded(name: str) -> bool:
+        return name.startswith("_") and not name.startswith("__")
+
+    def note_reads(node: ast.AST | list | None, bound: set[str]) -> None:
+        if node is None:
+            return
+        nodes = node if isinstance(node, list) else [node]
+        for candidate in nodes:
+            for child in ast.walk(candidate):
+                if (
+                    isinstance(child, ast.Name)
+                    and isinstance(child.ctx, ast.Load)
+                    and guarded(child.id)
+                    and child.id in bound
+                ):
+                    safe.add(child.id)
+
+    def store_names(node: ast.AST | list | None) -> set[str]:
+        if node is None:
+            return set()
+        nodes = node if isinstance(node, list) else [node]
+        found: set[str] = set()
+        for candidate in nodes:
+            for child in ast.walk(candidate):
+                if (
+                    isinstance(child, ast.Name)
+                    and isinstance(child.ctx, ast.Store)
+                    and guarded(child.id)
+                ):
+                    found.add(child.id)
+        return found
+
+    def walk_body(statements: list[ast.stmt], bound: set[str]) -> None:
+        for statement in statements:
+            walk_statement(statement, bound)
+
+    def walk_statement(statement: ast.stmt, bound: set[str]) -> None:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            note_reads(statement.decorator_list, bound)
+            note_reads(statement.args.defaults, bound)
+            inner = set(bound)
+            arguments = statement.args
             for argument in (
                 *arguments.posonlyargs,
                 *arguments.args,
                 *arguments.kwonlyargs,
             ):
-                bound.add(argument.arg)
+                inner.add(argument.arg)
             for optional in (arguments.vararg, arguments.kwarg):
                 if optional is not None:
-                    bound.add(optional.arg)
-        elif isinstance(node, ast.ExceptHandler) and node.name is not None:
-            bound.add(node.name)
-    return bound
+                    inner.add(optional.arg)
+            walk_body(statement.body, inner)
+            return
+        if isinstance(statement, ast.ClassDef):
+            walk_body(statement.body, set(bound))
+            return
+        if isinstance(statement, ast.With):
+            inner = set(bound)
+            for item in statement.items:
+                note_reads(item.context_expr, bound)
+                inner |= store_names(item.optional_vars)
+            walk_body(statement.body, inner)
+            return
+        if isinstance(statement, ast.Assign):
+            note_reads(statement.value, bound)
+            bound |= store_names(statement.targets)
+            return
+        if isinstance(statement, ast.AnnAssign):
+            if statement.value is not None:
+                note_reads(statement.value, bound)
+            bound |= store_names(statement.target)
+            return
+        if isinstance(statement, ast.AugAssign):
+            # `_a += 1` reads its target before writing it.
+            note_reads(statement.target, bound)
+            note_reads(statement.value, bound)
+            bound |= store_names(statement.target)
+            return
+        if isinstance(statement, (ast.For, ast.AsyncFor)):
+            note_reads(statement.iter, bound)
+            walk_body(statement.body, bound | store_names(statement.target))
+            note_reads(statement.orelse, bound)
+            walk_body(statement.orelse, set(bound))
+            return
+        if isinstance(statement, ast.If):
+            note_reads(statement.test, bound)
+            walk_body(statement.body, set(bound))
+            walk_body(statement.orelse, set(bound))
+            return
+        if isinstance(statement, ast.While):
+            note_reads(statement.test, bound)
+            walk_body(statement.body, set(bound))
+            walk_body(statement.orelse, set(bound))
+            return
+        if isinstance(statement, ast.Try):
+            walk_body(statement.body, set(bound))
+            for handler in statement.handlers:
+                note_reads(handler.type, bound)
+                inner = set(bound)
+                if handler.name is not None:
+                    inner.add(handler.name)
+                walk_body(handler.body, inner)
+            walk_body(statement.orelse, set(bound))
+            walk_body(statement.finalbody, set(bound))
+            return
+        # Any other statement reads against the bindings already made, and
+        # contributes none of its own.
+        note_reads(statement, bound)
+
+    if isinstance(tree, ast.Module):
+        walk_body(tree.body, set())
+    return safe
 
 
 def _validate(tree: ast.AST, state: dict) -> None:
@@ -173,7 +278,7 @@ def _validate(tree: ast.AST, state: dict) -> None:
         "oracle",
         "host",
     }
-    bound = _bound_names(tree)
+    safe = _safe_underscore_names(tree)
     for node in ast.walk(tree):
         bad = isinstance(
             node,
@@ -194,11 +299,11 @@ def _validate(tree: ast.AST, state: dict) -> None:
                 # `__import__`, `__loader__`) whether or not the cell binds
                 # one, so they stay denied in every position.
                 or node.id.startswith("__")
-                # A single-underscore name the cell binds is an ordinary local.
-                # One it never binds may read interpreter state, such as the
-                # IPython history buffers.
+                # A single-underscore name is admitted only where the cell
+                # provably bound it first; anywhere else it may read
+                # interpreter state, such as the IPython history buffers.
                 or node.id.startswith("_")
-                and node.id not in bound
+                and node.id not in safe
             )
         if isinstance(node, ast.Attribute):
             bad = (

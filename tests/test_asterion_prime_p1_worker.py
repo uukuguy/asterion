@@ -202,6 +202,13 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
             "__builtins__ = 1\ny = __builtins__",
             "x = json.dumps.__globals__",
             "def _helper(value):\n    return value\n",
+            # Each binds `_ih` somewhere in the tree but leaves it unbound at
+            # run time, so the read would fall through to the IPython
+            # namespace. A tree-wide binding set admitted all four.
+            "if False:\n    _ih = 1\nx = _ih\n",
+            "for _ih in ():\n    pass\nx = _ih\n",
+            "[_ih for _ih in ()]\nx = _ih\n",
+            "x = _ih\n_ih = 1\n",
         ):
             with self.subTest(code=code):
                 worker = P1WorkerProcess(deadline=time.monotonic() + 10)
