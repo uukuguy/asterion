@@ -281,6 +281,18 @@ def _validate(tree: ast.AST, state: dict) -> None:
         "display",
         "oracle",
         "host",
+        # IPython keeps these in the cell namespace, so an unbound read of one
+        # reaches interpreter state. Denying them outright — bound or not — is
+        # what lets a `with` body's bindings count outside it without opening a
+        # fail-open path: a name the cell invents has nothing behind it to read.
+        "_",
+        "_i",
+        "_ii",
+        "_iii",
+        "_ih",
+        "_oh",
+        "_dh",
+        "_exit_code",
     }
     safe = _safe_underscore_names(tree)
     for node in ast.walk(tree):
@@ -303,6 +315,8 @@ def _validate(tree: ast.AST, state: dict) -> None:
                 # `__import__`, `__loader__`) whether or not the cell binds
                 # one, so they stay denied in every position.
                 or node.id.startswith("__")
+                # `_i1`, `_i2`, ... are IPython's per-cell input history.
+                or (node.id.startswith("_i") and node.id[2:].isdigit())
                 # A single-underscore name is admitted only where the cell
                 # provably bound it first; anywhere else it may read
                 # interpreter state, such as the IPython history buffers.

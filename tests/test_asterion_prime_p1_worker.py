@@ -290,6 +290,12 @@ class TestP1Worker(unittest.IsolatedAsyncioTestCase):
             "for _ih in ():\n    pass\nx = _ih\n",
             "[_ih for _ih in ()]\nx = _ih\n",
             "x = _ih\n_ih = 1\n",
+            # Reserved IPython names stay denied even when the cell binds them.
+            # That is what makes counting a `with` body's bindings outside it
+            # safe: an invented name has nothing behind it, these do.
+            "_ih = 1\ny = _ih\n",
+            "_i3 = 1\n",
+            "_ = 1\n",
         ):
             with self.subTest(code=code):
                 worker = P1WorkerProcess(deadline=time.monotonic() + 10)
