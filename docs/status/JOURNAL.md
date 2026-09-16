@@ -2468,3 +2468,10 @@
 - 21:34 落地 [acc5ad1f]：`task.py` 的 `P1_TASK_STATEMENT` 增加「Use exactly one cell per turn, with no exploratory cells.」。改前已核实无 golden/digest 依赖（仅 operator.py / ipython_host.py 使用，无测试断言其字面内容）
 - 21:34 验证：operator/oracle/worker/installed **65 测试全过**；门禁 0；ruff 干净。**尚未对 live witness 复跑**
 - 21:34 三个故障现状：① 下划线拒绝 **已修复并实跑复验**；② cell 数量 **已修复待实跑复验**；③ compact「session too small」**根因静态确证、运行时证据待补、修法未定**
+- 22:17 **修正上面第③条的措辞**：复核 `findValidCutPoints`（`compaction.js:267`）后确认——该函数自 `startIndex` 扫描，`isCutPointMessage` 对 user/assistant 等几乎全部返回 true，故 `pathEntries[0]` 只要是这类 entry，`cutPoints[0] == startIndex == 0`，`messagesToSummarize` 即为空 → `undefined`，**原结论成立**。但**若首条 entry 是不产生 context messages 的 session header，则 `cutPoints[0] == 1`、能压缩，原结论即错**。该前提**未验证**，「session too small」仍是推断而非事实。上游源码不便确定 P1 的 `pathEntries[0]` 属哪种
+- 22:17 实跑（`p1-704fc64a…`）**又未走到 compact**（第一个 cell 即失败），故 Pi 的实际错误文本仍未取到
+- 22:17 但该次失败暴露**第四个独立故障并已确证**：`worker_main.py:432` 的 `safe_open(path, mode="r", *, encoding=None)` **没有 `newline` 参数**；模型写 `open("stage-one.json", "w", encoding="utf-8", newline="")` → `TypeError` → 被 cell 循环的 `except BaseException` 吞 → `uncertain` → 自毁
+- 22:17 证据链逐项吻合「参数绑定失败」而非「被拒的 cell」：`audit_denials: 0`（未走 `deny()`）、`class_name`/`callable_probe` 有值（执行到了）、`file_write_calls: 0`（写未发生）
+- 22:17 **不是模型的错**：`newline=""` 是精确控制字节的标准写法，而任务陈述正要求「canonical JSON plus one newline」。**同类问题第三次出现**（下划线命名 / cell 数量 / 现在的 newline）——模式一致：模型写完全正确的 Python，受限环境因签名更窄而拒绝，代价是整个运行
+- 22:17 用户裁决：**补齐 safe_open 签名**。落地 [0911d846]：接受 `newline` 并按内建取值校验（`{None,"","\n","\r","\r\n"}`），二进制模式带 `newline` 按内建同样拒绝；路径/权限/编码校验完全不动
+- 22:17 验证：worker **27 测试全过**（新增「用 `encoding=`+`newline=` 写读回」正面用例 + 拒绝矩阵）；门禁 0；ruff 干净

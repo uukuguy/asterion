@@ -7,20 +7,19 @@
 
 ## TL;DR
 
-1. **Two of three defects are fixed.** The underscore rule (`afb2f3b1`,
-   corrected at `b096e589` after a security review) and the missing
-   one-cell-per-turn rule (`acc5ad1f`). Both verified by tests; the first also
-   by a live run.
-2. **The compact failure is root-caused, and it is not a bug in Asterion's
-   compaction code.** Pi refuses to compact *before* it emits
-   `session_before_compact`: the witness session is far below
-   `keepRecentTokens` (20000), so `prepareCompaction` finds nothing to
-   summarize and throws "Nothing to compact (session too small)". The
-   extension therefore never sends the proposal frame, and the witness times
-   out.
-3. **The compact one needs a decision, not another patch.** P1 exists to prove
-   an object survives a real compaction. A session this small never triggers
-   one, so the witness cannot prove its own point as currently sized.
+1. **Three of four defects are fixed.** The underscore rule (`afb2f3b1`,
+   corrected at `b096e589` after a security review), the missing
+   one-cell-per-turn rule (`acc5ad1f`), and `safe_open`'s missing `newline`
+   (`0911d846`). All verified by tests; the first also by a live run.
+2. **The fourth is a reading, not yet a fact.** The compaction failure is
+   consistent with Pi refusing to compact *before* it emits
+   `session_before_compact` — the session sitting below `keepRecentTokens` —
+   but that holds only if the first session entry is a turn-start entry. That
+   has not been verified, and Pi's own error text has not been captured. Three
+   live runs since the hook was installed all died earlier.
+3. **The pattern is the real finding.** Three of the four were a model writing
+   ordinary, correct Python that a narrower restricted environment refused,
+   at the cost of the entire run.
 
 ## 已验证事实
 
@@ -37,6 +36,15 @@
   only "there are three independent turns". It now says "use exactly one cell
   per turn, with no exploratory cells". The oracle and the worker's four-cell
   ceiling are both unchanged; 65 tests pass.
+- **Fixed — `safe_open` signature (`0911d846`).** It took `encoding` but not
+  `newline`, so `open("stage-one.json", "w", encoding="utf-8", newline="")` —
+  exact bytes the way the task asks for — raised `TypeError` inside the
+  worker, which the bare `except BaseException` turned into `uncertain` and a
+  dead run. The frame reads as an argument-binding failure, not a rejected
+  cell: `audit_denials` 0, `class_name` and `callable_probe` populated,
+  `file_write_calls` 0. `newline` is now accepted and validated against the
+  builtin's values, and rejected in binary mode as the builtin does. Path,
+  permission and encoding checks unchanged. 27 worker tests.
 - **Root-caused — compaction, statically.** `agent-session.js:1474` documents
   `compact()` as the shared entry for `/compact`, RPC and extensions, and it
   does emit `session_before_compact` at `:1496`. So "RPC does not fire the
@@ -108,8 +116,12 @@
 
 ## 下一动作
 
-1. **Decide how the witness should reach a compactable size** — accumulate
-   context, lower `keepRecentTokens` for this application, or both.
+1. **Capture Pi's own compact error before acting on the sizing theory.** The
+   `PiRpcSession.compact` hook is installed and has not yet fired; three runs
+   died earlier. `findValidCutPoints` starts at `startIndex`, so the theory
+   holds only if the first session entry produces context messages — if it is
+   a header, `cutPoints[0]` is 1 and the session compacts fine. One captured
+   value settles it either way.
 2. **Independently, make `_compact` await the RPC result and the witness
    proposal concurrently**, so Pi's own failure surfaces instead of a bare
    timeout. This is a diagnosability fix worth having either way.
