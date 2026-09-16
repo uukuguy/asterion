@@ -2444,3 +2444,11 @@
 - 19:46 两次跑 worker stderr 均 `b''`：`showtraceback` 被禁、cell 输出被 `redirect_stderr(buffer)` 捕获且失败即丢弃、`_Denied` 被 `except BaseException` 吞——**可诊断性缺口在 worker 侧同样存在**，取证只能靠 host 侧 frame 字段
 - 19:46 待裁决（安全边界）：拒绝下划线是有意的（防 `_ih`/`__builtins__`/`obj.__dict__`），但把「模型给局部变量起名下划线」也一并拒了。放宽属安全边界决策，按 AGENTS.md 停下请示
 - 19:46 compact 链真因**未取到**（`_receipt` hook 已就位，但跑 B 未走到 compact）；需再跑一次才能捕获
+- 20:41 用户裁决下划线规则：**收窄校验器**（放行 cell 自绑的下划线局部名，保留拒绝解释器内部访问）
+- 20:41 实现 [afb2f3b1]：新增 `_bound_names`（收集 cell 自绑名：赋值/循环/with-as 目标、参数、推导式、except-as）；`worker_main.py` 的 `ast.Name` 检查改为三段——forbidden_names 不变；`__` 开头**任何位置都拒**（绑不绑都拒，防 `__builtins__`/`__import__`/`__loader__`）；单下划线**仅未绑定时拒**。`.attr` 下划线规则与下划线函数名规则未动
+- 20:41 验证：P1 worker 25 测试全过（含全部 fail-closed 安全测试）；门禁 0；operator/installed/provider 30 测试过；lint 干净；新增正面用例 + 6 条安全回归矩阵
+- 20:41 **为何既有测试从未暴露**：测试用的 cell 一律把局部名写作 `stream`/`accumulator`/`verified_bytes`，没有一个带下划线——缺陷正好落在测试覆盖的缝里
+- 20:41 实跑复验（`p1-cc5967b5…`）：`WORKER CLOSE {poisoned:false, closed:false, cells_recorded:2}`——**两个 cell 全成功、audit_denials 归零**，下划线修复在真实路径生效
+- 20:41 **compact 链真因取到**（新 `_receipt` hook 读 `sys.exc_info()` 的首次命中）：`_compact`(backend.py:990) → `witness.receive_proposal_and_decide`(context.py:734) → `_receive()` 等**扩展发来的 proposal 帧** → `asyncio.wait_for` 超时（`__context__` 为 TimeoutError，socket recv 被取消）→ `_fail()`(context.py:93) 抛 `PrimeContextError: invalid Prime context witness` → 被 `except Exception` 吞成兜底 receipt
+- 20:41 定位下一环：扩展 `packages/typescript/asterion-prime-extension/context-witness.ts:361` **确实会发 proposal**，但只在 Pi 的 `session_before_compact` 钩子（:423）触发时才发。**超时 ⇒ 该钩子没被触发**
+- 20:41 未查明（下一回合）：Pi 为何不发 `session_before_compact`——是 Asterion 主动发 `session.compact` RPC 不触发该钩子，还是扩展的 witness 未注册上。**这是 D-2026-09-16-01 的实质**

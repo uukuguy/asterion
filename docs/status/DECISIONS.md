@@ -342,3 +342,36 @@
   `@ar-llm/pi-custom-compaction` is a published third-party extension doing this via
   `ctx.modelRegistry.runtime.complete()`. **Not yet verified:** Asterion's own
   implementation, and a passing P1 witness.
+
+## D-2026-09-16-02 — A cell may name its own locals with a leading underscore
+
+- Status: 🟢 active (decided 2026-09-16; implemented at `afb2f3b1` and verified)
+- Context: the P1 cell validator denied every `ast.Name` starting with an
+  underscore, alongside `forbidden_names`. Nothing constrains how the model
+  names its locals, so a cell that bound `_stage_one_payload`, `_stage_one_bytes`
+  and `_f` was rejected before it ran. A denied cell is reported as `uncertain`,
+  which poisons the worker, which SIGTERMs its own process group and ends the
+  whole run. One live run failed exactly this way on a cell that was otherwise
+  correct. The existing tests never caught it because their cells name their
+  locals `stream`, `accumulator` and `verified_bytes`.
+- Decision: narrow the rule rather than remove it. Dunder names stay denied in
+  every position, bound or not. A single-underscore name is denied only when the
+  cell never binds it. `_bound_names` collects binding sites — assignment and
+  loop targets, `with ... as`, parameters, comprehension targets and
+  `except ... as`. `forbidden_names`, the `.attr` underscore rule and the
+  underscore function-name rule are unchanged.
+- Rationale: the rule exists to stop a cell reaching interpreter state, and that
+  part is worth keeping — an unbound `_ih` reads IPython history, and
+  `__builtins__`, `__import__` and `__loader__` reach interpreter internals
+  whether or not a cell rebinds them. What was over-broad is treating a
+  model-defined `_f` as the same thing. Binding a single-underscore name is
+  ordinary Python with no reach beyond the cell's own namespace.
+- Consequence: the fail-closed property is unchanged for every case the rule was
+  written for; only cell-local naming is freed. The cost is that the rule is now
+  two-part and needs its own regression matrix — a six-entry one was added
+  alongside the positive case.
+- Rejected — removing the underscore rule: it would admit `_ih`, `_oh` and the
+  rest of the IPython surface outright.
+- Rejected — fixing it in the task statement instead: the model would still be
+  free to name a local `_x`, and the failure mode is a whole run lost to a
+  naming choice, not a cell that misbehaves.
