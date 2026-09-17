@@ -2558,3 +2558,10 @@
 - 18:58 **新的未完成边界（第十七个，未测量）**：续跑之后第三个 cell（continuation）从未执行（`WORKER CLOSE cells_recorded: 2, seen: 2`），最终状态仍 `recovery-required`。终止判据在 `operator.py:887-890`——ipython 桥接任务 `except Exception:` **吞掉异常**后 `request_stop("recovery-required")`，原因被丢弃故日志无栈。这正是 MEMORY 记录的「分类不是原因」模式；下一步应照扩展的做法**加临时标记取回该异常**，而不是猜
 - 18:58 验证：context **25 过**、backend **43 过**、p1_operator **26 过**（合计 94）；TS 扩展 16 中 15 过（既有失败）
 - 19:05 收缩守卫的裁决入账本 [d7eedb1e]：**D-2026-09-17-04**。只记决策本身（等式是不变量、字节边界无 Pi 侧来源），其余三处是「与 Pi 真实形状对齐」的契约修正，非新决策，不入账
+- 19:14 **同一条字节收缩要求在路径上还有第二、第三处执法点**——`p1/worker.py:174`（`P1WorkerCheckpoint.post_init`）与 `capabilities/prime_ipython_coding_native/host.py:76`（`P1StageTwoRelease`，docstring「Safe checkpoint evidence **authorizing the second stage**」）。本次实跑 `before=7608 after=8657` 被 checkpoint 拒 → `operator.resume` 抛出 → `operator.py:768` 的 `except BaseException` 归为 `recovery-required` → stage-two 里程碑永不到达。**MEMORY 里「同一常量在路径上回声」的又一实例**（上次是 4096 出现四次）
+- 19:14 定位方式（不猜）：先给桥接处理器打标记——**真阴性**（桥接未捕获异常，我的初始归因被测量否证）；再给 `operator.py:768` 打标记，取回 `AST-O run-exc P1WorkerError: P1 worker checkpoint rejected` 及精确栈（`resume → P1WorkerCheckpoint → worker.py:176`）。标记事后已还原
+- 19:40 **用户裁决：三处一致移除该子句**（与 D-2026-09-17-04 一致）。落地 [0672e420]，两处各补边界测（用实跑值 7608/8657 断言「增长的重建必须被接受」）。计数本身仍为必填项并作为证据保留，只去掉比较
+- 19:40 **P1 首次跑通**。第 1 次实跑：`status=completed`，`receipt_sha256=928fb8d3b37172bde24b5f1c49836952cd39c08f374cb15aad4eb9ec3f8445dd`，`cells_recorded: 3`（此前恒为 2），compact `9848→9235`
+- 19:40 第 2 次实跑：**stage 轨迹完整**（`stage2.release → stage2.complete → host2.close → worker.close → backend.close → runner.terminal`），第三个 cell 成功且自校验通过（`setup_value_loaded: 40 / final_result: 98 / bytes_unchanged: True`），`cells_recorded: 3`，compact `8260→8596`（**增长**，直接证明旧门禁必须移除）——但 `status=recovery-required`、`receipt_sha256=None`
+- 19:40 **判读**：stage two 门禁修复**稳定生效**（两次都跑到 3 cells）；剩余失败在**收尾/回执签封**，间歇（2 次中 1 次完成），原因同样被丢弃（`operator.py:768` 的 `except BaseException` 只给分类）。故 P1 **尚不能宣告通过**：一次 completed + 一次同终点无回执
+- 19:40 门禁：detachment gate **0**。私有回执落在 Orb 内 per-run 临时根，**位置未钉死**（`/tmp/piagent-probe` 只有 settings.json）——下个会话不要假设它在宿主机上
