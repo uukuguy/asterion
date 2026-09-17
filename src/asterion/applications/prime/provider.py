@@ -107,8 +107,11 @@ def create_prime_programmatic_long_context_provider() -> InstalledApplicationPro
 def create_provider() -> InstalledApplicationProvider:
     """Return sorted native Prime applications and one peer runtime binding.
 
-    P2 stays unpublished until the witness passes (Phase 5 plan, Task 4).
-    P2's operator composes itself from :func:`create_prime_programmatic_long_context_provider`.
+    P2 is published together with its installed-route witness (Phase 5,
+    Task 4): exit 0 + sealed receipt ``cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5``
+    from ``make asterion-prime-p2-run``. The selector returns the exact
+    application record P2's operator composes from via
+    :func:`create_prime_programmatic_long_context_provider`.
     """
 
     root = _resource_root()
@@ -133,6 +136,9 @@ def create_provider() -> InstalledApplicationProvider:
             # for the P7 route, because the closure is validated for every
             # published application; the package it needs is now supplied.
             prime_ipython_coding_application(),
+            # Phase 5, Task 4: published together with its installed-route
+            # witness (``cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5``).
+            prime_programmatic_long_context_application(),
         ),
         runtime_factory_bindings=(asterion_prime_runtime_binding(),),
     )

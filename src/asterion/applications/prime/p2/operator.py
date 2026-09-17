@@ -308,7 +308,7 @@ async def _invoke_composed(resources: P2OperatorResources) -> P2PublicResult:
 def main(argv: list[str] | None = None) -> int:
     try:
         result = asyncio.run(_run())
-    except BaseException as error:
+    except BaseException:
         import traceback
 
         traceback.print_exc(file=sys.stderr)

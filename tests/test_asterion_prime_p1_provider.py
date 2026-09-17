@@ -164,11 +164,12 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                 )
             )
 
-    def test_provider_publishes_both_applications_with_p1_s_witness(self) -> None:
+    def test_provider_publishes_all_three_applications(self) -> None:
         # prime.ipython-coding returns to the public list together with its
-        # witness (Phase 4, D-2026-09-12-01). While it was withheld, metadata
+        # witness (Phase 4, D-2026-09-12-01). prime.programmatic-long-context
+        # returns with its Phase 5 witness. While either was withheld, metadata
         # lookup had to reject the selector before importing a runtime; the
-        # installed-route run now exists, so the selector is published again.
+        # installed-route runs now exist for both.
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-applications")
@@ -180,6 +181,7 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
             (
                 ("prime.arc-agi-3-solving", "1.0.0"),
                 ("prime.ipython-coding", "1.0.0"),
+                ("prime.programmatic-long-context", "1.0.0"),
             ),
         )
         self.assertEqual(

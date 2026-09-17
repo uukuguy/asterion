@@ -14,7 +14,6 @@ from asterion.applications.first_party_packages import (
 from asterion.applications.prime import (
     create_prime_programmatic_long_context_provider,
 )
-from asterion.applications.provider import ApplicationProviderError
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 
 
@@ -88,18 +87,20 @@ class TestAsterionPrimeP2Provider(unittest.TestCase):
             (PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE,),
         )
 
-    def test_p2_selector_is_omitted_from_public_index(self) -> None:
-        """Task 4 of the Phase 5 plan — P2 returns to the index with its witness."""
+    def test_p2_selector_is_present_in_public_index(self) -> None:
+        """Phase 5 Task 4 — P2 returns to the index with its witness."""
         pyproject = tomllib.loads(
             (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         )
         index = pyproject["project"]["entry-points"]["asterion.application_index"]
-        self.assertNotIn("prime.programmatic-long-context__1.0.0", index)
+        self.assertIn("prime.programmatic-long-context__1.0.0", index)
 
-    def test_p2_selector_unmapped_until_witness(self) -> None:
-        """Until P2 is published, resolution raises for the unmapped key."""
-        with self.assertRaises(ApplicationProviderError):
-            select_application_provider_id("prime.programmatic-long-context__1.0.0")
+    def test_p2_selector_resolves_after_witness(self) -> None:
+        """Once published, the selector resolves to the prime provider."""
+        self.assertEqual(
+            select_application_provider_id("prime.programmatic-long-context@1.0.0"),
+            "prime-applications",
+        )
 
 
 if __name__ == "__main__":

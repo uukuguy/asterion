@@ -13,9 +13,18 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: **Phase 5** — the next native application rebuild. Its
-  plan has not been written; the program plan stops at Phase 4, so Phase 5 needs
-  its own plan before implementation (see the resume baton).
+- Active work package: **Phase 6** — the next native application rebuild.
+  Phase 5 is complete (see below); Phase 6 needs its own plan before
+  implementation, per the program plan that stops detailing at Phase 4.
+  **Phase 5 is complete: native P2 is rebuilt, witnessed and republished.**
+  Run `make asterion-prime-p2-run` returns exit 0 with sealed receipt
+  `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`
+  (deterministic across host and Orb runs). `prime.programmatic-long-context@1.0.0`
+  is published in `create_provider()` and `pyproject.toml` index. 50 P2 unit tests
+  pass (context_service / oracle / receipt / worker / runtime_binding / provider),
+  no regression on the 102-test P1 set. Source material stays outside the
+  prompt; the model performs one bounded retrieval through the injected
+  `prime.p2-oracle`; the answer oracle agrees on the slice digest.
   **Phase 4 is complete: native P1 is rebuilt, witnessed and republished.**
   Run `make asterion-prime-p1-run` completed six times with sealed receipts
   (`d97808e2`, `f4a4c19a`, `ac3fbb1c`, `d15c9b45`, `400c45dc`, `838f2db6`),
@@ -51,9 +60,9 @@
   preset as an installed-wheel invocation, D-2026-09-14-02): the preset builds a
   wheel, unsets `PYTHONPATH`, and supplies the ARC engine as an operator-owned
   root plus pure-Python wheels. Native P7 remains the implementation anchor.
-  **P1-P7 native implementations: 2 of 7** — P7 and P1, each at its proven
-  boundary. P2-P6 remain unbuilt. Full benchmarking and production promotion
-  remain separately authorized work.
+  **P1-P7 native implementations: 3 of 7** — P7, P1, and P2, each at its proven
+  boundary. P3, P4, P5, P6 remain unbuilt. Full benchmarking and production
+  promotion remain separately authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
   W2 public extension reference, W3a cross-package evidence, W3b
