@@ -23,6 +23,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: test-typescript test-rust check-rust
 .PHONY: asterion-prime-p1-run
 .PHONY: asterion-prime-p2-run
+.PHONY: asterion-prime-p2-run-verbose
 .PHONY: asterion-prime-p7-solve
 
 # Operator-owned values for the Prime presets. Defaults below are this
@@ -211,11 +212,21 @@ asterion-prime-p2-run:
 # ASTERION_PRIME_ARC_ROOT and ASTERION_PRIME_PI_ENTRY, and the operator module
 # rejects the invocation when either is missing or unusable.
 asterion-prime-p7-solve:
+	@printf '[asterion-prime-p7-solve] native Asterion-prime ARC-AGI-3 first-level solve\n' >&2; \
 	@exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
-		printf '\''%s\n'\'' '\''[asterion-prime-p7-solve] native Asterion-prime ARC-AGI-3 first-level solve'\'' >&2; \
-		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_ARC_ROOT="$$3"; export ASTERION_PRIME_PI_ENTRY="$$4"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "$$3/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$3/wheels/arcengine-0.9.3-py3-none-any.whl" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p7.operator'\'' asterion-prime-p7-solve "$$1" "$(CURDIR)" "$(ASTERION_PRIME_ARC_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)"'
+		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_ARC_ROOT="$$3"; export ASTERION_PRIME_PI_ENTRY="$$4"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "$$3/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$3/wheels/arcengine-0.9.3-py3-none-any.whl" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p7.operator'\'' asterion-prime-p7-solve "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_ARC_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)"'
+
+# Diagnostic sibling of ``asterion-prime-p2-run``: identical command line,
+# without the ``@`` prefix on the orb invocation, so Orb / python stderr
+# surfaces to the host terminal for diagnosis only.
+asterion-prime-p2-run-verbose:
+	@printf '[asterion-prime-p2-run-verbose] native Asterion-prime fixed small verification\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p2-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P2_CORPUS="$$4"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated --with "$$1" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p2.operator'\'' asterion-prime-p2-run "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P2_CORPUS)"'
 
 test.native-controller-core.provider-free:
 	$(UV_BIN) run python -m unittest -v \

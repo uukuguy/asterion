@@ -119,7 +119,7 @@ class P2OperatorResources:
             raise P2RuntimeHostError("recovery-required") from None
         receipt = self.oracle.verify_retrieval(slice_=slice_)
         return _HostRetrievalReceipt(
-            call_id=receipt.call_id,
+            call_id=call.call_id,
             operation=receipt.operation,
             result_sha256=receipt.slice_sha256,
             bytes_returned=receipt.bytes_returned,
@@ -140,10 +140,16 @@ class P2OperatorResources:
         retrieval = self.oracle._retrieval
         if retrieval is None:
             raise P2RuntimeHostError("recovery-required")
+        # Close the worker once; subsequent calls are no-ops on the adapter.
         try:
-            worker_cleanup = await self.worker_owner.close()
+            await self.worker_owner.close()
         except Exception:
             raise P2RuntimeHostError("recovery-required") from None
+        # The adapter stores the receipt on success, None on validation
+        # failure. Refuse to seal with no receipt.
+        worker_cleanup = getattr(self.worker_owner, "_cleanup", None)
+        if worker_cleanup is None:
+            raise P2RuntimeHostError("recovery-required")
         result = self.oracle.verify_answer(answer_sha256=retrieval.slice_sha256)
         seal_cleanup_receipt(
             self.oracle,
@@ -154,9 +160,6 @@ class P2OperatorResources:
             bridge_closed=True,
             private_store_removed=True,
         )
-        native = build_native_receipt(self.oracle, result, seal_cleanup_receipt.__wrapped__ if hasattr(seal_cleanup_receipt, '__wrapped__') else None)  # type: ignore[arg-type]
-        # `seal_cleanup_receipt` mutates oracle._cleanup via closure;
-        # we need to re-fetch the cleanup that was just sealed.
         cleanup = self.oracle._cleanup
         if cleanup is None:
             raise P2RuntimeHostError("recovery-required")
@@ -305,7 +308,11 @@ async def _invoke_composed(resources: P2OperatorResources) -> P2PublicResult:
 def main(argv: list[str] | None = None) -> int:
     try:
         result = asyncio.run(_run())
-    except BaseException:
+    except BaseException as error:
+        import traceback
+
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
         result = P2PublicResult("p2-unavailable", "protocol-failure")
     print(json.dumps(asdict(result), separators=(",", ":")))
     if result.status == "completed" and result.receipt_sha256 is not None:
@@ -313,9 +320,21 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _entrypoint() -> None:
+    status = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    raise SystemExit(status)
+
+
+if __name__ == "__main__":
+    _entrypoint()
+
+
 __all__ = (
     "P2OperatorError",
     "P2OperatorResources",
     "P2PublicResult",
+    "_entrypoint",
     "main",
 )

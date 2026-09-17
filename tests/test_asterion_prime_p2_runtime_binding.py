@@ -14,6 +14,9 @@ from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 
 
 def _make_context(**overrides: object) -> RuntimeFactoryContext:
+    services: dict[str, object] = {name: object() for name in P2_HOST_CAPABILITIES}
+    # prime.private-trace is allowed to be None for P2.
+    services["prime.private-trace"] = None
     defaults: dict[str, object] = {
         "provider_id": "prime-applications",
         "application_id": "prime.programmatic-long-context",
@@ -21,7 +24,7 @@ def _make_context(**overrides: object) -> RuntimeFactoryContext:
         "runtime_id": "asterion.prime",
         "assembly_path": Path("/dev/null"),
         "options": dict(P2_RUNTIME_OPTIONS),
-        "host_services": {name: object() for name in P2_HOST_CAPABILITIES},
+        "host_services": services,
     }
     defaults.update(overrides)
     return RuntimeFactoryContext(**defaults)  # type: ignore[arg-type]

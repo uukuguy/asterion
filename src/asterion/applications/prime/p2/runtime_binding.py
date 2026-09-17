@@ -173,10 +173,6 @@ class _P2RuntimeSession:
             if signal is not None and signal.cancelled:
                 pending = "cancelled"
             else:
-                # The witness is exactly one bounded retrieval call. The
-                # runtime owns the call; the operator's injected service owns
-                # the bytes. Bounds and identity come from the host's worker
-                # state, which the host set in its constructor.
                 call = P2RetrievalCall(
                     call_id="p2-call-1",
                     operation="retrieve",
@@ -292,13 +288,22 @@ def build_p2_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
             raise ValueError
         host_services = context.host_services
         service = host_services.get("prime.session-backend")
+        # prime.private-trace has no consumer in P2 (no persistent session
+        # to trace), so it is allowed to be None. Every other host service
+        # must be a real instance.
+        required_host_services = tuple(
+            name for name in P2_HOST_CAPABILITIES if name != "prime.private-trace"
+        )
         if (
             context.provider_id != "prime-applications"
             or context.application_id != "prime.programmatic-long-context"
             or context.application_version != "1.0.0"
             or context.runtime_id != "asterion.prime"
             or set(host_services) != set(P2_HOST_CAPABILITIES)
-            or any(host_services.get(name) is None for name in P2_HOST_CAPABILITIES)
+            or any(
+                host_services.get(name) is None
+                for name in required_host_services
+            )
             or dict(context.options) != dict(P2_RUNTIME_OPTIONS)
             or not isinstance(service, P2RuntimeHost)
         ):
@@ -307,7 +312,7 @@ def build_p2_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
             ipython=host_services["prime.ipython"],
             oracle=host_services["prime.p2-oracle"],
             extension=host_services["prime.pi-extension"],
-            private_trace=host_services["prime.private-trace"],
+            private_trace=host_services.get("prime.private-trace"),
         )
         if validated is not None:
             raise ValueError
