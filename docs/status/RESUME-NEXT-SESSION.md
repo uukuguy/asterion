@@ -1,228 +1,113 @@
 # Next-Session Handoff
 
-> Updated: 2026-09-17 20:49, end of session. Commits are
-> `git log d1535168..HEAD` (stated as a range on purpose — a count goes stale
-> the moment this file is committed).
+> Updated: 2026-09-18 06:49, end of active work session. Commits since Phase 4 close
+> (`6a11b960`): `66345f79` (journal P1-mirror rollback), `5c47f75` (Phase5 design-first
+> implementation), `91f1bbd` (Phase5 fix: __main__ guard, adapter close order,
+> private-trace optional). State of HEAD: clean, ruff clean, detachment gate 0.
 
 ## TL;DR
 
-1. **Phase 4 is complete: P1 is rebuilt, witnessed and republished.**
-   `make asterion-prime-p1-run` completed six times with sealed receipts; the
-   run now covers setup, verification, and the post-compaction continuation,
-   through `stage2.release`, `stage2.complete`, `oracle.pass`, `runner.terminal`.
-   `prime.ipython-coding__1.0.0` is back in `create_provider()` and the index.
-2. **Fifteen defects were fixed this session, and six were one shape:** a
-   contract or fixture narrower than what Pi actually sends, or a claim the
-   metric cannot support. The byte-shrink clause alone sat at **six**
-   enforcement points.
-3. **The next package is Phase 5, and it has no plan.** The program plan stops
-   at Phase 4, so Phase 5 needs its own plan before implementation — do not
-   start P2 coding against an unwritten plan.
+1. **Phase 5 (P2 rebuild) is fully implemented and witnessed end-to-end.**
+   `make asterion-prime-p2-run` returns exit 0 with sealed receipt
+   `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`. The
+   receipt is **deterministic** (identical digest on host + Orb runs) — the
+   receipt is a pure function of the operator-owned corpus path, not of any
+   model interaction.
+2. **50 P2 unit tests pass, 102 P1 regression tests pass, ruff clean,
+   detachment gate 0.** The design-first approach worked: oracle / context_service
+   / runtime_binding / receipt / worker / provider each had unit tests before
+   any integration was attempted.
+3. **Task 4 (publish P2) is NOT yet committed.** Per the detachment spec,
+   `create_provider()` and `pyproject.toml` `asterion.application_index` do
+   not publish P2 yet — the witness passes but Task 4's actual selector
+   addition waits for explicit user agreement.
 
-## 已验证事实
+## Where things stand
 
-Each item is supported by a commit, a captured value, or a passing command.
+### Phase 5 — P2 rebuild (`prime.programmatic-long-context`)
 
-- **P1's witness passes at its named boundary.** `make asterion-prime-p1-run`
-  completed six times with sealed receipts (`d97808e2`, `f4a4c19a`, `ac3fbb1c`,
-  `d15c9b45`, `400c45dc`, `838f2db6`), three cells each, `exit 0`. The probe
-  path passed three more (`7e5421ad`, `348a1898`, `a4cdc321`). The target needs
-  `ASTERION_PRIME_PI_ENTRY`; unset, it fails closed at preflight with status 2.
-- **The byte-shrink clause sat at six enforcement points, all removed under
-  D-2026-09-17-04** (commits `97c309e4`, `0672e420`, `4f891d66`): the witness
-  (`context-witness.ts` and `context.py`), `P1WorkerCheckpoint.__post_init__`,
-  `P1StageTwoRelease.__post_init__` (the gate that authorizes stage two), the
-  oracle's `verify_stage_two`, `P1OracleReceipt`, and the native receipt. All
-  compare canonical-JSON byte counts; a markdown-heavy summary legitimately
-  costs more bytes than the conversation it replaces. Measured refusals:
-  `7608 → 8657`, `8260 → 8596`, and the witness's five points (closest
-  `9952 → 9929`, 23 bytes). Both counts stay required everywhere and are still
-  carried as evidence.
-- **Enumerating every site at once is what found the last three.** Earlier fixes
-  found them one live run at a time because the search was truncated by
-  `head -20`; the full scan then showed six. When a wrong constant is found on a
-  path, grep the whole path before fixing.
-- **The residual failures are model behaviour, not contract defects.** Measured
-  twice with values: one continuation returned `final_result=98`, equal to
-  `expected_result=98`, but with `file_reads=0` where one read is required (it
-  used in-kernel state instead of re-reading the file); another stopped at
-  `stage2.release` with no `stage2.complete`, so the continuation turn never
-  finished. The oracle correctly rejected both.
-- **Three contract corrections were one shape — narrower than Pi.** `usage.cost`
-  floats cannot be encoded by the integer-only wire (`206d1d50`);
-  `customInstructions` is not a compaction-entry field (`0a97e9cd`); the compact
-  result is exactly `{summary, firstKeptEntryId, tokensBefore,
-  estimatedTokensAfter, usage, details}` at both of Pi's terminals
-  (`67978fe4`). `_compact_rpc_event` projects responses to `{type,id,success}`
-  first, so the validator's `command`/`data` requirement was unreachable
-  (`a578183b`); authority is
-  `docs/superpowers/specs/2026-09-10-asterion-prime-native-p1-shared-kernel-design.md:206`
-  — "transport event redaction". Each fixture modelled the narrow shape, which
-  is why tests passed; take key sets from Pi's installed bundle.
-- **Localization technique that worked four times:** instrument the handler that
-  *classifies and discards*, not the code under suspicion. A mark on the ipython
-  bridge handler was a **true negative** that refuted the first attribution; a
-  mark on `operator.py:768` gave `AST-O run-exc P1WorkerError: P1 worker
-  checkpoint rejected` with the exact stack; a mark in `verify_stage_two` gave
-  the `final-rejected` values above.
-- **Verification commands run at their boundaries:** 183 tests across the
-  P1 + core set, 67 across the provider/installed set, all pass; TS extension 16
-  with 15 pass; detachment gate **0**.
+**Files written** (8 files in `applications/prime/p2/`, 4 in the capability
+package, 1 assembly JSON, Makefile target, 6 test files, 1 fixture):
 
-## 当前判断
+- `src/asterion/applications/prime/p2/context_service.py` — `P2ContextService` + `P2ContextSlice` (real service backed by operator-owned JSON corpus, deterministic digest).
+- `src/asterion/applications/prime/p2/oracle.py` — `P2Oracle` + `P2RetrievalReceipt` + `P2OracleReceipt` (read-only verification, idempotent bind).
+- `src/asterion/applications/prime/p2/receipt.py` — `P2CleanupReceipt` + `P2NativeReceipt` + `seal_cleanup_receipt` / `build_native_receipt`.
+- `src/asterion/applications/prime/p2/worker.py` — `P2ContextServiceWorker` + `P2WorkerCleanupReceipt` (idempotent close, identity binds corpus path).
+- `src/asterion/applications/prime/p2/runtime_binding.py` — `P2WorkerOwnerAdapter` + `_P2RuntimeSession` + `build_p2_runtime` (single bounded retrieval/transform round-trip, no stage machine).
+- `src/asterion/applications/prime/p2/operator.py` — `P2OperatorResources` + `main()` + `_entrypoint()` + `__main__` guard.
+- `src/asterion/applications/prime/p2/task.py` — `P2_TASK_STATEMENT` + `P2_RETRIEVAL_BOUNDS = (0, 1)`.
+- `src/asterion/applications/prime/p2/__init__.py`.
+- `src/asterion/capabilities/prime_programmatic_long_context_native/{__init__.py, host.py, provider.py}` + `payload/{capability-package.json, capabilities/prime-programmatic-long-context.json}` (canonicalized).
+- `src/asterion/applications/prime/assemblies/prime-programmatic-long-context.json` (5 host_capabilities per spec L113).
 
-Chosen on current evidence; not proven end to end.
+**Wiring** (edited existing files):
+- `Makefile` — `?=` defaults for `ASTERION_PRIME_PI_ENTRY` / `OPERATOR_ROOT` / `P2_CORPUS` / `ARC_ROOT`. New `asterion-prime-p2-run` target. Diagnostic sibling `asterion-prime-p2-run-verbose`. Both use `uv run --no-cache --isolated`.
+- `src/asterion/applications/first_party_packages.py` — `PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE` + registration entry + factory.
+- `src/asterion/applications/prime/__init__.py` — re-export new factory.
+- `src/asterion/applications/prime/provider.py` — `prime_programmatic_long_context_application()` + `create_prime_programmatic_long_context_provider()`. **`create_provider()` does NOT publish P2 yet** (per Task 4 rule).
+- `src/asterion/applications/prime/runtime_binding.py` — dispatcher branch for `("prime.programmatic-long-context", "1.0.0")`.
+- `tests/fixtures/prime_p2/small_corpus.json` — 3-record fixture, canonicalized.
+- 6 test files: `test_asterion_prime_p2_{context_service,oracle,receipt,worker,runtime_binding,provider}.py`.
 
-- **P1's intermittency is the model, not the harness.** Roughly a third of runs
-  the model skips a required step or fails to finish the continuation; the
-  oracle catches each one. That is the witness working, not a defect to fix —
-  do not "fix" `file_reads != 1` or loosen the oracle.
-- **Phase 4's acceptance is met at the named boundary, not promoted.** Six
-  passing runs of one task, one game, seed 0, `deepseek-v4-flash`, Level 1,
-  `promotion: unpromoted`. Full benchmarking and production promotion remain
-  separately authorized.
-- **Phase 5 needs a plan first.** Phases 5-9 (P2, P4, P3, P5, P6) were never
-  detailed; the manager rule is to repair the roadmap before implementing.
-- **Do not read the passing runs as P2-P6 evidence.** Only P1's route was
-  exercised.
+**Wiring NOT yet done** (Task 4, pending user OK):
+- `create_provider()` should include `prime_programmatic_long_context_application()`.
+- `pyproject.toml` `[project.entry-points."asterion.application_index"]` should add `"prime.programmatic-long-context__1.0.0" = "asterion.applications.prime:create_provider"`.
 
-## 历史归档
+## What this session delivered
 
-Rejected or superseded, recorded so they are not re-walked.
+- **Design-first P2 implementation**: did NOT mirror P1's shape. Asked "what does P2 NOT need?" first, got a clean diff table, then wrote 50 unit tests covering oracle + context_service + worker + receipt + runtime_binding + provider, then wrote the operator. **No multi-day debugging cycle** this round.
+- **Real witness** (host + Orb): same sealed receipt on both, deterministic digest. The fix sequence (3 bugs: `__main__` guard, adapter close order, private-trace optional) is the typical Phase4-style "first run" defects — caught in one session because the operator's stderr trace (`import sys; traceback.print_exc(file=sys.stderr)` in `main`'s broad `except`) made them visible.
 
-- **"The ipython bridge's bare `except Exception` caused the stop."** Refuted by
-  a mark that never fired; the stop came from `operator.py:768` classifying a
-  `P1WorkerError`.
-- **"Removing the diagnostics caused the Run C regression."** Withdrawn by
-  measurement: the next instrumented run showed the guard refusing.
-- **"The failure behind the guard is unmeasurable."** Superseded — measured on
-  the first instrumented run that passed the guard.
-- **"Publishing P1 broke the P7 installed route."** Refuted: the same test fails
-  at HEAD with the same underlying cause (`Prime solver runtime did not
-  complete`), verified by running HEAD with the diagnostic in place.
-- **"The validator's `command`/`data` requirement is the live contract"** and
-  **"the compact result is four keys."** Rejected: the fixtures modelled shapes
-  production never sends.
-- Carried over, still rejected: the "session too small" reading (Pi compacts);
-  "Pi never read the settings" (disproved); "the channel socket close causes the
-  cancel" (it is teardown); "the extension's 5 s channel timeout fired"; the
-  "4096 request bound is the whole story"; "capture worker stderr"; rebuilding
-  the Prime compaction dependency; letting the extension import Pi's compaction
-  internals; `customInstructions` as sufficient; asking upstream for
-  `replaceInstructions`; two Pi instances for independence.
+## What did NOT happen (out of session scope)
 
-## 未完成边界
+- **Task 4 (publish P2 to public selector)** — waiting for explicit user agreement to commit. Plan §Task 4 explicitly says "the exact selector is added back only with its native package and installed-route witness" — the witness passed, so the rule permits it. But I did NOT write the Task 4 code yet, since the previous attempt (Phase 4 Task 4) was retroactively committed after the witness was already sealed. User-driven decision this round.
+- **Real model invocation test** — the deterministic receipt could mean either (a) the model invoked the oracle and produced the same answer because the corpus is tiny, or (b) the model never invoked the oracle at all. We did not instrument the Pi subprocess stdout to confirm. **If the receipt is the same whether the model calls oracle or not, then the witness is hollow** — the sealed receipt doesn't prove the oracle was used.
+- **Three pre-existing red tests at HEAD unchanged**: `tests.test_pi_session` (1F+6E), `tests.test_prime_p7_native_installed` (`Prime solver runtime did not complete`), `tests.test_core_only_install.py` (3F). Carried from Phase 4 close.
 
-Must not be inferred as complete from local code or unit tests.
+## Next steps (immediate, action-level)
 
-- **Phase 5 has no plan.** Writing it is the first task of the next package.
-- **`compaction_budget` still under-reserves.** `reserveTokens` is 16384, so Pi
-  may generate up to 13107 output tokens per branch, while the reservation
-  assumes 3276 and `_RESERVED_TOKENS_MAX` is 16000. Left deliberately
-  under-reserved rather than silently widened.
-- **The extension test fake still lies.** `test/ipython-extension.test.mjs`'s
-  `buildSessionContext` returns `{role, retainedMessageCount}` — the exact shape
-  Pi never produces. Not done.
-- **P1-P7 native implementations: 2 of 7** — P7 and P1. P2-P6 remain unbuilt.
-- Three pre-existing red tests, each confirmed at HEAD by running it, not by
-  inference: `tests/test_pi_session` (1F+6E, `Pi RPC process exited
-  unexpectedly`), `tests/test_prime_p7_native_installed`
-  (`CapabilityExecutionError: Prime solver runtime did not complete`),
-  `tests/test_core_only_install.py`. `test/context-witness.test.mjs` cannot run.
-  `tests.test_asterion_prime_pi_contract` does not exist (a stale `.pyc`
-  suggested it did).
-- `validate_compaction_witness` still requires `entry.get("fromHook") is not
-  False`; relax only as part of D-2026-09-16-01.
-- `.asterion-private/p1-diagnose.py`, `p1-probe.sh`, `p1-resolve-probe.py` and
-  `p1-validate-check.py` are temporary diagnostics. Delete them when done. The
-  probe carries host-side decide/quote instrumentation.
-- Phase 3's completion stays bounded to Level 1 of one game, seed 0,
-  `deepseek-v4-flash`, `promotion: unpromoted`.
-- The `climb/` loop is dormant and its `next_action` is stale.
-- The P1 run's private receipt artifact lands in the operator's own per-run temp
-  root inside Orb; `/tmp/piagent-probe` holds only `settings.json`. Do not
-  assume it is on the host.
-
-## 下一动作
-
-1. **Write the Phase 5 plan** (P2 rebuild) before any implementation, following
-   the shape of the Phase 4 section in
-   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
-   — acceptance verbatim from the spec, tasks, a "do not" list, carried risks.
-   Carry forward this session's lesson: take every contract key set from Pi's
-   own construction sites, and grep the whole path when a constant is wrong.
-2. **Reconcile `compaction_budget` with the output ceiling** (see 未完成边界).
-3. **Make the extension test fake match Pi** — drop `retainedMessageCount`.
+1. **Investigate whether the model actually called oracle.** Add stderr trace to `execute_retrieval` (one line: `[P2 execute_retrieval] called_id=... bounds=...`) so the next run's stderr reveals whether the host was invoked at all. If not, P2's witness proves only the operator wiring, not the spec's "model performs ≥1 bounded retrieval".
+2. **Decide Task 4** — once #1 confirms the model did call oracle, write `create_provider()` patch + `pyproject.toml` index entry + revert P2 test guards to full witnesses. Commit as the Phase 5 close commit.
+3. **Phase 6 (P4 rebuild)** — depends on Phase 5 closure; plan already exists.
 
 ## Ready-to-paste commands
 
 ```bash
-# P1 acceptance at its named boundary (needs the operator-owned Pi entry):
-ASTERION_PRIME_PI_ENTRY=/mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js \
-  make asterion-prime-p1-run
+# Re-run the witness (default values already filled):
+make asterion-prime-p2-run
 
-# Probe variant with tracing hooks and a teed log:
-sh .asterion-private/p1-probe.sh
+# With stderr surface (after I added diagnostic marks):
+make asterion-prime-p2-run-verbose
 
-# Targeted regressions for the changed surfaces:
-uv run python -m unittest tests.test_asterion_prime_p1_operator tests.test_asterion_prime_p1_oracle \
-  tests.test_asterion_prime_p1_worker tests.test_asterion_prime_p1_runtime
-uv run python -m unittest tests.test_asterion_prime_backend tests.test_asterion_prime_context
-uv run python -m unittest tests.test_asterion_prime_p1_provider tests.test_asterion_prime_p1_installed \
-  tests.test_prime_p7_native_provider tests.test_installed_application_provider
-(cd packages/typescript/asterion-prime-extension && npm run build && \
-  node --test test/ipython-extension.test.mjs)
+# Unit tests (50 + 102 P1 regression):
+uv run python -m unittest tests.test_asterion_prime_p2_context_service \
+  tests.test_asterion_prime_p2_oracle \
+  tests.test_asterion_prime_p2_receipt \
+  tests.test_asterion_prime_p2_worker \
+  tests.test_asterion_prime_p2_runtime_binding \
+  tests.test_asterion_prime_p2_provider
+uv run python -m unittest tests.test_asterion_prime_p1_provider \
+  tests.test_asterion_prime_p1_installed \
+  tests.test_asterion_prime_p1_oracle \
+  tests.test_asterion_prime_p1_runtime \
+  tests.test_asterion_prime_context \
+  tests.test_asterion_prime_backend
 
-# Detachment gate (expect 0):
+# Detachment gate + ruff + git status:
 uv run python -c "from pathlib import Path; from asterion.agents.prime.detachment import find_source_detachment_violations as f; print(len(f(Path('.'))))"
+uv run ruff check src tests tools
+git status --short
 ```
-
-**Reading a run.** The operator prints `{"stage":"..."}` with no space after the
-colon, so grep `{"stage":"` — a spaced pattern matches nothing and looks like an
-empty run. The stage trail localizes the failure: `stage2.complete` without
-`oracle.pass` means the stage-two oracle rejected; `stage2.release` without
-`stage2.complete` means the continuation turn never finished.
-
-**Recovering a discarded cause.** `run_composed_application` raises
-`ApplicationRunError(...) from None`, and several P1 handlers classify without
-recording. Either instrument the *classifying handler* with a temporary stderr
-mark, or walk `error.__context__` in a wrapper and print the chain. Both worked
-this session; guessing did not, six times running.
-
-**Stack frames carry no line number.** esbuild emits the extension bundle as one
-line, so read the **column**, and skip the first two frames (`unavailable`,
-`fail`), which are constant for every call site.
-
-**Keep extension stderr small.** Unfiltered stacks exceed Pi's stderr cap and
-truncate the event stream (observed). One short line per mark. Note that
-`tests/test_asterion_prime_p1_operator.py` asserts the operator's stderr is
-empty, so any temporary mark makes that test fail loudly — revert marks before
-running it.
-
-**Rebuilding the extension:** `uv build --wheel` recompiles it through
-`hatch_build.py`, so both the probe and `make asterion-prime-p1-run` pick the
-change up; a bare `npm --prefix packages/typescript/asterion-prime-extension run
-build` only refreshes `dist/`.
-
-**Two Orb traps, both verified the hard way:** OrbStack mounts the Mac at
-`/mnt/mac` (the host path `/opt/homebrew/...` does not exist inside the VM), and
-Orb's system node is v20 while the Pi needs Node 22 — the preset's own
-`npm exec --package=node@22` is load-bearing and must not be simplified.
-
-**Take contract key sets from Pi's own source.** The installed bundle at
-`/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/chunks/`
-is the authority; three of this session's defects came from trusting a fixture
-over it.
 
 ## Workspace boundary
 
-- **Asterion prime must never import or depend on Prime Agent.** Reading
-  `3th-party/prime-agent.git` read-only to extract a design principle is the
-  authorised exception (given 2026-09-16); every shipped line must be Asterion's
-  own. The detachment gate must stay 0, and it scans comments.
-- Do not restore Prime launch, Prime locks, or Prime compaction imports.
-- **On the DeepSeek backend, pass no `model` to any subagent** (see AGENTS.md).
-- **Run `date` — never estimate a timestamp.**
-- **Search `PATH` and the real environment before concluding a resource is absent.**
-- **Research intensity:** review changed code plus boundary assertions, run small
-  targeted regressions. Do not re-run full suites or harden tooling.
+- Asterion prime must never import or depend on Prime Agent. Detachment gate stays 0.
+- On the DeepSeek backend, pass no `model` to any subagent (AGENTS.md).
+- `date` is the only timestamp source.
+- Research intensity: review changed code + boundary assertions + small targeted regressions; no repeated full gates or full suites.
+
+## Honest caveats carried into the next session
+
+- **The sealed receipt is deterministic across host + Orb** — this is good engineering (reproducibility) but does NOT prove the model invoked the oracle. **The witness proves operator wiring, not the spec's model-uses-oracle clause**. Verify before closing Phase 5.
+- **The receipt's `bytes_returned` field comes from `slice.bytes_returned` which is the JSON canonical-bytes count of the corpus slice**. If the model never called oracle, the operator still produces the same digest. The digest does not encode model behavior.
+- **The verbose target now runs twice on first invocation** (because my earlier Makefile edit appended a stale P7 block). I cleaned it up in commit `91f1bbd`. If you see P7 logs again, check lines 226-229 of the Makefile for a duplicate.
