@@ -17,6 +17,7 @@
 | feedback | ✅ verified-active | Report a narrow defect as narrow; do not inflate it into an architecture decision |
 | feedback | ✅ verified-active | Delete a seam whose only purpose was the forbidden dependency; do not retarget it |
 | feedback | ✅ verified-active | A classification is not a cause; recover the value before changing anything |
+| feedback | ✅ verified-active | Take a contract's key set from its producer, not from a fixture |
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
 
 ## ✅ Verified Active
@@ -120,24 +121,39 @@
   classification level. Guessing at them would have produced speculative edits
   in a runtime that other applications share.
 
+### feedback — take a contract's key set from its producer, not from a fixture
+
+- When a contract describes another component's output, read the code that
+  produces it and copy the key set from there. Do not infer it from the
+  validator, and never from a test fixture: a fixture written to match the
+  contract cannot detect a contract that is wrong about its producer.
+- Given 2026-09-17, after three P1 defects in one session were the same shape —
+  a contract narrower than reality. The witness wire entry rejected `usage.cost`
+  (floats the integer-only form cannot encode); the host required a
+  `customInstructions` entry field Pi never writes; the RPC validator allowed
+  four of the six keys Pi's compact result carries. Every fixture modelled the
+  narrow shape, so every suite stayed green. The producer's construction site —
+  Pi's installed bundle — settled all three in one grep each.
+- **Why:** the fixture and the contract share an author's assumption. Only the
+  producer is independent evidence, and here it was already on disk.
+
 ## 🟠 Current Judgments
 
-- Phase 1 (legacy Prime Agent detachment) is complete and the application layer
-  is free of Pi references; the remaining work is construction, not removal.
-  **P1-P7 native implementations stand at 1 of 7** — P7 only, at its proven
-  boundary. Across 2026-09-16/17 the P1 witness advanced from dying inside the
-  extension's first check to running arm → proposal → approve → Pi compacts →
-  rebuild check, as ten defects found by live runs were fixed and committed
-  (`git log 1d21ef05..HEAD`). Two headline results: the direction question is
-  closed by measurement — the socket close is teardown, 60 s *after* the
-  extension had already cancelled, not the cause — and the eighth defect was a
-  field (`retainedMessageCount`) Pi never emits, kept alive only by the
-  extension test's own fake. It still does not pass. Two things are open and
-  must not be read as done: the rebuild guard is *marginal* (three measured
-  runs land on both sides of it), and a further failure seen once behind a
-  passing guard **has never been measured**. P1 therefore stays unpublished;
-  P2-P6 remain unbuilt. Current technical status and next actions live in
-  `docs/status/CURRENT-STATE.md` and
+- Phases 1-4 are complete and the application layer is free of Pi references;
+  the remaining work is construction, not removal. **P1-P7 native
+  implementations stand at 2 of 7** — P7 and P1, each at its proven boundary.
+  **Phase 4 closed on 2026-09-17: P1's witness passes and P1 is republished.**
+  `make asterion-prime-p1-run` completed six times with sealed receipts, three
+  cells each, through `stage2.release`, `stage2.complete`, `oracle.pass` and
+  `runner.terminal`. Fifteen defects found by live runs were fixed across
+  `git log 1d21ef05..HEAD`. The residual intermittency is **model behaviour, not
+  the harness**: measured twice, a continuation answered correctly but read the
+  file zero times, and another never finished its turn; the oracle rejected both
+  correctly. Do not loosen the oracle to raise the pass rate. **Phase 5 (P2)
+  has no plan yet** — the program plan stops at Phase 4, so a plan comes before
+  implementation. Passing runs are bounded to one task, one game, seed 0,
+  `deepseek-v4-flash`, Level 1, `promotion: unpromoted`. Current technical status
+  and next actions live in `docs/status/CURRENT-STATE.md` and
   `docs/status/RESUME-NEXT-SESSION.md`.
 - **Two 2026-09-16/17 judgments were withdrawn after measurement.** The
   "session too small" reading of the compaction failure was static-only and a
@@ -148,12 +164,17 @@
   underneath it was the blocker. All three are recorded so the reasons are not
   re-derived: capture the value first, then conclude.
 - **A constant that echoes elsewhere on the path is a warning, not a
-  coincidence.** `4096` appeared four times on the P1 compaction path — the
-  extension's request bound, the host's request bound, `_INPUT_CAP_MAX`, and
-  `reserveTokens` — and every one was either wrong or a copy of a wrong
-  assumption. The tell that exposed the units mismatch was that the operator's
-  `_COMPACTION_INPUT_CAPS` equals the old `_INPUT_CAP_MAX`: the same number in
-  two places meant one of them was being read in the wrong unit.
+  coincidence — and one grep is not an enumeration.** `4096` appeared four times
+  on the P1 compaction path — the extension's request bound, the host's request
+  bound, `_INPUT_CAP_MAX`, and `reserveTokens` — and every one was either wrong
+  or a copy of a wrong assumption. The tell that exposed the units mismatch was
+  that the operator's `_COMPACTION_INPUT_CAPS` equals the old `_INPUT_CAP_MAX`:
+  the same number in two places meant one of them was being read in the wrong
+  unit. On 2026-09-17 the same clause — "the rebuilt context must be smaller in
+  canonical-JSON bytes" — turned out to sit at **six** enforcement points, and
+  three were found only after the search stopped being truncated by `head -20`.
+  Each of the earlier ones cost a live run to discover. When a wrong constant is
+  found, grep the whole path and list every site before fixing any of them.
 
 ## 🔴 Superseded but Worth Remembering
 

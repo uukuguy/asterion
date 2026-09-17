@@ -527,14 +527,14 @@
   token unit was rejected for this pass: the after-count lives in the
   compaction *result*, not the entry, so the persisted path has no producer for
   it. `context.py` used the same metric and moved with it.
-- **Applied at all three enforcement points.** The clause also sat in
-  `P1WorkerCheckpoint.__post_init__` (`p1/worker.py`) and in
-  `P1StageTwoRelease.__post_init__`
-  (`capabilities/prime_ipython_coding_native/host.py`), the gate that authorizes
-  stage two; a live run measured `7608 → 8657` and was refused at the
-  checkpoint, so the stage-two milestone never arrived and the continuation cell
-  never ran. The operator ruled the three sites one decision, not three. Both
-  counts remain required in both structures and are still carried as evidence.
-- Evidence: commits `97c309e4` and `0672e420`; the five measured witness
-  pre/post pairs and the live `7608 → 8657` refusal; decision taken by the
+- **Applied at all six enforcement points.** The clause also sat in
+  `P1WorkerCheckpoint.__post_init__` (`p1/worker.py`), `P1StageTwoRelease`
+  (`capabilities/prime_ipython_coding_native/host.py`, the gate that authorizes
+  stage two), the oracle's `verify_stage_two`, `P1OracleReceipt`, and the native
+  receipt. Live runs were refused at the checkpoint (`7608 → 8657`, which is
+  why the stage-two milestone never arrived) and at the oracle (`8260 → 8596`).
+  The operator ruled the sites one decision, not several. Both counts remain
+  required in every structure and are still carried as evidence.
+- Evidence: commits `97c309e4`, `0672e420`, `4f891d66`; the five measured
+  witness pre/post pairs and the two live refusals above; decision taken by the
   operator on 2026-09-17.
