@@ -134,10 +134,18 @@
 
 ## 下一动作
 
-1. **Re-run the live witness.** All seven fixes are in the tree, and it has
-   never been run with all of them present. That run is the first one that can
-   exercise the whole path: cells, oracle, Pi's compaction, Asterion's
-   terminal check, and then the witness's own compaction validation.
+1. **Find why the witness transport is closed mid-compaction.** The extension
+   fails because Asterion's private channel socket closes while it waits, not
+   because of any check in `before()`. The only caller of
+   `PrimeContextWitnessSession.close()` is the teardown at
+   `operator.py:679-680`; work out what reaches it before the 60 s witness
+   timeout. That is the last unclosed link.
+2. **To see the extension's own reason again**, temporarily give
+   `context-witness.ts`'s bare `catch {` a binding and print the stack with
+   `data:text/javascript` frames filtered out — unfiltered output exceeds Pi's
+   stderr cap and truncates the event stream instead. Restore the bare catch
+   afterwards.
+3. Then re-run the live witness.
 2. **Independently, make `_compact` await the RPC result and the witness
    proposal concurrently**, so Pi's own failure surfaces instead of a bare
    timeout. This is a diagnosability fix worth having either way.

@@ -2505,3 +2505,12 @@
 - 10:43 验证：backend **41 测试全过**（含 4 个新契约测试：接受前导 settled / 三事件流不变 / 其它前导仍拒 / 截断仍拒）；reusable+backend-rpc+operator 44 测试过；门禁 0；ruff 干净
 - 10:43 为何 P7 从未碰到：P7 单回合、不做 compact。**P1 是第一个走压缩路径的应用**
 - 10:43 本会话至此七个故障**全部修复**；下一步是重跑 live witness 验证端到端（尚未跑）
+- 12:06 运行时取证：**扩展的失败原因首次可见**。手段是临时把 `context-witness.ts` 的空绑定 `catch {` 改成 `catch (error)` 并输出**滤掉 `data:` 帧的栈**——原样输出会超 Pi 的 stderr 上限，实测把事件流截断过一次
+- 12:06 栈：`ASTERION-WITNESS-FAIL Error: Asterion context witness is unavailable`，**栈里没有扩展自身的帧**，只有 `processTicksAndRejections → ExtensionRunner.emit → AgentSession.compact`
+- 12:06 判读：**不是任何 `fail()` 检查点**（那会留下扩展的帧），而是**一个 Promise 被 reject** —— 对应 `context-witness.ts:187` 的 `#waiting?.reject(unavailable())`，即 `close()` 被调用
+- 12:06 链路：扩展 `close()` 由 socket 事件触发（`:173-175` 的 `error`/`end`/`close` 三个 handler）→ **Asterion 侧的私有通道 socket 被关闭** → 扩展在 `await this.#channel.read()`（等 arm 帧）时被 reject → 空 catch → `{cancel:true}` → Pi 报 `aborted:True` → Asterion 的 witness 空等 60 秒超时
+- 12:06 Asterion 侧关闭点：`context.py:576 close() → :582 _close_transport() → self._socket.close()`；上游唯一调用点是 `operator.py:679-680` 的**收尾清理**（`:1147 close_witness=witness.close` 注入）
+- 12:06 **未闭合的最后一环**：为什么收尾清理会在 compact 进行中（60 秒超时之前）被触发。已缩小到单一函数调用
+- 12:06 **方法学**：`fail()` 对所有检查点抛同一条消息——项目 MEMORY 里「分类不是原因，要取回真值」的又一实例；**栈是唯一能区分调用点的东西**，而它被空绑定 catch 丢弃
+- 12:06 扩展的临时诊断已**还原**，工作树干净；取证方法记在 RESUME，需要时可重新加
+- 12:06 至此：七个故障已修并提交，第八个（扩展通道被提前关闭）根因链闭合到最后一环
