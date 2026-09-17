@@ -18,6 +18,9 @@
 | D-2026-09-14-01 | 🟢 active | Keep the application layer free of implementation references; the runtime seam carries plain data |
 | D-2026-09-14-02 | 🟢 active | Supply research-preset external engines as operator-owned roots plus wheels, never as checkout-relative paths |
 | D-2026-09-14-03 | 🟢 active | Inject the Pi runtime as an operator-owned entry path, satisfied by an independently installed upstream Pi |
+| D-2026-09-17-01 | 🟢 active | Denominate the compaction reservation in tokens and convert at the call site |
+| D-2026-09-17-02 | 🟢 active | Treat `retained_message_count` as nullable; Pi states retention by entry id |
+| D-2026-09-17-03 | 🟢 active | Keep Pi's compaction reserve at upstream's default |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -431,3 +434,70 @@
 - Rejected — isolate failures at the turn level: the next turn could then
   build on an unfinished predecessor, and stage one's whole point is the
   cross-turn object surviving intact.
+
+## D-2026-09-17-01 — The compaction reservation is denominated in tokens
+
+- Status: 🟢 active
+- Context: `quote_compaction_reservation` names its constants
+  `_..._TOKENS_MAX` and prices cost per million tokens, but the caller in
+  `context.py` fed it `len(request.encode())` — byte counts. Cost was
+  overstated roughly fourfold and every cap was silently four times tighter
+  than its own name, which is why a real 6.9 KB request was refused.
+- Decision: Convert at the call site, with a four-bytes-per-token ceiling, and
+  keep the arithmetic in tokens. Derive `_INPUT_CAP_MAX` from the reservation
+  total rather than leaving it independent: the two branches are asymmetric by
+  construction (the main request carries the whole serialized conversation,
+  the turn-prefix request only a fragment), so a symmetric per-branch cap
+  contradicts the total and can never be approached.
+- Rationale: The tell was that the operator's own
+  `_COMPACTION_INPUT_CAPS = (4096, 4096)` is the same number as the old
+  `_INPUT_CAP_MAX` — those constants were always tokens, so only the call site
+  was wrong. A ceiling over-states the reservation, which is the fail-closed
+  direction for a budget.
+- Consequence: The total reservation remains the binding limit and the cost
+  ceiling is unchanged. What changes is which inputs are admissible.
+- Evidence: commit `2f744bf5`; the host approved a proposal for the first time
+  (`host-quote caps=(1740, 261) approved=True`); `test_asterion_prime_context`
+  and `test_asterion_prime_p1_operator` boundary assertions.
+
+## D-2026-09-17-02 — `retained_message_count` is nullable
+
+- Status: 🟢 active
+- Context: The extension's `preparedMaterial` read
+  `summary.retainedMessageCount`, which Pi never emits — the name appears zero
+  times in Pi's bundle, and `createCompactionSummaryMessage` produces only
+  `{role, summary, tokensBefore, timestamp}`. The field appears in no spec or
+  plan, entered with the witness feature, and the only thing that ever supplied
+  it was the extension test's own fake.
+- Decision: Treat the field as nullable end to end, matching what
+  `projectPrimeContext` and the host's message validator already tolerated. The
+  host's lower bound applies only when a producer actually supplies a value —
+  the takeover shape of D-2026-09-16-01.
+- Rationale: Pi states retention by `firstKeptEntryId`, not by a count, so
+  under the witness shape the field has no possible producer. Deriving a count
+  locally was rejected: it would make the host's `declared >= actual` bound a
+  predicate that can never fail.
+- Consequence: `countRebuiltContext` does not use the field, so size accounting
+  is unaffected. The field keeps its slot for the takeover implementation.
+- Evidence: commit `c03eecad`; measured `q1-summaryKeys` and
+  `q4-rawRetained=undefined`; Pi bundle search returning zero occurrences.
+
+## D-2026-09-17-03 — Pi's compaction reserve stays at upstream's default
+
+- Status: 🟢 active
+- Context: Pi caps a compaction summary at
+  `min(floor(0.8 * reserveTokens), model.maxTokens)`. Asterion set
+  `reserveTokens: 4096`, a quarter of Pi's default of 16384, giving a 3276
+  cap; Pi reported `generation hit the token cap and the summary is
+  incomplete` (`stopReason === "length"`), so compaction never completed and
+  the witness waited out its 60 s.
+- Decision: Restore `reserveTokens: 16384` on both sides — the operator's
+  written `settings.json` and the extension's `SETTINGS`, which the extension
+  asserts are exactly equal.
+- Rationale: This restores upstream's value rather than inventing one. Measured
+  both ways, twice each: 4096 fails, 16384 completes.
+- Consequence: **Measured, not witness-confirmed** — the witness still does not
+  pass. `compaction_budget` now under-reserves for the larger ceiling and is
+  deliberately left that way rather than silently widened.
+- Evidence: commit `0f1a7d98`; `compaction_end` carrying a full result with no
+  `errorMessage` at 16384, and the token-cap error at 4096.

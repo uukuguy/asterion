@@ -125,26 +125,35 @@
 - Phase 1 (legacy Prime Agent detachment) is complete and the application layer
   is free of Pi references; the remaining work is construction, not removal.
   **P1-P7 native implementations stand at 1 of 7** — P7 only, at its proven
-  boundary. Between 2026-09-16 and 2026-09-17 the P1 witness advanced from
-  failing at the first turn to completing stage one and driving a real Pi
-  compaction, as eight defects found by live runs were fixed and committed
-  (`git log 1d21ef05..HEAD`). The eighth — the extension requiring a
-  `retainedMessageCount` Pi never emits — was found by value, and the same
-  measurement closed the direction question: the socket close is teardown,
-  60 s *after* the extension had already cancelled, not the cause. It still
-  does not pass: a ninth defect is located and left open deliberately, because
-  `compaction_budget._INPUT_CAP_MAX` is coupled to a budget policy and changing
-  it redefines what a compaction may cost. The witness now reaches a proposal
-  and a host decision, and that decision is `reject`. P1 therefore stays
-  unpublished; P2-P6 remain unbuilt. Current technical status and next actions
-  live in `docs/status/CURRENT-STATE.md` and
+  boundary. Across 2026-09-16/17 the P1 witness advanced from dying inside the
+  extension's first check to running arm → proposal → approve → Pi compacts →
+  rebuild check, as ten defects found by live runs were fixed and committed
+  (`git log 1d21ef05..HEAD`). Two headline results: the direction question is
+  closed by measurement — the socket close is teardown, 60 s *after* the
+  extension had already cancelled, not the cause — and the eighth defect was a
+  field (`retainedMessageCount`) Pi never emits, kept alive only by the
+  extension test's own fake. It still does not pass. Two things are open and
+  must not be read as done: the rebuild guard is *marginal* (three measured
+  runs land on both sides of it), and a further failure seen once behind a
+  passing guard **has never been measured**. P1 therefore stays unpublished;
+  P2-P6 remain unbuilt. Current technical status and next actions live in
+  `docs/status/CURRENT-STATE.md` and
   `docs/status/RESUME-NEXT-SESSION.md`.
 - **Two 2026-09-16/17 judgments were withdrawn after measurement.** The
   "session too small" reading of the compaction failure was static-only and a
   decision was taken on it before any value was captured; Pi in fact compacts.
   The "Pi never read the Asterion settings" reading was disproved by importing
-  Pi's own `config.js` in Orb. Both are recorded so the reasons are not
+  Pi's own `config.js` in Orb. The 2026-09-17 "the ninth defect is the budget
+  cap" reading was also superseded — the cap was real but the units mismatch
+  underneath it was the blocker. All three are recorded so the reasons are not
   re-derived: capture the value first, then conclude.
+- **A constant that echoes elsewhere on the path is a warning, not a
+  coincidence.** `4096` appeared four times on the P1 compaction path — the
+  extension's request bound, the host's request bound, `_INPUT_CAP_MAX`, and
+  `reserveTokens` — and every one was either wrong or a copy of a wrong
+  assumption. The tell that exposed the units mismatch was that the operator's
+  `_COMPACTION_INPUT_CAPS` equals the old `_INPUT_CAP_MAX`: the same number in
+  two places meant one of them was being read in the wrong unit.
 
 ## 🔴 Superseded but Worth Remembering
 

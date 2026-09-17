@@ -33,9 +33,11 @@
   `retainedMessageCount` Pi never emits (`c03eecad`), and the compaction
   reservation's units — it was denominated in tokens but fed byte counts
   (`2f744bf5`), and Pi's compaction reserve, which was a quarter of Pi's own
-  default and left its summarization truncated (`0f1a7d98`). A twelfth is
-  located and **left open**: the shrink guard measures canonical-JSON bytes
-  while compaction reduces tokens, so a legitimate compaction is refused. The
+  default and left its summarization truncated (`0f1a7d98`). The rebuild guard
+  is the open boundary: it measures canonical-JSON bytes while compaction
+  reduces tokens, and across three measured runs it lands **on both sides of
+  its own threshold**, so it is marginal rather than uniformly wrong. A further
+  failure seen once behind a passing guard has not been measured at all. The
   witness now runs arm → proposal → approve → Pi compacts → rebuild check, and
   stops there; **P1 stays unpublished.**
   **Phase 4 is also where plan risk 1 (compaction) is finally tested**, and it
