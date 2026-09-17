@@ -2578,3 +2578,18 @@
 ## 2026-09-18
 - 04:33 **Phase 5 P1-mirror 还原**：本会话初尝试 Task1+Task3 脚手架落地（P2 capability 包、assembly、provider注册、Make预设、`P2ContextService`、P2 operator 等）。在调试见证运行中发现 6+ 个独立缺陷（`__main__` guard 缺失、`uv run` 缓存、`P2WorkerOwnerAdapter.close()`验证顺序错、`P2OwnerCleanup`字段名错、`wait_finalization` asyncio.shield 永久挂起），**全部源于「没有先设计，直接镜像 P1 的形状」**——把 P1 专属的 IPython/compaction/control-host 整套都搬过来了，其中大部分与 P2 语义无关。所有 P2 代码、assembly JSON、capability 包、fixture、tests 已删除；Makefile / provider / runtime_binding / first_party_packages 已 `git checkout` 回 HEAD。当前 `git status` 干净、Phase 4 封印 `6a11b960` 完整保留。
 - 04:33 **下一步（计划重写）**：在写任何 P2 代码之前，**先交「P2 vs P1 真实差异表」**——回答"P2 不需要什么 / P2 真正需要什么 / 真实 corpus fixture 长什么样 / operator 是否需要 host1/host2 重建"。待 user 审阅后，再写代码 + 测试 + 见证计划（plan §已验证事实：先 spec 后代码，operator 见证 = 收据驱动，agent 不该用自己的循环替代真见证）
+- 05:58 **Phase 5 重做（设计先行）**：本会话先交「P2 vs P1 真实差异表」——回答"不需要什么（IPython subprocess / compaction / control plane / journal replay / host1-host2 重建 / stage machine）/ 真正需要什么（P2ContextService + P2Oracle + 简单 host Protocol + 一份 receipt）"。然后按规格写代码，每个组件先写单元测试，再写下一层。
+- 05:58 **P2 已写组件（50 测试过 + ruff 干净 + detachment gate 0 + 102 P1 回归过）**：
+  - `src/asterion/applications/prime/p2/context_service.py`（P2ContextService + P2ContextSlice）— 真实服务，非 stub；3 条 fixture 单元测试过
+  - `src/asterion/applications/prime/p2/worker.py`（P2ContextServiceWorker + P2WorkerCleanupReceipt）— 9 测试过
+  - `src/asterion/applications/prime/p2/oracle.py`（P2Oracle + P2RetrievalReceipt + P2OracleReceipt）— 12 测试过；绑定 worker 后不可再 bind
+  - `src/asterion/applications/prime/p2/receipt.py`（P2CleanupReceipt + P2NativeReceipt + seal/build 函数）— 6 测试过
+  - `src/asterion/applications/prime/p2/runtime_binding.py`（P2WorkerOwnerAdapter + _P2RuntimeSession + build_p2_runtime）— 6 测试过；host capabilities 5 个与 spec L113 一致
+  - `src/asterion/applications/prime/p2/operator.py`（P2OperatorResources + main() + _preflight + _build_resources）— 实现薄、依赖 run_composed_application；本地未跑通真 witness（无 Orb 实跑）
+  - `src/asterion/capabilities/prime_programmatic_long_context_native/{__init__.py,host.py,provider.py,payload/capability-package.json,payload/capabilities/prime-programmatic-long-context.json}` — capability 包注册（canonical-JSON 序列化保证）
+  - `src/asterion/applications/prime/assemblies/prime-programmatic-long-context.json` — 5 host_capabilities 与 spec L113
+  - 配线：`first_party_packages.py` 注册 PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE；`provider.py` 加 `prime_programmatic_long_context_application()` + `create_prime_programmatic_long_context_provider()`；`runtime_binding.py` dispatcher 加 `build_p2_runtime` 分支；`__init__.py` re-export 两个新工厂
+  - `Makefile` 加 `asterion-prime-p2-run` 配方（带 `?=` 默认 PI_ENTRY / OPERATOR_ROOT / P2_CORPUS / ARC_ROOT；`uv run --no-cache --isolated`；5 参数：wheel + 3 env vars + Orb VM 调用）
+  - `tests/fixtures/prime_p2/small_corpus.json` — 3 条记录的小语料（canonical-JSON）
+- 05:58 **Phase 5 状态**：Task 1 + Task 2 + Task 3 落地（operator 已写，witness 见证实跑待 operator 授权）。50 单元测试覆盖 context_service / worker / oracle / receipt / runtime_binding / provider 全栈；P2 在 `create_provider()` 与 `pyproject.toml` 中暂未发布（spec §Task 4：见证通过才进 index）。detachment gate 0、ruff 0 新违规、P1 102 测试无回归
+- 05:58 **下一步（待 operator）**：你授权 Orb（`make asterion-prime-p2-run`，env vars 已 `?=` 默认），拿 `exit 0 + sealed receipt_sha256` 后，我合 Task 4（`create_provider()` 加 P2 + `pyproject.toml` index 加 P2 + 还原测试守卫）

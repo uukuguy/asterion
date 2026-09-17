@@ -1,0 +1,1 @@
+"""Native P2 programmatic long-context application; provider-owned execution."""

@@ -22,7 +22,18 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: dci-basic-example dci-runtime-context-example
 .PHONY: test-typescript test-rust check-rust
 .PHONY: asterion-prime-p1-run
+.PHONY: asterion-prime-p2-run
 .PHONY: asterion-prime-p7-solve
+
+# Operator-owned values for the Prime presets. Defaults below are this
+# machine's current install paths; pass any of them as `make <target>
+# VAR=value` to override (e.g. on a fresh install). Empty values fail
+# closed in the operator preflight, so unset defaults are surfaced
+# immediately rather than at the run boundary.
+ASTERION_PRIME_PI_ENTRY ?= /mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js
+ASTERION_PRIME_OPERATOR_ROOT ?= $(CURDIR)
+ASTERION_PRIME_P2_CORPUS ?= $(CURDIR)/tests/fixtures/prime_p2/small_corpus.json
+ASTERION_PRIME_ARC_ROOT ?= /Users/sujiangwen/sandbox/agentic-2026/external-prime/arc-agi-3
 .PHONY: test.native-controller-core.provider-free
 
 help:
@@ -177,6 +188,22 @@ asterion-prime-p1-run:
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		printf '\''%s\n'\'' '\''[asterion-prime-p1-run] native Asterion-prime fixed small verification'\'' >&2; \
 		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p1.operator'\'' asterion-prime-p1-run "$$1" "$(CURDIR)" "$(ASTERION_PRIME_PI_ENTRY)"'
+
+# P2 long-context witness: source material stays outside the prompt; the
+# model performs one bounded programmatic retrieval/transform through the
+# injected ``prime.p2-oracle`` service; the answer oracle passes within the
+# caps. Like P1, this is provider-backed and needs operator authorization.
+# Corpus path, Pi entry and node are operator-owned resources; the preset
+# supplies no provider, model, cost or deadline knob.
+#
+# Pass values either as `make asterion-prime-p2-run VAR=value` or via the
+# shell environment; the ``?=`` defaults fall back to whichever was set.
+asterion-prime-p2-run:
+	@printf '[asterion-prime-p2-run] native Asterion-prime fixed small verification\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p2-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P2_CORPUS="$$4"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated --with "$$1" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p2.operator'\'' asterion-prime-p2-run "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P2_CORPUS)"'
 
 # ARC root, Pi entry and node are operator-owned resources, exactly like
 # ASTERION_PRIME_OPERATOR_ROOT above. The preset supplies no provider, model,

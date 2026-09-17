@@ -2,8 +2,13 @@
 
 from asterion.applications.prime.provider import (
     create_prime_ipython_coding_provider,
+    create_prime_programmatic_long_context_provider,
     create_provider,
 )
 
 
-__all__ = ("create_prime_ipython_coding_provider", "create_provider")
+__all__ = (
+    "create_prime_ipython_coding_provider",
+    "create_prime_programmatic_long_context_provider",
+    "create_provider",
+)
