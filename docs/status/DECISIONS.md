@@ -21,6 +21,7 @@
 | D-2026-09-17-01 | 🟢 active | Denominate the compaction reservation in tokens and convert at the call site |
 | D-2026-09-17-02 | 🟢 active | Treat `retained_message_count` as nullable; Pi states retention by entry id |
 | D-2026-09-17-03 | 🟢 active | Keep Pi's compaction reserve at upstream's default |
+| D-2026-09-17-04 | 🟢 active | Keep the witness rebuild equality; drop the byte shrink bound |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -501,3 +502,30 @@
   deliberately left that way rather than silently widened.
 - Evidence: commit `0f1a7d98`; `compaction_end` carrying a full result with no
   `errorMessage` at 16384, and the token-cap error at 4096.
+
+## D-2026-09-17-04 — Keep the witness rebuild equality; drop the byte shrink bound
+
+- Status: 🟢 active
+- Context: The witness's `persisted()` required both that the rebuilt context
+  equal the expected projection and that `countRebuiltContext(post) <
+  pre_units`. Pi reports its own compaction as shrinking
+  (`tokensBefore: 1863 → estimatedTokensAfter: 1353`), but the metric compared
+  canonical-JSON **bytes**, and a markdown-heavy summary costs more bytes per
+  token than the conversation it replaces. Five measured live runs landed on
+  both sides of the bound with the projections equal every time, the closest
+  refusing by 23 bytes (`post=9952 pre=9929`).
+- Decision: Drop the byte bound on both sides — the extension's `persisted()`
+  and the host's `validate_compaction_witness`. The projection equality is the
+  invariant; the summary's own size is Pi's to choose.
+- Rationale: The equality already binds the rebuild to Pi's retained tail plus
+  the summary, so the only free quantity is the summary's size. A bound on it
+  refused legitimate compactions rather than catching a pathology, which makes
+  it a mis-refusal rather than a guard.
+- Consequence: `pre_units` stays validated against the pre-context projection
+  (`pre_units == count_rebuilt_context(pre)`) and `after_context_tokens` is
+  still reported as evidence; only the bound is gone. A replacement in Pi's own
+  token unit was rejected for this pass: the after-count lives in the
+  compaction *result*, not the entry, so the persisted path has no producer for
+  it. `context.py` used the same metric and moved with it.
+- Evidence: commits `97c309e4`; the five measured pre/post pairs; decision taken
+  by the operator on 2026-09-17.
