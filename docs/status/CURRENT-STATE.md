@@ -24,15 +24,18 @@
   `PrimeContextWitnessSession`. P1 also no longer resolves itself out of the
   published provider, so it composes while unpublished.
   **The live witness completes stage one end to end and Pi now performs a real
-  compaction; it does not pass, and P1 stays unpublished.** Seven defects found
+  compaction; it does not pass, and P1 stays unpublished.** Eight defects found
   by live runs are fixed (`git log 1d21ef05..HEAD`, 2026-09-16/17): the cell
   validator's underscore rule and its scope, `safe_open`'s missing `newline`,
   the worker-poison granularity, `with`-body bindings, the reserved IPython
-  names, the task statement's missing rules, and `validate_pi_compact_result`
-  not expecting Pi's leading `agent_settled` event. An eighth — the extension
-  cancelling compaction because Asterion's private channel socket closes under
-  it — is root-caused but **not closed**: whether that close causes the failure
-  or follows the witness's own 60 s timeout is unmeasured.
+  names, the task statement's missing rules, `validate_pi_compact_result` not
+  expecting Pi's leading `agent_settled` event, and the extension requiring a
+  `retainedMessageCount` Pi never emits (`c03eecad`). A ninth is located and
+  **left open deliberately**: `compaction_budget._INPUT_CAP_MAX = 4096` is the
+  same 4 KB payload assumption in a third place, and it is coupled to the
+  16000-token reservation policy, so changing it redefines what a compaction
+  may cost. The witness now reaches a proposal and a host decision, and that
+  decision is `reject`.
   **Phase 4 is also where plan risk 1 (compaction) is finally tested**, and it
   is being exercised for the first time.
   **Phase 3 is complete: native P7 is revalidated end to end.** Run

@@ -1,147 +1,135 @@
-# Next-Session Handoff
+# Live Session Checkpoint
 
-> Updated: 2026-09-17 12:15, end of session. This session's commits are
-> `git log 1d21ef05..HEAD` — 31 of them, from the loader change through the
-> probe forensics. Stated as a range on purpose: state-only bookkeeping lands
-> after this file, so a hard-coded count would go stale on commit.
+> Updated: 2026-09-17 14:16. **Session remains active — not a final handoff.**
+> Supersedes the 12:15 handoff, whose central open question is now answered.
 
 ## TL;DR
 
-1. **Seven defects that blocked the P1 witness are fixed and committed.** Each
-   was found by a live run and confirmed by value, not by reading code. Stage
-   one now passes end to end and Pi performs a real compaction.
-2. **An eighth was root-caused part of the way and deliberately left open.**
-   The extension cancels compaction because Asterion's private channel socket
-   closes under it. **Whether that close is the cause or the consequence of
-   the witness's own 60 s timeout is NOT established** — the teardown path
-   closes the witness too, so both readings fit the evidence. Treat the chain
-   as unclosed.
-3. **The next step is one timestamped measurement**, not more reading: record
-   when the extension rejects and when the witness's 60 s expires, and see
-   which came first. That decides which side to investigate.
+1. **The eighth defect is found, fixed and committed** (`c03eecad`), by value,
+   not by classification. The extension required `summary.retainedMessageCount`,
+   which **Pi never emits** — the only producer was the extension test's own
+   fake, which is why the suite stayed green while every live run died.
+2. **The direction question is closed by measurement.** The socket close is a
+   **consequence** of the witness's own 60 s timeout, not its cause; the
+   extension rejected 3 ms after receiving the arm frame, 60.057 s earlier.
+   The extension's own 5 s channel timeout never fired.
+3. **A ninth defect sits behind it, and it is a deliberate decision, not a
+   patch.** With the two fixes in place the extension sends a proposal for the
+   first time and the host answers it — but rejects, because
+   `compaction_budget._INPUT_CAP_MAX = 4096` is the **same 4 KB assumption in a
+   third place**, coupled to a budget policy. **P1 still does not pass.**
 
 ## 已验证事实
 
-Evidence: live probe runs, RPC event values, captured frame fields, passing
-tests. Each carries its commit.
+Evidence: live probe runs with epoch-ms marks on both ends, captured values,
+passing targeted tests. Each carries its commit.
 
-- **Cell naming (`afb2f3b1`, corrected at `b096e589`).** A cell may bind `_f`.
-  The exemption is order- and scope-aware; a binding inside an `if`, a loop
-  body or a comprehension does not count outside it.
-- **`safe_open` signature (`0911d846`).** It took `encoding` but not `newline`,
-  so `open(..., encoding="utf-8", newline="")` — the exact-bytes form the task
-  asks for — raised `TypeError` inside the worker.
-- **Poison granularity (`e4fbb1ea`, D-2026-09-16-03).** `_validate` runs before
-  `run_code`, so a refused cell has run nothing; the frame now carries
-  `executed` and only a cell that ran poisons the worker. This is what let a
-  later run survive a refused cell and expose the next defect.
-- **`with`-body bindings (`98937ac0`).** A `with` body always runs, so its
-  bindings count afterwards.
-- **Reserved names (`7c04f57b`).** `_`, `_i`, `_ii`, `_iii`, `_ih`, `_oh`,
-  `_dh`, `_exit_code` and `_i1`..`_iN` are denied outright, bound or not —
-  which is what makes the `with` rule sound rather than fail-open. Cost:
-  `for _i in range(n)` is now refused.
-- **Task statement (`acc5ad1f`, `2998ee78`).** It states the one-cell-per-turn
-  rule the oracle already enforced, and that the allowed modules must each be
-  imported.
-- **Compact terminal (`f5a41964`).** `validate_pi_compact_result` required
-  exactly three events; Pi sends four, because `PiSession.compact()` opens with
-  `await this.abort()` and so settles the agent first. One leading
-  `agent_settled` is now accepted; everything else is unchanged.
-- **Two security-review findings were real and are fixed** (`b096e589`,
-  `7c04f57b`). The first underscore exemption was tree-wide, admitting four
-  shapes whose binding never runs; the first `with` rule was fail-open because
-  `__exit__` can suppress an exception.
-- **The extension's failure is visible now.** Temporarily giving
-  `context-witness.ts`'s bare `catch {` a binding shows
-  `ASTERION-WITNESS-FAIL Error: Asterion context witness is unavailable`, with
-  no frame of the extension's own in the stack — only
-  `processTicksAndRejections → ExtensionRunner.emit → AgentSession.compact`.
-- **Everything else in the chain is measured:** Pi emits
-  `["agent_settled","compaction_start","compaction_end","response"]`;
-  `compaction_end` carries `aborted: True`; the native witness receives no
-  frame at all (`TimeoutError`, `wait_seconds: 60`).
-- **Pi resolves the settings path correctly** (verified in Orb by importing
-  Pi's own `config.js`): `PI_CODING_AGENT_DIR` → `getAgentDir()` →
-  `getSettingsPath()`, file present. So the "Pi never read the settings"
-  theory is **disproved**, and the extension's hard `SETTINGS` check against
-  `{enabled: false, reserveTokens: 4096, keepRecentTokens: 256}` — which
-  `_AGENT_SETTINGS` already matches exactly — is **not** the failure.
+- **The close follows the timeout (`c03eecad`, measured).** One clock:
+  `host-arm-sent` T+0.000 → extension `data-ok`/`read-buffered`/`before-arm`
+  T+0.001 → extension `before-failed` **T+0.003** → host
+  `witness-receive-FAILED wait=60 TimeoutError` and `host-socket-closed`
+  **T+60.063**, caller `backend.py:1241` (teardown). The extension did not time
+  out: no `bounded-timeout` mark ever fired.
+- **The extension failed inside `before()`, between the arm read and the
+  proposal write.** Step marks put it after `s6-tokens` and, one layer down,
+  after `p5-role`; the last value read was
+  `q1-summaryKeys=role,summary,tokensBefore,timestamp` and
+  `q4-rawRetained=undefined`.
+- **Pi has no retained count.** `retainedMessageCount` appears **0 times** in
+  the installed Pi bundle; Pi's `createCompactionSummaryMessage(summary,
+  tokensBefore, timestamp)` emits exactly the four keys observed. Pi expresses
+  retention by `firstKeptEntryId`, not by a count.
+- **The field is Asterion's own.** It appears in **no spec or plan**, entered
+  with the witness feature (`59e14138`), and was pinned by a test (`28a573eb`)
+  first. `countRebuiltContext` — the size accounting — does not use it.
+- **The 4 KB assumption has three sites**, all from `59e14138`: the extension's
+  request bound (`context-witness.ts`, 4096), the host's request bound
+  (`context.py:421`, 4096), and `compaction_budget.py:19 _INPUT_CAP_MAX`. The
+  summaries request **embeds the serialized conversation**, so all three cap
+  the conversation itself (observed `main` = 7114 and 7721 bytes).
+- **Fixed and verified (`c03eecad`).** The field is nullable end-to-end,
+  sharing one helper with `projectPrimeContext` (two copies of the rule were
+  what diverged); both request bounds now use the transport frame cap. TS 16
+  tests, `test_asterion_prime_context` 20, `test_asterion_prime_backend` 41,
+  detachment gate 0, ruff clean.
+- **The proposal now flows.** Post-fix run: `write-start phase=proposal` →
+  `write-ok` → `read-ok` → `before-decision status=reject`, with
+  `host-decide approved=False remaining_callbacks=4 deadline_in=592.18`.
+- Carry-over, still true: `validate_pi_compact_result` accepts one leading
+  `agent_settled`; Pi resolves its settings path correctly; the cell-validator,
+  `safe_open`, poison-granularity, `with`-body and reserved-name fixes from the
+  previous session are all in.
 
 ## 当前判断
 
 Chosen on current evidence; not proven.
 
-- **The socket close is the pivot and its direction is unknown.** `close()` →
-  `_close_transport()` → `socket.close()` is the only path that rejects the
-  extension. Its only caller is teardown (`operator.py:679-680`, and
-  `backend.close()` closes the witness by design). If teardown runs *after*
-  the 60 s witness timeout, the close is a consequence and the real question
-  returns to "why the extension never sends a proposal". Both readings fit
-  everything measured so far.
-- **Do not build on the "session too small" reading** — withdrawn, see below.
-- **The overall shape is now clear**: the failures were mostly a model writing
-  ordinary, correct Python that a narrower environment refused, plus one
-  contract mismatch about Pi's event stream. That class looks exhausted; what
-  remains is the channel/timing question.
+- **The ninth defect is a budget-policy decision, not a constant to bump.**
+  `_INPUT_CAP_MAX` is coupled to `_RESERVED_TOKENS_MAX = 16000` and
+  `_COST_MICRO_UNITS_MAX = 125000`: two branches plus two 3276-token outputs
+  leave only 4724 per branch, so a **symmetric** per-branch cap cannot hold a
+  7114-byte main request while the total holds. The real shape is asymmetric
+  (one large main branch, one small turn-prefix branch). Changing it redefines
+  what a compaction may cost.
+- **Whether the 4 KB family has a fourth site is unchecked.** The three found
+  were located by following the failure, not by auditing for the constant.
+- **The overall shape is unchanged:** the failures are mostly a narrower
+  environment refusing ordinary correct work, plus contract mismatches with Pi.
+  The class looks large but each instance has been cheap to fix once measured.
 
 ## 历史归档
 
-Rejected or superseded paths, recorded so they are not re-walked.
+Rejected or superseded paths, so they are not re-walked.
 
-- **"The witness session is too small, so `prepareCompaction` returns
-  undefined."** WITHDRAWN. Pi compacts; there is no "Nothing to compact". It
-  was static-only reasoning reported as root-caused before any value was
-  captured, and a decision (`keepRecentTokens`) was taken on it. It must not
-  be implemented for that reason.
-- **"Pi never read the Asterion settings, so the extension's SETTINGS check
-  fails."** Disproved by measurement (see above).
-- **"The extension fails a check inside `before()`."** Not established — the
-  stack has no extension frame, which points at a rejected promise (the
-  channel), not a check.
-- **"Asterion's `session.compact` RPC does not fire the hook."** Wrong:
-  `compact()` is the shared entry and emits it.
-- **"Something outside kills the worker."** Wrong: a failed cell poisons it and
-  the close path SIGTERMs its own group.
-- **"Capture worker stderr."** Both runs returned `b''`; read the frame.
-- Carried over: rebuilding the Prime compaction dependency against another
-  source; letting the extension import Pi's compaction internals; treating
-  `customInstructions` as sufficient; asking upstream for
+- **"Asterion's private channel socket closes under the extension, causing the
+  cancel."** Half right: the close is real but is teardown, 60 s *after* the
+  extension had already cancelled. Do not treat the channel as the suspect.
+- **"The extension's 5 s channel timeout fired."** Disproved — no
+  `bounded-timeout` mark in any run.
+- **"Fabricate a retained count so the host bound stays strict."** Rejected: it
+  would make a bound that can never fail, the "always-true predicate"
+  anti-pattern this project already recorded.
+- Carried over, still rejected: the "session too small" reading (Pi compacts);
+  "Pi never read the settings" (disproved); "a check inside `before()` fails"
+  (it was a value, not a check, that killed it — but the checks are still
+  un-named as a group); "capture worker stderr"; rebuilding the Prime
+  compaction dependency; letting the extension import Pi's compaction
+  internals; `customInstructions` as sufficient; asking upstream for
   `replaceInstructions`; two Pi instances for independence.
 
 ## 未完成边界
 
 Must not be inferred as complete from local code or unit tests.
 
-- **The P1 witness has NOT passed. P1 stays unpublished.** Seven defects fixed
-  is not a passing witness, and the witness has still never run with all seven
-  in place and reached its own validation.
-- **The channel chain is NOT closed.** One link is a hypothesis in both
-  directions.
+- **The P1 witness has NOT passed. P1 stays unpublished.** It now reaches a
+  proposal and a host decision, and that decision is `reject`.
 - **Phases 4-9 remain unstarted. P1-P7 native implementations: 1 of 7.**
+- **The extension test fake still lies.** `test/ipython-extension.test.mjs`'s
+  `buildSessionContext` returns `{role, retainedMessageCount}` — the exact
+  shape Pi never produces. Fixing it is the regression guard for the eighth
+  defect and has **not** been done.
+- The ninth fix is **not** made; `_INPUT_CAP_MAX` is untouched.
 - `validate_compaction_witness` still requires `entry.get("fromHook") is not
   False`; relax only as part of D-2026-09-16-01.
 - Known-unverified carry-overs: `test/context-witness.test.mjs` cannot run;
   `tests/test_core_only_install.py` was already red at HEAD.
 - `.asterion-private/p1-diagnose.py`, `p1-probe.sh` and `p1-validate-check.py`
-  are temporary diagnostics. Delete them when the diagnosis is done.
+  are temporary diagnostics. Delete them when the diagnosis is done. The probe
+  script now also carries host-side decide instrumentation.
 - Phase 3's completion stays bounded to Level 1 of one game, seed 0,
   `deepseek-v4-flash`, `promotion: unpromoted`.
 - The `climb/` loop is dormant and its `next_action` is stale.
 
 ## 下一动作
 
-1. **Measure the order, do not read for it.** Timestamp the extension's
-   rejection and the witness's 60 s expiry in one run. If the extension
-   rejects first, the channel close is a cause and belongs to Asterion's
-   teardown or transport; if it rejects after, the cause is upstream and the
-   question is why no proposal frame is ever written.
-2. **To see the extension's reason again**, temporarily bind the `catch` in
-   `context-witness.ts` and print the stack with `data:text/javascript` frames
-   filtered — unfiltered output exceeds Pi's stderr cap and truncates the
-   event stream instead (observed). Restore the bare catch afterwards; it is
-   currently restored.
-3. Then re-run the witness with all seven fixes and this one.
+1. **Decide the compaction budget policy** (`compaction_budget.py:19`). The
+   real shape is asymmetric, so the question is whether `_INPUT_CAP_MAX` bounds
+   each branch, the sum, or is derived from `_RESERVED_TOKENS_MAX`. This is a
+   cost decision and is deliberately not made unilaterally.
+2. **Then re-run** `sh .asterion-private/p1-probe.sh` and see whether the
+   witness completes or reveals a tenth defect.
+3. **Make the extension test fake match Pi** — drop `retainedMessageCount` from
+   `test/ipython-extension.test.mjs` so the suite would have caught this.
 
 ## Ready-to-paste commands
 
@@ -152,15 +140,25 @@ sh .asterion-private/p1-probe.sh
 # Zero-cost boundary check (both sides of the underscore rule):
 uv run python .asterion-private/p1-validate-check.py
 
-# Prime P1 tests, including the underscore, open and oracle boundaries:
-uv run python -m unittest -v tests.test_asterion_prime_p1_worker
-
-# The compact terminal contract:
+# Targeted regressions for the compaction path:
+uv run python -m unittest tests.test_asterion_prime_context
 uv run python -m unittest tests.test_asterion_prime_backend
+(cd packages/typescript/asterion-prime-extension && npm run build && \
+  node --test test/ipython-extension.test.mjs)
 
 # Detachment gate (expect 0):
 uv run python -c "from pathlib import Path; from asterion.agents.prime.detachment import find_source_detachment_violations as f; print(len(f(Path('.'))))"
 ```
+
+**Re-adding the diagnostics.** The extension-side marks were removed from
+production source (`git checkout` then the two real fixes re-applied), so
+`context-witness.ts` is clean. The technique is recorded in
+`docs/status/JOURNAL.md` (2026-09-17): a `stamp(tag)` helper writing
+`AST-W <epoch-ms> <tag>` to stderr, plus a `close(reason)` tag to name the
+caller; the host side uses the same shape with an `AST-P` prefix. Keep the
+volume low — unfiltered stacks exceed Pi's stderr cap and truncate the event
+stream (observed). The host-side `_stamp`/`_caller` helpers and the decide
+hooks are still present in `.asterion-private/p1-diagnose.py`.
 
 **Rebuilding the extension** (needed if `context-witness.ts` changes): `uv
 build --wheel` recompiles it through `hatch_build.py`, so the probe picks the

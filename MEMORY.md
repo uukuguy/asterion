@@ -127,13 +127,17 @@
   **P1-P7 native implementations stand at 1 of 7** — P7 only, at its proven
   boundary. Between 2026-09-16 and 2026-09-17 the P1 witness advanced from
   failing at the first turn to completing stage one and driving a real Pi
-  compaction, as seven defects found by live runs were fixed and committed
-  (`git log 1d21ef05..HEAD`). It still does not pass: an eighth defect — the
-  extension cancels compaction because Asterion's private channel socket closes
-  under it — is root-caused but open, because whether that close causes the
-  failure or follows the witness's own 60 s timeout has not been measured. P1
-  therefore stays unpublished; P2-P6 remain unbuilt. Current technical status
-  and next actions live in `docs/status/CURRENT-STATE.md` and
+  compaction, as eight defects found by live runs were fixed and committed
+  (`git log 1d21ef05..HEAD`). The eighth — the extension requiring a
+  `retainedMessageCount` Pi never emits — was found by value, and the same
+  measurement closed the direction question: the socket close is teardown,
+  60 s *after* the extension had already cancelled, not the cause. It still
+  does not pass: a ninth defect is located and left open deliberately, because
+  `compaction_budget._INPUT_CAP_MAX` is coupled to a budget policy and changing
+  it redefines what a compaction may cost. The witness now reaches a proposal
+  and a host decision, and that decision is `reject`. P1 therefore stays
+  unpublished; P2-P6 remain unbuilt. Current technical status and next actions
+  live in `docs/status/CURRENT-STATE.md` and
   `docs/status/RESUME-NEXT-SESSION.md`.
 - **Two 2026-09-16/17 judgments were withdrawn after measurement.** The
   "session too small" reading of the compaction failure was static-only and a
