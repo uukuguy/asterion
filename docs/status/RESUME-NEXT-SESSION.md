@@ -7,19 +7,16 @@
 
 ## TL;DR
 
-1. **Stage one now passes end to end and compaction actually runs.** Run
-   `p1-a4c9d893d2d7998a878abf87` completed setup, verify and the oracle, then
-   reached `compact.admit` where Pi emitted
-   `["agent_settled","compaction_start","compaction_end","response"]`.
-2. **The "session too small" reading was WRONG and is withdrawn.** Pi did
-   compact; there was no "Nothing to compact". The decision to lower
-   `keepRecentTokens` was taken on that wrong reading and must not be
-   implemented. The real failure is in Asterion's own RPC layer:
-   `ValueError('Pi RPC compact terminal is invalid')`, swallowed by
-   `_compact`'s `except`.
-3. **The next question is narrow:** why Asterion's terminal-event check
-   rejects the sequence Pi actually sends. Six defects are fixed; this is the
-   seventh and the first one that is not about the cell environment.
+1. **All seven defects are now fixed, and the last one was found by value.**
+   The compaction failure was `validate_pi_compact_result` requiring exactly
+   three events while Pi sends four: `PiSession.compact()` opens with
+   `await this.abort()`, so `agent_settled` leads the stream. `f5a41964`
+   accepts one leading settled event and validates everything else unchanged.
+2. **The witness has still never passed, and it has never been run with all
+   seven fixes in place.** The last run died at the terminal check, which is
+   now fixed. The next run is the first real test of the whole path.
+3. **Run `p1-a4c9d893d2d7998a878abf87` reached the furthest point so far** —
+   setup, verify, oracle and `stage1.complete`, then a real Pi compaction.
 
 ## 已验证事实
 
@@ -137,12 +134,10 @@
 
 ## 下一动作
 
-1. **Read `PiRpcSession.compact`'s terminal check.** It raised
-   `Pi RPC compact terminal is invalid` for
-   `["agent_settled","compaction_start","compaction_end","response"]`. Find
-   which sequence it accepts and why `compaction_end` is not it — that is the
-   whole remaining gap on this path. The probe hook already records the event
-   list, so a second run is only needed if the sequence varies.
+1. **Re-run the live witness.** All seven fixes are in the tree, and it has
+   never been run with all of them present. That run is the first one that can
+   exercise the whole path: cells, oracle, Pi's compaction, Asterion's
+   terminal check, and then the witness's own compaction validation.
 2. **Independently, make `_compact` await the RPC result and the witness
    proposal concurrently**, so Pi's own failure surfaces instead of a bare
    timeout. This is a diagnosability fix worth having either way.

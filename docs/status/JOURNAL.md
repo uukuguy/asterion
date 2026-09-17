@@ -2496,3 +2496,12 @@
 - 23:31 用户裁决：**外泄保留 + 硬禁 IPython 保留名**。落地 [7c04f57b]：`_`/`_i`/`_ii`/`_iii`/`_ih`/`_oh`/`_dh`/`_exit_code` 加入 forbidden_names，`_i\d+` 由正则规则拒绝——**绑定与否都拒**。这样「自造名读不到东西（NameError），保留名读不到（被拒）」，外泄即安全
 - 23:31 **代价（已如实记入提交信息，不隐藏）**：`_i` 是极常见的循环变量，`for _i in range(n)` 现在会被拒
 - 23:31 验证：边界矩阵 **25 例全过**（含保留名用例）；worker 29 测试全过；门禁 0；ruff 干净
+
+## 2026-09-17
+- 10:43 **第七个故障定位并修复 [f5a41964]**：`validate_pi_compact_result`（`pi_rpc.py:402`）要求**恰好 3 个**事件 `("compaction_start","compaction_end","response")`，而 Pi 实发 **4 个**——开头多一个 `agent_settled`
+- 10:43 原因：Pi 的 `compact()` 第一行是 `await this.abort()`（`agent-session.js:1475`），中止当前操作先让 agent settled，故事件流是 `agent_settled` + 那三个。**是 Pi 的既定行为，不是异常事件**
+- 10:43 定位方式：探针日志里 `RPC COMPACT CAUSE (depth 0)` 的 traceback 精确指向 `pi_rpc.py:406`（`len(result.events) != 3`）——**又一次靠取回真实值而非推断定位**
+- 10:43 修法：计数前剥掉**一个**前导 `agent_settled`；其后所有校验不变（三个事件仍须类型、顺序、序列号连续，payload 仍逐字段校验）。其它前导事件、第二个 settled、截断的流仍拒绝
+- 10:43 验证：backend **41 测试全过**（含 4 个新契约测试：接受前导 settled / 三事件流不变 / 其它前导仍拒 / 截断仍拒）；reusable+backend-rpc+operator 44 测试过；门禁 0；ruff 干净
+- 10:43 为何 P7 从未碰到：P7 单回合、不做 compact。**P1 是第一个走压缩路径的应用**
+- 10:43 本会话至此七个故障**全部修复**；下一步是重跑 live witness 验证端到端（尚未跑）
