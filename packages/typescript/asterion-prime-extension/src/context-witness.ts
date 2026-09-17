@@ -10,7 +10,7 @@ export const SUMMARIZATION_MATERIAL_VERSION = "asterion.prime-summarization/v1";
 const MAX_FRAME = 1024 * 1024;
 const NONCE = /^[0-9a-f]{64}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-const SETTINGS = Object.freeze({ enabled: false, reserveTokens: 4096, keepRecentTokens: 256 });
+const SETTINGS = Object.freeze({ enabled: false, reserveTokens: 16384, keepRecentTokens: 256 });
 const BASE_KEYS = ["authority_sha256", "command_nonce", "launch_nonce", "phase", "protocol"];
 const ARM_KEYS = [...BASE_KEYS, "summarization"];
 // Pi host mechanics this pinned source may not import for itself: the source is

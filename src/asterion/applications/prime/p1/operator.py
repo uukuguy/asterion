@@ -946,7 +946,7 @@ _COMPACTION_INSTRUCTIONS = {
 # and reads its settings from ``settings.json`` inside it.
 _AGENT_DIR_ENV = "PI_CODING_AGENT_DIR"
 _AGENT_SETTINGS = {
-    "compaction": {"enabled": False, "reserveTokens": 4096, "keepRecentTokens": 256},
+    "compaction": {"enabled": False, "reserveTokens": 16384, "keepRecentTokens": 256},
     "retry": {"enabled": False},
 }
 _IPYTHON_VERSION = "8.39.0" if sys.version_info[:2] == (3, 10) else "9.17.1"
