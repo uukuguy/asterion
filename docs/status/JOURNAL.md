@@ -2514,3 +2514,14 @@
 - 12:06 **方法学**：`fail()` 对所有检查点抛同一条消息——项目 MEMORY 里「分类不是原因，要取回真值」的又一实例；**栈是唯一能区分调用点的东西**，而它被空绑定 catch 丢弃
 - 12:06 扩展的临时诊断已**还原**，工作树干净；取证方法记在 RESUME，需要时可重新加
 - 12:06 至此：七个故障已修并提交，第八个（扩展通道被提前关闭）根因链闭合到最后一环
+- 13:26–13:38 第八个故障**根因取回（真值，非推断）**：给扩展与宿主两侧打 epoch-ms 标记后实跑。宿主 `host-arm-sent` T+0.000 → 扩展 `data-ok`/`read-buffered`/`before-arm` T+0.001 → **扩展 T+0.003 `before-failed`**；宿主 `witness-receive-FAILED wait=60` 与 `host-socket-closed` 在 **T+60.063**。**socket 关闭是 60s 超时的后果，不是原因**——RESUME 中悬置的方向问题就此闭合（另一读法被排除）
+- 13:38 **扩展侧 5s `#timeout` 从未触发**（无 `bounded-timeout` 标记）：扩展在 `before-arm` 后 2ms 内自行失败，不是超时。逐级下钻 `preparedMaterial` 取回：`q1-summaryKeys=role,summary,tokensBefore,timestamp`、`q4-rawRetained=undefined`
+- 13:38 **确切缺陷**：`context-witness.ts:309` 读 `summary.retainedMessageCount`，而 **Pi 从不提供该字段**——Pi bundle 中 `retainedMessageCount` 出现 **0 次**，Pi 的 `createCompactionSummaryMessage` 只产出 `{role,summary,tokensBefore,timestamp}` → `integer(undefined)` → `fail()` → 取消压缩 → 宿主空等 60s。**唯一曾提供该字段的是测试自己的假实现**（`test/ipython-extension.test.mjs:501`），故单测全绿而实跑必死
+- 13:38 与第七个故障同属一类：**Asterion 与 Pi 的契约不符**（第七个是 `validate_pi_compact_result` 只认 3 事件而 Pi 发 4）。教训：单测只验证了假实现，未验证 Pi 的真实形状
+- 13:44 **发现两个耦合缺陷，待裁决**：`preparedMaterial:309` 用严格 `integer()`，而同一字段在 `projectPrimeContext:230-233` 与宿主 `context.py:257-258` 都**显式容忍缺失**（→ `null`）；其后 `context.py:495-505` 的 `expected_post` 又要求 post 上下文的 compactionSummary 携带**声明的整数**，而真实投影给 `null`——只修前者会把失败推到后者。**属公共契约选择，不擅自定**
+- 14:16 **裁决（用户授权自判）：`retained_message_count` 是 Asterion 自造，不是 Pi 缺失。** 依据：Pi 用 `firstKeptEntryId`（entry id）表达保留，不用条数；该字段在 **spec/plan 中零出现**，随 witness 功能引入（`59e14138`），且先由测试 `28a573eb` 钉住；`countRebuiltContext`（尺寸核算）根本不用它。故改为**端到端可空**，**不伪造计数**——伪造会让宿主 `declared >= actual` 下界变成永不失败的检查（正是项目已记录的「恒真谓词」反模式）
+- 14:16 落地 [c03eecad]：扩展侧对齐 `projectPrimeContext` 既有容忍写法并**共用 `nonnegativeSafeInteger`**（两处曾各写一份，正是本次分叉的成因）；宿主 `context.py:404` 下界改为**仅在真有生产者时生效**（takeover 形态 D-2026-09-16-01 才提供）。校验器 257-258 与 `expected_post` 原本就已容忍 null，无需改
+- 14:16 同批修掉**同族第二个常量**：摘要请求内嵌整段序列化会话，两侧对它的 `4096` 字节上限实际是**给会话本身设上限**（实测 main=7114/7721 字节）。两侧改按**传输帧上限** `_MAX_FRAME` 约束——唯一非任意值，且通道写入已保证总量
+- 14:16 **实跑验证**：扩展**首次成功写出 proposal**（`write-ok`）、宿主收到并应答（`before-decision status=reject`）。**仍未通过**：第九个缺陷在宿主侧——`compaction_budget.py:19 _INPUT_CAP_MAX = 4096` 是**同一常量在第三处**，`_validated_caps` 因 7114>4096 抛错，被 `except (ValueError, TypeError)` 吞成 `approved=False`
+- 14:16 **第十个缺陷不擅改**：`_INPUT_CAP_MAX` 与 `_RESERVED_TOKENS_MAX=16000`、`_COST_MICRO_UNITS_MAX=125000` 构成**预算策略**（2×input+2×3276 ≤ 16000 ⇒ 每支上限仅 4724，装不下 7114 的 main 支），改它等于重定压缩成本政策，留作正式决策
+- 14:16 验证：TS 扩展 **16 测试过**、`test_asterion_prime_context` **20 过**、`test_asterion_prime_backend` **41 过**、门禁 **0**、ruff 干净。扩展侧诊断标记已全部还原（`git checkout` 后仅重放两处真实修复），生产源码无残留
