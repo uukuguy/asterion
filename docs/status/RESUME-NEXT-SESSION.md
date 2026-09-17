@@ -1,8 +1,8 @@
 # Next-Session Handoff
 
-> Updated: 2026-09-17 16:15, end of session. This session's commits are
-> `git log 1d21ef05..HEAD` — 20 of them. Stated as a range on purpose, so a
-> hard-coded count cannot go stale on commit.
+> Updated: 2026-09-17 16:15, end of session. The commits covering the P1
+> witness work are `git log 1d21ef05..HEAD`. Stated as a range on purpose: a
+> count goes stale the moment this file is committed.
 > Supersedes the 12:15 handoff, whose central open question is now answered.
 
 ## TL;DR
