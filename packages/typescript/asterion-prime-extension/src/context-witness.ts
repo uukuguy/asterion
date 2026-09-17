@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { closeSync, fstatSync } from "node:fs";
 import { Socket } from "node:net";
 import { TextDecoder } from "node:util";
-import { canonicalJson, projectPrimeContext, type PrimeContextProjectionV1 } from "./context-projection.js";
+import { canonicalJson, nonnegativeSafeInteger, projectPrimeContext, type PrimeContextProjectionV1 } from "./context-projection.js";
 import { countRebuiltContext } from "./context-counter.js";
 
 export const CONTEXT_WITNESS_PROTOCOL = "asterion.prime-context-witness/v1";
@@ -291,7 +291,12 @@ function preparedMaterial(preparation: RecordValue, branch: unknown[], systemPro
     messages_to_summarize: messages, turn_prefix_messages: prefix,
     is_split_turn: preparation.isSplitTurn, previous_summary: optionalString(preparation.previousSummary),
     custom_instructions: instructions, retained_context_projection: projectPrimeContext(rebuilt.slice(1), systemPrompt),
-    retained_message_count: integer(summary.retainedMessageCount),
+    // Pi states retention by `firstKeptEntryId` and never emits a retained
+    // count, so a witness proposal declares null. Only a real producer (the
+    // takeover shape, D-2026-09-16-01) supplies one. This mirrors
+    // `projectPrimeContext`, which already tolerates the same absence.
+    retained_message_count: summary.retainedMessageCount === undefined || summary.retainedMessageCount === null
+      ? null : nonnegativeSafeInteger(summary.retainedMessageCount),
   };
 }
 
@@ -349,7 +354,10 @@ export class ContextWitness {
       const proposed = preparedMaterial(preparation, branch, systemPrompt, instructions, this.#deps);
       const pre = projectPrimeContext(this.#deps.buildSessionContext(branch).messages, systemPrompt);
       const [main, prefix] = requests(preparation, instructions, this.#deps, summaryMaterial);
-      if (Buffer.byteLength(main) > 4096 || (prefix !== null && Buffer.byteLength(prefix) > 4096)) fail();
+      // The request embeds the serialized conversation being summarized, so a
+      // real one exceeds any small constant; the transport frame cap is the
+      // only non-arbitrary limit, and the channel write enforces the total.
+      if (Buffer.byteLength(main) > MAX_FRAME || (prefix !== null && Buffer.byteLength(prefix) > MAX_FRAME)) fail();
       const preJson = canonicalJson(pre);
       this.#proposal = { ...this.#identity, phase: "proposal", first_kept_entry_id: proposed.first_kept_entry_id,
         covered_leaf_id: proposed.covered_leaf_id, preparation: proposed, preparation_sha256: digest(proposed),

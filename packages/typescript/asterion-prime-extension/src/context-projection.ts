@@ -84,7 +84,7 @@ function safeInteger(value: unknown): number {
   return value;
 }
 
-function nonnegativeSafeInteger(value: unknown): number {
+export function nonnegativeSafeInteger(value: unknown): number {
   const parsed = safeInteger(value);
   if (parsed < 0) invalid();
   return parsed;

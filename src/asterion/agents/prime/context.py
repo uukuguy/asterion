@@ -401,7 +401,13 @@ def _validate_proposal(
     retained = _validate_projection(preparation["retained_context_projection"])
     if retained["system_prompt"] != pre["system_prompt"]:
         _fail()
-    if _integer(preparation["retained_message_count"]) < len(retained["messages"]):
+    # Pi states retention by `firstKeptEntryId` and never emits a retained
+    # count, so a witness proposal declares null. The bound applies only when a
+    # producer actually supplies one (the takeover shape, D-2026-09-16-01).
+    declared_retained = preparation["retained_message_count"]
+    if declared_retained is not None and _integer(declared_retained) < len(
+        retained["messages"]
+    ):
         _fail()
     for key in ("main_summary_request", "turn_prefix_summary_request"):
         request = p[key]
@@ -410,9 +416,12 @@ def _validate_proposal(
                 _fail()
             continue
         parsed = _json(_string(request))
+        # The request embeds the serialized conversation being summarized, so a
+        # real one exceeds any small constant. The transport frame cap is the
+        # only non-arbitrary limit; the channel write enforces the total.
         if (
             encode_prime_context_v1(parsed).decode() != request
-            or count_rebuilt_context(parsed) > 4096
+            or count_rebuilt_context(parsed) > _MAX_FRAME
         ):
             _fail()
     diagnostics = _record(p["private_diagnostics"], {"tokensBefore"})
