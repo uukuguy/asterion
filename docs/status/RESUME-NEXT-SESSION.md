@@ -18,10 +18,12 @@
    mismatch: the reservation arithmetic is denominated in tokens, but the
    caller fed it byte counts — cost overstated fourfold, and every cap
    silently four times tighter than its own name.
-4. **An eleventh defect is located and deliberately not fixed.** With approval
-   working, Pi performs its *own* summarization and **Pi's generation hits its
-   token cap**, so `session_compact` never fires, the extension's `persisted()`
-   never runs, and the host waits out its 60 s. **P1 still does not pass.**
+4. **Two more defects were behind it.** The eleventh — Pi's summarization hitting
+   its token cap, because Asterion set `reserveTokens` to 4096 against Pi's own
+   default of 16384 — is fixed (`0f1a7d98`) and Pi's compaction now completes.
+   The twelfth is located and **not fixed**: the extension's shrink guard
+   measures canonical-JSON **bytes** while compaction reduces **tokens**, so a
+   legitimate compaction is refused. **P1 still does not pass.**
 
 ## 已验证事实
 
@@ -112,11 +114,12 @@ Must not be inferred as complete from local code or unit tests.
   `buildSessionContext` returns `{role, retainedMessageCount}` — the exact
   shape Pi never produces. Fixing it is the regression guard for the eighth
   defect and has **not** been done.
-- **The eleventh defect is located and NOT fixed.** Pi's summarization hits its
-  token cap; the witness reaches `state=approved` and times out waiting for a
-  persisted frame that is never produced. Nothing has been changed for it.
+- **The twelfth defect is located and NOT fixed.** The shrink guard's unit. The
+  witness reaches the rebuild comparison and is refused there.
 - The witness has still never completed a compaction end to end. It now goes
-  arm → proposal → approve, and stops there.
+  arm → proposal → approve → Pi compacts → extension rebuild check, and stops.
+- **The `reserveTokens` change is measured but not witness-confirmed.** It is
+  justified by two runs each way, not by the witness passing, which it does not.
 - `validate_compaction_witness` still requires `entry.get("fromHook") is not
   False`; relax only as part of D-2026-09-16-01.
 - Known-unverified carry-overs: `test/context-witness.test.mjs` cannot run;
@@ -130,16 +133,21 @@ Must not be inferred as complete from local code or unit tests.
 
 ## 下一动作
 
-1. **Investigate `reserveTokens: 4096`** (`context-witness.ts`'s `SETTINGS`,
-   which both sides pin by exact equality, and whichever Asterion settings file
-   feeds Pi the same values). Pi reports `generation hit the token cap and the
-   summary is incomplete`. Establish whether the cap is Pi's summary reserve,
-   the model's output limit, or Asterion's own bound before changing it — and
-   note that 4096 is now the **fourth** appearance of that number on this path,
-   so check whether it is another copy of the same wrong assumption.
+1. **Fix the twelfth defect: the shrink guard's unit.** Both sides assert the
+   rebuilt context shrinks, but measure it as `countRebuiltContext` — the byte
+   length of the canonical JSON. Pi reports the same compaction as shrinking in
+   tokens (`tokensBefore: 1863 → estimatedTokensAfter: 1353`) while the byte
+   count grows (`9259 >= 8776`), because a markdown-heavy summary costs more
+   bytes per token. Decide the unit deliberately; the host's
+   `context.py` check uses the same metric and must move with it.
 2. **Then re-run** `sh .asterion-private/p1-probe.sh` and see whether the
-   witness completes or reveals a twelfth defect.
-3. **Make the extension test fake match Pi** — drop `retainedMessageCount` from
+   witness completes or reveals a thirteenth defect.
+3. **Reconcile `compaction_budget` with the new output ceiling.** `reserveTokens`
+   is now 16384, so Pi may generate up to `floor(0.8 * 16384) = 13107` output
+   tokens per branch, while the reservation still assumes 3276 and
+   `_RESERVED_TOKENS_MAX` is 16000. Left deliberately under-reserved rather than
+   silently widened; revisit once the witness passes.
+4. **Make the extension test fake match Pi** — drop `retainedMessageCount` from
    `test/ipython-extension.test.mjs` so the suite would have caught the eighth.
 
 ## Ready-to-paste commands

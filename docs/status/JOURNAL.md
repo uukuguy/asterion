@@ -2531,3 +2531,8 @@
 - 15:05 验证：context 23、p1_operator 26、backend 41 测试过；ruff 干净
 - 15:05 **第十一个故障（已定位，未修）**：扩展批准后 Pi 自己执行摘要，**Pi 的生成撞上 token 上限**——`compaction_end` 载荷 `{'reason':'manual','aborted':False,'willRetry':False,'errorMessage':'Compaction failed: Summarization failed: generation hit the token cap and the summary is incomplete'}`。故 `session_compact` 不触发 → 扩展 `persisted()` 从不运行 → 宿主空等 60s 超时
 - 15:05 该上限由两侧共同钉死的设置决定：`SETTINGS = {enabled:false, reserveTokens:4096, keepRecentTokens:256}`（扩展 `s5-settings` 要求 Pi 的 preparation.settings 与之完全相等，实测通过）。**注意 `reserveTokens: 4096` 又是一个 4096**——待查其来源与正确值
+- 15:27 **第十一个故障确因取回**：Pi 的 `maxTokens = min(floor(0.8 × reserveTokens), model.maxTokens)`，Asterion 把 `reserveTokens` 设为 **4096（Pi 自身默认是 16384，即四分之一）**，故上限 = 3276；`stopReason === 'length'` 即输出被截断。**两次对照实跑**：4096 时 Pi 摘要失败；16384 时成功（`compaction_end` 带完整 result、无 errorMessage）。落地 [0f1a7d98]，两侧同步（写进 Pi 的 `settings.json` 与扩展常量必须完全相等，是一个值放在两个文件）
+- 15:27 溯源：该值自 `a611bf42`(2026-09-10) 起沿用，**不是** 2026-09-16 那次已撤销裁决的残留。16384 是 Pi 自家默认，故此为**回归上游值**而非新造
+- 15:34 **第十二个故障（已定位，未修）**：摘要成功后扩展卡在**收缩保证**上——`context-witness.ts` 要求 `countRebuiltContext(post) < pre_units`，实测 `post_units=9259 >= pre_units=8776`。但 Pi 自报同一次压缩是**收缩**的（`tokensBefore:1863 → estimatedTokensAfter:1353`）。**判据**：`countRebuiltContext` 量的是**规范化 JSON 的字节数**，而 markdown 密集的摘要每 token 占字节更多——**字节代理与压缩真正改变的 token 量脱钩**，于是一次合法压缩被字节口径的守卫拒绝。宿主 `context.py` 用的是同一口径，两侧需一起改
+- 15:34 该步其余检查全过：`pd-entry fromHook=false`、`pd-branch tail==true prefix==true`、`pd-post equal=true`。即通道、身份、分支、投影一致性均已验证，**只剩收缩口径**
+- 15:34 注：`compaction_budget` 的预留常量仍按旧输出上限（3276）计，未随 `reserveTokens` 调整——**预留会低估新上限**。这是刻意保留并记录的，不静默放宽

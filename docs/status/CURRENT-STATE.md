@@ -32,9 +32,11 @@
   expecting Pi's leading `agent_settled` event, and the extension requiring a
   `retainedMessageCount` Pi never emits (`c03eecad`), and the compaction
   reservation's units — it was denominated in tokens but fed byte counts
-  (`2f744bf5`). An eleventh is located and **left open deliberately**: Pi's own
-  summarization hits its token cap, so `session_compact` never fires and the
-  witness waits out its 60 s. The witness now runs arm → proposal → approve and
+  (`2f744bf5`), and Pi's compaction reserve, which was a quarter of Pi's own
+  default and left its summarization truncated (`0f1a7d98`). A twelfth is
+  located and **left open**: the shrink guard measures canonical-JSON bytes
+  while compaction reduces tokens, so a legitimate compaction is refused. The
+  witness now runs arm → proposal → approve → Pi compacts → rebuild check, and
   stops there; **P1 stays unpublished.**
   **Phase 4 is also where plan risk 1 (compaction) is finally tested**, and it
   is being exercised for the first time.
