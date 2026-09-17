@@ -133,13 +133,14 @@ class FakeReusablePi:
         }
         approved = decision["status"] == "approve"
         end = {"reason": "manual", "aborted": not approved, "willRetry": False}
-        response = {"id": "compact-rpc", "command": "compact", "success": approved}
+        # `_compact_rpc_event` redacts a response to its identity and outcome
+        # (`compact_events` is transport event redaction), so these are the only
+        # response fields the stream carries.
+        response = {"id": "compact-rpc", "success": approved}
         if approved:
             end["result"] = body
-            response["data"] = body
         else:
             end["errorSeverity"] = "error"
-            response["error"] = "PRIVATE-ARBITRARY-CANCEL"
         events = []
         for kind, payload in (
             ("compaction_start", {"reason": "manual"}),
@@ -868,11 +869,13 @@ class TestPiCompactTerminalContract(unittest.TestCase):
                 "willRetry": False,
                 "customInstructions": None,
             },
+            # `_compact_rpc_event` projects a response to identity and outcome
+            # before the validator sees it; `command` and the echoed `data` are
+            # stripped. Modelling the raw stream here is what let the validator
+            # require fields the running path can never deliver.
             "response": {
                 "id": "compact-rpc",
-                "command": "compact",
                 "success": True,
-                "data": self.BODY,
             },
         }
         return PiRpcCompactResult(
@@ -900,6 +903,44 @@ class TestPiCompactTerminalContract(unittest.TestCase):
         validate_pi_compact_result(
             self._result("compaction_start", "compaction_end", "response")
         )
+
+    def test_the_unreduced_response_shape_is_refused(self) -> None:
+        # The projection is the contract. A response still carrying the raw
+        # `command` and echoed `data` did not come through `_compact_rpc_event`,
+        # so accepting it would validate a shape the running path never delivers.
+        from asterion.runtimes.pi_rpc import (
+            PiRpcCompactResult,
+            PiRpcEvent,
+            validate_pi_compact_result,
+        )
+
+        events = (
+            PiRpcEvent(1, "compaction_start", {"reason": "manual"}),
+            PiRpcEvent(
+                2,
+                "compaction_end",
+                {
+                    "reason": "manual",
+                    "result": self.BODY,
+                    "aborted": False,
+                    "willRetry": False,
+                },
+            ),
+            PiRpcEvent(
+                3,
+                "response",
+                {
+                    "id": "compact-rpc",
+                    "command": "compact",
+                    "success": True,
+                    "data": self.BODY,
+                },
+            ),
+        )
+        with self.assertRaises(ValueError):
+            validate_pi_compact_result(
+                PiRpcCompactResult("compact-rpc", "compact", events, b"")
+            )
 
     def test_other_leading_events_are_still_refused(self) -> None:
         from asterion.runtimes.pi_rpc import validate_pi_compact_result

@@ -425,8 +425,12 @@ def validate_pi_compact_result(result: PiRpcCompactResult) -> None:
             or start.payload.get("customInstructions") is not None
             or end.payload.get("customInstructions") is not None
             or end.payload.get("willRetry") is not False
+            # `_compact_rpc_event` projects a response to its identity and
+            # outcome, so this is the whole response the validator can be given:
+            # `command` and the echoed `data` never reach it, and the request is
+            # correlated by `id` (also enforced by the driver before this).
+            or set(response.payload) != {"id", "success"}
             or response.payload.get("id") != result.request_id
-            or response.payload.get("command") != "compact"
         ):
             raise ValueError
         if result.outcome == "completed":
@@ -445,8 +449,6 @@ def validate_pi_compact_result(result: PiRpcCompactResult) -> None:
                 or type(body.get("tokensBefore")) is not int
                 or body["tokensBefore"] < 0
                 or response.payload.get("success") is not True
-                or set(response.payload) != {"id", "command", "success", "data"}
-                or response.payload.get("data") != body
             ):
                 raise ValueError
         elif (
@@ -466,8 +468,6 @@ def validate_pi_compact_result(result: PiRpcCompactResult) -> None:
             or end.payload.get("errorMessage") is not None
             or end.payload.get("errorSeverity") != "error"
             or response.payload.get("success") is not False
-            or set(response.payload) != {"id", "command", "success", "error"}
-            or type(response.payload.get("error")) is not str
         ):
             raise ValueError
     except BaseException:
