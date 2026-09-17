@@ -2573,3 +2573,4 @@
 - 20:49 **既有红测新增一条**：`tests/test_prime_p7_native_installed` 在 HEAD 上即失败。在**同一 HEAD 树**上打点取到相同 cause `CapabilityExecutionError: Prime solver runtime did not complete`，确认与发布 P1 无关（此前 RESUME 的 carry-over 清单里没有它）
 - 20:49 验证：P1/provider/installed/worker/runtime/oracle/operator/backend/context/session/differential 合计 **183 过**；provider 相关 **67 过**；detachment gate **0**
 - 20:49 **P1-P7 原生实现：2 of 7**（P7、P1），P1 已发布
+- 21:05 **会话收口（handoff）[76f87915]**：协作 MEMORY.md 的 P1 判断已与现状对齐（原写「witness 仍未通过、P1 保持未发布」）；新增一条 feedback「契约的键集取自生产者而非 fixture」（本会话三处缺陷同源）；「同一常量回声」那条补上「一次 grep 不是枚举」与六处执法点的教训。DECISIONS 的 D-2026-09-17-04 Consequence 从「三处」修正为实测的**六处**。核验：INDEX 无缺行、RESUME 四类事实齐备（已验证事实/当前判断/历史归档/未完成边界）、无遗留进程、`git status --short` 为空
