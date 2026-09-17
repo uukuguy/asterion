@@ -440,8 +440,17 @@ def validate_pi_compact_result(result: PiRpcCompactResult) -> None:
                 - {"reason", "result", "aborted", "willRetry", "customInstructions"}
                 or end.payload.get("aborted") is not False
                 or not isinstance(body, Mapping)
+                # Pi builds this result as exactly these six keys at both of its
+                # compaction terminals; `usage` is absent when it is undefined.
                 or set(body)
-                - {"summary", "firstKeptEntryId", "tokensBefore", "details"}
+                - {
+                    "summary",
+                    "firstKeptEntryId",
+                    "tokensBefore",
+                    "estimatedTokensAfter",
+                    "usage",
+                    "details",
+                }
                 or type(body.get("summary")) is not str
                 or not body["summary"]
                 or type(body.get("firstKeptEntryId")) is not str

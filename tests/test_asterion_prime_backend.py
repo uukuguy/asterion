@@ -849,10 +849,13 @@ class TestPiCompactTerminalContract(unittest.TestCase):
     run failed here because the check required exactly three events.
     """
 
+    # Pi's compact result is exactly these keys at both of its terminals.
     BODY = {
         "summary": "a summary",
         "firstKeptEntryId": "entry-1",
         "tokensBefore": 10,
+        "estimatedTokensAfter": 4,
+        "usage": {"input": 3, "output": 1},
         "details": {},
     }
 
@@ -903,6 +906,34 @@ class TestPiCompactTerminalContract(unittest.TestCase):
         validate_pi_compact_result(
             self._result("compaction_start", "compaction_end", "response")
         )
+
+    def test_an_unknown_result_field_is_still_refused(self) -> None:
+        # Widening the result set to Pi's real keys must not turn it into an
+        # accept-anything: an unmodelled field is exactly the drift it catches.
+        from asterion.runtimes.pi_rpc import (
+            PiRpcCompactResult,
+            PiRpcEvent,
+            validate_pi_compact_result,
+        )
+
+        events = (
+            PiRpcEvent(1, "compaction_start", {"reason": "manual"}),
+            PiRpcEvent(
+                2,
+                "compaction_end",
+                {
+                    "reason": "manual",
+                    "result": {**self.BODY, "surprise": 1},
+                    "aborted": False,
+                    "willRetry": False,
+                },
+            ),
+            PiRpcEvent(3, "response", {"id": "compact-rpc", "success": True}),
+        )
+        with self.assertRaises(ValueError):
+            validate_pi_compact_result(
+                PiRpcCompactResult("compact-rpc", "compact", events, b"")
+            )
 
     def test_the_unreduced_response_shape_is_refused(self) -> None:
         # The projection is the contract. A response still carrying the raw
