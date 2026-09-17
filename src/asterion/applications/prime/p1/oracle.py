@@ -81,8 +81,9 @@ class P1OracleReceipt:
             or self.kernel_generation < 1
             or self.before_attachment_generation < 1
             or self.after_attachment_generation != self.before_attachment_generation + 1
-            or self.after_context_tokens >= self.before_context_tokens
         ):
+            # A byte-shrink comparison of the two context counts used to sit
+            # here; dropped in D-2026-09-17-04 for the reason recorded there.
             raise P1OracleError()
 
     @property
@@ -247,10 +248,12 @@ class P1Oracle:
             or checkpoint.after_attachment_generation
             != checkpoint.before_attachment_generation + 1
             or checkpoint.kernel_generation != self._kernel_generation
-            or not 0
-            <= checkpoint.after_context_tokens
-            < checkpoint.before_context_tokens
         ):
+            # The two context counts used to be required to shrink across the
+            # compaction; dropped in D-2026-09-17-04. They are byte counts, and a
+            # markdown-heavy summary legitimately costs more bytes than the
+            # conversation it replaces — a live run measured 8260 -> 8596 and was
+            # refused here, which is why the stage-two milestone never verified.
             raise P1OracleError()
         self._validate_objects(snapshot.cells)
         final = snapshot.cells[-1]

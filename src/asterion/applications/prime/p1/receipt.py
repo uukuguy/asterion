@@ -81,8 +81,9 @@ class P1NativeReceipt:
             or self.final_status != "verified"
             or self.kernel_generation < 1
             or self.control_reconstruction_generation < 2
-            or self.after_context_tokens >= self.before_context_tokens
         ):
+            # A byte-shrink comparison of the two context counts used to sit
+            # here; dropped in D-2026-09-17-04 for the reason recorded there.
             raise P1ReceiptError()
 
     def sha256(self) -> str:

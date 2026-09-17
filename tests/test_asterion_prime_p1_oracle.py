@@ -66,9 +66,13 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
         await self.cell(verification_cell(), 2)
         return self.oracle.verify_stage_one(self.worker.snapshot())
 
+    # Overridable so a case can present a rebuild that grew in bytes.
+    CONTEXT_TOKENS = (1024, 256)
+
     def checkpoint(self, *, kernel_generation: int = 1):
         from asterion.applications.prime.p1.worker import P1WorkerCheckpoint
 
+        before_tokens, after_tokens = self.CONTEXT_TOKENS
         checkpoint = P1WorkerCheckpoint(
             worker_identity_sha256=self.worker.identity.sha256(),
             after_sequence=2,
@@ -77,8 +81,8 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
             kernel_generation=kernel_generation,
             before_attachment_generation=1,
             after_attachment_generation=2,
-            before_context_tokens=1024,
-            after_context_tokens=256,
+            before_context_tokens=before_tokens,
+            after_context_tokens=after_tokens,
         )
         self.worker.mark_compact_checkpoint(checkpoint)
         return checkpoint
@@ -124,6 +128,16 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
         await self.cell(stage_two_cell(), 3)
         with self.assertRaises(P1OracleError):
             self.oracle.verify_stage_two(self.worker.snapshot(), first)
+
+    async def test_stage_two_verifies_a_rebuild_that_grew_in_bytes(self) -> None:
+        # Both counts are canonical-JSON bytes and a markdown-heavy summary
+        # legitimately costs more bytes than the conversation it replaces, so
+        # requiring the rebuild to shrink was dropped (D-2026-09-17-04). A live
+        # run measured 8260 -> 8596 and was refused here, which is why the
+        # stage-two milestone never verified. The pair is that measurement.
+        self.CONTEXT_TOKENS = (8260, 8596)
+        result = await self.final_stage()
+        self.assertTrue(result.succeeded)
 
     async def test_two_stages_and_safe_receipt_bind_actual_cleanup(self) -> None:
         from asterion.applications.prime.p1.receipt import (
