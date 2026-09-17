@@ -484,10 +484,13 @@ def validate_compaction_witness(
             "summary",
             "tokensBefore",
         }
+        # Pi's compaction entry is exactly this shape at both of its construction
+        # sites; `customInstructions` is not among its fields. Pi carries the
+        # custom instructions on the `before_compaction` hook event, never on the
+        # entry it persists, so requiring them here could never be satisfied.
         if not required <= set(entry) or set(entry) - required - {
             "details",
             "fromHook",
-            "customInstructions",
         }:
             _fail()
         if (
@@ -496,8 +499,6 @@ def validate_compaction_witness(
             or entry["firstKeptEntryId"] != p["first_kept_entry_id"]
             or entry.get("fromHook") is not False
             or entry["tokensBefore"] != p["private_diagnostics"]["tokensBefore"]
-            or entry.get("customInstructions")
-            != p["preparation"]["custom_instructions"]
         ):
             _fail()
         _identifier(entry["id"])
@@ -521,7 +522,12 @@ def validate_compaction_witness(
                     "role": "compactionSummary",
                     "summary": summary,
                     "retained_message_count": preparation["retained_message_count"],
-                    "custom_instructions": preparation["custom_instructions"],
+                    # Pi's `createCompactionSummaryMessage` emits only role,
+                    # summary, tokensBefore and timestamp, so the post-context
+                    # projection of the persisted entry carries no custom
+                    # instructions. The declared value is summarization material
+                    # (`preparation["custom_instructions"]`), not context state.
+                    "custom_instructions": None,
                 },
                 *retained["messages"],
             ],

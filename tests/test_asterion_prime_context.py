@@ -46,7 +46,7 @@ def digest(value):
     return hashlib.sha256(encode(value)).hexdigest()
 
 
-def material():
+def material(custom_instructions=None):
     pre = projection([user(SECRET * 24), user("retained")])
     retained = projection([user("retained")])
     preparation = {
@@ -56,7 +56,7 @@ def material():
         "turn_prefix_messages": projection([]),
         "is_split_turn": False,
         "previous_summary": None,
-        "custom_instructions": None,
+        "custom_instructions": custom_instructions,
         "retained_context_projection": retained,
         "retained_message_count": 1,
     }
@@ -243,6 +243,27 @@ class TestAsterionPrimeContext(ContextMixin, unittest.TestCase):
         self.assertNotIn("123456", public)
         self.assertEqual(evidence.usage_label, "reservation-charged")
 
+    def test_declared_custom_instructions_are_material_not_context_state(self):
+        # Pi carries custom instructions on the `before_compaction` hook event and
+        # never on the compaction entry it persists, so a proposal that declares
+        # them must still validate: the post-context projection of that entry has
+        # no such field, and the declared value is summarization material only.
+        # Asserted because the shared fixture exercised only the null case, which
+        # is how the requirement went unnoticed until a live run set a value.
+        context = self.module()
+        proposal, persisted = material(custom_instructions="KERNEL-NOTE-TEXT")
+        evidence = context.validate_compaction_witness(
+            proposal,
+            persisted,
+            expected_launch_nonce=LAUNCH,
+            expected_command_nonce=COMMAND,
+        )
+        self.assertNotIn("customInstructions", persisted["compaction_entry"])
+        self.assertIsNone(
+            persisted["post_context_projection"]["messages"][0]["custom_instructions"]
+        )
+        self.assertEqual(evidence.before_context_tokens, proposal["pre_units"])
+
     def test_witness_rejects_identity_digest_boundary_source_and_post_drift(self):
         context = self.module()
         mutations = [
@@ -254,6 +275,7 @@ class TestAsterionPrimeContext(ContextMixin, unittest.TestCase):
             lambda p, s: p["preparation"].update(messages_to_summarize=projection([])),
             lambda p, s: s.update(summary=SECRET),
             lambda p, s: s["compaction_entry"].update(parentId="other"),
+            lambda p, s: s["compaction_entry"].update(customInstructions="KERNEL-NOTE-TEXT"),
             lambda p, s: s["post_context_projection"]["messages"].append(user(SECRET)),
             lambda p, s: s.update(extra=SECRET),
         ]
