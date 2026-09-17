@@ -1,91 +1,95 @@
-# Next-Session Handoff
+# Live Session Checkpoint
 
-> Updated: 2026-09-17 16:15, end of session. The commits covering the P1
-> witness work are `git log 1d21ef05..HEAD`. Stated as a range on purpose: a
-> count goes stale the moment this file is committed.
-> Supersedes the 12:15 handoff, whose central open question is now answered.
+> Updated: 2026-09-17 18:32. **Session remains active — not a final handoff.**
+> Supersedes the 16:15 handoff: its next action (reproduce the failure behind
+> the guard) is done, and three further defects were found and fixed.
+> Commits this session: `git log d1535168..HEAD` (stated as a range on purpose).
 
 ## TL;DR
 
-1. **The direction question is closed by measurement.** Asterion's socket close
-   is teardown, 60.06 s *after* the extension had already cancelled — a
-   consequence, not the cause. The extension's own 5 s channel timeout never
-   fired. RESUME's binary framing was incomplete; the answer is neither side.
-2. **Four defects were fixed and committed** (`c03eecad`, `2f744bf5`,
-   `0f1a7d98`). The witness now runs arm → proposal → approve → Pi compacts →
-   rebuild check. Before this session it died inside the extension's first
-   check.
-3. **Two things are open and must not be read as done.** The rebuild guard is
-   *marginal* — three measured runs land on both sides of it — and a further
-   failure, seen once behind a passing guard, **has never been measured**.
-   **P1 does not pass and stays unpublished.**
+1. **The failure behind the guard was measured, and three defects are fixed.**
+   Pi's compaction entry carries float `usage.cost`, which the integer-only wire
+   canonical form cannot encode, so the persisted frame was never written at
+   all. Fixing that exposed two more: the host required a `customInstructions`
+   entry field Pi does not persist, and the RPC terminal validator required
+   response fields that `compact_events` redaction removes by design.
+2. **The witness now completes.** `pd-written` → `pd-ack` on a live run, the
+   host accepts the persisted frame, and the RPC terminal validates. The chain
+   stops at the rebuild guard instead.
+3. **The guard is confirmed marginal, now by 23 bytes.** `post=9952 pre=9929`.
+   Its unit is a public-contract decision and is the one thing this session did
+   not decide. **P1 still does not pass and stays unpublished.**
 
 ## 已验证事实
 
 Each item is supported by a commit, a captured value, or a passing command.
 
-- **The close follows the timeout (`c03eecad` path, measured).** One clock:
-  `host-arm-sent` T+0.000 → extension `data-ok`/`read-buffered`/`before-arm`
-  T+0.001 → extension `before-failed` **T+0.003** → host
-  `witness-receive-FAILED wait=60 TimeoutError` and `host-socket-closed`
-  **T+60.063**, caller `backend.py:1241` (teardown). No `bounded-timeout` mark
-  ever fired, so the extension's 5 s channel bound is not the cause either.
-- **Pi has no retained count.** `retainedMessageCount` appears **0 times** in
-  the installed Pi bundle; `createCompactionSummaryMessage(summary,
-  tokensBefore, timestamp)` emits exactly the four keys observed
-  (`q1-summaryKeys=role,summary,tokensBefore,timestamp`,
-  `q4-rawRetained=undefined`). Pi states retention by `firstKeptEntryId`.
-- **That field is Asterion's own.** It appears in **no spec or plan**, entered
-  with the witness feature (`59e14138`), was pinned by a test (`28a573eb`)
-  first, and `countRebuiltContext` does not use it. Fixed at `c03eecad`: the
-  field is now nullable end to end, sharing one helper with
-  `projectPrimeContext` — two copies of the same rule were what diverged.
-- **The reservation was denominated in tokens and fed bytes.** Its constants
-  are `_..._TOKENS_MAX` and its cost is priced per million tokens, but the
-  caller passed `len(request.encode())`. The tell: the operator's
-  `_COMPACTION_INPUT_CAPS = (4096, 4096)` is the same number as the old
-  `_INPUT_CAP_MAX`. Cost was overstated fourfold and every cap silently
-  tightened fourfold. Fixed at `2f744bf5`; the host then approved a proposal
-  for the first time (`host-quote caps=(1740, 261) approved=True`).
-- **Pi truncates the summary at `min(floor(0.8 * reserveTokens),
-  model.maxTokens)`.** Asterion set `reserveTokens: 4096` against Pi's own
-  default of `16384`, so the cap was 3276 and Pi reported
-  `Summarization failed: generation hit the token cap and the summary is
-  incomplete` (`stopReason === "length"`). Measured both ways, twice each:
-  4096 fails, 16384 completes. Fixed at `0f1a7d98` on both sides, because the
-  extension asserts Pi's `preparation.settings` equals its own `SETTINGS`
-  exactly — one value in two files.
-- **The rebuild comparison is marginal, not wrong.** Three runs:
-  `pre_bytes → post_bytes` = 8776→9259 (refused), 8804→8701 (passed),
-  7672→7884 (refused). A markdown-heavy summary costs more JSON bytes per token
-  than the conversation it replaces, so the byte metric loses discriminating
-  power at the boundary. `post_msgs=4` vs `pre_msgs=8`.
-- **Pi's compaction entry carries `tokensBefore` but not
-  `estimatedTokensAfter`.** `entryKeys=type,id,parentId,timestamp,summary,
-  firstKeptEntryId,tokensBefore,details,usage,fromHook`. The after-count lives
-  in the compaction *result*, not the entry.
-- **Everything else in the persisted path passes:** `pd-entry fromHook=false`,
-  `pd-branch tail==true prefix==true`, `pd-post equal=true`.
-- Verification commands are below and were run at the stated boundaries: TS
-  extension 16, `test_asterion_prime_context` 23, `test_asterion_prime_p1_operator`
-  26, `test_asterion_prime_backend` 41; detachment gate 0; ruff clean.
+- **The persisted frame was never written (`206d1d50`).** The extension sent
+  Pi's raw entry, which carries `usage.cost` with float values
+  (`input: 0.00023002000000000002`, `cacheRead: 7.168e-07`). `canonicalJson` is
+  `canonical(value, false)` (`context-projection.ts:147`) and rejects any
+  non-safe-integer at line 132, so `digest(entry)` and `#channel.write` both
+  threw. The marks showed `pd-units` then **no `pd-written`**. The same field was
+  independently refusable: the host's accepted entry keys are
+  `{type,id,parentId,timestamp,firstKeptEntryId,summary,tokensBefore}` plus
+  optional `{details,fromHook}`, so `usage` would have been rejected on arrival.
+  The wire now carries the contract fields and the digest covers what was sent.
+- **The failing check was localized by stack column, not by line.** esbuild emits
+  the bundle as a single line (44618 chars on line 1), so every frame reports
+  line 1. Only the column distinguishes one `fail()` site from another; the
+  columns resolved to `invalid()` ← `canonical`'s number branch.
+- **`customInstructions` is not a compaction-entry field (`0a97e9cd`).** Both of
+  Pi's construction sites omit it — `appendCompaction(summary, firstKeptEntryId,
+  tokensBefore, details, fromHook, usage)` and the `publishStructuralOutcome`
+  entry — and `createCompactionSummaryMessage` emits only `role`, `summary`,
+  `tokensBefore`, `timestamp`. Pi carries custom instructions on the
+  `before_compaction` **hook event**. Measured directly:
+  `pd-check tokens=2723 declared=2723 cust=undefined`. The host compared an
+  absent field against the proposal's declared value, so it could only pass
+  while that value was null — the fixture's only case
+  (`test_asterion_prime_context.py:59`). Same family as the eighth defect: the
+  test modelled a scenario production never produces.
+- **The compact response contract was unreachable (`a578183b`).**
+  `_compact_rpc_event` (`pi_rpc.py:76-79`) projects a response to
+  `{type,id,success}` before the validator sees it. The validator required
+  `command == "compact"` and key set `{id,command,success,data}`, which the
+  running path never delivers. Authority:
+  `docs/superpowers/specs/2026-09-10-asterion-prime-native-p1-shared-kernel-design.md:206`
+  — "`PiRpcConfig.compact_events` is transport event redaction". Dates settle the
+  direction: the reducer `063b6cc9` (09-09) predates the validator `8f8c6709`
+  (09-10), so the requirement was unreachable from the moment it was written.
+  The fixtures modelled the **unredacted** stream, which is why it survived.
+- **The rebuild guard is marginal, now at five measured points** (`eq=1` in every
+  one, so the projections agree and only the byte metric decides):
+  8776→9259 (refuse, +5.5%), 8804→8701 (pass, −1.2%), 7672→7884 (refuse, +2.8%),
+  9572→10758 (pass, −11%), 9952→9929 (**refuse, +0.23% — 23 bytes**).
+- **Verification commands run at their boundaries:** `test_asterion_prime_context`
+  24, `test_asterion_prime_backend` 42, `test_asterion_prime_p1_operator` 26 — all
+  pass; TS extension 16 with 15 pass.
+- **Two pre-existing failures were confirmed by reverting to HEAD source, not by
+  inference.** `test/ipython-extension.test.mjs`'s "the arm frame's native
+  material drives the request the witness proposes" (`witness peer timed out`)
+  fails identically on unmodified HEAD. `tests.test_pi_session` is red at HEAD
+  with **1 failure + 6 errors** (`Pi RPC process exited unexpectedly`), verified
+  twice by reverting; it is **not** in the previous carry-over list.
 
 ## 当前判断
 
 Chosen on current evidence; not proven end to end.
 
-- **The extension's diagnostics must be re-added before deciding the guard.**
-  In the single run where the guard passed, Pi still emitted `extension_error`
-  — so at least one more failure sits behind it. Changing the guard first would
-  fix a checkpoint the chain may not even be stopping at.
-- **A uniform divisor will not fix the guard.** Bytes/4 is a scalar multiple of
-  bytes, so the comparison is unchanged; the divergence is real (markdown is
-  byte-fat per token), not an encoding artifact.
-- **The `reserveTokens` change is measured, not witness-confirmed.** It is
-  justified by two runs each way. It is *not* justified by the witness passing,
-  which it does not. 16384 is upstream's own default, so it restores Pi's value
-  rather than inventing one — but the rule about not promoting unvalidated
-  values to defaults applies and is recorded rather than waved away.
+- **The shrink guard's unit is a contract decision, not a bug fix.** The entry
+  carries `tokensBefore` but no `estimatedTokensAfter` (that lives in the
+  compaction *result*, not the entry), so the extension cannot price the after
+  side in tokens from what it has. A byte-based guard cannot express Pi's own
+  claim and loses discriminating power at the boundary; a token-based one needs
+  a source that does not currently exist on the persisted path. The host's
+  `context.py` uses the same metric and must move with whatever is chosen.
+- **Do not widen the guard by a fitted factor.** Five points is not enough to
+  justify a constant, and a tolerance fitted to them would be the "constant that
+  echoes elsewhere" failure this project has already recorded.
+- **The three fixes are contract corrections, not loosenings.** Each replaced a
+  requirement on a field the running path never produces with the field it does;
+  none removed a check that could ever have passed.
 - **The overall shape is unchanged:** mostly a narrower environment refusing
   ordinary correct work, plus contract mismatches with Pi. Each instance has
   been cheap to fix once measured; guessing at them has never once been right.
@@ -94,46 +98,43 @@ Chosen on current evidence; not proven end to end.
 
 Rejected or superseded, recorded so they are not re-walked.
 
-- **"Asterion's channel socket close causes the cancel."** Half right: the close
-  is real but is teardown, 60 s *after* the extension cancelled.
-- **"The extension's 5 s channel timeout fired."** Disproved — no
-  `bounded-timeout` mark in any run.
-- **"Fabricate a retained count so the host bound stays strict."** Rejected: it
-  would make a bound that can never fail.
-- **"The 4096 request bound is the whole story."** It was one site of three; the
-  units mismatch underneath it was the real one.
-- **"`_INPUT_CAP_MAX` alone is the ninth defect."** Superseded by the units
-  finding; the derived cap is retained but was not the blocker.
 - Carried over, still rejected: the "session too small" reading (Pi compacts);
-  "Pi never read the settings" (disproved); "capture worker stderr"; rebuilding
-  the Prime compaction dependency; letting the extension import Pi's compaction
-  internals; `customInstructions` as sufficient; asking upstream for
-  `replaceInstructions`; two Pi instances for independence.
+  "Pi never read the settings" (disproved); "Asterion's channel socket close
+  causes the cancel" (it is teardown); "the extension's 5 s channel timeout
+  fired" (no `bounded-timeout` mark ever); "fabricate a retained count to keep
+  the host bound strict"; "the 4096 request bound is the whole story"; "capture
+  worker stderr"; rebuilding the Prime compaction dependency; letting the
+  extension import Pi's compaction internals; `customInstructions` as sufficient;
+  asking upstream for `replaceInstructions`; two Pi instances for independence.
+- **"The failure behind the guard is unmeasurable."** Superseded — it was
+  measured on the first instrumented run that passed the guard.
+- **"Removing the diagnostics caused the Run C regression."** Withdrawn by
+  measurement: the next instrumented run showed the guard refusing at
+  `post=9952 pre=9929`, so the same code fails whenever the guard refuses.
+- **"The validator's `command`/`data` requirement is the live contract."**
+  Rejected: the fixture modelled the raw stream, not the redacted one.
 
 ## 未完成边界
 
 Must not be inferred as complete from local code or unit tests.
 
 - **The P1 witness has NOT passed. P1 stays unpublished.** It reaches the
-  rebuild comparison and stops.
-- **The failure behind the guard is known to exist and has never been
-  measured.** One occurrence, not reproduced.
+  rebuild comparison and stops when the guard refuses.
 - **The rebuild guard is unfixed**, and its unit question is undecided.
-- **`compaction_budget` now under-reserves.** `reserveTokens` is 16384, so Pi
+- **`compaction_budget` still under-reserves.** `reserveTokens` is 16384, so Pi
   may generate up to 13107 output tokens per branch, while the reservation
-  still assumes 3276 and `_RESERVED_TOKENS_MAX` is 16000. Left deliberately
+  assumes 3276 and `_RESERVED_TOKENS_MAX` is 16000. Left deliberately
   under-reserved rather than silently widened.
 - **The extension test fake still lies.** `test/ipython-extension.test.mjs`'s
-  `buildSessionContext` returns `{role, retainedMessageCount}` — the exact
-  shape Pi never produces. Fixing it is the regression guard for the eighth
-  defect and has **not** been done.
+  `buildSessionContext` returns `{role, retainedMessageCount}` — the exact shape
+  Pi never produces. Not done.
 - **Phases 4-9 remain unstarted. P1-P7 native implementations: 1 of 7.**
 - `validate_compaction_witness` still requires `entry.get("fromHook") is not
   False`; relax only as part of D-2026-09-16-01.
 - Known-unverified carry-overs: `test/context-witness.test.mjs` cannot run;
   `tests/test_core_only_install.py` was already red at HEAD;
   `tests.test_asterion_prime_pi_contract` does not exist (a stale `.pyc`
-  suggested it did).
+  suggested it did); `tests.test_pi_session` is red at HEAD (1F+6E).
 - `.asterion-private/p1-diagnose.py`, `p1-probe.sh` and `p1-validate-check.py`
   are temporary diagnostics. Delete them when the diagnosis is done. The probe
   script carries host-side decide/quote instrumentation.
@@ -143,16 +144,14 @@ Must not be inferred as complete from local code or unit tests.
 
 ## 下一动作
 
-1. **Re-add the extension marks and reproduce the failure behind the guard.**
-   The marks are recorded in `docs/status/JOURNAL.md` (2026-09-17): a
-   `stamp(tag)` helper writing `AST-W <epoch-ms> <tag>` to stderr, inside
-   `persisted()` — `pd-enter`, `pd-event`, `pd-entry`, `pd-summary`,
-   `pd-branch`, `pd-post`, `pd-writing`, `pd-ack`, and `pd-failed` in the catch.
-   Run until one passes the guard; read what fails after it.
-2. **Then decide the shrink guard's unit**, with that value in hand. Note the
-   entry has no `estimatedTokensAfter`, so a token-denominated replacement
-   needs another source. The host's `context.py` uses the same metric and must
-   move with it.
+1. **Decide the rebuild guard's unit** — the one open contract choice. The entry
+   has no `estimatedTokensAfter`; the host's `context.py` uses the same metric
+   and must move with it. Options seen so far: drop the shrink comparison and
+   keep only the projection-equality invariant; denominate in tokens with a new
+   source on the persisted path; or compare something Pi actually claims.
+   **Ask before implementing** — this is a public-contract change.
+2. **Then re-run until the guard passes** and read whatever fails next. Every
+   stage behind it has now been reached at least once except a clean terminal.
 3. **Reconcile `compaction_budget` with the new output ceiling** (see 未完成边界).
 4. **Make the extension test fake match Pi** — drop `retainedMessageCount`.
 
@@ -167,8 +166,8 @@ uv run python .asterion-private/p1-validate-check.py
 
 # Targeted regressions for the changed surfaces:
 uv run python -m unittest tests.test_asterion_prime_context
-uv run python -m unittest tests.test_asterion_prime_p1_operator
 uv run python -m unittest tests.test_asterion_prime_backend
+uv run python -m unittest tests.test_asterion_prime_p1_operator
 (cd packages/typescript/asterion-prime-extension && npm run build && \
   node --test test/ipython-extension.test.mjs)
 
@@ -176,14 +175,26 @@ uv run python -m unittest tests.test_asterion_prime_backend
 uv run python -c "from pathlib import Path; from asterion.agents.prime.detachment import find_source_detachment_violations as f; print(len(f(Path('.'))))"
 ```
 
-**Rebuilding the extension** (needed if `context-witness.ts` changes): `uv
-build --wheel` recompiles it through `hatch_build.py`, so the probe picks the
-change up; a bare `npm --prefix packages/typescript/asterion-prime-extension
-run build` only refreshes `dist/`. `npm run build` runs `tsc` first and will
-fail the wheel build if the TS does not typecheck.
+**Reading a failed run.** The probe log's `RPC COMPACT EVENTS` list names the
+stage. `extension_error` on `session_compact` with `witness-receive-FAILED
+wait=60` means `persisted()` threw; re-add the marks to learn which check.
+Marks that worked: a `stamp(tag)` helper writing `AST-W <epoch-ms> <tag>` to
+stderr, calls at `pd-enter`, `pd-event`, `pd-entry`, `pd-check`, `pd-summary`,
+`pd-branch`, `pd-units` (with the actual `post`/`pre`/`eq` values),
+`pd-writing`, `pd-written`, `pd-ack`, and `pd-failed` in the catch.
 
 **Keep extension stderr small.** Unfiltered stacks exceed Pi's stderr cap and
 truncate the event stream (observed). One short line per mark.
+
+**Stack frames carry no line number.** esbuild emits the bundle as one line, so
+read the **column**; skip the first two frames (`unavailable`, `fail`), which are
+constant for every call site.
+
+**Rebuilding the extension:** `uv build --wheel` recompiles it through
+`hatch_build.py`, so the probe picks the change up; a bare `npm --prefix
+packages/typescript/asterion-prime-extension run build` only refreshes `dist/`.
+`npm run build` runs `tsc` first and will fail the wheel build if the TS does
+not typecheck.
 
 **Two Orb traps, both verified the hard way:** OrbStack mounts the Mac at
 `/mnt/mac` (the host path `/opt/homebrew/...` does not exist inside the VM), and
