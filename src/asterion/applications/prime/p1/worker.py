@@ -166,12 +166,17 @@ class P1WorkerCheckpoint:
             for value in hashes
         ) or any(type(value) is not int or value < 0 for value in counters):
             raise P1WorkerError("P1 worker checkpoint rejected")
+        # Every clause here is an exact structural invariant. A comparison of
+        # `after_context_tokens` against `before_context_tokens` used to sit
+        # among them; it is dropped for the reason recorded in
+        # D-2026-09-17-04 — those counts are canonical-JSON bytes, and a
+        # markdown-heavy summary legitimately costs more bytes than the
+        # conversation it replaces. Both counts are still carried as evidence.
         if (
             self.after_sequence != 2
             or self.kernel_generation < 1
             or self.before_attachment_generation < 1
             or self.after_attachment_generation != self.before_attachment_generation + 1
-            or self.after_context_tokens >= self.before_context_tokens
         ):
             raise P1WorkerError("P1 worker checkpoint rejected")
 

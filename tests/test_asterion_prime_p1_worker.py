@@ -69,6 +69,21 @@ class TestP1WorkerContract(unittest.TestCase):
                 self.assertNotIn("sentinel", str(caught.exception))
 
 
+    def test_a_checkpoint_whose_rebuild_grew_is_accepted(self) -> None:
+        # `after_context_tokens >= before_context_tokens` used to be refused
+        # here. Both counts are canonical-JSON bytes, and a markdown-heavy
+        # summary legitimately costs more bytes than the conversation it
+        # replaces, so the comparison was dropped (D-2026-09-17-04). The values
+        # are the ones a live run produced.
+        from asterion.applications.prime.p1.worker import P1WorkerCheckpoint
+
+        checkpoint = P1WorkerCheckpoint(
+            "a" * 64, 2, "b" * 64, "c" * 64, 1, 1, 2, 7608, 8657
+        )
+        self.assertEqual(checkpoint.before_context_tokens, 7608)
+        self.assertEqual(checkpoint.after_context_tokens, 8657)
+
+
 class TestP1Worker(unittest.IsolatedAsyncioTestCase):
     def assert_redacted_cancellation(self, error: asyncio.CancelledError) -> None:
         # Python 3.10 Task._make_cancelled_error adds an empty cancellation

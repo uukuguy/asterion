@@ -143,6 +143,16 @@ async def _events(service: _Service):
 
 
 class TestAsterionPrimeP1Runtime(unittest.TestCase):
+    def test_stage_two_release_accepts_a_rebuild_that_grew_in_bytes(self) -> None:
+        # The release used to require `after_context_tokens <
+        # before_context_tokens`. Both are canonical-JSON byte counts, and a
+        # markdown-heavy summary legitimately costs more bytes than the
+        # conversation it replaces, so the comparison was dropped
+        # (D-2026-09-17-04). A live run measured 7608 -> 8657 and was refused at
+        # this gate, which is why the stage-two milestone never arrived.
+        release = P1StageTwoRelease(DIGESTS[1], DIGESTS[2], 7608, 8657, 2, 14_744)
+        self.assertEqual(release.after_context_tokens, 8657)
+
     def test_runtime_options_are_fixed_and_immutable(self) -> None:
         self.assertEqual(
             dict(P1_RUNTIME_OPTIONS),

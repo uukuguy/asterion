@@ -73,7 +73,11 @@ class P1StageTwoRelease:
             or not _digest(self.compact_receipt_sha256)
             or not _count(self.before_context_tokens)
             or not _count(self.after_context_tokens)
-            or self.after_context_tokens >= self.before_context_tokens
+            # A byte-shrink comparison of the two counts used to sit here; it is
+            # dropped for the reason recorded in D-2026-09-17-04 — the counts are
+            # canonical-JSON bytes, and a markdown-heavy summary legitimately
+            # costs more bytes than the conversation it replaces. Both counts
+            # remain required, and are carried as evidence.
             or type(self.reconstruction_generation) is not int
             or self.reconstruction_generation < 2
             or not _count(self.compact_reserved_tokens)
