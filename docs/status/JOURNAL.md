@@ -2550,3 +2550,10 @@
 - 18:32 **既有红测记录**：`tests.test_pi_session` 在 HEAD 上即为 **1F+6E**（`Pi RPC process exited unexpectedly`），已换回 HEAD 复核两次一致；RESUME 的 carry-over 清单里没有它
 - 18:32 实跑验证三处修复：`pd-written` → `pd-ack` 全绿（宿主接受 persisted 帧并回 ack），RPC 终端校验通过，失败点前移至**收缩守卫**
 - 18:32 **收缩守卫的第五个实测点**：`post=9952 pre=9929`（拒，仅超 **23 字节**），`eq=1` 说明投影一致，纯属字节口径。至此五点分列两侧：8776→9259(拒,+5.5%)、8804→8701(过,−1.2%)、7672→7884(拒,+2.8%)、9572→10758(过,−11%)、9952→9929(拒,+0.23%)
+- 18:58 **用户裁决：去掉字节收缩比较，只保留投影等式**。落地 [97c309e4]：扩展侧删掉 `countRebuiltContext(post) >= integer(proposal.pre_units)`，宿主侧 `if post != expected_post:`。判据是该等式**已经**把重建结果钉死为「Pi 的保留尾部 + 摘要」，唯一自由量是摘要自身大小，而那是 Pi 的职责——**按设计就会拒绝合法压缩的边界不是守卫，是误拒**
+- 18:58 `pre_units` 仍是受校验量（`context.py:387` 已有 `== count_rebuilt_context(pre)` 的真实不变量），`after_context_tokens` 仍作为证据上报，只去掉边界。新增边界测 `test_a_summary_larger_than_what_it_replaces_is_accepted`（先断言 after > pre 再断言接受）——否则这次移除就没有回归守卫
+- 18:58 **第十六个故障 [67978fe4]**：`validate_pi_compact_result` 的 result 允许集只有 4 个键，而 Pi 的 compact result **两个构造点都恰好是 6 个键**：`{summary, firstKeptEntryId, tokensBefore, estimatedTokensAfter, usage, details}`（在已安装 bundle 中实证）。缺失 `estimatedTokensAfter` 与 `usage` → 真实成功压缩被判为 invalid terminal。保留集合式（`usage` 在 undefined 时不出现），并新增「未建模字段仍拒绝」用例防止白名单退化为来者不拒
+- 18:58 该缺口能存活的原因同前：fixture 的 `BODY` 只建模了 4 个键。**今日第三个同类缺陷**（前两个：扩展 entry、witness entry），全部是「契约/fixture 比 Pi 实际发送的窄」
+- 18:58 **实跑：压缩路径首次端到端完成**。`WITNESS FRAME RECEIVED` 两次（proposal+persisted）、`RPC COMPACT RESULT {"events":[4], "outcome":"completed"}`、`COMPACT RECEIPT status=succeeded`（`before_context_tokens=7608, after_context_tokens=8657`）；随后 `journal.reopen → host2.recover → authority.sync → resume.admit → resume.persist → host2.close` **整条续跑链路执行完毕**，全程无异常栈
+- 18:58 **新的未完成边界（第十七个，未测量）**：续跑之后第三个 cell（continuation）从未执行（`WORKER CLOSE cells_recorded: 2, seen: 2`），最终状态仍 `recovery-required`。终止判据在 `operator.py:887-890`——ipython 桥接任务 `except Exception:` **吞掉异常**后 `request_stop("recovery-required")`，原因被丢弃故日志无栈。这正是 MEMORY 记录的「分类不是原因」模式；下一步应照扩展的做法**加临时标记取回该异常**，而不是猜
+- 18:58 验证：context **25 过**、backend **43 过**、p1_operator **26 过**（合计 94）；TS 扩展 16 中 15 过（既有失败）
