@@ -35,6 +35,7 @@ prime-applications = "asterion.applications.prime:create_provider"
 "dci.local-benchmark-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 "dci.research-capability__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 "prime.arc-agi-3-solving__1.0.0" = "asterion.applications.prime:create_provider"
+"prime.ipython-coding__1.0.0" = "asterion.applications.prime:create_provider"
 
 [project.entry-points."asterion.host_services"]
 "corpus.local-root" = "asterion.capabilities.dci.implementation.services:create_local_corpus_service_factory"

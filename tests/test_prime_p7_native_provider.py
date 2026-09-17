@@ -230,11 +230,11 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-applications")
-        # P7 only. prime.ipython-coding is not published until it has a native
-        # package and an installed-route witness, per the detachment spec.
+        # Both native applications. prime.ipython-coding returns to the list
+        # with its installed-route witness (Phase 4, D-2026-09-12-01).
         self.assertEqual(
             tuple(application.application_id for application in provider.applications),
-            ("prime.arc-agi-3-solving",),
+            ("prime.arc-agi-3-solving", "prime.ipython-coding"),
         )
         application = provider.applications[0]
         self.assertEqual(
@@ -653,12 +653,15 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             entry_points["asterion.applications"]["prime-applications"],
             "asterion.applications.prime:create_provider",
         )
-        self.assertEqual(
-            entry_points["asterion.application_index"][
-                "prime.arc-agi-3-solving__1.0.0"
-            ],
-            "asterion.applications.prime:create_provider",
-        )
+        for selector in (
+            "prime.arc-agi-3-solving__1.0.0",
+            "prime.ipython-coding__1.0.0",
+        ):
+            with self.subTest(selector=selector):
+                self.assertEqual(
+                    entry_points["asterion.application_index"][selector],
+                    "asterion.applications.prime:create_provider",
+                )
 
 
 if __name__ == "__main__":

@@ -164,11 +164,11 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                 )
             )
 
-    def test_provider_publishes_only_p7_until_p1_has_a_witness(self) -> None:
-        # prime.ipython-coding is not published: it has no native package and no
-        # installed-route witness yet, and the detachment spec requires an
-        # unmigrated selector to be omitted so metadata lookup rejects it before
-        # importing a runtime or starting a process. Phase 4 restores it.
+    def test_provider_publishes_both_applications_with_p1_s_witness(self) -> None:
+        # prime.ipython-coding returns to the public list together with its
+        # witness (Phase 4, D-2026-09-12-01). While it was withheld, metadata
+        # lookup had to reject the selector before importing a runtime; the
+        # installed-route run now exists, so the selector is published again.
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-applications")
@@ -177,7 +177,10 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                 (application.application_id, application.version)
                 for application in provider.applications
             ),
-            (("prime.arc-agi-3-solving", "1.0.0"),),
+            (
+                ("prime.arc-agi-3-solving", "1.0.0"),
+                ("prime.ipython-coding", "1.0.0"),
+            ),
         )
         self.assertEqual(
             tuple(binding.runtime_id for binding in provider.runtime_factory_bindings),
@@ -198,12 +201,10 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
             source.load_provider(matching[0]).package_ref, matching[0].package_ref
         )
 
-        # Composition through the provider is gone by design while the
-        # application is unpublished. The retained assembly's exact
-        # host_capabilities are asserted in
+        # The package composes through the provider now that P1 is published;
+        # the retained assembly's exact host_capabilities are still asserted in
         # test_closed_metadata_is_exact_sorted_and_contains_no_authority, which
-        # reads the JSON directly. Phase 4 restores provider composition along
-        # with the witness.
+        # reads the JSON directly.
 
     def test_closed_metadata_is_exact_sorted_and_contains_no_authority(self) -> None:
         assembly = json.loads(ASSEMBLY.read_text(encoding="utf-8"))
@@ -263,12 +264,21 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
             ):
                 self.assertNotIn(forbidden, serialized)
 
-    def test_public_index_migrates_only_p1_and_keeps_legacy_surfaces(self) -> None:
+    def test_public_index_migrates_p1_and_keeps_legacy_surfaces(self) -> None:
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        entry_points = pyproject["project"]["entry-points"]
+        index = pyproject["project"]["entry-points"]["asterion.application_index"]
 
+        # P1's selector returns to the index together with its witness.
+        self.assertEqual(
+            index["prime.ipython-coding__1.0.0"],
+            "asterion.applications.prime:create_provider",
+        )
         self.assertEqual(
             select_application_provider_id("prime.arc-agi-3-solving@1.0.0"),
+            "prime-applications",
+        )
+        self.assertEqual(
+            select_application_provider_id("prime.ipython-coding@1.0.0"),
             "prime-applications",
         )
 

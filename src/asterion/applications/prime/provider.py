@@ -24,14 +24,14 @@ def _resource_root() -> Path:
 
 
 def prime_ipython_coding_application() -> InstalledApplication:
-    """Return the exact P1 application record, published or not.
+    """Return the exact P1 application record.
 
     P1's operator composes itself from this record instead of looking itself up
     in the published list. Running an application must not depend on whether it
     is advertised: if it does, the installed-route witness can only be produced
     after publication while publication is gated on that same witness, and the
-    application's own route tests cannot build a fixture at all. ``create_provider``
-    appends this record once the witness lands.
+    application's own route tests cannot build a fixture at all. The record is
+    also published by :func:`create_provider` now that the witness has passed.
     """
 
     root = _resource_root()
@@ -47,7 +47,7 @@ def prime_ipython_coding_application() -> InstalledApplication:
 
 
 def create_prime_ipython_coding_provider() -> InstalledApplicationProvider:
-    """Return the provider carrying P1's own record, published or not.
+    """Return the provider carrying P1's own record alone.
 
     P1's operator composes itself from this provider instead of from
     :func:`create_provider`, so running the application never depends on
@@ -82,15 +82,13 @@ def create_provider() -> InstalledApplicationProvider:
                 capability_packages=(PRIME_ARC_AGI_3_SOLVER_PACKAGE,),
                 runtime_ids=("asterion.prime",),
             ),
-            # prime.ipython-coding is deliberately NOT published. It has no
-            # installed-route witness yet, and the detachment spec requires an
-            # unmigrated selector to be omitted so metadata lookup rejects it
-            # before importing a runtime or starting a process. Publishing it
-            # here also made resolution impossible for the P7 route: the closure
-            # is validated for every published application, so a P7 run failed
-            # unless P1's package was supplied too. Its record is defined by
-            # :func:`prime_ipython_coding_application` and is appended here once
-            # Phase 4 supplies the witness.
+            # Published together with its witness (Phase 4, D-2026-09-12-01):
+            # the detachment spec requires an unmigrated selector to be omitted,
+            # so the selector returns only once the installed-route witness
+            # passes. Publishing it before that also made resolution impossible
+            # for the P7 route, because the closure is validated for every
+            # published application; the package it needs is now supplied.
+            prime_ipython_coding_application(),
         ),
         runtime_factory_bindings=(asterion_prime_runtime_binding(),),
     )

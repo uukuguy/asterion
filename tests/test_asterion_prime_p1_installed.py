@@ -1,9 +1,8 @@
-"""Installed-wheel proof that unpublished P1 is packaged but not reachable.
+"""Installed-wheel proof that P1's selector is packaged and reachable.
 
-P1 has no native package and no installed-route witness yet, so its selector is
-omitted from the index and metadata lookup rejects it before importing a runtime.
-Its resources stay packaged, ready for Phase 4, which will replace this with the
-full installed-route witness.
+P1 returns to the index together with its installed-route witness (Phase 4,
+D-2026-09-12-01). The selector resolves from the installed wheel, and the
+assembly, capability-package, and capability resources ship with it.
 """
 
 from __future__ import annotations
@@ -64,12 +63,9 @@ class TestAsterionPrimeP1Installed(unittest.TestCase):
                         if name.endswith(".dist-info/entry_points.txt")
                     )
                 ).decode("utf-8")
-                # P1 is not published: no native package, no installed-route
-                # witness. The spec requires an unmigrated selector to be
-                # omitted from the index so metadata lookup rejects it before
-                # importing a runtime. Its resources stay packaged above, ready
-                # for Phase 4, but the selector must not be reachable.
-                self.assertNotIn(
+                # P1 is published together with its witness, and its resources
+                # ship with it (asserted above).
+                self.assertIn(
                     "prime.ipython-coding__1.0.0 = asterion.applications.prime:create_provider",
                     entry_points,
                 )
@@ -102,15 +98,10 @@ class TestAsterionPrimeP1Installed(unittest.TestCase):
 import json
 from importlib import resources
 from asterion.applications.discovery import select_application_provider_id
-from asterion.applications.provider import ApplicationProviderError
 
-# The unpublished selector is rejected before any runtime is imported.
-try:
-    select_application_provider_id("prime.ipython-coding@1.0.0")
-except ApplicationProviderError:
-    pass
-else:
-    raise AssertionError("unpublished P1 selector was not rejected")
+# The published selector resolves to its provider from the installed wheel.
+provider_id = select_application_provider_id("prime.ipython-coding@1.0.0")
+assert provider_id == "prime-applications", provider_id
 root = resources.files("asterion")
 paths = (
     root.joinpath("applications/prime/assemblies/prime-ipython-coding.json"),
@@ -118,7 +109,7 @@ paths = (
     root.joinpath("capabilities/prime_ipython_coding_native/payload/capabilities/prime-ipython-coding.json"),
 )
 assert all(path.is_file() for path in paths)
-print(json.dumps({"selector": "rejected", "resources": "present"}, sort_keys=True))
+print(json.dumps({"selector": "published", "resources": "present"}, sort_keys=True))
 """.strip()
                 + "\n",
                 encoding="utf-8",
@@ -129,7 +120,7 @@ print(json.dumps({"selector": "rejected", "resources": "present"}, sort_keys=Tru
             self.assertEqual(probed.returncode, 0, probed.stderr)
             self.assertEqual(
                 json.loads(probed.stdout),
-                {"selector": "rejected", "resources": "present"},
+                {"selector": "published", "resources": "present"},
             )
 
 
