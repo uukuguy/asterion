@@ -32,6 +32,19 @@ const MARKERS: Record<string, readonly string[]> = Object.freeze({
 });
 const ALL_MARKERS = [CONVERSATION_MARKER, PREVIOUS_MARKER, INSTRUCTIONS_MARKER];
 const MAX_MATERIAL_BYTES = 8192;
+// The host accepts exactly these entry fields, rejects any other, and digests
+// the entry it receives. Pi's own entry additionally carries token accounting
+// (`usage.cost`) whose values are floats: the integer-only wire canonical form
+// cannot express them, and the host would reject the key outright. The wire
+// therefore carries the contract fields, and the digest covers what was sent.
+const WIRE_ENTRY_KEYS = ["type", "id", "parentId", "timestamp", "firstKeptEntryId", "summary",
+  "tokensBefore", "fromHook"] as const;
+
+function projectedEntry(entry: RecordValue): RecordValue {
+  const projected: RecordValue = {};
+  for (const key of WIRE_ENTRY_KEYS) projected[key] = entry[key];
+  return projected;
+}
 
 type RecordValue = Record<string, unknown>;
 export interface ContextDependencies {
@@ -405,9 +418,10 @@ export class ContextWitness {
         string(object(proposal.pre_context_projection).system_prompt));
       if (canonicalJson(post) !== canonicalJson(expected) || countRebuiltContext(post) >= integer(proposal.pre_units)) fail();
       const postJson = canonicalJson(post);
+      const wire = projectedEntry(entry);
       await this.#channel.write({ ...this.#identity, phase: "persisted", first_kept_entry_id: proposal.first_kept_entry_id,
         covered_leaf_id: proposal.covered_leaf_id, preparation_sha256: proposal.preparation_sha256,
-        compaction_entry: entry, compaction_entry_sha256: digest(entry), summary, summary_sha256: sha(summary),
+        compaction_entry: wire, compaction_entry_sha256: digest(wire), summary, summary_sha256: sha(summary),
         post_context_projection: post, post_context_json: postJson, post_context_sha256: sha(postJson) });
       const ack = await this.#channel.read();
       this.#authenticate(ack, "ack", BASE_KEYS);
