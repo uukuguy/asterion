@@ -402,11 +402,20 @@ class PiRpcCompactResult:
 def validate_pi_compact_result(result: PiRpcCompactResult) -> None:
     """Validate pinned manual-compaction events without interpreting error text."""
     try:
-        if type(result) is not PiRpcCompactResult or len(result.events) != 3:
+        if type(result) is not PiRpcCompactResult:
             raise ValueError
-        start, end, response = result.events
+        events = result.events
+        # `PiSession.compact()` aborts the running operation before it starts,
+        # so that abort's own settled event arrives ahead of the compaction.
+        # It is expected rather than an extra: the three events this contract
+        # is about are the ones that follow, with their sequences intact.
+        if events and events[0].type == "agent_settled":
+            events = events[1:]
+        if len(events) != 3:
+            raise ValueError
+        start, end, response = events
         if (
-            tuple(event.type for event in result.events)
+            tuple(event.type for event in events)
             != ("compaction_start", "compaction_end", "response")
             or end.sequence != start.sequence + 1
             or response.sequence != end.sequence + 1

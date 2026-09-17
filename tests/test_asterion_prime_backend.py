@@ -840,5 +840,90 @@ class TestPrimeBackendBeforeCreate(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.backend.replay_events(), ())
 
 
+class TestPiCompactTerminalContract(unittest.TestCase):
+    """`PiSession.compact()` aborts first, so a settled event leads the stream.
+
+    That abort is Pi's own opening step rather than an extra event, so the three
+    events the contract is about follow it with their sequences intact. A live
+    run failed here because the check required exactly three events.
+    """
+
+    BODY = {
+        "summary": "a summary",
+        "firstKeptEntryId": "entry-1",
+        "tokensBefore": 10,
+        "details": {},
+    }
+
+    def _result(self, *kinds: str):
+        from asterion.runtimes.pi_rpc import PiRpcCompactResult, PiRpcEvent
+
+        payloads = {
+            "agent_settled": {},
+            "compaction_start": {"reason": "manual"},
+            "compaction_end": {
+                "reason": "manual",
+                "result": self.BODY,
+                "aborted": False,
+                "willRetry": False,
+                "customInstructions": None,
+            },
+            "response": {
+                "id": "compact-rpc",
+                "command": "compact",
+                "success": True,
+                "data": self.BODY,
+            },
+        }
+        return PiRpcCompactResult(
+            "compact-rpc",
+            "compact",
+            tuple(
+                PiRpcEvent(index, kind, payloads.get(kind, {}))
+                for index, kind in enumerate(kinds, 1)
+            ),
+            b"",
+        )
+
+    def test_the_aborts_settled_event_is_accepted(self) -> None:
+        from asterion.runtimes.pi_rpc import validate_pi_compact_result
+
+        validate_pi_compact_result(
+            self._result(
+                "agent_settled", "compaction_start", "compaction_end", "response"
+            )
+        )
+
+    def test_the_three_event_stream_is_still_accepted(self) -> None:
+        from asterion.runtimes.pi_rpc import validate_pi_compact_result
+
+        validate_pi_compact_result(
+            self._result("compaction_start", "compaction_end", "response")
+        )
+
+    def test_other_leading_events_are_still_refused(self) -> None:
+        from asterion.runtimes.pi_rpc import validate_pi_compact_result
+
+        for kinds in (
+            ("agent_start", "compaction_start", "compaction_end", "response"),
+            (
+                "agent_settled",
+                "agent_settled",
+                "compaction_start",
+                "compaction_end",
+                "response",
+            ),
+        ):
+            with self.subTest(kinds=kinds):
+                with self.assertRaises(ValueError):
+                    validate_pi_compact_result(self._result(*kinds))
+
+    def test_a_truncated_stream_is_still_refused(self) -> None:
+        from asterion.runtimes.pi_rpc import validate_pi_compact_result
+
+        with self.assertRaises(ValueError):
+            validate_pi_compact_result(self._result("compaction_start", "response"))
+
+
 if __name__ == "__main__":
     unittest.main()
