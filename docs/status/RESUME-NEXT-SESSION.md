@@ -13,11 +13,15 @@
    **consequence** of the witness's own 60 s timeout, not its cause; the
    extension rejected 3 ms after receiving the arm frame, 60.057 s earlier.
    The extension's own 5 s channel timeout never fired.
-3. **A ninth defect sits behind it, and it is a deliberate decision, not a
-   patch.** With the two fixes in place the extension sends a proposal for the
-   first time and the host answers it — but rejects, because
-   `compaction_budget._INPUT_CAP_MAX = 4096` is the **same 4 KB assumption in a
-   third place**, coupled to a budget policy. **P1 still does not pass.**
+3. **Two more defects sat behind it and are now fixed** (`2f744bf5`), and the
+   host **approved the proposal for the first time**. The second was a units
+   mismatch: the reservation arithmetic is denominated in tokens, but the
+   caller fed it byte counts — cost overstated fourfold, and every cap
+   silently four times tighter than its own name.
+4. **An eleventh defect is located and deliberately not fixed.** With approval
+   working, Pi performs its *own* summarization and **Pi's generation hits its
+   token cap**, so `session_compact` never fires, the extension's `persisted()`
+   never runs, and the host waits out its 60 s. **P1 still does not pass.**
 
 ## 已验证事实
 
@@ -108,7 +112,11 @@ Must not be inferred as complete from local code or unit tests.
   `buildSessionContext` returns `{role, retainedMessageCount}` — the exact
   shape Pi never produces. Fixing it is the regression guard for the eighth
   defect and has **not** been done.
-- The ninth fix is **not** made; `_INPUT_CAP_MAX` is untouched.
+- **The eleventh defect is located and NOT fixed.** Pi's summarization hits its
+  token cap; the witness reaches `state=approved` and times out waiting for a
+  persisted frame that is never produced. Nothing has been changed for it.
+- The witness has still never completed a compaction end to end. It now goes
+  arm → proposal → approve, and stops there.
 - `validate_compaction_witness` still requires `entry.get("fromHook") is not
   False`; relax only as part of D-2026-09-16-01.
 - Known-unverified carry-overs: `test/context-witness.test.mjs` cannot run;
@@ -122,14 +130,17 @@ Must not be inferred as complete from local code or unit tests.
 
 ## 下一动作
 
-1. **Decide the compaction budget policy** (`compaction_budget.py:19`). The
-   real shape is asymmetric, so the question is whether `_INPUT_CAP_MAX` bounds
-   each branch, the sum, or is derived from `_RESERVED_TOKENS_MAX`. This is a
-   cost decision and is deliberately not made unilaterally.
+1. **Investigate `reserveTokens: 4096`** (`context-witness.ts`'s `SETTINGS`,
+   which both sides pin by exact equality, and whichever Asterion settings file
+   feeds Pi the same values). Pi reports `generation hit the token cap and the
+   summary is incomplete`. Establish whether the cap is Pi's summary reserve,
+   the model's output limit, or Asterion's own bound before changing it — and
+   note that 4096 is now the **fourth** appearance of that number on this path,
+   so check whether it is another copy of the same wrong assumption.
 2. **Then re-run** `sh .asterion-private/p1-probe.sh` and see whether the
-   witness completes or reveals a tenth defect.
+   witness completes or reveals a twelfth defect.
 3. **Make the extension test fake match Pi** — drop `retainedMessageCount` from
-   `test/ipython-extension.test.mjs` so the suite would have caught this.
+   `test/ipython-extension.test.mjs` so the suite would have caught the eighth.
 
 ## Ready-to-paste commands
 

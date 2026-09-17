@@ -30,12 +30,12 @@
   the worker-poison granularity, `with`-body bindings, the reserved IPython
   names, the task statement's missing rules, `validate_pi_compact_result` not
   expecting Pi's leading `agent_settled` event, and the extension requiring a
-  `retainedMessageCount` Pi never emits (`c03eecad`). A ninth is located and
-  **left open deliberately**: `compaction_budget._INPUT_CAP_MAX = 4096` is the
-  same 4 KB payload assumption in a third place, and it is coupled to the
-  16000-token reservation policy, so changing it redefines what a compaction
-  may cost. The witness now reaches a proposal and a host decision, and that
-  decision is `reject`.
+  `retainedMessageCount` Pi never emits (`c03eecad`), and the compaction
+  reservation's units — it was denominated in tokens but fed byte counts
+  (`2f744bf5`). An eleventh is located and **left open deliberately**: Pi's own
+  summarization hits its token cap, so `session_compact` never fires and the
+  witness waits out its 60 s. The witness now runs arm → proposal → approve and
+  stops there; **P1 stays unpublished.**
   **Phase 4 is also where plan risk 1 (compaction) is finally tested**, and it
   is being exercised for the first time.
   **Phase 3 is complete: native P7 is revalidated end to end.** Run

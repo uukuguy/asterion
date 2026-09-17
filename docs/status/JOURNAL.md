@@ -2525,3 +2525,9 @@
 - 14:16 **实跑验证**：扩展**首次成功写出 proposal**（`write-ok`）、宿主收到并应答（`before-decision status=reject`）。**仍未通过**：第九个缺陷在宿主侧——`compaction_budget.py:19 _INPUT_CAP_MAX = 4096` 是**同一常量在第三处**，`_validated_caps` 因 7114>4096 抛错，被 `except (ValueError, TypeError)` 吞成 `approved=False`
 - 14:16 **第十个缺陷不擅改**：`_INPUT_CAP_MAX` 与 `_RESERVED_TOKENS_MAX=16000`、`_COST_MICRO_UNITS_MAX=125000` 构成**预算策略**（2×input+2×3276 ≤ 16000 ⇒ 每支上限仅 4724，装不下 7114 的 main 支），改它等于重定压缩成本政策，留作正式决策
 - 14:16 验证：TS 扩展 **16 测试过**、`test_asterion_prime_context` **20 过**、`test_asterion_prime_backend` **41 过**、门禁 **0**、ruff 干净。扩展侧诊断标记已全部还原（`git checkout` 后仅重放两处真实修复），生产源码无残留
+- 15:05 **第九、十个故障定位并修复 [2f744bf5]**：`_INPUT_CAP_MAX=4096` 是同一 4KB 假设的第三处；但真正的问题是**量纲错配**——预留算术以 **token** 计价（常量名 `_..._TOKENS_MAX`、成本按每百万 token 计），而调用方 `context.py` 喂的是 `len(request.encode())` 的**字节数**。**判据**：算子自己的 `_COMPACTION_INPUT_CAPS = (4096, 4096)` 与旧 `_INPUT_CAP_MAX` **是同一个数**——说明这些常量一直是 token，错的是调用点
+- 15:05 后果：成本被高估约 4 倍（安全方向），但**每个上限都被静默收紧了 4 倍**。修法：调用点按 4 字节/token 取上界转成 token（高估而非低估，fail-closed）；`_INPUT_CAP_MAX` 改为由预留总量推导（两支天然不对称——main 承载整段会话、turn-prefix 只是片段——对称的每支上限与总量自相矛盾、永不触达），总量仍是硬约束
+- 15:05 **实跑：宿主首次 `approved=True`**（caps 由被拒的 (6929,1041) 字节 → (1740,261) token，`reserved_tokens=8292`）
+- 15:05 验证：context 23、p1_operator 26、backend 41 测试过；ruff 干净
+- 15:05 **第十一个故障（已定位，未修）**：扩展批准后 Pi 自己执行摘要，**Pi 的生成撞上 token 上限**——`compaction_end` 载荷 `{'reason':'manual','aborted':False,'willRetry':False,'errorMessage':'Compaction failed: Summarization failed: generation hit the token cap and the summary is incomplete'}`。故 `session_compact` 不触发 → 扩展 `persisted()` 从不运行 → 宿主空等 60s 超时
+- 15:05 该上限由两侧共同钉死的设置决定：`SETTINGS = {enabled:false, reserveTokens:4096, keepRecentTokens:256}`（扩展 `s5-settings` 要求 Pi 的 preparation.settings 与之完全相等，实测通过）。**注意 `reserveTokens: 4096` 又是一个 4096**——待查其来源与正确值
