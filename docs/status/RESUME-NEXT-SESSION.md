@@ -114,10 +114,11 @@ Must not be inferred as complete from local code or unit tests.
   `buildSessionContext` returns `{role, retainedMessageCount}` — the exact
   shape Pi never produces. Fixing it is the regression guard for the eighth
   defect and has **not** been done.
-- **The twelfth defect is located and NOT fixed.** The shrink guard's unit. The
-  witness reaches the rebuild comparison and is refused there.
+- **The twelfth defect is characterised, not fixed.** The rebuild guard's unit is
+  *marginal* across three measured runs, not uniformly wrong, and a further
+  failure sits behind it that has not been measured at all.
 - The witness has still never completed a compaction end to end. It now goes
-  arm → proposal → approve → Pi compacts → extension rebuild check, and stops.
+  arm → proposal → approve → Pi compacts → rebuild check, and stops.
 - **The `reserveTokens` change is measured but not witness-confirmed.** It is
   justified by two runs each way, not by the witness passing, which it does not.
 - `validate_compaction_witness` still requires `entry.get("fromHook") is not
@@ -133,15 +134,20 @@ Must not be inferred as complete from local code or unit tests.
 
 ## 下一动作
 
-1. **Fix the twelfth defect: the shrink guard's unit.** Both sides assert the
-   rebuilt context shrinks, but measure it as `countRebuiltContext` — the byte
-   length of the canonical JSON. Pi reports the same compaction as shrinking in
-   tokens (`tokensBefore: 1863 → estimatedTokensAfter: 1353`) while the byte
-   count grows (`9259 >= 8776`), because a markdown-heavy summary costs more
-   bytes per token. Decide the unit deliberately; the host's
-   `context.py` check uses the same metric and must move with it.
-2. **Then re-run** `sh .asterion-private/p1-probe.sh` and see whether the
-   witness completes or reveals a thirteenth defect.
+1. **Recover the value behind run B's `extension_error`.** In the one run where
+   the rebuild guard passed, Pi still emitted `extension_error` — so something
+   *after* the guard fails. The `pd-writing` / `pd-ack` / `pd-failed` marks
+   exist for exactly this and are recorded in `docs/status/JOURNAL.md`; re-add
+   them and run. **Take this value before changing the guard**, since the guard
+   may not be the only blocker.
+2. **Then decide the shrink guard's unit.** Measured across three runs it is
+   *marginal*, not wrong: `pre_bytes → post_bytes` was 8776→9259 (refused),
+   8804→8701 (passed), 7672→7884 (refused). A markdown-heavy summary costs more
+   bytes per token than the conversation it replaces, so `countRebuiltContext`
+   loses discriminating power at the boundary. Note the entry carries only
+   `tokensBefore` — **no `estimatedTokensAfter`** — so a token-denominated
+   replacement needs a different source. The host's `context.py` uses the same
+   metric and must move with it.
 3. **Reconcile `compaction_budget` with the new output ceiling.** `reserveTokens`
    is now 16384, so Pi may generate up to `floor(0.8 * 16384) = 13107` output
    tokens per branch, while the reservation still assumes 3276 and

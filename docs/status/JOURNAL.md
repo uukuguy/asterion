@@ -2536,3 +2536,7 @@
 - 15:34 **第十二个故障（已定位，未修）**：摘要成功后扩展卡在**收缩保证**上——`context-witness.ts` 要求 `countRebuiltContext(post) < pre_units`，实测 `post_units=9259 >= pre_units=8776`。但 Pi 自报同一次压缩是**收缩**的（`tokensBefore:1863 → estimatedTokensAfter:1353`）。**判据**：`countRebuiltContext` 量的是**规范化 JSON 的字节数**，而 markdown 密集的摘要每 token 占字节更多——**字节代理与压缩真正改变的 token 量脱钩**，于是一次合法压缩被字节口径的守卫拒绝。宿主 `context.py` 用的是同一口径，两侧需一起改
 - 15:34 该步其余检查全过：`pd-entry fromHook=false`、`pd-branch tail==true prefix==true`、`pd-post equal=true`。即通道、身份、分支、投影一致性均已验证，**只剩收缩口径**
 - 15:34 注：`compaction_budget` 的预留常量仍按旧输出上限（3276）计，未随 `reserveTokens` 调整——**预留会低估新上限**。这是刻意保留并记录的，不静默放宽
+- 16:02–16:06 **第十二个故障改判为「临界」**（三次实跑取真值）。`pd-units` 显示 `countRebuiltContext` 的 pre/post 字节数**在临界处摆动**：run A `8776→9259`（拒）、run B `8804→8701`（过）、run C `7672→7884`（拒）。**不是恒定错，是口径临界**——摘要 4200–4900 字符，post 里摘要一项就占 ~4900 字节；`post_msgs=4` vs `pre_msgs=8`（消息数减半）仍可能字节增长。即 markdown 密集摘要的「每 token 字节数」高于会话，字节口径在临界处失去判别力
+- 16:06 **新增未解问题（下一个要取的量）**：run B 守卫**通过后仍报 `extension_error`**——守卫之后还有一处失败。当时缺 `pd-writing`/`pd-ack` 标记故未取到值；补上标记后该次运行恰好卡在守卫，**未复现**。待取
+- 16:06 判据补注：Pi 的 compaction **entry 只有 `tokensBefore`，无 `estimatedTokensAfter`**（后者在 compaction *result* 里，不在 entry）。故 entry 侧拿不到「之后」的 token 数，改口径需另寻依据
+- 16:06 诊断标记已全部还原，工作树干净；`reserveTokens: 16384` 保留（已提交 `0f1a7d98`）
