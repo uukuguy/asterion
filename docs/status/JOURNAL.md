@@ -2574,3 +2574,7 @@
 - 20:49 验证：P1/provider/installed/worker/runtime/oracle/operator/backend/context/session/differential 合计 **183 过**；provider 相关 **67 过**；detachment gate **0**
 - 20:49 **P1-P7 原生实现：2 of 7**（P7、P1），P1 已发布
 - 21:05 **会话收口（handoff）[76f87915]**：协作 MEMORY.md 的 P1 判断已与现状对齐（原写「witness 仍未通过、P1 保持未发布」）；新增一条 feedback「契约的键集取自生产者而非 fixture」（本会话三处缺陷同源）；「同一常量回声」那条补上「一次 grep 不是枚举」与六处执法点的教训。DECISIONS 的 D-2026-09-17-04 Consequence 从「三处」修正为实测的**六处**。核验：INDEX 无缺行、RESUME 四类事实齐备（已验证事实/当前判断/历史归档/未完成边界）、无遗留进程、`git status --short` 为空
+
+## 2026-09-18
+- 04:33 **Phase 5 P1-mirror 还原**：本会话初尝试 Task1+Task3 脚手架落地（P2 capability 包、assembly、provider注册、Make预设、`P2ContextService`、P2 operator 等）。在调试见证运行中发现 6+ 个独立缺陷（`__main__` guard 缺失、`uv run` 缓存、`P2WorkerOwnerAdapter.close()`验证顺序错、`P2OwnerCleanup`字段名错、`wait_finalization` asyncio.shield 永久挂起），**全部源于「没有先设计，直接镜像 P1 的形状」**——把 P1 专属的 IPython/compaction/control-host 整套都搬过来了，其中大部分与 P2 语义无关。所有 P2 代码、assembly JSON、capability 包、fixture、tests 已删除；Makefile / provider / runtime_binding / first_party_packages 已 `git checkout` 回 HEAD。当前 `git status` 干净、Phase 4 封印 `6a11b960` 完整保留。
+- 04:33 **下一步（计划重写）**：在写任何 P2 代码之前，**先交「P2 vs P1 真实差异表」**——回答"P2 不需要什么 / P2 真正需要什么 / 真实 corpus fixture 长什么样 / operator 是否需要 host1/host2 重建"。待 user 审阅后，再写代码 + 测试 + 见证计划（plan §已验证事实：先 spec 后代码，operator 见证 = 收据驱动，agent 不该用自己的循环替代真见证）
