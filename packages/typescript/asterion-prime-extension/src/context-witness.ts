@@ -416,7 +416,13 @@ export class ContextWitness {
       const post = projectPrimeContext(this.#deps.buildSessionContext(branch).messages, string(context.getSystemPrompt()));
       const expected = projectPrimeContext(this.#deps.buildSessionContext([...this.#branch, entry]).messages,
         string(object(proposal.pre_context_projection).system_prompt));
-      if (canonicalJson(post) !== canonicalJson(expected) || countRebuiltContext(post) >= integer(proposal.pre_units)) fail();
+      // The projection equality already binds the rebuild to Pi's retained tail
+      // plus the summary, so the only free quantity is the summary's own size —
+      // which is Pi's to choose. A byte bound on it refused legitimate
+      // compactions: markdown-heavy summaries cost more JSON bytes per token
+      // than the conversation they replace, and measured runs landed on both
+      // sides of it (five points, the closest by 23 bytes).
+      if (canonicalJson(post) !== canonicalJson(expected)) fail();
       const postJson = canonicalJson(post);
       const wire = projectedEntry(entry);
       await this.#channel.write({ ...this.#identity, phase: "persisted", first_kept_entry_id: proposal.first_kept_entry_id,

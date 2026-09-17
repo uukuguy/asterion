@@ -532,8 +532,13 @@ def validate_compaction_witness(
                 *retained["messages"],
             ],
         }
+        # The equality above already binds the rebuild to the retained tail plus
+        # the summary, so the only free quantity is the summary's own size, which
+        # Pi chooses. A byte bound on it refused legitimate compactions: a
+        # markdown-heavy summary costs more JSON bytes per token than the
+        # conversation it replaces. `after` is still reported as evidence.
         after = count_rebuilt_context(post)
-        if post != expected_post or after >= p["pre_units"]:
+        if post != expected_post:
             _fail()
         return PrimeCompactionEvidence(
             expected_command_nonce,

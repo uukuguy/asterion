@@ -46,7 +46,7 @@ def digest(value):
     return hashlib.sha256(encode(value)).hexdigest()
 
 
-def material(custom_instructions=None):
+def material(custom_instructions=None, summary_text="checkpoint"):
     pre = projection([user(SECRET * 24), user("retained")])
     retained = projection([user("retained")])
     preparation = {
@@ -82,7 +82,7 @@ def material(custom_instructions=None):
         "pre_units": len(encode(pre)),
         "private_diagnostics": {"tokensBefore": 123456},
     }
-    summary = "checkpoint"
+    summary = summary_text
     post = projection(
         [
             {
@@ -263,6 +263,24 @@ class TestAsterionPrimeContext(ContextMixin, unittest.TestCase):
             persisted["post_context_projection"]["messages"][0]["custom_instructions"]
         )
         self.assertEqual(evidence.before_context_tokens, proposal["pre_units"])
+
+    def test_a_summary_larger_than_what_it_replaces_is_accepted(self):
+        # A byte bound on the rebuilt context refused legitimate compactions:
+        # a markdown-heavy summary costs more JSON bytes per token than the
+        # conversation it replaces, and measured live runs landed on both sides
+        # of the bound. The projection equality is the invariant; the summary's
+        # own size is Pi's to choose.
+        context = self.module()
+        proposal, persisted = material(summary_text="S" * 8192)
+        after = context.count_rebuilt_context(persisted["post_context_projection"])
+        self.assertGreater(after, proposal["pre_units"])
+        evidence = context.validate_compaction_witness(
+            proposal,
+            persisted,
+            expected_launch_nonce=LAUNCH,
+            expected_command_nonce=COMMAND,
+        )
+        self.assertEqual(evidence.after_context_tokens, after)
 
     def test_witness_rejects_identity_digest_boundary_source_and_post_drift(self):
         context = self.module()
