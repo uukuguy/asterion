@@ -16,10 +16,16 @@ _ERROR = "invalid compaction reservation"
 _SAFE_INTEGER_MAX = (1 << 53) - 1
 _PER_MILLION = 1_000_000
 _BRANCH_COUNT = 2
-_INPUT_CAP_MAX = 4_096
 _OUTPUT_CAP_MAX = 3_276
 _RESERVED_TOKENS_MAX = 16_000
 _COST_MICRO_UNITS_MAX = 125_000
+# Derived, not independent. The two branches are asymmetric by construction: the
+# main request carries the whole serialized conversation and the turn-prefix
+# request only a fragment, so one branch is legitimately much larger than the
+# other. A symmetric per-branch cap contradicts the total below -- it can never
+# be approached. A single branch may take whatever the reservation leaves once
+# both output branches have their cap; the total stays the binding limit.
+_INPUT_CAP_MAX = _RESERVED_TOKENS_MAX - 2 * _OUTPUT_CAP_MAX
 
 
 def _fail() -> None:

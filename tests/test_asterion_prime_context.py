@@ -559,6 +559,43 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
         await asyncio.gather(sending, return_exceptions=True)
 
 
+class TestCompactionInputTokenCeiling(unittest.TestCase):
+    """The reservation is denominated in tokens; a request is measured in bytes."""
+
+    def test_bytes_are_rounded_up_to_a_token_ceiling(self) -> None:
+        from asterion.agents.prime.context import _input_token_ceiling
+
+        for text, expected in (("", 0), ("abcd", 1), ("abcde", 2), ("a" * 13_000, 3_250)):
+            with self.subTest(size=len(text)):
+                self.assertEqual(_input_token_ceiling(text), expected)
+
+    def test_a_realistic_request_leaves_room_under_the_reservation(self) -> None:
+        from asterion.agents.prime.compaction_budget import quote_compaction_reservation
+        from asterion.agents.prime.context import _input_token_ceiling
+
+        # Observed live: a ~6.9 KB and a ~7.7 KB main request beside a small
+        # turn-prefix request, with the price the P1 operator pins.
+        for request_bytes in (6_929, 7_721):
+            with self.subTest(request_bytes=request_bytes):
+                quote = quote_compaction_reservation(
+                    branch_input_caps=(_input_token_ceiling("x" * request_bytes), 261),
+                    branch_output_caps=(3_276, 3_276),
+                    price=ModelPrice(140_000, 280_000),
+                )
+                self.assertLessEqual(quote.reserved_tokens, 16_000)
+
+    def test_the_same_request_counted_in_bytes_is_refused(self) -> None:
+        # The defect this pins: feeding byte counts in as tokens.
+        from asterion.agents.prime.compaction_budget import quote_compaction_reservation
+
+        with self.assertRaises(ValueError):
+            quote_compaction_reservation(
+                branch_input_caps=(13_000, 261),
+                branch_output_caps=(3_276, 3_276),
+                price=ModelPrice(140_000, 280_000),
+            )
+
+
 # Removed 2026-09-15 (Phase 4): TestPrimeContextWitnessIntegration drove
 # packages/typescript/asterion-prime-extension/test/context-witness-harness.mjs.
 # That harness resolved the off-limits Prime Agent checkout, verified its

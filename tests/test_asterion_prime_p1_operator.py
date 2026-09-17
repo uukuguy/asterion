@@ -832,6 +832,43 @@ class TestP1LaunchPreflight(unittest.TestCase):
         self.assertLessEqual(quote.reserved_tokens, 16_000)
         self.assertLessEqual(quote.cost_micro_units, 125_000)
 
+    def test_asymmetric_branch_caps_fit_the_reservation(self) -> None:
+        from asterion.applications.prime.p1 import operator
+
+        # The live witness sends one large main request and one small turn-prefix
+        # request. A symmetric per-branch cap refused the real shape even though
+        # it reserves fewer tokens than the operator already reserved up front.
+        quote = quote_compaction_reservation(
+            branch_input_caps=(7_114, 1_041),
+            branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
+            price=operator._PRICE,
+        )
+        self.assertLessEqual(quote.reserved_tokens, 16_000)
+
+    def test_a_single_branch_cannot_take_more_than_the_total_leaves(self) -> None:
+        from asterion.applications.prime.p1 import operator
+
+        for caps in ((16_000, 0), (9_449, 0)):
+            with self.subTest(caps=caps):
+                with self.assertRaises(ValueError):
+                    quote_compaction_reservation(
+                        branch_input_caps=caps,
+                        branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
+                        price=operator._PRICE,
+                    )
+
+    def test_the_total_reservation_remains_the_binding_limit(self) -> None:
+        from asterion.applications.prime.p1 import operator
+
+        # Each branch is within the per-branch cap, but together they exceed the
+        # reservation: the total must still refuse.
+        with self.assertRaises(ValueError):
+            quote_compaction_reservation(
+                branch_input_caps=(9_448, 9_448),
+                branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
+                price=operator._PRICE,
+            )
+
     def test_source_tree_operator_root_is_refused_before_any_process(self) -> None:
         from asterion.applications.prime.p1 import operator
 

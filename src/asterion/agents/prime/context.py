@@ -35,6 +35,18 @@ PROJECTION = "asterion.prime-context-projection/v1"
 _ERROR = "invalid Prime context witness"
 _MAX_INTEGER = (1 << 53) - 1
 _MAX_FRAME = 1024 * 1024
+
+
+def _input_token_ceiling(request: str) -> int:
+    """Bound one summarization request's input cost, in tokens.
+
+    The reservation arithmetic is denominated in tokens, and a request is
+    measured in bytes. Four bytes per token is the conventional ceiling, so this
+    over-states the reservation rather than under-stating it, which is the
+    fail-closed direction. Feeding byte counts in as tokens instead overstated
+    cost roughly fourfold and silently tightened every cap by the same factor.
+    """
+    return (len(request.encode("utf-8")) + 3) // 4
 _HEX = re.compile(r"[0-9a-f]{64}")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}")
 _BASE = {"protocol", "launch_nonce", "command_nonce", "authority_sha256", "phase"}
@@ -755,7 +767,7 @@ class PrimeContextWitnessSession:
                 ):
                     _fail()
                 caps = tuple(
-                    len(_string(p[key]).encode()) if p[key] is not None else 0
+                    _input_token_ceiling(_string(p[key])) if p[key] is not None else 0
                     for key in ("main_summary_request", "turn_prefix_summary_request")
                 )
                 quote = quote_compaction_reservation(
