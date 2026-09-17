@@ -2557,3 +2557,4 @@
 - 18:58 **实跑：压缩路径首次端到端完成**。`WITNESS FRAME RECEIVED` 两次（proposal+persisted）、`RPC COMPACT RESULT {"events":[4], "outcome":"completed"}`、`COMPACT RECEIPT status=succeeded`（`before_context_tokens=7608, after_context_tokens=8657`）；随后 `journal.reopen → host2.recover → authority.sync → resume.admit → resume.persist → host2.close` **整条续跑链路执行完毕**，全程无异常栈
 - 18:58 **新的未完成边界（第十七个，未测量）**：续跑之后第三个 cell（continuation）从未执行（`WORKER CLOSE cells_recorded: 2, seen: 2`），最终状态仍 `recovery-required`。终止判据在 `operator.py:887-890`——ipython 桥接任务 `except Exception:` **吞掉异常**后 `request_stop("recovery-required")`，原因被丢弃故日志无栈。这正是 MEMORY 记录的「分类不是原因」模式；下一步应照扩展的做法**加临时标记取回该异常**，而不是猜
 - 18:58 验证：context **25 过**、backend **43 过**、p1_operator **26 过**（合计 94）；TS 扩展 16 中 15 过（既有失败）
+- 19:05 收缩守卫的裁决入账本 [d7eedb1e]：**D-2026-09-17-04**。只记决策本身（等式是不变量、字节边界无 Pi 侧来源），其余三处是「与 Pi 真实形状对齐」的契约修正，非新决策，不入账
