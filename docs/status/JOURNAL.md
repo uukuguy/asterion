@@ -2565,3 +2565,11 @@
 - 19:40 第 2 次实跑：**stage 轨迹完整**（`stage2.release → stage2.complete → host2.close → worker.close → backend.close → runner.terminal`），第三个 cell 成功且自校验通过（`setup_value_loaded: 40 / final_result: 98 / bytes_unchanged: True`），`cells_recorded: 3`，compact `8260→8596`（**增长**，直接证明旧门禁必须移除）——但 `status=recovery-required`、`receipt_sha256=None`
 - 19:40 **判读**：stage two 门禁修复**稳定生效**（两次都跑到 3 cells）；剩余失败在**收尾/回执签封**，间歇（2 次中 1 次完成），原因同样被丢弃（`operator.py:768` 的 `except BaseException` 只给分类）。故 P1 **尚不能宣告通过**：一次 completed + 一次同终点无回执
 - 19:40 门禁：detachment gate **0**。私有回执落在 Orb 内 per-run 临时根，**位置未钉死**（`/tmp/piagent-probe` 只有 settings.json）——下个会话不要假设它在宿主机上
+- 20:20 **第五、六处同源执法点**：`p1/oracle.py`（`verify_stage_two` 与 `P1OracleReceipt`）与 `p1/receipt.py`。实跑 `8260→8596` 被 oracle 拒 → `AST-O run-exc P1OracleError: P1 oracle rejected` → 无回执。**方法教训**：前几处是逐次撞见的，因为我的 grep 被 `head -20` 截断；一次列全后同一子句共 **6 处**，全部按 D-2026-09-17-04 移除
+- 20:20 定位方式同前：给分类处理器打点。桥接处理器那次是**真阴性**（否证了我的初始归因）；`operator.py:768` 与 `oracle.verify_stage_two` 各自取回精确真值
+- 20:49 **Phase 4 完成（Task 4 落地 [09d2f259]）**：`create_provider()` 追加 `prime_ipython_coding_application()`，`prime.ipython-coding__1.0.0` 回到 `pyproject.toml` 的 `asterion.application_index`；三处「保持未发布」的断言按计划被撤回为完整 witness（provider 测试改为断言两个应用都在、索引测试断言 P1 条目可解析、installed-wheel 证明从「选择器被拒」改为「可达」）
+- 20:49 **真实入口 `make asterion-prime-p1-run` 通过 6 次**（`d97808e2`、`f4a4c19a`、`ac3fbb1c`、`d15c9b45`、`400c45dc`、`838f2db6`），stage 轨迹含 `oracle.pass` 与 `runner.terminal`，exit 0。注意该 target 需 `ASTERION_PRIME_PI_ENTRY`，未设则 fail-closed 于 preflight（status 2）——与 RESUME 记录一致
+- 20:49 **剩余间歇失败经取值为模型行为，非契约缺陷**（两次各有真值）：① oracle `final-rejected`——`final_result=98` 与 `expected 98` **相符**，但 `file_reads=0`（要求恰好 1），即模型用内核残留状态而非重新读文件；② 缺 `stage2.complete`，停在 `stage2.release`——continuation 回合本身未跑完。**oracle 正确地拒绝了这两次**，这正是 witness 的职责
+- 20:49 **既有红测新增一条**：`tests/test_prime_p7_native_installed` 在 HEAD 上即失败。在**同一 HEAD 树**上打点取到相同 cause `CapabilityExecutionError: Prime solver runtime did not complete`，确认与发布 P1 无关（此前 RESUME 的 carry-over 清单里没有它）
+- 20:49 验证：P1/provider/installed/worker/runtime/oracle/operator/backend/context/session/differential 合计 **183 过**；provider 相关 **67 过**；detachment gate **0**
+- 20:49 **P1-P7 原生实现：2 of 7**（P7、P1），P1 已发布

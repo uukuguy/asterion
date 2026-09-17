@@ -13,35 +13,32 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: **Phase 4** — rebuild P1's *launch path*
-  (`prime.ipython-coding`). P1 is not missing an implementation: its operator,
-  ipython host, coordination, oracle, receipt, runtime binding, worker and
-  worker_main all exist, as does the native substrate. What was gone was the
-  wiring — `p1/operator.py::_preflight` used to raise the Phase 1 "unavailable"
-  stub. **That launch path is rebuilt and committed** (`f1b08c1f`): Pi comes from
-  the operator-owned `ASTERION_PRIME_PI_ENTRY`, the extension from Asterion's
-  packaged resource, and compaction from Asterion's own
-  `PrimeContextWitnessSession`. P1 also no longer resolves itself out of the
-  published provider, so it composes while unpublished.
-  **The live witness completes stage one end to end and Pi now performs a real
-  compaction; it does not pass, and P1 stays unpublished.** Eight defects found
-  by live runs are fixed (`git log 1d21ef05..HEAD`, 2026-09-16/17): the cell
-  validator's underscore rule and its scope, `safe_open`'s missing `newline`,
-  the worker-poison granularity, `with`-body bindings, the reserved IPython
-  names, the task statement's missing rules, `validate_pi_compact_result` not
-  expecting Pi's leading `agent_settled` event, and the extension requiring a
-  `retainedMessageCount` Pi never emits (`c03eecad`), and the compaction
-  reservation's units — it was denominated in tokens but fed byte counts
-  (`2f744bf5`), and Pi's compaction reserve, which was a quarter of Pi's own
-  default and left its summarization truncated (`0f1a7d98`). The rebuild guard
-  is the open boundary: it measures canonical-JSON bytes while compaction
-  reduces tokens, and across three measured runs it lands **on both sides of
-  its own threshold**, so it is marginal rather than uniformly wrong. A further
-  failure seen once behind a passing guard has not been measured at all. The
-  witness now runs arm → proposal → approve → Pi compacts → rebuild check, and
-  stops there; **P1 stays unpublished.**
-  **Phase 4 is also where plan risk 1 (compaction) is finally tested**, and it
-  is being exercised for the first time.
+- Active work package: **Phase 5** — the next native application rebuild. Its
+  plan has not been written; the program plan stops at Phase 4, so Phase 5 needs
+  its own plan before implementation (see the resume baton).
+  **Phase 4 is complete: native P1 is rebuilt, witnessed and republished.**
+  Run `make asterion-prime-p1-run` completed six times with sealed receipts
+  (`d97808e2`, `f4a4c19a`, `ac3fbb1c`, `d15c9b45`, `400c45dc`, `838f2db6`),
+  three cells each — setup, verification, and the post-compaction continuation —
+  through `stage2.release`, `stage2.complete`, `oracle.pass` and
+  `runner.terminal`. Phase 4's acceptance is met: two model-driven cells share
+  one restricted worker, immutable stage-one file bytes survive Asterion-owned
+  compaction and host reconstruction, and the oracle passes before the public
+  terminal. `prime.ipython-coding__1.0.0` is back in `create_provider()` and in
+  the packaging index, and the assertions that held the selector out are
+  reverted to full witnesses.
+  Fifteen defects found by live runs are fixed across `git log 1d21ef05..HEAD`
+  (2026-09-16/17). Six of them were one shape — a contract or fixture narrower
+  than what Pi actually sends, or a claim the metric cannot support: the wire
+  entry, the witness entry key set, the compact response projection, the compact
+  result key set, and the byte-shrink clause, which sat at **six** enforcement
+  points (witness, worker checkpoint, stage-two release, oracle verification,
+  oracle receipt, native receipt) and is removed from all of them under
+  D-2026-09-17-04. The oracle still rejects runs where the model does not
+  perform the task — measured twice: a continuation that answered correctly but
+  read the file zero times, and a continuation turn that never completed.
+  **Phase 4 is also where plan risk 1 (compaction) was tested**, and it is
+  resolved: the Asterion-owned compaction backend completes against Pi.
   **Phase 3 is complete: native P7 is revalidated end to end.** Run
   `p7-live-20260914141314` solved Level 1 of `ls20-9607627b` in 20 primitive
   actions and 40 persistent IPython cells, `partial_game_score` 3.571429,
@@ -54,10 +51,9 @@
   preset as an installed-wheel invocation, D-2026-09-14-02): the preset builds a
   wheel, unsets `PYTHONPATH`, and supplies the ARC engine as an operator-owned
   root plus pure-Python wheels. Native P7 remains the implementation anchor.
-  **P1-P7 native implementations: 1 of 7** — P7 only, at its proven boundary.
-  P1's launch path exists and runs through stage one, but its witness has not
-  passed, so it stays unpublished. P2-P6 remain unbuilt. Full benchmarking and
-  production promotion remain separately authorized work.
+  **P1-P7 native implementations: 2 of 7** — P7 and P1, each at its proven
+  boundary. P2-P6 remain unbuilt. Full benchmarking and production promotion
+  remain separately authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
   W2 public extension reference, W3a cross-package evidence, W3b
