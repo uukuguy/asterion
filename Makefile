@@ -405,14 +405,7 @@ asterion-prime-p5-run-limits:
 		rm -rf "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; \
 		limits_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P5_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P5_MODE=limits; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p5.operator'\'' asterion-prime-p5-run-limits "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P5_PRIVATE_ROOT)")"; \
 		[ -n "$$limits_json" ] || { echo "[asterion-prime-p5-run-limits] operator produced no JSON output" >&2; exit 2; }; \
-		echo "$$limits_json" | jq -e -s ' \
-			length == 3 and \
-			.[0].scenario == "iteration-cap" and .[0].terminal_reason == "iteration-cap-exceeded" and \
-			.[1].scenario == "duration-cap" and .[1].terminal_reason == "duration-cap-exceeded" and \
-			.[2].scenario == "no-progress" and .[2].terminal_reason == "no-progress" and \
-			(.[0] | .receipt_sha256 != null) and (.[1] | .receipt_sha256 != null) and \
-			(.[2] | .receipt_sha256 != null) \
-		' >/dev/null || { echo "[asterion-prime-p5-run-limits] witness failed: $$limits_json" >&2; exit 2; }; \
+		echo "$$limits_json" | jq -e -s "length == 3 and .[0].scenario == \"iteration-cap\" and .[0].terminal_reason == \"iteration-cap-exceeded\" and .[1].scenario == \"duration-cap\" and .[1].terminal_reason == \"duration-cap-exceeded\" and .[2].scenario == \"no-progress\" and .[2].terminal_reason == \"no-progress\" and (.[0].receipt_sha256 | length == 64) and (.[1].receipt_sha256 | length == 64) and (.[2].receipt_sha256 | length == 64)" >/dev/null || { echo "[asterion-prime-p5-run-limits] witness failed: $$limits_json" >&2; exit 2; }; \
 		echo "[asterion-prime-p5-run-limits] witness passed: iteration-cap / duration-cap / no-progress refusals, each with terminal_reason and receipt_sha256" >&2'
 
 # Diagnostic sibling of ``asterion-prime-p5-run`` + ``-limits``: re-invokes
