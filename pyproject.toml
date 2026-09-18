@@ -45,6 +45,7 @@ prime-applications = "asterion.applications.prime:create_provider"
 "corpus.local-root" = "asterion.capabilities.dci.implementation.services:create_local_corpus_service_factory"
 "evaluation.answer-judge" = "asterion.capabilities.dci.implementation.services:create_answer_judge_service_factory"
 "prime.bounded-autonomy" = "asterion.applications.prime.services:create_bounded_autonomy_host_service"
+"prime.candidate-store" = "asterion.applications.prime.services:create_candidate_store_host_service"
 "prime.child-runner" = "asterion.applications.prime.services:create_child_runner_host_service"
 "prime.continuity-store" = "asterion.applications.prime.services:create_continuity_store_host_service"
 
