@@ -25,6 +25,9 @@ PRIME_IPYTHON_CODING_NATIVE_PACKAGE = CapabilityPackageRef(
 PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE = CapabilityPackageRef(
     "prime-programmatic-long-context-native", "1.0.0"
 )
+PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE = CapabilityPackageRef(
+    "prime-long-session-continuity-native", "1.0.0"
+)
 
 
 def builtin_capability_registrations() -> tuple[BuiltinCapabilityRegistration, ...]:
@@ -56,6 +59,11 @@ def builtin_capability_registrations() -> tuple[BuiltinCapabilityRegistration, .
             PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE,
             package_root / "prime_programmatic_long_context_native/payload",
             create_prime_programmatic_long_context_native_package,
+        ),
+        BuiltinCapabilityRegistration(
+            PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE,
+            package_root / "prime_long_session_continuity_native/payload",
+            create_prime_long_session_continuity_native_package,
         ),
     )
 
@@ -128,6 +136,16 @@ def create_prime_programmatic_long_context_native_package() -> InstalledCapabili
     return create()
 
 
+def create_prime_long_session_continuity_native_package() -> InstalledCapabilityPackage:
+    """Load the selected native P4 package after source selection."""
+
+    from asterion.capabilities.prime_long_session_continuity_native import (
+        create_prime_long_session_continuity_native_package as create,
+    )
+
+    return create()
+
+
 __all__ = (
     "CONTROLLED_CODE_PACKAGE",
     "CONTROLLED_CODE_SOURCE_ID",
@@ -135,10 +153,12 @@ __all__ = (
     "PRIME_ARC_AGI_3_SOLVER_PACKAGE",
     "PRIME_IPYTHON_CODING_NATIVE_PACKAGE",
     "PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE",
+    "PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE",
     "builtin_capability_registrations",
     "create_controlled_code_package",
     "create_dci_package",
     "create_prime_arc_agi_3_solver_package",
     "create_prime_ipython_coding_native_package",
     "create_prime_programmatic_long_context_native_package",
+    "create_prime_long_session_continuity_native_package",
 )

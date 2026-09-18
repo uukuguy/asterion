@@ -174,6 +174,8 @@ class FilePrimeSessionStore:
         self._mutex = threading.RLock()
         self._closed = False
         self._poisoned = False
+        self._continued_from: PrimeBackendIdentity | None = None
+        self._highest_sealed_generation: int = 0
         try:
             if type(identity) is not PrimeBackendIdentity:
                 _fail()
@@ -210,6 +212,7 @@ class FilePrimeSessionStore:
             self._record_identity = _file_identity(os.fstat(self._record_fd))
             self._load_records()
             self._validate_root_artifacts()
+            self._compute_highest_sealed_generation()
             self._validate_checkpoints()
             if lock_created or identity_created or record_created:
                 os.fsync(self._root_fd)
@@ -220,6 +223,112 @@ class FilePrimeSessionStore:
         except (OSError, TypeError, ValueError, UnicodeError, json.JSONDecodeError):
             self._close_descriptors()
             _fail()
+
+    @classmethod
+    def open_continued(
+        cls,
+        prior_root: os.PathLike[str] | str,
+        next_identity: PrimeBackendIdentity,
+        *,
+        max_bytes: int = _DEFAULT_MAX_BYTES,
+        max_record_bytes: int = _DEFAULT_MAX_RECORD_BYTES,
+    ) -> FilePrimeSessionStore:
+        """Bind a NEW identity against an existing private_root.
+
+        Sole entry point that widens the same-identity fail-closed rule. Rules:
+
+        * The prior ``identity.json`` must exist and parse as a
+          :class:`PrimeBackendIdentity`.
+        * ``next_identity.private_root_identity`` MUST equal the on-disk
+          private root's dev/ino digest.
+        * ``next_identity.generation`` MUST equal ``prior.generation + 1``.
+        * ``next_identity.continuation_id`` MUST equal ``prior.continuation_id``.
+        * Every other identity field MUST equal the prior identity's value,
+          EXCEPT ``worker_identity_sha256`` (a different host may host the
+          continuing process; the swap is recorded via
+          :attr:`continued_from` and asserted on the next write).
+
+        The on-disk ``identity.json`` is rewritten with ``next_identity``.
+        Historical records (including prior-generation checkpoints) are
+        preserved and re-validated against a relaxed per-generation chain.
+        The new store's ``write_checkpoint`` then refuses to seal any
+        generation at or below the prior highest sealed generation —
+        the durable "no committed effect replayed" guarantee.
+        """
+
+        store = cls.__new__(cls)
+        store._root = Path(".")
+        store._identity = next_identity
+        store._max_bytes = max_bytes
+        store._max_record_bytes = max_record_bytes
+        store._root_fd = -1
+        store._lock_fd = -1
+        store._identity_fd = -1
+        store._record_fd = -1
+        store._root_identity = None
+        store._lock_identity = None
+        store._identity_identity = None
+        store._record_identity = None
+        store._record_stamp = None
+        store._identity_document = b""
+        store._identity_document_sha256 = ""
+        store._records = ()
+        store._by_id = {}
+        store._mutex = threading.RLock()
+        store._closed = False
+        store._poisoned = False
+        store._continued_from = None
+        store._highest_sealed_generation = 0
+        try:
+            if type(next_identity) is not PrimeBackendIdentity:
+                _fail()
+            _limit(max_bytes)
+            _limit(max_record_bytes)
+            if max_record_bytes > max_bytes:
+                _fail()
+            store._root = _root_path(prior_root)
+            prior_identity = _read_prior_identity(store._root)
+            _enforce_continuation_rules(prior_identity, next_identity)
+            store._continued_from = prior_identity
+            store._identity_document = _identity_document(next_identity)
+            store._identity_document_sha256 = _sha256(store._identity_document)
+            store._root_fd = _open_root(store._root)
+            root_details = os.fstat(store._root_fd)
+            store._root_identity = _file_identity(root_details)
+            if private_root_identity(store._root) != next_identity.private_root_identity:
+                _fail()
+            store._lock_fd, _ = _open_regular(
+                store._root_fd, ".writer.lock", create=True, append=False
+            )
+            store._lock_identity = _file_identity(os.fstat(store._lock_fd))
+            try:
+                fcntl.flock(store._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as error:
+                if error.errno in {errno.EACCES, errno.EAGAIN}:
+                    _fail()
+                raise
+            store._identity_fd, _ = _open_regular(
+                store._root_fd, "identity.json", create=True, append=False
+            )
+            store._identity_identity = _file_identity(os.fstat(store._identity_fd))
+            _rewrite_identity_document(store._identity_fd, store._identity_document)
+            store._record_fd, _ = _open_regular(
+                store._root_fd, "records.jsonl", create=True, append=True
+            )
+            store._record_identity = _file_identity(os.fstat(store._record_fd))
+            store._load_records()
+            store._validate_root_artifacts()
+            store._compute_highest_sealed_generation()
+            store._validate_checkpoints()
+            os.fsync(store._root_fd)
+            store._confirm_bindings()
+        except PrimeStoreError:
+            store._close_descriptors()
+            raise
+        except (OSError, TypeError, ValueError, UnicodeError, json.JSONDecodeError):
+            store._close_descriptors()
+            _fail()
+        return store
 
     @property
     def position(self) -> int:
@@ -239,6 +348,27 @@ class FilePrimeSessionStore:
         with self._mutex:
             self._refresh_for_read()
             return self._records
+
+    @property
+    def continued_from(self) -> PrimeBackendIdentity | None:
+        """Return the prior identity this store was continued from, if any.
+
+        ``None`` for an initial open; the prior :class:`PrimeBackendIdentity`
+        when this store was opened via :meth:`open_continued`. The prior
+        worker ``worker_identity_sha256`` may differ from the current one; that
+        swap is intentional and recorded here.
+        """
+
+        with self._mutex:
+            return self._continued_from
+
+    @property
+    def highest_sealed_generation(self) -> int:
+        """Return the highest generation that has at least one sealed checkpoint."""
+
+        with self._mutex:
+            self._refresh_for_read()
+            return self._highest_sealed_generation
 
     def has_record(self, record_id: str) -> bool:
         with self._mutex:
@@ -354,7 +484,10 @@ class FilePrimeSessionStore:
                 _expected_position(expected_position, len(self._records))
                 for name, body in additions:
                     self._write_blob(name, body)
-                return self._append_encoded(candidate, encoded)
+                record = self._append_encoded(candidate, encoded)
+                if checkpoint.generation > self._highest_sealed_generation:
+                    self._highest_sealed_generation = checkpoint.generation
+                return record
             except PrimeStoreError:
                 raise
             except (OSError, TypeError, ValueError, UnicodeError, PrimeStateError):
@@ -605,15 +738,29 @@ class FilePrimeSessionStore:
             recovered = self._recover_record(record)
             checkpoint = recovered.checkpoint
             if (
-                checkpoint.generation != self._identity.generation
-                or checkpoint.worker_identity_sha256
-                != self._identity.worker_identity_sha256
+                checkpoint.generation > self._identity.generation
                 or checkpoint.continuation_id != self._identity.continuation_id
                 or checkpoint.public_event_cursor != cursor
                 or checkpoint.prior_checkpoint_sha256 != prior
             ):
                 _fail()
+            if checkpoint.generation == self._identity.generation:
+                if checkpoint.worker_identity_sha256 != self._identity.worker_identity_sha256:
+                    _fail()
             prior = checkpoint.digest
+
+    def _compute_highest_sealed_generation(self) -> None:
+        highest = 0
+        for record in self._records:
+            if record.kind != "checkpoint.sealed":
+                continue
+            try:
+                checkpoint = PrimeCheckpoint.from_mapping(record.payload["checkpoint"])
+            except PrimeStateError:
+                _fail()
+            if checkpoint.generation > highest:
+                highest = checkpoint.generation
+        self._highest_sealed_generation = highest
 
     def _public_cursor(self) -> int:
         return sum(record.kind == "public.event" for record in self._records)
@@ -861,6 +1008,76 @@ def _identity_document(identity: PrimeBackendIdentity) -> bytes:
         )
         + b"\n"
     )
+
+
+def _read_prior_identity(root: Path) -> PrimeBackendIdentity:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            "identity.json",
+            os.O_RDONLY | _NOFOLLOW | _CLOEXEC,
+            dir_fd=_open_root(root),
+        )
+        raw = _read_fd(descriptor)
+    except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+        _fail()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    try:
+        value = json.loads(raw.decode("utf-8", errors="strict"))
+    except (UnicodeError, ValueError, json.JSONDecodeError):
+        _fail()
+    if (
+        type(value) is not dict
+        or set(value) != {"version", "identity"}
+        or value.get("version") != _IDENTITY_VERSION
+        or not isinstance(value.get("identity"), Mapping)
+    ):
+        _fail()
+    try:
+        return PrimeBackendIdentity.from_mapping(value["identity"])
+    except PrimeStateError:
+        _fail()
+    except (TypeError, ValueError):
+        _fail()
+
+
+def _enforce_continuation_rules(
+    prior: PrimeBackendIdentity, next_identity: PrimeBackendIdentity
+) -> None:
+    if next_identity.generation != prior.generation + 1:
+        _fail()
+    if next_identity.continuation_id != prior.continuation_id:
+        _fail()
+    if next_identity.session_id != prior.session_id:
+        _fail()
+    if next_identity.provider_id != prior.provider_id:
+        _fail()
+    if next_identity.application_id != prior.application_id:
+        _fail()
+    if next_identity.application_version != prior.application_version:
+        _fail()
+    if next_identity.runtime_id != prior.runtime_id:
+        _fail()
+    if next_identity.pi_command_sha256 != prior.pi_command_sha256:
+        _fail()
+    if next_identity.extension_binding_fingerprint != prior.extension_binding_fingerprint:
+        _fail()
+    if next_identity.private_root_identity != prior.private_root_identity:
+        _fail()
+    if next_identity.ceilings_sha256 != prior.ceilings_sha256:
+        _fail()
+
+
+def _rewrite_identity_document(descriptor: int, document: bytes) -> None:
+    try:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        _write_all(descriptor, document, offset=0)
+        os.ftruncate(descriptor, len(document))
+        os.fsync(descriptor)
+    except (OSError, ValueError):
+        _fail()
 
 
 def _json_value(value: object, depth: int = 0) -> object:

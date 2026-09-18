@@ -41,6 +41,7 @@ prime-applications = "asterion.applications.prime:create_provider"
 [project.entry-points."asterion.host_services"]
 "corpus.local-root" = "asterion.capabilities.dci.implementation.services:create_local_corpus_service_factory"
 "evaluation.answer-judge" = "asterion.capabilities.dci.implementation.services:create_answer_judge_service_factory"
+"prime.continuity-store" = "asterion.applications.prime.services:create_continuity_store_host_service"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/asterion"]

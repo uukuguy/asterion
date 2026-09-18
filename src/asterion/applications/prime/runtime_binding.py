@@ -333,6 +333,10 @@ def build_asterion_prime_runtime(
         from asterion.applications.prime.p2.runtime_binding import build_p2_runtime
 
         return build_p2_runtime(context)
+    if key == ("prime.long-session-continuity", "1.0.0"):
+        from asterion.applications.prime.p4.runtime_binding import build_p4_runtime
+
+        return build_p4_runtime(context)
     if key == ("prime.arc-agi-3-solving", "1.0.0"):
         return build_p7_runtime(context)
     raise RuntimeFactoryError(_ERROR)
