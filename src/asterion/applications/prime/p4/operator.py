@@ -127,7 +127,19 @@ def _build_identity(
     continuation_id: str,
     worker_sha: str,
     session_id: str,
+    pi_command_sha256: str = sha256(b"prime.pi-native").hexdigest(),
+    extension_binding_fingerprint: str = sha256(b"prime.extension").hexdigest(),
+    ceilings_sha256: str = sha256(b"prime.ceilings").hexdigest(),
 ) -> PrimeBackendIdentity:
+    """Build a PrimeBackendIdentity for P4.
+
+    Default pi/extension/ceilings SHAs match the fixture used in the
+    end-to-end witness (commit and recover invocations within the same
+    operator run must share them, or the continuation rules will reject
+    the recover-side identity). The recover path overrides these with the
+    prior identity's values when available so a pre-baked private_root
+    (e.g. one sealed by a different operator build) can still bind.
+    """
     return PrimeBackendIdentity(
         session_id=session_id,
         generation=generation,
@@ -135,12 +147,12 @@ def _build_identity(
         application_id="prime.long-session-continuity",
         application_version="1.0.0",
         runtime_id="asterion.prime",
-        pi_command_sha256=sha256(b"prime.pi-native").hexdigest(),
-        extension_binding_fingerprint=sha256(b"prime.extension").hexdigest(),
+        pi_command_sha256=pi_command_sha256,
+        extension_binding_fingerprint=extension_binding_fingerprint,
         worker_identity_sha256=worker_sha,
         continuation_id=continuation_id,
         private_root_identity=private_root_identity(private_root),
-        ceilings_sha256=sha256(b"prime.ceilings").hexdigest(),
+        ceilings_sha256=ceilings_sha256,
     )
 
 
@@ -238,6 +250,9 @@ async def _recover_mode(
         continuation_id=prior_identity.continuation_id,
         worker_sha=worker.identity_sha256,
         session_id=prior_identity.session_id,
+        pi_command_sha256=prior_identity.pi_command_sha256,
+        extension_binding_fingerprint=prior_identity.extension_binding_fingerprint,
+        ceilings_sha256=prior_identity.ceilings_sha256,
     )
     store = FilePrimeSessionStore.open_continued(
         preflight.private_root, next_identity

@@ -1,0 +1,38 @@
+{
+  "checkpoint": {
+    "checkpoint_id": "p4-commit-fixture-001",
+    "continuation_id": "continuation-p4-fixture-001",
+    "covered_leaf_id": null,
+    "generation": 1,
+    "outstanding_effect": null,
+    "prior_checkpoint_sha256": null,
+    "private_transcript_sha256": "e142fd32f3a3411d036cc0a379f35c4151f759586bf5842d9d3cb7dc93939940",
+    "public_event_cursor": 0,
+    "summary_sha256": null,
+    "usage_sha256": "ec8dd70a26fb090c78203467fd67a178107ccea41aa190a6e39020af12cae775",
+    "worker_identity_sha256": "fa8a601b6987f028107182117f32b9fbb4d28b27579afcbf2455ac6d6e7e9903"
+  },
+  "description": "Pre-baked gen=1 sealed checkpoint for P4 operator recover-mode tests. The materialized private_root contains identity.json + one records.jsonl row + transcript/usage blobs, and the checkpoint's digest must equal the recover-mode prior_checkpoint_sha256 field.",
+  "identity_document": {
+    "identity": {
+      "application_id": "prime.long-session-continuity",
+      "application_version": "1.0.0",
+      "ceilings_sha256": "283b72b606b7d612beb90d3c5c6efbe7755f3dbd44d723721f7f805f038f116f",
+      "continuation_id": "continuation-p4-fixture-001",
+      "extension_binding_fingerprint": "cdfcf2e4bb4b551d3350d4876a5bfce7821112a6537ea1e5ff97ea09441044da",
+      "generation": 1,
+      "pi_command_sha256": "525b404b312acb38f430e1a86a245b2d725232aeeac5610be182b7f44b84b4c2",
+      "private_root_identity": "c74788b797ed6a14116811c29beb5c4f6e239aa7a275190a364fb6b23d95daeb",
+      "provider_id": "prime-applications",
+      "runtime_id": "asterion.prime",
+      "session_id": "p4-test-session-0001",
+      "worker_identity_sha256": "fa8a601b6987f028107182117f32b9fbb4d28b27579afcbf2455ac6d6e7e9903"
+    },
+    "version": "asterion.prime-session-identity/v1"
+  },
+  "summary_hex": null,
+  "transcript_hex": "70342d666978747572652d636f6d6d69742d7472616e736372697074",
+  "usage": {
+    "result_sha256": "dfd8d3af288fd3639f30ef055cbacfd229a743fb8139b51103bca88f2fb2d281"
+  }
+}
