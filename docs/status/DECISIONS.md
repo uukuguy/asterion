@@ -25,6 +25,7 @@
 | D-2026-09-18-01 | 🟢 active | Cross-process continuity inherits runtime-binding SHAs from prior identity |
 | D-2026-09-18-02 | 🟢 active | P3 child-runner is in-process by default; subprocess is fallback-only |
 | D-2026-09-19-01 | 🟢 active | P5 bounded-autonomy is one loop controller host service; limits-path has 3 refusal scenarios (cancellation folds in) |
+| D-2026-09-19-02 | 🟢 active | P6 candidate-store wraps framework-owned HarnessCoordinator; closed 2-element `terminal_outcome` enum stays closed (global-rejected folds in) |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -677,3 +678,93 @@
   §"Newly introduced in Phase 8" / §"Stopping conditions" /
   §"P5 oracle" / §"Witness strategy"; docs/superpowers/plans/2026-09-19-asterion-prime-p5-native.md
   §"Components" Task 3 / §"Verification" / §"Open risks".
+
+## D-2026-09-19-02 — P6 candidate-store wraps the framework-owned HarnessCoordinator; closed 2-element `terminal_outcome` stays closed
+
+- Status: 🟢 active
+- Decision: `prime.candidate-store` is implemented as a **single new host
+  service** (`HostServiceFactoryBinding` in
+  `src/asterion/applications/prime/services.py`) that **wraps** the
+  framework-owned `HarnessCoordinator` at
+  `src/asterion/control/harness.py:543`. It does NOT reimplement the
+  coordinator's append-only revision authority, scope mapping,
+  inverse-rollback logic, or snapshot projection — it composes over
+  them through `HarnessCoordinator.apply(proposal)` /
+  `HarnessCoordinator.rollback(...)`. The default path is
+  **in-process** (mirror D-2026-09-18-02 / D-2026-09-19-01); a
+  subprocess supervisor is reserved by design but un-implemented
+  in Phase 9. The Makefile target `make asterion-prime-p6-run` emits
+  the `preserved` record (single Orb invocation);
+  `make asterion-prime-p6-run-limits` emits **two** records —
+  `rolled-back` and `global-rejected` — in a single `jq -s slurp +
+  .[N]` array. Three witness records total; `global-rejected` is
+  **not** a fourth.
+- Rationale: P6 is the continual-improvement application layer that
+  composes the framework's existing harness-refinement substrate.
+  The pre-detachment 2026-09-04 spec explicitly states P6 "does not
+  reimplement Harness coordination, revision storage, scope mapping,
+  or rollback" — the existing `HarnessCoordinator` already owns
+  append-only revision authority, scope mapping, inverse-rollback,
+  and snapshot projection. A separate engine would duplicate
+  verified authority. The wrapper's added surface is the
+  admitted-candidate lifecycle + holdout-evaluation gate +
+  explicit-promotion contract; these are application-level
+  concerns, not framework-level. In-process default mirrors
+  D-2026-09-18-02 (P3) and D-2026-09-19-01 (P5): P6 has no
+  cross-process recovery semantics, so the supervisor pattern
+  P4 introduced for `prime.continuity-store` does not apply. The
+  three Orb-invocation witness shape — one per mode — was chosen
+  because each mode is a fundamentally different outcome class
+  (`preserved` exercises explicit-promotion; `rolled-back` exercises
+  inverse-rollback; `global-rejected` exercises the scope boundary
+  surface). A single `limits-path` Orb invocation with multiple
+  scenarios (P5's pattern) was rejected because P5's three refusal
+  scenarios are all sub-cases of one closed
+  `terminal_reason="cancelled"-family` failure surface, while P6's
+  three modes include one *success* mode (`preserved`) and two
+  *non-success* modes (`rolled-back`, `global-rejected`) with
+  distinct application-level preconditions.
+- The closed-enum surface stays closed at 2 elements
+  (`preserved` | `rolled-back`). The oracle's internal verdict
+  enum is 3 elements (`preserved` | `rolled-back` |
+  `global-rejected`), where `global-rejected` is the wrapper's
+  pre-orchestration boundary rejection (scope=global without
+  `global_activation_approved=True`). At the public receipt
+  surface, `global-rejected` folds into
+  `terminal_outcome="rolled-back"` + `global_activation_approved=False`.
+  This keeps the public 2-element enum closed (matches the
+  pre-detachment spec L46–L47 "declared outcome: preserved or
+  rolled-back"; matches P5's closed-enum discipline). All four
+  error paths — cancellation, candidate-admission error,
+  holdout-evaluation error, promotion-action error — also fold
+  into `terminal_outcome="rolled-back"` with diagnostic digests
+  in the receipt's rationale (NOT new terminal outcomes). The
+  rationale keeps the closed enum closed.
+- Consequence: The wrapper's public surface is `CandidateStoreLoop`
+  (async context manager with `public_identity`, `admit_candidate`,
+  `evaluate_holdout`, `promote_or_rollback`) and
+  `create_candidate_store_host_service(context)`. The
+  `terminal_outcome` field on `P6NativeReceipt` is the closed
+  2-element `Literal["preserved", "rolled-back"]` enum; the oracle
+  verdict is the internal 3-element enum
+  `Literal["preserved", "rolled-back", "global-rejected"]`. The
+  Phase 5/7/8 fixture / capability-package / Makefile patterns
+  are reused unchanged. The provider gate stays closed until
+  `make asterion-prime-p6-run` AND `make asterion-prime-p6-run-limits`
+  both exit 0; a single Task-16 commit then publishes P6 to
+  `create_provider()` (6 → 7 apps) and `asterion.application_index`,
+  mirroring the Phase 6/7/8 closures. If a future phase wants a
+  separate harness-revision engine, it must not split the
+  framework-owned `HarnessCoordinator`'s append-only authority.
+- Evidence: docs/superpowers/specs/2026-09-19-asterion-prime-p6-native-design.md
+  §"Ground truth — what P6 is" / §"Architectural principle" /
+  §"Substrate reuse vs new components" / §"P6 oracle — three
+  invariants" / §"P6 sealed receipt" / §"Witness strategy" /
+  §"Failure behavior" / §"What Phase 9 must NOT do";
+  docs/superpowers/specs/2026-09-04-prime-p6-continual-improvement-design.md
+  (pre-detachment canonical P6 design, "does not reimplement"
+  clause); docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md
+  L259–L264 / L116 / L351–L353 (P6 charter / application row /
+  witness verbatim);
+  src/asterion/control/harness.py:543 (framework-owned
+  `HarnessCoordinator`).
