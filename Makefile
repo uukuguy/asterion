@@ -265,7 +265,7 @@ asterion-prime-p4-run:
 		[ -n "$$commit_json" ] && [ -n "$$recover_json" ] || { echo "[asterion-prime-p4-run] operator produced no JSON output" >&2; exit 2; }; \
 		echo "$$commit_json" | jq -e ".status == \"committed\" and (.checkpoint_sha256 | length) == 64 and (.receipt_sha256 | length) == 64" >/dev/null || { echo "[asterion-prime-p4-run] commit witness failed: $$commit_json" >&2; exit 2; }; \
 		echo "$$recover_json" | jq -e ".status == \"recovered\" and (.prior_checkpoint_sha256 | length) == 64" >/dev/null || { echo "[asterion-prime-p4-run] recover witness failed: $$recover_json" >&2; exit 2; }; \
-		echo "$$recover_json" | jq -e --argjson c "$$commit_json" ".prior_checkpoint_sha256 == \$c.checkpoint_sha256 and .new_generation == (\$c.generation + 1) and .result_sha256 != \$c.result_sha256 and .continuation_id == \$c.continuation_id and .worker_identity_sha256 != \$c.worker_identity_sha256" >/dev/null || { echo "[asterion-prime-p4-run] continuity invariants failed: $$recover_json (commit: $$commit_json)" >&2; exit 2; }; \
+		{ echo "$$commit_json"; echo "$$recover_json"; } | jq -e -s ".[1].prior_checkpoint_sha256 == .[0].checkpoint_sha256 and .[1].new_generation == (.[0].generation + 1) and .[1].result_sha256 != .[0].result_sha256 and .[1].continuation_id == .[0].continuation_id and .[1].worker_identity_sha256 != .[0].worker_identity_sha256" >/dev/null || { echo "[asterion-prime-p4-run] continuity invariants failed: $$recover_json (commit: $$commit_json)" >&2; exit 2; }; \
 		echo "[asterion-prime-p4-run] witness passed: gen 1 -> 2, prior_checkpoint_sha256 matches commit checkpoint, result_sha256 differs across modes" >&2'
 
 # Diagnostic sibling of ``asterion-prime-p4-run``: identical command line,
