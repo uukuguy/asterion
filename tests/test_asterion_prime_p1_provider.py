@@ -164,7 +164,7 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                 )
             )
 
-    def test_provider_publishes_all_six_applications(self) -> None:
+    def test_provider_publishes_all_seven_applications(self) -> None:
         # prime.ipython-coding returns to the public list together with its
         # witness (Phase 4, D-2026-09-12-01). prime.programmatic-long-context
         # returns with its Phase 5 witness. prime.long-session-continuity
@@ -176,9 +176,14 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
         # ``make asterion-prime-p3-run-limits``). prime.bounded-autonomy
         # returns with its Phase 8 propose/verify/repair + limits witness
         # (exit 0 from ``make asterion-prime-p5-run`` and
-        # ``make asterion-prime-p5-run-limits``). While any was withheld,
+        # ``make asterion-prime-p5-run-limits``). prime.continual-improvement
+        # returns with its Phase 9 preserved + limits witness (exit 0 from
+        # both ``make asterion-prime-p6-run`` and
+        # ``make asterion-prime-p6-run-limits``; D-2026-09-19-02: closed
+        # 2-element ``terminal_outcome`` enum + composition over
+        # framework-owned HarnessCoordinator). While any was withheld,
         # metadata lookup had to reject the selector before importing a
-        # runtime; the installed-route runs now exist for all six.
+        # runtime; the installed-route runs now exist for all seven.
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-applications")
@@ -190,6 +195,7 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
             (
                 ("prime.arc-agi-3-solving", "1.0.0"),
                 ("prime.bounded-autonomy", "1.0.0"),
+                ("prime.continual-improvement", "1.0.0"),
                 ("prime.ipython-coding", "1.0.0"),
                 ("prime.long-session-continuity", "1.0.0"),
                 ("prime.recursive-workflow", "1.0.0"),

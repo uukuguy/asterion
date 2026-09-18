@@ -315,6 +315,20 @@ def create_provider() -> InstalledApplicationProvider:
             # (Phase 8: P5NativeOracle + P5NativeReceipt with sealed
             # ``receipt_sha256`` over canonical-JSON of the bounded turn).
             prime_bounded_autonomy_application(),
+            # Phase 9, Task 16: published together with its installed-route
+            # continual-improvement preserved + limits witness (exit 0 from
+            # both ``make asterion-prime-p6-run`` and
+            # ``make asterion-prime-p6-run-limits``; the limits witness
+            # asserts rolled-back + global-rejected records, each with a
+            # sealed ``receipt_sha256``). The preserved witness asserts
+            # ``terminal_outcome == "preserved"``,
+            # ``global_activation_approved == false``, ``rollback_invocation_count == 0``,
+            # and a non-null ``task_b_result_digest`` over canonical-JSON of
+            # the holdout evidence (Phase 9: P6NativeReceipt with closed
+            # 2-element ``terminal_outcome`` enum + 10th ``failure_digest`` field;
+            # D-2026-09-19-02: prime.candidate-store wraps framework-owned
+            # HarnessCoordinator at src/asterion/control/harness.py:543).
+            prime_continual_improvement_application(),
             # Published together with its witness (Phase 4, D-2026-09-12-01):
             # the detachment spec requires an unmigrated selector to be omitted,
             # so the selector returns only once the installed-route witness

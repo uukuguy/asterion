@@ -39,15 +39,15 @@ class TestAsterionPrimeP6Provider(unittest.TestCase):
             "prime.continual-improvement",
         )
 
-        # P6 stays out of the public selector until the witness passes
-        # (Phase 9, Task 16). create_provider() still publishes the six
-        # Phase 8 apps (P7 + P1 + P2 + P3 + P4 + P5); P6 must NOT be
-        # among them.
+        # Phase 9, Task 16: P6 is now published together with its
+        # installed-route continual-improvement preserved + limits witness
+        # (exit 0 from both ``make asterion-prime-p6-run`` and
+        # ``make asterion-prime-p6-run-limits``).
         public_provider = create_provider()
         published_ids = tuple(
             application.application_id for application in public_provider.applications
         )
-        self.assertNotIn("prime.continual-improvement", published_ids)
+        self.assertIn("prime.continual-improvement", published_ids)
 
 
 if __name__ == "__main__":
