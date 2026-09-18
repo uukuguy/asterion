@@ -2678,3 +2678,5 @@
 - 22:12 **会话收口（handoff）**：用户触发 handoff 命令。Phase 6 closeout 已写 (`bd638cb6`，21:48)；本会话后期工作（22:00 之后）属 statusline 定制化，与 Asterion 主线解耦，不进 git。`git status --short` 空，HEAD `bd638cb6` clean，无 `python -m asterion.*` 后台进程。OrbStack helper 进程是系统级 daemon，与本会话无关，不视为遗留。下一会话起点：Phase 7 (P3 rebuild) — `discuss → plan → execute` 流程。
 
 - 22:13 **statusline 路径截断加固（out-of-repo）**：用户反馈"当前目录名有可能非常长"。加固 `~/.claude/statusline-p10k.sh` 的 `short_dir()`：除原有"≤3 段全显 / >3 段取末两段"外，加 `shorten_segment()` helper — 单段 basename > 16 字符时按 head=8 + `…` + tail=4 截断（如 `test-fixtures-with-an-extremely-long-name-that-no-one-would-type` → `test-fix…type`，保留可识别性）。host 上 5 个不同长度/深度路径 dry-run 通过。仍 out-of-repo。
+
+- 22:15 **statusline 路径显示进一步简化（out-of-repo）**：用户反馈"项目在哪里从路径后部是可以区分的，没有必要是全路径" — 把 `short_dir()` 简化为只用 basename（最后一路径段），单段 > 16 字符时才按 head…tail 缩。从 22:13 版的"≤3 段全显 / >3 段取末两段 / 单段 > 16 字符缩"三段策略降级为单段策略。原因：basename 已能区分项目位置，省前缀可大幅缩短 statusline 长度（`agentic-2026/asterion` → `asterion`）。host 6 个不同路径 dry-run 通过。仍 out-of-repo，未 commit 到 Asterion。
