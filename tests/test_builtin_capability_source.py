@@ -115,7 +115,7 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
 
         def registrations():
             raise ValueError(sentinel)
-            yield None
+            yield None  # type: ignore[unreachable]
 
         with self.assertRaises(BuiltinCapabilitySourceError) as raised:
             BuiltinCapabilitySource(registrations())
