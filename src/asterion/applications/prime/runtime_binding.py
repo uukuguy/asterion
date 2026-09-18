@@ -291,7 +291,7 @@ def build_p7_runtime(
         rpc_session = build_rpc_session(
             command=launch.approved_command,
             cwd=launch.working_directory,
-            environment=dict(launch.approved_environment),
+            environment=launch.approved_environment or {},
             deadline_seconds=launch.deadline_seconds,
             inherited_fds=launch.extension_lease.inherited_fds,
             compact_events=launch.compact_events,
