@@ -8,6 +8,7 @@ from pathlib import Path
 from asterion.applications.first_party_packages import (
     PRIME_ARC_AGI_3_SOLVER_PACKAGE,
     PRIME_BOUNDED_AUTONOMY_NATIVE_PACKAGE,
+    PRIME_CONTINUAL_IMPROVEMENT_NATIVE_PACKAGE,
     PRIME_IPYTHON_CODING_NATIVE_PACKAGE,
     PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE,
     PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE,
@@ -221,6 +222,46 @@ def create_prime_bounded_autonomy_provider() -> InstalledApplicationProvider:
     )
 
 
+def prime_continual_improvement_application() -> InstalledApplication:
+    """Return the exact P6 application record.
+
+    Mirrors :func:`prime_bounded_autonomy_application`: P6's
+    operator composes itself from this record instead of looking itself up
+    in the published list. The selector stays unpublished until the
+    installed-route witness passes (Phase 9, Task 16).
+    """
+
+    root = _resource_root()
+    return InstalledApplication(
+        application_id="prime.continual-improvement",
+        version="1.0.0",
+        assembly_paths=(
+            root / "applications/prime/assemblies/prime-continual-improvement.json",
+        ),
+        capability_packages=(PRIME_CONTINUAL_IMPROVEMENT_NATIVE_PACKAGE,),
+        runtime_ids=("asterion.prime",),
+    )
+
+
+def create_prime_continual_improvement_provider() -> InstalledApplicationProvider:
+    """Return the provider carrying P6's own record alone.
+
+    See :func:`prime_continual_improvement_application` for why the
+    P6 operator composes itself from this provider rather than from the
+    public :func:`create_provider`. The public :func:`create_provider`
+    still returns the six Phase 8 apps (P7 + P1 + P2 + P3 + P4 + P5)
+    until the witness passes (Phase 9, Task 16).
+    """
+
+    return InstalledApplicationProvider(
+        protocol=APPLICATION_PROVIDER_PROTOCOL,
+        provider_id="prime-applications",
+        resource_root=_resource_root(),
+        applications=(prime_continual_improvement_application(),),
+        runtime_factory_bindings=(asterion_prime_runtime_binding(),),
+    )
+
+
 def create_provider() -> InstalledApplicationProvider:
     """Return sorted native Prime applications and one peer runtime binding.
 
@@ -311,12 +352,14 @@ def create_provider() -> InstalledApplicationProvider:
 
 __all__ = (
     "create_prime_bounded_autonomy_provider",
+    "create_prime_continual_improvement_provider",
     "create_prime_ipython_coding_provider",
     "create_prime_long_session_continuity_provider",
     "create_prime_programmatic_long_context_provider",
     "create_prime_recursive_workflow_provider",
     "create_provider",
     "prime_bounded_autonomy_application",
+    "prime_continual_improvement_application",
     "prime_ipython_coding_application",
     "prime_long_session_continuity_application",
     "prime_programmatic_long_context_application",
