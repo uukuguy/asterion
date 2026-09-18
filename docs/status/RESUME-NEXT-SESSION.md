@@ -1,45 +1,67 @@
-# Recovered Session Checkpoint
+# Next-Session Handoff
 
-> Updated: 2026-09-18 20:57. **Session remains active — recovery synthesized from JOURNAL; prior session missed final `handoff`.**
-> HEAD: `d0778767` clean.
+> Updated: 2026-09-18 21:14, end of session. **Phase 6 closes** — Task 17 witness passed, P4 published.
+> HEAD: `80a238ec` clean.
 
-## What changed since last RESUME
+## TL;DR
 
-The last RESUME (20:50) referenced HEAD `35427ad8`. Two doc commits landed after:
+1. **`make asterion-prime-p4-run` exit 0** (operator-authorized). Sealed receipt `6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d` (deterministic across host runs by fake-worker construction; equals both `commit.checkpoint_sha256` and `recover.prior_checkpoint_sha256`). Cross-process continuity proved under a fresh Orb wheel build.
+2. **Task-4 mirror commit** `80a238ec` published P4:
+   - `create_provider()` now returns **4** native Prime applications (`arc-agi-3-solving`, `ipython-coding`, `long-session-continuity`, `programmatic-long-context`).
+   - `pyproject.toml.asterion.application_index` adds `prime.long-session-continuity__1.0.0`.
+   - P1 regression guard renamed `test_provider_publishes_all_three_applications` → `..._all_four_...`.
+   - P4 provider test's Task 17 guard (`assertNotIn`) inverted to `assertEqual`.
+3. **68 P1/P2/P4 tests green, ruff clean, detachment gate 0.** Three pre-existing red tests untouched: `test_pi_session` (1F+6E), `test_prime_p7_native_installed`, `test_core_only_install`.
+4. **Phase 6 closes here. P1-P7 native implementations: 4 of 7** — P7, P1, P2, P4. P3 / P5 / P6 remain unbuilt.
 
-- `0635ea46` `docs: Phase 6 handoff closeout (RESUME + DECISIONS + MEMORY + JOURNAL)` — rewrote RESUME as the Phase 6 handoff baton, added `D-2026-09-18-01` (cross-process continuity runtime-binding SHA inheritance), updated `MEMORY.md` 🟠 Current Judgments to "Phase 6 Tasks 1-16 committed at `35427ad8`", added 4 JOURNAL lines.
-- `d0778767` `docs: gsd hook cleanup — audit-completeness correction in collaboration memory` — 20:54 JOURNAL entry, deleted `gsd-session-state.sh` + `gsd-statusline.js` from `settings.json` + 11 leftover `~/.claude/hooks/gsd-*` scripts (9 of which the earlier handoff journal claimed "removed" but actually survived). MEMORY "global hook audit" feedback gains an audit-completeness correction: a "removed" entry is only true if **both** the settings reference AND the script file are gone. Re-audit recipe: `grep -nE 'gsd' ~/.claude/settings.json ~/.claude/settings.local.json` AND `ls ~/.claude/hooks/gsd*`.
+## Where things stand
 
-**Net scope of the diff vs. last RESUME**: 4 files / +140 / −150 (MEMORY.md + DECISIONS.md + JOURNAL.md + RESUME-NEXT-SESSION.md). **Zero code, zero tests, zero plan content change.** Task 17 (operator-authorized witness) remains the single live next action.
+- **Branch**: local `main`, clean at `80a238ec` (was `d0778767` at session start).
+- **Phase 6 commits this session**:
+  - `bb4b804` `fix(makefile): add -q to uv run in P4 witness targets` — first witness run failed on uv spinner polluting stdout
+  - `9d1a2bb` `fix(makefile): use jq -s slurp + index for P4 cross-JSON assertion` — second witness run failed on `\$c` make-recipe quoting
+  - `80a238ec` `feat(prime/p4): Task 17 — publish P4 to public selector with witness` — Task-4 mirror commit after witness exit 0
+- **No background processes** (no Orb VM, no Pi subprocess, no `python -m asterion`).
+- **No `ASTERION_PRIME_*` env vars leaked.**
+- **Plan file** still at `~/.claude/plans/serene-mixing-cat.md` (255 lines, sha256 `aa45271e531eaf55150d48011a4c88f290087c780182bb58f9988c698bf017ac`) — closed.
 
-## Live next action
+## What this session delivered
 
-**User authorizes and runs:**
-```
-cd /Users/sujiangwen/sandbox/agentic-2026/asterion
-make asterion-prime-p4-run
-```
+### Code
 
-Expected on success:
-```
-[asterion-prime-p4-run] native Asterion-prime P4 cross-generation continuity witness
-[asterion-prime-p4-run] witness passed: gen 1 -> 2, prior_checkpoint_sha256 matches commit checkpoint, result_sha256 differs across modes
-```
-Exit 2 with JSON-dump lines on failure. `make asterion-prime-p4-run-verbose` surfaces Orb / python stderr. Override `PRIME_ORB_MACHINE=<vm>` if needed.
+| File | Change |
+|---|---|
+| `Makefile` (`asterion-prime-p4-run` + `-verbose`) | Added `-q` to 4 `uv run` invocations (`bb4b804`); rewrote third `jq -e` to `jq -e -s` slurp + `.[0]/.[1]` indexing, removing the `\$c` make-recipe quoting trap (`9d1a2bb`) |
+| `src/asterion/applications/prime/provider.py` | `create_provider()` appends `prime_long_session_continuity_application()` between P1 and P2 alphabetically; docstring expanded to record P4 witness |
+| `pyproject.toml` | `asterion.application_index` adds `prime.long-session-continuity__1.0.0` (between P1 and P2) |
+| `tests/test_asterion_prime_p1_provider.py` | Renamed `test_provider_publishes_all_three_applications` → `..._all_four_...`; appended P4 tuple entry |
+| `tests/test_asterion_prime_p4_provider.py` | Inverted Task 17 guard: `assertNotIn` of `prime.long-session-continuity__1.0.0` → `assertEqual` of index entry value |
 
-**After witness exit 0**, paste the output. Agent performs the **Task-4 mirror commit** (single commit, ~3 file edits):
-- `src/asterion/applications/prime/provider.py`: append `prime_long_session_continuity_application()` to the `applications` tuple inside `create_provider()` (alphabetically between P1 `prime.ipython-coding` and P2 `prime.programmatic-long-context`).
-- `pyproject.toml`: add `prime.long-session-continuity__1.0.0` to `asterion.application_index`.
-- `tests/test_asterion_prime_p1_provider.py`: rename `test_provider_publishes_all_three_applications` → `test_provider_publishes_all_four_applications` and append the P4 tuple entry.
-- Sealed receipt sha256 should be recorded in the commit message (per the P2 / P4 pattern).
-- Final journal entry + this handoff file gets a `# Next-Session Handoff` rewrite at the next `handoff` invocation.
+### State
 
-## Out-of-scope (carried forward)
+| File | Change |
+|---|---|
+| `docs/status/JOURNAL.md` | 4 new lines: 21:01 (-q fix), 21:05 (jq -s fix), 21:09 (witness pass), 21:13 (Phase 6 closeout) |
+| `docs/status/RESUME-NEXT-SESSION.md` | Rewritten as `# Next-Session Handoff` (was `# Recovered Session Checkpoint`) |
+| `docs/status/CURRENT-STATE.md` | Updated Active work package: **Phase 6 closed**; P1-P7 native = 4 of 7 |
+| `MEMORY.md` | 🟠 Current Judgments: Phase 6 in flight → closed; P1-P7 count 3/7 → 4/7 |
 
-- Phase 7 (P3 rebuild) gets its own plan after Phase 6 closes.
-- Recursive continuity (gen=2→3) explicitly out of scope.
-- Source-detachment gate stays at 0.
-- Three pre-existing red tests untouched: `test_pi_session` (1F+6E), `test_prime_p7_native_installed` (`Prime solver runtime did not complete`), `test_core_only_install.py`.
+## Next steps (immediate, action-level)
+
+1. **Phase 7 (P3 rebuild)** is the next package. It needs its own plan — P3's spec semantics differ from P4 (compile/eval loop, not commit/recover). The shared substrate from P4 (`prime.continuity-store` host service, host Protocol shape, runtime binding dispatcher, operator pattern) should be reused, but the capability shape and event sequence are new.
+   - **Do not** start Phase 7 implementation in this session — plan + spec + design-first pass required first (per Phase 6 methodology).
+2. **Phase 8 / Phase 9** (P5 / P6 rebuild) come after P3 closes.
+3. **Pre-existing red tests** still to address: `test_pi_session`, `test_prime_p7_native_installed`, `test_core_only_install` — out of scope for P4; consider during a separate test-hygiene pass.
+
+## Don't go down these paths again (ruled out)
+
+- `jq -e --argjson c "$commit_json" "...\$c.checkpoint_sha256..."` in a make recipe — `\$` is consumed by make's recipe parser, leaving `\.` for jq. Use `jq -e -s` slurp + `.[0]`/`.[1]` instead.
+- `uv run --no-cache --isolated --with ...` without `-q` — first run emits a spinner + "Installed N packages" to stdout, polluting any stdout capture. Add `-q`.
+- Hardcoded runtime-binding SHAs (`pi_command_sha256` / `extension_binding_fingerprint` / `ceilings_sha256`) in P4 `_recover_mode` — broke cross-build detach+attach. D-2026-09-18-01 fixes.
+- `prior_checkpoint_sha256 == prior_identity.continuation_id` — wrong field; must be `store.recover_checkpoint().checkpoint.digest`.
+- Real Pi subprocess in P4 witness — fake-worker is the design.
+- Child-process supervisor for the two operator invocations — two `make` Orb invocations are sufficient.
+- Multi-generation recovery (gen=2→3) — out of scope.
 
 ## Workspace boundary (carried from Phase 5)
 
@@ -48,10 +70,10 @@ Exit 2 with JSON-dump lines on failure. `make asterion-prime-p4-run-verbose` sur
 - `date` is the only timestamp source.
 - Research intensity: review changed code + boundary assertions + small targeted regressions.
 - No `python -m asterion.*` background processes may linger.
-- The P4 witness does NOT prove model capability — the deterministic fake-worker produces distinct result SHAs by construction (design per Phase 6 spec). Real-model invocation is P1/P7 territory.
 
-## Honest caveats
+## Honest caveats carried forward
 
-- **Task 17 has NOT run.** `make asterion-prime-p4-run` was not executed (operator-authorized work); the witness either passes or it doesn't, and the Task-4 mirror commit depends on that result.
-- **The Orb shell's path-translation** for `$(CURDIR)/.asterion-private/prime-p4-witness` was not end-to-end tested — the Makefile target was syntactically validated and the `jq -e` fragments were tested against host-runnable operator output, but the full Orb shell + wheel install + path translation chain was not exercised. If `make asterion-prime-p4-run` fails with "no such directory" or similar Orb-translation errors, the workaround is to set `ASTERION_PRIME_P4_PRIVATE_ROOT` to a path Orb translates correctly (see P1/P2 patterns in `~/.claude/CLAUDE-PRECEDENTS.md`).
-- **Plugin caches must be reloaded by a full Claude Code restart** for the second-wave plugin cleanup (54→28 plugins, hooks 99→7) to take effect in this session. If `UserPromptSubmit N/M Xs` waiting reappears, re-check `~/.claude/plugins/cache/*/hooks/hooks.json`.
+- Three pre-existing red tests still red (Phase 5 closure): `tests.test_pi_session` (1F+6E), `tests.test_prime_p7_native_installed`, `tests.test_core_only_install.py`.
+- The P4 witness does NOT prove model capability — the deterministic fake-worker produces distinct result SHAs by construction. That's the design (per spec for Phase 6). Real-model invocation is P1/P7 territory.
+- Recursive continuity (gen=2→3) is explicitly out of scope.
+- Plugin caches must be reloaded by a full Claude Code restart for the second-wave plugin cleanup (54→28 plugins, hooks 99→7) to take effect in this session.

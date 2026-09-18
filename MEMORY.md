@@ -188,23 +188,20 @@
 
 ## 🟠 Current Judgments
 
-- Phases 1-5 are complete and the application layer is free of Pi references.
-  **P1-P7 native implementations stand at 3 of 7** — P7, P1, and P2, each at its
-  proven boundary; P4 is code-complete but unpublished pending Task 17 witness.
-  **Phase 5 closed on 2026-09-18: P2's witness passes and P2 is republished.**
-  `make asterion-prime-p2-run` returned exit 0 with sealed receipt
-  `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`
-  (deterministic across host and Orb). **Phase 6 in flight: Tasks 1-16
-  committed at `35427ad8`** (Tasks 1-13 at `3c11b994` + 4 follow-ups:
-  `a2839e6` Task 9 fix, `048078d` Task 14 fixture + secondary fix,
-  `ce67fa0` Task 15 Makefile supervisor, `35427ad` docs at Task 17 gate).
-  55 P4 tests + 105 P1/P2 regression tests green; detachment gate 0; ruff
-  clean. **Remaining Phase 6 work: Task 17** — operator-authorized
-  `make asterion-prime-p4-run` exit0 → single Task-4 mirror commit that
-  appends `prime_long_session_continuity_application()` to
-  `create_provider()`, adds `prime.long-session-continuity__1.0.0` to
-  `pyproject.toml` `asterion.application_index`, and bumps the P1 regression
-  guard from 3 apps to 4. The agent does NOT execute the witness directly.
+- Phases 1-6 are complete and the application layer is free of Pi references.
+  **P1-P7 native implementations stand at 4 of 7** — P7, P1, P2, and P4,
+  each at its proven boundary. **Phase 6 closed on 2026-09-18: P4's
+  cross-generation continuity witness passes and P4 is republished.**
+  `make asterion-prime-p4-run` returned exit 0 with sealed receipt
+  `6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d`
+  (deterministic across host runs by fake-worker construction; equals both
+  commit.checkpoint_sha256 and recover.prior_checkpoint_sha256). Task-4
+  mirror commit `80a238ec` appended P4 to `create_provider()` and
+  `pyproject.toml` index; P1 regression guard bumped from 3 to 4 apps. 68
+  P1/P2/P4 tests green; detachment gate 0; ruff clean. **Next package:
+  Phase 7 — P3 rebuild** requires its own plan + spec + design-first pass
+  before implementation (P3's compile/eval semantics differ from P4's
+  commit/recover even though they share the P4 substrate).
 - **P4 design choices locked in**: deterministic fake-worker for the witness
   (no real Pi subprocess), two `make` Orb invocations against a persistent
   `ASTERION_PRIME_P4_PRIVATE_ROOT` as the supervisor (no child-process
