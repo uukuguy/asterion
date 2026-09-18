@@ -29,6 +29,9 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p3-run
 .PHONY: asterion-prime-p3-run-limits
 .PHONY: asterion-prime-p3-run-verbose
+.PHONY: asterion-prime-p5-run
+.PHONY: asterion-prime-p5-run-limits
+.PHONY: asterion-prime-p5-run-verbose
 .PHONY: asterion-prime-p7-solve
 
 # Operator-owned values for the Prime presets. Defaults below are this
@@ -42,6 +45,7 @@ ASTERION_PRIME_P2_CORPUS ?= $(CURDIR)/tests/fixtures/prime_p2/small_corpus.json
 ASTERION_PRIME_ARC_ROOT ?= /Users/sujiangwen/sandbox/agentic-2026/external-prime/arc-agi-3
 ASTERION_PRIME_P4_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-witness
 ASTERION_PRIME_P3_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-witness
+ASTERION_PRIME_P5_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-witness
 .PHONY: test.native-controller-core.provider-free
 
 help:
@@ -347,6 +351,77 @@ asterion-prime-p3-run-verbose:
 		rm -rf "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; \
 		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P3_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P3_MODE=success; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p3.operator'\'' asterion-prime-p3-run-success "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; \
 		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P3_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P3_MODE=limits; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p3.operator'\'' asterion-prime-p3-run-limits "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"'
+
+# P5 bounded-autonomy success-path witness: re-invokes the operator with
+# ``ASTERION_PRIME_P5_MODE=success``. The operator drives exactly one
+# propose step, observes one verify failure, runs one repair step, and
+# then verifies-pass on the second verify attempt, emitting one JSON
+# line that seals the receipt. The host shell captures the stdout JSON
+# and ``jq -e`` asserts the success invariants:
+#
+#   1. status == "completed", propose_step_count == 1
+#   2. verify_step_count == 2, repair_step_count == 1
+#   3. failed_verify_count == 1 (first verify rejected the proposal)
+#   4. terminal_reason == "success"
+#   5. joined_workspace_digest and receipt_sha256 each 64 chars
+#
+# Pass values either as `make asterion-prime-p5-run VAR=value` or via
+# the shell environment; the ``?=`` defaults fall back to whichever was
+# set. Like the other Prime presets, this is provider-backed and needs
+# operator authorization. Operator root, PI entry, P5 private root, Orb
+# VM, and node are operator-owned; the preset supplies no provider,
+# model, cost, or deadline knob.
+asterion-prime-p5-run:
+	@printf '[asterion-prime-p5-run] native Asterion-prime P5 bounded-autonomy success-path witness\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p5-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		rm -rf "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; \
+		success_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P5_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P5_MODE=success; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p5.operator'\'' asterion-prime-p5-run-success "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P5_PRIVATE_ROOT)")"; \
+		[ -n "$$success_json" ] || { echo "[asterion-prime-p5-run] operator produced no JSON output" >&2; exit 2; }; \
+		echo "$$success_json" | jq -e ".status == \"completed\" and (.propose_step_count == 1) and (.verify_step_count == 2) and (.repair_step_count == 1) and (.failed_verify_count == 1) and (.terminal_reason == \"success\") and (.joined_workspace_digest | length == 64) and (.receipt_sha256 | length == 64)" >/dev/null || { echo "[asterion-prime-p5-run] witness failed: $$success_json" >&2; exit 2; }; \
+		echo "[asterion-prime-p5-run] witness passed: propose 1 + verify 2 + repair 1, terminal_reason=success" >&2'
+
+# P5 refusal-scenarios witness: re-invokes the operator with
+# ``ASTERION_PRIME_P5_MODE=limits``. Per D-2026-09-19-01, cancellation
+# folds into the closed enum rather than surfacing as a fourth
+# scenario, so the operator emits exactly three JSON records
+# (iteration-cap / duration-cap / no-progress), one per line, each
+# carrying its ``scenario`` field, ``terminal_reason``, and a non-null
+# ``receipt_sha256``. The host shell ``jq -e -s`` slurps all three into
+# one array and asserts by index — fixed-position ``.[N]`` lookup dodges
+# the make-recipe ``\$`` quoting trap that bit P4's earlier draft (Phase
+# 6 commit ``9d1a2bb7``); see ``serene-mixing-cat.md`` §"Critical files".
+#
+# Pass values either as `make asterion-prime-p5-run-limits VAR=value` or
+# via the shell environment; the ``?=`` defaults fall back to whichever
+# was set. Like the other Prime presets, this is provider-backed and
+# needs operator authorization.
+asterion-prime-p5-run-limits:
+	@printf '[asterion-prime-p5-run-limits] native Asterion-prime P5 three-refusal-scenarios witness\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p5-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		rm -rf "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; \
+		limits_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P5_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P5_MODE=limits; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p5.operator'\'' asterion-prime-p5-run-limits "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P5_PRIVATE_ROOT)")"; \
+		[ -n "$$limits_json" ] || { echo "[asterion-prime-p5-run-limits] operator produced no JSON output" >&2; exit 2; }; \
+		echo "$$limits_json" | jq -e -s ' \
+			length == 3 and \
+			.[0].scenario == "iteration-cap" and .[0].terminal_reason == "iteration-cap-exceeded" and \
+			.[1].scenario == "duration-cap" and .[1].terminal_reason == "duration-cap-exceeded" and \
+			.[2].scenario == "no-progress" and .[2].terminal_reason == "no-progress" and \
+			(.[0] | .receipt_sha256 != null) and (.[1] | .receipt_sha256 != null) and \
+			(.[2] | .receipt_sha256 != null) \
+		' >/dev/null || { echo "[asterion-prime-p5-run-limits] witness failed: $$limits_json" >&2; exit 2; }; \
+		echo "[asterion-prime-p5-run-limits] witness passed: iteration-cap / duration-cap / no-progress refusals, each with terminal_reason and receipt_sha256" >&2'
+
+# Diagnostic sibling of ``asterion-prime-p5-run`` + ``-limits``: re-invokes
+# both witnesses with full output so Orb / python stderr surfaces to the
+# host terminal for diagnosis only.
+asterion-prime-p5-run-verbose:
+	@$(MAKE) asterion-prime-p5-run ASTERION_PRIME_P5_PRIVATE_ROOT=$(ASTERION_PRIME_P5_PRIVATE_ROOT) || exit 1
+	@$(MAKE) asterion-prime-p5-run-limits ASTERION_PRIME_P5_PRIVATE_ROOT=$(ASTERION_PRIME_P5_PRIVATE_ROOT) || exit 1
+	@echo "[asterion-prime-p5-run-verbose] all witnesses passed"
 
 test.native-controller-core.provider-free:
 	$(UV_BIN) run python -m unittest -v \
