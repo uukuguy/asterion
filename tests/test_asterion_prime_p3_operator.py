@@ -46,6 +46,7 @@ from asterion.applications.prime.p3.operator import (
     run_limits_path,
     run_success_path,
 )
+from asterion.agents.prime.state import PrimeBackendIdentity
 
 
 _OPERATOR_ROOT_ENV = "ASTERION_PRIME_OPERATOR_ROOT"
@@ -396,6 +397,43 @@ class P3OperatorRunFunctions(unittest.TestCase):
             self.assertEqual(
                 scenarios, ["depth", "concurrency", "budget", "cancellation"]
             )
+
+
+class P3RootFixture(unittest.TestCase):
+    """Load ``tests/fixtures/prime_p3/small_root.json`` and assert the
+    pre-baked ``PrimeBackendIdentity`` matches the P3 application contract.
+
+    The fixture is a mirror of ``tests/fixtures/prime_p4/small_state.json``
+    shape (identity-only — P3 has no recover-mode sealed-checkpoint path,
+    so the fixture is just the identity mapping). It exists so in-process
+    tests can assert P3-bound identities without seeding a private_root.
+    """
+
+    def test_root_fixture_loads_with_p3_application_id(self) -> None:
+        fixture_path = (
+            Path(__file__).resolve().parent / "fixtures/prime_p3/small_root.json"
+        )
+        self.assertTrue(
+            fixture_path.is_file(),
+            f"missing fixture: {fixture_path}",
+        )
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        identity = fixture["identity"]
+        assert isinstance(identity, dict)
+        self.assertEqual(identity["application_id"], "prime.recursive-workflow")
+        self.assertEqual(identity["provider_id"], "prime-applications")
+        self.assertEqual(identity["runtime_id"], "asterion.prime")
+        self.assertEqual(identity["generation"], 1)
+        self.assertEqual(
+            identity["session_id"], "prime.recursive-workflow.1.0.0"
+        )
+        # The fixture's identity mapping must round-trip through the
+        # producer (PrimeBackendIdentity.from_mapping) without raising —
+        # this is the same check the store applies when reading
+        # identity.json from a materialized private_root.
+        identity_obj = PrimeBackendIdentity.from_mapping(identity)
+        self.assertEqual(identity_obj.generation, 1)
+        self.assertEqual(identity_obj.application_id, "prime.recursive-workflow")
 
 
 if __name__ == "__main__":
