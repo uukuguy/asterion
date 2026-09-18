@@ -13,29 +13,26 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: **Phase 8 closed**. Next is **Phase 9 — P6 rebuild**
-  (plan/spec/design-first pass required before implementation; P6's
-  continual-improvement bounded-evaluation + explicit-promotion semantics
-  differ from P5's bounded-loop semantics even though both compose the
-  native substrate).
-  Phase 8 plan lived at `docs/superpowers/plans/2026-09-19-asterion-prime-p5-native.md`;
-  spec at `docs/superpowers/specs/2026-09-19-asterion-prime-p5-native-design.md`;
-  both closed at commit `8a3b57cb`. Phase 8 delivery: Tasks 1–16 all complete
-  + one Makefile bash 3.2 quoting fix-on-verify (`5c07d9ff`).
-  P5 is **published** in `create_provider()` and `pyproject.toml`
-  `asterion.application_index` together with its installed-route
-  in-process bounded-autonomy witness (`make asterion-prime-p5-run` AND
-  `make asterion-prime-p5-run-limits` both exit 0; deterministic
-  fake-worker keyed on `(mode, step_kind, run_id)`; success-path
-  propose-1/verify-2/repair-1 → terminal_reason=success; limits-path
-  3 refusal scenarios per D-2026-09-19-01: iteration-cap-exceeded /
-  duration-cap-exceeded / no-progress). Task-4 mirror commit
-  `0a74bc1a` appended P5 to the provider tuple + index; P1 regression
-  guard bumped from 5 to 6 apps. 75 P5 tests + P1/P2/P3/P4 regression =
-  164/164 pass, ruff clean, detachment gate 0. P5 follows the P4 / P3
-  Task-4 mirror pattern: provider gate stayed closed until both
-  witnesses exit 0, then a single commit appended P5 to the provider
-  tuple + index and inverted the Task 16 guard.
+- Active work package: **Phase 9 closed**. The 9-phase native detachment
+  program is COMPLETE — P1–P7 native implementations stand at **7 of 7**.
+  Next session has no Phase 10 defined in the canonical worklist.
+  Phase 9 plan lived at `docs/superpowers/plans/2026-09-19-asterion-prime-p6-native.md`;
+  spec at `docs/superpowers/specs/2026-09-19-asterion-prime-p6-native-design.md`;
+  both closed at commit `2e328f45`. Phase 9 delivery: Tasks 1–16 all complete
+  + Task-4 mirror commit `5bac6f05` published P6 in `create_provider()` and
+  `asterion.application_index`. 70 P6 tests + 324 P1–P5 regression = 394/394
+  pass at close, ruff clean, detachment gate 0.
+  **P6 follows the P5 / P4 / P3 Task-4 mirror pattern**: provider gate stayed
+  closed until both witnesses (`make asterion-prime-p6-run` AND
+  `make asterion-prime-p6-run-limits`) exit 0, then a single commit appended
+  P6 to the provider tuple + index and inverted the Task 16 guard. P6 is the
+  `prime.candidate-store` host service that wraps framework-owned
+  `HarnessCoordinator` at `src/asterion/control/harness.py:543` (composition,
+  not duplication — D-2026-09-19-02). Witness emits 2 records (preserved +
+  rolled-back + global-rejected via `jq -s slurp + .[N]`). Public
+  `terminal_outcome` is closed 2-element enum (`preserved` | `rolled-back`);
+  `global-rejected` folds into `rolled-back` + `global_activation_approved=False`
+  at the receipt surface.
   **Phase 5 is complete: native P2 is rebuilt, witnessed and republished.**
   Run `make asterion-prime-p2-run` returns exit 0 with sealed receipt
   `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`

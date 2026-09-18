@@ -188,25 +188,43 @@
 
 ## 🟠 Current Judgments
 
-- Phases 1-8 are complete and the application layer is free of Pi references.
-  **P1-P7 native implementations stand at 6 of 7** — P7, P1, P2, P3, P4,
-  and P5, each at its proven boundary. **Phase 8 closed on 2026-09-19:
-  P5's in-process bounded-autonomy witness passes and P5 is
-  republished.** `make asterion-prime-p5-run` AND
-  `make asterion-prime-p5-run-limits` both returned exit 0
-  (deterministic fake-worker keyed on `(mode, step_kind, run_id)`;
-  success-path: propose 1 + verify 2 + repair 1 → terminal_reason=success;
-  limits-path: 3 refusal scenarios per D-2026-09-19-01 — iteration-cap-
-  exceeded / duration-cap-exceeded / no-progress — each with sealed
-  `receipt_sha256`). Task-4 mirror commit `0a74bc1a` appended P5 to
-  `create_provider()` and `pyproject.toml`
-  `asterion.application_index`; P1 regression guard bumped from 5 to 6
-  apps. 75 P5 tests + P1/P2/P3/P4 regression = 164/164 green; detachment
-  gate 0; ruff clean. **Next package: Phase 9 — P6 rebuild** requires
-  its own plan + spec + design-first pass before implementation (P6's
-  continual-improvement bounded-evaluation + explicit-promotion
-  semantics differ from P5's bounded-loop semantics even though both
-  compose the native substrate).
+- **The 9-phase native detachment program is CLOSED on 2026-09-19.
+  P1-P7 native implementations stand at 7 of 7** — P7, P1, P2, P3, P4,
+  P5, and P6, each at its proven boundary. **Phase 9 closed with P6's
+  in-process continual-improvement witness passing and P6 republished.**
+  `make asterion-prime-p6-run` AND `make asterion-prime-p6-run-limits`
+  both returned exit 0 (deterministic fake-worker keyed on
+  `(mode, candidate_kind, run_id)`; preserved-path: admit + evaluate
+  non_regressing=True + apply promotion → terminal_outcome=preserved;
+  limits-path: 2 records via `jq -s slurp + .[N]` per D-2026-09-19-02
+  — `.[0]` rolled-back (rollback_invocation_count=1) and `.[1]`
+  global-rejected (pre-orchestration boundary rejection) — each with
+  sealed `receipt_sha256`). Task-4 mirror commit `5bac6f05` appended
+  P6 to `create_provider()` and `pyproject.toml`
+  `asterion.application_index`; P1 regression guard bumped from 6 to 7
+  apps. 70 P6 tests + 324 P1-P5 regression = 394/394 green; detachment
+  gate 0; ruff clean. **No Phase 10 defined in the canonical worklist;
+  next session must surface a user decision on (a) production promotion
+  / cross-package evidence sweep, (b) maintenance window (pre-existing
+  red tests + pyright latent issues + conformance-table gap), or (c)
+  new Phase 10 charter with its own spec + plan + design-first pass.**
+- **D-2026-09-19-02 locks P6's composition-over-duplication principle
+  and closed 2-element public `terminal_outcome` discipline**:
+  `prime.candidate-store` wraps framework-owned `HarnessCoordinator` at
+  `src/asterion/control/harness.py:543` (4 call sites: `services.py:1758/
+  1943/1990/2055`); zero reimplementation of the coordinator's
+  append-only authority, scope mapping, inverse-rollback, or snapshot
+  projection. The public receipt's `terminal_outcome` is the closed
+  2-element enum (`preserved` | `rolled-back`); the oracle's internal
+  verdict is the closed 3-element enum (`preserved` | `rolled-back` |
+  `global-rejected`), and `global-rejected` folds into `rolled-back` +
+  `global_activation_approved=False` at the receipt surface.
+  Cancellation / candidate-admission / holdout-evaluation / promotion-
+  action errors all fold to `rolled-back` with diagnostic digests in
+  the receipt's 10th field `failure_digest` (no new terminal outcomes).
+  A future shared-substrate change that wants a separate harness engine
+  must not split the framework-owned `HarnessCoordinator`'s append-only
+  authority.
 - **P4 design choices locked in**: deterministic fake-worker for the witness
   (no real Pi subprocess), two `make` Orb invocations against a persistent
   `ASTERION_PRIME_P4_PRIVATE_ROOT` as the supervisor (no child-process
