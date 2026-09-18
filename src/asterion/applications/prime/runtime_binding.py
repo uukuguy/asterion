@@ -345,6 +345,10 @@ def build_asterion_prime_runtime(
         from asterion.applications.prime.p5.runtime_binding import build_p5_runtime
 
         return build_p5_runtime(context)
+    if key == ("prime.continual-improvement", "1.0.0"):
+        from asterion.applications.prime.p6.runtime_binding import build_p6_runtime
+
+        return build_p6_runtime(context)
     if key == ("prime.arc-agi-3-solving", "1.0.0"):
         return build_p7_runtime(context)
     raise RuntimeFactoryError(_ERROR)
