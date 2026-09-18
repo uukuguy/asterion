@@ -12,6 +12,9 @@ from asterion.applications.prime.p3.runtime_binding import (
     P3_RUNTIME_OPTIONS,
     build_p3_runtime,
 )
+from asterion.applications.prime.runtime_binding import (
+    build_asterion_prime_runtime,
+)
 from asterion.applications.prime.services import (
     ChildRunnerHostService,
     _ChildRunnerLimits,
@@ -202,6 +205,34 @@ class P3RuntimeBindingTests(unittest.TestCase):
         ctx = _make_context(options={"aggregate_tokens": "16001"})
         with self.assertRaises(RuntimeFactoryError):
             build_p3_runtime(ctx)
+
+
+class AsterionPrimeDispatcherTests(unittest.TestCase):
+    def test_dispatcher_routes_p3_application_id_to_build_p3_runtime(self) -> None:
+        # We can't easily construct a fully-valid context here, so we just
+        # verify the dispatcher dispatches to P3 by passing an invalid
+        # context (wrong application_id) and confirming the dispatcher
+        # rejects it with RuntimeFactoryError — proving the dispatch path
+        # at least gets exercised.
+        ctx = _make_context(application_id="prime.recursive-workflow")
+        # Patch build_p3_runtime to a sentinel that raises a specific
+        # marker, confirming dispatch.
+        sentinel_calls: list[bool] = []
+
+        def _sentinel_build(_context: object) -> None:
+            sentinel_calls.append(True)
+            raise RuntimeFactoryError("sentinel")
+
+        import asterion.applications.prime.p3.runtime_binding as p3_binding
+
+        original = p3_binding.build_p3_runtime
+        p3_binding.build_p3_runtime = _sentinel_build
+        try:
+            with self.assertRaises(RuntimeFactoryError):
+                build_asterion_prime_runtime(ctx)
+            self.assertTrue(sentinel_calls)
+        finally:
+            p3_binding.build_p3_runtime = original
 
 
 if __name__ == "__main__":
