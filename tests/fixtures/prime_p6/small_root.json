@@ -1,0 +1,16 @@
+{
+  "identity": {
+    "provider_id": "prime-applications",
+    "application_id": "prime.continual-improvement",
+    "application_version": "1.0.0",
+    "runtime_id": "asterion.prime",
+    "session_id": "prime.continual-improvement.1.0.0",
+    "generation": 1,
+    "pi_command_sha256": "4c87602eb209ccdbf2ec7a061ce81fd8c5e1742edfaf6a22c6ae482eb505c217",
+    "extension_binding_fingerprint": "2cc185309d95b0217e4f077ce87b470e3df43ff862e2f1367d9a9ca9f072a1b8",
+    "worker_identity_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "continuation_id": "continuation-p6-root-fixture-001",
+    "private_root_identity": "0000000000000000000000000000000000000000000000000000000000000001",
+    "ceilings_sha256": "4fea8ca8db3dc4c6566317ddbd957a7392814d1777b16890355ea67be434bdf8"
+  }
+}
