@@ -10,6 +10,7 @@ from asterion.applications.first_party_packages import (
     PRIME_IPYTHON_CODING_NATIVE_PACKAGE,
     PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE,
     PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE,
+    PRIME_RECURSIVE_WORKFLOW_NATIVE_PACKAGE,
 )
 from asterion.applications.provider import (
     APPLICATION_PROVIDER_PROTOCOL,
@@ -143,6 +144,44 @@ def create_prime_long_session_continuity_provider() -> InstalledApplicationProvi
     )
 
 
+def prime_recursive_workflow_application() -> InstalledApplication:
+    """Return the exact P3 application record.
+
+    Mirrors :func:`prime_long_session_continuity_application`: P3's
+    operator composes itself from this record instead of looking itself up
+    in the published list. The selector stays unpublished until the
+    installed-route witness passes (Phase 7, Task 16).
+    """
+
+    root = _resource_root()
+    return InstalledApplication(
+        application_id="prime.recursive-workflow",
+        version="1.0.0",
+        assembly_paths=(
+            root / "applications/prime/assemblies/prime-recursive-workflow.json",
+        ),
+        capability_packages=(PRIME_RECURSIVE_WORKFLOW_NATIVE_PACKAGE,),
+        runtime_ids=("asterion.prime",),
+    )
+
+
+def create_prime_recursive_workflow_provider() -> InstalledApplicationProvider:
+    """Return the provider carrying P3's own record alone.
+
+    See :func:`prime_recursive_workflow_application` for why the
+    P3 operator composes itself from this provider rather than from the
+    public :func:`create_provider`.
+    """
+
+    return InstalledApplicationProvider(
+        protocol=APPLICATION_PROVIDER_PROTOCOL,
+        provider_id="prime-applications",
+        resource_root=_resource_root(),
+        applications=(prime_recursive_workflow_application(),),
+        runtime_factory_bindings=(asterion_prime_runtime_binding(),),
+    )
+
+
 def create_provider() -> InstalledApplicationProvider:
     """Return sorted native Prime applications and one peer runtime binding.
 
@@ -199,8 +238,10 @@ __all__ = (
     "create_prime_ipython_coding_provider",
     "create_prime_long_session_continuity_provider",
     "create_prime_programmatic_long_context_provider",
+    "create_prime_recursive_workflow_provider",
     "create_provider",
     "prime_ipython_coding_application",
     "prime_long_session_continuity_application",
     "prime_programmatic_long_context_application",
+    "prime_recursive_workflow_application",
 )
