@@ -164,12 +164,16 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                 )
             )
 
-    def test_provider_publishes_all_three_applications(self) -> None:
+    def test_provider_publishes_all_four_applications(self) -> None:
         # prime.ipython-coding returns to the public list together with its
         # witness (Phase 4, D-2026-09-12-01). prime.programmatic-long-context
-        # returns with its Phase 5 witness. While either was withheld, metadata
-        # lookup had to reject the selector before importing a runtime; the
-        # installed-route runs now exist for both.
+        # returns with its Phase 5 witness. prime.long-session-continuity
+        # returns with its Phase 6 cross-generation continuity witness
+        # (sealed receipt
+        # 6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d).
+        # While any was withheld, metadata lookup had to reject the selector
+        # before importing a runtime; the installed-route runs now exist for
+        # all four.
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-applications")
@@ -181,6 +185,7 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
             (
                 ("prime.arc-agi-3-solving", "1.0.0"),
                 ("prime.ipython-coding", "1.0.0"),
+                ("prime.long-session-continuity", "1.0.0"),
                 ("prime.programmatic-long-context", "1.0.0"),
             ),
         )

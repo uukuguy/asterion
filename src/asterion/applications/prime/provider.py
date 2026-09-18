@@ -148,9 +148,13 @@ def create_provider() -> InstalledApplicationProvider:
 
     P2 is published together with its installed-route witness (Phase 5,
     Task 4): exit 0 + sealed receipt ``cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5``
-    from ``make asterion-prime-p2-run``. The selector returns the exact
-    application record P2's operator composes from via
-    :func:`create_prime_programmatic_long_context_provider`.
+    from ``make asterion-prime-p2-run``. P4 is published together with its
+    cross-generation continuity witness (Phase 6, Task 17): exit 0 + sealed
+    receipt ``6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d``
+    from ``make asterion-prime-p4-run``. The selector returns the exact
+    application records those operators compose from via
+    :func:`create_prime_programmatic_long_context_provider` and
+    :func:`create_prime_long_session_continuity_provider`.
     """
 
     root = _resource_root()
@@ -175,6 +179,14 @@ def create_provider() -> InstalledApplicationProvider:
             # for the P7 route, because the closure is validated for every
             # published application; the package it needs is now supplied.
             prime_ipython_coding_application(),
+            # Phase 6, Task 17: published together with its installed-route
+            # cross-generation continuity witness (sealed receipt
+            # ``6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d``).
+            # The recover-mode invocation opens the prior's private_root at
+            # gen 2 and reads back the prior sealed checkpoint digest; the
+            # witness asserts cross-process continuity under a fresh Orb
+            # wheel build (D-2026-09-18-01).
+            prime_long_session_continuity_application(),
             # Phase 5, Task 4: published together with its installed-route
             # witness (``cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5``).
             prime_programmatic_long_context_application(),

@@ -95,16 +95,21 @@ class TestAsterionPrimeP4Provider(unittest.TestCase):
         self.assertEqual(record.application_id, "prime.long-session-continuity")
         self.assertEqual(record.version, "1.0.0")
 
-    def test_p4_does_not_yet_publish_to_public_selector(self) -> None:
-        """Phase 6 Task 17 gates publication on ``make asterion-prime-p4-run``."""
+    def test_p4_is_published_to_public_selector(self) -> None:
+        """Phase 6 Task 17: published together with its installed-route
+        cross-generation continuity witness (sealed receipt
+        ``6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d``
+        from ``make asterion-prime-p4-run``).
+        """
         import tomllib
 
         pyproject = tomllib.loads(
             (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         )
         index = pyproject["project"]["entry-points"]["asterion.application_index"]
-        self.assertNotIn(
-            "prime.long-session-continuity__1.0.0", index
+        self.assertEqual(
+            index["prime.long-session-continuity__1.0.0"],
+            "asterion.applications.prime:create_provider",
         )
 
 
