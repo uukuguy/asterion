@@ -19,7 +19,7 @@
 | feedback | ✅ verified-active | A classification is not a cause; recover the value before changing anything |
 | feedback | ✅ verified-active | Take a contract's key set from its producer, not from a fixture |
 | feedback | ✅ verified-active | The "倒数第 2-3 个 hook 位置挂几十秒" pattern points at the last synchronous hook, not the first slow one |
-| feedback | ✅ verified-active | Global hook audit: keep only hooks whose project-condition (lwm JOURNAL.md / gsd .planning/config.json / adr .adr-config.yaml / rtk) actually matches the project under CLAUDE_PROJECT_DIR |
+| feedback | ✅ verified-active | Global hook audit: keep only hooks whose project-condition (lwm JOURNAL.md / gsd .planning/config.json / adr .adr-config.yaml / rtk) actually matches the project under CLAUDE_PROJECT_DIR; verify both settings reference AND script file are gone |
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
 
 ## ✅ Verified Active
@@ -170,6 +170,18 @@
   bash). Kept `lwm-stop-health.sh` (Asterion uses project-state =
   lightweight-memory system; Stop fires once and the check is the project's
   own health probe).
+- **Audit completeness check (2026-09-18 evening correction).** The first
+  audit cleared 9 gsd hooks from `settings.json`'s `hooks` block but missed
+  two survivors: (1) `SessionStart` `gsd-session-state.sh` had a
+  `.planning/PROJECT.md + ROADMAP.md` opt-in gate that fired on every
+  SessionStart as a fork-then-exit-zero shell call; (2) `statusLine`
+  `gsd-statusline.js` ran **on every user message** (every turn's status
+  bar) — likely the "Claude is unresponsive" tail-latency felt during the
+  earlier session. A "removed" entry in a journal/commit is only true if
+  both the settings reference AND the script file are gone; the first
+  audit only checked the first. Re-audit with `grep -nE 'gsd' ~/.claude/
+  settings.json ~/.claude/settings.local.json` AND
+  `ls ~/.claude/hooks/gsd*` to confirm both sides are clear.
 - **Why:** hooks fire on every tool call, regardless of project. Stale hooks
   cost latency that compounds into the user's "Claude is unresponsive"
   feeling. Audit is cheap; the win is per-event, every session.
