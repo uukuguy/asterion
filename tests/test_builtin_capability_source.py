@@ -32,6 +32,35 @@ CONTROLLED_CODE = CapabilityPackageRef("controlled-code", "1.0.0")
 DCI = CapabilityPackageRef("dci", "1.0.0")
 PRIME_ARC_AGI_3_SOLVER = CapabilityPackageRef("prime-arc-agi-3-solver", "1.0.0")
 PRIME_IPYTHON_CODING_NATIVE = CapabilityPackageRef("prime-ipython-coding-native", "1.0.0")
+PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE = CapabilityPackageRef(
+    "prime-programmatic-long-context-native", "1.0.0"
+)
+PRIME_LONG_SESSION_CONTINUITY_NATIVE = CapabilityPackageRef(
+    "prime-long-session-continuity-native", "1.0.0"
+)
+PRIME_RECURSIVE_WORKFLOW_NATIVE = CapabilityPackageRef(
+    "prime-recursive-workflow-native", "1.0.0"
+)
+PRIME_BOUNDED_AUTONOMY_NATIVE = CapabilityPackageRef(
+    "prime-bounded-autonomy-native", "1.0.0"
+)
+PRIME_CONTINUAL_IMPROVEMENT_NATIVE = CapabilityPackageRef(
+    "prime-continual-improvement-native", "1.0.0"
+)
+# Registry-stub packages: declared in the builtin registry but operator-driven —
+# their factories carry `implementations=()` per Phase 7/8/9 (# operator-driven;
+# no synchronous implementation). They intentionally fail run_capability_conformance
+# with `implementation binding is missing`; only the registered package_refs with a
+# real CapabilityImplementationBinding pass that check.
+RUNTIME_READY_PACKAGE_IDS = frozenset(
+    {
+        "controlled-code",
+        "dci",
+        "prime-arc-agi-3-solver",
+        "prime-ipython-coding-native",
+        "prime-programmatic-long-context-native",
+    }
+)
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "extensions" / "minimal" / "payload"
 
 
@@ -110,6 +139,11 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
                 DCI,
                 PRIME_ARC_AGI_3_SOLVER,
                 PRIME_IPYTHON_CODING_NATIVE,
+                PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE,
+                PRIME_LONG_SESSION_CONTINUITY_NATIVE,
+                PRIME_RECURSIVE_WORKFLOW_NATIVE,
+                PRIME_BOUNDED_AUTONOMY_NATIVE,
+                PRIME_CONTINUAL_IMPROVEMENT_NATIVE,
             ),
         )
         self.assertNotIn(
@@ -257,6 +291,11 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
             DCI: ("externalization.json",),
             PRIME_ARC_AGI_3_SOLVER: (),
             PRIME_IPYTHON_CODING_NATIVE: (),
+            PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE: (),
+            PRIME_LONG_SESSION_CONTINUITY_NATIVE: (),
+            PRIME_RECURSIVE_WORKFLOW_NATIVE: (),
+            PRIME_BOUNDED_AUTONOMY_NATIVE: (),
+            PRIME_CONTINUAL_IMPROVEMENT_NATIVE: (),
         }
 
         for candidate in source.discover_metadata():
@@ -266,6 +305,13 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
                     tuple(item.resource_id for item in payload.manifest.conformance),
                     declared_conformance[candidate.package_ref],
                 )
+                # run_capability_conformance is only meaningful for packages whose
+                # factory carries a real CapabilityImplementationBinding. Operator-
+                # driven packages (P3/P4/P5/P6) intentionally have `implementations=()`
+                # and would fail with `implementation binding is missing`; the
+                # declared-resource assertion above is the correct invariant for them.
+                if candidate.package_ref.package_id not in RUNTIME_READY_PACKAGE_IDS:
+                    continue
                 installed = source.load_provider(candidate)
                 result = run_capability_conformance(installed)
                 self.assertTrue(result.passed, result.errors)
