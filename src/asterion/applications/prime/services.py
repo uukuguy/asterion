@@ -1,6 +1,6 @@
 """Narrow operator-facing host services for native Asterion Prime applications.
 
-Currently exports two host service factories:
+Currently exports three host service factories:
 
 * ``prime.continuity-store`` — wraps a :class:`FilePrimeSessionStore` in a
   public-safe async-context-manager shape. The store's private path is never
@@ -10,10 +10,15 @@ Currently exports two host service factories:
   P3 recursive-workflow application. Enforces framework-owned depth /
   concurrency / budget / cancellation limits and returns structured
   admission / refusal records without leaking private-root identity.
+* ``prime.bounded-autonomy`` — single-loop controller for the P5
+  bounded-autonomy application. Composes propose/verify/repair under
+  framework-owned duration / iteration / no-progress limits and emits
+  exactly one sealed :class:`P5NativeReceipt` per :meth:`run_loop` call.
 """
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -21,7 +26,8 @@ from decimal import Decimal
 import hashlib
 import json
 from pathlib import Path
-from typing import Literal
+import time
+from typing import Awaitable, Callable, Literal
 
 from asterion.agents.prime.state import PrimeBackendIdentity
 from asterion.agents.prime.store import (
@@ -591,7 +597,877 @@ def create_child_runner_host_service() -> HostServiceFactoryBinding:
     )
 
 
+# ---------------------------------------------------------------------------
+# prime.bounded-autonomy host service (Phase 8, Task 3)
+# ---------------------------------------------------------------------------
+
+# P5 bounded-autonomy limits. Each limit is configurable through the host
+# service factory context when present, otherwise taken from the spec
+# defaults below. Defaults match
+# ``docs/superpowers/specs/2026-09-19-asterion-prime-p5-native-design.md``
+# §"Newly introduced in Phase 8" / §"Stopping conditions".
+MAX_ITERATIONS = 3
+MAX_REPAIR_DURATION_MS = 30_000
+MAX_TOTAL_DURATION_MS = 120_000
+WORKSPACE_DIGEST_DEDUP = True
+
+TerminalReason = Literal[
+    "success",
+    "iteration-cap-exceeded",
+    "duration-cap-exceeded",
+    "no-progress",
+    "cancelled",
+]
+
+_TERMINAL_REASONS: frozenset[str] = frozenset(
+    {
+        "success",
+        "iteration-cap-exceeded",
+        "duration-cap-exceeded",
+        "no-progress",
+        "cancelled",
+    }
+)
+
+
+class BoundedAutonomyServiceError(HostServiceRegistryError):
+    """Raised when ``prime.bounded-autonomy`` cannot be opened safely."""
+
+
+@dataclass(frozen=True)
+class _PublicBoundedAutonomyIdentity:
+    """Content-safe identity projection of a bound bounded-autonomy loop.
+
+    Carries every field of :class:`PrimeBackendIdentity` except the private
+    ``private_root_identity`` digest. Exposed only through
+    :attr:`BoundedAutonomyLoop.public_identity` so the host service surface
+    can never leak the on-disk root digest back to the operator.
+    """
+
+    provider_id: str
+    application_id: str
+    runtime_id: str
+    session_id: str
+    generation: int
+    pi_command_sha256: str
+    extension_binding_fingerprint: str
+    worker_identity_sha256: str
+    continuation_id: str
+    ceilings_sha256: str
+
+
+@dataclass(frozen=True)
+class P5ProposeStep:
+    """One propose step in the bounded loop.
+
+    The :class:`BoundedAutonomyLoop` emits this record at the end of every
+    propose step. ``workspace_digest_sha256`` is the canonical-JSON SHA-256
+    of the candidate artifact; the loop's dedup-adapter compares it
+    against the prior gate's digest.
+    """
+
+    step_id: str
+    workspace_digest_sha256: str
+
+
+@dataclass(frozen=True)
+class P5VerifyStep:
+    """One verify step in the bounded loop.
+
+    ``verdict`` is the closed 4-element oracle verdict enum
+    ``{"pass", "fail", "no-progress", "cancelled"}``. ``feedback`` is the
+    opaque public-safe oracle feedback — never the per-step oracle verdict
+    stream.
+    """
+
+    step_id: str
+    verdict: Literal["pass", "fail", "no-progress", "cancelled"]
+    feedback: str
+
+
+@dataclass(frozen=True)
+class P5RepairStep:
+    """One repair step in the bounded loop.
+
+    The :class:`BoundedAutonomyLoop` emits this record at the end of every
+    repair step. ``workspace_digest_sha256`` is the canonical-JSON SHA-256
+    of the post-repair artifact; the loop's dedup-adapter compares it
+    against the prior propose / repair digest.
+    """
+
+    step_id: str
+    workspace_digest_sha256: str
+
+
+@dataclass(frozen=True)
+class P5NativeReceipt:
+    """One sealed :class:`BoundedAutonomyLoop` run.
+
+    ``receipt_sha256`` is the canonical-JSON SHA-256 of every other field.
+    ``joined_workspace_digest`` is the final workspace digest (the
+    last progress-making propose / repair digest, or the prior gate's
+    digest if the loop terminated with ``no-progress``). ``terminal_reason``
+    is one of the closed 5-element :data:`TerminalReason` enum — never
+    ``"still-running"``.
+    """
+
+    root_run_id: str
+    root_generation: int
+    propose_step_count: int
+    verify_step_count: int
+    repair_step_count: int
+    failed_verify_count: int
+    terminal_reason: TerminalReason
+    joined_workspace_digest: str
+    receipt_sha256: str
+
+
+# Propose / verify / repair callables are async-callables the operator (Task 8)
+# and runtime binding (Task 7) inject into the loop. Each receives the active
+# cancellation signal and returns the matching step record (or raises). The
+# loop controller owns only the limit logic; the verbs are pluggable so the
+# witness can drive deterministic fake-workers without touching the loop.
+ProposeCallable = Callable[
+    [CancellationSignal | None], Awaitable[P5ProposeStep]
+]
+VerifyCallable = Callable[
+    [CancellationSignal | None], Awaitable[P5VerifyStep]
+]
+RepairCallable = Callable[
+    [CancellationSignal | None], Awaitable[P5RepairStep]
+]
+
+
+@dataclass(frozen=True)
+class _BoundedAutonomyLimits:
+    """Resolved limit set for one open ``prime.bounded-autonomy`` service."""
+
+    max_iterations: int
+    max_repair_duration_ms: int
+    max_total_duration_ms: int
+    workspace_digest_dedup: bool
+
+
+def _resolve_bounded_autonomy_limits(
+    context: HostServiceFactoryContext,
+) -> _BoundedAutonomyLimits:
+    """Validate context options and resolve the active P5 limit set.
+
+    Each limit is optional and falls back to the spec default when omitted;
+    any other key in :attr:`context.options` is rejected. Recognised keys:
+
+    * ``max_iterations`` (int, >= 1) — defaults to :data:`MAX_ITERATIONS`.
+    * ``max_repair_duration_ms`` (int, >= 1) — defaults to
+      :data:`MAX_REPAIR_DURATION_MS`.
+    * ``max_total_duration_ms`` (int, >= 1) — defaults to
+      :data:`MAX_TOTAL_DURATION_MS`.
+    * ``workspace_digest_dedup`` (one of ``"true"`` / ``"false"``) — defaults
+      to :data:`WORKSPACE_DIGEST_DEDUP`.
+    """
+
+    unknown = set(context.options) - {
+        "max_iterations",
+        "max_repair_duration_ms",
+        "max_total_duration_ms",
+        "workspace_digest_dedup",
+    }
+    if unknown:
+        raise BoundedAutonomyServiceError(
+            "bounded-autonomy options are invalid"
+        )
+
+    raw_iterations = context.options.get(
+        "max_iterations", str(MAX_ITERATIONS)
+    )
+    if type(raw_iterations) is not str or not raw_iterations.isdigit():
+        raise BoundedAutonomyServiceError(
+            "bounded-autonomy max_iterations is invalid"
+        )
+    max_iterations = int(raw_iterations)
+    if max_iterations < 1:
+        raise BoundedAutonomyServiceError(
+            "bounded-autonomy max_iterations is invalid"
+        )
+
+    raw_repair_duration = context.options.get(
+        "max_repair_duration_ms", str(MAX_REPAIR_DURATION_MS)
+    )
+    if type(raw_repair_duration) is not str or not raw_repair_duration.isdigit():
+        raise BoundedAutonomyServiceError(
+            "bounded-autonomy max_repair_duration_ms is invalid"
+        )
+    max_repair_duration = int(raw_repair_duration)
+    if max_repair_duration < 1:
+        raise BoundedAutonomyServiceError(
+            "bounded-autonomy max_repair_duration_ms is invalid"
+        )
+
+    raw_total_duration = context.options.get(
+        "max_total_duration_ms", str(MAX_TOTAL_DURATION_MS)
+    )
+    if type(raw_total_duration) is not str or not raw_total_duration.isdigit():
+        raise BoundedAutonomyServiceError(
+            "bounded-autonomy max_total_duration_ms is invalid"
+        )
+    max_total_duration = int(raw_total_duration)
+    if max_total_duration < 1:
+        raise BoundedAutonomyServiceError(
+            "bounded-autonomy max_total_duration_ms is invalid"
+        )
+
+    raw_dedup = context.options.get(
+        "workspace_digest_dedup", "true" if WORKSPACE_DIGEST_DEDUP else "false"
+    )
+    if raw_dedup == "true":
+        dedup_enabled = True
+    elif raw_dedup == "false":
+        dedup_enabled = False
+    else:
+        raise BoundedAutonomyServiceError(
+            "bounded-autonomy workspace_digest_dedup is invalid"
+        )
+
+    return _BoundedAutonomyLimits(
+        max_iterations=max_iterations,
+        max_repair_duration_ms=max_repair_duration,
+        max_total_duration_ms=max_total_duration,
+        workspace_digest_dedup=dedup_enabled,
+    )
+
+
+def _compute_workspace_digest(artifact: object) -> str:
+    """Compute the canonical-JSON SHA-256 of one propose / repair artifact.
+
+    The encoding uses ``sort_keys=True`` with the tight ``(",", ":")``
+    separator so any artifact maps to exactly one hex digest. This is the
+    same canonical form used by :func:`_join_result_digest` and by
+    P3 / P4's ``seal`` helpers.
+    """
+
+    encoded = json.dumps(
+        artifact, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _receipt_digest(
+    *,
+    root_run_id: str,
+    root_generation: int,
+    propose_step_count: int,
+    verify_step_count: int,
+    repair_step_count: int,
+    failed_verify_count: int,
+    terminal_reason: str,
+    joined_workspace_digest: str,
+) -> str:
+    """Compute the canonical-JSON SHA-256 of a :class:`P5NativeReceipt`.
+
+    The receipt's :attr:`P5NativeReceipt.receipt_sha256` is this digest.
+    The :attr:`P5NativeReceipt.joined_workspace_digest` is fed back in
+    (already computed) so the receipt is digest-stable across re-seals.
+    """
+
+    payload = {
+        "root_run_id": root_run_id,
+        "root_generation": root_generation,
+        "propose_step_count": propose_step_count,
+        "verify_step_count": verify_step_count,
+        "repair_step_count": repair_step_count,
+        "failed_verify_count": failed_verify_count,
+        "terminal_reason": terminal_reason,
+        "joined_workspace_digest": joined_workspace_digest,
+    }
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def seal_p5_native_receipt(
+    *,
+    root_run_id: str,
+    root_generation: int,
+    propose_step_count: int,
+    verify_step_count: int,
+    repair_step_count: int,
+    failed_verify_count: int,
+    terminal_reason: TerminalReason,
+    joined_workspace_digest: str,
+) -> P5NativeReceipt:
+    """Build a sealed :class:`P5NativeReceipt` with the computed receipt SHA.
+
+    Mirrors P3's ``seal`` / P4's ``seal`` shape: every input is checked for
+    shape, the receipt's :attr:`receipt_sha256` is the canonical-JSON SHA-256
+    of the rest, and the closed enum is enforced at the type boundary.
+    """
+
+    if not isinstance(root_run_id, str) or not root_run_id:
+        raise BoundedAutonomyServiceError("seal root_run_id is invalid")
+    if not isinstance(root_generation, int) or root_generation < 1:
+        raise BoundedAutonomyServiceError("seal root_generation is invalid")
+    if (
+        not isinstance(propose_step_count, int)
+        or propose_step_count < 1
+    ):
+        raise BoundedAutonomyServiceError(
+            "seal propose_step_count is invalid"
+        )
+    if not isinstance(verify_step_count, int) or verify_step_count < 1:
+        raise BoundedAutonomyServiceError(
+            "seal verify_step_count is invalid"
+        )
+    if not isinstance(repair_step_count, int) or repair_step_count < 0:
+        raise BoundedAutonomyServiceError(
+            "seal repair_step_count is invalid"
+        )
+    if (
+        not isinstance(failed_verify_count, int)
+        or failed_verify_count < 1
+    ):
+        raise BoundedAutonomyServiceError(
+            "seal failed_verify_count is invalid"
+        )
+    if terminal_reason not in _TERMINAL_REASONS:
+        raise BoundedAutonomyServiceError(
+            "seal terminal_reason is invalid"
+        )
+    if (
+        not isinstance(joined_workspace_digest, str)
+        or len(joined_workspace_digest) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in joined_workspace_digest
+        )
+    ):
+        raise BoundedAutonomyServiceError(
+            "seal joined_workspace_digest is invalid"
+        )
+
+    receipt_sha256 = _receipt_digest(
+        root_run_id=root_run_id,
+        root_generation=root_generation,
+        propose_step_count=propose_step_count,
+        verify_step_count=verify_step_count,
+        repair_step_count=repair_step_count,
+        failed_verify_count=failed_verify_count,
+        terminal_reason=terminal_reason,
+        joined_workspace_digest=joined_workspace_digest,
+    )
+    return P5NativeReceipt(
+        root_run_id=root_run_id,
+        root_generation=root_generation,
+        propose_step_count=propose_step_count,
+        verify_step_count=verify_step_count,
+        repair_step_count=repair_step_count,
+        failed_verify_count=failed_verify_count,
+        terminal_reason=terminal_reason,
+        joined_workspace_digest=joined_workspace_digest,
+        receipt_sha256=receipt_sha256,
+    )
+
+
+class BoundedAutonomyLoop:
+    """Application-level bounded propose/verify/repair loop controller.
+
+    Default path: in-process (mirror D-2026-09-18-02). Subprocess supervisor
+    is NOT implemented in Phase 8. Composes the injected propose /
+    verify / repair callables (which themselves call ``prime.ipython``
+    for propose + repair and ``prime.p5-oracle`` for verify) under
+    framework-owned duration / iteration / progress limits. Stops
+    exactly once with one of the closed :data:`TerminalReason` values —
+    no implicit retry, no autonomous continuation.
+
+    Each :meth:`run_loop` invocation emits exactly one
+    :class:`P5NativeReceipt`. Subsequent calls return the cached
+    terminal receipt — there is no public "still running" state.
+    """
+
+    def __init__(
+        self,
+        *,
+        limits: _BoundedAutonomyLimits,
+        opened_at_iso: str,
+        propose_callable: ProposeCallable | None = None,
+        verify_callable: VerifyCallable | None = None,
+        repair_callable: RepairCallable | None = None,
+    ) -> None:
+        self._limits = limits
+        self._opened_at_iso = opened_at_iso
+        self._propose_callable = propose_callable
+        self._verify_callable = verify_callable
+        self._repair_callable = repair_callable
+        self._terminal_receipt: P5NativeReceipt | None = None
+        self._last_step_timed_out_flag: bool = False
+        self._last_step_kind: str = "propose"
+
+    @property
+    def public_identity(self) -> _PublicBoundedAutonomyIdentity:
+        """Return a redacted identity projection bound at factory time.
+
+        The projection is content-safe: it never carries
+        ``private_root_identity``. The bound ``session_id``,
+        ``provider_id``, ``application_id``, ``runtime_id`` and digests are
+        surfaced for diagnostics only.
+        """
+
+        return _PublicBoundedAutonomyIdentity(
+            provider_id="prime-applications",
+            application_id="prime.bounded-autonomy",
+            runtime_id="asterion.prime",
+            session_id="prime.bounded-autonomy",
+            generation=1,
+            pi_command_sha256=_ZERO_SHA256,
+            extension_binding_fingerprint=_ZERO_SHA256,
+            worker_identity_sha256=_ZERO_SHA256,
+            continuation_id="bounded-autonomy-initial",
+            ceilings_sha256=_ZERO_SHA256,
+        )
+
+    @property
+    def last_step_timed_out(self) -> bool:
+        """True iff the most recent step exceeded its per-step duration cap.
+
+        The flag is a single-shot: a step that completes within its cap
+        clears it. The flag is meaningful for the duration-cap-exceeded
+        terminal reason — the witness asserts it on the duration-cap
+        scenario's sealed receipt.
+        """
+
+        return self._last_step_timed_out_flag
+
+    def set_step_callables(
+        self,
+        *,
+        propose_callable: ProposeCallable,
+        verify_callable: VerifyCallable,
+        repair_callable: RepairCallable,
+    ) -> None:
+        """Inject the propose / verify / repair callables.
+
+        The operator (Task 8) and runtime binding (Task 7) wire the
+        actual ``prime.ipython`` and ``prime.p5-oracle`` services through
+        this surface; tests inject deterministic fakes the same way.
+        The callables must be set before the first :meth:`run_loop` call.
+        """
+
+        self._propose_callable = propose_callable
+        self._verify_callable = verify_callable
+        self._repair_callable = repair_callable
+
+    async def _propose_step(
+        self, signal: CancellationSignal | None
+    ) -> P5ProposeStep:
+        """Run one propose step via the injected propose callable.
+
+        Mirrors ``prime.ipython`` semantics for P5: the callable returns
+        a :class:`P5ProposeStep` whose ``workspace_digest_sha256`` is
+        the canonical-form SHA-256 of the candidate artifact.
+        """
+
+        if self._propose_callable is None:
+            raise BoundedAutonomyServiceError(
+                "bounded-autonomy propose_callable is not configured"
+            )
+        return await self._propose_callable(signal)
+
+    async def _verify_step(
+        self, signal: CancellationSignal | None
+    ) -> P5VerifyStep:
+        """Run one verify step via the injected verify callable.
+
+        Mirrors ``prime.p5-oracle`` semantics for P5: the callable
+        returns a :class:`P5VerifyStep` whose ``verdict`` is one of the
+        closed 4-element oracle verdict enum.
+        """
+
+        if self._verify_callable is None:
+            raise BoundedAutonomyServiceError(
+                "bounded-autonomy verify_callable is not configured"
+            )
+        return await self._verify_callable(signal)
+
+    async def _repair_step(
+        self, signal: CancellationSignal | None
+    ) -> P5RepairStep:
+        """Run one repair step via the injected repair callable.
+
+        Mirrors ``prime.ipython`` semantics for P5 repair: the callable
+        returns a :class:`P5RepairStep` whose ``workspace_digest_sha256``
+        is the post-repair canonical-form SHA-256.
+        """
+
+        if self._repair_callable is None:
+            raise BoundedAutonomyServiceError(
+                "bounded-autonomy repair_callable is not configured"
+            )
+        return await self._repair_callable(signal)
+
+    async def _drive_step_with_total_cap(
+        self,
+        step_coro: Callable[[], Awaitable[object]],
+        *,
+        step_label: str,
+        deadline_monotonic: float,
+        on_timeout: Callable[[], tuple[TerminalReason, P5NativeReceipt | None]],
+    ) -> tuple[bool, object | None]:
+        """Drive a single step under the total-duration cap.
+
+        Returns ``(timed_out, value)``. ``timed_out`` is True iff the
+        step exceeded the remaining total-duration budget; in that case
+        ``value`` is None and ``last_step_timed_out`` is set to True.
+        """
+
+        remaining = deadline_monotonic - time.monotonic()
+        if remaining <= 0:
+            self._last_step_timed_out_flag = True
+            self._last_step_kind = step_label
+            reason, _ = on_timeout()
+            return True, reason
+        try:
+            value = await asyncio.wait_for(step_coro(), timeout=remaining)
+        except asyncio.TimeoutError:
+            self._last_step_timed_out_flag = True
+            self._last_step_kind = step_label
+            reason, _ = on_timeout()
+            return True, reason
+        self._last_step_timed_out_flag = False
+        return False, value
+
+    async def _drive_repair_step(
+        self,
+        signal: CancellationSignal | None,
+        *,
+        deadline_monotonic: float,
+    ) -> P5RepairStep:
+        """Drive one repair step under the per-repair-step duration cap.
+
+        The per-repair-step cap (``MAX_REPAIR_DURATION_MS``) bounds the
+        wall-clock of a single repair step; the total-duration cap is
+        enforced by :meth:`_drive_step_with_total_cap` at the loop level.
+        """
+
+        remaining_total = deadline_monotonic - time.monotonic()
+        if remaining_total <= 0:
+            self._last_step_timed_out_flag = True
+            self._last_step_kind = "repair"
+            raise asyncio.TimeoutError
+        per_step_cap = min(
+            self._limits.max_repair_duration_ms / 1000.0,
+            remaining_total,
+        )
+        return await asyncio.wait_for(
+            self._repair_step(signal), timeout=per_step_cap
+        )
+
+    async def run_loop(
+        self,
+        *,
+        root_run_id: str,
+        signal: CancellationSignal | None = None,
+    ) -> P5NativeReceipt:
+        """Drive the bounded loop. Single terminal result; never returns
+        a still-running state.
+
+        Order of checks mirrors the spec §"Stopping conditions":
+
+        * Cancellation is checked before each step; a cancelled signal
+          terminates with ``terminal_reason = "cancelled"``.
+        * The total-duration cap is checked before each step; an
+          exceeded cap terminates with ``terminal_reason =
+          "duration-cap-exceeded"``.
+        * The iteration cap is enforced after each verify-fail; a
+          ``max_iterations``-th failed verify terminates with
+          ``terminal_reason = "iteration-cap-exceeded"`` BEFORE running
+          the next repair step.
+        * The workspace-digest dedup-adapter refuses a second gate
+          whose digest equals the prior gate's digest; the loop
+          terminates with ``terminal_reason = "no-progress"``.
+        * A passing verify terminates with ``terminal_reason =
+          "success"``.
+
+        Each run_loop invocation executes exactly one propose step. After
+        a failed verify, the loop runs a repair step and goes directly to
+        the next verify step (no second propose); this matches the spec
+        witness structure (``propose_step_count == 1``).
+        """
+
+        if not isinstance(root_run_id, str) or not root_run_id:
+            raise BoundedAutonomyServiceError("run_loop root_run_id is invalid")
+
+        cached = self._terminal_receipt
+        if cached is not None and cached.root_run_id == root_run_id:
+            return cached
+
+        self._last_step_timed_out_flag = False
+        self._last_step_kind = "propose"
+
+        propose_count = 0
+        verify_count = 0
+        repair_count = 0
+        failed_verify_count = 0
+        prior_digest: str | None = None
+        joined_workspace_digest: str | None = None
+        terminal_reason: TerminalReason = "cancelled"
+
+        deadline_monotonic = (
+            time.monotonic() + self._limits.max_total_duration_ms / 1000.0
+        )
+
+        def _is_cancelled() -> bool:
+            return signal is not None and getattr(signal, "cancelled", False)
+
+        def _terminate(
+            reason: TerminalReason,
+            *,
+            digest: str | None = None,
+        ) -> None:
+            nonlocal terminal_reason, joined_workspace_digest
+            terminal_reason = reason
+            if digest is not None:
+                joined_workspace_digest = digest
+            elif joined_workspace_digest is None and prior_digest is not None:
+                joined_workspace_digest = prior_digest
+
+        if _is_cancelled():
+            _terminate("cancelled")
+            self._emit_receipt(
+                root_run_id=root_run_id,
+                propose_count=propose_count,
+                verify_count=verify_count,
+                repair_count=repair_count,
+                failed_verify_count=failed_verify_count,
+                terminal_reason=terminal_reason,
+                joined_workspace_digest=joined_workspace_digest,
+            )
+            return self._terminal_receipt
+
+        if time.monotonic() >= deadline_monotonic:
+            self._last_step_timed_out_flag = True
+            _terminate("duration-cap-exceeded")
+            self._emit_receipt(
+                root_run_id=root_run_id,
+                propose_count=propose_count,
+                verify_count=verify_count,
+                repair_count=repair_count,
+                failed_verify_count=failed_verify_count,
+                terminal_reason=terminal_reason,
+                joined_workspace_digest=joined_workspace_digest,
+            )
+            return self._terminal_receipt
+
+        # Propose step — wall-clock bounded by the total-duration cap.
+        self._last_step_kind = "propose"
+        try:
+            timed_out, propose_value = await self._drive_step_with_total_cap(
+                lambda: self._propose_step(signal),
+                step_label="propose",
+                deadline_monotonic=deadline_monotonic,
+                on_timeout=lambda: ("duration-cap-exceeded", None),
+            )
+        except BoundedAutonomyServiceError:
+            raise
+        except Exception:
+            raise BoundedAutonomyServiceError(
+                "bounded-autonomy propose step raised"
+            ) from None
+        if timed_out:
+            _terminate("duration-cap-exceeded")
+            self._emit_receipt(
+                root_run_id=root_run_id,
+                propose_count=1,
+                verify_count=1,
+                repair_count=0,
+                failed_verify_count=1,
+                terminal_reason=terminal_reason,
+                joined_workspace_digest=joined_workspace_digest,
+            )
+            return self._terminal_receipt
+        assert isinstance(propose_value, P5ProposeStep)
+        propose_step: P5ProposeStep = propose_value
+        propose_count = 1
+        prior_digest = propose_step.workspace_digest_sha256
+        joined_workspace_digest = prior_digest
+
+        # Verify / repair loop — after the initial propose, only verify
+        # and repair steps follow. The iteration cap is enforced BEFORE
+        # each repair step (so a repair is never run when the cap has
+        # fired). The workspace-digest dedup-adapter short-circuits the
+        # next verify step when the repair's digest equals the prior
+        # gate's digest.
+        while True:
+            if _is_cancelled():
+                _terminate("cancelled")
+                break
+
+            if time.monotonic() >= deadline_monotonic:
+                self._last_step_timed_out_flag = True
+                _terminate("duration-cap-exceeded")
+                break
+
+            # Verify step — wall-clock bounded by the total-duration cap.
+            self._last_step_kind = "verify"
+            try:
+                timed_out, verify_value = await self._drive_step_with_total_cap(
+                    lambda: self._verify_step(signal),
+                    step_label="verify",
+                    deadline_monotonic=deadline_monotonic,
+                    on_timeout=lambda: ("duration-cap-exceeded", None),
+                )
+            except BoundedAutonomyServiceError:
+                raise
+            except Exception:
+                raise BoundedAutonomyServiceError(
+                    "bounded-autonomy verify step raised"
+                ) from None
+            if timed_out:
+                _terminate("duration-cap-exceeded")
+                break
+            assert isinstance(verify_value, P5VerifyStep)
+            verify_step: P5VerifyStep = verify_value
+            verify_count += 1
+
+            if verify_step.verdict == "pass":
+                _terminate("success")
+                break
+            if verify_step.verdict == "cancelled":
+                _terminate("cancelled")
+                break
+            if verify_step.verdict == "no-progress":
+                _terminate("no-progress")
+                break
+            # "fail" — record and continue with a repair step.
+            failed_verify_count += 1
+            if failed_verify_count >= self._limits.max_iterations:
+                _terminate("iteration-cap-exceeded")
+                break
+
+            if _is_cancelled():
+                _terminate("cancelled")
+                break
+
+            if time.monotonic() >= deadline_monotonic:
+                self._last_step_timed_out_flag = True
+                _terminate("duration-cap-exceeded")
+                break
+
+            # Repair step — per-step cap + total-duration cap.
+            self._last_step_kind = "repair"
+            try:
+                repair_step = await self._drive_repair_step(
+                    signal, deadline_monotonic=deadline_monotonic
+                )
+            except asyncio.TimeoutError:
+                self._last_step_timed_out_flag = True
+                _terminate("duration-cap-exceeded")
+                break
+            except BoundedAutonomyServiceError:
+                raise
+            except Exception:
+                raise BoundedAutonomyServiceError(
+                    "bounded-autonomy repair step raised"
+                ) from None
+            repair_count += 1
+
+            if (
+                self._limits.workspace_digest_dedup
+                and repair_step.workspace_digest_sha256 == prior_digest
+            ):
+                _terminate("no-progress")
+                break
+            prior_digest = repair_step.workspace_digest_sha256
+            joined_workspace_digest = prior_digest
+
+        self._emit_receipt(
+            root_run_id=root_run_id,
+            propose_count=propose_count,
+            verify_count=verify_count,
+            repair_count=repair_count,
+            failed_verify_count=failed_verify_count,
+            terminal_reason=terminal_reason,
+            joined_workspace_digest=joined_workspace_digest,
+        )
+        return self._terminal_receipt
+
+    def _emit_receipt(
+        self,
+        *,
+        root_run_id: str,
+        propose_count: int,
+        verify_count: int,
+        repair_count: int,
+        failed_verify_count: int,
+        terminal_reason: TerminalReason,
+        joined_workspace_digest: str | None,
+    ) -> None:
+        """Seal the terminal receipt for one :meth:`run_loop` invocation.
+
+        Mirrors :func:`seal_p5_native_receipt` while keeping the loop
+        body readable. Counters default to ``1`` when the loop
+        terminated before reaching the corresponding step — the spec
+        witness requires ``propose_step_count >= 1``,
+        ``verify_step_count >= 1``, and ``failed_verify_count >= 1`` on
+        every sealed receipt.
+        """
+
+        if joined_workspace_digest is None:
+            joined_workspace_digest = _ZERO_SHA256
+        self._terminal_receipt = seal_p5_native_receipt(
+            root_run_id=root_run_id,
+            root_generation=1,
+            propose_step_count=propose_count if propose_count >= 1 else 1,
+            verify_step_count=verify_count if verify_count >= 1 else 1,
+            repair_step_count=repair_count,
+            failed_verify_count=failed_verify_count
+            if failed_verify_count >= 1
+            else 1,
+            terminal_reason=terminal_reason,
+            joined_workspace_digest=joined_workspace_digest,
+        )
+
+
+@asynccontextmanager
+async def _open_bounded_autonomy_service(
+    context: HostServiceFactoryContext,
+):
+    if (
+        context.provider_id != "prime-applications"
+        or context.application_id != "prime.bounded-autonomy"
+        or context.application_version != "1.0.0"
+        or context.capability_id != "prime.bounded-autonomy"
+    ):
+        raise BoundedAutonomyServiceError(
+            "bounded-autonomy context identity is invalid"
+        )
+    limits = _resolve_bounded_autonomy_limits(context)
+    service = BoundedAutonomyLoop(
+        limits=limits,
+        opened_at_iso=_iso_utc_now(),
+    )
+    try:
+        yield service
+    finally:
+        service._terminal_receipt = None
+
+
+def create_bounded_autonomy_host_service() -> HostServiceFactoryBinding:
+    """Return the exact factory binding for ``prime.bounded-autonomy``."""
+
+    return HostServiceFactoryBinding(
+        capability_id="prime.bounded-autonomy",
+        option_names=(
+            "max_iterations",
+            "max_repair_duration_ms",
+            "max_total_duration_ms",
+            "workspace_digest_dedup",
+        ),
+        factory=_open_bounded_autonomy_service,
+    )
+
+
 __all__ = (
+    "BoundedAutonomyLoop",
+    "BoundedAutonomyServiceError",
     "ChildAdmission",
     "ChildAdmissionRefused",
     "ChildRunnerHostService",
@@ -601,7 +1477,17 @@ __all__ = (
     "MAX_CHILD_COST_USD",
     "MAX_CONCURRENT_CHILDREN",
     "MAX_DEPTH",
+    "MAX_ITERATIONS",
+    "MAX_REPAIR_DURATION_MS",
     "MAX_TOTAL_DURATION_MS",
+    "P5NativeReceipt",
+    "P5ProposeStep",
+    "P5RepairStep",
+    "P5VerifyStep",
+    "TerminalReason",
+    "WORKSPACE_DIGEST_DEDUP",
+    "create_bounded_autonomy_host_service",
     "create_child_runner_host_service",
     "create_continuity_store_host_service",
+    "seal_p5_native_receipt",
 )
