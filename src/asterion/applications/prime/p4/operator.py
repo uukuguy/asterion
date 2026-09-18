@@ -150,7 +150,6 @@ def _seal_commit_checkpoint(
     worker_sha: str,
     prior_checkpoint_sha: str | None,
     run_id: str,
-    result_sha: str,
     transcript: bytes,
     usage: dict[str, object],
     continuation_id: str,
@@ -212,7 +211,6 @@ async def _commit_mode(
             worker_sha=worker_sha,
             prior_checkpoint_sha=None,
             run_id=run_id,
-            result_sha=result_sha,
             transcript=bytes(_canonical_bytes(result)),
             usage={"result_sha256": result_sha},
             continuation_id=continuation_id,
@@ -224,8 +222,8 @@ async def _commit_mode(
 
 async def _recover_mode(
     preflight: _Preflight,
-) -> tuple[PrimeBackendIdentity, PrimeBackendIdentity, str]:
-    """Run the recover round; return prior identity, next identity, result SHA."""
+) -> tuple[PrimeBackendIdentity, PrimeBackendIdentity, str, str]:
+    """Run the recover round; return prior id, next id, prior checkpoint digest, result SHA."""
 
     if not preflight.private_root.exists():
         raise P4OperatorError()
@@ -245,10 +243,21 @@ async def _recover_mode(
         preflight.private_root, next_identity
     )
     try:
+        # Capture the prior's last sealed checkpoint digest BEFORE running the
+        # worker / writing the next checkpoint — the witness depends on the
+        # exact prior SHA, not the new one. `recover_checkpoint()` returns the
+        # last sealed record (the commit pass sealed it at generation 1).
+        recovered = store.recover_checkpoint()
+        if recovered is None:
+            raise P4OperatorError()
+        prior_checkpoint_digest = recovered.checkpoint.digest
         result = await worker.execute()
-        return prior_identity, next_identity, sha256(
-            _canonical_bytes(result)
-        ).hexdigest()
+        return (
+            prior_identity,
+            next_identity,
+            prior_checkpoint_digest,
+            sha256(_canonical_bytes(result)).hexdigest(),
+        )
     finally:
         store.close()
 
@@ -276,12 +285,14 @@ async def _run_async() -> P4PublicResult:
             receipt_sha256=checkpoint.digest,
             worker_identity_sha256=identity.worker_identity_sha256,
         )
-    prior_identity, next_identity, result_sha = await _recover_mode(preflight)
+    _, next_identity, prior_checkpoint_digest, result_sha = await _recover_mode(
+        preflight
+    )
     return P4PublicResult(
         status="recovered",
         run_id=None,
         checkpoint_sha256=None,
-        prior_checkpoint_sha256=prior_identity.continuation_id,
+        prior_checkpoint_sha256=prior_checkpoint_digest,
         generation=None,
         new_generation=next_identity.generation,
         continuation_id=next_identity.continuation_id,
@@ -291,7 +302,7 @@ async def _run_async() -> P4PublicResult:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     """Run one operator invocation; print one JSON line; exit 0 or 2."""
     try:
         result = asyncio.run(_run_async())
