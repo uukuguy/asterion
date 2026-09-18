@@ -24,6 +24,7 @@
 | D-2026-09-17-04 | 🟢 active | Keep the witness rebuild equality; drop the byte shrink bound |
 | D-2026-09-18-01 | 🟢 active | Cross-process continuity inherits runtime-binding SHAs from prior identity |
 | D-2026-09-18-02 | 🟢 active | P3 child-runner is in-process by default; subprocess is fallback-only |
+| D-2026-09-19-01 | 🟢 active | P5 bounded-autonomy is one loop controller host service; limits-path has 3 refusal scenarios (cancellation folds in) |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -614,3 +615,65 @@
   plan); docs/superpowers/specs/2026-09-18-asterion-prime-p3-native-design.md
   §"Newly introduced in Phase 7"; docs/superpowers/plans/2026-09-18-asterion-prime-p3-native.md
   §"Components" Task 3 / Task 8 / §"Out-of-scope" / §"Open risks" 1.
+
+## D-2026-09-19-01 — P5 bounded-autonomy is one loop controller; limits-path folds cancellation
+
+- Status: 🟢 active
+- Decision: `prime.bounded-autonomy` is implemented as a **single
+  host service** (one new `HostServiceFactoryBinding` in
+  `src/asterion/applications/prime/services.py`), not as three
+  separate `prime.proposer` / `prime.verifier` / `prime.repairer`
+  services. Inside the controller, `_propose_step()` /
+  `_verify_step()` / `_repair_step()` are private methods, not
+  separate host-service injection points. The default path is
+  **in-process** (mirror D-2026-09-18-02); subprocess supervisor is
+  not implemented in Phase 8. The limits-path Makefile target
+  (`make asterion-prime-p5-run-limits`) asserts **three** refusal
+  scenarios in fixed order — `iteration-cap-exceeded`,
+  `duration-cap-exceeded`, `no-progress` — and cancellation is
+  folded into the closed enum rather than emitted as a fourth
+  witness record.
+- Rationale: P1–P7 are applications that demonstrate Asterion
+  Prime's capabilities and architecture, not new runtimes or
+  parallel agent kernels. P5 demonstrates **bounded autonomy** at
+  the application level — the framework already exposes
+  `PrimeSessionBackend` budget / cancellation gates that the loop
+  composes through; a separate proposer / verifier / repairer
+  triple would multiply host-service surface area without
+  adding capability, and would split a single tight invariant
+  (`terminal_reason`) across three injection points. In-process
+  default mirrors D-2026-09-18-02's reasoning for the P3
+  child-runner: the loop has no recovery / cross-process
+  semantics, so the cross-process supervisor pattern that P4
+  introduced for `prime.continuity-store` does not apply.
+  Cancellation folds into the closed enum because it is a
+  *side-effect* of the duration gate, not an independent limit;
+  P3's four scenarios (depth / concurrency / budget /
+  cancellation) correspond to four independent limits, but P5's
+  limits set is three (iteration / duration / no-progress), and
+  emitting a fourth cancellation record would add cost without
+  adding coverage that the closed-enum contract doesn't already
+  give us. A future caller can still observe cancellation
+  through `terminal_reason = "cancelled"` in any single-record
+  receipt.
+- Consequence: The loop controller's public surface is
+  `BoundedAutonomyLoop` (async context manager with
+  `public_identity`, `run_loop(...)`, `last_step_timed_out`) and
+  `create_bounded_autonomy_host_service(context)`. The
+  `terminal_reason` field on `P5NativeReceipt` is the closed
+  5-element enum, and the closed-enum contract is enforced at
+  the type level (`Literal[...]`). The Phase 5/7 fixture /
+  capability-package / Makefile patterns are reused unchanged.
+  The provider gate stays closed until `make
+  asterion-prime-p5-run` AND `make asterion-prime-p5-run-limits`
+  both exit 0; a single Task-16 commit then publishes P5 to
+  `create_provider()` (5 → 6 apps) and `asterion.application_index`,
+  mirroring the Phase 6 P4 closure and the Phase 7 P3 closure.
+  If a future P6 phase wants a separate proposer / verifier /
+  repairer injection surface, it must not split the closed
+  `terminal_reason` enum.
+- Evidence: commit 8a3b57cb (Phase 8 design-first pass — spec +
+  plan); docs/superpowers/specs/2026-09-19-asterion-prime-p5-native-design.md
+  §"Newly introduced in Phase 8" / §"Stopping conditions" /
+  §"P5 oracle" / §"Witness strategy"; docs/superpowers/plans/2026-09-19-asterion-prime-p5-native.md
+  §"Components" Task 3 / §"Verification" / §"Open risks".
