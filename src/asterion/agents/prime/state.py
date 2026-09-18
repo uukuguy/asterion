@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 import hashlib
 import json
 import re
@@ -118,6 +118,19 @@ class PrimeBackendIdentity:
     @property
     def digest(self) -> str:
         return _mapping_digest(self.to_mapping())
+
+    def bump_generation(self) -> PrimeBackendIdentity:
+        """Return a copy with ``generation`` incremented by one.
+
+        All other fields — including the runtime-binding SHAs
+        (``pi_command_sha256``, ``extension_binding_fingerprint``,
+        ``ceilings_sha256``) per D-2026-09-18-01 — are preserved exactly.
+        The operator is the single authority on the next-generation
+        identity; ``prime.child-runner`` itself is stateless about
+        generation math.
+        """
+
+        return replace(self, generation=self.generation + 1)
 
     def __repr__(self) -> str:
         return (
