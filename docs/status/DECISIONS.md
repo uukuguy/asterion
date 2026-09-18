@@ -23,6 +23,7 @@
 | D-2026-09-17-03 | 🟢 active | Keep Pi's compaction reserve at upstream's default |
 | D-2026-09-17-04 | 🟢 active | Keep the witness rebuild equality; drop the byte shrink bound |
 | D-2026-09-18-01 | 🟢 active | Cross-process continuity inherits runtime-binding SHAs from prior identity |
+| D-2026-09-18-02 | 🟢 active | P3 child-runner is in-process by default; subprocess is fallback-only |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -572,3 +573,44 @@
   prior checkpoint digest 35af5974...ba72 matches fixture's sealed
   checkpoint; _enforce_continuation_rules no longer rejects the cross-build
   recover path; decision taken by the operator on 2026-09-18.
+
+## D-2026-09-18-02 — P3 child-runner is in-process by default; subprocess is fallback-only
+
+- Status: 🟢 active
+- Decision: `prime.child-runner` (the new host service introduced by
+  Phase 7 / P3) uses an in-process child session factory as its
+  default path. Admitted children share the parent's process and
+  compose `PrimeSessionBackend.attach(next_identity)` for budget /
+  cancellation gating. Subprocess supervisor is reserved as an
+  application-explicit fallback (e.g., to isolate a child that has
+  consumed a large context, or to enforce a per-child cost ceiling)
+  and is **not** implemented in Phase 7.
+- Rationale: P1–P7 are applications that demonstrate Asterion Prime's
+  capabilities and architecture, not new runtimes or parallel agent
+  kernels. P3's witness (detachment spec L342–L344) is about depth /
+  concurrency / budget / cancellation limits under recursive
+  composition — limits that the existing Asterion control / session
+  backend already enforces. An in-process child session factory
+  composes those framework primitives directly; a subprocess supervisor
+  would re-introduce the cross-process supervisor pattern that Phase 6
+  (P4) introduced specifically for cross-generation recovery, which
+  P3 does not need (P3 has no recovery semantics). The closed-enum
+  refusal reasons (`depth-exceeded`, `concurrency-exceeded`,
+  `budget-exceeded`, `cancelled`, `session-backend-rejected`) are the
+  public contract — keeping them at the application layer makes them
+  visible to the operator and the limits-witness without coupling
+  them to a runtime seam.
+- Consequence: `prime.child-runner` is implemented as a thin
+  application-level host service that delegates admission to the
+  existing `PrimeSessionBackend` budget gate. The child identity is
+  constructed by the operator via
+  `root_identity.bump_generation()` (preserving the runtime-binding
+  SHAs per D-2026-09-18-01). The four refusal scenarios are exercised
+  by `make asterion-prime-p3-run-limits` against the same operator in
+  `mode=limits`. If a future P5 / P6 phase requires subprocess
+  isolation, the fallback path is reserved by design but
+  un-implemented and un-promoted.
+- Evidence: commit 602d5971 (Phase 7 design-first pass — spec +
+  plan); docs/superpowers/specs/2026-09-18-asterion-prime-p3-native-design.md
+  §"Newly introduced in Phase 7"; docs/superpowers/plans/2026-09-18-asterion-prime-p3-native.md
+  §"Components" Task 3 / Task 8 / §"Out-of-scope" / §"Open risks" 1.
