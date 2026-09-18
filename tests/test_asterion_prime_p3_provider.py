@@ -1,8 +1,8 @@
 """Native P3 provider factory tests.
 
 The witness-gated publication in :func:`create_provider` (Phase 7, Task 16)
-is intentionally NOT asserted here; P3 stays unpublished in the public
-selector until ``make asterion-prime-p3-run`` and
+is asserted in :func:`test_p3_is_published_to_public_selector`; P3 returns
+to the public selector once ``make asterion-prime-p3-run`` and
 ``make asterion-prime-p3-run-limits`` both exit 0.
 """
 
@@ -24,7 +24,14 @@ class TestAsterionPrimeP3Provider(unittest.TestCase):
         self.assertEqual(record.version, "1.0.0")
         self.assertEqual(record.runtime_ids, ("asterion.prime",))
 
-    def test_create_provider_does_not_include_p3_until_witness_passes(self) -> None:
+    def test_p3_is_published_to_public_selector(self) -> None:
+        """Phase 7, Task 16: published together with its installed-route
+        recursive-workflow depth + limits witness (exit 0 from both
+        ``make asterion-prime-p3-run`` and
+        ``make asterion-prime-p3-run-limits``; the limits witness asserts
+        depth-exceeded / concurrency-exceeded / budget-exceeded / cancelled
+        refusals, each with a sealed ``receipt_sha256``).
+        """
         provider = create_prime_recursive_workflow_provider()
         self.assertEqual(provider.provider_id, "prime-applications")
         self.assertEqual(len(provider.applications), 1)
@@ -32,14 +39,14 @@ class TestAsterionPrimeP3Provider(unittest.TestCase):
             provider.applications[0].application_id, "prime.recursive-workflow"
         )
 
-        # The P3 selector stays unpublished until its installed-route witness
-        # passes (Phase 7, Task 16). create_provider() currently publishes
-        # P7 + P1 + P2 + P4 (4 apps); P3 must not be among them yet.
+        # After the witness passes (Phase 7, Task 16), P3 returns to the
+        # public selector. create_provider() now publishes P7 + P1 + P2 + P3
+        # + P4 (5 apps); P3 must be among them.
         public_provider = create_provider()
         published_ids = tuple(
             application.application_id for application in public_provider.applications
         )
-        self.assertNotIn("prime.recursive-workflow", published_ids)
+        self.assertIn("prime.recursive-workflow", published_ids)
 
 
 if __name__ == "__main__":

@@ -190,10 +190,16 @@ def create_provider() -> InstalledApplicationProvider:
     from ``make asterion-prime-p2-run``. P4 is published together with its
     cross-generation continuity witness (Phase 6, Task 17): exit 0 + sealed
     receipt ``6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d``
-    from ``make asterion-prime-p4-run``. The selector returns the exact
+    from ``make asterion-prime-p4-run``. P3 is published together with its
+    recursive-workflow depth + limits witness (Phase 7, Task 16): exit 0
+    from both ``make asterion-prime-p3-run`` and
+    ``make asterion-prime-p3-run-limits`` (depth-exceeded /
+    concurrency-exceeded / budget-exceeded / cancelled refusals each with
+    a sealed ``receipt_sha256``). The selector returns the exact
     application records those operators compose from via
-    :func:`create_prime_programmatic_long_context_provider` and
-    :func:`create_prime_long_session_continuity_provider`.
+    :func:`create_prime_programmatic_long_context_provider`,
+    :func:`create_prime_long_session_continuity_provider`, and
+    :func:`create_prime_recursive_workflow_provider`.
     """
 
     root = _resource_root()
@@ -226,6 +232,18 @@ def create_provider() -> InstalledApplicationProvider:
             # witness asserts cross-process continuity under a fresh Orb
             # wheel build (D-2026-09-18-01).
             prime_long_session_continuity_application(),
+            # Phase 7, Task 16: published together with its recursive-workflow
+            # depth + limits witness (exit 0 from both
+            # ``make asterion-prime-p3-run`` and
+            # ``make asterion-prime-p3-run-limits``; the limits witness
+            # asserts depth-exceeded / concurrency-exceeded / budget-exceeded
+            # / cancelled refusals, each with a sealed ``receipt_sha256``).
+            # The depth witness asserts ``depth_reached == 2``,
+            # ``child_generation == root_generation + 1``,
+            # ``child_result_sha256 != root_result_sha256``, and a non-null
+            # ``joined_result_sha256`` over canonical-JSON of the root+child
+            # result pair (D-2026-09-18-02: in-process child session factory).
+            prime_recursive_workflow_application(),
             # Phase 5, Task 4: published together with its installed-route
             # witness (``cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5``).
             prime_programmatic_long_context_application(),

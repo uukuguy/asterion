@@ -38,6 +38,7 @@ prime-applications = "asterion.applications.prime:create_provider"
 "prime.ipython-coding__1.0.0" = "asterion.applications.prime:create_provider"
 "prime.long-session-continuity__1.0.0" = "asterion.applications.prime:create_provider"
 "prime.programmatic-long-context__1.0.0" = "asterion.applications.prime:create_provider"
+"prime.recursive-workflow__1.0.0" = "asterion.applications.prime:create_provider"
 
 [project.entry-points."asterion.host_services"]
 "corpus.local-root" = "asterion.capabilities.dci.implementation.services:create_local_corpus_service_factory"
