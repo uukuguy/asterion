@@ -234,11 +234,17 @@ def create_provider() -> InstalledApplicationProvider:
     from both ``make asterion-prime-p3-run`` and
     ``make asterion-prime-p3-run-limits`` (depth-exceeded /
     concurrency-exceeded / budget-exceeded / cancelled refusals each with
-    a sealed ``receipt_sha256``). The selector returns the exact
-    application records those operators compose from via
+    a sealed ``receipt_sha256``). P5 is published together with its
+    bounded-autonomy propose/verify/repair + limits witness (Phase 8,
+    Task 16): exit 0 from both ``make asterion-prime-p5-run`` and
+    ``make asterion-prime-p5-run-limits`` (iteration-cap-exceeded /
+    duration-cap-exceeded / no-progress refusals each with a sealed
+    ``receipt_sha256``). The selector returns the exact application
+    records those operators compose from via
     :func:`create_prime_programmatic_long_context_provider`,
-    :func:`create_prime_long_session_continuity_provider`, and
-    :func:`create_prime_recursive_workflow_provider`.
+    :func:`create_prime_long_session_continuity_provider`,
+    :func:`create_prime_recursive_workflow_provider`, and
+    :func:`create_prime_bounded_autonomy_provider`.
     """
 
     root = _resource_root()
@@ -256,6 +262,18 @@ def create_provider() -> InstalledApplicationProvider:
                 capability_packages=(PRIME_ARC_AGI_3_SOLVER_PACKAGE,),
                 runtime_ids=("asterion.prime",),
             ),
+            # Phase 8, Task 16: published together with its installed-route
+            # bounded-autonomy propose/verify/repair + limits witness (exit 0
+            # from both ``make asterion-prime-p5-run`` and
+            # ``make asterion-prime-p5-run-limits``; the limits witness
+            # asserts iteration-cap-exceeded / duration-cap-exceeded /
+            # no-progress refusals, each with a sealed ``receipt_sha256``).
+            # The success witness asserts ``propose == 1``,
+            # ``verify == 2``, ``repair == 1``, and ``terminal_reason ==
+            # "success"`` over canonical-JSON of the bounded-turn transcript
+            # (Phase 8: P5NativeOracle + P5NativeReceipt with sealed
+            # ``receipt_sha256`` over canonical-JSON of the bounded turn).
+            prime_bounded_autonomy_application(),
             # Published together with its witness (Phase 4, D-2026-09-12-01):
             # the detachment spec requires an unmigrated selector to be omitted,
             # so the selector returns only once the installed-route witness

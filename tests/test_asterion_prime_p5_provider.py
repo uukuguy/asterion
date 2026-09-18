@@ -1,9 +1,9 @@
 """Native P5 provider factory tests.
 
 The witness-gated publication in :func:`create_provider` (Phase 8, Task 16)
-is asserted in :func:`test_create_provider_does_not_include_p5_until_witness_passes`;
-P5 returns to the public selector once ``make asterion-prime-p5-run`` exits 0
-with a sealed ``receipt_sha256``.
+is asserted in :func:`test_p5_is_published_to_public_selector`; P5 returns
+to the public selector once ``make asterion-prime-p5-run`` and
+``make asterion-prime-p5-run-limits`` both exit 0.
 """
 
 from __future__ import annotations
@@ -24,18 +24,14 @@ class TestAsterionPrimeP5Provider(unittest.TestCase):
         self.assertEqual(record.version, "1.0.0")
         self.assertEqual(record.runtime_ids, ("asterion.prime",))
 
-    def test_create_provider_does_not_include_p5_until_witness_passes(self) -> None:
+    def test_p5_is_published_to_public_selector(self) -> None:
         """Phase 8, Task 16: published together with its installed-route
-        bounded-autonomy witness (exit 0 from ``make asterion-prime-p5-run``
-        with a sealed ``receipt_sha256``).
-
-        Until that witness passes, P5 stays unpublished in the public
-        selector — ``create_provider()`` returns P7 + P1 + P2 + P3 + P4
-        (5 apps) only. The P5 operator composes itself from
-        :func:`create_prime_bounded_autonomy_provider` instead, so the
-        application is reachable without depending on publication.
+        bounded-autonomy propose/verify/repair + limits witness (exit 0
+        from both ``make asterion-prime-p5-run`` and
+        ``make asterion-prime-p5-run-limits``; the limits witness asserts
+        iteration-cap-exceeded / duration-cap-exceeded / no-progress
+        refusals, each with a sealed ``receipt_sha256``).
         """
-
         p5_provider = create_prime_bounded_autonomy_provider()
         self.assertEqual(p5_provider.provider_id, "prime-applications")
         self.assertEqual(len(p5_provider.applications), 1)
@@ -43,14 +39,14 @@ class TestAsterionPrimeP5Provider(unittest.TestCase):
             p5_provider.applications[0].application_id, "prime.bounded-autonomy"
         )
 
-        # Before the witness passes, P5 stays unpublished: the public
-        # selector returns 5 apps (P7 + P1 + P2 + P3 + P4), not 6.
+        # After the witness passes (Phase 8, Task 16), P5 returns to the
+        # public selector. create_provider() now publishes P7 + P1 + P2 + P3
+        # + P4 + P5 (6 apps); P5 must be among them.
         public_provider = create_provider()
         published_ids = tuple(
             application.application_id for application in public_provider.applications
         )
-        self.assertNotIn("prime.bounded-autonomy", published_ids)
-        self.assertEqual(len(published_ids), 5)
+        self.assertIn("prime.bounded-autonomy", published_ids)
 
 
 if __name__ == "__main__":
