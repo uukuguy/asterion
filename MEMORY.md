@@ -188,22 +188,24 @@
 
 ## 🟠 Current Judgments
 
-- Phases 1-7 are complete and the application layer is free of Pi references.
-  **P1-P7 native implementations stand at 5 of 7** — P7, P1, P2, P3, and P4,
-  each at its proven boundary. **Phase 7 closed on 2026-09-19: P3's
-  in-process child-runner witness passes and P3 is republished.**
-  `make asterion-prime-p3-run` AND `make asterion-prime-p3-run-limits`
-  both returned exit 0 (deterministic fake-worker keyed on
-  `(mode, depth, run_id)`; both witnesses print the canonical
-  `refusal_reason is null` and four-scenario `depth / concurrency /
-  budget / cancellation` assertions respectively). Task-4 mirror commit
-  `2c068c2d` appended P3 to `create_provider()` and `pyproject.toml`
-  `asterion.application_index`; P1 regression guard bumped from 4 to 5
-  apps. 78 P3 tests + P1/P2/P4 regression = 144/144 green; detachment
-  gate 0; ruff clean. **Next package: Phase 8 — P5 rebuild** requires
-  its own plan + spec + design-first pass before implementation (P5's
-  bounded-autonomy propose/verify/repair loop with exact stopping
-  conditions differs from P3's recursive composition even though both
+- Phases 1-8 are complete and the application layer is free of Pi references.
+  **P1-P7 native implementations stand at 6 of 7** — P7, P1, P2, P3, P4,
+  and P5, each at its proven boundary. **Phase 8 closed on 2026-09-19:
+  P5's in-process bounded-autonomy witness passes and P5 is
+  republished.** `make asterion-prime-p5-run` AND
+  `make asterion-prime-p5-run-limits` both returned exit 0
+  (deterministic fake-worker keyed on `(mode, step_kind, run_id)`;
+  success-path: propose 1 + verify 2 + repair 1 → terminal_reason=success;
+  limits-path: 3 refusal scenarios per D-2026-09-19-01 — iteration-cap-
+  exceeded / duration-cap-exceeded / no-progress — each with sealed
+  `receipt_sha256`). Task-4 mirror commit `0a74bc1a` appended P5 to
+  `create_provider()` and `pyproject.toml`
+  `asterion.application_index`; P1 regression guard bumped from 5 to 6
+  apps. 75 P5 tests + P1/P2/P3/P4 regression = 164/164 green; detachment
+  gate 0; ruff clean. **Next package: Phase 9 — P6 rebuild** requires
+  its own plan + spec + design-first pass before implementation (P6's
+  continual-improvement bounded-evaluation + explicit-promotion
+  semantics differ from P5's bounded-loop semantics even though both
   compose the native substrate).
 - **P4 design choices locked in**: deterministic fake-worker for the witness
   (no real Pi subprocess), two `make` Orb invocations against a persistent

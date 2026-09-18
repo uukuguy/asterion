@@ -13,23 +13,28 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: **Phase 7 closed**. Next is **Phase 8 — P5 rebuild**
-  (plan/spec/design-first pass required before implementation; P5's
-  bounded-autonomy propose/verify/repair loop differs from P3's
-  recursive composition even though both compose the native substrate).
-  Phase 7 plan lived at `docs/superpowers/plans/2026-09-18-asterion-prime-p3-native.md`;
-  spec at `docs/superpowers/specs/2026-09-18-asterion-prime-p3-native-design.md`;
-  both closed at commit `602d5971`. Phase 7 delivery: Tasks 1–16 all complete.
-  P3 is **published** in `create_provider()` and `pyproject.toml`
+- Active work package: **Phase 8 closed**. Next is **Phase 9 — P6 rebuild**
+  (plan/spec/design-first pass required before implementation; P6's
+  continual-improvement bounded-evaluation + explicit-promotion semantics
+  differ from P5's bounded-loop semantics even though both compose the
+  native substrate).
+  Phase 8 plan lived at `docs/superpowers/plans/2026-09-19-asterion-prime-p5-native.md`;
+  spec at `docs/superpowers/specs/2026-09-19-asterion-prime-p5-native-design.md`;
+  both closed at commit `8a3b57cb`. Phase 8 delivery: Tasks 1–16 all complete
+  + one Makefile bash 3.2 quoting fix-on-verify (`5c07d9ff`).
+  P5 is **published** in `create_provider()` and `pyproject.toml`
   `asterion.application_index` together with its installed-route
-  in-process child-runner witness (`make asterion-prime-p3-run` AND
-  `make asterion-prime-p3-run-limits` both exit 0; deterministic
-  fake-worker keyed on `(mode, depth, run_id)`). Task-4 mirror commit
-  `2c068c2d` appended P3 to the provider tuple + index; P1 regression
-  guard bumped from 4 to 5 apps. 78 P3 tests + P1/P2/P4 regression =
-  144/144 pass, ruff clean, detachment gate 0. P3 follows the P4
+  in-process bounded-autonomy witness (`make asterion-prime-p5-run` AND
+  `make asterion-prime-p5-run-limits` both exit 0; deterministic
+  fake-worker keyed on `(mode, step_kind, run_id)`; success-path
+  propose-1/verify-2/repair-1 → terminal_reason=success; limits-path
+  3 refusal scenarios per D-2026-09-19-01: iteration-cap-exceeded /
+  duration-cap-exceeded / no-progress). Task-4 mirror commit
+  `0a74bc1a` appended P5 to the provider tuple + index; P1 regression
+  guard bumped from 5 to 6 apps. 75 P5 tests + P1/P2/P3/P4 regression =
+  164/164 pass, ruff clean, detachment gate 0. P5 follows the P4 / P3
   Task-4 mirror pattern: provider gate stayed closed until both
-  witnesses exit 0, then a single commit appended P3 to the provider
+  witnesses exit 0, then a single commit appended P5 to the provider
   tuple + index and inverted the Task 16 guard.
   **Phase 5 is complete: native P2 is rebuilt, witnessed and republished.**
   Run `make asterion-prime-p2-run` returns exit 0 with sealed receipt
@@ -75,8 +80,8 @@
   preset as an installed-wheel invocation, D-2026-09-14-02): the preset builds a
   wheel, unsets `PYTHONPATH`, and supplies the ARC engine as an operator-owned
   root plus pure-Python wheels. Native P7 remains the implementation anchor.
-  **P1-P7 native implementations: 5 of 7** — P7, P1, P2, P3, and P4, each at its
-  proven boundary. P5, P6 remain unbuilt. Full benchmarking and
+  **P1-P7 native implementations: 6 of 7** — P7, P1, P2, P3, P4, and P5, each
+  at its proven boundary. P6 remains unbuilt. Full benchmarking and
   production promotion remain separately authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and
