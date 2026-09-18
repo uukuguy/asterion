@@ -192,5 +192,6 @@ __all__ = (
     "P5ReceiptError",
     "TerminalReason",
     "build",
+    "media_type",
     "seal",
 )

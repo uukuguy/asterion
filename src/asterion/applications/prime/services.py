@@ -40,6 +40,12 @@ from asterion.services.registry import (
     HostServiceFactoryContext,
     HostServiceRegistryError,
 )
+from asterion.applications.prime.p5.receipt import (
+    P5NativeReceipt,
+    P5ReceiptError,
+    TerminalReason,
+    seal as _seal_p5_native_receipt_impl,
+)
 
 
 _OPTION_ROOT = "root"
@@ -611,24 +617,6 @@ MAX_REPAIR_DURATION_MS = 30_000
 MAX_TOTAL_DURATION_MS = 120_000
 WORKSPACE_DIGEST_DEDUP = True
 
-TerminalReason = Literal[
-    "success",
-    "iteration-cap-exceeded",
-    "duration-cap-exceeded",
-    "no-progress",
-    "cancelled",
-]
-
-_TERMINAL_REASONS: frozenset[str] = frozenset(
-    {
-        "success",
-        "iteration-cap-exceeded",
-        "duration-cap-exceeded",
-        "no-progress",
-        "cancelled",
-    }
-)
-
 
 class BoundedAutonomyServiceError(HostServiceRegistryError):
     """Raised when ``prime.bounded-autonomy`` cannot be opened safely."""
@@ -699,28 +687,12 @@ class P5RepairStep:
     workspace_digest_sha256: str
 
 
-@dataclass(frozen=True)
-class P5NativeReceipt:
-    """One sealed :class:`BoundedAutonomyLoop` run.
-
-    ``receipt_sha256`` is the canonical-JSON SHA-256 of every other field.
-    ``joined_workspace_digest`` is the final workspace digest (the
-    last progress-making propose / repair digest, or the prior gate's
-    digest if the loop terminated with ``no-progress``). ``terminal_reason``
-    is one of the closed 5-element :data:`TerminalReason` enum — never
-    ``"still-running"``.
-    """
-
-    root_run_id: str
-    root_generation: int
-    propose_step_count: int
-    verify_step_count: int
-    repair_step_count: int
-    failed_verify_count: int
-    terminal_reason: TerminalReason
-    joined_workspace_digest: str
-    receipt_sha256: str
-
+# NOTE: ``P5NativeReceipt`` and :func:`seal_p5_native_receipt` live in
+# :mod:`asterion.applications.prime.p5.receipt` since Phase 8 / Task 6.
+# They are imported at the top of this module. The host-service surface
+# keeps a thin wrapper below that re-raises ``BoundedAutonomyServiceError``
+# on receipt-validation failures so the existing host-service callers
+# (and their tests) see the same exception type.
 
 # Propose / verify / repair callables are async-callables the operator (Task 8)
 # and runtime binding (Task 7) inject into the loop. Each receives the active
@@ -850,40 +822,6 @@ def _compute_workspace_digest(artifact: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _receipt_digest(
-    *,
-    root_run_id: str,
-    root_generation: int,
-    propose_step_count: int,
-    verify_step_count: int,
-    repair_step_count: int,
-    failed_verify_count: int,
-    terminal_reason: str,
-    joined_workspace_digest: str,
-) -> str:
-    """Compute the canonical-JSON SHA-256 of a :class:`P5NativeReceipt`.
-
-    The receipt's :attr:`P5NativeReceipt.receipt_sha256` is this digest.
-    The :attr:`P5NativeReceipt.joined_workspace_digest` is fed back in
-    (already computed) so the receipt is digest-stable across re-seals.
-    """
-
-    payload = {
-        "root_run_id": root_run_id,
-        "root_generation": root_generation,
-        "propose_step_count": propose_step_count,
-        "verify_step_count": verify_step_count,
-        "repair_step_count": repair_step_count,
-        "failed_verify_count": failed_verify_count,
-        "terminal_reason": terminal_reason,
-        "joined_workspace_digest": joined_workspace_digest,
-    }
-    encoded = json.dumps(
-        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def seal_p5_native_receipt(
     *,
     root_run_id: str,
@@ -897,41 +835,19 @@ def seal_p5_native_receipt(
 ) -> P5NativeReceipt:
     """Build a sealed :class:`P5NativeReceipt` with the computed receipt SHA.
 
-    Mirrors P3's ``seal`` / P4's ``seal`` shape: every input is checked for
-    shape, the receipt's :attr:`receipt_sha256` is the canonical-JSON SHA-256
-    of the rest, and the closed enum is enforced at the type boundary.
+    Thin host-service wrapper around
+    :func:`asterion.applications.prime.p5.receipt.seal`. The
+    canonical-JSON SHA-256 logic and shape validation live in
+    :mod:`asterion.applications.prime.p5.receipt`; this wrapper exists
+    so the existing host-service callers (and their tests) keep seeing
+    :class:`BoundedAutonomyServiceError` for invalid inputs rather than
+    the receipt-level :class:`P5ReceiptError`.
+
+    The 64-char hex digest format check is enforced here because the
+    host-service boundary requires it independently of the receipt-level
+    validator; this matches the original Phase 8 / Task 3 surface.
     """
 
-    if not isinstance(root_run_id, str) or not root_run_id:
-        raise BoundedAutonomyServiceError("seal root_run_id is invalid")
-    if not isinstance(root_generation, int) or root_generation < 1:
-        raise BoundedAutonomyServiceError("seal root_generation is invalid")
-    if (
-        not isinstance(propose_step_count, int)
-        or propose_step_count < 1
-    ):
-        raise BoundedAutonomyServiceError(
-            "seal propose_step_count is invalid"
-        )
-    if not isinstance(verify_step_count, int) or verify_step_count < 1:
-        raise BoundedAutonomyServiceError(
-            "seal verify_step_count is invalid"
-        )
-    if not isinstance(repair_step_count, int) or repair_step_count < 0:
-        raise BoundedAutonomyServiceError(
-            "seal repair_step_count is invalid"
-        )
-    if (
-        not isinstance(failed_verify_count, int)
-        or failed_verify_count < 1
-    ):
-        raise BoundedAutonomyServiceError(
-            "seal failed_verify_count is invalid"
-        )
-    if terminal_reason not in _TERMINAL_REASONS:
-        raise BoundedAutonomyServiceError(
-            "seal terminal_reason is invalid"
-        )
     if (
         not isinstance(joined_workspace_digest, str)
         or len(joined_workspace_digest) != 64
@@ -943,28 +859,19 @@ def seal_p5_native_receipt(
         raise BoundedAutonomyServiceError(
             "seal joined_workspace_digest is invalid"
         )
-
-    receipt_sha256 = _receipt_digest(
-        root_run_id=root_run_id,
-        root_generation=root_generation,
-        propose_step_count=propose_step_count,
-        verify_step_count=verify_step_count,
-        repair_step_count=repair_step_count,
-        failed_verify_count=failed_verify_count,
-        terminal_reason=terminal_reason,
-        joined_workspace_digest=joined_workspace_digest,
-    )
-    return P5NativeReceipt(
-        root_run_id=root_run_id,
-        root_generation=root_generation,
-        propose_step_count=propose_step_count,
-        verify_step_count=verify_step_count,
-        repair_step_count=repair_step_count,
-        failed_verify_count=failed_verify_count,
-        terminal_reason=terminal_reason,
-        joined_workspace_digest=joined_workspace_digest,
-        receipt_sha256=receipt_sha256,
-    )
+    try:
+        return _seal_p5_native_receipt_impl(
+            root_run_id=root_run_id,
+            root_generation=root_generation,
+            propose_step_count=propose_step_count,
+            verify_step_count=verify_step_count,
+            repair_step_count=repair_step_count,
+            failed_verify_count=failed_verify_count,
+            terminal_reason=terminal_reason,
+            joined_workspace_digest=joined_workspace_digest,
+        )
+    except P5ReceiptError as exc:
+        raise BoundedAutonomyServiceError(str(exc)) from None
 
 
 class BoundedAutonomyLoop:
