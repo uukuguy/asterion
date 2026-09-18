@@ -32,6 +32,9 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p5-run
 .PHONY: asterion-prime-p5-run-limits
 .PHONY: asterion-prime-p5-run-verbose
+.PHONY: asterion-prime-p6-run
+.PHONY: asterion-prime-p6-run-limits
+.PHONY: asterion-prime-p6-run-verbose
 .PHONY: asterion-prime-p7-solve
 
 # Operator-owned values for the Prime presets. Defaults below are this
@@ -46,6 +49,7 @@ ASTERION_PRIME_ARC_ROOT ?= /Users/sujiangwen/sandbox/agentic-2026/external-prime
 ASTERION_PRIME_P4_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-witness
 ASTERION_PRIME_P3_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-witness
 ASTERION_PRIME_P5_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-witness
+ASTERION_PRIME_P6_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-witness
 .PHONY: test.native-controller-core.provider-free
 
 help:
@@ -415,6 +419,77 @@ asterion-prime-p5-run-verbose:
 	@$(MAKE) asterion-prime-p5-run ASTERION_PRIME_P5_PRIVATE_ROOT=$(ASTERION_PRIME_P5_PRIVATE_ROOT) || exit 1
 	@$(MAKE) asterion-prime-p5-run-limits ASTERION_PRIME_P5_PRIVATE_ROOT=$(ASTERION_PRIME_P5_PRIVATE_ROOT) || exit 1
 	@echo "[asterion-prime-p5-run-verbose] all witnesses passed"
+
+# P6 continual-improvement preserved-path witness: re-invokes the operator with
+# ``ASTERION_PRIME_P6_MODE=preserved``. The wrapper admits one candidate via
+# ``HarnessCoordinator.apply(proposal)``, evaluates on the task B holdout, then
+# applies the explicit promotion action and seals ``P6NativeReceipt`` with
+# ``terminal_outcome="preserved"``, ``global_activation_approved=false``,
+# ``rollback_invocation_count=0``. The host shell captures the stdout JSON line
+# and ``jq -e`` asserts the success invariants:
+#
+#   1. status == "completed", terminal_outcome == "preserved"
+#   2. global_activation_approved == false, rollback_invocation_count == 0
+#   3. baseline_snapshot_digest, candidate_revision_digest,
+#      task_b_result_digest, receipt_sha256 each 64 chars
+#   4. task_b_result_digest and candidate_revision_digest both differ from
+#      baseline_snapshot_digest (proves the candidate produced a different
+#      snapshot and a different task B output)
+#
+# Pass values either as `make asterion-prime-p6-run VAR=value` or via the
+# shell environment; the ``?=`` defaults fall back to whichever was set. Like
+# the other Prime presets, this is provider-backed and needs operator
+# authorization. Operator root, PI entry, P6 private root, Orb VM, and node
+# are operator-owned; the preset supplies no provider, model, cost, or
+# deadline knob. The single-record form (NOT ``jq -s slurp``) proves the
+# preserved-path contract — see the spec section 7 / 8 ``Witness strategy``
+# and ``Determinism``. Single-line jq is required (bash 3.2.57 macOS default
+# rejects multi-line ``\`` continuation; Phase 8 Task 14 fix-on-verify lesson,
+# commit ``5c07d9ff``).
+asterion-prime-p6-run:
+	@printf '[asterion-prime-p6-run] native Asterion-prime P6 continual-improvement preserved-path witness\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p6-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		rm -rf "$(ASTERION_PRIME_P6_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P6_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P6_PRIVATE_ROOT)"; \
+		preserved_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P6_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P6_MODE=preserved; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p6.operator'\'' asterion-prime-p6-run-preserved "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P6_PRIVATE_ROOT)")"; \
+		[ -n "$$preserved_json" ] || { echo "[asterion-prime-p6-run] operator produced no JSON output" >&2; exit 2; }; \
+		echo "$$preserved_json" | jq -e ".status == \"completed\" and (.terminal_outcome == \"preserved\") and (.global_activation_approved == false) and (.rollback_invocation_count == 0) and (.baseline_snapshot_digest | length == 64) and (.candidate_revision_digest | length == 64) and (.task_b_result_digest | length == 64) and (.receipt_sha256 | length == 64) and (.candidate_revision_digest != .baseline_snapshot_digest) and (.task_b_result_digest != .baseline_snapshot_digest)" >/dev/null || { echo "[asterion-prime-p6-run] witness failed: $$preserved_json" >&2; exit 2; }; \
+		echo "[asterion-prime-p6-run] witness passed: terminal_outcome=preserved, rollback_invocation_count=0, candidate_revision_digest and task_b_result_digest differ from baseline_snapshot_digest" >&2'
+
+# P6 continual-improvement refusal-scenarios witness: re-invokes the operator
+# with ``ASTERION_PRIME_P6_MODE=limits``. The operator emits exactly two JSON
+# records (``rolled-back`` then ``global-rejected``), one per line, each
+# carrying its ``scenario`` field, ``terminal_outcome``, and a non-null
+# ``receipt_sha256``. The host shell ``jq -e -s`` slurps both into one array
+# and asserts by index — fixed-position ``.[N]`` lookup dodges the make-
+# recipe ``\$`` quoting trap that bit P4's earlier draft (Phase 6 commit
+# ``9d1a2bb7``); see ``serene-mixing-cat.md`` §"Critical files".
+#
+# Pass values either as `make asterion-prime-p6-run-limits VAR=value` or via
+# the shell environment; the ``?=`` defaults fall back to whichever was set.
+# Like the other Prime presets, this is provider-backed and needs operator
+# authorization. Single-line jq is required (bash 3.2.57 macOS default rejects
+# multi-line ``\`` continuation; Phase 8 Task 14 fix-on-verify lesson, commit
+# ``5c07d9ff``).
+asterion-prime-p6-run-limits:
+	@printf '[asterion-prime-p6-run-limits] native Asterion-prime P6 two-refusal-scenarios witness\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p6-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		rm -rf "$(ASTERION_PRIME_P6_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P6_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P6_PRIVATE_ROOT)"; \
+		limits_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P6_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P6_MODE=limits; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p6.operator'\'' asterion-prime-p6-run-limits "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P6_PRIVATE_ROOT)")"; \
+		[ -n "$$limits_json" ] || { echo "[asterion-prime-p6-run-limits] operator produced no JSON output" >&2; exit 2; }; \
+		echo "$$limits_json" | jq -e -s "length == 2 and .[0].scenario == \"rolled-back\" and .[0].terminal_outcome == \"rolled-back\" and .[0].rollback_invocation_count == 1 and .[0].global_activation_approved == false and (.[0].candidate_revision_digest | length == 64) and .[1].scenario == \"global-rejected\" and .[1].terminal_outcome == \"rolled-back\" and .[1].rollback_invocation_count == 0 and .[1].global_activation_approved == false and .[1].candidate_revision_digest == .[1].baseline_snapshot_digest and (.[0].receipt_sha256 | length == 64) and (.[1].receipt_sha256 | length == 64)" >/dev/null || { echo "[asterion-prime-p6-run-limits] witness failed: $$limits_json" >&2; exit 2; }; \
+		echo "[asterion-prime-p6-run-limits] witness passed: rolled-back (rollback_invocation_count=1) and global-rejected (boundary pre-orchestration), each with terminal_outcome=rolled-back and receipt_sha256" >&2'
+
+# Diagnostic sibling of ``asterion-prime-p6-run`` + ``-limits``: re-invokes
+# both witnesses with full output so Orb / python stderr surfaces to the
+# host terminal for diagnosis only.
+asterion-prime-p6-run-verbose:
+	@$(MAKE) asterion-prime-p6-run ASTERION_PRIME_P6_PRIVATE_ROOT=$(ASTERION_PRIME_P6_PRIVATE_ROOT) || exit 1
+	@$(MAKE) asterion-prime-p6-run-limits ASTERION_PRIME_P6_PRIVATE_ROOT=$(ASTERION_PRIME_P6_PRIVATE_ROOT) || exit 1
+	@echo "[asterion-prime-p6-run-verbose] all witnesses passed"
 
 test.native-controller-core.provider-free:
 	$(UV_BIN) run python -m unittest -v \
