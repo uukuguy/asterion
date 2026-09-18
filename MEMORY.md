@@ -18,6 +18,8 @@
 | feedback | ✅ verified-active | Delete a seam whose only purpose was the forbidden dependency; do not retarget it |
 | feedback | ✅ verified-active | A classification is not a cause; recover the value before changing anything |
 | feedback | ✅ verified-active | Take a contract's key set from its producer, not from a fixture |
+| feedback | ✅ verified-active | The "倒数第 2-3 个 hook 位置挂几十秒" pattern points at the last synchronous hook, not the first slow one |
+| feedback | ✅ verified-active | Global hook audit: keep only hooks whose project-condition (lwm JOURNAL.md / gsd .planning/config.json / adr .adr-config.yaml / rtk) actually matches the project under CLAUDE_PROJECT_DIR |
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
 
 ## ✅ Verified Active
@@ -137,24 +139,70 @@
 - **Why:** the fixture and the contract share an author's assumption. Only the
   producer is independent evidence, and here it was already on disk.
 
+### feedback — last-sync-hook is the latency source, not the first slow one
+
+- When the user reports latency at the "倒数第 2-3 个位置" (the 2nd-to-last /
+  3rd-to-last hook in a chain), start the diagnosis at the **last** synchronous
+  hook, not the first slow one. Front hooks usually exit fast; the tail is
+  where `curl --max-time` and similar timeouts land.
+- Given 2026-09-18, when the user reported Claude sitting idle for tens of
+  seconds to minutes before processing already-typed input. Inspecting
+  `~/.claude/settings.json` hooks: the 2nd-to-last hook on every event was
+  `~/.orca/agent-hooks/claude-hook.sh`, a `curl --max-time 1.5` against an
+  unreachable local endpoint. Removed 10 orca groups + 7 otty groups + 9 gsd
+  hooks + adr-guard + 3 lwm pretooluse (29 hooks total); input latency dropped.
+- **Why:** the chain front is usually not the bottleneck; the tail hook is
+  running every event with a hard timeout that no UI surface reveals. Skim
+  the last 1-2 hooks before chasing earlier ones.
+
+### feedback — global hook audit before every new phase
+
+- Before starting a new project / phase, audit `~/.claude/settings.json` hooks
+  against the project's actual structure under `$CLAUDE_PROJECT_DIR`. Drop
+  hooks whose project-condition (lwm JOURNAL.md / gsd `.planning/config.json`
+  / adr `.adr-config.yaml` / rtk) does not match.
+- Given 2026-09-18 on Asterion: removed `gsd-context-monitor` (no opt-in,
+  fires on every PostToolUse), `gsd-read-guard` / `read-injection-scanner`
+  / `workflow-guard` (all node, no opt-in, fire on every Edit/Read), the
+  opt-in `gsd-*` group (Asterion has no `.planning/`), `adr-guard.sh`
+  (no `.adr-config.yaml`), and 3 lwm PreToolUse hooks (commit-reminder /
+  long-task-launch / milestone never matched pattern but always started
+  bash). Kept `lwm-stop-health.sh` (Asterion uses project-state =
+  lightweight-memory system; Stop fires once and the check is the project's
+  own health probe).
+- **Why:** hooks fire on every tool call, regardless of project. Stale hooks
+  cost latency that compounds into the user's "Claude is unresponsive"
+  feeling. Audit is cheap; the win is per-event, every session.
+
 ## 🟠 Current Judgments
 
-- Phases 1-4 are complete and the application layer is free of Pi references;
-  the remaining work is construction, not removal. **P1-P7 native
-  implementations stand at 2 of 7** — P7 and P1, each at its proven boundary.
-  **Phase 4 closed on 2026-09-17: P1's witness passes and P1 is republished.**
-  `make asterion-prime-p1-run` completed six times with sealed receipts, three
-  cells each, through `stage2.release`, `stage2.complete`, `oracle.pass` and
-  `runner.terminal`. Fifteen defects found by live runs were fixed across
-  `git log 1d21ef05..HEAD`. The residual intermittency is **model behaviour, not
-  the harness**: measured twice, a continuation answered correctly but read the
-  file zero times, and another never finished its turn; the oracle rejected both
-  correctly. Do not loosen the oracle to raise the pass rate. **Phase 5 (P2)
-  has no plan yet** — the program plan stops at Phase 4, so a plan comes before
-  implementation. Passing runs are bounded to one task, one game, seed 0,
-  `deepseek-v4-flash`, Level 1, `promotion: unpromoted`. Current technical status
-  and next actions live in `docs/status/CURRENT-STATE.md` and
-  `docs/status/RESUME-NEXT-SESSION.md`.
+- Phases 1-5 are complete and the application layer is free of Pi references.
+  **P1-P7 native implementations stand at 3 of 7** — P7, P1, and P2, each at its
+  proven boundary. **Phase 5 closed on 2026-09-18: P2's witness passes and P2
+  is republished.** `make asterion-prime-p2-run` returned exit 0 with sealed
+  receipt `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`
+  (deterministic across host and Orb). **Phase 6 in flight: Tasks 1-13
+  committed at `3c11b994` (P4 store + capability package + assembly + host
+  service + host contract + oracle + receipt + runtime binding + operator +
+  provider factories + first-party registration).** Remaining Phase 6 work:
+  Task 14 (commit fixture), Task 15 (Makefile `asterion-prime-p4-run`
+  supervisor with `jq -e` assertions), Task 16 (final sweep), Task 17
+  (witness exit0 → publish P4 to `create_provider()` + index + P1 test
+  guard upgrade 3→4 apps). **One defect to fix before Task 17**: operator's
+  recover-mode output puts `prior_identity.continuation_id` where the
+  Makefile expects `prior_checkpoint_sha256` (the prior's last sealed
+  checkpoint digest). The witness's no-replay SHA inequality check is
+  unaffected; this is a JSON output field bug.
+- **P4 design choices locked in**: deterministic fake-worker for the witness
+  (no real Pi subprocess), two `make` invocations against a persistent
+  `ASTERION_PRIME_P4_PRIVATE_ROOT` as the supervisor (no child-process
+  spawn), provider gate stays closed until witness passes (mirror of P2's
+  Task 4 closure). `prime.continuity-store` is the new injected host service;
+  the store's `open_continued` classmethod is the **only** path that binds
+  a new identity against an existing private_root (every other identity
+  field must equal prior, else `PrimeStoreError`; only `generation` may +1).
+  Current technical status and next actions live in `docs/status/CURRENT-STATE.md`
+  and `docs/status/RESUME-NEXT-SESSION.md`.
 - **Two 2026-09-16/17 judgments were withdrawn after measurement.** The
   "session too small" reading of the compaction failure was static-only and a
   decision was taken on it before any value was captured; Pi in fact compacts.
