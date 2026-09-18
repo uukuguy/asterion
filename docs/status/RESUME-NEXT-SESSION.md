@@ -1,148 +1,86 @@
 # Next-Session Handoff
 
-> Updated: 2026-09-18 19:57, end of session. Phase 6 Tasks 1-13 committed.
-> HEAD: `3c11b994d52647ca90dde626c84a97785f2f27d2` clean.
+> Updated: 2026-09-18 20:50, end of session. Phase 6 P4 Tasks 9 / 14 / 15 / 16 committed; **Task 17 (witness-gated publish) awaits operator authorization**.
+> HEAD: `35427ad8` clean.
 
 ## TL;DR
 
-1. **Phase 6 (P4 rebuild) Tasks 1-13 done and committed.** P4's application,
-   capability package, host service, host contract, oracle, receipt, runtime
-   binding, operator, provider factories, and first-party registration all
-   landed. P4 stays unpublished in `create_provider()` until the witness
-   passes (Task 17 gate). 139 tests green (52 P4 + 87 regression), ruff
-   clean, detachment gate 0, no leftover processes.
-2. **End-to-end witness smoke ran on host** (commit + recover both rc=0,
-   generations 1→2, `result_sha256` differs, worker swapped, continuation_id
-   matches). Orb mirror + Makefile supervisor still to wire (Task 15).
-3. **Hook cleanup: 29 hooks removed.** Orca (10) + Otty (7) + GSD (9) + adr-guard
-   + lwm PreToolUse×3. Verified: orca's `curl --max-time 1.5` was the "倒数
-   第 2-3 个位置挂几十秒" root cause. `UserPromptSubmit`,
-   `PermissionRequest`, `PostToolUse`, `PostToolUseFailure`, `StopFailure`,
-   `SubagentStart`, `SubagentStop`, `TeammateIdle` now have **0 hooks**
-   — zero overhead on user input / tool completion / task switching.
-4. **One known defect in Task 9 operator:** recover-mode output's
-   `prior_checkpoint_sha256` field is `prior_identity.continuation_id`
-   instead of the prior's last checkpoint digest. Witness's no-replay SHA
-   inequality assertion still passes; this is a cosmetic output bug that
-   must be fixed before Task 17 publishes P4 to the public selector.
-5. **Open invariants carried from Phase 5:** three pre-existing red tests
-   (`test_pi_session`, `test_prime_p7_native_installed`, `test_core_only_install`)
-   untouched. Project uses `dev-phase-manager` for state, `project-state` for
-   docs/status lifecycle.
+1. **Phase 6 (P4 rebuild) Tasks 9, 14, 15, 16 done and committed.** Tasks 1-13 were already at `3c11b994`. Three commits closed the remaining code-side gap:
+   - `a2839e6` Task 9 fix: operator `recover.prior_checkpoint_sha256` reads `store.recover_checkpoint().checkpoint.digest` (was `prior_identity.continuation_id`)
+   - `048078d` Task 14 commit fixture + secondary fix: operator recover-mode inherits prior's `pi_command_sha256` / `extension_binding_fingerprint` / `ceilings_sha256` (hardcoded literals only matched same-build commit+recover, broke cross-build detach+attach)
+   - `ce67fa0` Task 15 Makefile `asterion-prime-p4-run` + `-verbose` supervisors with `jq -e` assertions
+2. **55 P4 tests green** (52 prior + 3 operator), 105 P1/P2 regression tests green, **detachment gate 0**, ruff clean, `create_provider()` still returns 3 apps (P7/P1/P2) — P4 stays gated until Task 17 witness.
+3. **Task 17 needs operator authorization** to run `make asterion-prime-p4-run` (builds a wheel + invokes Orb twice + asserts via `jq -e`). The Makefile target is in place; this is operator-bounded work the agent cannot run.
+4. **Open invariants carried from Phase 5:** three pre-existing red tests (`test_pi_session`, `test_prime_p7_native_installed`, `test_core_only_install`) untouched. Project uses `project-state` for docs/status lifecycle.
 
 ## Where things stand
 
-- **Branch**: local `main`, clean at `3c11b994`.
-- **Phase 6 tasks**: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 done.
-  Remaining: **14** (commit fixture), **15** (Makefile `asterion-prime-p4-run`),
-  **16** (final sweep + ruff + detachment gate), **17** (witness exit0 →
-  publish P4 to `create_provider()` + index + P1 test guard upgrade 3→4 apps).
-- **No background processes**: no Orb VM, no Pi subprocess, no `python -m asterion`.
+- **Branch**: local `main`, clean at `35427ad8` (was `3c11b994` at session start).
+- **Phase 6 commits this session**:
+  - `a2839e6e` `fix(prime/p4): operator recover-mode prior_checkpoint_sha256 reads prior's last sealed checkpoint digest`
+  - `048078d3` `feat(prime/p4): Task 14 commit fixture + recover-mode inherits prior runtime-binding SHAs`
+  - `ce67fa05` `feat(prime/p4): Task 15 Makefile asterion-prime-p4-run witness supervisor`
+  - `35427ad8` `docs: Phase 6 stop at Task 17 witness gate`
+- **No background processes** (no Orb VM, no Pi subprocess, no `python -m asterion`).
 - **No `ASTERION_PRIME_*` env vars leaked.**
-- **Journal** has handoff closeout entry at 19:51.
-- **Plan file** lives outside repo at `~/.claude/plans/serene-mixing-cat.md`
-  (255 lines, sha256 `aa45271e531eaf55150d48011a4c88f290087c780182bb58f9988c698bf017ac`).
+- **Plan file** still at `~/.claude/plans/serene-mixing-cat.md` (255 lines, sha256 `aa45271e531eaf55150d48011a4c88f290087c780182bb58f9988c698bf017ac`).
+- **New DECISIONS entry**: `D-2026-09-18-01` records the runtime-binding SHA inheritance invariant surfaced by Task 14.
 
 ## What this session delivered
 
-| Files | Type | Notes |
-|---|---|---|
-| `src/asterion/agents/prime/store.py` | modified | `open_continued` classmethod + 3 module helpers + `continued_from` / `highest_sealed_generation` accessors + relaxed `_validate_checkpoints` |
-| `src/asterion/capabilities/prime_long_session_continuity_native/{__init__,host,provider}.py` + `payload/{capability-package,capabilities/prime-long-session-continuity}.json` | new | Capability package + JSON contracts (canonical) |
-| `src/asterion/applications/prime/assemblies/prime-long-session-continuity.json` | new | Assembly JSON (canonical, alphabetical host_capabilities) |
-| `src/asterion/applications/prime/services.py` | new | `prime.continuity-store` host service factory |
-| `src/asterion/applications/prime/p4/{__init__,host,oracle,receipt,worker,runtime_binding,operator}.py` | new | Application P4 modules |
-| `src/asterion/applications/prime/{__init__,provider,runtime_binding}.py` | modified | Re-exports + provider factories + dispatcher branch |
-| `src/asterion/applications/first_party_packages.py` | modified | `PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE` registration |
-| `pyproject.toml` | modified | `prime.continuity-store` entry point |
-| `tests/test_asterion_prime_p4_*.py` | new | 9 test files, 52 tests |
+### Code
 
-**Settings cleanup** (outside repo, in `~/.claude/settings.json`):
-- Removed 17 orca+otty group hooks (the 1.5s `curl --max-time 1.5` blockers)
-- Removed 12 gsd+adr+lwm hooks (gsd=4 unconditional + 3 opt-in never matched; adr no config; lwm pretooluse never matched)
-- Kept: rtk hook (PreToolUse Bash), gsd-planning-bootstrap + jcode + herdr (SessionStart), lwm-stop-health (Stop)
+| File | Change | Why |
+|---|---|---|
+| `src/asterion/applications/prime/p4/operator.py` | `_recover_mode` returns 4-tuple `(prior_id, next_id, prior_checkpoint_digest, result_sha)`; captures `store.recover_checkpoint().checkpoint.digest` before worker execution; `_run_async` recover branch uses prior_checkpoint_digest for the output field | Task 9 fix: `prior_checkpoint_sha256` must equal prior's last sealed checkpoint digest, not `continuation_id` |
+| `src/asterion/applications/prime/p4/operator.py` | `_build_identity` accepts `pi_command_sha256` / `extension_binding_fingerprint` / `ceilings_sha256` as kwargs with the same literals as defaults; `_recover_mode` passes prior identity's values | Task 14 secondary fix: continuation rules reject hardcoded literals when prior was sealed by a different build |
+| `src/asterion/applications/prime/p4/operator.py` | Removed unused `result_sha` parameter from `_seal_commit_checkpoint`, unused `prior_identity` tuple element in `_run_async`, unused `argv` parameter on `main()` | Pyright / clean-code cleanup |
+| `tests/fixtures/prime_p4/small_state.json` (new) | Pre-baked gen=1 sealed state (PrimeBackendIdentity + PrimeCheckpoint + transcript + usage, hex-encoded bytes); canonical public description; checkpoint digest `35af5974…ba72` | Task 14: enables in-process recover-mode test against a cross-build prior |
+| `tests/test_asterion_prime_p4_operator.py` (new + extended) | Three tests: subprocess end-to-end + 2 fixture-based in-process (`test_recover_mode_reads_prior_checkpoint_from_fixture`, `test_recover_mode_seeded_identity_uses_random_worker`) | Task 14 consumer + regression guards for both fixes |
+| `Makefile` | `asterion-prime-p4-run` + `asterion-prime-p4-run-verbose` targets; `ASTERION_PRIME_P4_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-witness` default | Task 15: witness supervisor with `jq -e` assertions (6 invariants) |
+
+### State
+
+| File | Change |
+|---|---|
+| `docs/status/JOURNAL.md` | 5 new lines: Task 9 fix commit, Task 14 + secondary fix commit, Task 15 commit, Task 16 sweep, Task 17 gate stop |
+| `docs/status/DECISIONS.md` | New `D-2026-09-18-01` — runtime-binding SHA inheritance invariant for cross-process continuity |
+| `docs/status/INDEX.md` | No change (no new docs/status files added) |
 
 ## Next steps (immediate, action-level)
 
-1. **Fix Task 9 defect first**: `prior_checkpoint_sha256` in recover-mode output
-   must be `prior.recover_checkpoint().digest`, not `prior_identity.continuation_id`.
-   In `src/asterion/applications/prime/p4/operator.py` `_recover_mode_async`,
-   after `open_continued`, call `store.recover_checkpoint()` and set the
-   output field to `.digest`. Add unit test asserting this.
-2. **Task 14** — `tests/fixtures/prime_p4/small_state.json` (pre-baked identity
-   + checkpoint for operator tests).
-3. **Task 15** — `Makefile` `asterion-prime-p4-run` target. Pattern:
+1. **User-authorize witness**:
    ```
-   ?= defaults for 5 env vars (operator root, PI entry, P4 private root,
-       Orb VM, node path)
-   two operator invocations (commit, recover) under Orb shell
-   jq -e assertions:
-     commit.status == "committed" && commit.checkpoint_sha256 non-null
-     recover.status == "recovered" && recover.prior_checkpoint_sha256 non-null
-     recover.prior_checkpoint_sha256 == commit.checkpoint_sha256
-     recover.new_generation == commit.generation + 1
-     recover.result_sha256 != commit.result_sha256
-     both receipt_sha256 non-null
-   + verbose sibling `asterion-prime-p4-run-verbose`
+   cd /Users/sujiangwen/sandbox/agentic-2026/asterion
+   make asterion-prime-p4-run
    ```
-4. **Task 16** — full targeted sweep:
+   Expected output on success:
    ```
-   uv run python -m unittest tests.test_asterion_prime_p4_*
-   uv run python -c "from pathlib import Path; from asterion.agents.prime.detachment import find_source_detachment_violations as f; print(len(f(Path('.'))))"
-   uv run ruff check src/asterion/...
+   [asterion-prime-p4-run] native Asterion-prime P4 cross-generation continuity witness
+   [asterion-prime-p4-run] witness passed: gen 1 -> 2, prior_checkpoint_sha256 matches commit checkpoint, result_sha256 differs across modes
    ```
-5. **Task 17** — Witness exit0 + sealed receipt sha256 → Task-4-mirror commit:
-   - Append P4 to `create_provider()` in `provider.py`
-   - Add `prime.long-session-continuity__1.0.0` to `pyproject.toml`
-     `asterion.application_index`
-   - Revert P1 regression test guard from 3 apps to expect 4 apps
-   - Journal + final handoff
+   Exit code 2 with JSON-dump lines on failure. Override with `PRIME_ORB_MACHINE=<vm>` if needed; `make asterion-prime-p4-run-verbose` to surface Orb / python stderr.
+
+2. **After witness exit 0**, paste the output. Agent performs the **Task-4 mirror commit** (single commit, ~3 file edits):
+   - `src/asterion/applications/prime/provider.py`: append `prime_long_session_continuity_application()` to the `applications` tuple inside `create_provider()` (alphabetically between P1 `prime.ipython-coding` and P2 `prime.programmatic-long-context`).
+   - `pyproject.toml`: add `prime.long-session-continuity__1.0.0` to `asterion.application_index`.
+   - `tests/test_asterion_prime_p1_provider.py`: rename `test_provider_publishes_all_three_applications` → `test_provider_publishes_all_four_applications` and append the P4 tuple entry.
+   - Sealed receipt sha256 should be recorded in the commit message (per the P2 / P4 pattern).
+   - Final journal entry + this handoff file gets a `# Next-Session Handoff` rewrite at the next `handoff` invocation.
+
+3. **Out-of-scope for this session** (carried forward):
+   - Phase 7 (P3 rebuild) gets its own plan after Phase 6 closes.
+   - Recursive continuity (gen=2→3) explicitly out of scope.
+   - Source-detachment gate stays at 0.
 
 ## Don't go down these paths again (ruled out)
 
-- `generation == highest + 1` invariant — broke P1 in-process compaction.
-  Original `generation == self._identity.generation` is correct; cross-
-  continuation replay falls out automatically because `next_identity.generation
-  == prior.generation + 1`.
-- A child-process supervisor — two `make` invocations on persistent
-  `ASTERION_PRIME_P4_PRIVATE_ROOT` are sufficient.
+- `prior_checkpoint_sha256 == prior_identity.continuation_id` — wrong field; must be `store.recover_checkpoint().checkpoint.digest`.
+- Hardcoded `pi_command_sha256` / `extension_binding_fingerprint` / `ceilings_sha256` in `_recover_mode` — breaks cross-build detach+attach; inherit from prior identity.
+- The plan's "both `receipt_sha256` non-null" assertion is over-specified — recover does not seal a new checkpoint by design; only commit's receipt is asserted.
 - Real Pi subprocess in P4 witness — fake-worker is the design.
+- Child-process supervisor for the two operator invocations — two `make` Orb invocations are sufficient.
 - Multi-generation recovery (gen=2→3) — out of scope.
-- Hook removal: otty + orca 全删即可；lwm 保留 stop-health；gsd 全部 opt-in；
-  adr 无 config 即可删。
-- `MappingProxyType` 用作 `usage=` 或 `worker.execute()` 返回 — store 的
-  `json.dumps` 不接受，要传 plain `dict`。
-- sync 函数直接 return async coroutine（崩溃）— 调用方直接 `await`。
-
-## Ready-to-paste commands / configs
-
-```bash
-# Plan file
-cat ~/.claude/plans/serene-mixing-cat.md
-
-# Targeted regression after Task 1
-uv run python -m unittest -v \
-  tests.test_asterion_prime_p4_store \
-  tests.test_asterion_prime_p4_capability_package \
-  tests.test_asterion_prime_p4_host_protocol \
-  tests.test_asterion_prime_p4_oracle \
-  tests.test_asterion_prime_p4_receipt \
-  tests.test_asterion_prime_p4_continuity_store_service \
-  tests.test_asterion_prime_p4_entry_point \
-  tests.test_asterion_prime_p4_runtime_binding \
-  tests.test_asterion_prime_p4_provider
-
-# Detachment gate (must stay 0)
-uv run python -c "from pathlib import Path; from asterion.agents.prime.detachment import find_source_detachment_violations as f; print(len(f(Path('.'))))"
-
-# Phase 6 operator end-to-end (host direct, no Orb)
-ASTERION_PRIME_OPERATOR_ROOT=$(pwd) \
-ASTERION_PRIME_P4_PRIVATE_ROOT=$(pwd)/.asterion-private/prime-p4-witness \
-ASTERION_PRIME_P4_MODE=commit \
-uv run python -I -m asterion.applications.prime.p4.operator
-ASTERION_PRIME_P4_MODE=recover \
-uv run python -I -m asterion.applications.prime.p4.operator
-```
 
 ## Workspace boundary (carried from Phase 5)
 
@@ -154,13 +92,8 @@ uv run python -I -m asterion.applications.prime.p4.operator
 
 ## Honest caveats carried forward
 
-- **P4 operator's `recover-mode` JSON's `prior_checkpoint_sha256` field is
-  wrong** (currently `continuation_id`, should be the prior's last sealed
-  checkpoint digest). Fix in next session **before** Task 17 publishes.
-- **Three pre-existing red tests still red** (Phase 5 closure):
-  `tests.test_pi_session` (1F+6E), `tests.test_prime_p7_native_installed`
-  (`Prime solver runtime did not complete`), `tests.test_core_only_install.py`.
-- **The P4 witness does NOT prove model capability** — the deterministic
-  fake-worker produces distinct result SHAs by construction. That's the
-  design (per spec for Phase 6). Real-model invocation is P1/P7 territory.
+- **Task 17 has NOT run.** `make asterion-prime-p4-run` was not executed (operator-authorized work); the witness either passes or it doesn't, and the Task-4 mirror commit depends on that result.
+- **Three pre-existing red tests still red** (Phase 5 closure): `tests.test_pi_session` (1F+6E), `tests.test_prime_p7_native_installed` (`Prime solver runtime did not complete`), `tests.test_core_only_install.py`.
+- **The P4 witness does NOT prove model capability** — the deterministic fake-worker produces distinct result SHAs by construction. That's the design (per spec for Phase 6). Real-model invocation is P1/P7 territory.
 - **Recursive continuity (gen=2→3)** is explicitly out of scope.
+- **The Orb shell's path-translation** for `$(CURDIR)/.asterion-private/prime-p4-witness` was not end-to-end tested — the Makefile target was syntactically validated and the `jq -e` fragments were tested against host-runnable operator output, but the full Orb shell + wheel install + path translation chain was not exercised. If `make asterion-prime-p4-run` fails with "no such directory" or similar Orb-translation errors, the workaround is to set `ASTERION_PRIME_P4_PRIVATE_ROOT` to a path Orb translates correctly (see P1/P2 patterns in `~/.claude/CLAUDE-PRECEDENTS.md`).

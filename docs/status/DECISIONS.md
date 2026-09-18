@@ -22,6 +22,7 @@
 | D-2026-09-17-02 | 🟢 active | Treat `retained_message_count` as nullable; Pi states retention by entry id |
 | D-2026-09-17-03 | 🟢 active | Keep Pi's compaction reserve at upstream's default |
 | D-2026-09-17-04 | 🟢 active | Keep the witness rebuild equality; drop the byte shrink bound |
+| D-2026-09-18-01 | 🟢 active | Cross-process continuity inherits runtime-binding SHAs from prior identity |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -538,3 +539,36 @@
 - Evidence: commits `97c309e4`, `0672e420`, `4f891d66`; the five measured
   witness pre/post pairs and the two live refusals above; decision taken by the
   operator on 2026-09-17.
+
+## D-2026-09-18-01 — Cross-process continuity inherits runtime-binding SHAs from prior identity
+
+- Status: 🟢 active
+- Decision: When the P4 operator opens a private_root across a process
+  boundary (FilePrimeSessionStore.open_continued), the next identity MUST
+  inherit the prior identity's pi_command_sha256,
+  extension_binding_fingerprint, and ceilings_sha256 field values.
+  Only generation, worker_identity_sha256, and private_root_identity are
+  allowed to differ between prior and next; every other identity field
+  is enforced equal by _enforce_continuation_rules and the rules do not
+  negotiate.
+- Rationale: The continuation rules already fail closed on drift; the
+  recover-mode next identity constructed from hardcoded literal SHAs only
+  matched same-build commit+recover pairs (a single operator invocation).
+  A pre-baked prior sealed by a different build (the fixture scenario, or
+  any real cross-version deployment) was rejected at the rules with no
+  recoverable cause. The hardcoded literals were a same-build convenience
+  that became a cross-build correctness gap. The fix preserves the
+  same-build convenience as the default for commit-mode (where no prior
+  exists) and copies the prior values in recover-mode.
+- Consequence: _build_identity accepts the three runtime-binding SHAs as
+  keyword args with the same literals as defaults; _recover_mode passes
+  prior_identity.pi_command_sha256,
+  prior_identity.extension_binding_fingerprint, and
+  prior_identity.ceilings_sha256. The commit-mode path is unchanged.
+  A fixture-based in-process test pins the cross-build recovery invariant
+  so a future literal-restoration regression is caught at unit-test speed.
+- Evidence: commit 048078d3 (Task 14 fixture + secondary fix);
+  tests/test_asterion_prime_p4_operator.py::P4OperatorRecoverFromFixture;
+  prior checkpoint digest 35af5974...ba72 matches fixture's sealed
+  checkpoint; _enforce_continuation_rules no longer rejects the cross-build
+  recover path; decision taken by the operator on 2026-09-18.

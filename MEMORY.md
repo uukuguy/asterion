@@ -178,31 +178,38 @@
 
 - Phases 1-5 are complete and the application layer is free of Pi references.
   **P1-P7 native implementations stand at 3 of 7** — P7, P1, and P2, each at its
-  proven boundary. **Phase 5 closed on 2026-09-18: P2's witness passes and P2
-  is republished.** `make asterion-prime-p2-run` returned exit 0 with sealed
-  receipt `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`
-  (deterministic across host and Orb). **Phase 6 in flight: Tasks 1-13
-  committed at `3c11b994` (P4 store + capability package + assembly + host
-  service + host contract + oracle + receipt + runtime binding + operator +
-  provider factories + first-party registration).** Remaining Phase 6 work:
-  Task 14 (commit fixture), Task 15 (Makefile `asterion-prime-p4-run`
-  supervisor with `jq -e` assertions), Task 16 (final sweep), Task 17
-  (witness exit0 → publish P4 to `create_provider()` + index + P1 test
-  guard upgrade 3→4 apps). **One defect to fix before Task 17**: operator's
-  recover-mode output puts `prior_identity.continuation_id` where the
-  Makefile expects `prior_checkpoint_sha256` (the prior's last sealed
-  checkpoint digest). The witness's no-replay SHA inequality check is
-  unaffected; this is a JSON output field bug.
+  proven boundary; P4 is code-complete but unpublished pending Task 17 witness.
+  **Phase 5 closed on 2026-09-18: P2's witness passes and P2 is republished.**
+  `make asterion-prime-p2-run` returned exit 0 with sealed receipt
+  `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`
+  (deterministic across host and Orb). **Phase 6 in flight: Tasks 1-16
+  committed at `35427ad8`** (Tasks 1-13 at `3c11b994` + 4 follow-ups:
+  `a2839e6` Task 9 fix, `048078d` Task 14 fixture + secondary fix,
+  `ce67fa0` Task 15 Makefile supervisor, `35427ad` docs at Task 17 gate).
+  55 P4 tests + 105 P1/P2 regression tests green; detachment gate 0; ruff
+  clean. **Remaining Phase 6 work: Task 17** — operator-authorized
+  `make asterion-prime-p4-run` exit0 → single Task-4 mirror commit that
+  appends `prime_long_session_continuity_application()` to
+  `create_provider()`, adds `prime.long-session-continuity__1.0.0` to
+  `pyproject.toml` `asterion.application_index`, and bumps the P1 regression
+  guard from 3 apps to 4. The agent does NOT execute the witness directly.
 - **P4 design choices locked in**: deterministic fake-worker for the witness
-  (no real Pi subprocess), two `make` invocations against a persistent
+  (no real Pi subprocess), two `make` Orb invocations against a persistent
   `ASTERION_PRIME_P4_PRIVATE_ROOT` as the supervisor (no child-process
   spawn), provider gate stays closed until witness passes (mirror of P2's
   Task 4 closure). `prime.continuity-store` is the new injected host service;
   the store's `open_continued` classmethod is the **only** path that binds
   a new identity against an existing private_root (every other identity
-  field must equal prior, else `PrimeStoreError`; only `generation` may +1).
-  Current technical status and next actions live in `docs/status/CURRENT-STATE.md`
-  and `docs/status/RESUME-NEXT-SESSION.md`.
+  field must equal prior, else `PrimeStoreError`; only `generation` may +1,
+  `worker_identity_sha256` may swap with the new value recorded).
+  **D-2026-09-18-01** locks in the runtime-binding SHA inheritance: the
+  recover-mode next identity must inherit `pi_command_sha256`,
+  `extension_binding_fingerprint`, and `ceilings_sha256` from the prior
+  identity, never hardcoded literals. Same-build commit+recover worked by
+  accident; cross-build detach+attach (the fixture scenario) was rejected
+  by `_enforce_continuation_rules`. Current technical status and next
+  actions live in `docs/status/CURRENT-STATE.md` and
+  `docs/status/RESUME-NEXT-SESSION.md`.
 - **Two 2026-09-16/17 judgments were withdrawn after measurement.** The
   "session too small" reading of the compaction failure was static-only and a
   decision was taken on it before any value was captured; Pi in fact compacts.
