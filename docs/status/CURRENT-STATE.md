@@ -13,22 +13,24 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: **Phase 6 closed**. Next is **Phase 7 — P3 rebuild**
-  (plan/spec/design-first pass required before implementation; P3's
-  compile/eval semantics differ from P4's commit/recover even though they
-  share the substrate).
-  Phase 6 plan lived at `~/.claude/plans/serene-mixing-cat.md` (255 lines,
-  17 tasks; design-first methodology); now closed at commit `80a238ec`.
-  Phase 6 delivery: Tasks 1–17 all complete. P4 is **published** in
-  `create_provider()` and `pyproject.toml` `asterion.application_index`
-  together with its installed-route cross-generation continuity witness
-  (sealed receipt
-  `6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d`
-  from `make asterion-prime-p4-run`, exit 0, deterministic across host
-  runs). 68 P1/P2/P4 tests pass, ruff clean, detachment gate 0. P4 follows
-  the P2 Task-4 mirror pattern: provider gate stayed closed until witness
-  exit 0, then a single commit appended P4 to the provider tuple + index
-  and inverted the Task 17 guard.
+- Active work package: **Phase 7 closed**. Next is **Phase 8 — P5 rebuild**
+  (plan/spec/design-first pass required before implementation; P5's
+  bounded-autonomy propose/verify/repair loop differs from P3's
+  recursive composition even though both compose the native substrate).
+  Phase 7 plan lived at `docs/superpowers/plans/2026-09-18-asterion-prime-p3-native.md`;
+  spec at `docs/superpowers/specs/2026-09-18-asterion-prime-p3-native-design.md`;
+  both closed at commit `602d5971`. Phase 7 delivery: Tasks 1–16 all complete.
+  P3 is **published** in `create_provider()` and `pyproject.toml`
+  `asterion.application_index` together with its installed-route
+  in-process child-runner witness (`make asterion-prime-p3-run` AND
+  `make asterion-prime-p3-run-limits` both exit 0; deterministic
+  fake-worker keyed on `(mode, depth, run_id)`). Task-4 mirror commit
+  `2c068c2d` appended P3 to the provider tuple + index; P1 regression
+  guard bumped from 4 to 5 apps. 78 P3 tests + P1/P2/P4 regression =
+  144/144 pass, ruff clean, detachment gate 0. P3 follows the P4
+  Task-4 mirror pattern: provider gate stayed closed until both
+  witnesses exit 0, then a single commit appended P3 to the provider
+  tuple + index and inverted the Task 16 guard.
   **Phase 5 is complete: native P2 is rebuilt, witnessed and republished.**
   Run `make asterion-prime-p2-run` returns exit 0 with sealed receipt
   `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`
@@ -73,8 +75,8 @@
   preset as an installed-wheel invocation, D-2026-09-14-02): the preset builds a
   wheel, unsets `PYTHONPATH`, and supplies the ARC engine as an operator-owned
   root plus pure-Python wheels. Native P7 remains the implementation anchor.
-  **P1-P7 native implementations: 4 of 7** — P7, P1, P2, and P4, each at its
-  proven boundary. P3, P5, P6 remain unbuilt. Full benchmarking and
+  **P1-P7 native implementations: 5 of 7** — P7, P1, P2, P3, and P4, each at its
+  proven boundary. P5, P6 remain unbuilt. Full benchmarking and
   production promotion remain separately authorized work.
 - W0 inventory alignment, W1a executable-kind consistency, W1b exact source
   preparation, W1c runtime-provider separation, W1d core-only isolation, and

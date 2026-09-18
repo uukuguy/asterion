@@ -188,20 +188,23 @@
 
 ## 🟠 Current Judgments
 
-- Phases 1-6 are complete and the application layer is free of Pi references.
-  **P1-P7 native implementations stand at 4 of 7** — P7, P1, P2, and P4,
-  each at its proven boundary. **Phase 6 closed on 2026-09-18: P4's
-  cross-generation continuity witness passes and P4 is republished.**
-  `make asterion-prime-p4-run` returned exit 0 with sealed receipt
-  `6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d`
-  (deterministic across host runs by fake-worker construction; equals both
-  commit.checkpoint_sha256 and recover.prior_checkpoint_sha256). Task-4
-  mirror commit `80a238ec` appended P4 to `create_provider()` and
-  `pyproject.toml` index; P1 regression guard bumped from 3 to 4 apps. 68
-  P1/P2/P4 tests green; detachment gate 0; ruff clean. **Next package:
-  Phase 7 — P3 rebuild** requires its own plan + spec + design-first pass
-  before implementation (P3's compile/eval semantics differ from P4's
-  commit/recover even though they share the P4 substrate).
+- Phases 1-7 are complete and the application layer is free of Pi references.
+  **P1-P7 native implementations stand at 5 of 7** — P7, P1, P2, P3, and P4,
+  each at its proven boundary. **Phase 7 closed on 2026-09-19: P3's
+  in-process child-runner witness passes and P3 is republished.**
+  `make asterion-prime-p3-run` AND `make asterion-prime-p3-run-limits`
+  both returned exit 0 (deterministic fake-worker keyed on
+  `(mode, depth, run_id)`; both witnesses print the canonical
+  `refusal_reason is null` and four-scenario `depth / concurrency /
+  budget / cancellation` assertions respectively). Task-4 mirror commit
+  `2c068c2d` appended P3 to `create_provider()` and `pyproject.toml`
+  `asterion.application_index`; P1 regression guard bumped from 4 to 5
+  apps. 78 P3 tests + P1/P2/P4 regression = 144/144 green; detachment
+  gate 0; ruff clean. **Next package: Phase 8 — P5 rebuild** requires
+  its own plan + spec + design-first pass before implementation (P5's
+  bounded-autonomy propose/verify/repair loop with exact stopping
+  conditions differs from P3's recursive composition even though both
+  compose the native substrate).
 - **P4 design choices locked in**: deterministic fake-worker for the witness
   (no real Pi subprocess), two `make` Orb invocations against a persistent
   `ASTERION_PRIME_P4_PRIVATE_ROOT` as the supervisor (no child-process
