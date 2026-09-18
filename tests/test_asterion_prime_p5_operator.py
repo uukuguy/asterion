@@ -343,6 +343,39 @@ class P5OperatorPublicResultShape(unittest.TestCase):
         )
 
 
+class P5RootFixture(unittest.TestCase):
+    """The pre-baked ``small_root.json`` fixture must describe a valid
+    gen=1 ``PrimeBackendIdentity`` for the bounded-autonomy application
+    and load byte-identically across host runs.
+    """
+
+    FIXTURE_PATH = (
+        Path(__file__).resolve().parent / "fixtures" / "prime_p5" / "small_root.json"
+    )
+
+    def test_root_fixture_loads_with_p5_application_id(self) -> None:
+        from asterion.agents.prime.state import PrimeBackendIdentity
+
+        with self.FIXTURE_PATH.open("r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+        identity_payload = raw["identity"]
+        identity = PrimeBackendIdentity.from_mapping(identity_payload)
+        self.assertEqual(identity.application_id, "prime.bounded-autonomy")
+        self.assertEqual(identity.generation, 1)
+        self.assertEqual(identity.session_id, "prime.bounded-autonomy.1.0.0")
+        self.assertEqual(identity.provider_id, "prime-applications")
+        self.assertEqual(identity.runtime_id, "asterion.prime")
+
+    def test_root_fixture_is_byte_identical(self) -> None:
+        """Deterministic on-disk bytes — no timestamps, no UUIDs."""
+        first = self.FIXTURE_PATH.read_bytes()
+        second = self.FIXTURE_PATH.read_bytes()
+        self.assertEqual(first, second)
+        self.assertIn(b"prime.bounded-autonomy", first)
+        self.assertNotIn(b"datetime", first)
+        self.assertNotIn(b"uuid", first)
+
+
 class P5OperatorRunFunctions(unittest.TestCase):
     """In-process entry points: ``run_success_path`` and ``run_limits_path``.
 
