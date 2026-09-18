@@ -31,6 +31,9 @@ PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE = CapabilityPackageRef(
 PRIME_RECURSIVE_WORKFLOW_NATIVE_PACKAGE = CapabilityPackageRef(
     "prime-recursive-workflow-native", "1.0.0"
 )
+PRIME_BOUNDED_AUTONOMY_NATIVE_PACKAGE = CapabilityPackageRef(
+    "prime-bounded-autonomy-native", "1.0.0"
+)
 
 
 def builtin_capability_registrations() -> tuple[BuiltinCapabilityRegistration, ...]:
@@ -72,6 +75,11 @@ def builtin_capability_registrations() -> tuple[BuiltinCapabilityRegistration, .
             PRIME_RECURSIVE_WORKFLOW_NATIVE_PACKAGE,
             package_root / "prime_recursive_workflow_native/payload",
             create_prime_recursive_workflow_native_package,
+        ),
+        BuiltinCapabilityRegistration(
+            PRIME_BOUNDED_AUTONOMY_NATIVE_PACKAGE,
+            package_root / "prime_bounded_autonomy_native/payload",
+            create_prime_bounded_autonomy_native_package,
         ),
     )
 
@@ -164,6 +172,16 @@ def create_prime_recursive_workflow_native_package() -> InstalledCapabilityPacka
     return create()
 
 
+def create_prime_bounded_autonomy_native_package() -> InstalledCapabilityPackage:
+    """Load the selected native P5 package after source selection."""
+
+    from asterion.capabilities.prime_bounded_autonomy_native import (
+        create_prime_bounded_autonomy_native_package as create,
+    )
+
+    return create()
+
+
 __all__ = (
     "CONTROLLED_CODE_PACKAGE",
     "CONTROLLED_CODE_SOURCE_ID",
@@ -173,6 +191,7 @@ __all__ = (
     "PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE",
     "PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE",
     "PRIME_RECURSIVE_WORKFLOW_NATIVE_PACKAGE",
+    "PRIME_BOUNDED_AUTONOMY_NATIVE_PACKAGE",
     "builtin_capability_registrations",
     "create_controlled_code_package",
     "create_dci_package",
@@ -181,4 +200,5 @@ __all__ = (
     "create_prime_programmatic_long_context_native_package",
     "create_prime_long_session_continuity_native_package",
     "create_prime_recursive_workflow_native_package",
+    "create_prime_bounded_autonomy_native_package",
 )
