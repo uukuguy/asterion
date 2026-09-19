@@ -749,6 +749,13 @@ class PiRpcSession:
             on_request_written()
         self.send({"id": request_id, "type": "prompt", "message": message})
         acknowledged = False
+        # Pi 0.85.1 in the reuse path may emit `agent_settled` as its first event
+        # for a new prompt without a preceding `response` ack — the prompt was
+        # accepted but the bare response event was elided (D-2026-09-19-03).
+        # Treat `agent_settled` as an implicit ack: the agent reaching the
+        # settled state proves Pi took the prompt, so blocking COMPLETE on a
+        # missing explicit response would refuse legitimate reuse-path runs.
+        settled_seen = False
         while True:
             event = control.read_event()
             directive = on_event(event, control)
@@ -760,11 +767,13 @@ class PiRpcSession:
                 if acknowledged or event.get("success") is not True:
                     raise RuntimeError("RPC prompt failed")
                 acknowledged = True
+            if event.get("type") == "agent_settled":
+                settled_seen = True
             if directive is PiRpcDirective.ABORT:
                 control.abort()
                 continue
             if directive is PiRpcDirective.COMPLETE:
-                if not acknowledged:
+                if not acknowledged and not settled_seen:
                     event_type = event.get("type", "terminal event")
                     raise RuntimeError(
                         f"Received {event_type} before prompt acknowledgement"

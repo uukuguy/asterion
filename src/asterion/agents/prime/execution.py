@@ -360,10 +360,12 @@ class PrimeExecutionKernel:
                 # idle. agent_end terminates the round, so this trailing event
                 # belongs to the round that just finished; a round driver stops
                 # reading at the terminal, so it reaches the next round's
-                # callback. It is benign there, not a second terminal — treating
-                # it as unknown is what broke the second round of a multi-round
-                # application.
-                "agent_settled",
+                # callback. The leading variant (Pi 0.85.1 reuse path: settled
+                # arrives as the first/only event of a fresh round because the
+                # prior round already settled) is handled separately below,
+                # where it also terminates the round. Treating leading
+                # `agent_settled` as benign-trailing would leave
+                # `round_terminal_seen` False and refuse the round.
             }:
                 # Streaming tool updates carry private partial output and have
                 # no public projection.
@@ -428,6 +430,19 @@ class PrimeExecutionKernel:
                 if round_terminal_seen:
                     raise _NativeEventRejected(_NativeDiagnostic.DUPLICATE_TERMINAL)
                 round_terminal_seen = True
+                return
+            if event_type == "agent_settled":
+                # Pi 0.85.1 in the reuse path may emit `agent_settled` as the
+                # first (and only) event of a new prompt round — the prior
+                # round is already settled, so Pi elides `agent_end` for this
+                # round. Treat the leading `agent_settled` (round has not yet
+                # seen a terminal) as a valid round terminal. The trailing
+                # variant (after `agent_end` within a round, where
+                # `round_terminal_seen` is already True) is silently ignored:
+                # the round is already done.
+                if not round_terminal_seen:
+                    round_terminal_seen = True
+                    return
                 return
             raise _NativeEventRejected(_NativeDiagnostic.EVENT_TYPE_INVALID)
 
@@ -510,7 +525,7 @@ class PrimeExecutionKernel:
             if (
                 not round_terminal_seen
                 or not current_round
-                or current_round[-1].type != "agent_end"
+                or current_round[-1].type not in {"agent_end", "agent_settled"}
             ):
                 raise ProtocolError("Asterion-prime native terminal is invalid")
             if self._completion_predicate is None or self._completion_predicate():
