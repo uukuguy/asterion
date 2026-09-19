@@ -26,6 +26,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native Asterion Prime P7 live-run facts, digests, verification boundary, and remaining parity work. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `DECISIONS.md` | 🟢 active | Indexed architecture and trust-boundary decisions; D-2026-09-12-01 governs native P1-P7 work. |
+| `PRIME-P1-P7-ACCEPTANCE.md` | 🟢 active | P1–P7 验收指南(每个应用的 purpose / design / Prime 能力 / 验收命令 / 边界 + 跨应用硬约束 + 术语表)。受众:所有角色,少黑话说人话。 |
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |
 

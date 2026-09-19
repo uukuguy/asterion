@@ -26,6 +26,7 @@
 | D-2026-09-18-02 | 🟢 active | P3 child-runner is in-process by default; subprocess is fallback-only |
 | D-2026-09-19-01 | 🟢 active | P5 bounded-autonomy is one loop controller host service; limits-path has 3 refusal scenarios (cancellation folds in) |
 | D-2026-09-19-02 | 🟢 active | P6 candidate-store wraps framework-owned HarnessCoordinator; closed 2-element `terminal_outcome` enum stays closed (global-rejected folds in) |
+| D-2026-09-19-03 | 🟢 active | Accept `agent_settled` as implicit ack (`drive_prompt`) and as a leading round terminal (`execution.py:431-444`); Pi 0.85.1's reuse path emits `agent_settled` as the first event of a fresh prompt round, both with no `response` ack and with no `agent_end`. |
 
 ## D-2026-07-26-01 — Operator configuration root
 

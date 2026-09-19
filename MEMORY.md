@@ -18,6 +18,7 @@
 | feedback | ✅ verified-active | Delete a seam whose only purpose was the forbidden dependency; do not retarget it |
 | feedback | ✅ verified-active | A classification is not a cause; recover the value before changing anything |
 | feedback | ✅ verified-active | Take a contract's key set from its producer, not from a fixture |
+| feedback | ✅ verified-active | A state-machine bug fix in one layer is not done — find every place that checks the same key set |
 | feedback | ✅ verified-active | The "倒数第 2-3 个 hook 位置挂几十秒" pattern points at the last synchronous hook, not the first slow one |
 | feedback | ✅ verified-active | Global hook audit: keep only hooks whose project-condition (lwm JOURNAL.md / gsd .planning/config.json / adr .adr-config.yaml / rtk) actually matches the project under CLAUDE_PROJECT_DIR; verify both settings reference AND script file are gone |
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
@@ -122,6 +123,71 @@
 - **Why:** two of this session's three real defects were invisible at the
   classification level. Guessing at them would have produced speculative edits
   in a runtime that other applications share.
+
+### feedback — instrument ack state, not just the surrounding exception
+
+- When a multi-prompt state machine (here `drive_prompt` in
+  `runtimes/pi_rpc.py`) raises "X before Y", instrument both the event sequence
+  AND the state transitions at each step — not just the surrounding exception
+  block. The exception tells you "what", the event trace tells you "why this
+  prompt took a different path than the previous one".
+- Given 2026-09-19, after P1's `recovery-required` was finally traced to
+  `pi_rpc.py:769 RuntimeError("Received agent_settled before prompt
+  acknowledgement")`. Earlier diagnostic passes that only printed the
+  exception caught at `backend.py:797` and `execution.py:479` showed the
+  symptom (`run.failed`) but not the producer-side event order; only adding a
+  trace in `drive_prompt`'s loop exposed that **the second `_prompt`'s first
+  event was `agent_settled`, with no prior `response` ack** — while the first
+  `_prompt` had `response` first, then `agent_start/.../agent_end`. The
+  exception-only trace (`raise ... from None` at three layers) hid exactly the
+  ordering signal that the producer's vocabulary reveals directly.
+- **Why:** a state machine that classifies by event *type* (`response` vs
+  not) cannot be debugged from a typed exception — the same exception fires
+  for "ack lost" and "ack never came", and the only discriminator is the
+  event sequence leading into the throw. If the underlying protocol can
+  reorder, **always log the sequence that produced the failure**, not just
+  the failure.
+- **Practical rule:** for state-machine `raise` in `drive_prompt` /
+  `_invoke` / `_await_driver` / `handle_event`, the diagnostic should print
+  every event type the loop sees AND the state variable (`acknowledged` /
+  `round_terminal_seen` / etc.) after each step — not just at the throw.
+  Single-point exception print is necessary but not sufficient for these
+  state machines.
+
+### feedback — a state-machine bug fix in one layer is not done; find every place that checks the same key set
+
+- When a multi-layer state machine rejects a key set at one layer (e.g.
+  `handle_event` rejects `agent_settled` with `EVENT_TYPE_INVALID`), fix
+  that layer — but immediately grep for every other layer that has the same
+  key set embedded. A fix at one layer often exposes a sibling layer that
+  still has the narrow shape, and a "fixed" bug that still produces a
+  different rejection is not fixed.
+- Given 2026-09-19, after `a581a56c` accepted `agent_settled` in
+  `execution.py:366`'s benign-trailing set (so `handle_event` no longer
+  raises `EVENT_TYPE_INVALID`), but P1 still failed at the next layer with
+  `RuntimeError("Received agent_settled before prompt acknowledgement")` from
+  `runtimes/pi_rpc.py:725-772`'s `drive_prompt` ack state machine. The
+  sibling layer (`agent_end`-only round-terminal check at `execution.py:539`)
+  was the third layer; only after fixing all three did the protocol stage
+  progress (`verify.start → verify.complete → oracle.start`). The pattern
+  is: **`handle_event` filters out the event → `drive_prompt` checks the
+  same key set → `consume_checked` and the round-terminal guard check it
+  again.** Whenever the key set is filtered at one layer, grep the whole
+  tree for that key and re-check each call site.
+- **Why:** the `from None` exception suppression at three layers
+  (`backend.py:797/818`, `execution.py:479`, `runtime_binding.py:204`)
+  hid which layer was throwing. Without the event-sequence trace, the
+  rejection looked identical ("runtime failure") at every layer, and the
+  only way to find all three was to instrument the deepest layer first
+  and walk outward. Once the deepest layer is fixed, the *next* deep layer
+  becomes the bottleneck — and the failure mode at that next layer is
+  usually the same key set with a sibling check the original fix missed.
+- **Practical rule:** when a bug fix touches a state-machine key set
+  (event types, terminal kinds, lifecycle names), do the same grep the
+  consumer-side debugging did, then fix **every** site that matches. If
+  the bug fix is at the consumer side and the producer side already
+  accepted the key, the consumer-side fix is usually a sequence of fixes
+  at multiple layers, not one.
 
 ### feedback — take a contract's key set from its producer, not from a fixture
 
