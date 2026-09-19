@@ -1,1 +1,1 @@
-{"benchmark_suites":[],"capabilities":[{"capability_id":"prime.continual-improvement","version":"1.0.0"}],"conformance":[],"package_id":"prime-continual-improvement-native","protocol":"asterion.capability-package/v1","resources":[],"version":"1.0.0"}
+{"benchmark_suites":[],"capabilities":[{"capability_id":"policy.continual-loop","version":"1.0.0"},{"capability_id":"prime.continual-improvement","version":"1.0.0"}],"conformance":[],"package_id":"prime-continual-improvement-native","protocol":"asterion.capability-package/v1","resources":[],"version":"1.0.0"}
