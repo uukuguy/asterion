@@ -13,9 +13,18 @@
   `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
   — 9-phase program roadmap in the spec's mandated order; Phase 1 detailed to
   task level. Phases 3-9 receive their own plans when reached.
-- Active work package: **Phase 9 closed**. The 9-phase native detachment
-  program is COMPLETE — P1–P7 native implementations stand at **7 of 7**.
-  Next session has no Phase 10 defined in the canonical worklist.
+- Active work package: **Phase 10 draft landed, implementation deferred**.
+  The 9-phase native detachment program is COMPLETE — P1–P7 native
+  implementations stand at **7 of 7** (P1 protocol layer fixed by
+  `D-2026-09-19-03` at commit `69787da6`; oracle layer still blocked
+  on Asterion→Pi wrapper contamination, see Phase 10 below).
+  Phase 10 is a **draft** at `docs/superpowers/specs/2026-09-19-asterion-prime-p1-verify-strategies-design.md`
+  (committed at `ed1b0ec9`); no plan, no code. The draft specifies
+  `D-2026-09-19-04` (P1 verify multi-strategy: subagent / new-pi-subprocess /
+  same-session-reuse, subagent default) but the **implementation,
+  root-cause investigation, and atomic-pi-prompt API design** are all
+  deferred. Next session opens with the choice of which of those three
+  to start, or with a different Phase 10 charter.
   Phase 9 plan lived at `docs/superpowers/plans/2026-09-19-asterion-prime-p6-native.md`;
   spec at `docs/superpowers/specs/2026-09-19-asterion-prime-p6-native-design.md`;
   both closed at commit `2e328f45`. Phase 9 delivery: Tasks 1–16 all complete
