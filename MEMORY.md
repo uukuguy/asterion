@@ -19,6 +19,7 @@
 | feedback | ✅ verified-active | A classification is not a cause; recover the value before changing anything |
 | feedback | ✅ verified-active | Take a contract's key set from its producer, not from a fixture |
 | feedback | ✅ verified-active | A state-machine bug fix in one layer is not done — find every place that checks the same key set |
+| feedback | ✅ verified-active | Verify the producer side independently before assigning blame (direct RPC probe over the same wire format) |
 | feedback | ✅ verified-active | The "倒数第 2-3 个 hook 位置挂几十秒" pattern points at the last synchronous hook, not the first slow one |
 | feedback | ✅ verified-active | Global hook audit: keep only hooks whose project-condition (lwm JOURNAL.md / gsd .planning/config.json / adr .adr-config.yaml / rtk) actually matches the project under CLAUDE_PROJECT_DIR; verify both settings reference AND script file are gone |
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
@@ -188,6 +189,43 @@
   the bug fix is at the consumer side and the producer side already
   accepted the key, the consumer-side fix is usually a sequence of fixes
   at multiple layers, not one.
+
+### feedback — verify the producer side independently before assigning blame
+
+- When a producer's behavior looks broken in your call path, run a
+  one-shot RPC probe that uses the same JSON protocol your code uses
+  *minus your own wrapping layer*. If the probe works correctly and your
+  path doesn't, the bug is in your wrapper — not in the producer. Writing
+  a 30-line shell + node script that spawns the producer binary and
+  sends two prompts over the same wire format is cheaper than chasing a
+  non-existent upstream bug through deeper layers of state-machine
+  debugging.
+- Given 2026-09-19, after concluding from P1's event stream that "Pi
+  0.85.1 reuse path has a functional regression: second prompt produces
+  only `agent_settled`, no model turn". The actual root cause was
+  somewhere in the Asterion→Pi wrapper path (likely a session/compaction
+  side effect between the two prompts). A direct RPC probe against
+  `pi-coding-agent/dist/bundle/rpc-entry.js` using only
+  `{id, type: "prompt", message: "..."}` twice — exactly the shape
+  Asterion's `drive_prompt` sends — ran cleanly twice with full
+  `message_start → message_update × N → message_end → agent_end`
+  sequences both times. The conclusion that Pi has a reuse-path bug was
+  wrong; the difference between the probe and Asterion's call path was
+  the *whole* Asterion side (session backend, extension, IPython worker,
+  the context between the two prompts), not Pi.
+- **Why:** blaming an external library is **sticky** — once it lands in
+  a journal entry, a decision doc, and a stub commit message, the next
+  session spends hours looking for upstream fixes or version downgrades
+  that don't exist. The direct probe costs two minutes and prevents
+  the entire failure mode. Use it the moment you find yourself saying
+  "the producer must be broken".
+- **Practical rule:** when `producer` is a binary/library you have on
+  disk and the call shape is a small JSON RPC (or HTTP, or any wire
+  protocol), spawn it directly with a 30-line probe that omits your
+  wrapper, send the same calls your wrapper sends, and compare the
+  observed behavior. If the probe passes and your wrapper fails, the
+  bug is in your wrapper — full stop. Write the probe before drafting
+  any blame or commit.
 
 ### feedback — take a contract's key set from its producer, not from a fixture
 

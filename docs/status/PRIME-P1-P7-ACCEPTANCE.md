@@ -103,37 +103,39 @@ make asterion-prime-p1-run
 
 **2026-09-19 实测**(`make asterion-prime-p1-run` 现场跑):退出码 **1**,JSON 是 `{"receipt_sha256": null, "run_id": "p1-03b3eb6b55e94c5950aae07f", "status": "recovery-required"}`。stage 流:`backend.open → host1.open → runner.start → stage1.setup.start → stage1.setup.complete → stage1.verify.start → host1.close → worker.close → backend.close → runner.terminal` —— verify 阶段没 emit `stage1.verify.complete`,host/worker 立刻被关,runner 直接出 terminal。也就是说**verify 还没回,会话就被回收了**。
 
-**2026-09-19 第二次实测** (在应用协议层 A 修复后):stage 流**部分进展**到 `stage1.verify.start → stage1.verify.complete → stage1.oracle.start`,然后 `host1.close` —— 协议层完全通过,但 oracle.verify_stage_one 在 worker.snapshot 上拒收 (因为 verify 那条 prompt 根本没让 IPython cell 执行,worker.snapshot 里没有 verification cell)。这是 Pi 0.85.1 reuse path **更深的功能回退**——不只是协议层不同,而是 Pi 第二次 prompt 时把 session 当作已 settled,不处理 prompt 内容。
+**2026-09-19 第二次实测** (在应用协议层 A 修复后):stage 流**部分进展**到 `stage1.verify.start → stage1.verify.complete → stage1.oracle.start`,然后 `host1.close` —— 协议层完全通过,但 oracle.verify_stage_one 在 worker.snapshot 上拒收。
+
+**重要更正 (2026-09-19 18:01, 后续独立验证)**: 之前在 journal 17:24 那条里写的 "剩余 bug 是 Pi 0.85.1 reuse path 功能回退, 第二次 prompt 没让 IPython cell 执行" **是错的**。host 上独立 RPC probe (直接 spawn pi-coding-agent rpc-entry.js 连发两条 prompt) **完整确认 Pi 0.85.1 能正常连续处理多次 prompt** —— 两次都产生完整 `message_start → message_update × N → message_end → turn_end → agent_end → agent_settled`。**真实根因在 Asterion 端**, 不是 Pi 端 —— 嫌疑是 Asterion 发的 prompt request 带了某种参数 (sessionId / generation / flag) 让 Pi 走 reuse early-settled 路径, 或 Asterion 在两次 prompt 之间调了 session.compact 让 Pi session 进入 settled-but-reuseable 状态。在没查清 Asterion→Pi 状态污染的精确路径之前, **绕过 reuse 是最干净的解法** (用户的判断: "verify 用另一个 pi 进程是符合隔离独立策略的")。
 
 **历史 6 次跑的 digest**(`d97808e2` / `f4a4c19a` / `ac3fbb1c` / `d15c9b45` / `400c45dc` / `838f2db6`)是 **D-2026-09-16-01 接管式压缩方案落地之前**的早期形态跑出来的;它们证明"压缩后跨会话状态保持完整"的合约在那个旧实现下成立,**但不能套到当前代码**。
 
 **Root cause (2026-09-19 完整定位, user-driven debug)**: 5 次诊断 traceback 找出完整链 —
 
-1. Pi 0.85.1 在第二次 `_prompt` (`p1-verify`) 时**第一条事件就是 `agent_settled`**,完全跳过 `response`(prompt acknowledgement)事件。setup 那轮走的是「先 `response` 后 `agent_start/.../agent_end`」顺序;verify 那轮是「直接 `agent_settled`」(没 response)。
+1. Asterion 第二次 `_prompt` (`p1-verify`) 时,Pi 发的事件**第一条就是 `agent_settled`**,完全跳过 `response`(prompt acknowledgement)事件。setup 那轮走的是「先 `response` 后 `agent_start/.../agent_end`」顺序;verify 那轮是「直接 `agent_settled`」(没 response)。**这条是事实**,但解读需要更新 —— Pi 自身能连续 prompt,Asterion 这边的某种状态让 Pi 走 reuse early-settled。
 2. `runtimes/pi_rpc.py:725-772` 的 `drive_prompt` 状态机**只看 `response` 事件作为 ack**(`line 757: if event.get("type") == "response": ... acknowledged = True`)。`agent_settled` 到达时 on_event 返回 COMPLETE,line 766 收 COMPLETE,line 767 `not acknowledged` 为真 → `raise RuntimeError("Received agent_settled before prompt acknowledgement")`。
 3. RuntimeError propagate 到 `execution.py:469` driver call → `execution.py:479 except Exception:` 接住 → emit `run.failed` (`code="asterion_prime_failed"`) → backend.py:766 `status="failed" != "completed"` 抛 PrimeBackendError → backend.py:797/818 `except Exception: ... from None` 又吞掉原始 cause → 转 `recovery-required`。
-4. **`a581a56c` (2026-09-19) 修了 bug 的第一半**(`execution.py:366` 把 `agent_settled` 加入 benign-trailing 集, 让 `handle_event` 接受它)。**这次发现的 bug 是 `a581a56c` 漏掉的另一半**——`drive_prompt` 的 ack 状态机 + `execution.py` 的 round-terminal check 都没把 `agent_settled` 当合法 round 终结。
+4. **`a581a56c` (2026-09-19) 修了 bug 的第一半**(`execution.py:366` 把 `agent_settled` 加入 benign-trailing 集, 让 `handle_event` 接受它)。**A 修复 (commit `69787da6`) 修了 bug 的另一半**——`drive_prompt` 的 ack 状态机 + `execution.py` 的 round-terminal check 都没把 `agent_settled` 当合法 round 终结。
 
-**应用的修复 (A 方案, 已 commit-ready, 2026-09-19)**:
+**应用的修复 (A 方案, 已 commit `69787da6`, 2026-09-19)**:
 
 1. `runtimes/pi_rpc.py:751-781` — `drive_prompt` 新增 `settled_seen` 标志,`agent_settled` 事件出现时设它,COMPLETE gate check 改成 `if not acknowledged and not settled_seen: raise`(允许 `agent_settled` 当 implicit ack)。
 2. `agents/prime/execution.py:362-372` — 把 `agent_settled` 从 benign-trailing 集拿出来(不让它绕开 round-terminal 处理)。
 3. `agents/prime/execution.py:431-444` — 新加 `if event_type == "agent_settled"`: leading 位置(轮未终止)时设 `round_terminal_seen=True`,trailing 位置(已 agent_end)时 silently ignore。
 4. `agents/prime/execution.py:539` — round-terminal check `current_round[-1].type != "agent_end"` 改成 `current_round[-1].type not in {"agent_end", "agent_settled"}`。
 
-**修复进展**: 协议层完全通过(stage 流从 `verify.start → close` 进展到 `verify.start → verify.complete → oracle.start`)。**未解决**: Pi 0.85.1 reuse path 在第二次 prompt 时把 session 当作已 settled,不处理 prompt 内容也不执行 IPython cell → oracle.verify_stage_one 拒收。这是 Pi 0.85.1 自身的功能回退,不是 Asterion 端的协议 bug。
+**修复进展**: 协议层完全通过(stage 流从 `verify.start → close` 进展到 `verify.start → verify.complete → oracle.start`)。**剩余 bug**: oracle.verify_stage_one 在 worker.snapshot 上拒收,因为 verify 那条 prompt 物理上没让 IPython cell 执行。**这条不是因为 Pi 0.85.1 不能连续 prompt**, 而是因为 Asterion 端跟 Pi session reuse 之间有未查清的状态污染(下一次 P1 真模型路径 session 应该走"verify 用独立 Pi 进程"策略, 见 D-2026-09-19-04)。
 
 ### 边界与未验证项
 
-❌ **P1 当前没跑通**(2026-09-19 实测)——`recovery-required` + `receipt_sha256=null`。协议层 bug 已修 (A 修复 4 处);剩余 bug 是 Pi 0.85.1 reuse path 功能回退(无 IPython cell 执行)。
+❌ **P1 当前没跑通**(2026-09-19 实测)——`recovery-required` + `receipt_sha256=null`。协议层 bug 已修 (A 修复 4 处);剩余 bug 在 Asterion→Pi session reuse 这一段, 不是 Pi 自身。
 ⚠️ **2026-09-19 之前的描述(已撤回)**:之前写的"6 次完整跑通"指的是 takeover 实现之前的旧形态,**不能套到当前代码**。
 📝 **剩余 bug 的可能修复路径 (未尝试)**:
-  - **方案 1**: 让 Asterion 在第二次 `_prompt` 之前**重启 Pi session**(`_rpc.open` 新 subprocess)。这样第二次 prompt 走 setup 那条 "先 response 后 agent_..." 的正常路径。代价:放弃 session reuse,跟 D-2026-09-18-01 的"继承 runtime-binding SHA"原则冲突。
-  - **方案 2**: 检查上游 Pi 0.85.1 是否是已知有 reuse path bug,等上游修复或回退到 0.74.0。
-  - **方案 3**: 让 verify cell 在第一次 prompt 时**一起写完**(setup + verify 一个 prompt 里出两个 cell)。代价:违反 task_statement 的设计。
-  - **方案 4**: 接受 P1 现状为 "协议层已修但功能回退未解",把真模型路径标为外部问题,等 Pi 上游。
+  - **方案 D-2026-09-19-04 (用户推荐)**: 让 verify prompt 走**独立 Pi subprocess**。setup 跟 verify 不共享同一个 Pi session,绕过 reuse 状态污染。代价:跨进程的 worker checkpoint 协调要新设计(setup 写到 private_root,verify 从 private_root 读)。
+  - **方案 2**: 找出 Asterion→Pi reuse 状态污染的精确路径并修。代价:需要先 diff Asterion 两次 prompt 之间做了什么,定位 compact 或别的状态变更,可能改 session backend。
+  - **方案 3**: 检查上游 Pi 0.85.1 是否有 reuse mode 下"agent_settled 立即发"的已知 issue,等上游修或回退到 0.74.0。
+  - **方案 4**: 让 verify cell 在第一次 prompt 时**一起写完**(setup + verify 一个 prompt 里出两个 cell)。代价:违反 task_statement 的设计。
 ℹ️ **fake-worker 还是真模型**:P1 的 make 目标走**真 Pi 子进程**(`ASTERION_PRIME_PI_ENTRY` 必须指向真路径),不是 fake-worker。
-ℹ️ **为什么复杂**:压缩区域在开发过程中累计了 15 个 bug(2026-09-16/17),其中 6 个都是"合约比实际窄"——是 P1 整个 9 阶段里调试时间最长的部分。这次发现的 bug 是 Pi 0.85.1 在 reuse path 上的功能回退,不在压缩区域,是独立路径。
+ℹ️ **为什么复杂**:压缩区域在开发过程中累计了 15 个 bug(2026-09-16/17),其中 6 个都是"合约比实际窄"——是 P1 整个 9 阶段里调试时间最长的部分。这次发现的 bug 是 Asterion→Pi session reuse 这一段的未查清状态污染,不在压缩区域,是独立路径。
 
 ---
 
