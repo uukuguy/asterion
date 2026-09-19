@@ -138,6 +138,11 @@ for line in sys.stdin:
 """
 
 
+@unittest.skip(
+    "Real Pi subprocess + Node 22+ environment required (RESUME-NEXT-SESSION.md L325), "
+    "out of maintenance-window-2 scope; scheduled for a future real-Pi-subprocess "
+    "environment wiring pass. Class preserved as documentation."
+)
 class TestPrimeBackendRealRpc(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
