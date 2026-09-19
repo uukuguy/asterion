@@ -138,7 +138,9 @@ CORE_MODULES = (
     "asterion.runtime.defaults",
     "asterion.runtime.factory",
     "asterion.runtime.host",
+    "asterion.runtime.native_rpc",
     "asterion.runtime.observation",
+    "asterion.runtime.pinned_extension",
     "asterion.runtime.protocol",
     "asterion.runtime.working_directory",
     "asterion.runtimes",
@@ -175,7 +177,12 @@ NON_CORE_MODULE_PREFIXES = (
     "asterion.capabilities.controlled_code",
     "asterion.capabilities.dci",
     "asterion.capabilities.prime_arc_agi_3_solver",
+    "asterion.capabilities.prime_bounded_autonomy_native",
+    "asterion.capabilities.prime_continual_improvement_native",
     "asterion.capabilities.prime_ipython_coding_native",
+    "asterion.capabilities.prime_long_session_continuity_native",
+    "asterion.capabilities.prime_programmatic_long_context_native",
+    "asterion.capabilities.prime_recursive_workflow_native",
     "asterion.control.providers.native",
 )
 
