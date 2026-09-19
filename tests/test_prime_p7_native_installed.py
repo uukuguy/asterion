@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -65,6 +66,33 @@ class TestPrimeP7NativeInstalled(unittest.TestCase):
                 environment=environment,
             )
             self.assertEqual(installed.returncode, 0, installed.stderr)
+            # The Pi extension loader imports `@earendil-works/pi-coding-agent`
+            # via ESM, which walks ``./node_modules`` up from the loader file's
+            # directory. The package is operator-installed globally
+            # (``/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent``),
+            # so stage a symlink next to the installed loader. ``NODE_PATH`` is
+            # not honored by ESM and is not used. This is environment wiring
+            # owned by the test, not a change to the loader or its import.
+            loader_dir = (
+                python.parent.parent
+                / "lib"
+                / f"python{sys.version_info.major}.{sys.version_info.minor}"
+                / "site-packages"
+                / "asterion"
+                / "runtimes"
+                / "resources"
+            )
+            self.assertTrue(loader_dir.is_dir(), f"loader dir missing: {loader_dir}")
+            earendil_host = Path(
+                "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent"
+            )
+            self.assertTrue(earendil_host.is_dir(), f"global package missing: {earendil_host}")
+            loader_node_modules = loader_dir / "node_modules" / "@earendil-works"
+            loader_node_modules.mkdir(parents=True, exist_ok=True)
+            symlink_target = loader_node_modules / "pi-coding-agent"
+            if symlink_target.is_symlink() or symlink_target.exists():
+                symlink_target.unlink()
+            symlink_target.symlink_to(earendil_host)
             fixture = root / "fake_pi_rpc.py"
             shutil.copy2(FAKE_PI, fixture)
             node = shutil.which("node")
