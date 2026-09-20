@@ -100,13 +100,16 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
     async def _cleanup_temporary(self) -> None:
         self.temporary.cleanup()
 
-    def make_session(self, *, deadline_seconds: float = 2.0) -> PiRpcSession:
+    def make_session(
+        self, *, deadline_seconds: float = 2.0, compact_events: bool = False
+    ) -> PiRpcSession:
         return PiRpcSession(
             PiRpcConfig(
                 (sys.executable, "-u", str(self.fake_rpc), str(self.abort_marker)),
                 self.work,
                 {},
                 deadline_seconds=deadline_seconds,
+                compact_events=compact_events,
             )
         )
 
@@ -156,7 +159,7 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_prompt_compact_prompt_reuses_one_process(self) -> None:
-        rpc = self.make_session()
+        rpc = self.make_session(compact_events=True)
         await rpc.open(signal=NeverCancelled())
         self.addAsyncCleanup(rpc.close)
         assert rpc.process is not None
@@ -451,7 +454,7 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(rpc.process)
 
     async def test_aborted_compact_needs_exact_typed_settlement_before_reuse(self):
-        rpc = self.make_session()
+        rpc = self.make_session(compact_events=True)
         await rpc.open(signal=NeverCancelled())
         self.addAsyncCleanup(rpc.close)
         await rpc.prompt(

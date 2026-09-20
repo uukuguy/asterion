@@ -21,6 +21,12 @@ from asterion.applications.discovery import (
 )
 from asterion.applications.first_party_packages import (
     create_prime_arc_agi_3_solver_package,
+    create_prime_bounded_autonomy_native_package,
+    create_prime_continual_improvement_native_package,
+    create_prime_ipython_coding_native_package,
+    create_prime_long_session_continuity_native_package,
+    create_prime_programmatic_long_context_native_package,
+    create_prime_recursive_workflow_native_package,
 )
 from asterion.applications.provider import compose_installed_provider
 from asterion.applications.prime import create_provider
@@ -230,11 +236,19 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         provider = create_provider()
 
         self.assertEqual(provider.provider_id, "prime-applications")
-        # Both native applications. prime.ipython-coding returns to the list
-        # with its installed-route witness (Phase 4, D-2026-09-12-01).
+        # All seven native prime applications are now published after Phase 9
+        # (P1-P7 native). prime.arc-agi-3-solving remains at index 0.
         self.assertEqual(
             tuple(application.application_id for application in provider.applications),
-            ("prime.arc-agi-3-solving", "prime.ipython-coding"),
+            (
+                "prime.arc-agi-3-solving",
+                "prime.bounded-autonomy",
+                "prime.continual-improvement",
+                "prime.ipython-coding",
+                "prime.long-session-continuity",
+                "prime.recursive-workflow",
+                "prime.programmatic-long-context",
+            ),
         )
         application = provider.applications[0]
         self.assertEqual(
@@ -251,9 +265,17 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         composed = compose_installed_provider(
             create_provider(),
             runtime_factories=RuntimeFactoryRegistry(()),
-            installed_packages=(
-                create_prime_arc_agi_3_solver_package(),
-                create_prime_ipython_coding_native_package(),
+            installed_packages=tuple(
+                factory()
+                for factory in (
+                    create_prime_arc_agi_3_solver_package,
+                    create_prime_ipython_coding_native_package,
+                    create_prime_programmatic_long_context_native_package,
+                    create_prime_long_session_continuity_native_package,
+                    create_prime_recursive_workflow_native_package,
+                    create_prime_bounded_autonomy_native_package,
+                    create_prime_continual_improvement_native_package,
+                )
             ),
         )
 
@@ -470,9 +492,17 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             composed = compose_installed_provider(
                 create_provider(),
                 runtime_factories=RuntimeFactoryRegistry(()),
-                installed_packages=(
-                    create_prime_arc_agi_3_solver_package(),
-                    create_prime_ipython_coding_native_package(),
+                installed_packages=tuple(
+                    factory()
+                    for factory in (
+                        create_prime_arc_agi_3_solver_package,
+                        create_prime_ipython_coding_native_package,
+                        create_prime_programmatic_long_context_native_package,
+                        create_prime_long_session_continuity_native_package,
+                        create_prime_recursive_workflow_native_package,
+                        create_prime_bounded_autonomy_native_package,
+                        create_prime_continual_improvement_native_package,
+                    )
                 ),
             )
             assembly = composed.applications[0].assemblies[0]
