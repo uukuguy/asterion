@@ -35,9 +35,9 @@ class TestPrimeP6CapabilityPackage(unittest.TestCase):
         self.assertEqual(data["protocol"], "asterion.capability-package/v1")
         self.assertEqual(data["package_id"], "prime-continual-improvement-native")
         self.assertEqual(data["version"], "1.0.0")
-        self.assertEqual(len(data["capabilities"]), 1)
+        self.assertEqual(len(data["capabilities"]), 2)
         self.assertEqual(
-            data["capabilities"][0]["capability_id"], "prime.continual-improvement"
+            data["capabilities"][0]["capability_id"], "policy.continual-loop"
         )
         self.assertEqual(data["capabilities"][0]["version"], "1.0.0")
         self.assertEqual(data["benchmark_suites"], [])

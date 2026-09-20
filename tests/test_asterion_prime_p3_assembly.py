@@ -45,7 +45,7 @@ class TestPrimeP3Assembly(unittest.TestCase):
         self.assertEqual(len(data["capabilities"]), 1)
         self.assertEqual(
             data["capabilities"][0]["capability_id"],
-            "prime.recursive-workflow",
+            "policy.recursive-loop",
         )
         self.assertEqual(data["capabilities"][0]["version"], "1.0.0")
 

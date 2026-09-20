@@ -46,7 +46,7 @@ class TestPrimeP6Assembly(unittest.TestCase):
         self.assertEqual(len(data["capabilities"]), 1)
         self.assertEqual(
             data["capabilities"][0]["capability_id"],
-            "prime.continual-improvement",
+            "policy.continual-loop",
         )
         self.assertEqual(data["capabilities"][0]["version"], "1.0.0")
 

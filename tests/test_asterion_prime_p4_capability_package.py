@@ -80,7 +80,7 @@ class TestPrimeP4CapabilityPackage(unittest.TestCase):
         self.assertEqual(len(data["capabilities"]), 1)
         self.assertEqual(
             data["capabilities"][0]["capability_id"],
-            "prime.long-session-continuity",
+            "policy.long-session-loop",
         )
         self.assertEqual(data["capabilities"][0]["version"], "1.0.0")
 
