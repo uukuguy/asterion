@@ -363,7 +363,13 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertEqual(rpc.calls, 0)
         self.assertTrue(lease.closed)
 
-    def test_rejects_settled_after_agent_end_without_private_payload(self) -> None:
+    def test_trailing_settled_after_agent_end_does_not_leak_private_payload(
+        self,
+    ) -> None:
+        """D-2026-09-19-03: a trailing `agent_settled` after `agent_end` is a
+        benign drop (the round is already terminal). The private payload in
+        `agent_end.messages` must never reach the public event stream.
+        """
         session, _rpc, _lease = self.fixture.make(
             native_events(
                 ("agent_end", {"messages": ["PRIVATE-ANSWER"]}),
@@ -371,10 +377,13 @@ class TestAsterionPrimeSession(unittest.TestCase):
             )
         )
 
-        with self.assertRaises(ProtocolError) as caught:
-            asyncio.run(collect(session))
+        public = asyncio.run(collect(session))
 
-        self.assertNotIn("PRIVATE-ANSWER", str(caught.exception))
+        self.assertEqual(
+            [event.type for event in public], ["run.started", "run.completed"]
+        )
+        self.assertEqual(public[-1].payload, {"status": "completed"})
+        self.assertNotIn("PRIVATE-ANSWER", repr(public))
 
     def test_default_agent_end_terminal_completes_without_public_payload(self) -> None:
         session, _rpc, _lease = self.fixture.make(
