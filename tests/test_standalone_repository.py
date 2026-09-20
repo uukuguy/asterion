@@ -429,20 +429,15 @@ class StandaloneRepositoryTests(unittest.TestCase):
     def test_readme_is_a_complete_standalone_landing_page(self) -> None:
         text = (PROJECT / "README.md").read_text(encoding="utf-8")
         for heading in (
-            "## Installation",
-            "## Discovery and installed acceptance",
-            "## External Pi and resources",
-            "## Cost boundaries",
-            "## Development",
-            "## Promotion",
-            "## Mixed-repository integration parity",
+            "## Install and inspect",
+            "## External runtimes and resources",
+            "## Development and promotion",
+            "## Compatibility and history",
         ):
             with self.subTest(heading=heading):
                 self.assertIn(heading, text)
         for command in (
             "uv sync --frozen",
-            "make setup-pi",
-            "make setup-resources-basic",
             "cp .env.template .env",
             "make doctor",
             "uv run asterion list",
@@ -463,7 +458,7 @@ class StandaloneRepositoryTests(unittest.TestCase):
                 self.assertIn(statement, text)
         for setting in (
             ".env",
-            "corpora",
+            "Corpora",
             "datasets",
             "Judge",
         ):
