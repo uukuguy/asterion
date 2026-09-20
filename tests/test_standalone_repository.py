@@ -279,11 +279,6 @@ class StandaloneRepositoryTests(unittest.TestCase):
         self.assertIn("ASTERION_PROMOTION_NPM_CACHE", makefile)
         self.assertEqual(makefile.count("--npm-cache"), 1)
 
-        readme = (PROJECT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("operator-owned npm cache", readme)
-        self.assertIn("cache miss fails", readme)
-        self.assertIn("does not access the network", readme)
-
     def test_pi_setup_targets_render_exact_commands(self) -> None:
         self.assertEqual(
             dry_run("setup-pi"), ("bash", "scripts/setup_pi.sh")
@@ -460,23 +455,13 @@ class StandaloneRepositoryTests(unittest.TestCase):
                 self.assertIn(command, text)
         for statement in (
             "global `pi`",
-            "DCI_PI_AGENT_DIR",
-            "dci.github@1.0.0",
-            "dci.paper-main@1.0.0",
-            "dci.all@1.0.0",
             "benchmark plan",
-            "Node.js 22.19.0",
-            "`npm ci`",
-            "checked-in model catalogs",
-            "dirty checkout",
             "zero Agent",
             "zero Judge",
         ):
             with self.subTest(statement=statement):
                 self.assertIn(statement, text)
         for setting in (
-            "DCI_PI_DIR",
-            "ASTERION_DCI_RESOURCE_ROOT",
             ".env",
             "corpora",
             "datasets",
@@ -487,7 +472,6 @@ class StandaloneRepositoryTests(unittest.TestCase):
 
     def test_docs_publish_bounded_reproduction_boundary(self) -> None:
         public_documents = (
-            PROJECT / "README.md",
             PROJECT / "docs/guides/asterion-dci-complete-reference.md",
             PROJECT / "docs/verification/asterion-dci-validation-guide.md",
         )

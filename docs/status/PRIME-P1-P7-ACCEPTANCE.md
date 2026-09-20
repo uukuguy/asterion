@@ -62,7 +62,7 @@ make asterion-prime-p1-run
 ### 怎么验收
 
 ```bash
-export ASTERION_PRIME_ARC_ROOT="/Users/sujiangwen/sandbox/agentic-2026/external-prime/arc-agi-3"
+export ASTERION_PRIME_ARC_ROOT="$HOME/sandbox/agentic-2026/external-prime/arc-agi-3"
 make asterion-prime-p7-solve
 ```
 

@@ -331,7 +331,7 @@
   OrbStack mounts the Mac at `/mnt/mac` and `/Users` at the same path, so the
   installed Pi is reachable *inside* Orb only via the `/mnt/mac` form:
   `ASTERION_PRIME_PI_ENTRY=/mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js`.
-  `ASTERION_PRIME_ARC_ROOT=/Users/sujiangwen/sandbox/agentic-2026/external-prime/arc-agi-3`
+  `ASTERION_PRIME_ARC_ROOT=$HOME/sandbox/agentic-2026/external-prime/arc-agi-3`
   (visible in Orb at the same path, with both wheels and `environment_files/ls20/`).
   `ASTERION_PRIME_OPERATOR_ROOT` is the mounted checkout. `DEEPSEEK_API_KEY` is
   present in `.env`.
