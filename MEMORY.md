@@ -292,7 +292,7 @@
 
 ## 🟠 Current Judgments
 
-- For the 2026-09-22 architecture remediation, read `docs/status/CURRENT-STATE.md` and `RESUME-NEXT-SESSION.md` for current evidence. The 2026-09-19 “7 of 7 complete” statement is historical implementation evidence, not a current end-to-end claim. Technical decisions and verification limits live in `docs/status/DECISIONS.md` and the review report.
+- The 2026-09-22 architecture remediation is committed on `codex/review-implementation-20260922` and awaits integration into `main`. Read `docs/status/CURRENT-STATE.md` and `RESUME-NEXT-SESSION.md` for current evidence. The 2026-09-19 “7 of 7 complete” statement is historical implementation evidence, not a current end-to-end claim. Technical decisions and verification limits live in `docs/status/DECISIONS.md` and the review report.
 
 - **P4 design choices locked in**: deterministic fake-worker for the witness
   (no real Pi subprocess), two `make` Orb invocations against a persistent
