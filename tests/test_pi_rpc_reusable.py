@@ -55,6 +55,15 @@ for line in sys.stdin:
             with open(sys.argv[1], "w", encoding="utf-8") as marker:
                 marker.write(json.dumps(abort, separators=(",", ":")))
             time.sleep(60)
+        if message == "retry-recovered":
+            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "PRIVATE-RETRY-ERROR"}})
+            emit({"type": "agent_end", "willRetry": True})
+            emit({"type": "agent_start"})
+            emit({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "recovered"}})
+            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}})
+            emit({"type": "agent_end", "willRetry": False})
+            emit({"type": "agent_settled"})
+            continue
         emit({
             "type": "message_update",
             "assistantMessageEvent": {"type": "text_delta", "delta": message},
@@ -107,6 +116,21 @@ class CallbackFailure(BaseException):
 
 
 class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_retry_can_recover_before_settlement(self) -> None:
+        for compact_events in (False, True):
+            with self.subTest(compact_events=compact_events):
+                rpc = self.make_session(compact_events=compact_events)
+                await rpc.open(signal=NeverCancelled())
+                try:
+                    result = await rpc.prompt(
+                        "retry-recovered", signal=NeverCancelled(),
+                        on_event=self.events.append,
+                    )
+                    self.assertEqual(result.final_text, "recovered")
+                    self.assertFalse(rpc._lifecycle_poisoned)
+                finally:
+                    await rpc.close()
+
     async def asyncSetUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addAsyncCleanup(self._cleanup_temporary)

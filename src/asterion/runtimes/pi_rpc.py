@@ -111,9 +111,12 @@ def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
             for key in ("type", "toolCallId", "isError", "effect")
             if key in payload
         }
+    if event_type == "agent_end":
+        return {
+            key: payload[key] for key in ("type", "willRetry") if key in payload
+        }
     if event_type in {
         "agent_start",
-        "agent_end",
         "message_start",
         "turn_start",
         "turn_end",
@@ -795,7 +798,9 @@ class PiRpcSession:
         acknowledged = False
         settled_seen = False
         activity_seen = False
-        native_failure = False
+        aborted = False
+        cycle_failure = False
+        retry_allowed = False
         completion_requested = False
         while True:
             event = control.read_event()
@@ -818,22 +823,29 @@ class PiRpcSession:
                 if settled_seen:
                     raise RuntimeError("Pi RPC activity followed prompt settlement")
                 activity_seen = True
+            if event_type == "agent_start":
+                if cycle_failure and not retry_allowed:
+                    raise RuntimeError("Pi RPC failed cycle continued without retry")
+                cycle_failure = False
+                retry_allowed = False
             if event_type == "message_end":
                 assistant = event.get("message")
                 if isinstance(assistant, Mapping) and assistant.get("role") == "assistant":
-                    native_failure |= assistant.get("stopReason") in {"error", "aborted"}
+                    cycle_failure |= assistant.get("stopReason") in {"error", "aborted"}
+            if event_type == "agent_end":
+                retry_allowed = event.get("willRetry") is True
             directive = on_event(event, control)
             if type(directive) is not PiRpcDirective:
                 raise RuntimeError("Pi RPC prompt directive is invalid")
             if directive is PiRpcDirective.ABORT:
                 control.abort()
-                native_failure = True
+                aborted = True
             elif directive is PiRpcDirective.COMPLETE:
                 completion_requested = True
             # agent_end closes one cycle. Post-run work can start another cycle
             # before finally emitting this operation's settlement barrier.
             if acknowledged and settled_seen and completion_requested:
-                if native_failure:
+                if aborted or cycle_failure:
                     raise RuntimeError("Pi RPC prompt execution failed")
                 return control.remaining_seconds()
 
