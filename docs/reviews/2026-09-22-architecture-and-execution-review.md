@@ -1,6 +1,6 @@
 # Asterion 设计与代码深度评审及改进方案
 
-日期：2026-09-22。代码基线：`f7c4f97b`。状态：**评审与改进建议，未实施修复，未批准新的运行权限或协议变更。**
+日期：2026-09-22。代码基线：`f7c4f97b`。状态：**原始评审基线；后续实现与验证边界见文末“实施跟进”。本报告不授予新的运行权限或协议变更。**
 
 ## 结论与范围
 
@@ -235,6 +235,24 @@ CURRENT-STATE 应精简为结构快照，去掉相互矛盾的“7/7”与“P6 
 - 生产代码、schema、manifest、测试与配置未改；已有未跟踪 `.codex/config.toml` 保留。
 
 后续修复不得把本报告中的局部复现直接提升为应用能力完成。新 evidence 应记录对应修复提交、入口和真实边界。
+
+## 实施跟进（2026-09-22）
+
+本节记录后续修复，原始复现和当时的“未实施”描述保留为基线。R1/R6 的 prompt 屏障与 wire 验证见 `00d5008a`、`3f92df84`；R2 的 P3 与 P5/P6 公共组合路径见 `b8f2f914`、`86f8ad63`、`11a4d00a`；R3/R4 见 `91ca07b1`，最终复审发现的来源身份漂移拒绝见 `6baffd9e`；R5 见 `fc947d87`、`d6a888c9`；R7 见 `5d2fdbef`、`8f5bd9aa`；R8 第一阶段见 `fe30a6cf`；R9 的 journal codec、Prime inventory、服务拆分及隔离 wheel 资源校验见 `5890f261`、`49cbb550`、`11a4d00a`、`921200d6`。所有变更保持公共 v1 contract，不等同于真实模型能力证明。
+
+| 应用 | 执行入口 | Driver / worker | 环境 | 本次命令或既有 receipt 与结论 |
+|---|---|---|---|---|
+| P1 `prime.ipython-coding` | 已发布 provider + operator | Pi RPC / model | 操作者注入；本次为本地模拟 producer | `tests.test_pi_rpc_reusable` 验证精确 ack、settlement、三次连续 prompt 与取消。历史真模型 receipt 存在；本次**未重跑**真模型。 |
+| P2 `prime.programmatic-long-context` | 已发布 provider + operator | 本地检索与 oracle，历史 preset | 操作者语料 | 历史 `make asterion-prime-p2-run` receipt `cac924ed…`；本次**未重跑**，零 token witness 不证明模型长上下文能力。 |
+| P3 `prime.recursive-workflow` | 选中 provider → assembly → runner | 注入 child runner，确定性 fake worker | 本地临时 operator root | `tests.test_prime_p3_composed_runtime` 及 P3 operator 26 项通过；证明执行调用、期限、取消、身份与 receipt，**未验证 live worker**。 |
+| P4 `prime.long-session-continuity` | 已发布 provider + operator | 确定性 fake worker | 持久 private root 的历史 preset | 历史 `make asterion-prime-p4-run`；本次**未重跑**，不推断真实模型跨会话能力。 |
+| P5 `prime.bounded-autonomy` | 选中 provider → assembly → runner | 注入 loop，确定性 propose/verify/repair | 本地 operator root | `tests.test_prime_p5_p6_composed_execution` 与 P5/P6 139 项通过；证明成功路径确实工作并封签，limits preset 仍单独拒绝。 |
+| P6 `prime.continual-improvement` | 选中 provider → assembly → runner | 注入 candidate store / 单一 HarnessCoordinator / oracle | 本地 operator root | 同上；覆盖真实 candidate admission、holdout、promotion、取消逆向与 recovery-required。**未证明持久恢复或 live model**。 |
+| P7 `prime.arc-agi-3-solving` | 已安装 wheel 的 operator preset | 独立安装的 Pi + 外部 ARC engine | 历史 Orb / 外部数据 | 历史限定 Level-1 receipt `c00e3263…`，见 `../status/ASTERION-PRIME-P7-EVIDENCE.md`；本次**未重跑**，不代表全游戏或多 seed。 |
+
+验证：`make check` 通过（2990 项 Python 测试，2 项跳过，并通过 TypeScript、lint、文档、Rust 测试与构建）；`make promotion-check` 在隔离副本中通过（25 条命令，provider 操作 0，完整数据集未运行）。最终复审额外发现来源身份漂移绕过，`6baffd9e` 补了 `source_id`/`source_kind` 拒绝测试并修复。详细命令与证据边界见当前 `RESUME-NEXT-SESSION.md`。
+
+边界：R8 仍对每次独立文件追加验证全部旧前缀，保留篡改发现时机；长会话分段封存须先审查恢复契约。R7 私有 sink 是操作者可注入的进程内关联点，未提供持久诊断存储。R5 用进程组清理可控命令树，但不能约束改变凭据或脱离进程组的后代，也不是 OS sandbox；取消与同步 `spawn()` 之间尚无原子化调度门闩。P6 旧的底层结果 tuple 含历史错误分类，不能单凭文字 `rolled-back` 当作实际逆向证据；公共组合 host 另行核验 coordinator revision 与 baseline，并在无法证明时拒绝成功。真实 P1 模型路径、完整 benchmark、持久恢复与诊断均未由本次通过的命令证明。
 
 ## 附录：两个关键缺陷的最小复现
 

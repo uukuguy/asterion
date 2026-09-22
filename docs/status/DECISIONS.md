@@ -25,8 +25,10 @@
 | D-2026-09-18-01 | 🟢 active | Cross-process continuity inherits runtime-binding SHAs from prior identity |
 | D-2026-09-18-02 | 🟢 active | P3 child-runner is in-process by default; subprocess is fallback-only |
 | D-2026-09-19-01 | 🟢 active | P5 bounded-autonomy is one loop controller host service; limits-path has 3 refusal scenarios (cancellation folds in) |
-| D-2026-09-19-02 | 🟢 active | P6 candidate-store wraps framework-owned HarnessCoordinator; closed 2-element `terminal_outcome` enum stays closed (global-rejected folds in) |
-| D-2026-09-19-03 | 🟢 active | Accept `agent_settled` as implicit ack (`drive_prompt`) and as a leading round terminal (`execution.py:431-444`); Pi 0.85.1's reuse path emits `agent_settled` as the first event of a fresh prompt round, both with no `response` ack and with no `agent_end`. |
+| D-2026-09-19-02 | 🟡 amended | P6 candidate-store wraps framework-owned HarnessCoordinator; D-2026-09-22-02 corrects cancellation/recovery claims |
+| D-2026-09-19-03 | 🔴 superseded | Former implicit-ack interpretation of `agent_settled`; disproved by delayed-settlement reproduction |
+| D-2026-09-22-01 | 🟢 active | Fence each Pi prompt on exact request acknowledgment and its own settlement barrier |
+| D-2026-09-22-02 | 🟢 active | P6 failed work with admitted effects requires verified inverse or recovery-required state |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -769,3 +771,16 @@
   witness verbatim);
   src/asterion/control/harness.py:543 (framework-owned
   `HarnessCoordinator`).
+
+## D-2026-09-22-01 — Pi prompt completion requires exact acknowledgment and settlement
+
+- Status: 🟢 active. Supersedes D-2026-09-19-03's implicit-ack interpretation.
+- Decision: One Pi RPC session has one in-flight prompt. Completion requires the exact request-ID response and that prompt's settlement barrier. `agent_end` closes an agent cycle, including a retryable failed cycle, but cannot free the session or acknowledge the next request. Wire responses are validated before optional compact event projection. Ambiguous ownership fences the session.
+- Evidence: `docs/reviews/2026-09-22-architecture-and-execution-review.md` R1/R6 reproduction; commits `00d5008a` and `3f92df84`; focused simulated-producer tests. A real P1 model rerun remains a separate evidence boundary.
+- Consequence: Phase 10's proposed two kernels on one PiRpcSession do not provide independent sessions. A new verify strategy must respect this operation boundary and cannot claim rollback of already executed tools merely because the prompt was cancelled.
+
+## D-2026-09-22-02 — P6 unresolved admitted effects require recovery
+
+- Status: 🟢 active. Amends D-2026-09-19-02's claim that every cancellation or post-admission error can be represented as a completed rollback.
+- Decision: The existing `HarnessCoordinator` remains the sole revision and inverse authority. On cancellation or failure after candidate admission, the operator may attempt one exact authorized inverse against the current candidate revision. It records rolled-back effects only after the inverse succeeds and the baseline is restored. If the inverse fails or another revision intervenes, it records recovery-required and emits no successful receipt or artifact. The public `terminal_outcome` enum remains unchanged; unresolved effects are failure state, not an invented receipt outcome.
+- Evidence: 2026-09-22 P6 cancellation regression and focused coordinator/operator tests. Deterministic tests establish control semantics only, not live model capability.
