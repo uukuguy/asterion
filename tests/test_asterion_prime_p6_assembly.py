@@ -25,7 +25,6 @@ class TestPrimeP6Assembly(unittest.TestCase):
             set(data["host_capabilities"]),
             {
                 "prime.candidate-store",
-                "prime.ipython",
                 "prime.p6-oracle",
                 "prime.pi-extension",
                 "prime.private-trace",
@@ -43,7 +42,7 @@ class TestPrimeP6Assembly(unittest.TestCase):
         self.assertEqual(
             data["capability_packages"][0]["version"], "1.0.0"
         )
-        self.assertEqual(len(data["capabilities"]), 1)
+        self.assertEqual(len(data["capabilities"]), 2)
         self.assertEqual(
             data["capabilities"][0]["capability_id"],
             "policy.continual-loop",

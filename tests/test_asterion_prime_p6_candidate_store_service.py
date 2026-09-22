@@ -627,6 +627,28 @@ class TestCandidateStoreService(unittest.TestCase):
         self.assertIn("cancellation_digest", summary)
         self.assertEqual(len(summary["cancellation_digest"]), 64)
 
+    def test_cancellation_after_admission_requires_recovery_instead_of_false_rollback(self) -> None:
+        class _CancelledSignal:
+            cancelled = True
+
+        loop, coordinator = _build_loop()
+        candidate = loop.admit_candidate(proposal=_proposal())
+        with self.assertRaisesRegex(
+            CandidateStoreServiceError, "effects require recovery"
+        ):
+            loop.promote_or_rollback(
+                promotion_action=_proposal(proposal_id="promotion-unused"),
+                rollback_proposal_id="rollback-1",
+                rollback_authority_id="prime.candidate-store",
+                rollback_authority_revision=1,
+                rollback_target_revision_id=candidate.revision_id,
+                rollback_rationale_ref="private:rationale-rb",
+                rollback_rationale_digest="f" * 64,
+                rollback_expected_outcome_digest="1" * 64,
+                signal=_CancelledSignal(),
+            )
+        self.assertEqual(coordinator.snapshot().revision_id, candidate.revision_id)
+
     def test_terminal_outcome_is_closed_two_element_enum(self) -> None:
         """The public ``terminal_outcome`` is the closed 2-element enum."""
 

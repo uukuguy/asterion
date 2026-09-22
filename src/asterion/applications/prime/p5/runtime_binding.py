@@ -20,6 +20,8 @@ its four Protocol methods (``validate_runtime_services`` / ``run_loop``
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import asdict
 from collections.abc import AsyncIterator, Mapping
 from types import MappingProxyType
 
@@ -30,6 +32,12 @@ from asterion.applications.prime.p5.host import (
     P5TerminalReason,
 )
 from asterion.applications.prime.p5.oracle import P5Oracle
+from asterion.applications.prime.p5.receipt import seal
+from asterion.capabilities.prime_bounded_autonomy_native.provider import (
+    P5_INPUT_PRESET,
+    P5_ARTIFACT_ID,
+    P5_RECEIPT_MEDIA_TYPE,
+)
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 from asterion.runtime.host import CancellationSignal, RunEvent, RunRequest
 from asterion.runtime.protocol import ProtocolError
@@ -98,9 +106,7 @@ class _P5RuntimeSession:
     # P5RuntimeHost Protocol surface
     # ------------------------------------------------------------------
 
-    def validate_runtime_services(
-        self, services: Mapping[str, object]
-    ) -> None:
+    def validate_runtime_services(self, services: Mapping[str, object]) -> None:
         """Reject unknown or missing host services — fail closed.
 
         ``services`` must equal ``P5_HOST_CAPABILITIES`` exactly (set
@@ -136,9 +142,7 @@ class _P5RuntimeSession:
             root_run_id=root_run_id,
         )
 
-    async def wait_finalization(
-        self, *, signal: CancellationSignal
-    ) -> P5Finalization:
+    async def wait_finalization(self, *, signal: CancellationSignal) -> P5Finalization:
         """Block until the host transfers terminal status."""
 
         return await self._session_backend.wait_finalization(signal=signal)
@@ -158,19 +162,85 @@ class _P5RuntimeSession:
         request.to_mapping()
         if self._active or self._consumed:
             raise ProtocolError("P5 runtime session is unavailable")
+        if (
+            request.input_text != P5_INPUT_PRESET
+            or request.requested_capabilities
+            or request.deadline_ms != 120_000
+        ):
+            raise ProtocolError("P5 runtime request is invalid")
         self._active = self._consumed = True
-        # The P5 witness is operator-driven through Make; this surface
-        # exists so the runtime client is constructable end-to-end and
-        # yields a single terminal event so callers see a closed shape.
+        signal = signal or _NeverCancelled()
         try:
+            yield RunEvent(request.run_id, 1, "run.started", {"capabilities": []})
+            if signal.cancelled:
+                yield RunEvent(
+                    request.run_id, 2, "run.completed", {"status": "cancelled"}
+                )
+                return
+            async with asyncio.timeout(request.deadline_ms / 1000):
+                result = await self.run_loop(root_run_id=request.run_id, signal=signal)
+                if (
+                    type(result) is not P5LoopResult
+                    or result.root_run_id != request.run_id
+                ):
+                    raise ProtocolError("P5 loop result is invalid")
+                fields = asdict(result)
+                digest = fields.pop("receipt_sha256")
+                sealed = seal(**fields)
+                if sealed.receipt_sha256 != digest:
+                    raise ProtocolError("P5 loop receipt is invalid")
+                verdict = self._oracle.check(**fields)
+                finalization = await self.wait_finalization(signal=signal)
+            if signal.cancelled or result.terminal_reason == "cancelled":
+                yield RunEvent(
+                    request.run_id, 2, "run.completed", {"status": "cancelled"}
+                )
+                return
+            if (
+                result.terminal_reason != "success"
+                or not verdict.verified
+                or verdict.verdict != "pass"
+            ):
+                self.report_loop_stopped(
+                    terminal_reason=result.terminal_reason, root_run_id=request.run_id
+                )
+                raise ProtocolError("P5 loop did not succeed")
+            if (
+                type(finalization) is not P5Finalization
+                or finalization.terminal_status != "completed"
+                or finalization.receipt_sha256 != digest
+            ):
+                raise ProtocolError("P5 finalization is invalid")
             yield RunEvent(
                 request.run_id,
-                1,
-                "run.completed",
-                {"status": "completed"},
+                2,
+                "artifact.created",
+                {
+                    "artifact": {
+                        "artifact_id": P5_ARTIFACT_ID,
+                        "kind": "p5-native",
+                        "media_type": P5_RECEIPT_MEDIA_TYPE,
+                        "sha256": digest,
+                    }
+                },
+            )
+            yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
+        except Exception:
+            yield RunEvent(
+                request.run_id,
+                2,
+                "run.failed",
+                {
+                    "code": "prime_p5_failed",
+                    "message": "Prime P5 execution failed.",
+                },
             )
         finally:
             self._active = False
+
+
+class _NeverCancelled:
+    cancelled = False
 
 
 __all__ = (
@@ -209,9 +279,7 @@ def build_p5_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
         # session to trace), so it is allowed to be None. Every other
         # host service must be a real instance.
         required_host_services = tuple(
-            name
-            for name in P5_HOST_CAPABILITIES
-            if name != "prime.private-trace"
+            name for name in P5_HOST_CAPABILITIES if name != "prime.private-trace"
         )
         if (
             context.provider_id != "prime-applications"
@@ -219,10 +287,7 @@ def build_p5_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
             or context.application_version != "1.0.0"
             or context.runtime_id != "asterion.prime"
             or set(host_services) != set(P5_HOST_CAPABILITIES)
-            or any(
-                host_services.get(name) is None
-                for name in required_host_services
-            )
+            or any(host_services.get(name) is None for name in required_host_services)
             or dict(context.options) != dict(P5_RUNTIME_OPTIONS)
             or not isinstance(service, P5RuntimeHost)
             or not isinstance(oracle_value, P5Oracle)
@@ -236,6 +301,7 @@ def build_p5_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
         # Eagerly validate the 5-tuple so a malformed host-services
         # shape is rejected before the runtime is handed to callers.
         session.validate_runtime_services(host_services)
+        service.validate_runtime_services(host_services)
         return AsterionPrimeRuntimeClient(session)
     except Exception:
         raise RuntimeFactoryError(_ERROR) from None

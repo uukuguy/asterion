@@ -42,7 +42,7 @@ class TestPrimeP5Assembly(unittest.TestCase):
         self.assertEqual(
             data["capability_packages"][0]["version"], "1.0.0"
         )
-        self.assertEqual(len(data["capabilities"]), 1)
+        self.assertEqual(len(data["capabilities"]), 2)
         self.assertEqual(
             data["capabilities"][0]["capability_id"],
             "policy.bounded-loop",

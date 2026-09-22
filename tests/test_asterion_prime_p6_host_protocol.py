@@ -40,35 +40,9 @@ def _make_entry(entry_id: str = "entry-1") -> HarnessEntryDescriptor:
 
 
 class TestP6HostProtocol(unittest.TestCase):
-    def test_p6_runtime_host_protocol_defines_five_methods(self) -> None:
-        members = {
-            name
-            for name in dir(P6RuntimeHost)
-            if not name.startswith("_")
-        }
-        # P6's load-bearing surface: validate_runtime_services +
-        # admit_candidate + evaluate_holdout + promote_or_rollback +
-        # wait_finalization. Mirrors P3 / P4 / P5's shape but scoped
-        # to the admit → holdout → preserve-or-rollback lifecycle.
-        self.assertIn("validate_runtime_services", members)
-        self.assertIn("admit_candidate", members)
-        self.assertIn("evaluate_holdout", members)
-        self.assertIn("promote_or_rollback", members)
-        self.assertIn("wait_finalization", members)
-        # P6 has no recovery surface and no bounded-loop surface;
-        # P3's run_root, P4's commit_checkpoint / wait_recovery, and
-        # P5's run_loop / report_loop_stopped must NOT appear here.
-        self.assertNotIn("run_root", members)
-        self.assertNotIn("run_loop", members)
-        self.assertNotIn("commit_checkpoint", members)
-        self.assertNotIn("wait_recovery", members)
-        self.assertNotIn("report_admission_refused", members)
-        self.assertNotIn("report_loop_stopped", members)
-        self.assertNotIn("report_recovery_stopped", members)
-        # Method count: exactly 5 — load-bearing for the closed
-        # 5-method shape (mirrors P5's 4-method closed shape; P6
-        # adds the explicit promote/rollback split).
-        self.assertEqual(len(members), 5)
+    def test_p6_runtime_host_owns_one_candidate_workflow(self) -> None:
+        members = {name for name in dir(P6RuntimeHost) if not name.startswith("_")}
+        self.assertEqual(members, {"validate_runtime_services", "run_candidate"})
 
     def test_p6_admitted_proposal_is_frozen(self) -> None:
         field_names = {f.name for f in fields(P6AdmittedProposal)}

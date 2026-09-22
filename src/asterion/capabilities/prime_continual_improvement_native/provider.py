@@ -5,20 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from asterion.capability_sdk import (
+    CapabilityImplementationBinding,
     CapabilityPackageRef,
     CapabilityRef,
     InstalledCapabilityPackage,
     open_portable_payload,
 )
 
+from asterion.capabilities.prime_native_receipt import PrimeNativeReceiptImplementation
+
 
 PACKAGE_REF = CapabilityPackageRef("prime-continual-improvement-native", "1.0.0")
 CAPABILITY_REF = CapabilityRef("prime.continual-improvement", "1.0.0")
 P6_INPUT_PRESET = "fixed-continual-improvement"
 P6_ARTIFACT_ID = "prime.p6-native.receipt"
-P6_RECEIPT_MEDIA_TYPE = (
-    "application/vnd.asterion.prime.p6-native-receipt+json"
-)
+P6_RECEIPT_MEDIA_TYPE = "application/vnd.asterion.prime.p6-native-receipt+json"
 
 
 def create_prime_continual_improvement_native_package() -> InstalledCapabilityPackage:
@@ -33,7 +34,19 @@ def create_prime_continual_improvement_native_package() -> InstalledCapabilityPa
         source_kind="builtin",
         catalog_roots=(payload_root / "capabilities",),
         benchmark_suite_paths=(),
-        implementations=(),  # operator-driven; no synchronous implementation
+        implementations=(
+            CapabilityImplementationBinding(
+                CAPABILITY_REF,
+                PrimeNativeReceiptImplementation(
+                    CAPABILITY_REF,
+                    P6_INPUT_PRESET,
+                    P6_ARTIFACT_ID,
+                    P6_RECEIPT_MEDIA_TYPE,
+                    "p6-native",
+                    120_000,
+                ),
+            ),
+        ),
         benchmark_bindings=(),
     )
 

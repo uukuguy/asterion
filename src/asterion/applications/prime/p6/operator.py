@@ -97,6 +97,11 @@ class P6OperatorError(RuntimeError):
         super().__init__("P6 operator is unavailable")
 
 
+class P6RecoveryRequired(P6OperatorError):
+    def __init__(self) -> None:
+        RuntimeError.__init__(self, "P6 effects require recovery")
+
+
 # ---------------------------------------------------------------------------
 # Public result shapes (one JSON record per root run)
 # ---------------------------------------------------------------------------
@@ -184,11 +189,7 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
     operator_value = environment.get(_OPERATOR_ROOT_ENV, "").strip()
     private_value = environment.get(_PRIVATE_ROOT_ENV, "").strip()
     mode_value = environment.get(_MODE_ENV, "").strip()
-    if (
-        not operator_value
-        or not private_value
-        or mode_value not in _VALID_MODES
-    ):
+    if not operator_value or not private_value or mode_value not in _VALID_MODES:
         raise P6OperatorError()
     try:
         operator_root = Path(operator_value).resolve(strict=True)
@@ -236,9 +237,7 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
 # ---------------------------------------------------------------------------
 
 
-def _fake_worker_payload_sha(
-    *, mode: str, candidate_kind: str, run_id: str
-) -> str:
+def _fake_worker_payload_sha(*, mode: str, candidate_kind: str, run_id: str) -> str:
     """Deterministic SHA-256 over ``(mode, candidate_kind, run_id)``.
 
     Different tuples produce different SHAs, so the
@@ -309,9 +308,7 @@ def _default_send(proposal: HarnessProposal):  # noqa: ANN202 - framework callab
     from asterion.control.harness import HarnessEffectReceipt
 
     changed = tuple(
-        edit.replacement
-        for edit in proposal.edits
-        if edit.replacement is not None
+        edit.replacement for edit in proposal.edits if edit.replacement is not None
     )
     return HarnessEffectReceipt.succeeded(
         proposal,
@@ -473,9 +470,7 @@ def _seal_receipt_from_loop(
     else:
         terminal_outcome = "rolled-back"
     rollback_invocation_count = int(summary.get("rollback_invocation_count", 0))
-    global_activation_approved = bool(
-        summary.get("global_activation_approved", False)
-    )
+    global_activation_approved = bool(summary.get("global_activation_approved", False))
     if holdout_result is None:
         task_b_result_digest = "0" * 64
     else:
@@ -520,9 +515,7 @@ def _seal_receipt_pre_orchestration(
         global_activation_approved=bool(
             summary.get("global_activation_approved", False)
         ),
-        rollback_invocation_count=int(
-            summary.get("rollback_invocation_count", 0)
-        ),
+        rollback_invocation_count=int(summary.get("rollback_invocation_count", 0)),
         receipt_sha256="0" * 64,
         failure_digest=failure_digest,
     )
@@ -644,9 +637,7 @@ async def _open_candidate_store_for_run(
         MAX_USAGE_PROVIDER_OPS,
     )
 
-    coordinator = _build_coordinator(
-        scope=scope, private_store=private_store
-    )
+    coordinator = _build_coordinator(scope=scope, private_store=private_store)
     limits = _CandidateStoreLimits(
         max_candidate_revisions_per_run=MAX_CANDIDATE_REVISIONS_PER_RUN,
         max_holdout_evaluations_per_run=MAX_HOLDOUT_EVALUATIONS_PER_RUN,
@@ -666,7 +657,9 @@ async def _open_candidate_store_for_run(
     return loop, coordinator
 
 
-async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult:
+async def _execute_candidate_workflow(
+    resources: _OperatorResources, loop, coordinator, signal, *, non_regressing=True
+) -> P6NativeReceipt:
     """Drive the preserved path: admit → holdout (non_regressing=True) →
     explicit promotion action → seal.
 
@@ -677,10 +670,6 @@ async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult
 
     root_run_id = resources.root_run_id
     scope = resources.scope
-
-    loop, coordinator = await _open_candidate_store_for_run(
-        scope=scope, global_activation_approved=False
-    )
 
     # Build the candidate proposal off the empty baseline snapshot.
     baseline_snapshot = coordinator.snapshot()
@@ -697,23 +686,21 @@ async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult
         mode=resources.mode, candidate_kind="admit", run_id=root_run_id
     )
 
-    def holdout_callable(
-        candidate: HarnessRevision, baseline: object
-    ) -> HoldoutResult:
+    def holdout_callable(candidate: HarnessRevision, baseline: object) -> HoldoutResult:
         return HoldoutResult(
             task_b_result_sha256=task_b_sha,
-            non_regressing=True,
+            non_regressing=non_regressing,
         )
 
     loop.set_holdout_callable(holdout_callable=holdout_callable)
     candidate_revision = loop.admit_candidate(
-        proposal=candidate_proposal, signal=_NeverCancelled()
+        proposal=candidate_proposal, signal=signal
     )
     baseline_snapshot_after_admit = coordinator.snapshot()
     holdout_result = loop.evaluate_holdout(
         candidate=candidate_revision,
-        baseline=baseline_snapshot_after_admit,
-        signal=_NeverCancelled(),
+        baseline=baseline_snapshot,
+        signal=signal,
     )
 
     promotion_action = _build_promotion_proposal(
@@ -731,14 +718,45 @@ async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult
         rollback_rationale_ref="private:rationale-rb",
         rollback_rationale_digest="f" * 64,
         rollback_expected_outcome_digest="1" * 64,
-        signal=_NeverCancelled(),
+        signal=signal,
     )
-    if verdict != "preserved" or terminal_outcome != "preserved":
+    from datetime import datetime, timezone
+    from asterion.applications.prime.p6.host import (
+        P6AdmittedProposal,
+        P6HoldoutResult,
+        P6PromotionAction,
+    )
+
+    now = datetime.now(timezone.utc)
+    oracle_receipt = resources.p6_oracle.check(
+        root_run_id=root_run_id,
+        admitted_proposal=P6AdmittedProposal(
+            candidate_proposal.proposal_id,
+            candidate_proposal.digest,
+            candidate_revision.revision_id,
+            now,
+        ),
+        holdout_result=P6HoldoutResult(
+            holdout_result.task_b_result_sha256, holdout_result.non_regressing, now
+        ),
+        promotion_action=(
+            P6PromotionAction(
+                promotion_action.proposal_id,
+                promotion_action.digest,
+                candidate_revision.revision_id,
+                now,
+            )
+            if verdict == "preserved"
+            else None
+        ),
+        rollback_invocation_count=loop.rollback_invocation_count,
+        global_activation_approved=False,
+        signal=signal,
+    )
+    if oracle_receipt.verdict != verdict or terminal_outcome != verdict:
         raise P6OperatorError()
 
-    baseline_digest = _baseline_snapshot_digest(
-        baseline_snapshot_after_admit.entries
-    )
+    baseline_digest = _baseline_snapshot_digest(baseline_snapshot.entries)
     sealed = _seal_receipt_from_loop(
         loop=loop,
         root_run_id=root_run_id,
@@ -750,19 +768,137 @@ async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult
         summary=summary,
         failure_digest=None,
     )
-    return P6PublicResult(
-        status="completed",
-        root_run_id=sealed.root_run_id,
-        baseline_snapshot_digest=sealed.baseline_snapshot_digest,
-        candidate_revision_digest=sealed.candidate_revision_digest,
-        task_a_evidence_digest=sealed.task_a_evidence_digest,
-        task_b_result_digest=sealed.task_b_result_digest,
-        terminal_outcome=sealed.terminal_outcome,
-        global_activation_approved=sealed.global_activation_approved,
-        rollback_invocation_count=sealed.rollback_invocation_count,
-        receipt_sha256=sealed.receipt_sha256,
-        failure_digest=sealed.failure_digest,
+    return sealed
+
+
+class _ComposedCandidateHost:
+    def __init__(self, resources, loop, coordinator, *, non_regressing=True):
+        self.resources = resources
+        self.loop = loop
+        self.coordinator = coordinator
+        self.non_regressing = non_regressing
+        self.receipt = None
+        self.effects_state = "not-started"
+
+    def validate_runtime_services(self, services):
+        if (
+            services.get("prime.candidate-store") is not self.loop
+            or services.get("prime.p6-oracle") is not self.resources.p6_oracle
+            or services.get("prime.pi-extension") is not self.coordinator
+            or services.get("prime.private-trace") is not None
+            or services.get("prime.session-backend") is not self
+        ):
+            raise P6OperatorError()
+
+    async def run_candidate(self, *, root_run_id, signal):
+        from dataclasses import replace
+
+        resources = replace(self.resources, root_run_id=root_run_id)
+        baseline = self.coordinator.snapshot()
+        try:
+            self.receipt = await _execute_candidate_workflow(
+                resources,
+                self.loop,
+                self.coordinator,
+                signal,
+                non_regressing=self.non_regressing,
+            )
+        except BaseException:
+            self.receipt = None
+            if self.coordinator.snapshot().entries == baseline.entries:
+                self.effects_state = (
+                    "rolled-back"
+                    if self.loop.rollback_invocation_count == 1
+                    else "unchanged"
+                )
+                raise
+            try:
+                # The operator supplied this exact authority for normal
+                # rollback too. Cancellation stops work, not its inverse.
+                self.loop.rollback_admitted_candidate(
+                    proposal_id="rollback-cleanup-1",
+                    authority_id="prime.candidate-store",
+                    authority_revision=1,
+                    rationale_ref="private:rationale-rb",
+                    rationale_digest="f" * 64,
+                    expected_outcome_digest="1" * 64,
+                )
+                if self.coordinator.snapshot().entries != baseline.entries:
+                    raise P6RecoveryRequired()
+            except BaseException:
+                self.effects_state = "recovery-required"
+                raise P6RecoveryRequired() from None
+            self.effects_state = "rolled-back"
+            raise
+        self.effects_state = self.receipt.terminal_outcome
+        return self.receipt
+
+
+async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult:
+    from asterion.applications.provider import compose_installed_provider
+    from asterion.applications.prime.provider import (
+        create_prime_continual_improvement_provider,
     )
+    from asterion.applications.prime.p6.runtime_binding import (
+        build_p6_runtime,
+        P6_RUNTIME_OPTIONS,
+    )
+    from asterion.capabilities.prime_continual_improvement_native.provider import (
+        create_prime_continual_improvement_native_package,
+    )
+    from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
+    from asterion.runner.composed import run_composed_application
+
+    loop, coordinator = await _open_candidate_store_for_run(
+        scope=resources.scope,
+        global_activation_approved=False,
+        private_store=MemoryHarnessPrivateRevisionStore(),
+    )
+    host = _ComposedCandidateHost(resources, loop, coordinator)
+    package = create_prime_continual_improvement_native_package()
+    provider = compose_installed_provider(
+        create_prime_continual_improvement_provider(),
+        runtime_factories=RuntimeFactoryRegistry(()),
+        installed_packages=(package,),
+    )
+    plan = provider.applications[0].assemblies[0].plan
+    services = {
+        "prime.candidate-store": loop,
+        "prime.session-backend": host,
+        "prime.p6-oracle": resources.p6_oracle,
+        "prime.private-trace": None,
+        "prime.pi-extension": coordinator,
+    }
+    runtime = build_p6_runtime(
+        RuntimeFactoryContext(
+            provider_id="prime-applications",
+            application_id="prime.continual-improvement",
+            application_version="1.0.0",
+            runtime_id="asterion.prime",
+            assembly_path=Path(__file__).resolve().parent.parent
+            / "assemblies/prime-continual-improvement.json",
+            options=P6_RUNTIME_OPTIONS,
+            host_services=services,
+        )
+    )
+    result = await run_composed_application(
+        plan,
+        implementations=tuple(
+            (b.capability_ref, b.implementation) for b in package.implementations
+        ),
+        runtime=runtime,
+        run_id=resources.root_run_id,
+        input_text="fixed-continual-improvement",
+        host_services=services,
+        signal=_NeverCancelled(),
+    )
+    if (
+        host.receipt is None
+        or len(result.artifacts) != 1
+        or result.artifacts[0]["value"]["receipt_sha256"] != host.receipt.receipt_sha256
+    ):
+        raise P6OperatorError()
+    return P6PublicResult(status="completed", **asdict(host.receipt))
 
 
 async def _run_scenario_rolled_back(
@@ -796,9 +932,7 @@ async def _run_scenario_rolled_back(
         run_id=root_run_id,
     )
 
-    def holdout_callable(
-        candidate: HarnessRevision, baseline: object
-    ) -> HoldoutResult:
+    def holdout_callable(candidate: HarnessRevision, baseline: object) -> HoldoutResult:
         return HoldoutResult(
             task_b_result_sha256=task_b_sha,
             non_regressing=False,
@@ -837,9 +971,7 @@ async def _run_scenario_rolled_back(
     if int(summary.get("rollback_invocation_count", 0)) != 1:
         raise P6OperatorError()
 
-    baseline_digest = _baseline_snapshot_digest(
-        baseline_snapshot_after_admit.entries
-    )
+    baseline_digest = _baseline_snapshot_digest(baseline_snapshot_after_admit.entries)
     sealed = _seal_receipt_from_loop(
         loop=loop,
         root_run_id=root_run_id,
@@ -980,9 +1112,7 @@ def _sealed_error_receipt(
         global_activation_approved=bool(
             summary.get("global_activation_approved", False)
         ),
-        rollback_invocation_count=int(
-            summary.get("rollback_invocation_count", 0)
-        ),
+        rollback_invocation_count=int(summary.get("rollback_invocation_count", 0)),
         receipt_sha256="0" * 64,
         failure_digest=failure_digest,
     )
@@ -1128,9 +1258,7 @@ def _entrypoint() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def drive_preserved_for_test(
-    *, root_run_id: str
-) -> P6PublicResult:
+async def drive_preserved_for_test(*, root_run_id: str) -> P6PublicResult:
     """In-process helper for the operator's ``preserved`` path.
 
     Returns a fully-sealed :class:`P6PublicResult` for the supplied
@@ -1151,9 +1279,7 @@ async def drive_preserved_for_test(
     return await _drive_preserved_path(resources)
 
 
-async def drive_scenario_rolled_back_for_test(
-    *, root_run_id: str
-) -> P6LimitsRecord:
+async def drive_scenario_rolled_back_for_test(*, root_run_id: str) -> P6LimitsRecord:
     """In-process helper for the ``rolled-back`` limits scenario."""
 
     scope = HarnessScope.project("prime.continual-improvement")
@@ -1185,9 +1311,7 @@ async def drive_scenario_global_rejected_for_test(
     return await _run_scenario_global_rejected(resources)
 
 
-async def drive_cancellation_for_test(
-    *, root_run_id: str
-) -> P6NativeReceipt:
+async def drive_cancellation_for_test(*, root_run_id: str) -> P6NativeReceipt:
     """In-process helper for the cancellation-folded-to-rolled-back path."""
 
     scope = HarnessScope.project("prime.continual-improvement")
@@ -1255,9 +1379,7 @@ async def drive_candidate_admission_error_for_test(
     )
 
     try:
-        loop.admit_candidate(
-            proposal=bad_candidate, signal=_NeverCancelled()
-        )
+        loop.admit_candidate(proposal=bad_candidate, signal=_NeverCancelled())
     except CandidateStoreServiceError as exc:
         summary = {
             "candidate_admission_error_digest": _hex_digest(repr(exc)),
@@ -1295,9 +1417,7 @@ async def drive_holdout_evaluation_error_for_test(
         baseline_snapshot_id=baseline_snapshot.snapshot_id,
     )
 
-    def holdout_callable(
-        candidate: HarnessRevision, baseline: object
-    ) -> HoldoutResult:
+    def holdout_callable(candidate: HarnessRevision, baseline: object) -> HoldoutResult:
         raise HarnessError("SENTINEL_HOLDOUT_FAIL")
 
     loop.set_holdout_callable(holdout_callable=holdout_callable)
@@ -1320,9 +1440,7 @@ async def drive_holdout_evaluation_error_for_test(
     else:
         raise P6OperatorError()
 
-    baseline_digest = _baseline_snapshot_digest(
-        coordinator.snapshot().entries
-    )
+    baseline_digest = _baseline_snapshot_digest(coordinator.snapshot().entries)
     return _sealed_error_receipt(
         root_run_id=root_run_id,
         failure_kind=_fail_at_kind("holdout_evaluation"),
@@ -1333,9 +1451,7 @@ async def drive_holdout_evaluation_error_for_test(
     )
 
 
-async def drive_promotion_action_error_for_test(
-    *, root_run_id: str
-) -> P6NativeReceipt:
+async def drive_promotion_action_error_for_test(*, root_run_id: str) -> P6NativeReceipt:
     """In-process helper for the promotion-action-error path.
 
     A promotion whose scope mismatches the wrapped coordinator's
@@ -1359,9 +1475,7 @@ async def drive_promotion_action_error_for_test(
         mode="preserved", candidate_kind="admit", run_id=root_run_id
     )
 
-    def holdout_callable(
-        candidate: HarnessRevision, baseline: object
-    ) -> HoldoutResult:
+    def holdout_callable(candidate: HarnessRevision, baseline: object) -> HoldoutResult:
         return HoldoutResult(
             task_b_result_sha256=task_b_sha,
             non_regressing=True,
@@ -1407,9 +1521,7 @@ async def drive_promotion_action_error_for_test(
     if verdict != "rolled-back" or "promotion_action_error_digest" not in summary:
         raise P6OperatorError()
 
-    baseline_digest = _baseline_snapshot_digest(
-        coordinator.snapshot().entries
-    )
+    baseline_digest = _baseline_snapshot_digest(coordinator.snapshot().entries)
     return _sealed_error_receipt(
         root_run_id=root_run_id,
         failure_kind=_fail_at_kind("promotion_action"),
