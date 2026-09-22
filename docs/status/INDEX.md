@@ -35,6 +35,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | File | Status | What it recorded | Outcome / supersession |
 |---|---|---|---|
 | `GIT-RECOVERY-CLOSURE-20260830.md` | 🟡 decision-history | Git recovery and worktree cleanup audit | Historical closure; current branch state is in `CURRENT-STATE.md`. |
+| `../reviews/2026-09-22-architecture-and-execution-review.md` | 🟡 decision-history | Design/code review with provider-free reproductions and a prioritized improvement proposal | Findings pending repair; narrows earlier P1–P7 completion claims and challenges the Phase 10 shared-session subagent draft. |
 
 ## Archived
 

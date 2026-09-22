@@ -2766,3 +2766,7 @@
 ## 2026-09-22
 
 - 16:27 **handoff — make test 全绿, 48 + 6 = 54 pre-existing failures 全部修复 (5 commits, ed1b0ec9 → 1a7107e0)**: `Ran 2943 tests in 251.511s, OK (skipped=2)`。修复分布：A 类 (2 项 settlement-state 测试重写以反映 D-2026-09-19-03 新规范) + B-1 (7 个 P3-P6 assembly/package 文件 11 处 hardcoded ID) + B-2 (README subTests 删除 DCI-era 字符串) + B-3 (2 docs host 路径归一化为 `$HOME/`) + B-4 (1 src + 1 test DCI 元组 10→15) + B-5 (CLI unbound_resources 3→8) + B-6 (P7 provider 应用列表 2→7) + C-1 (两处 composition 测试传全部 7 个 package) + C-2 (删除 `tests/test_prepare_prime_development_cli.py`) + D (`make_session` 加 `compact_events` 参数, 2 个 compact 测试 opt-in `True`)。**关键陷阱**: `make_session(compact_events=True)` 不能作为测试 fixture 默认 (会破坏 14 个 prompt-only 测试)，必须显式 opt-in —— 这与 agent 2 报告的建议相反，实测验证后修正。Provider application tuple 实际顺序 (实测 `provider.py:296-362`) 是 `recursive-workflow` 在 `programmatic-long-context` **之前**，与初始假设相反；agent 1 的 P4 capability_package 报告漏报了一处 `len == 1`（已补）。RESUME 改写为 handoff 状态，记录全部已验证事实 + 未完成边界 + Honest caveats（agent_settled 新断言只覆盖 fake fixture，真 Pi 路径仍待端到端验证）。
+
+- 16:58 设计代码评审复现 prompt 跨轮 settlement 污染及 P3/P5/P6 组合路径空执行；真实 P1 未重跑，生产代码未改。
+- 16:58 复现包快照内容漂移、自消费环漏检、executor 入场取消泄漏与输出超时；日志追加全量解析呈平方增长，见 2026-09-22 review。
+- 17:07 深度评审九项方案完成独立复审；make docs-check 216 文件通过，git diff --check 通过；生产修复未实施。
