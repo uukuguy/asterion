@@ -43,15 +43,18 @@ class ManagedControlledExecutor:
         self._process = process
         if process.stderr is not None:
             self._stderr_task = asyncio.create_task(_discard_stderr(process.stderr))
-        await asyncio.sleep(0)
-        if (
-            process.returncode is not None
-            or process.stdin is None
-            or process.stdout is None
-            or process.stderr is None
-        ):
+        try:
+            await asyncio.sleep(0)
+            if (
+                process.returncode is not None
+                or process.stdin is None
+                or process.stdout is None
+                or process.stderr is None
+            ):
+                raise ControlledExecutorError("controlled executor is unavailable")
+        except BaseException:
             await self._shutdown()
-            raise ControlledExecutorError("controlled executor is unavailable")
+            raise
         return ControlledExecutorJsonlClient(
             reader=process.stdout,
             writer=process.stdin,
@@ -69,6 +72,16 @@ class ManagedControlledExecutor:
         self._stderr_task = None
         if process is None:
             return
+        cleanup = asyncio.create_task(_reap_process(process, stderr_task))
+        await _await_owned_cleanup(cleanup)
+
+
+async def _reap_process(
+    process: asyncio.subprocess.Process, stderr_task: asyncio.Task[None] | None
+) -> None:
+    """Boundedly stop the sidecar and await the stderr drainer."""
+
+    try:
         if process.stdin is not None:
             process.stdin.close()
         try:
@@ -80,12 +93,27 @@ class ManagedControlledExecutor:
             except TimeoutError:
                 process.kill()
                 await process.wait()
+    finally:
         if stderr_task is not None:
             try:
                 await asyncio.wait_for(stderr_task, timeout=1)
             except TimeoutError:
                 stderr_task.cancel()
                 await asyncio.gather(stderr_task, return_exceptions=True)
+
+
+async def _await_owned_cleanup(task: asyncio.Task[None]) -> None:
+    """Keep cleanup owned and awaited if its caller is cancelled again."""
+
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            cancelled = True
+    task.result()
+    if cancelled:
+        raise asyncio.CancelledError
 
 
 async def _discard_stderr(stream: asyncio.StreamReader) -> None:
