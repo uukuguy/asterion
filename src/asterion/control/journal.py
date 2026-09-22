@@ -14,6 +14,12 @@ from typing import TYPE_CHECKING, Protocol
 
 import fcntl
 
+from asterion.control._journal_file_codec import (
+    JOURNAL_FILE_VERSION as _JOURNAL_FILE_VERSION,
+    decode_row,
+    encode_row,
+    json_value as _json_value,
+)
 from asterion.control.authority import OperationDecision, SessionContextDecision
 
 if TYPE_CHECKING:
@@ -81,11 +87,7 @@ JOURNAL_RECORD_KINDS = frozenset(
         "long-running.closed",
     }
 )
-JOURNAL_FILE_VERSION = "asterion.control-journal/v1"
-_FILE_ROW_FIELDS = frozenset(
-    {"version", "position", "previous_digest", "record_digest", "record"}
-)
-_RECORD_FIELDS = frozenset({"record_id", "kind", "payload"})
+JOURNAL_FILE_VERSION = _JOURNAL_FILE_VERSION
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
@@ -1373,26 +1375,9 @@ def _read_file_entries(file_fd: int, session_id: str) -> tuple[JournalEntry, ...
     raw_lines = raw[:-1].split(b"\n") if raw else ()
     for expected_position, raw_line in enumerate(raw_lines, start=1):
         try:
-            text = raw_line.decode("utf-8", errors="strict")
-            value = json.loads(text)
-            if (
-                not isinstance(value, dict)
-                or set(value) != _FILE_ROW_FIELDS
-                or json.dumps(
-                    value,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                ).encode("utf-8")
-                != raw_line
-                or value["version"] != JOURNAL_FILE_VERSION
-                or value["position"] != expected_position
-                or value["previous_digest"] != previous_digest
-                or not isinstance(value["record"], dict)
-                or set(value["record"]) != _RECORD_FIELDS
-            ):
-                raise JournalConflictError("file journal row is invalid")
+            value = decode_row(raw_line, expected_position, previous_digest)
             record_value = value["record"]
+            assert isinstance(record_value, dict)
             record = JournalRecord(
                 record_id=record_value["record_id"],
                 kind=record_value["kind"],
@@ -1473,25 +1458,13 @@ def _verify_file_binding(root_fd: int, filename: str, file_fd: int) -> None:
 
 
 def _encode_file_row(entry: JournalEntry, previous_digest: str | None) -> bytes:
-    value = {
-        "version": JOURNAL_FILE_VERSION,
-        "position": entry.position,
-        "previous_digest": previous_digest,
-        "record_digest": entry.digest,
-        "record": {
-            "record_id": entry.record.record_id,
-            "kind": entry.record.kind,
-            "payload": _json_value(entry.record.payload),
-        },
-    }
-    return (
-        json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
-        + b"\n"
+    return encode_row(
+        entry.position,
+        previous_digest,
+        entry.digest,
+        entry.record.record_id,
+        entry.record.kind,
+        entry.record.payload,
     )
 
 
@@ -2326,12 +2299,4 @@ def _freeze(value: object) -> object:
         return _freeze_mapping(value)
     if isinstance(value, (list, tuple)):
         return tuple(_freeze(item) for item in value)
-    return value
-
-
-def _json_value(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, tuple):
-        return [_json_value(item) for item in value]
     return value

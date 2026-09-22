@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
 import os
 import stat
@@ -67,6 +69,38 @@ def _journal_file(root: Path) -> Path:
 
 
 class TestControlFileJournal(unittest.TestCase):
+    def test_internal_codec_preserves_canonical_row_bytes(self) -> None:
+        spec = importlib.util.find_spec("asterion.control._journal_file_codec")
+        self.assertIsNotNone(spec)
+        codec = importlib.import_module("asterion.control._journal_file_codec")
+        from asterion.control import journal as journal_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "journal"
+            journal = FileCanonicalJournal.open(root, "session-1")
+            record = JournalRecord.system_bound(
+                system_id="research.system", system_version="1.0.0"
+            )
+            entry = journal.append(0, record)
+            row = _journal_file(root).read_bytes()
+            self.assertEqual(
+                codec.encode_row(
+                    entry.position,
+                    None,
+                    entry.digest,
+                    record.record_id,
+                    record.kind,
+                    record.payload,
+                ),
+                row,
+            )
+            decoded = codec.decode_row(row[:-1], 1, None)
+            self.assertEqual(decoded["record"]["record_id"], record.record_id)
+            self.assertEqual(codec.JOURNAL_FILE_VERSION, journal_module.JOURNAL_FILE_VERSION)
+            self.assertIs(journal_module.JournalRecord, JournalRecord)
+            with self.assertRaises(ValueError):
+                codec.decode_row(b" " + row[:-1], 1, None)
+
     def test_default_accept_uses_one_validated_read(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "journal"
