@@ -14,7 +14,6 @@ from tools.check_promotion import (
     _closed_npm_subprocess_environment,
     _default_runner,
     _resolve_promotion_npm_cache,
-    _run,
     main,
     run_promotion,
 )
