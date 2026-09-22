@@ -85,12 +85,10 @@ class SessionContextManager:
                 "session context manager construction is invalid"
             )
         try:
-            position = journal.position
+            entries = journal.replay(JournalCursor(0))
+            position = len(entries)
             if position < 2:
                 raise JournalConflictError("control journal prefix is incomplete")
-            entries = journal.replay(JournalCursor(0))
-            if len(entries) != position:
-                raise JournalConflictError("control journal changed")
             recovered = recover_control_host_state(
                 entries,
                 authority.envelope,
@@ -443,20 +441,15 @@ class SessionContextManager:
 
     def _refresh_position(self) -> None:
         try:
-            position = self._journal.position
-            if position < self._journal_position:
-                raise JournalConflictError("control journal position regressed")
-            if position > self._journal_position:
-                suffix = self._journal.replay(
-                    JournalCursor(self._journal_position)
-                )
+            suffix = self._journal.replay(JournalCursor(self._journal_position))
+            if suffix:
                 if any(
                     entry.record.kind.startswith("context.") for entry in suffix
                 ):
                     raise JournalConflictError(
                         "session context journal changed externally"
                     )
-                self._advance(position)
+                self._advance(suffix[-1].position)
         except (JournalConflictError, TypeError, ValueError):
             raise SessionContextManagerError(
                 "session context journal changed"

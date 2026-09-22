@@ -67,6 +67,55 @@ def _journal_file(root: Path) -> Path:
 
 
 class TestControlFileJournal(unittest.TestCase):
+    def test_default_accept_uses_one_validated_read(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "journal"
+            journal = FileCanonicalJournal.open(root, "session-1")
+            _bind(journal)
+            from asterion.control import journal as journal_module
+
+            with patch(
+                "asterion.control.journal._read_file_entries",
+                wraps=journal_module._read_file_entries,
+            ) as read_entries:
+                entry = journal.accept_event(_checkpoint())
+            self.assertEqual(entry.position, 3)
+            self.assertEqual(read_entries.call_count, 1)
+
+    def test_default_accept_rejects_prefix_mutation_and_truncation(self) -> None:
+        for mutation in ("prefix", "truncation"):
+            with (
+                self.subTest(mutation=mutation),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory) / "journal"
+                journal = FileCanonicalJournal.open(root, "session-1")
+                _bind(journal)
+                target = _journal_file(root)
+                content = target.read_bytes()
+                if mutation == "prefix":
+                    changed = content.replace(b"research.system", b"research.systfm")
+                else:
+                    changed = content[:-1]
+                target.write_bytes(changed)
+                with self.assertRaises(JournalConflictError):
+                    journal.accept_event(_checkpoint())
+                self.assertEqual(target.read_bytes(), changed)
+
+    def test_explicit_append_requires_a_numeric_position(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            journal = FileCanonicalJournal.open(Path(directory) / "journal", "session-1")
+            _bind(journal)
+            record = JournalRecord.fault_projected(
+                fault_id="fault-1",
+                code="provider-disconnected",
+                recoverable=True,
+                evidence_ref=None,
+            )
+            with self.assertRaises(JournalConflictError):
+                journal.append(None, record)  # type: ignore[arg-type]
+            self.assertEqual(journal.position, 2)
+
     def test_append_fsyncs_canonical_chain_and_reopens_exact_prefix(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "journal"

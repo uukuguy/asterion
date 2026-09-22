@@ -886,6 +886,9 @@ class MemoryCanonicalJournal:
             raise JournalConflictError("journal record session identity mismatches")
 
 
+_APPEND_CURRENT = object()
+
+
 class FileCanonicalJournal:
     """Descriptor-relative, hash-chained canonical JSONL journal."""
 
@@ -986,6 +989,14 @@ class FileCanonicalJournal:
                 pass
 
     def append(self, expected_position: int, record: JournalRecord) -> JournalEntry:
+        return self._append(expected_position, record)
+
+    def _append_current(self, record: JournalRecord) -> JournalEntry:
+        return self._append(_APPEND_CURRENT, record)
+
+    def _append(
+        self, expected_position: object, record: JournalRecord
+    ) -> JournalEntry:
         if not isinstance(record, JournalRecord):
             raise JournalConflictError("journal record is invalid")
         try:
@@ -1004,9 +1015,12 @@ class FileCanonicalJournal:
                     self._file_stamp = _file_stamp(os.fstat(file_fd))
                     return existing
                 if (
-                    isinstance(expected_position, bool)
-                    or not isinstance(expected_position, int)
-                    or expected_position != len(entries)
+                    expected_position is not _APPEND_CURRENT
+                    and (
+                        isinstance(expected_position, bool)
+                        or not isinstance(expected_position, int)
+                        or expected_position != len(entries)
+                    )
                 ):
                     raise JournalConflictError("journal append position conflicts")
                 _validate_prefix(len(entries), record)
@@ -1054,9 +1068,8 @@ class FileCanonicalJournal:
     ) -> JournalEntry:
         if not isinstance(command, ControlCommand):
             raise JournalConflictError("journal command is invalid")
-        position = self.position if expected_position is None else expected_position
-        return self.append(
-            position,
+        return self._append_optional(
+            expected_position,
             JournalRecord(
                 record_id=f"command:{command.command_id}",
                 kind="command.accepted",
@@ -1069,9 +1082,8 @@ class FileCanonicalJournal:
     ) -> JournalEntry:
         if not isinstance(event, ControlEvent):
             raise JournalConflictError("journal event is invalid")
-        position = self.position if expected_position is None else expected_position
-        return self.append(
-            position,
+        return self._append_optional(
+            expected_position,
             JournalRecord(
                 record_id=f"event:{event.event_id}",
                 kind="event.accepted",
@@ -1082,22 +1094,23 @@ class FileCanonicalJournal:
     def accept_client_intent(
         self, intent: object, *, expected_position: int | None = None
     ) -> JournalEntry:
-        position = self.position if expected_position is None else expected_position
-        return self.append(position, JournalRecord.client_intent_accepted(intent))
+        return self._append_optional(
+            expected_position, JournalRecord.client_intent_accepted(intent)
+        )
 
     def accept_client_observation(
         self, observation: Mapping[str, object], *, expected_position: int | None = None
     ) -> JournalEntry:
-        position = self.position if expected_position is None else expected_position
-        return self.append(
-            position, JournalRecord.client_observation_accepted(observation)
+        return self._append_optional(
+            expected_position, JournalRecord.client_observation_accepted(observation)
         )
 
     def accept_client_event(
         self, event: object, *, expected_position: int | None = None
     ) -> JournalEntry:
-        position = self.position if expected_position is None else expected_position
-        return self.append(position, JournalRecord.client_event_accepted(event))
+        return self._append_optional(
+            expected_position, JournalRecord.client_event_accepted(event)
+        )
 
     def accept_session_context_command(
         self,
@@ -1107,15 +1120,21 @@ class FileCanonicalJournal:
     ) -> JournalEntry:
         if not isinstance(command, SessionContextCommand):
             raise JournalConflictError("journal context command is invalid")
-        position = self.position if expected_position is None else expected_position
-        return self.append(
-            position,
+        return self._append_optional(
+            expected_position,
             JournalRecord(
                 record_id=f"context-command:{command.command_id}",
                 kind="context.command.accepted",
                 payload={"command": command.to_mapping()},
             ),
         )
+
+    def _append_optional(
+        self, expected_position: int | None, record: JournalRecord
+    ) -> JournalEntry:
+        if expected_position is None:
+            return self._append_current(record)
+        return self.append(expected_position, record)
 
     def _refresh(self, *, exclusive: bool, create: bool) -> None:
         try:
