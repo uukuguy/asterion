@@ -78,6 +78,80 @@ async fn response(
     serde_json::from_str(&line).expect("response json")
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn stdin_eof_cancels_in_flight_process_group() {
+    let (mut writer, mut lines, workspace) = start_service().await;
+    let parent_pid_path = workspace.join("parent.pid");
+    let descendant_pid_path = workspace.join("descendant.pid");
+    send(
+        &mut writer,
+        &json!({
+            "protocol": "dci.executor/v1",
+            "request_id": "eof-target",
+            "type": "execute",
+            "program_id": "python",
+            "arguments": [
+                "-c",
+                concat!(
+                    "import os,sys,time; ",
+                    "open(sys.argv[1], 'w').write(str(os.getpid())); ",
+                    "descendant=os.fork(); ",
+                    "(open(sys.argv[2], 'w').write(str(descendant)) if descendant else time.sleep(10)); ",
+                    "os._exit(0) if descendant else None"
+                ),
+                parent_pid_path.display().to_string(),
+                descendant_pid_path.display().to_string()
+            ],
+            "cwd": ".",
+            "deadline_ms": 5000,
+            "max_output_bytes": 1024
+        }),
+    )
+    .await;
+    let started = tokio::time::Instant::now();
+    while !descendant_pid_path.exists() {
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "fixture did not start"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let group: i32 = fs::read_to_string(parent_pid_path)
+        .expect("parent pid")
+        .parse()
+        .expect("pid integer");
+    let descendant: i32 = fs::read_to_string(descendant_pid_path)
+        .expect("descendant pid")
+        .parse()
+        .expect("pid integer");
+
+    writer.shutdown().await.expect("close request input");
+    drop(writer);
+    let terminal = timeout(Duration::from_secs(2), lines.next_line()).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let survived = unsafe { libc::kill(descendant, 0) == 0 };
+    unsafe {
+        libc::kill(-group, libc::SIGKILL);
+    }
+    fs::remove_dir_all(workspace).expect("cleanup");
+    let line = terminal
+        .expect("EOF cancellation timeout")
+        .expect("read response")
+        .expect("response line");
+    let result: Value = serde_json::from_str(&line).expect("response json");
+    assert_eq!(result["status"], "cancelled");
+    assert!(!survived, "EOF left descendant alive");
+    assert!(
+        timeout(Duration::from_secs(2), lines.next_line())
+            .await
+            .expect("service did not close")
+            .expect("read service EOF")
+            .is_none(),
+        "service emitted another response after EOF"
+    );
+}
+
 #[tokio::test]
 async fn service_keeps_input_responsive_and_emits_out_of_order_results() {
     let (mut writer, mut lines, workspace) = start_service().await;

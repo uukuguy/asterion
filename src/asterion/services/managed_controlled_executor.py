@@ -13,6 +13,9 @@ from asterion.services.controlled_executor_jsonl import TrustedValidationConfig
 from asterion.services.controlled_executor_jsonl import ControlledExecutorJsonlClient
 
 
+_SIDECAR_EOF_GRACE_SECONDS = 2
+
+
 @dataclass(frozen=True)
 class OperatorExecutorConfig:
     binary_path: Path
@@ -85,7 +88,7 @@ async def _reap_process(
         if process.stdin is not None:
             process.stdin.close()
         try:
-            await asyncio.wait_for(process.wait(), timeout=1)
+            await asyncio.wait_for(process.wait(), timeout=_SIDECAR_EOF_GRACE_SECONDS)
         except TimeoutError:
             process.terminate()
             try:

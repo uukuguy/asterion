@@ -155,6 +155,31 @@ class ManagedControlledExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create.await_args.kwargs["env"], {})
         self.assertTrue(process.stdin.closed)
 
+    async def test_shutdown_allows_bounded_sidecar_cleanup_after_stdin_eof(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            marker = root / "cleaned"
+            script = root / "sidecar.py"
+            script.write_text(
+                "import sys, time\n"
+                "sys.stdin.buffer.read()\n"
+                "time.sleep(1.2)\n"
+                f"open({str(marker)!r}, 'w').write('done')\n"
+            )
+            manager = ManagedControlledExecutor(
+                OperatorExecutorConfig(
+                    binary_path=Path(sys.executable),
+                    policy_path=script,
+                    validation_config=self.config().validation_config,
+                )
+            )
+
+            async with manager:
+                pass
+
+            self.assertTrue(marker.exists(), "sidecar cleanup was interrupted")
+            self.assertEqual(marker.read_text(), "done")
+
     async def test_immediate_exit_is_rejected_without_echoing_paths(self) -> None:
         process = FakeProcess(returncode=1)
         with patch(
