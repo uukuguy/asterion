@@ -52,23 +52,13 @@ _EXPECTED_PACKAGED_ASSEMBLIES = (
     "applications/dci_agent_lite/assemblies/dci-local-research.json",
     "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
     "applications/dci_agent_lite/assemblies/dci-research-capability.json",
-    "applications/prime/assemblies/prime-arc-agi-3-solving.json",
-    "applications/prime/assemblies/prime-bounded-autonomy.json",
-    "applications/prime/assemblies/prime-continual-improvement.json",
-    "applications/prime/assemblies/prime-ipython-coding.json",
-    "applications/prime/assemblies/prime-long-session-continuity.json",
-    "applications/prime/assemblies/prime-programmatic-long-context.json",
-    "applications/prime/assemblies/prime-recursive-workflow.json",
 )
 _EXPECTED_UNBOUND_ASSEMBLIES = (
     "applications/dci_agent_lite/assemblies/dci-local-research.json",
-    "applications/prime/assemblies/prime-arc-agi-3-solving.json",
-    "applications/prime/assemblies/prime-bounded-autonomy.json",
-    "applications/prime/assemblies/prime-continual-improvement.json",
-    "applications/prime/assemblies/prime-ipython-coding.json",
-    "applications/prime/assemblies/prime-long-session-continuity.json",
-    "applications/prime/assemblies/prime-programmatic-long-context.json",
-    "applications/prime/assemblies/prime-recursive-workflow.json",
+)
+_PACKAGE_OWNED_ASSEMBLY_DIRECTORIES = (
+    "applications/controlled_code/assemblies",
+    "applications/dci_agent_lite/assemblies",
 )
 _EXPECTED_BOUND_ASSEMBLIES = tuple(
     identity
@@ -249,7 +239,8 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         packaged_assemblies = tuple(
             sorted(
                 identity
-                for path in (package_root / "applications").glob("*/assemblies/*.json")
+                for directory in _PACKAGE_OWNED_ASSEMBLY_DIRECTORIES
+                for path in (package_root / directory).glob("*.json")
                 if (identity := package_identity(path)) is not None
             )
         )

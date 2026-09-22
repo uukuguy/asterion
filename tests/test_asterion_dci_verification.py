@@ -288,8 +288,14 @@ class InstalledAcceptanceTests(unittest.TestCase):
         self.assertEqual(len(applications), 4)
         self.assertEqual(len(bound_assemblies), 7)
         self.assertEqual(
-            len(tuple((package_root / "applications").glob("*/assemblies/*.json"))),
-            15,
+            sum(
+                len(tuple((package_root / directory).glob("*.json")))
+                for directory in (
+                    "applications/controlled_code/assemblies",
+                    "applications/dci_agent_lite/assemblies",
+                )
+            ),
+            8,
         )
         self.assertEqual(
             len(
@@ -326,7 +332,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
                 "composed-assemblies": {"actual": 7, "expected": 7},
                 "context-profiles": {"actual": 5, "expected": 5},
                 "executable-assemblies": {"actual": 7, "expected": 7},
-                "packaged-assemblies": {"actual": 15, "expected": 15},
+                "packaged-assemblies": {"actual": 8, "expected": 8},
                 "paper-benchmarks": {"actual": 13, "expected": 13},
                 "paper-scopes": {"actual": 17, "expected": 17},
                 "provider-requests": {"actual": 0, "expected": 0},
@@ -338,13 +344,6 @@ class InstalledAcceptanceTests(unittest.TestCase):
             (
                 "applications/dci_agent_lite/assemblies/"
                 "dci-local-research.json",
-                "applications/prime/assemblies/prime-arc-agi-3-solving.json",
-                "applications/prime/assemblies/prime-bounded-autonomy.json",
-                "applications/prime/assemblies/prime-continual-improvement.json",
-                "applications/prime/assemblies/prime-ipython-coding.json",
-                "applications/prime/assemblies/prime-long-session-continuity.json",
-                "applications/prime/assemblies/prime-programmatic-long-context.json",
-                "applications/prime/assemblies/prime-recursive-workflow.json",
             ),
         )
         self.assertTrue(
@@ -367,10 +366,6 @@ class InstalledAcceptanceTests(unittest.TestCase):
             patch(
                 "asterion.runtime.defaults._create_claude_code_runtime",
                 side_effect=AssertionError("acceptance constructed Claude"),
-            ),
-            patch(
-                "asterion.applications.prime.create_provider",
-                side_effect=AssertionError("acceptance loaded native provider"),
             ),
         ):
             result = verifier(acceptance_request())
@@ -772,7 +767,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         self.assertEqual(tuple(checks), ("installed-closure",))
         self.assertEqual(checks["installed-closure"].status, "FAIL")
 
-    def test_acceptance_rejects_same_count_native_p1_assembly_substitution(self) -> None:
+    def test_acceptance_ignores_cross_product_assembly_changes(self) -> None:
         verifier = _dci_verifier(repo_root=PROJECT, backend=ExplodingBackend())
         with tempfile.TemporaryDirectory() as temp_dir:
             package_root = Path(temp_dir) / "asterion"
@@ -793,13 +788,14 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             with patch("importlib.resources.files", side_effect=files):
                 result = verifier(acceptance_request())
 
+        self.assertEqual(result.status, "PASS")
         self.assert_named_layers(
-            result, packaged="FAIL", bound="PASS", composed="PASS", executable="PASS"
+            result, packaged="PASS", bound="PASS", composed="PASS", executable="PASS"
         )
         packaged = next(
             check for check in result.checks if check.check_id == "packaged-assemblies"
         )
-        self.assertEqual(dict(packaged.counts), {"actual": 15, "expected": 15})
+        self.assertEqual(dict(packaged.counts), {"actual": 8, "expected": 8})
 
     def test_acceptance_reports_independent_damage_layers(self) -> None:
         verifier = _dci_verifier(repo_root=PROJECT, backend=ExplodingBackend())
@@ -837,7 +833,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 for check in result.checks
                 if check.check_id == "packaged-assemblies"
             )
-            self.assertEqual(dict(packaged.counts)["actual"], 15)
+            self.assertEqual(dict(packaged.counts)["actual"], 8)
 
         with self.subTest(layer="bound"):
             installed = create_dci_provider()
