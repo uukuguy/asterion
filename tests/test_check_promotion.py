@@ -517,8 +517,11 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertEqual(len(protocol_smokes), 1)
         smoke_source = protocol_smokes[0][2]
         self.assertIn("'applications/*/assemblies/*.json'", smoke_source)
+        self.assertIn("PRIME_RELEASE_INVENTORY", smoke_source)
         self.assertIn("'capabilities/*/capability-package.json'", smoke_source)
         self.assertIn("'capabilities/*/manifests/*.json'", smoke_source)
+        self.assertIn("'capabilities/prime_*/payload/capability-package.json'", smoke_source)
+        self.assertIn("'capabilities/prime_*/payload/capabilities/*.json'", smoke_source)
         self.assertIn(
             "'capabilities/dci/payload/capability-package.json'",
             smoke_source,

@@ -102,6 +102,8 @@ from importlib import resources
 from pathlib import Path
 from types import MappingProxyType
 
+from asterion.applications.prime.inventory import PRIME_RELEASE_INVENTORY
+
 root = Path(str(resources.files('asterion')))
 schema_paths = (
     'asterion/schemas/agent-client/v1/intent.schema.json',
@@ -190,6 +192,30 @@ for suite_ref in descriptor_payload['benchmark_suites']:
     assert suite_path not in declared_suite_paths
     declared_suite_paths.add(suite_path)
     expected[suite_path] = 'asterion.benchmark-suite/v1'
+for application in PRIME_RELEASE_INVENTORY:
+    expected[application.assembly_identity] = 'asterion.application-assembly/v1'
+    package_root = (
+        'capabilities/'
+        + application.capability_package.package_id.replace('-', '_')
+        + '/payload'
+    )
+    descriptor_path = package_root + '/capability-package.json'
+    descriptor = json.loads((root / descriptor_path).read_text(encoding='utf-8'))
+    assert descriptor['package_id'] == application.capability_package.package_id
+    assert descriptor['version'] == application.capability_package.version
+    expected[descriptor_path] = 'asterion.capability-package/v1'
+    capability_paths = tuple((root / package_root / 'capabilities').glob('*.json'))
+    declared_ids = {
+        ref['capability_id'] for ref in descriptor['capabilities']
+    }
+    actual_ids = {
+        json.loads(path.read_text(encoding='utf-8'))['capability_id']
+        for path in capability_paths
+    }
+    assert len(capability_paths) == len(declared_ids) == len(actual_ids)
+    assert actual_ids == declared_ids
+    for path in capability_paths:
+        expected[str(path.relative_to(root))] = 'asterion.capability/v1'
 actual_paths = {
     str(path.relative_to(root))
     for pattern in (
@@ -199,6 +225,8 @@ actual_paths = {
         'capabilities/dci/payload/capability-package.json',
         'capabilities/dci/payload/benchmark-suites/*.json',
         'capabilities/dci/payload/capabilities/*.json',
+        'capabilities/prime_*/payload/capability-package.json',
+        'capabilities/prime_*/payload/capabilities/*.json',
     )
     for path in root.glob(pattern)
 }
