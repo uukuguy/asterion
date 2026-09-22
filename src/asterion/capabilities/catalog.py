@@ -9,7 +9,7 @@ import stat
 import sys
 from collections.abc import Iterable, Mapping
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
@@ -40,6 +40,7 @@ class CatalogEntry:
     ref: CapabilityRef
     source: Path
     manifest: Mapping[str, object]
+    _document_bytes: bytes | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -111,9 +112,10 @@ def discover_capabilities(roots: Iterable[Path]) -> CapabilityCatalog:
                 if Path(name).suffix != ".json":
                     continue
                 source = root.path / name
-                manifest = _read_manifest(root, name, source)
-                if manifest is None:
+                document = _read_manifest(root, name, source)
+                if document is None:
                     continue
+                manifest, document_bytes = document
                 capability_id = manifest["capability_id"]
                 version = manifest["version"]
                 assert isinstance(capability_id, str) and isinstance(version, str)
@@ -128,6 +130,7 @@ def discover_capabilities(roots: Iterable[Path]) -> CapabilityCatalog:
                         ref=ref,
                         source=source,
                         manifest=_freeze_mapping(manifest),
+                        _document_bytes=document_bytes,
                     )
                 )
     return CapabilityCatalog(
@@ -258,7 +261,7 @@ def _read_manifest(
     root: _PinnedRoot,
     name: str,
     source: Path,
-) -> Mapping[str, object] | None:
+) -> tuple[Mapping[str, object], bytes] | None:
     try:
         details = os.stat(name, dir_fd=root.fd, follow_symlinks=False)
     except OSError as error:
@@ -275,9 +278,10 @@ def _read_manifest(
         opened = os.fstat(descriptor)
         if not stat.S_ISREG(opened.st_mode):
             return None
-        with os.fdopen(descriptor, encoding="utf-8") as stream:
+        with os.fdopen(descriptor, "rb") as stream:
             descriptor = -1
-            manifest = json.load(stream)
+            document_bytes = stream.read()
+            manifest = json.loads(document_bytes.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         if isinstance(error, OSError) and error.errno == errno.ELOOP:
             raise CapabilityCatalogError(
@@ -291,7 +295,7 @@ def _read_manifest(
     if not isinstance(manifest, dict):
         raise CapabilityCatalogError(f"capability document is invalid: {source}")
     try:
-        return validate_capability_manifest(manifest)
+        return validate_capability_manifest(manifest), document_bytes
     except CapabilityProtocolError as error:
         raise CapabilityCatalogError(f"capability document is invalid: {source}") from error
 

@@ -335,6 +335,23 @@ def _compose_application(
                 raise ApplicationProviderError(
                     "installed application package authority is invalid"
                 )
+            if package._catalog_payload_bytes is not None:
+                if len(package.catalog_roots) != 1:
+                    raise ApplicationProviderError(
+                        "installed application package authority is invalid"
+                    )
+                root = _canonical_resource(package.catalog_roots[0], kind="directory")
+                discovered_bytes = tuple(
+                    sorted(
+                        (entry.source.name, entry._document_bytes)
+                        for entry in catalog.entries
+                        if entry.source.parent == root
+                    )
+                )
+                if discovered_bytes != package._catalog_payload_bytes:
+                    raise ApplicationProviderError(
+                        "installed application package authority is invalid"
+                    )
             if any(
                 binding.capability_ref not in owned_refs
                 for binding in package.implementations

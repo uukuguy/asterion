@@ -96,6 +96,9 @@ class InstalledCapabilityPackage:
     _owned_capability_refs: frozenset[CapabilityRef] | None = field(
         default=None, init=False, repr=False, compare=False
     )
+    _catalog_payload_bytes: tuple[tuple[str, bytes], ...] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         _validate_package_ref(self.package_ref)
@@ -145,6 +148,16 @@ def bind_prepared_package_authority(
     object.__setattr__(
         snapshot, "_owned_capability_refs", frozenset(payload.manifest.capabilities)
     )
+    try:
+        capability_root = payload.resource_root.joinpath("capabilities")
+        documents = tuple(
+            sorted((child.name, child.read_bytes()) for child in capability_root.iterdir())
+        )
+    except Exception:
+        raise CapabilityPackageModelError(
+            "capability package authority is invalid"
+        ) from None
+    object.__setattr__(snapshot, "_catalog_payload_bytes", documents)
     return snapshot
 
 

@@ -166,6 +166,37 @@ class CapabilityCompositionTests(unittest.TestCase):
         with self.assertRaises(CapabilityCompositionError):
             compose_capabilities(manifests)
 
+    def test_rejects_self_consumed_outputs(self) -> None:
+        cases = (
+            capability(
+                "self.event",
+                kind="workflow",
+                emits_events=["loop.done"],
+                consumes_events=["loop.done"],
+            ),
+            capability(
+                "self.artifact",
+                kind="workflow",
+                produces_artifacts=["text/plain"],
+                consumes_artifacts=["text/plain"],
+            ),
+        )
+        for manifest in cases:
+            with self.subTest(capability_id=manifest["capability_id"]):
+                with self.assertRaises(CapabilityCompositionError):
+                    compose_capabilities((manifest,))
+
+        composition = compose_capabilities(
+            (
+                capability(
+                    "self.capability",
+                    provides_capabilities=["self.cap"],
+                    requires_capabilities=["self.cap"],
+                ),
+            )
+        )
+        self.assertEqual(composition.capability_ids, ("self.capability",))
+
 
 if __name__ == "__main__":
     unittest.main()
