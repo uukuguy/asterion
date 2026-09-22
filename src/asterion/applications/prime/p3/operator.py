@@ -38,7 +38,23 @@ import sys
 from asterion.agents.prime.state import PrimeBackendIdentity
 from asterion.agents.prime.store import private_root_identity
 from asterion.applications.prime.p3.oracle import P3Oracle
+from asterion.applications.prime.p3.host import (
+    P3AdmissionRefused,
+    P3ChildRequest,
+    P3Finalization,
+    P3RootResult,
+)
 from asterion.applications.prime.p3.receipt import seal as seal_receipt
+from asterion.applications.prime.p3.runtime_binding import (
+    P3_RUNTIME_OPTIONS,
+    build_p3_runtime,
+)
+from asterion.applications.prime.provider import create_prime_recursive_workflow_provider
+from asterion.applications.provider import compose_installed_provider
+from asterion.capabilities.prime_recursive_workflow_native.provider import (
+    P3_INPUT_PRESET,
+    create_prime_recursive_workflow_native_package,
+)
 from asterion.applications.prime.services import (
     ChildAdmissionRefused,
     ChildRunnerHostService,
@@ -47,6 +63,8 @@ from asterion.applications.prime.services import (
 from asterion.services.progress import NOOP_HOST_PROGRESS_REPORTER
 from asterion.services.presentation import NOOP_HOST_PRESENTATION_SINK
 from asterion.services.registry import HostServiceFactoryContext
+from asterion.runner.composed import run_composed_application
+from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
 
 
 _OPERATOR_ROOT_ENV = "ASTERION_PRIME_OPERATOR_ROOT"
@@ -260,6 +278,10 @@ class _AlwaysCancelled:
         return True
 
 
+class _FakeWorkerBoundary:
+    """Operator-owned marker for this preset's deterministic worker."""
+
+
 # ---------------------------------------------------------------------------
 # Operator resources — host services + identity the operator owns
 # ---------------------------------------------------------------------------
@@ -342,7 +364,7 @@ async def _build_resources(preflight: _Preflight) -> _OperatorResources:
         child_identity=child_identity,
         child_runner=child_runner,
         p3_oracle=p3_oracle,
-        pi_extension=None,
+        pi_extension=_FakeWorkerBoundary(),
         private_trace=None,
     )
 
@@ -465,6 +487,56 @@ async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
         refusal_reason=None,
         receipt_sha256=receipt.sha256(),
     )
+
+
+class _OperatorP3RuntimeHost:
+    """Connect the selected runtime to the operator's actual child workflow."""
+
+    def __init__(self, resources: _OperatorResources) -> None:
+        self._resources = resources
+        self.result: P3PublicResult | None = None
+
+    def validate_runtime_services(self, services: Mapping[str, object]) -> None:
+        if set(services) != {
+            "prime.child-runner", "prime.p3-oracle", "prime.pi-extension",
+            "prime.private-trace", "prime.session-backend",
+        }:
+            raise P3OperatorError()
+
+    async def run_root(
+        self,
+        *,
+        parent_run_id: str,
+        child_request: P3ChildRequest | None,
+        signal: object,
+    ) -> P3RootResult:
+        if (
+            parent_run_id != self._resources.root_run_id
+            or child_request is not None
+            or getattr(signal, "cancelled", True)
+            or self.result is not None
+        ):
+            raise P3OperatorError()
+        result = await _drive_success(self._resources)
+        self.result = result
+        return P3RootResult(
+            root_run_id=result.root_run_id,
+            root_generation=result.root_generation,
+            child_run_id=result.child_run_id,
+            child_generation=result.child_generation,
+            child_result_sha256=result.child_result_sha256,
+            joined_result_sha256=result.joined_result_sha256,
+            depth_reached=result.depth_reached,
+            refusal_reason=result.refusal_reason,
+        )
+
+    def report_admission_refused(self, *, refusal: P3AdmissionRefused) -> None:
+        raise P3OperatorError()
+
+    async def wait_finalization(self, *, signal: object) -> P3Finalization:
+        if self.result is None or getattr(signal, "cancelled", True):
+            raise P3OperatorError()
+        return P3Finalization("completed", self.result.receipt_sha256)
 
 
 async def _drive_limits_async(resources: _OperatorResources) -> list[P3LimitsRecord]:
@@ -609,6 +681,52 @@ async def _drive_cancellation_scenario(
 # ---------------------------------------------------------------------------
 
 
+async def _invoke_composed_success(resources: _OperatorResources) -> P3PublicResult:
+    package = create_prime_recursive_workflow_native_package()
+    provider = compose_installed_provider(
+        create_prime_recursive_workflow_provider(),
+        runtime_factories=RuntimeFactoryRegistry(()),
+        installed_packages=(package,),
+    )
+    application = provider.applications[0]
+    assembly = application.assemblies[0]
+    session_backend = _OperatorP3RuntimeHost(resources)
+    host_services = {
+        "prime.child-runner": resources.child_runner,
+        "prime.p3-oracle": resources.p3_oracle,
+        "prime.pi-extension": resources.pi_extension,
+        "prime.private-trace": resources.private_trace,
+        "prime.session-backend": session_backend,
+    }
+    runtime = build_p3_runtime(
+        RuntimeFactoryContext(
+            "prime-applications",
+            "prime.recursive-workflow",
+            "1.0.0",
+            "asterion.prime",
+            assembly.path,
+            P3_RUNTIME_OPTIONS,
+            host_services,
+        )
+    )
+    result = await run_composed_application(
+        assembly.plan,
+        implementations=application.implementations,
+        runtime=runtime,
+        run_id=resources.root_run_id,
+        input_text=P3_INPUT_PRESET,
+        host_services=host_services,
+    )
+    public = session_backend.result
+    if (
+        public is None
+        or len(result.artifacts) != 1
+        or result.artifacts[0]["value"]["receipt_sha256"] != public.receipt_sha256
+    ):
+        raise P3OperatorError()
+    return public
+
+
 async def _invoke_composed_root_async(
     resources: _OperatorResources,
 ) -> list[dict[str, object]]:
@@ -620,7 +738,7 @@ async def _invoke_composed_root_async(
     """
 
     if resources.mode == "success":
-        result = await _drive_success(resources)
+        result = await _invoke_composed_success(resources)
         return [asdict(result)]
     records = await _drive_limits_async(resources)
     return [asdict(record) for record in records]

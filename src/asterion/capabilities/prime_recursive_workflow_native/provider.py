@@ -5,11 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from asterion.capability_sdk import (
+    CapabilityImplementationBinding,
     CapabilityPackageRef,
     CapabilityRef,
     InstalledCapabilityPackage,
     open_portable_payload,
 )
+from asterion.capabilities.prime_native_receipt import PrimeNativeReceiptImplementation
 
 
 PACKAGE_REF = CapabilityPackageRef("prime-recursive-workflow-native", "1.0.0")
@@ -33,7 +35,19 @@ def create_prime_recursive_workflow_native_package() -> InstalledCapabilityPacka
         source_kind="builtin",
         catalog_roots=(payload_root / "capabilities",),
         benchmark_suite_paths=(),
-        implementations=(),  # operator-driven; no synchronous implementation
+        implementations=(
+            CapabilityImplementationBinding(
+                CAPABILITY_REF,
+                PrimeNativeReceiptImplementation(
+                    CAPABILITY_REF,
+                    P3_INPUT_PRESET,
+                    P3_ARTIFACT_ID,
+                    P3_RECEIPT_MEDIA_TYPE,
+                    "p3-native",
+                    60_000,
+                ),
+            ),
+        ),
         benchmark_bindings=(),
     )
 
