@@ -14,6 +14,7 @@ from asterion.capability_packages import (
 )
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.applications.first_party_packages import builtin_capability_registrations
+from asterion.services.diagnostics import MemoryDiagnosticSink
 
 
 PACKAGE = CapabilityPackageRef("dci", "1.0.0")
@@ -88,6 +89,24 @@ def payload() -> PortableCapabilityPayload:
 
 
 class CapabilitySourcePreparationTests(unittest.TestCase):
+    def test_private_diagnostic_links_redacted_source_failure(self) -> None:
+        source = RecordingSource("selected", payload())
+        source.discover_metadata = lambda: (_ for _ in ()).throw(
+            RuntimeError("SECRET-PATH")
+        )  # type: ignore[method-assign]
+        sink = MemoryDiagnosticSink()
+
+        with self.assertRaises(ValueError) as raised:
+            prepare_capability_source(PACKAGE, (source,), None, diagnostics=sink)
+
+        self.assertEqual(str(raised.exception), "capability source preparation failed")
+        diagnostic_id = raised.exception.diagnostic_id
+        self.assertIsNotNone(diagnostic_id)
+        record = sink.get(diagnostic_id)
+        self.assertEqual(record.stage, "package.prepare")
+        self.assertEqual(record.exception_type, "RuntimeError")
+        self.assertNotIn("SECRET-PATH", repr(record))
+
     def test_invalid_request_boundaries_fail_before_discovery(self) -> None:
         malformed_lock = object.__new__(CapabilitySourceLock)
         object.__setattr__(malformed_lock, "entries", (object(),))

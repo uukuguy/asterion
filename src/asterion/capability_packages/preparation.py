@@ -19,10 +19,20 @@ from asterion.capability_packages.protocol import (
 )
 from asterion.capability_packages.resolution import resolve_capability_source
 from asterion.capability_packages.sources.base import CapabilityPackageSource
+from asterion.services.diagnostics import DiagnosticSink, capture_failure
 
 
 class CapabilitySourcePreparationError(ValueError):
     """Raised when host-owned source preparation or loading fails closed."""
+
+    def __init__(
+        self,
+        message: str = "capability source preparation failed",
+        *,
+        diagnostic_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.diagnostic_id = diagnostic_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,10 +71,12 @@ def prepare_capability_source(
     package_ref: CapabilityPackageRef,
     sources: Sequence[CapabilityPackageSource],
     lock: CapabilitySourceLock | None,
+    *,
+    diagnostics: DiagnosticSink | None = None,
 ) -> PreparedCapabilityPackage:
     """Discover, select, validate, and snapshot one source without loading it."""
 
-    failed = False
+    diagnostic_id: str | None = None
     prepared: PreparedCapabilityPackage | None = None
     try:
         source_values = _validate_request(package_ref, sources, lock)
@@ -82,19 +94,30 @@ def prepare_capability_source(
         )
         resolve_capability_source(package_ref, (normalized,), lock)
         prepared = PreparedCapabilityPackage(normalized, payload, original, source)
-    except Exception:
-        failed = True
-    if failed or prepared is None:
-        raise CapabilitySourcePreparationError("capability source preparation failed")
+    except Exception as error:
+        diagnostic_id = capture_failure(
+            diagnostics,
+            stage="package.prepare",
+            error=error,
+            subject_id=(
+                f"{package_ref.package_id}@{package_ref.version}"
+                if isinstance(package_ref, CapabilityPackageRef)
+                else "invalid-package"
+            ),
+        )
+    if prepared is None:
+        raise CapabilitySourcePreparationError(diagnostic_id=diagnostic_id)
     return prepared
 
 
 def load_prepared_capability_source(
     prepared: PreparedCapabilityPackage,
+    *,
+    diagnostics: DiagnosticSink | None = None,
 ) -> InstalledCapabilityPackage:
     """Revalidate and load exactly the source selected during preparation."""
 
-    failed = False
+    diagnostic_id: str | None = None
     installed: InstalledCapabilityPackage | None = None
     try:
         if type(prepared) is not PreparedCapabilityPackage:
@@ -118,15 +141,29 @@ def load_prepared_capability_source(
             or installed.payload_sha256 != prepared.candidate.payload_sha256
         ):
             _fail()
-    except Exception:
-        failed = True
-    if failed or installed is None:
-        raise CapabilitySourcePreparationError("capability source preparation failed")
+    except Exception as error:
+        diagnostic_id = capture_failure(
+            diagnostics,
+            stage="package.load",
+            error=error,
+            subject_id=(
+                f"{prepared.candidate.package_ref.package_id}@{prepared.candidate.package_ref.version}"
+                if isinstance(prepared, PreparedCapabilityPackage)
+                else "invalid-package"
+            ),
+        )
+    if installed is None:
+        raise CapabilitySourcePreparationError(diagnostic_id=diagnostic_id)
     try:
         return bind_prepared_package_authority(installed, prepared.payload)
-    except Exception:
+    except Exception as error:
         raise CapabilitySourcePreparationError(
-            "capability source preparation failed"
+            diagnostic_id=capture_failure(
+                diagnostics,
+                stage="package.load",
+                error=error,
+                subject_id=f"{prepared.candidate.package_ref.package_id}@{prepared.candidate.package_ref.version}",
+            )
         ) from None
 
 

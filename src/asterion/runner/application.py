@@ -18,6 +18,10 @@ from asterion.runtime.protocol import ProtocolError, validate_event_stream
 class ApplicationRunError(RuntimeError):
     """Raised when an application cannot produce one valid normalized result."""
 
+    def __init__(self, message: str, *, diagnostic_id: str | None = None) -> None:
+        super().__init__(message)
+        self.diagnostic_id = diagnostic_id
+
 
 @dataclass(frozen=True)
 class ApplicationRunResult:

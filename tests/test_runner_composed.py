@@ -21,6 +21,7 @@ from asterion.pathlight import MemoryPathlightRecorder
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
+from asterion.services.diagnostics import MemoryDiagnosticSink
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -113,6 +114,12 @@ class RaisingRecorder:
         return None
 
 
+class RaisingDiagnosticSink:
+    def record(self, diagnostic: object) -> None:
+        del diagnostic
+        raise RuntimeError("SECRET-SINK-FAILURE")
+
+
 class InvalidTraceRecorder:
     trace_id = "not-a-uuid"
 
@@ -178,6 +185,42 @@ def plan(
 
 
 class ComposedRunnerPathlightTests(unittest.IsolatedAsyncioTestCase):
+    async def test_diagnostic_sink_failure_does_not_mask_execution_failure(self) -> None:
+        with self.assertRaises(ApplicationRunError) as captured:
+            await run_composed_application(
+                plan(),
+                implementations=((CapabilityRef("trace.capability", "1.0.0"), FailingImplementation()),),
+                runtime=FixtureRuntime(),
+                run_id="run-1",
+                input_text="SECRET-INPUT",
+                host_services={},
+                diagnostics=RaisingDiagnosticSink(),
+            )
+        self.assertEqual(str(captured.exception), "application capability execution failed")
+        self.assertIsNone(captured.exception.diagnostic_id)
+
+    async def test_capability_failure_has_private_diagnostic_without_secret(self) -> None:
+        sink = MemoryDiagnosticSink()
+        with self.assertRaises(ApplicationRunError) as captured:
+            await run_composed_application(
+                plan(),
+                implementations=((CapabilityRef("trace.capability", "1.0.0"), FailingImplementation()),),
+                runtime=FixtureRuntime(),
+                run_id="SENTINEL-PRIVATE-RUN",
+                input_text="SECRET-INPUT",
+                host_services={},
+                diagnostics=sink,
+            )
+        error = captured.exception
+        self.assertEqual(str(error), "application capability execution failed")
+        self.assertIsNotNone(error.diagnostic_id)
+        record = sink.get(error.diagnostic_id)
+        self.assertEqual(record.stage, "capability.execute")
+        self.assertEqual(record.exception_type, "RuntimeError")
+        self.assertEqual(len(record.subject_sha256), 64)
+        self.assertNotIn("SECRET", repr(record))
+        self.assertNotIn("SENTINEL", repr(record))
+
     async def test_trace_links_available_evaluation_and_artifact_identity(self) -> None:
         recorder = MemoryPathlightRecorder(TRACE_ID)
         p = plan(
