@@ -2792,3 +2792,4 @@
 - 18:21 921200d6 将 Prime 精确清单纳入隔离 wheel 资源验证，修复 promotion 清单漏项。
 - 18:26 cbf4ccab 为隔离 wheel 的 DCI 描述验证安装声明的 extra，修复缺少 dotenv 导致的加载失败。
 - 18:31 最终验证：make check 2990 项通过、2 项跳过；promotion 隔离 25 命令通过，无 provider 操作。
+- 18:32 e35461d7 收口评审证据、状态索引与恢复边界，防止历史完成记录被误作当前能力。
