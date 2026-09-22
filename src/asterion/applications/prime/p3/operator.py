@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 from hashlib import sha256
 import json
@@ -61,6 +61,7 @@ from asterion.applications.prime.services import (
     create_child_runner_host_service,
 )
 from asterion.services.progress import NOOP_HOST_PROGRESS_REPORTER
+from asterion.services.diagnostics import DiagnosticSink, capture_failure
 from asterion.services.presentation import NOOP_HOST_PRESENTATION_SINK
 from asterion.services.registry import HostServiceFactoryContext
 from asterion.runner.composed import run_composed_application
@@ -301,6 +302,7 @@ class _OperatorResources:
     p3_oracle: P3Oracle
     pi_extension: object
     private_trace: object
+    diagnostics: DiagnosticSink | None = None
 
 
 async def _open_child_runner() -> ChildRunnerHostService:
@@ -443,9 +445,18 @@ async def _drive_success(
         raise asyncio.CancelledError()
 
     # Stage 2: deterministic fake-worker payload.
-    child_result_sha = _fake_worker_payload_sha(
-        mode=resources.mode, depth=depth, run_id=child_run_id
-    )
+    try:
+        child_result_sha = _fake_worker_payload_sha(
+            mode=resources.mode, depth=depth, run_id=child_run_id
+        )
+    except Exception as error:
+        capture_failure(
+            resources.diagnostics,
+            stage="prime.worker",
+            error=error,
+            subject_id=child_run_id,
+        )
+        raise
     # Stage 3: close out the admission slot.
     resources.child_runner.record_child_cost(
         Decimal("0.05"), child_run_id=child_run_id
@@ -462,16 +473,25 @@ async def _drive_success(
         depth_reached=depth,
     )
     # Stage 5: oracle check.
-    resources.p3_oracle.check(
-        root_run_id=root_run_id,
-        root_generation=root_generation,
-        child_run_id=child_run_id,
-        child_generation=child_generation,
-        child_result_sha256=child_result_sha,
-        joined_result_sha256=joined_sha,
-        depth_reached=depth,
-        refusal_reason=None,
-    )
+    try:
+        resources.p3_oracle.check(
+            root_run_id=root_run_id,
+            root_generation=root_generation,
+            child_run_id=child_run_id,
+            child_generation=child_generation,
+            child_result_sha256=child_result_sha,
+            joined_result_sha256=joined_sha,
+            depth_reached=depth,
+            refusal_reason=None,
+        )
+    except Exception as error:
+        capture_failure(
+            resources.diagnostics,
+            stage="prime.oracle",
+            error=error,
+            subject_id=root_run_id,
+        )
+        raise
     # Stage 6: receipt seal.
     receipt = seal_receipt(
         root_run_id=root_run_id,
@@ -770,6 +790,8 @@ def _emit(records: list[dict[str, object]]) -> None:
 
 async def _run_async(
     environment: Mapping[str, str],
+    *,
+    diagnostics: DiagnosticSink | None = None,
 ) -> tuple[int, list[dict[str, object]]]:
     """Top-level async driver used by the sync entry points.
 
@@ -783,6 +805,8 @@ async def _run_async(
         return 2, []
     try:
         resources = await _build_resources(preflight)
+        if diagnostics is not None:
+            resources = replace(resources, diagnostics=diagnostics)
         records = await _invoke_composed_root_async(resources)
     except P3OperatorError:
         return 2, []
@@ -791,13 +815,15 @@ async def _run_async(
     return 0, records
 
 
-def run_success_path(environment: Mapping[str, str]) -> int:
+def run_success_path(
+    environment: Mapping[str, str], *, diagnostics: DiagnosticSink | None = None
+) -> int:
     """Run the operator in ``success`` mode and emit one JSON record.
 
     Returns 0 on success, 2 on preflight failure, 1 on operator error.
     """
 
-    rc, records = asyncio.run(_run_async(environment))
+    rc, records = asyncio.run(_run_async(environment, diagnostics=diagnostics))
     if rc != 0:
         return rc
     _emit(records)

@@ -49,10 +49,15 @@ from asterion.control.session_context import (
 from asterion.runtime.host import CancellationSignal, RunRequest
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
 from asterion.runtimes.pi_rpc import PiRpcCompactResult, PiRpcEvent, PiRpcSession
+from asterion.services.diagnostics import DiagnosticSink, capture_failure
 
 
 class PrimeBackendError(RuntimeError):
     """Fixed errors never interpolate private payloads or upstream exceptions."""
+
+    def __init__(self, message: str, *, diagnostic_id: str | None = None) -> None:
+        super().__init__(message)
+        self.diagnostic_id = diagnostic_id
 
 
 class PrimeBackendBudgetError(PrimeBackendError):
@@ -262,6 +267,7 @@ class PrimeSessionBackend:
         witness: PrimeContextWitnessSession | None = None,
         tool_executor: PrimeToolExecutor | None = None,
         compaction_instructions: Mapping[str, str] | None = None,
+        diagnostics: DiagnosticSink | None = None,
     ) -> None:
         try:
             if type(identity) is not PrimeBackendIdentity or store.identity != identity:
@@ -333,6 +339,7 @@ class PrimeSessionBackend:
             tool_executor,
         )
         self._compaction_instructions = dict(compaction_instructions or {})
+        self._diagnostics = diagnostics
         self._authority_id = authority_id
         self._authority_revision = 0
         self._budget: RemainingBudget | None = None
@@ -794,9 +801,17 @@ class PrimeSessionBackend:
             except asyncio.CancelledError:
                 self._fence(request.command_id)
                 raise
-            except Exception:
+            except Exception as error:
                 self._fence(request.command_id)
-                raise PrimeBackendError("Prime backend recovery required") from None
+                diagnostic_id = capture_failure(
+                    self._diagnostics,
+                    stage="prime.prompt",
+                    error=error,
+                    subject_id=request.command_id,
+                )
+                raise PrimeBackendError(
+                    "Prime backend recovery required", diagnostic_id=diagnostic_id
+                ) from None
             finally:
                 self._active_task = None
 

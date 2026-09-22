@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
 
+from asterion.services.diagnostics import MemoryDiagnosticSink
+
 from asterion.runtimes.pi_rpc import (
     CancellationSignal,
     PiRpcConfig,
@@ -144,7 +146,8 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         self.temporary.cleanup()
 
     def make_session(
-        self, *, deadline_seconds: float = 2.0, compact_events: bool = False
+        self, *, deadline_seconds: float = 2.0, compact_events: bool = False,
+        diagnostics=None,
     ) -> PiRpcSession:
         return PiRpcSession(
             PiRpcConfig(
@@ -153,7 +156,8 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
                 {},
                 deadline_seconds=deadline_seconds,
                 compact_events=compact_events,
-            )
+            ),
+            diagnostics=diagnostics,
         )
 
     async def test_prompt_waits_for_settlement_after_agent_end(self) -> None:
@@ -230,6 +234,25 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
                             await rpc.prompt("never-sent", signal=NeverCancelled(), on_event=lambda event: None)
                     finally:
                         await rpc.close()
+
+    async def test_prompt_failure_records_private_diagnostic_without_payload(self) -> None:
+        sink = MemoryDiagnosticSink()
+        rpc = self.make_session(deadline_seconds=0.3, diagnostics=sink)
+        await rpc.open(signal=NeverCancelled())
+        try:
+            with self.assertRaises(RuntimeError) as caught:
+                await rpc.prompt(
+                    "assistant-error", signal=NeverCancelled(), on_event=lambda event: None
+                )
+            diagnostic_id = rpc.last_diagnostic_id
+            self.assertIsNotNone(diagnostic_id)
+            record = sink.get(diagnostic_id)
+            self.assertEqual(record.stage, "pi.prompt")
+            self.assertNotIn("PRIVATE-ERROR", repr(record))
+            self.assertNotIn("assistant-error", repr(record))
+            self.assertNotIn("PRIVATE-ERROR", str(caught.exception))
+        finally:
+            await rpc.close()
 
     async def test_compact_semantics_match_in_both_projection_modes(self) -> None:
         for compact_events in (False, True):

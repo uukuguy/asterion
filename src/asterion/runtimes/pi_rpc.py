@@ -20,6 +20,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
+from asterion.services.diagnostics import DiagnosticSink, capture_failure
+
 
 _MAX_STDOUT_LINE_BYTES = 1024 * 1024
 _MAX_STDOUT_BYTES = 4 * 1024 * 1024
@@ -494,12 +496,15 @@ class PiRpcSession:
         *,
         _popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
         _thread_factory: Callable[..., threading.Thread] = threading.Thread,
+        diagnostics: DiagnosticSink | None = None,
     ) -> None:
         if type(config) is not PiRpcConfig:
             raise TypeError("Pi RPC config is invalid")
         self.config = config
         self._popen = _popen
         self._thread_factory = _thread_factory
+        self._diagnostics = diagnostics
+        self._last_diagnostic_id: str | None = None
         self._state: _ProcessState | None = None
         self._last_stderr = b""
         self._last_failure: str | None = None
@@ -577,6 +582,10 @@ class PiRpcSession:
     @property
     def last_failure(self) -> str | None:
         return self._last_failure
+
+    @property
+    def last_diagnostic_id(self) -> str | None:
+        return self._last_diagnostic_id
 
     def next_id(self) -> str:
         self._request_id += 1
@@ -1087,6 +1096,7 @@ class PiRpcSession:
         if self._command_lock.locked():
             raise RuntimeError("Pi RPC session already has an active command")
         async with self._command_lock:
+            self._last_diagnostic_id = None
             self._check_command_ready("prompt", signal)
             absolute_deadline = self._session_deadline
             assert absolute_deadline is not None
@@ -1168,14 +1178,23 @@ class PiRpcSession:
                     absolute_deadline=absolute_deadline,
                 )
             )
-            await self._await_driver(
-                driver_task,
-                local_cancel=local_cancel,
-                request_written=request_written,
-            )
-            if state is not None and state.output_error is not None:
-                self._lifecycle_poisoned = True
-                raise state.output_error
+            try:
+                await self._await_driver(
+                    driver_task,
+                    local_cancel=local_cancel,
+                    request_written=request_written,
+                )
+                if state is not None and state.output_error is not None:
+                    self._lifecycle_poisoned = True
+                    raise state.output_error
+            except Exception as error:
+                self._last_diagnostic_id = capture_failure(
+                    self._diagnostics,
+                    stage="pi.prompt",
+                    error=error,
+                    subject_id=request_id,
+                )
+                raise
             final_text = (
                 bytes(state.compact_final_text).decode("utf-8", "ignore")
                 if self.config.compact_events and state is not None
@@ -1369,6 +1388,7 @@ def build_rpc_session(
     deadline_seconds: float,
     inherited_fds: tuple[int, ...] = (),
     compact_events: bool = False,
+    diagnostics: DiagnosticSink | None = None,
 ) -> PiRpcSession:
     """Construct one session from neutral launch material, Pi-side."""
 
@@ -1380,7 +1400,8 @@ def build_rpc_session(
             deadline_seconds=deadline_seconds,
             inherited_fds=inherited_fds,
             compact_events=compact_events,
-        )
+        ),
+        diagnostics=diagnostics,
     )
 
 

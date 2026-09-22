@@ -32,6 +32,7 @@ from asterion.runtimes.pi_rpc import (
     PiRpcEvent,
     PiRpcResult,
 )
+from asterion.services.diagnostics import MemoryDiagnosticSink
 from tests.test_asterion_prime_context import LAUNCH, material, receive, send
 
 
@@ -372,6 +373,20 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PrimeBackendError):
             await self.backend.execute_prompt(self.request())
         self.assertEqual(self.rpc.calls, 1)
+
+    async def test_prompt_failure_records_private_diagnostic_and_safe_id(self):
+        sink = MemoryDiagnosticSink()
+        self.backend._diagnostics = sink
+        self.rpc.failure = RuntimeError("PRIVATE-PROMPT-PAYLOAD")
+        with self.assertRaises(PrimeBackendError) as caught:
+            await self.backend.execute_prompt(self.request())
+        self.assertEqual(str(caught.exception), "Prime backend recovery required")
+        diagnostic_id = caught.exception.diagnostic_id
+        self.assertIsNotNone(diagnostic_id)
+        record = sink.get(diagnostic_id)
+        self.assertEqual(record.stage, "prime.prompt")
+        self.assertEqual(record.exception_type, "PrimeBackendError")
+        self.assertNotIn("PRIVATE-PROMPT-PAYLOAD", repr(record))
 
     async def test_authority_snapshots_and_read_only_context(self):
         self.backend.sync_authority_snapshot(
