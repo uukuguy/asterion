@@ -496,7 +496,8 @@ class PromotionCheckTests(unittest.TestCase):
             if command[:3] == ("uv", "pip", "install")
         )
         self.assertEqual(len(installed_wheel), 1)
-        self.assertFalse(any("[dci]" in item or "[prime]" in item for item in installed_wheel[0]))
+        self.assertTrue(any(item.endswith(".whl[dci]") for item in installed_wheel[0]))
+        self.assertFalse(any("[prime]" in item for item in installed_wheel[0]))
         wheel_smoke = next(
             command
             for command in commands

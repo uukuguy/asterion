@@ -760,7 +760,7 @@ def _run_full(
     python, asterion = _venv_paths(venv_root)
     installed_commands = (
         ("uv", "venv", str(venv_root)),
-        ("uv", "pip", "install", "--python", str(python), str(wheels[0])),
+        ("uv", "pip", "install", "--python", str(python), f"{wheels[0]}[dci]"),
         (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
         (str(python), "-c", _wheel_protocol_resource_smoke(node_executable)),
         (str(asterion), "list"),
