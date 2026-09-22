@@ -26,6 +26,7 @@ from asterion.applications.first_party_packages import (
     create_prime_recursive_workflow_native_package,
 )
 from asterion.capability_packages.protocol import CapabilityPackageRef
+from asterion.capability_sdk import CapabilityRef
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -120,7 +121,10 @@ class TestCreatePrimeRecursiveWorkflowNativePackage(unittest.TestCase):
         )
         self.assertEqual(package.source_id, "prime-recursive-workflow-native.builtin")
         self.assertEqual(package.source_kind, "builtin")
-        self.assertEqual(package.implementations, ())
+        self.assertEqual(
+            tuple(binding.capability_ref for binding in package.implementations),
+            (CapabilityRef("prime.recursive-workflow", "1.0.0"),),
+        )
         self.assertEqual(package.benchmark_bindings, ())
 
 
@@ -135,7 +139,10 @@ class TestCreatePrimeBoundedAutonomyNativePackage(unittest.TestCase):
             package.source_id, "prime-bounded-autonomy-native.builtin"
         )
         self.assertEqual(package.source_kind, "builtin")
-        self.assertEqual(package.implementations, ())
+        self.assertEqual(
+            tuple(binding.capability_ref for binding in package.implementations),
+            (CapabilityRef("prime.bounded-autonomy", "1.0.0"),),
+        )
         self.assertEqual(package.benchmark_bindings, ())
 
 
@@ -173,7 +180,10 @@ class TestFirstPartyPackagesIncludesContinualImprovement(unittest.TestCase):
             "prime-continual-improvement-native.builtin",
         )
         self.assertEqual(package.source_kind, "builtin")
-        self.assertEqual(package.implementations, ())
+        self.assertEqual(
+            tuple(binding.capability_ref for binding in package.implementations),
+            (CapabilityRef("prime.continual-improvement", "1.0.0"),),
+        )
         self.assertEqual(package.benchmark_bindings, ())
 
     def test_capability_package_module_three_part_requirement(self) -> None:
