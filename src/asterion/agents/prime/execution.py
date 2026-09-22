@@ -350,25 +350,15 @@ class PrimeExecutionKernel:
             self._native_events.append(event)
             event_type = event.type
             payload = event.payload
+            if event_type == "agent_start":
+                # Post-run work may start another agent cycle before the
+                # prompt's settlement barrier. Its terminal is still required.
+                round_terminal_seen = False
+                return
             if event_type in {
-                "response",
-                "agent_start",
-                "message_start",
-                "turn_end",
-                "tool_execution_update",
-                # Pi emits agent_end and then agent_settled when the agent goes
-                # idle. agent_end terminates the round, so this trailing event
-                # belongs to the round that just finished; a round driver stops
-                # reading at the terminal, so it reaches the next round's
-                # callback. The leading variant (Pi 0.85.1 reuse path: settled
-                # arrives as the first/only event of a fresh round because the
-                # prior round already settled) is handled separately below,
-                # where it also terminates the round. Treating leading
-                # `agent_settled` as benign-trailing would leave
-                # `round_terminal_seen` False and refuse the round.
+                "response", "message_start", "turn_end", "tool_execution_update",
             }:
-                # Streaming tool updates carry private partial output and have
-                # no public projection.
+                # Streaming tool updates contain private partial output.
                 return
             if event_type == "turn_start":
                 model_callbacks += 1
@@ -432,17 +422,8 @@ class PrimeExecutionKernel:
                 round_terminal_seen = True
                 return
             if event_type == "agent_settled":
-                # Pi 0.85.1 in the reuse path may emit `agent_settled` as the
-                # first (and only) event of a new prompt round — the prior
-                # round is already settled, so Pi elides `agent_end` for this
-                # round. Treat the leading `agent_settled` (round has not yet
-                # seen a terminal) as a valid round terminal. The trailing
-                # variant (after `agent_end` within a round, where
-                # `round_terminal_seen` is already True) is silently ignored:
-                # the round is already done.
                 if not round_terminal_seen:
-                    round_terminal_seen = True
-                    return
+                    raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
                 return
             raise _NativeEventRejected(_NativeDiagnostic.EVENT_TYPE_INVALID)
 

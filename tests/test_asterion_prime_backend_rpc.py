@@ -79,6 +79,7 @@ for line in sys.stdin:
             },
         })
         emit({"type": "agent_end"})
+        emit({"type": "agent_settled"})
     elif request["type"] == "compact":
         with open(material_path + ".request", "a", encoding="utf-8") as stream:
             stream.write(json.dumps(request, sort_keys=True, separators=(",", ":")) + "\n")
