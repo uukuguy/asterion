@@ -39,6 +39,8 @@ class RecordingSource:
         self.payload = payload
         self.discoveries = self.opens = self.loads = 0
         self.installed_digest = payload.payload_sha256
+        self.installed_source_id: str | None = None
+        self.installed_source_kind: str | None = None
         self.raw_package: InstalledCapabilityPackage | None = None
 
     def discover_metadata(self) -> tuple[CapabilityPackageCandidate, ...]:
@@ -70,8 +72,8 @@ class RecordingSource:
         self.raw_package = InstalledCapabilityPackage(
             package_ref=PACKAGE,
             payload_sha256=self.installed_digest,
-            source_id=candidate.source_id,
-            source_kind=candidate.source_kind,
+            source_id=self.installed_source_id or candidate.source_id,
+            source_kind=self.installed_source_kind or candidate.source_kind,
             catalog_roots=(),
             benchmark_suite_paths=(),
             implementations=(),
@@ -199,6 +201,29 @@ class CapabilitySourcePreparationTests(unittest.TestCase):
             load_prepared_capability_source(prepared)
 
         self.assertEqual(str(raised.exception), "capability source preparation failed")
+
+    def test_load_rejects_installed_source_identity_mismatch(self) -> None:
+        for attribute, mismatched in (
+            ("installed_source_id", "wrong-source"),
+            ("installed_source_kind", "archive"),
+        ):
+            with self.subTest(attribute=attribute):
+                source = RecordingSource("selected", payload())
+                prepared = prepare_capability_source(PACKAGE, (source,), None)
+                setattr(source, attribute, mismatched)
+                sink = MemoryDiagnosticSink()
+
+                with self.assertRaises(ValueError) as raised:
+                    load_prepared_capability_source(prepared, diagnostics=sink)
+
+                self.assertEqual(
+                    str(raised.exception), "capability source preparation failed"
+                )
+                self.assertEqual(source.loads, 1)
+                self.assertIsNotNone(raised.exception.diagnostic_id)
+                self.assertEqual(
+                    sink.get(raised.exception.diagnostic_id).stage, "package.load"
+                )
 
     def test_load_returns_fresh_authoritative_package_snapshot(self) -> None:
         source = RecordingSource("selected", payload())

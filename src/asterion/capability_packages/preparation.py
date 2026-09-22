@@ -142,6 +142,7 @@ def load_prepared_capability_source(
         ):
             _fail()
     except Exception as error:
+        installed = None
         diagnostic_id = capture_failure(
             diagnostics,
             stage="package.load",
