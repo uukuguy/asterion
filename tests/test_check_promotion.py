@@ -469,9 +469,9 @@ class PromotionCheckTests(unittest.TestCase):
 
         rendered = tuple(" ".join(command) for command in commands)
         for expected in (
-            "uv sync --frozen --extra dci",
-            "uv run --extra dci python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification",
-            "uv run --extra dci python -m unittest discover -s tests -v",
+            "uv sync --frozen --extra dci --extra prime",
+            "uv run --extra dci --extra prime python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification",
+            "uv run --extra dci --extra prime python -m unittest discover -s tests -v",
             "uv run python -m compileall -q src tests tools",
             "uv run ruff check src tests tools",
             "uv build .",
