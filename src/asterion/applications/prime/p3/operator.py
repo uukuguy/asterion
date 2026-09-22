@@ -65,6 +65,7 @@ from asterion.services.presentation import NOOP_HOST_PRESENTATION_SINK
 from asterion.services.registry import HostServiceFactoryContext
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
+from asterion.runtime.host import CancellationSignal
 
 
 _OPERATOR_ROOT_ENV = "ASTERION_PRIME_OPERATOR_ROOT"
@@ -414,7 +415,9 @@ def _refusal_receipt_sha(
     return sha256(encoded).hexdigest()
 
 
-async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
+async def _drive_success(
+    resources: _OperatorResources, signal: CancellationSignal | None = None
+) -> P3PublicResult:
     """Drive one admitted-child root run end-to-end."""
 
     root_run_id = resources.root_run_id
@@ -423,11 +426,12 @@ async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
     depth = 2
 
     # Stage 1: admission against the in-process child-runner.
+    active_signal = signal if signal is not None else _NeverCancelled()
     admission = await resources.child_runner.admit_child(
         parent_run_id=root_run_id,
         depth=depth,
         child_identity=resources.child_identity,
-        signal=_NeverCancelled(),
+        signal=active_signal,
     )
     if isinstance(admission, ChildAdmissionRefused):
         # On the success path a refusal is a programming error: the
@@ -435,6 +439,8 @@ async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
         # as operator error.
         raise P3OperatorError()
     child_run_id = admission.child_run_id
+    if active_signal.cancelled:
+        raise asyncio.CancelledError()
 
     # Stage 2: deterministic fake-worker payload.
     child_result_sha = _fake_worker_payload_sha(
@@ -444,6 +450,8 @@ async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
     resources.child_runner.record_child_cost(
         Decimal("0.05"), child_run_id=child_run_id
     )
+    if active_signal.cancelled:
+        raise asyncio.CancelledError()
     # Stage 4: closed-form join.
     root_result_sha = _fake_worker_payload_sha(
         mode=resources.mode, depth=1, run_id=root_run_id
@@ -497,10 +505,17 @@ class _OperatorP3RuntimeHost:
         self.result: P3PublicResult | None = None
 
     def validate_runtime_services(self, services: Mapping[str, object]) -> None:
-        if set(services) != {
-            "prime.child-runner", "prime.p3-oracle", "prime.pi-extension",
-            "prime.private-trace", "prime.session-backend",
-        }:
+        if (
+            set(services) != {
+                "prime.child-runner", "prime.p3-oracle", "prime.pi-extension",
+                "prime.private-trace", "prime.session-backend",
+            }
+            or services["prime.child-runner"] is not self._resources.child_runner
+            or services["prime.p3-oracle"] is not self._resources.p3_oracle
+            or services["prime.pi-extension"] is not self._resources.pi_extension
+            or services["prime.private-trace"] is not self._resources.private_trace
+            or services["prime.session-backend"] is not self
+        ):
             raise P3OperatorError()
 
     async def run_root(
@@ -517,7 +532,7 @@ class _OperatorP3RuntimeHost:
             or self.result is not None
         ):
             raise P3OperatorError()
-        result = await _drive_success(self._resources)
+        result = await _drive_success(self._resources, signal)
         self.result = result
         return P3RootResult(
             root_run_id=result.root_run_id,
@@ -534,7 +549,7 @@ class _OperatorP3RuntimeHost:
         raise P3OperatorError()
 
     async def wait_finalization(self, *, signal: object) -> P3Finalization:
-        if self.result is None or getattr(signal, "cancelled", True):
+        if self.result is None:
             raise P3OperatorError()
         return P3Finalization("completed", self.result.receipt_sha256)
 
@@ -681,7 +696,9 @@ async def _drive_cancellation_scenario(
 # ---------------------------------------------------------------------------
 
 
-async def _invoke_composed_success(resources: _OperatorResources) -> P3PublicResult:
+async def _invoke_composed_success(
+    resources: _OperatorResources, signal: CancellationSignal | None = None
+) -> P3PublicResult:
     package = create_prime_recursive_workflow_native_package()
     provider = compose_installed_provider(
         create_prime_recursive_workflow_provider(),
@@ -716,6 +733,7 @@ async def _invoke_composed_success(resources: _OperatorResources) -> P3PublicRes
         run_id=resources.root_run_id,
         input_text=P3_INPUT_PRESET,
         host_services=host_services,
+        signal=signal,
     )
     public = session_backend.result
     if (

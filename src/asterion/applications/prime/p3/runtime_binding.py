@@ -171,7 +171,8 @@ class _P3RuntimeSession:
         if (
             request.input_text != P3_INPUT_PRESET
             or request.requested_capabilities != ()
-            or request.deadline_ms not in {None, 60_000}
+            or request.deadline_ms is None
+            or request.deadline_ms > 60_000
         ):
             raise ProtocolError("P3 runtime request is invalid")
         self._active = self._consumed = True
@@ -183,12 +184,18 @@ class _P3RuntimeSession:
                 )
                 return
             active_signal = signal if signal is not None else _NeverCancelled()
-            root = await self.run_root(
-                parent_run_id=request.run_id,
-                child_request=None,
-                signal=active_signal,
-            )
-            final = await self.wait_finalization(signal=active_signal)
+            async with asyncio.timeout((request.deadline_ms or 60_000) / 1000):
+                root = await self.run_root(
+                    parent_run_id=request.run_id,
+                    child_request=None,
+                    signal=active_signal,
+                )
+                final = await self.wait_finalization(signal=active_signal)
+            if active_signal.cancelled:
+                yield RunEvent(
+                    request.run_id, 2, "run.completed", {"status": "cancelled"}
+                )
+                return
             if (
                 type(root) is not P3RootResult
                 or root.root_run_id != request.run_id
@@ -279,6 +286,7 @@ def build_p3_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
         # Eagerly validate the 5-tuple so a malformed host-services
         # shape is rejected before the runtime is handed to callers.
         session.validate_runtime_services(host_services)
+        service.validate_runtime_services(host_services)
         return AsterionPrimeRuntimeClient(session)
     except Exception:
         raise RuntimeFactoryError(_ERROR) from None
