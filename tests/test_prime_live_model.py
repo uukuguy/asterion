@@ -6,8 +6,15 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from asterion.applications.prime.live_model import LiveModelError, LiveModelSession
+import asterion
+
+from asterion.applications.prime.live_model import (
+    LiveModelError,
+    LiveModelSession,
+    resolve_live_model_launch,
+)
 
 
 _PRODUCER = r"""
@@ -133,3 +140,84 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(LiveModelError):
             await self.session.prompt("x" * 100_000, signal=_NeverCancelled())
         self.assertIsNotNone(process.poll())
+
+
+class TestResolveLiveModelLaunch(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name) / "operator"
+        self.root.mkdir()
+        node = self.root / "node"
+        pi = self.root / "pi.mjs"
+        node.write_text("node")
+        pi.write_text("pi")
+        node.chmod(0o700)
+        pi.chmod(0o700)
+        (self.root / ".env").write_text(
+            "DEEPSEEK_API_KEY=from-file\nPI_CODING_AGENT_DIR=/private/unsafe\n"
+        )
+        installed = self.root.parent / "venv/site-packages/asterion/__init__.py"
+        installed.parent.mkdir(parents=True)
+        installed.write_text("")
+        self.installed = installed
+        self.environment = {
+            "ASTERION_PRIME_NODE": str(node),
+            "ASTERION_PRIME_PI_ENTRY": str(pi),
+            "PATH": "/usr/bin",
+        }
+
+    def test_fixed_no_tool_launch_and_redacted_immutable_environment(self):
+        with patch.object(asterion, "__file__", str(self.installed)):
+            launch = resolve_live_model_launch(self.root, self.environment)
+        self.assertEqual(launch.cwd, self.root.resolve())
+        self.assertEqual(
+            launch.command[:2],
+            (
+                str((self.root / "node").resolve()),
+                str((self.root / "pi.mjs").resolve()),
+            ),
+        )
+        for option in (
+            "--no-tools",
+            "--no-extensions",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-themes",
+            "--no-context-files",
+            "--no-session",
+        ):
+            self.assertIn(option, launch.command)
+        self.assertEqual(
+            launch.command[-4:],
+            ("--provider", "deepseek", "--model", "deepseek-v4-flash"),
+        )
+        self.assertEqual(launch.environment["DEEPSEEK_API_KEY"], "from-file")
+        self.assertNotIn("PI_CODING_AGENT_DIR", launch.environment)
+        self.assertNotIn("from-file", repr(launch))
+        with self.assertRaises(TypeError):
+            launch.environment["DEEPSEEK_API_KEY"] = "mutated"
+
+    def test_environment_credential_overrides_dotenv(self):
+        with patch.object(asterion, "__file__", str(self.installed)):
+            launch = resolve_live_model_launch(
+                self.root, {**self.environment, "DEEPSEEK_API_KEY": "from-env"}
+            )
+        self.assertEqual(launch.environment["DEEPSEEK_API_KEY"], "from-env")
+
+    def test_source_checkout_is_rejected(self):
+        with patch.object(
+            asterion, "__file__", str(self.root / "src/asterion/__init__.py")
+        ):
+            with self.assertRaises(LiveModelError):
+                resolve_live_model_launch(self.root, self.environment)
+
+    def test_missing_credential_and_non_executable_entry_are_rejected(self):
+        (self.root / ".env").write_text("DEEPSEEK_API_KEY=\n")
+        with patch.object(asterion, "__file__", str(self.installed)):
+            with self.assertRaises(LiveModelError):
+                resolve_live_model_launch(self.root, self.environment)
+            (self.root / ".env").write_text("DEEPSEEK_API_KEY=secret\n")
+            (self.root / "pi.mjs").chmod(0o600)
+            with self.assertRaises(LiveModelError):
+                resolve_live_model_launch(self.root, self.environment)

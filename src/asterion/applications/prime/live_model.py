@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import os
 from pathlib import Path
+from types import MappingProxyType
 from typing import Mapping
+
+from dotenv import dotenv_values
 
 from asterion.runtime.host import CancellationSignal
 from asterion.runtimes.pi_rpc import (
@@ -36,6 +40,89 @@ class LiveModelError(RuntimeError):
 
     def __init__(self) -> None:
         super().__init__("Prime live model session failed")
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class LiveModelLaunch:
+    """Private, immutable operator-approved Pi process resources."""
+
+    command: tuple[str, ...]
+    environment: Mapping[str, str]
+    cwd: Path
+
+    def __repr__(self) -> str:
+        return "<LiveModelLaunch redacted>"
+
+
+def resolve_live_model_launch(
+    operator_root: Path, environment: Mapping[str, str]
+) -> LiveModelLaunch:
+    """Preflight the fixed, no-tool Pi launch from operator-owned inputs.
+
+    This is an application integration boundary. It reads only the operator
+    root's `.env`, never framework configuration or a neighboring source tree.
+    """
+
+    import asterion
+
+    try:
+        if not isinstance(operator_root, Path) or not isinstance(environment, Mapping):
+            raise ValueError
+        root = operator_root.resolve(strict=True)
+        package = Path(str(asterion.__file__)).resolve(strict=True)
+        if (
+            not root.is_dir()
+            or package.is_relative_to(root)
+            or "site-packages" not in package.parts
+        ):
+            raise ValueError
+        dotenv = {
+            name: value
+            for name, value in dotenv_values(root / ".env").items()
+            if value is not None
+        }
+        merged = {**dotenv, **dict(environment)}
+        credential = merged.get("DEEPSEEK_API_KEY", "")
+        if (
+            type(credential) is not str
+            or not credential.strip()
+            or any(character in credential for character in "\x00\r\n")
+        ):
+            raise ValueError
+        executable_paths = []
+        for name in ("ASTERION_PRIME_NODE", "ASTERION_PRIME_PI_ENTRY"):
+            value = merged.get(name)
+            if type(value) is not str or not value.strip():
+                raise ValueError
+            path = Path(value).resolve(strict=True)
+            if not path.is_file() or not os.access(path, os.X_OK):
+                raise ValueError
+            executable_paths.append(str(path))
+        approved_environment = {"DEEPSEEK_API_KEY": credential}
+        for name in ("PATH", "LANG", "LC_ALL"):
+            value = environment.get(name)
+            if type(value) is str and value and "\x00" not in value:
+                approved_environment[name] = value
+        command = (
+            *executable_paths,
+            "--mode",
+            "rpc",
+            "--print",
+            "--no-tools",
+            "--no-session",
+            "--no-extensions",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-themes",
+            "--no-context-files",
+            "--provider",
+            "deepseek",
+            "--model",
+            "deepseek-v4-flash",
+        )
+        return LiveModelLaunch(command, MappingProxyType(approved_environment), root)
+    except Exception:
+        raise LiveModelError() from None
 
 
 @dataclass(frozen=True, slots=True, repr=False)
