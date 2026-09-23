@@ -59,7 +59,7 @@ P4_RUNTIME_OPTIONS: Mapping[str, str] = MappingProxyType(
 _ERROR = "Asterion-prime runtime configuration is invalid"
 _BUDGET_MESSAGE = "P4 continuity exceeded its fixed budget."
 _RECOVERY_MESSAGE = "P4 continuity requires operator recovery."
-_MAX_AGGREGATE_TOKENS = 32_000
+_MAX_RECEIPT_BYTES = 32_000
 
 
 class _P4BudgetExceeded(Exception):
@@ -169,7 +169,7 @@ class _P4RuntimeSession:
             )
         ]
         pending: P4PendingClassification = "completed"
-        aggregate_tokens = 0
+        aggregate_bytes = 0
         try:
             if signal is not None and signal.cancelled:
                 pending = "cancelled"
@@ -204,8 +204,8 @@ class _P4RuntimeSession:
                 )
                 if type(receipt) is not P4CommitReceipt:
                     raise ValueError
-                aggregate_tokens += receipt.bytes_returned
-                if aggregate_tokens > _MAX_AGGREGATE_TOKENS:
+                aggregate_bytes += receipt.bytes_returned
+                if aggregate_bytes > _MAX_RECEIPT_BYTES:
                     raise _P4BudgetExceeded
         except _P4BudgetExceeded:
             pending = "budget-limited"
@@ -238,15 +238,18 @@ class _P4RuntimeSession:
         classification = finalization.classification
         if classification == "completed":
             assert finalization.receipt_sha256 is not None
+            # Commit receipts carry artifact bytes, not model token usage.
+            # The deterministic host has no model usage; live hosts expose the
+            # same measured usage that they persist in the private checkpoint.
+            measured = getattr(self._host, "usage", None)
+            input_tokens = 0 if measured is None else measured["input_tokens"]
+            output_tokens = 0 if measured is None else measured["output_tokens"]
+            if any(type(value) is not int or value < 0 for value in (input_tokens, output_tokens)):
+                raise ProtocolError("P4 runtime usage is invalid")
             public.append(
                 RunEvent(
-                    request.run_id,
-                    len(public) + 1,
-                    "usage.reported",
-                    {
-                        "input_tokens": aggregate_tokens,
-                        "output_tokens": 0,
-                    },
+                    request.run_id, len(public) + 1, "usage.reported",
+                    {"input_tokens": input_tokens, "output_tokens": output_tokens},
                 )
             )
             public.append(

@@ -481,7 +481,10 @@ class _OperatorP4RuntimeHost:
             self._store.close()
 
 
-async def _invoke_composed_round(preflight: _Preflight) -> P4PublicResult:
+async def _invoke_composed_round(
+    preflight: _Preflight, *, host: _OperatorP4RuntimeHost | None = None,
+    signal=None,
+) -> P4PublicResult:
     package = create_prime_long_session_continuity_native_package()
     provider = compose_installed_provider(
         create_prime_long_session_continuity_provider(),
@@ -490,7 +493,8 @@ async def _invoke_composed_round(preflight: _Preflight) -> P4PublicResult:
     )
     application = provider.applications[0]
     assembly = application.assemblies[0]
-    host = _OperatorP4RuntimeHost(preflight)
+    if host is None:
+        host = _OperatorP4RuntimeHost(preflight)
     try:
         services = {
             "prime.continuity-store": host.continuity,
@@ -517,6 +521,7 @@ async def _invoke_composed_round(preflight: _Preflight) -> P4PublicResult:
             run_id="p4-" + preflight.mode + "-" + secrets.token_hex(8),
             input_text=P4_INPUT_PRESET,
             host_services=services,
+            signal=signal,
         )
         public = host.public_result()
         if (
