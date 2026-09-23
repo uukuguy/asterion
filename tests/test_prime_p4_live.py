@@ -78,6 +78,8 @@ class Session:
         self.owner.events.append("open:" + self.mode)
 
     async def prompt(self, text, *, signal):
+        if self.owner.fail_prompt:
+            raise RuntimeError("PRIVATE-TRANSIENT-MODEL-FAILURE")
         self.owner.prompts.append(text)
         task = json.loads(text.split("TASK_JSON=", 1)[1])
         if self.mode == "commit":
@@ -107,6 +109,7 @@ class TestP4Live(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.temp.name) / "store"
         self.sessions, self.events, self.prompts = [], [], []
         self.bad_answer = self.bad_close = False
+        self.fail_prompt = False
 
     def factory(self, mode, cwd):
         session = Session(mode, self)
@@ -168,6 +171,41 @@ class TestP4Live(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(live.P4LiveError):
             await self.run_round("recover")
         self.assertEqual(len(self.sessions), 2)
+
+    async def test_transient_recovery_failure_preserves_checkpoint_for_retry(self):
+        committed = await self.run_round("commit")
+        identity = (self.root / "identity.json").read_bytes()
+        records = (self.root / "records.jsonl").read_bytes()
+        blobs = {path.name: path.read_bytes() for path in self.root.glob("transcript-*.blob")}
+        self.fail_prompt = True
+        with self.assertRaises(live.P4LiveError):
+            await self.run_round("recover")
+        self.assertTrue(self.sessions[-1].closed)
+        self.assertEqual((self.root / "identity.json").read_bytes(), identity)
+        self.assertEqual((self.root / "records.jsonl").read_bytes(), records)
+        self.fail_prompt = False
+        recovered = await self.run_round("recover")
+        self.assertEqual(recovered.prior_checkpoint_sha256, committed.checkpoint_sha256)
+        self.assertEqual(recovered.new_generation, 2)
+        for name, content in blobs.items():
+            self.assertEqual((self.root / name).read_bytes(), content)
+
+    async def test_recovery_holds_prior_generation_lock_until_model_finishes(self):
+        await self.run_round("commit")
+        host = live.P4LiveHost(
+            mode="recover", private_root=self.root, session_factory=self.factory,
+            command_sha256="a" * 64, binding_sha256="b" * 64,
+        )
+        try:
+            self.assertEqual(operator._read_prior_identity(self.root).generation, 1)
+            self.assertEqual(host.continuity.current_generation, 1)
+            with self.assertRaises(live.P4LiveError):
+                await self.run_round("recover")
+            self.assertEqual(len(self.sessions), 1)
+        finally:
+            await host.close()
+        recovered = await self.run_round("recover")
+        self.assertEqual(recovered.new_generation, 2)
 
     async def test_cancelled_invocation_starts_no_session(self):
         with self.assertRaises(asyncio.CancelledError):

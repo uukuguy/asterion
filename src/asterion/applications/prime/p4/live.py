@@ -93,6 +93,20 @@ def _committed_state(text):
     return result
 
 
+class _LiveContinuityStore(ContinuityStoreHostService):
+    """Keep one injected service while its owner advances the durable store."""
+
+    def __init__(self, store):
+        super().__init__(store)
+        self._bound_identity = store.identity
+
+    def use_continued(self, store):
+        if store.continued_from != self._bound_identity:
+            raise P4LiveError()
+        self._store = store
+        self._bound_identity = store.identity
+
+
 class P4LiveHost(operator._OperatorP4RuntimeHost):
     """Live host using existing continuity storage and public composed runtime."""
 
@@ -109,6 +123,7 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
         self._result_sha = None
         self.usage = None
         self._factory = session_factory
+        self._private_root = private_root
         ceilings_sha = _digest(dict(P4_RUNTIME_OPTIONS))
         try:
             if mode == "commit":
@@ -125,17 +140,16 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
                     or prior.ceilings_sha256 != ceilings_sha
                 ):
                     raise P4LiveError()
-                # Authenticate all prior material before changing the generation.
-                prior_store = FilePrimeSessionStore(private_root, prior)
-                try:
-                    recovered = prior_store.recover_checkpoint()
-                    if recovered is None or recovered.checkpoint.generation != 1:
-                        raise P4LiveError()
-                    self._state = _committed_state(recovered.transcript.decode())
-                    if recovered.usage.get("result_sha256") != _digest(self._state):
-                        raise P4LiveError()
-                finally:
-                    prior_store.close()
+                # Hold the original writer lock throughout model execution.
+                # A failed or cancelled prompt must leave generation 1 intact.
+                self._store = FilePrimeSessionStore(private_root, prior)
+                recovered = self._store.recover_checkpoint()
+                if recovered is None or recovered.checkpoint.generation != 1:
+                    raise P4LiveError()
+                self._state = _committed_state(recovered.transcript.decode())
+                if recovered.usage.get("result_sha256") != _digest(self._state):
+                    raise P4LiveError()
+                self._prior = recovered
                 generation = 2
                 continuation_id = prior.continuation_id
                 session_id = prior.session_id
@@ -149,16 +163,10 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
                 extension_binding_fingerprint=binding_sha256,
                 ceilings_sha256=ceilings_sha,
             )
-            self._store = (
-                FilePrimeSessionStore(private_root, identity)
-                if mode == "commit"
-                else FilePrimeSessionStore.open_continued(private_root, identity)
-            )
-            if mode == "recover":
-                self._prior = self._store.recover_checkpoint()
-                if self._prior is None:
-                    raise P4LiveError()
-            self.continuity = ContinuityStoreHostService(self._store)
+            self._execution_identity = identity
+            if mode == "commit":
+                self._store = FilePrimeSessionStore(private_root, identity)
+            self.continuity = _LiveContinuityStore(self._store)
             self.oracle = object()
             self.extension = session_factory
             self._temporary = tempfile.TemporaryDirectory(prefix="p4-live-session-")
@@ -166,6 +174,28 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
             if self._store is not None:
                 self._store.close()
             raise
+
+    @property
+    def identity(self):
+        """Identity assigned to this attempt; persisted only when it commits."""
+        return self._execution_identity
+
+    def _continue_validated_recovery(self):
+        if self._store.recover_checkpoint() != self._prior:
+            raise P4LiveError()
+        prior_position = self._store.position
+        self._store.close()
+        self._store = FilePrimeSessionStore.open_continued(
+            self._private_root, self.identity
+        )
+        # Reopening acquires a new writer lease. Refuse any intervening writer
+        # or changed history; never seal the model result against a new input.
+        if (
+            self._store.position != prior_position
+            or self._store.recover_checkpoint() != self._prior
+        ):
+            raise P4LiveError()
+        self.continuity.use_continued(self._store)
 
     async def _close_model(self):
         if self._session is not None and not self._worker_closed:
@@ -225,6 +255,8 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
         finally:
             # No checkpoint is signed until the model process has been reaped.
             await self._close_model()
+        if signal.cancelled:
+            raise asyncio.CancelledError()
         encoded = _encoded(result)
         self._result_sha = sha256(encoded).hexdigest()
         if self._prior is not None:
@@ -233,6 +265,7 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
                 recover_result_sha256=self._result_sha,
                 recovered_prior_checkpoint_sha256=prior_sha,
             )
+            self._continue_validated_recovery()
         self._checkpoint = operator._seal_commit_checkpoint(
             store=self._store, worker_sha=self.identity.worker_identity_sha256,
             prior_checkpoint_sha=prior_sha, run_id=run_id, transcript=encoded,
