@@ -27,6 +27,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p4-run
 .PHONY: asterion-prime-p4-run-verbose
 .PHONY: asterion-prime-p3-run
+.PHONY: asterion-prime-p3-witness
 .PHONY: asterion-prime-p3-run-limits
 .PHONY: asterion-prime-p3-run-verbose
 .PHONY: asterion-prime-p5-run
@@ -46,6 +47,8 @@ ASTERION_PRIME_P2_CORPUS ?= $(CURDIR)/tests/fixtures/prime_p2/small_corpus.json
 ASTERION_PRIME_ARC_ROOT ?=
 ASTERION_PRIME_P4_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-witness
 ASTERION_PRIME_P3_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-witness
+ASTERION_PRIME_LOCAL_PI_ENTRY ?= /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js
+ASTERION_PRIME_P3_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-live
 ASTERION_PRIME_P5_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-witness
 ASTERION_PRIME_P6_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-witness
 .PHONY: test.native-controller-core.provider-free
@@ -307,7 +310,7 @@ asterion-prime-p4-run-verbose:
 # authorization. Operator root, PI entry, P3 private root, Orb VM, and
 # node are operator-owned; the preset supplies no provider, model, cost,
 # or deadline knob.
-asterion-prime-p3-run:
+asterion-prime-p3-witness:
 	@printf '[asterion-prime-p3-run] native Asterion-prime P3 cross-runner continuity witness\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p3-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
@@ -317,6 +320,17 @@ asterion-prime-p3-run:
 		[ -n "$$success_json" ] || { echo "[asterion-prime-p3-run] operator produced no JSON output" >&2; exit 2; }; \
 		echo "$$success_json" | jq -e ".status == \"completed\" and (.child_run_id | length > 0) and (.depth_reached == 2) and (.child_generation == (.root_generation + 1)) and (.child_result_sha256 != .root_result_sha256) and (.joined_result_sha256 | length == 64) and (.receipt_sha256 | length == 64) and (.refusal_reason == null)" >/dev/null || { echo "[asterion-prime-p3-run] witness failed: $$success_json" >&2; exit 2; }; \
 		echo "[asterion-prime-p3-run] witness passed: depth 1 -> 2, child_generation = root_generation + 1, child_result_sha256 differs from root_result_sha256, refusal_reason is null" >&2'
+
+# The application preset calls Pi twice on independent local sessions. Evidence
+# is private under a fresh per-run directory; only the safe receipt is printed.
+asterion-prime-p3-run:
+	@printf '[asterion-prime-p3-run] bounded live P3 child/root verification\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p3-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		ASTERION_PRIME_OPERATOR_ROOT="$(ASTERION_PRIME_OPERATOR_ROOT)" ASTERION_PRIME_P3_PRIVATE_ROOT="$(ASTERION_PRIME_P3_LIVE_ROOT)" ASTERION_PRIME_NODE="$$(command -v node)" ASTERION_PRIME_PI_ENTRY="$(ASTERION_PRIME_LOCAL_PI_ENTRY)" \
+			$(UV_BIN) run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p3.live_entry | \
+			jq -e '\''select(.status == "completed" and .model_call_count == 2 and .input_tokens > 0 and .output_tokens > 0 and (.evidence_sha256 | length) == 64 and (.receipt_sha256 | length) == 64)'\'''
 
 # P3 refusal-scenarios witness: re-invokes the operator with
 # ``ASTERION_PRIME_P3_MODE=limits``. The operator emits exactly four JSON
