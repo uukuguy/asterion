@@ -9,7 +9,7 @@ Two invocation modes:
   identity, runs the worker in recover mode (different payload), seals a new
   checkpoint at generation 2, prints ``{"status":"recovered",...}``.
 
-The Makefile target ``asterion-prime-p4-run`` runs the operator twice in
+The Makefile target ``asterion-prime-p4-witness`` runs the operator twice in
 sequence and asserts the no-replay invariant via SHA inequality.
 """
 

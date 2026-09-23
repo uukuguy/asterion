@@ -7,7 +7,7 @@ bounded root run per invocation, so the operator reads either mode and
 emits one JSON record (success) or four JSON records (limits, one per
 refused scenario).
 
-The Makefile target ``asterion-prime-p3-run`` invokes the operator in
+The Makefile target ``asterion-prime-p3-witness`` invokes the operator in
 ``success`` mode: one root run admits one child at depth=2, the child
 result joins the root, and the operator seals a single receipt. The
 sibling target ``asterion-prime-p3-run-limits`` invokes ``limits`` mode:

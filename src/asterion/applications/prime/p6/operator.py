@@ -7,8 +7,8 @@ candidate-store run per invocation, so the operator reads either mode
 and emits one JSON record (preserved) or two JSON records (limits, in
 fixed order: rolled-back then global-rejected).
 
-The Makefile targets ``asterion-prime-p6-run`` and
-``asterion-prime-p6-run-limits`` (Task 14) will invoke the operator in
+The Makefile targets ``asterion-prime-p6-witness`` and
+``asterion-prime-p6-run-limits`` invoke the operator in
 ``preserved`` and ``limits`` mode respectively. The fake-worker contract
 is deterministic: given ``(mode, candidate_kind, run_id)`` the same
 SHA-256 is produced across host runs. No real Pi subprocess is involved

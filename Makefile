@@ -74,7 +74,8 @@ help:
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
-	@echo "Asterion Prime P4 cross-generation witness: asterion-prime-p4-run"
+	@echo "Asterion Prime bounded live applications: asterion-prime-p3-run p4-run p5-run p6-run"
+	@echo "Asterion Prime deterministic diagnostics: asterion-prime-p3-witness p4-witness p5-witness p6-witness"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
 
@@ -274,18 +275,18 @@ asterion-prime-p2-run-verbose:
 # node are operator-owned; the preset supplies no provider, model, cost,
 # or deadline knob.
 asterion-prime-p4-witness:
-	@printf '[asterion-prime-p4-run] native Asterion-prime P4 cross-generation continuity witness\n' >&2; \
+	@printf '[asterion-prime-p4-witness] native Asterion-prime P4 cross-generation continuity witness\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p4-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		rm -rf "$(ASTERION_PRIME_P4_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P4_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P4_PRIVATE_ROOT)"; \
 		commit_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P4_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P4_MODE=commit; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p4.operator'\'' asterion-prime-p4-run-commit "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P4_PRIVATE_ROOT)")"; \
 		recover_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P4_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P4_MODE=recover; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p4.operator'\'' asterion-prime-p4-run-recover "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P4_PRIVATE_ROOT)")"; \
-		[ -n "$$commit_json" ] && [ -n "$$recover_json" ] || { echo "[asterion-prime-p4-run] operator produced no JSON output" >&2; exit 2; }; \
-		echo "$$commit_json" | jq -e ".status == \"committed\" and (.checkpoint_sha256 | length) == 64 and (.receipt_sha256 | length) == 64" >/dev/null || { echo "[asterion-prime-p4-run] commit witness failed: $$commit_json" >&2; exit 2; }; \
-		echo "$$recover_json" | jq -e ".status == \"recovered\" and (.prior_checkpoint_sha256 | length) == 64" >/dev/null || { echo "[asterion-prime-p4-run] recover witness failed: $$recover_json" >&2; exit 2; }; \
-		{ echo "$$commit_json"; echo "$$recover_json"; } | jq -e -s ".[1].prior_checkpoint_sha256 == .[0].checkpoint_sha256 and .[1].new_generation == (.[0].generation + 1) and .[1].result_sha256 != .[0].result_sha256 and .[1].continuation_id == .[0].continuation_id and .[1].worker_identity_sha256 != .[0].worker_identity_sha256" >/dev/null || { echo "[asterion-prime-p4-run] continuity invariants failed: $$recover_json (commit: $$commit_json)" >&2; exit 2; }; \
-		echo "[asterion-prime-p4-run] witness passed: gen 1 -> 2, prior_checkpoint_sha256 matches commit checkpoint, result_sha256 differs across modes" >&2'
+		[ -n "$$commit_json" ] && [ -n "$$recover_json" ] || { echo "[asterion-prime-p4-witness] operator produced no JSON output" >&2; exit 2; }; \
+		echo "$$commit_json" | jq -e ".status == \"committed\" and (.checkpoint_sha256 | length) == 64 and (.receipt_sha256 | length) == 64" >/dev/null || { echo "[asterion-prime-p4-witness] commit witness failed: $$commit_json" >&2; exit 2; }; \
+		echo "$$recover_json" | jq -e ".status == \"recovered\" and (.prior_checkpoint_sha256 | length) == 64" >/dev/null || { echo "[asterion-prime-p4-witness] recover witness failed: $$recover_json" >&2; exit 2; }; \
+		{ echo "$$commit_json"; echo "$$recover_json"; } | jq -e -s ".[1].prior_checkpoint_sha256 == .[0].checkpoint_sha256 and .[1].new_generation == (.[0].generation + 1) and .[1].result_sha256 != .[0].result_sha256 and .[1].continuation_id == .[0].continuation_id and .[1].worker_identity_sha256 != .[0].worker_identity_sha256" >/dev/null || { echo "[asterion-prime-p4-witness] continuity invariants failed: $$recover_json (commit: $$commit_json)" >&2; exit 2; }; \
+		echo "[asterion-prime-p4-witness] witness passed: gen 1 -> 2, prior_checkpoint_sha256 matches commit checkpoint, result_sha256 differs across modes" >&2'
 
 # Commit and recover run in separate installed-wheel processes. The checkpoint
 # and both private transcripts remain under the per-run local evidence root.
@@ -322,15 +323,15 @@ asterion-prime-p4-run-verbose:
 # node are operator-owned; the preset supplies no provider, model, cost,
 # or deadline knob.
 asterion-prime-p3-witness:
-	@printf '[asterion-prime-p3-run] native Asterion-prime P3 cross-runner continuity witness\n' >&2; \
+	@printf '[asterion-prime-p3-witness] native Asterion-prime P3 cross-runner continuity witness\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p3-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		rm -rf "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; \
 		success_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P3_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P3_MODE=success; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p3.operator'\'' asterion-prime-p3-run-success "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P3_PRIVATE_ROOT)")"; \
-		[ -n "$$success_json" ] || { echo "[asterion-prime-p3-run] operator produced no JSON output" >&2; exit 2; }; \
-		echo "$$success_json" | jq -e ".status == \"completed\" and (.child_run_id | length > 0) and (.depth_reached == 2) and (.child_generation == (.root_generation + 1)) and (.child_result_sha256 != .root_result_sha256) and (.joined_result_sha256 | length == 64) and (.receipt_sha256 | length == 64) and (.refusal_reason == null)" >/dev/null || { echo "[asterion-prime-p3-run] witness failed: $$success_json" >&2; exit 2; }; \
-		echo "[asterion-prime-p3-run] witness passed: depth 1 -> 2, child_generation = root_generation + 1, child_result_sha256 differs from root_result_sha256, refusal_reason is null" >&2'
+		[ -n "$$success_json" ] || { echo "[asterion-prime-p3-witness] operator produced no JSON output" >&2; exit 2; }; \
+		echo "$$success_json" | jq -e ".status == \"completed\" and (.child_run_id | length > 0) and (.depth_reached == 2) and (.child_generation == (.root_generation + 1)) and (.child_result_sha256 != .root_result_sha256) and (.joined_result_sha256 | length == 64) and (.receipt_sha256 | length == 64) and (.refusal_reason == null)" >/dev/null || { echo "[asterion-prime-p3-witness] witness failed: $$success_json" >&2; exit 2; }; \
+		echo "[asterion-prime-p3-witness] witness passed: depth 1 -> 2, child_generation = root_generation + 1, child_result_sha256 differs from root_result_sha256, refusal_reason is null" >&2'
 
 # The application preset calls Pi twice on independent local sessions. Evidence
 # is private under a fresh per-run directory; only the safe receipt is printed.
@@ -392,15 +393,15 @@ asterion-prime-p3-run-verbose:
 # VM, and node are operator-owned; the preset supplies no provider,
 # model, cost, or deadline knob.
 asterion-prime-p5-witness:
-	@printf '[asterion-prime-p5-run] native Asterion-prime P5 bounded-autonomy success-path witness\n' >&2; \
+	@printf '[asterion-prime-p5-witness] native Asterion-prime P5 bounded-autonomy success-path witness\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p5-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		rm -rf "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P5_PRIVATE_ROOT)"; \
 		success_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P5_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P5_MODE=success; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p5.operator'\'' asterion-prime-p5-run-success "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P5_PRIVATE_ROOT)")"; \
-		[ -n "$$success_json" ] || { echo "[asterion-prime-p5-run] operator produced no JSON output" >&2; exit 2; }; \
-		echo "$$success_json" | jq -e ".status == \"completed\" and (.propose_step_count == 1) and (.verify_step_count == 2) and (.repair_step_count == 1) and (.failed_verify_count == 1) and (.terminal_reason == \"success\") and (.joined_workspace_digest | length == 64) and (.receipt_sha256 | length == 64)" >/dev/null || { echo "[asterion-prime-p5-run] witness failed: $$success_json" >&2; exit 2; }; \
-		echo "[asterion-prime-p5-run] witness passed: propose 1 + verify 2 + repair 1, terminal_reason=success" >&2'
+		[ -n "$$success_json" ] || { echo "[asterion-prime-p5-witness] operator produced no JSON output" >&2; exit 2; }; \
+		echo "$$success_json" | jq -e ".status == \"completed\" and (.propose_step_count == 1) and (.verify_step_count == 2) and (.repair_step_count == 1) and (.failed_verify_count == 1) and (.terminal_reason == \"success\") and (.joined_workspace_digest | length == 64) and (.receipt_sha256 | length == 64)" >/dev/null || { echo "[asterion-prime-p5-witness] witness failed: $$success_json" >&2; exit 2; }; \
+		echo "[asterion-prime-p5-witness] witness passed: propose 1 + verify 2 + repair 1, terminal_reason=success" >&2'
 
 # Real candidate proposal, local semantic verification, and bounded repair.
 asterion-prime-p5-run:
@@ -444,7 +445,7 @@ asterion-prime-p5-run-limits:
 asterion-prime-p5-run-verbose:
 	@$(MAKE) asterion-prime-p5-run ASTERION_PRIME_P5_PRIVATE_ROOT=$(ASTERION_PRIME_P5_PRIVATE_ROOT) || exit 1
 	@$(MAKE) asterion-prime-p5-run-limits ASTERION_PRIME_P5_PRIVATE_ROOT=$(ASTERION_PRIME_P5_PRIVATE_ROOT) || exit 1
-	@echo "[asterion-prime-p5-run-verbose] all witnesses passed"
+	@echo "[asterion-prime-p5-run-verbose] live run and limit witness passed"
 
 # P6 continual-improvement preserved-path witness: re-invokes the operator with
 # ``ASTERION_PRIME_P6_MODE=preserved``. The wrapper admits one candidate via
@@ -473,15 +474,15 @@ asterion-prime-p5-run-verbose:
 # rejects multi-line ``\`` continuation; Phase 8 Task 14 fix-on-verify lesson,
 # commit ``5c07d9ff``).
 asterion-prime-p6-witness:
-	@printf '[asterion-prime-p6-run] native Asterion-prime P6 continual-improvement preserved-path witness\n' >&2; \
+	@printf '[asterion-prime-p6-witness] native Asterion-prime P6 continual-improvement preserved-path witness\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p6-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		rm -rf "$(ASTERION_PRIME_P6_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P6_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P6_PRIVATE_ROOT)"; \
 		preserved_json="$$(orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P6_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P6_MODE=preserved; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p6.operator'\'' asterion-prime-p6-run-preserved "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P6_PRIVATE_ROOT)")"; \
-		[ -n "$$preserved_json" ] || { echo "[asterion-prime-p6-run] operator produced no JSON output" >&2; exit 2; }; \
-		echo "$$preserved_json" | jq -e ".status == \"completed\" and (.terminal_outcome == \"preserved\") and (.global_activation_approved == false) and (.rollback_invocation_count == 0) and (.baseline_snapshot_digest | length == 64) and (.candidate_revision_digest | length == 64) and (.task_b_result_digest | length == 64) and (.receipt_sha256 | length == 64) and (.candidate_revision_digest != .baseline_snapshot_digest) and (.task_b_result_digest != .baseline_snapshot_digest)" >/dev/null || { echo "[asterion-prime-p6-run] witness failed: $$preserved_json" >&2; exit 2; }; \
-		echo "[asterion-prime-p6-run] witness passed: terminal_outcome=preserved, rollback_invocation_count=0, candidate_revision_digest and task_b_result_digest differ from baseline_snapshot_digest" >&2'
+		[ -n "$$preserved_json" ] || { echo "[asterion-prime-p6-witness] operator produced no JSON output" >&2; exit 2; }; \
+		echo "$$preserved_json" | jq -e ".status == \"completed\" and (.terminal_outcome == \"preserved\") and (.global_activation_approved == false) and (.rollback_invocation_count == 0) and (.baseline_snapshot_digest | length == 64) and (.candidate_revision_digest | length == 64) and (.task_b_result_digest | length == 64) and (.receipt_sha256 | length == 64) and (.candidate_revision_digest != .baseline_snapshot_digest) and (.task_b_result_digest != .baseline_snapshot_digest)" >/dev/null || { echo "[asterion-prime-p6-witness] witness failed: $$preserved_json" >&2; exit 2; }; \
+		echo "[asterion-prime-p6-witness] witness passed: terminal_outcome=preserved, rollback_invocation_count=0, candidate_revision_digest and task_b_result_digest differ from baseline_snapshot_digest" >&2'
 
 # One model-proposed candidate, actual train/holdout comparison, and explicit
 # project-scope promotion through the composed candidate-store application.
@@ -526,7 +527,7 @@ asterion-prime-p6-run-limits:
 asterion-prime-p6-run-verbose:
 	@$(MAKE) asterion-prime-p6-run ASTERION_PRIME_P6_PRIVATE_ROOT=$(ASTERION_PRIME_P6_PRIVATE_ROOT) || exit 1
 	@$(MAKE) asterion-prime-p6-run-limits ASTERION_PRIME_P6_PRIVATE_ROOT=$(ASTERION_PRIME_P6_PRIVATE_ROOT) || exit 1
-	@echo "[asterion-prime-p6-run-verbose] all witnesses passed"
+	@echo "[asterion-prime-p6-run-verbose] live run and limit witness passed"
 
 test.native-controller-core.provider-free:
 	$(UV_BIN) run python -m unittest -v \

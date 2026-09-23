@@ -7,8 +7,8 @@ bounded root run per invocation, so the operator reads either mode and
 emits one JSON record (success) or three JSON records (limits, one per
 refused scenario).
 
-The Makefile targets ``asterion-prime-p5-run`` and
-``asterion-prime-p5-run-limits`` (Task 9) will invoke the operator in
+The Makefile targets ``asterion-prime-p5-witness`` and
+``asterion-prime-p5-run-limits`` invoke the operator in
 ``success`` and ``limits`` mode respectively. The fake-worker contract
 is deterministic: given ``(mode, step_kind, run_id)`` the same workspace
 SHA is produced across host runs. No real Pi subprocess is involved on
