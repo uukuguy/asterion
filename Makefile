@@ -31,6 +31,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p3-run-limits
 .PHONY: asterion-prime-p3-run-verbose
 .PHONY: asterion-prime-p5-run
+.PHONY: asterion-prime-p5-witness
 .PHONY: asterion-prime-p5-run-limits
 .PHONY: asterion-prime-p5-run-verbose
 .PHONY: asterion-prime-p6-run
@@ -50,6 +51,7 @@ ASTERION_PRIME_P3_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-witness
 ASTERION_PRIME_LOCAL_PI_ENTRY ?= /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js
 ASTERION_PRIME_P3_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-live
 ASTERION_PRIME_P5_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-witness
+ASTERION_PRIME_P5_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-live
 ASTERION_PRIME_P6_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-witness
 .PHONY: test.native-controller-core.provider-free
 
@@ -387,7 +389,7 @@ asterion-prime-p3-run-verbose:
 # operator authorization. Operator root, PI entry, P5 private root, Orb
 # VM, and node are operator-owned; the preset supplies no provider,
 # model, cost, or deadline knob.
-asterion-prime-p5-run:
+asterion-prime-p5-witness:
 	@printf '[asterion-prime-p5-run] native Asterion-prime P5 bounded-autonomy success-path witness\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p5-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
@@ -397,6 +399,16 @@ asterion-prime-p5-run:
 		[ -n "$$success_json" ] || { echo "[asterion-prime-p5-run] operator produced no JSON output" >&2; exit 2; }; \
 		echo "$$success_json" | jq -e ".status == \"completed\" and (.propose_step_count == 1) and (.verify_step_count == 2) and (.repair_step_count == 1) and (.failed_verify_count == 1) and (.terminal_reason == \"success\") and (.joined_workspace_digest | length == 64) and (.receipt_sha256 | length == 64)" >/dev/null || { echo "[asterion-prime-p5-run] witness failed: $$success_json" >&2; exit 2; }; \
 		echo "[asterion-prime-p5-run] witness passed: propose 1 + verify 2 + repair 1, terminal_reason=success" >&2'
+
+# Real candidate proposal, local semantic verification, and bounded repair.
+asterion-prime-p5-run:
+	@printf '[asterion-prime-p5-run] bounded live P5 proposal/verification\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p5-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		ASTERION_PRIME_OPERATOR_ROOT="$(ASTERION_PRIME_OPERATOR_ROOT)" ASTERION_PRIME_P5_PRIVATE_ROOT="$(ASTERION_PRIME_P5_LIVE_ROOT)" ASTERION_PRIME_NODE="$$(command -v node)" ASTERION_PRIME_PI_ENTRY="$(ASTERION_PRIME_LOCAL_PI_ENTRY)" \
+			$(UV_BIN) run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p5.live | \
+			jq -e '\''select(.status == "completed" and .terminal_reason == "success" and .propose_step_count == 1 and .verify_step_count >= 1 and .repair_step_count == .failed_verify_count and .model_call_count >= 1 and .input_tokens > 0 and (.evidence_sha256 | length) == 64 and (.receipt_sha256 | length) == 64)'\'''
 
 # P5 refusal-scenarios witness: re-invokes the operator with
 # ``ASTERION_PRIME_P5_MODE=limits``. Per D-2026-09-19-01, cancellation
