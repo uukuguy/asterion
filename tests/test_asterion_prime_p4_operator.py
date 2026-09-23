@@ -73,8 +73,7 @@ def _run_operator(
 def _parse_stdout(completed: subprocess.CompletedProcess[str]) -> dict[str, object]:
     line = completed.stdout.strip()
     assert line, (
-        f"operator stdout empty; stderr={completed.stderr!r}, "
-        f"rc={completed.returncode}"
+        f"operator stdout empty; stderr={completed.stderr!r}, rc={completed.returncode}"
     )
     parsed = json.loads(line)
     assert isinstance(parsed, dict)
@@ -142,6 +141,54 @@ class P4OperatorEndToEnd(unittest.TestCase):
                 commit["worker_identity_sha256"],
             )
 
+    def test_recover_seals_generation_two_checkpoint(self) -> None:
+        from asterion.agents.prime.store import FilePrimeSessionStore
+        from asterion.applications.prime.p4.operator import _read_prior_identity
+
+        with __import__("tempfile").TemporaryDirectory() as tmp:
+            private_root = Path(tmp) / "prime-p4-test"
+            for mode in ("commit", "recover"):
+                process = _run_operator(
+                    operator_root=Path.cwd(), private_root=private_root, mode=mode
+                )
+                self.assertEqual(process.returncode, 0, process.stderr)
+            identity = _read_prior_identity(private_root)
+            self.assertEqual(identity.generation, 2)
+            store = FilePrimeSessionStore(private_root, identity)
+            try:
+                self.assertEqual(store.highest_sealed_generation, 2)
+                recovered = store.recover_checkpoint()
+                self.assertIsNotNone(recovered)
+                self.assertEqual(recovered.checkpoint.generation, 2)
+            finally:
+                store.close()
+
+    def test_operator_round_uses_composed_provider_route(self) -> None:
+        import asyncio
+        from unittest.mock import patch
+
+        from asterion.applications.prime.p4 import operator
+        from asterion.runner.composed import run_composed_application
+
+        with __import__("tempfile").TemporaryDirectory() as tmp:
+            environment = {
+                _OPERATOR_ROOT_ENV: str(Path.cwd()),
+                _PRIVATE_ROOT_ENV: str(Path(tmp) / "prime-p4-test"),
+                _MODE_ENV: "commit",
+            }
+            with (
+                patch.dict(os.environ, environment),
+                patch.object(
+                    operator,
+                    "run_composed_application",
+                    wraps=run_composed_application,
+                    create=True,
+                ) as composed,
+            ):
+                result = asyncio.run(operator._run_async())
+            self.assertEqual(result.status, "committed")
+            self.assertEqual(composed.call_count, 1)
+
 
 def _fixture_path() -> Path:
     return Path(__file__).resolve().parent / "fixtures/prime_p4/small_state.json"
@@ -171,9 +218,9 @@ def _materialize_private_root(fixture: dict[str, object], root: Path) -> str:
     # 2. checkpoint + blobs — checkpoint mapping is fixed by the fixture.
     checkpoint_mapping: dict[str, object] = dict(fixture["checkpoint"])  # type: ignore[arg-type]
     checkpoint = PrimeCheckpoint.from_mapping(checkpoint_mapping)
-    assert checkpoint.digest == _mapping_digest_from_fixture(
-        checkpoint_mapping
-    ), "fixture checkpoint mapping must be self-consistent (digest vs fields)"
+    assert checkpoint.digest == _mapping_digest_from_fixture(checkpoint_mapping), (
+        "fixture checkpoint mapping must be self-consistent (digest vs fields)"
+    )
 
     transcript_hex = str(fixture["transcript_hex"])  # type: ignore[arg-type]
     transcript_bytes = bytes.fromhex(transcript_hex)
@@ -185,12 +232,12 @@ def _materialize_private_root(fixture: dict[str, object], root: Path) -> str:
     usage_bytes = _canonical_bytes(usage_mapping)
 
     # Validate checkpoint hashes match the fixture's stated values.
-    assert (
-        checkpoint.private_transcript_sha256 == _sha256_of(transcript_bytes)
-    ), "fixture transcript_sha256 mismatch"
-    assert (
-        checkpoint.usage_sha256 == _sha256_of(usage_bytes)
-    ), "fixture usage_sha256 mismatch"
+    assert checkpoint.private_transcript_sha256 == _sha256_of(transcript_bytes), (
+        "fixture transcript_sha256 mismatch"
+    )
+    assert checkpoint.usage_sha256 == _sha256_of(usage_bytes), (
+        "fixture usage_sha256 mismatch"
+    )
     if summary_bytes is None:
         assert checkpoint.summary_sha256 is None
     else:
@@ -215,16 +262,18 @@ def _materialize_private_root(fixture: dict[str, object], root: Path) -> str:
     record_payload = {
         "checkpoint": checkpoint_mapping,
         "checkpoint_sha256": checkpoint.digest,
-        "summary_blob": (
-            None if summary_blob is None else summary_blob.name
-        ),
+        "summary_blob": (None if summary_blob is None else summary_blob.name),
         "transcript_blob": transcript_blob.name,
         "usage_blob": usage_blob.name,
     }
     record_id = f"checkpoint:{checkpoint.checkpoint_id}"
     record_digest = _sha256_of(
         _canonical_bytes(
-            {"record_id": record_id, "kind": "checkpoint.sealed", "payload": record_payload}
+            {
+                "record_id": record_id,
+                "kind": "checkpoint.sealed",
+                "payload": record_payload,
+            }
         )
     )
     row = {
@@ -319,7 +368,9 @@ class P4OperatorRecoverFromFixture(unittest.TestCase):
             # but the recover-mode worker is different (recover payload), so
             # the worker identity is allowed to swap.
             self.assertEqual(next_identity.generation, 2)
-            self.assertEqual(next_identity.continuation_id, "continuation-p4-fixture-001")
+            self.assertEqual(
+                next_identity.continuation_id, "continuation-p4-fixture-001"
+            )
             self.assertEqual(
                 len(result_sha), 64
             )  # recover result SHA must be a 64-hex digest
@@ -355,9 +406,7 @@ class P4OperatorRecoverFromFixture(unittest.TestCase):
             # The fixture pinned the prior worker_sha to fa8a601b…e9903;
             # the recover-mode worker uses a different payload, so the swap
             # is recorded on the next identity.
-            self.assertEqual(
-                len(next_identity.worker_identity_sha256), 64
-            )
+            self.assertEqual(len(next_identity.worker_identity_sha256), 64)
             self.assertNotEqual(
                 next_identity.worker_identity_sha256,
                 "fa8a601b6987f028107182117f32b9fbb4d28b27579afcbf2455ac6d6e7e9903",

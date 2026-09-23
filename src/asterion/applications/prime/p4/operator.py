@@ -36,6 +36,29 @@ from asterion.agents.prime.store import (
     private_root_identity,
 )
 from asterion.applications.prime.p4.worker import P4DeterministicWorker
+from asterion.applications.prime.p4.host import (
+    P4CommitCall,
+    P4CommitReceipt,
+    P4Finalization,
+    P4PendingClassification,
+    P4RecoveredSession,
+)
+from asterion.applications.prime.p4.oracle import P4Oracle
+from asterion.applications.prime.p4.runtime_binding import (
+    P4_RUNTIME_OPTIONS,
+    build_p4_runtime,
+)
+from asterion.applications.prime.provider import (
+    create_prime_long_session_continuity_provider,
+)
+from asterion.applications.prime.services import ContinuityStoreHostService
+from asterion.applications.provider import compose_installed_provider
+from asterion.capabilities.prime_long_session_continuity_native.provider import (
+    P4_INPUT_PRESET,
+    create_prime_long_session_continuity_native_package,
+)
+from asterion.runner.composed import run_composed_application
+from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
 
 
 _OPERATOR_ROOT_ENV = "ASTERION_PRIME_OPERATOR_ROOT"
@@ -77,7 +100,11 @@ def _preflight(environment: MappingProxyType) -> _Preflight:  # type: ignore[typ
     operator_value = environment.get(_OPERATOR_ROOT_ENV, "").strip()
     private_value = environment.get(_PRIVATE_ROOT_ENV, "").strip()
     mode_value = environment.get(_MODE_ENV, "").strip()
-    if not operator_value or not private_value or mode_value not in {"commit", "recover"}:
+    if (
+        not operator_value
+        or not private_value
+        or mode_value not in {"commit", "recover"}
+    ):
         raise P4OperatorError()
     try:
         operator_root = Path(operator_value).resolve(strict=True)
@@ -166,9 +193,9 @@ def _seal_commit_checkpoint(
     usage: dict[str, object],
     continuation_id: str,
 ) -> PrimeCheckpoint:
-    cursor = store.position
     # Public events are zero per round in this witness — the witness is
     # about continuity, not prompt streams.
+    cursor = 0
     checkpoint = PrimeCheckpoint(
         checkpoint_id=run_id,
         generation=store.identity.generation,
@@ -254,9 +281,7 @@ async def _recover_mode(
         extension_binding_fingerprint=prior_identity.extension_binding_fingerprint,
         ceilings_sha256=prior_identity.ceilings_sha256,
     )
-    store = FilePrimeSessionStore.open_continued(
-        preflight.private_root, next_identity
-    )
+    store = FilePrimeSessionStore.open_continued(preflight.private_root, next_identity)
     try:
         # Capture the prior's last sealed checkpoint digest BEFORE running the
         # worker / writing the next checkpoint — the witness depends on the
@@ -267,11 +292,21 @@ async def _recover_mode(
             raise P4OperatorError()
         prior_checkpoint_digest = recovered.checkpoint.digest
         result = await worker.execute()
+        result_sha = sha256(_canonical_bytes(result)).hexdigest()
+        _seal_commit_checkpoint(
+            store=store,
+            worker_sha=worker.identity_sha256,
+            prior_checkpoint_sha=prior_checkpoint_digest,
+            run_id="p4-recover-" + secrets.token_hex(8),
+            transcript=_canonical_bytes(result),
+            usage={"result_sha256": result_sha},
+            continuation_id=next_identity.continuation_id,
+        )
         return (
             prior_identity,
             next_identity,
             prior_checkpoint_digest,
-            sha256(_canonical_bytes(result)).hexdigest(),
+            result_sha,
         )
     finally:
         store.close()
@@ -283,38 +318,221 @@ def _read_prior_identity(root: Path) -> PrimeBackendIdentity:
     return _rpi(root)
 
 
+class _OperatorP4RuntimeHost:
+    """Own one deterministic store and worker behind the composed P4 runtime."""
+
+    def __init__(self, preflight: _Preflight) -> None:
+        self.mode = preflight.mode
+        self._worker = P4DeterministicWorker(preflight.mode)
+        self._prior = None
+        if preflight.mode == "commit":
+            preflight.private_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            identity = _build_identity(
+                private_root=preflight.private_root,
+                generation=1,
+                continuation_id="continuation-" + secrets.token_hex(8),
+                worker_sha=self._worker.identity_sha256,
+                session_id="p4-" + secrets.token_hex(8),
+            )
+            self._store = FilePrimeSessionStore(preflight.private_root, identity)
+        else:
+            prior = _read_prior_identity(preflight.private_root)
+            identity = _build_identity(
+                private_root=preflight.private_root,
+                generation=prior.generation + 1,
+                continuation_id=prior.continuation_id,
+                worker_sha=self._worker.identity_sha256,
+                session_id=prior.session_id,
+                pi_command_sha256=prior.pi_command_sha256,
+                extension_binding_fingerprint=prior.extension_binding_fingerprint,
+                ceilings_sha256=prior.ceilings_sha256,
+            )
+            self._store = FilePrimeSessionStore.open_continued(
+                preflight.private_root, identity
+            )
+            self._prior = self._store.recover_checkpoint()
+            if self._prior is None:
+                self._store.close()
+                raise P4OperatorError()
+        self.continuity = ContinuityStoreHostService(self._store)
+        self.oracle = object()
+        self.extension = object()  # deterministic witness; no Pi process
+        self._classification: P4PendingClassification | None = None
+        self._checkpoint: PrimeCheckpoint | None = None
+        self._result_sha: str | None = None
+        self._worker_closed = False
+
+    @property
+    def identity(self) -> PrimeBackendIdentity:
+        return self._store.identity
+
+    def validate_runtime_services(
+        self,
+        *,
+        continuity_store: object,
+        oracle: object,
+        extension: object,
+        private_trace: object,
+        session_backend: object,
+    ) -> None:
+        if (
+            continuity_store is not self.continuity
+            or oracle is not self.oracle
+            or extension is not self.extension
+            or private_trace is not None
+            or session_backend is not self
+        ):
+            raise P4OperatorError()
+
+    async def wait_recovery(
+        self, *, run_id: str, signal: object
+    ) -> P4RecoveredSession | None:
+        if self.mode != "recover" or self._prior is None:
+            raise P4OperatorError()
+        prior = self._prior.checkpoint
+        return P4RecoveredSession(
+            prior_checkpoint_sha256=prior.digest,
+            prior_generation=prior.generation,
+            recovered_payload_sha256=prior.private_transcript_sha256,
+            bytes_returned=0,
+        )
+
+    async def commit_checkpoint(
+        self, *, run_id: str, call: P4CommitCall, signal: object
+    ) -> P4CommitReceipt:
+        if self._checkpoint is not None or (signal is not None and signal.cancelled):
+            raise P4OperatorError()
+        prior_sha = None if self._prior is None else self._prior.checkpoint.digest
+        if (
+            call.generation != self.identity.generation
+            or call.prior_checkpoint_sha256 != prior_sha
+        ):
+            raise P4OperatorError()
+        result = await self._worker.execute()
+        encoded = _canonical_bytes(result)
+        self._result_sha = sha256(encoded).hexdigest()
+        if self._prior is not None:
+            prior_result_sha = self._prior.usage["result_sha256"]
+            P4Oracle(self._prior.checkpoint, self.identity).verify(
+                commit_result_sha256=prior_result_sha,
+                recover_result_sha256=self._result_sha,
+                recovered_prior_checkpoint_sha256=prior_sha,
+            )
+        self._checkpoint = _seal_commit_checkpoint(
+            store=self._store,
+            worker_sha=self._worker.identity_sha256,
+            prior_checkpoint_sha=prior_sha,
+            run_id=run_id,
+            transcript=encoded,
+            usage={"result_sha256": self._result_sha},
+            continuation_id=self.identity.continuation_id,
+        )
+        return P4CommitReceipt(
+            call.call_id,
+            self._checkpoint.digest,
+            self._result_sha,
+            self.identity.generation,
+            len(encoded),
+        )
+
+    async def report_recovery_stopped(
+        self, *, run_id: str, pending_classification: P4PendingClassification
+    ) -> None:
+        cleanup = await self._worker.close()
+        self._worker_closed = True
+        if not (cleanup.reaped and cleanup.pipes_closed and cleanup.root_removed):
+            raise P4OperatorError()
+        self._classification = pending_classification
+
+    async def wait_finalization(self, *, run_id: str, signal: object) -> P4Finalization:
+        if self._classification is None:
+            raise P4OperatorError()
+        return P4Finalization(
+            self._classification,
+            self._checkpoint.digest
+            if self._classification == "completed" and self._checkpoint
+            else None,
+        )
+
+    def public_result(self) -> P4PublicResult:
+        checkpoint = self._checkpoint
+        if checkpoint is None or self._result_sha is None:
+            raise P4OperatorError()
+        prior = self._prior
+        return P4PublicResult(
+            status="committed" if prior is None else "recovered",
+            run_id=checkpoint.checkpoint_id,
+            checkpoint_sha256=checkpoint.digest,
+            prior_checkpoint_sha256=None if prior is None else prior.checkpoint.digest,
+            generation=checkpoint.generation,
+            new_generation=checkpoint.generation,
+            continuation_id=self.identity.continuation_id,
+            result_sha256=self._result_sha,
+            receipt_sha256=checkpoint.digest,
+            worker_identity_sha256=self.identity.worker_identity_sha256,
+        )
+
+    async def close(self) -> None:
+        try:
+            if not self._worker_closed:
+                await self._worker.close()
+                self._worker_closed = True
+        finally:
+            self._store.close()
+
+
+async def _invoke_composed_round(preflight: _Preflight) -> P4PublicResult:
+    package = create_prime_long_session_continuity_native_package()
+    provider = compose_installed_provider(
+        create_prime_long_session_continuity_provider(),
+        runtime_factories=RuntimeFactoryRegistry(()),
+        installed_packages=(package,),
+    )
+    application = provider.applications[0]
+    assembly = application.assemblies[0]
+    host = _OperatorP4RuntimeHost(preflight)
+    try:
+        services = {
+            "prime.continuity-store": host.continuity,
+            "prime.p4-oracle": host.oracle,
+            "prime.pi-extension": host.extension,
+            "prime.private-trace": None,
+            "prime.session-backend": host,
+        }
+        runtime = build_p4_runtime(
+            RuntimeFactoryContext(
+                "prime-applications",
+                "prime.long-session-continuity",
+                "1.0.0",
+                "asterion.prime",
+                assembly.path,
+                P4_RUNTIME_OPTIONS,
+                services,
+            )
+        )
+        result = await run_composed_application(
+            assembly.plan,
+            implementations=application.implementations,
+            runtime=runtime,
+            run_id="p4-" + preflight.mode + "-" + secrets.token_hex(8),
+            input_text=P4_INPUT_PRESET,
+            host_services=services,
+        )
+        public = host.public_result()
+        if (
+            len(result.artifacts) != 1
+            or result.artifacts[0]["value"]["receipt_sha256"] != public.receipt_sha256
+        ):
+            raise P4OperatorError()
+        return public
+    finally:
+        await host.close()
+
+
 async def _run_async() -> P4PublicResult:
     environment = MappingProxyType(os.environ.copy())  # type: ignore[type-arg]
     preflight = _preflight(environment)
-    if preflight.mode == "commit":
-        identity, checkpoint, result_sha = await _commit_mode(preflight)
-        return P4PublicResult(
-            status="committed",
-            run_id=checkpoint.checkpoint_id,
-            checkpoint_sha256=checkpoint.digest,
-            prior_checkpoint_sha256=None,
-            generation=checkpoint.generation,
-            new_generation=checkpoint.generation,
-            continuation_id=identity.continuation_id,
-            result_sha256=result_sha,
-            receipt_sha256=checkpoint.digest,
-            worker_identity_sha256=identity.worker_identity_sha256,
-        )
-    _, next_identity, prior_checkpoint_digest, result_sha = await _recover_mode(
-        preflight
-    )
-    return P4PublicResult(
-        status="recovered",
-        run_id=None,
-        checkpoint_sha256=None,
-        prior_checkpoint_sha256=prior_checkpoint_digest,
-        generation=None,
-        new_generation=next_identity.generation,
-        continuation_id=next_identity.continuation_id,
-        result_sha256=result_sha,
-        receipt_sha256=None,
-        worker_identity_sha256=next_identity.worker_identity_sha256,
-    )
+    return await _invoke_composed_round(preflight)
 
 
 def main() -> int:

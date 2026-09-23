@@ -22,7 +22,9 @@ class TestPrimeP4CapabilityPackage(unittest.TestCase):
         self.assertEqual(data["package_id"], "prime-long-session-continuity-native")
         self.assertEqual(data["version"], "1.0.0")
         self.assertEqual(len(data["capabilities"]), 2)
-        self.assertEqual(data["capabilities"][0]["capability_id"], "policy.long-session-loop")
+        self.assertEqual(
+            data["capabilities"][0]["capability_id"], "policy.long-session-loop"
+        )
         self.assertEqual(data["capabilities"][0]["version"], "1.0.0")
         self.assertEqual(data["benchmark_suites"], [])
         self.assertEqual(data["resources"], [])
@@ -39,8 +41,19 @@ class TestPrimeP4CapabilityPackage(unittest.TestCase):
         self.assertEqual(data["capability_id"], "prime.long-session-continuity")
         self.assertEqual(data["version"], "1.0.0")
         self.assertEqual(data["kind"], "capability")
-        self.assertEqual(data["provides_capabilities"], ["prime.long-session-continuity"])
-        self.assertEqual(data["requires_capabilities"], ["prime.tool.ipython"])
+        self.assertEqual(
+            data["provides_capabilities"], ["prime.long-session-continuity"]
+        )
+        self.assertEqual(
+            data["requires_capabilities"],
+            [
+                "prime.continuity-store",
+                "prime.p4-oracle",
+                "prime.pi-extension",
+                "prime.private-trace",
+                "prime.session-backend",
+            ],
+        )
         self.assertEqual(
             data["produces_artifacts"],
             ["application/vnd.asterion.prime.p4-native-receipt+json"],
@@ -74,15 +87,17 @@ class TestPrimeP4CapabilityPackage(unittest.TestCase):
             data["capability_packages"][0]["package_id"],
             "prime-long-session-continuity-native",
         )
-        self.assertEqual(
-            data["capability_packages"][0]["version"], "1.0.0"
-        )
-        self.assertEqual(len(data["capabilities"]), 1)
+        self.assertEqual(data["capability_packages"][0]["version"], "1.0.0")
+        self.assertEqual(len(data["capabilities"]), 2)
         self.assertEqual(
             data["capabilities"][0]["capability_id"],
             "policy.long-session-loop",
         )
         self.assertEqual(data["capabilities"][0]["version"], "1.0.0")
+        self.assertEqual(
+            data["capabilities"][1]["capability_id"], "prime.long-session-continuity"
+        )
+        self.assertEqual(data["capabilities"][1]["version"], "1.0.0")
 
 
 if __name__ == "__main__":

@@ -165,7 +165,7 @@ class _P4RuntimeSession:
                 request.run_id,
                 1,
                 "run.started",
-                {"capabilities": ["prime.tool.ipython"], "mode": self._mode},
+                {"capabilities": ["prime.tool.ipython"]},
             )
         ]
         pending: P4PendingClassification = "completed"
@@ -319,17 +319,18 @@ def build_p4_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
             or context.application_version != "1.0.0"
             or context.runtime_id != "asterion.prime"
             or set(host_services) != set(P4_HOST_CAPABILITIES)
-            or any(
-                host_services.get(name) is None
-                for name in required_host_services
-            )
+            or any(host_services.get(name) is None for name in required_host_services)
             or continuity_store is None
             or not isinstance(continuity_store, ContinuityStoreHostService)
             or dict(context.options) != dict(P4_RUNTIME_OPTIONS)
             or not isinstance(service, P4RuntimeHost)
         ):
             raise ValueError
-        mode = context.options.get("mode", "commit")
+        # Invocation mode belongs to the preflighted operator host, not the
+        # immutable runtime limits shared by both generations.
+        mode = getattr(service, "mode", None)
+        if mode not in {"commit", "recover"}:
+            raise ValueError
         validated = service.validate_runtime_services(  # type: ignore[attr-defined]
             continuity_store=continuity_store,
             oracle=host_services["prime.p4-oracle"],
