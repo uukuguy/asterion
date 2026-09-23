@@ -1,8 +1,10 @@
 # Asterion Prime P1–P7 验收指南
 
-> Updated: 2026-09-19. 9 阶段原生化计划已收尾(P1–P7 共 7 个原生应用,7/7 完成)。
+> Updated: 2026-09-24. P3–P6 默认 `-run` 命令已改为有界真实模型应用运行；旧确定性路径改名 `-witness`。
 > 这份文档给"想要快速理解每个应用在做什么、跑得通什么、还有哪些没验证"
 > 的人看。
+
+2026-09-24 本地已安装 wheel 实跑：P3 两个独立 Pi 会话完成子任务与汇合；P4 两个独立进程完成固定任务状态的提交与恢复；P5 模型首轮候选通过语义校验（0 次修复）；P6 模型候选经独立 holdout 改进检查并在项目范围促升。四者都只有一次固定小任务成功，不是稳定率、通用编码能力或完整论文复现。以下旧章节中的 deterministic 结果仅指各自 `-witness` 和 `-run-limits` 路径。
 
 ## 文档怎么读
 
@@ -72,7 +74,7 @@ make asterion-prime-p7-solve
 
 ✅ **已验证**:Level 1 / 种子 0 / `deepseek-v4-flash` 下通过;trace 完整、回放通过、清理干净。
 ⚠️ **设计选择但未端到端验证**:多关 / 多种子 / 多游戏 / 完整 benchmark;`promotion` 仍是 `unpromoted`(只跑过一次的边界)。
-ℹ️ **为什么是"真"模型跑过的**:P7 是唯一直接跑真模型的见证;其他 P1–P6 的 witness 都用 deterministic fake-worker(详见各自章节)。
+ℹ️ **历史说明**:P7 是原验收文档写作时唯一直接跑真模型的见证。P1 与 P3–P6 后来已有各自固定有界真实运行；P2 的能力边界仍见本节。
 ℹ️ **P7 没有独立的"native spec"**:它是 Phase 3 的产物,设计沉淀在 `docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md` 的 P7 应用章节里。
 
 ---
@@ -132,7 +134,7 @@ make asterion-prime-p1-run
 ### 当前边界
 
 - P1 本次完成运行使用真实 Pi 子进程与模型;此前用户失败运行的内部临时记录已清理,不能当作可回放证据。
-- 一次成功不证明跨模型、跨任务或多次运行的稳定率。P2 的零 token witness 与 P3–P6 的确定性 worker witness 也不能替代各自的真实模型能力验证。
+- 一次成功不证明跨模型、跨任务或多次运行的稳定率。P2 的零 token witness 与 P3–P6 的旧确定性 worker witness 不能替代各自后来完成的固定小任务真实运行，也不能据此推断广泛能力。
 - 2026-09-19 的独立 verify 进程提案是历史方向;后续精确 request-ID ack 与 settlement 屏障已修复本次复现的连续 prompt 缺陷,不应把旧提案当作当前必做修复。
 
 ---
@@ -180,7 +182,7 @@ make asterion-prime-p2-run
 
 - **新 host service `prime.continuity-store`**(operator 拥有的私有目录):持久化身份快照 + 已提交的 checkpoint。
 - **跨进程不变量**:新进程接管时,**身份字段必须严格匹配**(`pi_command_sha256` / `extension_binding_fingerprint` / `ceilings_sha256` 必须一致);只有 generation 可以 +1,worker 身份可以换。如果不匹配,直接拒收。
-- **绕过 supervisor 模式**:用 `mk` 通过 `asterion-prime-p4-run` 跑两次(commit 模式 + recover 模式),每次都是一次 Orb invocation,但两者共享同一个 `ASTERION_PRIME_P4_PRIVATE_ROOT`。
+- **固定双进程 preset**:`make asterion-prime-p4-run` 在本地已安装 wheel 中启动独立 commit/recover 进程，共用一个新的私有 checkpoint 根。旧 Orb 确定性路径为 `make asterion-prime-p4-witness`。
 
 ### Prime 能力
 
@@ -192,12 +194,12 @@ make asterion-prime-p2-run
 make asterion-prime-p4-run
 ```
 
-**期望**:退出码 0;输出是**两次 Orb invocation 的合并结果**,各含一条 `receipt_sha256`,recover 模式的 receipt 含一个 `generation` 比 commit 模式 +1 的标识。
+**期望**:退出码 0；输出 commit/recover 两条真实模型结果，二者各有 `model_call_count == 1`，recover 的 `prior_checkpoint_sha256` 等于 commit 的 `checkpoint_sha256`，generation 增 1。
 
 ### 边界与未验证项
 
-✅ **已验证**:commit → 进程死 → recover → 继续,继续的代是确定性 SHA。`D-2026-09-18-01` 的"跨构建继承 SHA"不变量在 fixture 里测过。
-ℹ️ **fake-worker**:用 deterministic fake-worker。SHA 在不同 `(mode, generation, run_id)` 下不同,所以"代际不混淆"和"joined-result"检查是有意义的。
+✅ **已验证**:2026-09-24 本地真实 Pi 两个独立进程完成固定任务状态恢复，并封存第二代 checkpoint；注入测试证明暂态模型失败后同根可重试；旧 deterministic fake-worker 可用 `-witness` 重跑。
+ℹ️ **恢复范围**:固定任务 transcript 被新进程消费；任意 IPython 内存或任意长任务状态恢复尚未验证。
 ℹ️ **为什么不是 supervisor**:Phase 6 原本考虑过引入 supervisor 进程(Pi 实现的做法),但那是 Phase 1 已经砍掉的"跨进程运行时依赖"模式。新设计用更强的不变量(identity 字段对齐)替代 supervisor 守护。
 
 ---
@@ -227,6 +229,7 @@ make asterion-prime-p4-run
 
 ```bash
 make asterion-prime-p3-run            # 正常路径
+make asterion-prime-p3-witness        # 旧确定性结构见证
 make asterion-prime-p3-run-limits     # 4 条拒收路径
 ```
 
@@ -237,7 +240,7 @@ make asterion-prime-p3-run-limits     # 4 条拒收路径
 ### 边界与未验证项
 
 ✅ **已验证**:子会话被接纳 + 结果合并 + 4 条限额路径都按预期拒收。
-ℹ️ **fake-worker**:用 deterministic fake-worker。
+ℹ️ **真实运行边界**:默认 `-run` 用两个真实 Pi 文本会话；`-witness` 与 `-run-limits` 仍用 deterministic fake-worker。没有验证 IPython worker 中的递归工具调用。
 ℹ️ **深度 > 2 没测**:`MAX_DEPTH = 2` 是见证合约,不是框架硬限。框架层面其实可以更深,但 P3 不证明。
 ℹ️ **subprocess supervisor 路径没实现**:`D-2026-09-18-02` 明确把"用 supervisor 隔离大 context 子会话"作为后备方案保留,但 Phase 7 没动。如果以后真有需要,可以单独开 phase。
 
@@ -272,7 +275,7 @@ make asterion-prime-p5-run            # 成功路径
 make asterion-prime-p5-run-limits     # 3 条限额路径
 ```
 
-**期望(成功路径)**:退出码 0;JSON 含 `terminal_reason == "success"`、`propose_step_count == 1`、`verify_step_count == 2`、`repair_step_count == 1`、`failed_verify_count == 1`。
+**期望(成功路径)**:退出码 0；JSON 含 `terminal_reason == "success"`、`propose_step_count == 1`，验证/修复次数反映实际模型候选。2026-09-24 实跑首轮答对：`verify_step_count == 1`、`repair_step_count == 0`。
 
 **期望(限额路径)**:退出码 0;输出是**3 条记录**:
 - `[0]` `iteration-cap-exceeded`(3 次 verify 失败)
@@ -282,7 +285,7 @@ make asterion-prime-p5-run-limits     # 3 条限额路径
 ### 边界与未验证项
 
 ✅ **已验证**:成功路径 + 3 条限额路径都按预期停机。
-ℹ️ **fake-worker**:用 deterministic fake-worker。
+ℹ️ **修复边界**:真实首轮修复尚未发生；注入测试覆盖失败反馈与修复。旧 deterministic 成功见证保留为 `make asterion-prime-p5-witness`。
 ℹ️ **为什么是单一服务**:`D-2026-09-19-01` 明确反对拆成 `proposer` / `verifier` / `repairer` 三个独立 host service——那会人为切碎一个紧凑约束。
 
 ---
@@ -310,11 +313,14 @@ make asterion-prime-p5-run-limits     # 3 条限额路径
 ### 怎么验收
 
 ```bash
-make asterion-prime-p6-run            # 3 条 witness 一次性
-make asterion-prime-p6-run-limits     # 同上(witness 包含全部 3 种结果)
+make asterion-prime-p6-run            # 一个真实候选与独立 holdout
+make asterion-prime-p6-witness        # 旧确定性成功见证
+make asterion-prime-p6-run-limits     # 旧确定性拒收见证
 ```
 
-**期望**:退出码 0;输出是**3 条记录**(`jq -s slurp + .[N]` 索引):
+**期望(默认 `-run`)**:退出码 0；一条结果中 `terminal_outcome="preserved"`、`model_call_count == 1`、`rollback_invocation_count == 0`、`global_activation_approved=false`。
+
+**旧确定性见证**分别覆盖以下结果:
 - `[0]` `terminal_outcome="preserved"`、`rollback_invocation_count=0`、`global_activation_approved=false`、`task_b_result_digest` 与 baseline 不同
 - `[1]` `terminal_outcome="rolled-back"`、`rollback_invocation_count=1`、`baseline_snapshot.revision_id` 已回到 `None`
 - `[2]` `terminal_outcome="rolled-back"`、`global_activation_approved=false`、`rollback_invocation_count=0`、`candidate_revision_digest == baseline_snapshot_digest`(没有真实 admission)
@@ -322,7 +328,7 @@ make asterion-prime-p6-run-limits     # 同上(witness 包含全部 3 种结果)
 ### 边界与未验证项
 
 ✅ **已验证**:`HarnessCoordinator` 被正确包装而非重写;3 种结果都按公开 enum 输出。
-ℹ️ **fake-worker**:用 deterministic fake-worker。
+ℹ️ **真实运行边界**:默认 `-run` 用模型候选和独立数值 holdout；真实回滚/全局拒收未发生，相关路径只有注入测试与旧 deterministic witness 证据。
 ℹ️ **为什么是"封装"而非"重写"**:`D-2026-09-19-02` 明确禁止拆分 `HarnessCoordinator` 的"只追加修订权"。如果未来有人想做"独立的修订引擎",这一禁令适用。
 
 ---
@@ -372,7 +378,7 @@ make asterion-prime-p6-run-limits     # 同上(witness 包含全部 3 种结果)
 
 ### 6. Witness 用 deterministic fake-worker(P2–P6)
 
-- P2–P6 的 witness 全用 fake-worker(可重复、可验签)。真模型跑只在 P1/P7 范围内出现。
+- P2–P6 的历史 witness 用 fake-worker(可重复、可验签)。2026-09-24 起 P3–P6 的默认 `-run` 已换成有界真模型路径，历史路径改为 `-witness`；P2 零 token 见证仍保留原边界。
 - fake-worker 接收 `(mode, candidate_kind, run_id)` 这样的元组,SHA 按元组不同——这样"子会话确实做了事"和"代际不混淆"是可证的不是可猜的。
 
 ---
