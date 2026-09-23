@@ -454,6 +454,7 @@ def _seal_receipt_from_loop(
     verdict: CandidateStoreVerdict,
     summary: dict[str, object],
     failure_digest: str | None,
+    task_a_evidence_digest: str | None = None,
 ) -> P6NativeReceipt:
     """Build and seal a :class:`P6NativeReceipt` from the wrapper's outcome.
 
@@ -479,7 +480,8 @@ def _seal_receipt_from_loop(
         root_run_id=root_run_id,
         baseline_snapshot_digest=baseline_digest,
         candidate_revision_digest=candidate_revision.proposal_digest,
-        task_a_evidence_digest=_evidence_digest(candidate_proposal),
+        task_a_evidence_digest=task_a_evidence_digest
+        or _evidence_digest(candidate_proposal),
         task_b_result_digest=task_b_result_digest,
         terminal_outcome=terminal_outcome,
         global_activation_approved=global_activation_approved,
@@ -612,6 +614,7 @@ async def _open_candidate_store_for_run(
     scope: HarnessScope,
     global_activation_approved: bool,
     private_store: MemoryHarnessPrivateRevisionStore | None = None,
+    effect_sender=None,
 ) -> tuple[CandidateStoreLoop, HarnessCoordinator]:
     """Open a fresh candidate-store host service and return the loop +
     the wired coordinator. Used by every scenario driver.
@@ -637,7 +640,9 @@ async def _open_candidate_store_for_run(
         MAX_USAGE_PROVIDER_OPS,
     )
 
-    coordinator = _build_coordinator(scope=scope, private_store=private_store)
+    coordinator = _build_coordinator(
+        scope=scope, private_store=private_store, effect_sender=effect_sender
+    )
     limits = _CandidateStoreLimits(
         max_candidate_revisions_per_run=MAX_CANDIDATE_REVISIONS_PER_RUN,
         max_holdout_evaluations_per_run=MAX_HOLDOUT_EVALUATIONS_PER_RUN,
@@ -772,11 +777,14 @@ async def _execute_candidate_workflow(
 
 
 class _ComposedCandidateHost:
-    def __init__(self, resources, loop, coordinator, *, non_regressing=True):
+    def __init__(
+        self, resources, loop, coordinator, *, non_regressing=True, workflow=None
+    ):
         self.resources = resources
         self.loop = loop
         self.coordinator = coordinator
         self.non_regressing = non_regressing
+        self.workflow = workflow or _execute_candidate_workflow
         self.receipt = None
         self.effects_state = "not-started"
 
@@ -796,7 +804,7 @@ class _ComposedCandidateHost:
         resources = replace(self.resources, root_run_id=root_run_id)
         baseline = self.coordinator.snapshot()
         try:
-            self.receipt = await _execute_candidate_workflow(
+            self.receipt = await self.workflow(
                 resources,
                 self.loop,
                 self.coordinator,
