@@ -385,6 +385,19 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertEqual(public[-1].payload, {"status": "completed"})
         self.assertNotIn("PRIVATE-ANSWER", repr(public))
 
+    def test_leading_settlement_cannot_complete_a_native_round(self) -> None:
+        session, _rpc, _lease = self.fixture.make(native_events(("agent_settled", {})))
+        with self.assertRaises(ProtocolError):
+            asyncio.run(collect(session))
+
+    def test_post_run_continuation_remains_in_one_native_round(self) -> None:
+        session, _rpc, _lease = self.fixture.make(native_events(
+            ("agent_start", {}), ("agent_end", {}),
+            ("agent_start", {}), ("agent_end", {}), ("agent_settled", {}),
+        ))
+        public = asyncio.run(collect(session))
+        self.assertEqual(public[-1].payload, {"status": "completed"})
+
     def test_default_agent_end_terminal_completes_without_public_payload(self) -> None:
         session, _rpc, _lease = self.fixture.make(
             native_events(("agent_end", {"messages": ["PRIVATE-ANSWER"]}))

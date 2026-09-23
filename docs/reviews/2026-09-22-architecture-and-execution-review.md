@@ -250,6 +250,8 @@ CURRENT-STATE 应精简为结构快照，去掉相互矛盾的“7/7”与“P6 
 | P6 `prime.continual-improvement` | 选中 provider → assembly → runner | 注入 candidate store / 单一 HarnessCoordinator / oracle | 本地 operator root | 同上；覆盖真实 candidate admission、holdout、promotion、取消逆向与 recovery-required。**未证明持久恢复或 live model**。 |
 | P7 `prime.arc-agi-3-solving` | 已安装 wheel 的 operator preset | 独立安装的 Pi + 外部 ARC engine | 历史 Orb / 外部数据 | 历史限定 Level-1 receipt `c00e3263…`，见 `../status/ASTERION-PRIME-P7-EVIDENCE.md`；本次**未重跑**，不代表全游戏或多 seed。 |
 
+**2026-09-24 后续 P1 证据**：上表记录的是 2026-09-22 评审修复当日边界。之后，旧 main `cbe668f3` 的有界 installed-wheel 运行在 stage-one oracle 因仅有 1 个 cell 被拒收；评审分支 `43fea703` 在相同 operator 配置和 preset 下完成两阶段并签发收据 `ab24c3d0ca04b760d377fcd225bb222cea907aaea9fc2ff4316f5d773ac74354`。两次轮次的阶段和 wheel 摘要见 `../status/PRIME-P1-P7-ACCEPTANCE.md`。这是一轮真实模型成功，不是长期稳定性结论；用户原始失败运行没有可回放的内部记录。
+
 验证：`make check` 通过（2990 项 Python 测试，2 项跳过，并通过 TypeScript、lint、文档、Rust 测试与构建）；`make promotion-check` 在隔离副本中通过（25 条命令，provider 操作 0，完整数据集未运行）。最终复审额外发现来源身份漂移绕过，`6baffd9e` 补了 `source_id`/`source_kind` 拒绝测试并修复。详细命令与证据边界见当前 `RESUME-NEXT-SESSION.md`。
 
 边界：R8 仍对每次独立文件追加验证全部旧前缀，保留篡改发现时机；长会话分段封存须先审查恢复契约。R7 私有 sink 是操作者可注入的进程内关联点，未提供持久诊断存储。R5 用进程组清理可控命令树，但不能约束改变凭据或脱离进程组的后代，也不是 OS sandbox；取消与同步 `spawn()` 之间尚无原子化调度门闩。P6 旧的底层结果 tuple 含历史错误分类，不能单凭文字 `rolled-back` 当作实际逆向证据；公共组合 host 另行核验 coordinator revision 与 baseline，并在无法证明时拒绝成功。真实 P1 模型路径、完整 benchmark、持久恢复与诊断均未由本次通过的命令证明。

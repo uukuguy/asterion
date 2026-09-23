@@ -15,6 +15,7 @@ from asterion.applications.first_party_packages import (
     create_prime_ipython_coding_native_package,
 )
 from asterion.applications.prime import create_provider
+from asterion.applications.prime.inventory import PRIME_RELEASE_INVENTORY
 from asterion.capability_packages import CapabilityPackageRef
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.capabilities.execution import (
@@ -101,6 +102,31 @@ class _CancelledAfterUsageRuntime(_Runtime):
 
 
 class TestAsterionPrimeP1Provider(unittest.TestCase):
+    def test_provider_publications_match_declared_release_inventory(self) -> None:
+        provider = create_provider()
+        self.assertEqual(
+            tuple(
+                (
+                    application.application_id,
+                    application.version,
+                    application.assembly_paths[0]
+                    .relative_to(provider.resource_root)
+                    .as_posix(),
+                    application.capability_packages[0],
+                )
+                for application in provider.applications
+            ),
+            tuple(
+                (
+                    item.application_id,
+                    item.version,
+                    item.assembly_identity,
+                    item.capability_package,
+                )
+                for item in PRIME_RELEASE_INVENTORY
+            ),
+        )
+
     def test_capability_accepts_only_literal_preset_and_projects_digest(self) -> None:
         package = create_prime_ipython_coding_native_package()
         implementation = package.implementations[0].implementation

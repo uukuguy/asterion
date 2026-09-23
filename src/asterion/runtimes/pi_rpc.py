@@ -20,6 +20,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
+from asterion.services.diagnostics import DiagnosticSink, capture_failure
+
 
 _MAX_STDOUT_LINE_BYTES = 1024 * 1024
 _MAX_STDOUT_BYTES = 4 * 1024 * 1024
@@ -74,9 +76,9 @@ def _normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
 def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
     event_type = payload.get("type")
     if event_type == "response":
-        return {
-            key: payload[key] for key in ("type", "id", "success") if key in payload
-        }
+        # Preserve wire identity and command results until the command owner
+        # validates them. Projection must not change protocol acceptance.
+        return payload
     if event_type == "message_update":
         update = payload.get("assistantMessageEvent")
         compact_update: dict[str, object] = {}
@@ -90,8 +92,9 @@ def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
         message = payload.get("message")
         compact_message: dict[str, object] = {}
         if isinstance(message, Mapping):
-            if "role" in message:
-                compact_message["role"] = message["role"]
+            for key in ("role", "stopReason"):
+                if key in message:
+                    compact_message[key] = message[key]
             usage = message.get("usage")
             if isinstance(usage, Mapping):
                 compact_message["usage"] = {
@@ -110,9 +113,12 @@ def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
             for key in ("type", "toolCallId", "isError", "effect")
             if key in payload
         }
+    if event_type == "agent_end":
+        return {
+            key: payload[key] for key in ("type", "willRetry") if key in payload
+        }
     if event_type in {
         "agent_start",
-        "agent_end",
         "message_start",
         "turn_start",
         "turn_end",
@@ -425,10 +431,8 @@ def validate_pi_compact_result(result: PiRpcCompactResult) -> None:
             or start.payload.get("customInstructions") is not None
             or end.payload.get("customInstructions") is not None
             or end.payload.get("willRetry") is not False
-            # `_compact_rpc_event` projects a response to its identity and
-            # outcome, so this is the whole response the validator can be given:
-            # `command` and the echoed `data` never reach it, and the request is
-            # correlated by `id` (also enforced by the driver before this).
+            # The compact driver validates wire command/data, then normalizes
+            # the response independently of optional trace compression.
             or set(response.payload) != {"id", "success"}
             or response.payload.get("id") != result.request_id
         ):
@@ -492,12 +496,15 @@ class PiRpcSession:
         *,
         _popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
         _thread_factory: Callable[..., threading.Thread] = threading.Thread,
+        diagnostics: DiagnosticSink | None = None,
     ) -> None:
         if type(config) is not PiRpcConfig:
             raise TypeError("Pi RPC config is invalid")
         self.config = config
         self._popen = _popen
         self._thread_factory = _thread_factory
+        self._diagnostics = diagnostics
+        self._last_diagnostic_id: str | None = None
         self._state: _ProcessState | None = None
         self._last_stderr = b""
         self._last_failure: str | None = None
@@ -505,6 +512,7 @@ class PiRpcSession:
         self._run_active = False
         self._run_owner: asyncio.Task[object] | None = None
         self._command_lock = asyncio.Lock()
+        self._prompt_driver_lock = threading.Lock()
         self._lifecycle_open = False
         self._lifecycle_poisoned = False
         self._session_deadline: float | None = None
@@ -574,6 +582,10 @@ class PiRpcSession:
     @property
     def last_failure(self) -> str | None:
         return self._last_failure
+
+    @property
+    def last_diagnostic_id(self) -> str | None:
+        return self._last_diagnostic_id
 
     def next_id(self) -> str:
         self._request_id += 1
@@ -735,6 +747,50 @@ class PiRpcSession:
     ) -> float | None:
         """Drive one prompt exchange while the caller interprets Pi events."""
 
+        if not self._prompt_driver_lock.acquire(blocking=False):
+            raise RuntimeError("Pi RPC session already has an active command")
+        dispatched = False
+
+        def mark_dispatched() -> None:
+            nonlocal dispatched
+            # A failed write/flush may already have delivered part of a request.
+            dispatched = True
+            if on_request_written is not None:
+                on_request_written()
+
+        try:
+            if self._lifecycle_poisoned:
+                raise RuntimeError("Pi RPC session is poisoned; close is required")
+            state = self._state
+            if state is not None and not state.stdout_queue.empty():
+                self._lifecycle_poisoned = True
+                raise RuntimeError("Pi RPC session has unowned events; close is required")
+            return self._drive_prompt(
+                message, timeout_seconds=timeout_seconds, signal=signal,
+                on_event=on_event, request_id=request_id,
+                on_request_written=mark_dispatched,
+                absolute_deadline=absolute_deadline,
+            )
+        except BaseException:
+            if dispatched:
+                self._lifecycle_poisoned = True
+            raise
+        finally:
+            self._prompt_driver_lock.release()
+
+    def _drive_prompt(
+        self,
+        message: str,
+        *,
+        timeout_seconds: float | None,
+        signal: CancellationSignal | threading.Event | None,
+        on_event: Callable[[dict[str, Any], PiRpcPromptControl], PiRpcDirective],
+        request_id: str | None = None,
+        on_request_written: Callable[[], None] | None = None,
+        absolute_deadline: float | None = None,
+    ) -> float | None:
+        """Drive one prompt exchange while the caller interprets Pi events."""
+
         if type(message) is not str:
             raise ValueError("Pi RPC prompt is invalid")
         control = PiRpcPromptControl(
@@ -749,35 +805,57 @@ class PiRpcSession:
             on_request_written()
         self.send({"id": request_id, "type": "prompt", "message": message})
         acknowledged = False
-        # Pi 0.85.1 in the reuse path may emit `agent_settled` as its first event
-        # for a new prompt without a preceding `response` ack — the prompt was
-        # accepted but the bare response event was elided (D-2026-09-19-03).
-        # Treat `agent_settled` as an implicit ack: the agent reaching the
-        # settled state proves Pi took the prompt, so blocking COMPLETE on a
-        # missing explicit response would refuse legitimate reuse-path runs.
         settled_seen = False
+        activity_seen = False
+        aborted = False
+        cycle_failure = False
+        retry_allowed = False
+        completion_requested = False
         while True:
             event = control.read_event()
-            directive = on_event(event, control)
-            if type(directive) is not PiRpcDirective:
-                raise RuntimeError("Pi RPC prompt directive is invalid")
-            if event.get("type") == "response":
+            event_type = event.get("type")
+            if event_type == "response":
                 if event.get("id") != request_id:
                     raise RuntimeError("Pi RPC response did not match the prompt")
                 if acknowledged or event.get("success") is not True:
                     raise RuntimeError("RPC prompt failed")
                 acknowledged = True
-            if event.get("type") == "agent_settled":
+            elif event_type == "agent_settled":
+                if settled_seen:
+                    raise RuntimeError("Pi RPC prompt settlement is duplicated")
+                if not acknowledged and not activity_seen:
+                    raise RuntimeError(
+                        "Received agent_settled before prompt acknowledgement"
+                    )
                 settled_seen = True
+            else:
+                if settled_seen:
+                    raise RuntimeError("Pi RPC activity followed prompt settlement")
+                activity_seen = True
+            if event_type == "agent_start":
+                if cycle_failure and not retry_allowed:
+                    raise RuntimeError("Pi RPC failed cycle continued without retry")
+                cycle_failure = False
+                retry_allowed = False
+            if event_type == "message_end":
+                assistant = event.get("message")
+                if isinstance(assistant, Mapping) and assistant.get("role") == "assistant":
+                    cycle_failure |= assistant.get("stopReason") in {"error", "aborted"}
+            if event_type == "agent_end":
+                retry_allowed = event.get("willRetry") is True
+            directive = on_event(event, control)
+            if type(directive) is not PiRpcDirective:
+                raise RuntimeError("Pi RPC prompt directive is invalid")
             if directive is PiRpcDirective.ABORT:
                 control.abort()
-                continue
-            if directive is PiRpcDirective.COMPLETE:
-                if not acknowledged and not settled_seen:
-                    event_type = event.get("type", "terminal event")
-                    raise RuntimeError(
-                        f"Received {event_type} before prompt acknowledgement"
-                    )
+                aborted = True
+            elif directive is PiRpcDirective.COMPLETE:
+                completion_requested = True
+            # agent_end closes one cycle. Post-run work can start another cycle
+            # before finally emitting this operation's settlement barrier.
+            if acknowledged and settled_seen and completion_requested:
+                if aborted or cycle_failure:
+                    raise RuntimeError("Pi RPC prompt execution failed")
                 return control.remaining_seconds()
 
     def abort(self) -> None:
@@ -903,6 +981,9 @@ class PiRpcSession:
         if state is not None and state.output_error is not None:
             self._lifecycle_poisoned = True
             raise state.output_error
+        if state is not None and not state.stdout_queue.empty():
+            self._lifecycle_poisoned = True
+            raise RuntimeError("Pi RPC session has unowned events; close is required")
         if signal.cancelled:
             raise RuntimeError(f"RPC {operation} was cancelled before start")
         return self._remaining_session_seconds(operation)
@@ -1015,6 +1096,7 @@ class PiRpcSession:
         if self._command_lock.locked():
             raise RuntimeError("Pi RPC session already has an active command")
         async with self._command_lock:
+            self._last_diagnostic_id = None
             self._check_command_ready("prompt", signal)
             absolute_deadline = self._session_deadline
             assert absolute_deadline is not None
@@ -1062,7 +1144,7 @@ class PiRpcSession:
                                 )
                                 text_bytes = _MAX_FINAL_TEXT_BYTES
                             text_truncated = True
-                elif event.type in {"agent_end", "agent_settled"}:
+                elif event.type == "agent_settled":
                     # Pi emits agent_end before post-run work and agent_settled.
                     # Consume the settlement before admitting another command.
                     return PiRpcDirective.COMPLETE
@@ -1096,14 +1178,23 @@ class PiRpcSession:
                     absolute_deadline=absolute_deadline,
                 )
             )
-            await self._await_driver(
-                driver_task,
-                local_cancel=local_cancel,
-                request_written=request_written,
-            )
-            if state is not None and state.output_error is not None:
-                self._lifecycle_poisoned = True
-                raise state.output_error
+            try:
+                await self._await_driver(
+                    driver_task,
+                    local_cancel=local_cancel,
+                    request_written=request_written,
+                )
+                if state is not None and state.output_error is not None:
+                    self._lifecycle_poisoned = True
+                    raise state.output_error
+            except Exception as error:
+                self._last_diagnostic_id = capture_failure(
+                    self._diagnostics,
+                    stage="pi.prompt",
+                    error=error,
+                    subject_id=request_id,
+                )
+                raise
             final_text = (
                 bytes(state.compact_final_text).decode("utf-8", "ignore")
                 if self.config.compact_events and state is not None
@@ -1165,6 +1256,24 @@ class PiRpcSession:
                 self.send(request)
                 while True:
                     raw = control.read_event()
+                    if raw.get("type") == "response":
+                        if raw.get("id") != request_id:
+                            raise RuntimeError(
+                                "Pi RPC response did not match the compact request"
+                            )
+                        if raw.get("command") != "compact":
+                            raise RuntimeError("Pi RPC compact response command is invalid")
+                        if raw.get("success") is True and (
+                            not events
+                            or events[-1].type != "compaction_end"
+                            or _freeze(raw.get("data")) != events[-1].payload.get("result")
+                        ):
+                            raise RuntimeError("Pi RPC compact response result is invalid")
+                        raw = {
+                            key: raw[key] for key in ("type", "id", "success")
+                            if key in raw
+                        }
+
                     delivered: concurrent.futures.Future[PiRpcEvent] = (
                         concurrent.futures.Future()
                     )
@@ -1279,6 +1388,7 @@ def build_rpc_session(
     deadline_seconds: float,
     inherited_fds: tuple[int, ...] = (),
     compact_events: bool = False,
+    diagnostics: DiagnosticSink | None = None,
 ) -> PiRpcSession:
     """Construct one session from neutral launch material, Pi-side."""
 
@@ -1290,7 +1400,8 @@ def build_rpc_session(
             deadline_seconds=deadline_seconds,
             inherited_fds=inherited_fds,
             compact_events=compact_events,
-        )
+        ),
+        diagnostics=diagnostics,
     )
 
 

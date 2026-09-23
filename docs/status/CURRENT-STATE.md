@@ -1,10 +1,10 @@
 # Current State
 
-Updated 2026-09-22. This file is the structural snapshot; the active session checkpoint and next actions are in `RESUME-NEXT-SESSION.md`. Historical decisions and receipts remain in `DECISIONS.md`, `JOURNAL.md`, and the named evidence files.
+Updated 2026-09-24. This file is the structural snapshot; the active session checkpoint and next actions are in `RESUME-NEXT-SESSION.md`. Historical decisions and receipts remain in `DECISIONS.md`, `JOURNAL.md`, and the named evidence files.
 
 ## Project and authority
 
-- Project route: managed. Canonical historical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Most recent work package: 2026-09-22 R1–R9 review remediation, complete on its isolated branch and not declared as a new numbered phase.
+- Project route: managed. Canonical historical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Most recent work package: 2026-09-22 R1–R9 review remediation, integrated into main and not declared as a new numbered phase.
 - Asterion is a composable, multi-runtime research framework. The root wheel and `src/asterion/` are authoritative. DCI is a reference product; Pi, data, credentials, generated evidence, and the parent DCI baseline are external.
 - Python owns composition and orchestration, TypeScript validates shared contracts and Node integration, and Rust owns controlled execution. Framework modules remain product neutral. Applications select exact package and runtime bindings; runners execute an already resolved plan.
 - Protocols `asterion.agent-runtime/v1`, `asterion.capability/v1`, `asterion.capability-package/v1`, and `asterion.application-assembly/v1` remain closed. The 2026-09-22 remediation does not introduce protocol v2.
@@ -12,7 +12,7 @@ Updated 2026-09-22. This file is the structural snapshot; the active session che
 
 ## Active work
 
-- The nine findings and priorities are recorded in `../reviews/2026-09-22-architecture-and-execution-review.md`. The implementation is isolated on `codex/review-implementation-20260922` in `.worktrees/review-implementation`; the main branch has not integrated those commits.
+- The nine findings and priorities are recorded in `../reviews/2026-09-22-architecture-and-execution-review.md`. Their implementation is on main; `.worktrees/review-implementation` retains the reviewed source branch.
 - R1/R6 repair Pi prompt ownership through an exact request acknowledgment and settlement barrier, and normalize wire responses before optional event compaction. The Phase 10 shared-session draft is historical and must be corrected before implementation.
 - R2 connects Prime P3/P5/P6 selected assemblies to executable capabilities, injected hosts, and sealed receipts. Deterministic host tests prove this composition path, not live model ability. P6 cancellation after admission must either complete a verified inverse or mark recovery required; it cannot label unverified effects rolled back.
 - R3/R4 bind composition to the validated package snapshot and reject self-consumed event/artifact cycles. R5 bounds Python/Rust executor cleanup. R7 adds private diagnostic correlation while retaining public redaction. R8 coalesces validated journal reads without changing the canonical journal. R9 narrows Prime inventory and module ownership.
@@ -20,7 +20,7 @@ Updated 2026-09-22. This file is the structural snapshot; the active session che
 ## Evidence boundary
 
 - The native detachment program and its historical P1–P7 receipts remain documented. “Implemented” means code and entry point exist; it does not establish every application’s current end-to-end capability.
-- P1 has prior live receipts and a later real-model failure report. The repaired prompt boundary has focused simulated-producer tests; a bounded real P1 verification is still separately named and must not be inferred from them.
+- P1 has prior live receipts and a later real-model failure report. The repaired prompt boundary has focused simulated-producer tests and one bounded installed-wheel live completion on the reviewed branch. This is one preset run, not a reliability estimate.
 - P2 has local retrieval and oracle evidence; a zero-token operator witness alone does not prove model long-context performance.
 - P3/P5/P6 had independent deterministic operator witnesses, while the 2026-09-22 review reproduced an empty public composition path. The selected-provider tests and isolated package gate now pass after repair. They do not prove live model capability.
 - P4 has deterministic continuity/recovery evidence, not broad live-model cross-session proof. P7 has a recorded, bounded live Level-1 solve, not a full benchmark, multi-seed result, or rerun in this remediation.

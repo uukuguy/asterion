@@ -33,6 +33,7 @@ from asterion.runtime.host import (
     RunRequest,
 )
 from asterion.runtime.protocol import ProtocolError
+from asterion.services.diagnostics import DiagnosticSink, capture_failure
 
 
 async def run_composed_application(
@@ -49,6 +50,7 @@ async def run_composed_application(
     pathlight: PathlightRecorder | None = None,
     implementation_packages: Mapping[CapabilityRef, CapabilityPackageRef] | None = None,
     monotonic_ns: Callable[[], int] | None = None,
+    diagnostics: DiagnosticSink | None = None,
 ) -> ApplicationRunResult:
     """Run explicitly bound capability implementations sequentially."""
 
@@ -90,9 +92,15 @@ async def run_composed_application(
         )
         try:
             bindings = validate_implementation_bindings(plan, implementations)
-        except CapabilityExecutionError:
+        except CapabilityExecutionError as error:
             raise ApplicationRunError(
-                "application capability binding is invalid"
+                "application capability binding is invalid",
+                diagnostic_id=capture_failure(
+                    diagnostics,
+                    stage="capability.binding",
+                    error=error,
+                    subject_id=run_id,
+                ),
             ) from None
 
         events: list[Mapping[str, object]] = []
@@ -170,12 +178,19 @@ async def run_composed_application(
                             "application artifact identity is duplicated"
                         )
                     artifact_ids.add(artifact_id)
-            except Exception:
+            except Exception as error:
                 lifecycle.fail_capability(active_capability_span)
                 active_capability_span = None
                 failure_class = "capability-execution-failed"
                 raise ApplicationRunError(
-                    "application capability execution failed"
+                    "application capability execution failed",
+                    diagnostic_id=capture_failure(
+                        diagnostics,
+                        stage="capability.execute",
+                        error=error,
+                        subject_id=run_id,
+                        capability_ref=f"{capability_ref.capability_id}@{capability_ref.version}",
+                    ),
                 ) from None
             lifecycle.record_capability_outputs(
                 active_capability_span,

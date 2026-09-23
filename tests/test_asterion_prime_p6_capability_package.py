@@ -25,7 +25,6 @@ REQUIRED_HOST_SERVICES = {
     "prime.pi-extension",
     "prime.private-trace",
     "prime.session-backend",
-    "prime.ipython",
 }
 
 

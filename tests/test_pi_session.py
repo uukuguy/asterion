@@ -333,21 +333,13 @@ class PiRpcSessionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "response did not match"):
             self.collect("mismatch")
 
-    def test_leading_settled_is_accepted_as_implicit_ack(self) -> None:
-        """D-2026-09-19-03: `agent_settled` without a preceding `response` is a
-        legal implicit ack — the prompt was accepted, the bare response event
-        was elided. The COMPLETE gate now accepts either path.
-        """
-        result = self.collect("no-ack")
+    def test_leading_settled_cannot_acknowledge_a_prompt(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "acknowledgement"):
+            self.collect("no-ack")
 
-        self.assertEqual([event.type for event in result.events], ["agent_settled"])
-        self.assertEqual(result.final_text, "")
-        self.assertEqual(result.stderr, b"")
-
-    def test_agent_end_is_accepted_as_native_terminal(self) -> None:
-        result = self.collect("agent-end")
-
-        self.assertEqual([event.type for event in result.events], ["response", "agent_end"])
+    def test_agent_end_without_settlement_fails_closed(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "exited unexpectedly"):
+            self.collect("agent-end")
 
     def test_stdout_line_cap_fails_closed(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "output limit"):

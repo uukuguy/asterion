@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
 
+from asterion.services.diagnostics import MemoryDiagnosticSink
+
 from asterion.runtimes.pi_rpc import (
     CancellationSignal,
     PiRpcConfig,
@@ -39,18 +41,46 @@ for line in sys.stdin:
     if request_type == "prompt":
         message = request["message"]
         response_id = "wrong" if message == "mismatch" else request["id"]
-        emit({"type": "response", "id": response_id, "success": True})
+        if message == "leading-settled":
+            emit({"type": "agent_settled"})
+            continue
+        if message not in {"missing-ack", "late-ack"}:
+            emit({"type": "response", "id": response_id, "success": True})
         emit({"type": "agent_start", "pid": os.getpid()})
-        if message == "blocking":
+        if message == "tool-blocking":
+            emit({"type": "tool_execution_start", "toolCallId": "effect-1", "toolName": "ipython", "args": {}})
+            with open(sys.argv[1] + ".effect", "w", encoding="utf-8") as marker:
+                marker.write("effect remains after cancellation")
+            emit({"type": "tool_execution_end", "toolCallId": "effect-1", "isError": False})
+        if message in {"blocking", "tool-blocking"}:
             abort = json.loads(sys.stdin.readline())
             with open(sys.argv[1], "w", encoding="utf-8") as marker:
                 marker.write(json.dumps(abort, separators=(",", ":")))
             time.sleep(60)
+        if message == "retry-recovered":
+            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "PRIVATE-RETRY-ERROR"}})
+            emit({"type": "agent_end", "willRetry": True})
+            emit({"type": "agent_start"})
+            emit({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "recovered"}})
+            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}})
+            emit({"type": "agent_end", "willRetry": False})
+            emit({"type": "agent_settled"})
+            continue
         emit({
             "type": "message_update",
             "assistantMessageEvent": {"type": "text_delta", "delta": message},
         })
+        if message in {"assistant-error", "assistant-aborted"}:
+            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": message.removeprefix("assistant-"), "errorMessage": "PRIVATE-ERROR"}})
         emit({"type": "agent_end", "messages": []})
+        if message == "continuation":
+            emit({"type": "agent_start"})
+            emit({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": ":continued"}})
+            emit({"type": "agent_end", "messages": []})
+        if message == "late-ack":
+            emit({"type": "response", "id": request["id"], "success": True})
+        time.sleep(0.02)
+        emit({"type": "agent_settled"})
         late_stderr = message == "late-stderr"
     elif request_type == "compact":
         emit({"type": "compaction_start", "reason": "manual"})
@@ -60,7 +90,7 @@ for line in sys.stdin:
         else:
             result = {"summary": "private summary", "firstKeptEntryId": "entry-1", "tokensBefore": 100, "details": {}}
             emit({"type": "compaction_end", "reason": "manual", "result": result, "aborted": False, "willRetry": False})
-            emit({"type": "response", "id": request["id"], "command": "compact", "success": True, "data": result})
+            emit({"type": "response", "id": "wrong" if message == "compact-wrong-id" else request["id"], "command": "prompt" if message == "compact-wrong-command" else "compact", "success": True, "data": {} if message == "compact-wrong-result" else result})
     elif request_type == "abort":
         break
     else:
@@ -88,6 +118,21 @@ class CallbackFailure(BaseException):
 
 
 class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_retry_can_recover_before_settlement(self) -> None:
+        for compact_events in (False, True):
+            with self.subTest(compact_events=compact_events):
+                rpc = self.make_session(compact_events=compact_events)
+                await rpc.open(signal=NeverCancelled())
+                try:
+                    result = await rpc.prompt(
+                        "retry-recovered", signal=NeverCancelled(),
+                        on_event=self.events.append,
+                    )
+                    self.assertEqual(result.final_text, "recovered")
+                    self.assertFalse(rpc._lifecycle_poisoned)
+                finally:
+                    await rpc.close()
+
     async def asyncSetUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addAsyncCleanup(self._cleanup_temporary)
@@ -101,7 +146,8 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         self.temporary.cleanup()
 
     def make_session(
-        self, *, deadline_seconds: float = 2.0, compact_events: bool = False
+        self, *, deadline_seconds: float = 2.0, compact_events: bool = False,
+        diagnostics=None,
     ) -> PiRpcSession:
         return PiRpcSession(
             PiRpcConfig(
@@ -110,10 +156,11 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
                 {},
                 deadline_seconds=deadline_seconds,
                 compact_events=compact_events,
-            )
+            ),
+            diagnostics=diagnostics,
         )
 
-    async def test_prompt_completes_on_default_agent_end_terminal(self) -> None:
+    async def test_prompt_waits_for_settlement_after_agent_end(self) -> None:
         rpc = self.make_session(deadline_seconds=0.2)
         await rpc.open(signal=NeverCancelled())
         self.addAsyncCleanup(rpc.close)
@@ -127,16 +174,16 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.final_text, "selected-default-terminal")
         self.assertEqual(
             [event.type for event in result.events],
-            ["response", "agent_start", "message_update", "agent_end"],
+            ["response", "agent_start", "message_update", "agent_end", "agent_settled"],
         )
 
-    async def test_consecutive_prompts_complete_on_agent_end_terminal(self) -> None:
+    async def test_consecutive_prompts_own_their_settlement(self) -> None:
         rpc = self.make_session()
         await rpc.open(signal=NeverCancelled())
         self.addAsyncCleanup(rpc.close)
 
         results = []
-        for stage in ("one", "two"):
+        for stage in ("one", "two", "three"):
             results.append(
                 await rpc.prompt(
                     f"paired-terminal-{stage}",
@@ -148,15 +195,107 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         for result in results:
             self.assertEqual(
                 result.events[-1].type,
-                "agent_end",
+                "agent_settled",
             )
         self.assertEqual(
-            [result.request_id for result in results], ["py-1", "py-2"]
+            [result.request_id for result in results], ["py-1", "py-2", "py-3"]
         )
         self.assertEqual(
             [event.sequence for event in self.events],
             list(range(1, len(self.events) + 1)),
         )
+
+    async def test_prompt_boundaries_match_in_both_projection_modes(self) -> None:
+        for compact_events in (False, True):
+            with self.subTest(compact_events=compact_events):
+                rpc = self.make_session(compact_events=compact_events)
+                await rpc.open(signal=NeverCancelled())
+                try:
+                    events = []
+                    for prompt in ("first", "continuation", "third", "late-ack"):
+                        result = await rpc.prompt(prompt, signal=NeverCancelled(), on_event=events.append)
+                        self.assertEqual(result.final_text, prompt + (":continued" if prompt == "continuation" else ""))
+                        self.assertEqual(result.events[-1].type, "agent_settled")
+                    self.assertEqual([event.sequence for event in events], list(range(1, len(events) + 1)))
+                finally:
+                    await rpc.close()
+
+    async def test_missing_ack_and_native_failure_never_complete(self) -> None:
+        for compact_events in (False, True):
+            for prompt in ("leading-settled", "missing-ack", "assistant-error", "assistant-aborted"):
+                with self.subTest(compact_events=compact_events, prompt=prompt):
+                    rpc = self.make_session(deadline_seconds=0.3, compact_events=compact_events)
+                    await rpc.open(signal=NeverCancelled())
+                    try:
+                        with self.assertRaises(RuntimeError) as caught:
+                            await rpc.prompt(prompt, signal=NeverCancelled(), on_event=lambda event: None)
+                        self.assertNotIn("PRIVATE-ERROR", str(caught.exception))
+                        with self.assertRaisesRegex(RuntimeError, "poisoned"):
+                            await rpc.prompt("never-sent", signal=NeverCancelled(), on_event=lambda event: None)
+                    finally:
+                        await rpc.close()
+
+    async def test_prompt_failure_records_private_diagnostic_without_payload(self) -> None:
+        sink = MemoryDiagnosticSink()
+        rpc = self.make_session(deadline_seconds=0.3, diagnostics=sink)
+        await rpc.open(signal=NeverCancelled())
+        try:
+            with self.assertRaises(RuntimeError) as caught:
+                await rpc.prompt(
+                    "assistant-error", signal=NeverCancelled(), on_event=lambda event: None
+                )
+            diagnostic_id = rpc.last_diagnostic_id
+            self.assertIsNotNone(diagnostic_id)
+            record = sink.get(diagnostic_id)
+            self.assertEqual(record.stage, "pi.prompt")
+            self.assertNotIn("PRIVATE-ERROR", repr(record))
+            self.assertNotIn("assistant-error", repr(record))
+            self.assertNotIn("PRIVATE-ERROR", str(caught.exception))
+        finally:
+            await rpc.close()
+
+    async def test_compact_semantics_match_in_both_projection_modes(self) -> None:
+        for compact_events in (False, True):
+            for prompt in ("normal", "reject-compact"):
+                with self.subTest(compact_events=compact_events, prompt=prompt):
+                    rpc = self.make_session(compact_events=compact_events)
+                    await rpc.open(signal=NeverCancelled())
+                    try:
+                        await rpc.prompt(prompt, signal=NeverCancelled(), on_event=lambda event: None)
+                        result = await rpc.compact(signal=NeverCancelled(), on_event=lambda event: None)
+                        self.assertEqual(result.outcome, "aborted" if prompt == "reject-compact" else "completed")
+                        self.assertEqual(set(result.events[-1].payload), {"id", "success"})
+                    finally:
+                        await rpc.close()
+
+    async def test_invalid_compact_wire_responses_fail_in_both_modes(self) -> None:
+        for compact_events in (False, True):
+            for prompt in ("compact-wrong-id", "compact-wrong-command", "compact-wrong-result"):
+                with self.subTest(compact_events=compact_events, prompt=prompt):
+                    rpc = self.make_session(compact_events=compact_events)
+                    await rpc.open(signal=NeverCancelled())
+                    try:
+                        await rpc.prompt(prompt, signal=NeverCancelled(), on_event=lambda event: None)
+                        with self.assertRaises(RuntimeError):
+                            await rpc.compact(signal=NeverCancelled(), on_event=lambda event: None)
+                        with self.assertRaisesRegex(RuntimeError, "poisoned"):
+                            await rpc.prompt("never-sent", signal=NeverCancelled(), on_event=lambda event: None)
+                    finally:
+                        await rpc.close()
+
+    async def test_unowned_queued_event_fences_before_another_prompt(self) -> None:
+        rpc = self.make_session()
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+        await rpc.prompt("first", signal=NeverCancelled(), on_event=lambda event: None)
+        assert rpc._state is not None
+        rpc._state.stdout_queue.put({"type": "agent_settled"})
+        with patch.object(rpc, "send", wraps=rpc.send) as send:
+            with self.assertRaisesRegex(RuntimeError, "unowned"):
+                await rpc.prompt("never-sent", signal=NeverCancelled(), on_event=lambda event: None)
+        send.assert_not_called()
+        with self.assertRaisesRegex(RuntimeError, "poisoned"):
+            await rpc.prompt("never-sent", signal=NeverCancelled(), on_event=lambda event: None)
 
     async def test_prompt_compact_prompt_reuses_one_process(self) -> None:
         rpc = self.make_session(compact_events=True)
@@ -264,6 +403,23 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
 
         await rpc.close()
         self.assertIsNone(rpc.process)
+
+    async def test_cancellation_after_tool_effect_fences_without_rollback(self) -> None:
+        rpc = self.make_session()
+        signal = MutableSignal()
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+
+        def cancel_after_effect(event) -> None:
+            if event.type == "tool_execution_end":
+                signal.cancelled = True
+
+        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+            await rpc.prompt("tool-blocking", signal=signal, on_event=cancel_after_effect)
+        with self.assertRaisesRegex(RuntimeError, "poisoned"):
+            await rpc.prompt("never-sent", signal=NeverCancelled(), on_event=lambda event: None)
+        await rpc.close()
+        self.assertEqual(Path(str(self.abort_marker) + ".effect").read_text(), "effect remains after cancellation")
 
     async def test_cancelled_pre_dispatch_prompt_leaves_session_reusable(self) -> None:
         rpc = self.make_session()
@@ -504,7 +660,7 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(type(result), PiRpcResult)
         self.assertEqual(result.final_text, "legacy")
         self.assertIsNone(result.request_id)
-        self.assertEqual([event.sequence for event in result.events], [1, 2, 3, 4])
+        self.assertEqual([event.sequence for event in result.events], [1, 2, 3, 4, 5])
         self.assertIsNone(rpc.process)
 
     async def test_legacy_run_rejects_close_between_open_and_prompt(self) -> None:

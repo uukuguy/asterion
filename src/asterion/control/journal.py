@@ -14,6 +14,12 @@ from typing import TYPE_CHECKING, Protocol
 
 import fcntl
 
+from asterion.control._journal_file_codec import (
+    JOURNAL_FILE_VERSION as _JOURNAL_FILE_VERSION,
+    decode_row,
+    encode_row,
+    json_value as _json_value,
+)
 from asterion.control.authority import OperationDecision, SessionContextDecision
 
 if TYPE_CHECKING:
@@ -81,11 +87,7 @@ JOURNAL_RECORD_KINDS = frozenset(
         "long-running.closed",
     }
 )
-JOURNAL_FILE_VERSION = "asterion.control-journal/v1"
-_FILE_ROW_FIELDS = frozenset(
-    {"version", "position", "previous_digest", "record_digest", "record"}
-)
-_RECORD_FIELDS = frozenset({"record_id", "kind", "payload"})
+JOURNAL_FILE_VERSION = _JOURNAL_FILE_VERSION
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
@@ -886,6 +888,9 @@ class MemoryCanonicalJournal:
             raise JournalConflictError("journal record session identity mismatches")
 
 
+_APPEND_CURRENT = object()
+
+
 class FileCanonicalJournal:
     """Descriptor-relative, hash-chained canonical JSONL journal."""
 
@@ -986,6 +991,14 @@ class FileCanonicalJournal:
                 pass
 
     def append(self, expected_position: int, record: JournalRecord) -> JournalEntry:
+        return self._append(expected_position, record)
+
+    def _append_current(self, record: JournalRecord) -> JournalEntry:
+        return self._append(_APPEND_CURRENT, record)
+
+    def _append(
+        self, expected_position: object, record: JournalRecord
+    ) -> JournalEntry:
         if not isinstance(record, JournalRecord):
             raise JournalConflictError("journal record is invalid")
         try:
@@ -1004,9 +1017,12 @@ class FileCanonicalJournal:
                     self._file_stamp = _file_stamp(os.fstat(file_fd))
                     return existing
                 if (
-                    isinstance(expected_position, bool)
-                    or not isinstance(expected_position, int)
-                    or expected_position != len(entries)
+                    expected_position is not _APPEND_CURRENT
+                    and (
+                        isinstance(expected_position, bool)
+                        or not isinstance(expected_position, int)
+                        or expected_position != len(entries)
+                    )
                 ):
                     raise JournalConflictError("journal append position conflicts")
                 _validate_prefix(len(entries), record)
@@ -1054,9 +1070,8 @@ class FileCanonicalJournal:
     ) -> JournalEntry:
         if not isinstance(command, ControlCommand):
             raise JournalConflictError("journal command is invalid")
-        position = self.position if expected_position is None else expected_position
-        return self.append(
-            position,
+        return self._append_optional(
+            expected_position,
             JournalRecord(
                 record_id=f"command:{command.command_id}",
                 kind="command.accepted",
@@ -1069,9 +1084,8 @@ class FileCanonicalJournal:
     ) -> JournalEntry:
         if not isinstance(event, ControlEvent):
             raise JournalConflictError("journal event is invalid")
-        position = self.position if expected_position is None else expected_position
-        return self.append(
-            position,
+        return self._append_optional(
+            expected_position,
             JournalRecord(
                 record_id=f"event:{event.event_id}",
                 kind="event.accepted",
@@ -1082,22 +1096,23 @@ class FileCanonicalJournal:
     def accept_client_intent(
         self, intent: object, *, expected_position: int | None = None
     ) -> JournalEntry:
-        position = self.position if expected_position is None else expected_position
-        return self.append(position, JournalRecord.client_intent_accepted(intent))
+        return self._append_optional(
+            expected_position, JournalRecord.client_intent_accepted(intent)
+        )
 
     def accept_client_observation(
         self, observation: Mapping[str, object], *, expected_position: int | None = None
     ) -> JournalEntry:
-        position = self.position if expected_position is None else expected_position
-        return self.append(
-            position, JournalRecord.client_observation_accepted(observation)
+        return self._append_optional(
+            expected_position, JournalRecord.client_observation_accepted(observation)
         )
 
     def accept_client_event(
         self, event: object, *, expected_position: int | None = None
     ) -> JournalEntry:
-        position = self.position if expected_position is None else expected_position
-        return self.append(position, JournalRecord.client_event_accepted(event))
+        return self._append_optional(
+            expected_position, JournalRecord.client_event_accepted(event)
+        )
 
     def accept_session_context_command(
         self,
@@ -1107,15 +1122,21 @@ class FileCanonicalJournal:
     ) -> JournalEntry:
         if not isinstance(command, SessionContextCommand):
             raise JournalConflictError("journal context command is invalid")
-        position = self.position if expected_position is None else expected_position
-        return self.append(
-            position,
+        return self._append_optional(
+            expected_position,
             JournalRecord(
                 record_id=f"context-command:{command.command_id}",
                 kind="context.command.accepted",
                 payload={"command": command.to_mapping()},
             ),
         )
+
+    def _append_optional(
+        self, expected_position: int | None, record: JournalRecord
+    ) -> JournalEntry:
+        if expected_position is None:
+            return self._append_current(record)
+        return self.append(expected_position, record)
 
     def _refresh(self, *, exclusive: bool, create: bool) -> None:
         try:
@@ -1354,26 +1375,9 @@ def _read_file_entries(file_fd: int, session_id: str) -> tuple[JournalEntry, ...
     raw_lines = raw[:-1].split(b"\n") if raw else ()
     for expected_position, raw_line in enumerate(raw_lines, start=1):
         try:
-            text = raw_line.decode("utf-8", errors="strict")
-            value = json.loads(text)
-            if (
-                not isinstance(value, dict)
-                or set(value) != _FILE_ROW_FIELDS
-                or json.dumps(
-                    value,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                ).encode("utf-8")
-                != raw_line
-                or value["version"] != JOURNAL_FILE_VERSION
-                or value["position"] != expected_position
-                or value["previous_digest"] != previous_digest
-                or not isinstance(value["record"], dict)
-                or set(value["record"]) != _RECORD_FIELDS
-            ):
-                raise JournalConflictError("file journal row is invalid")
+            value = decode_row(raw_line, expected_position, previous_digest)
             record_value = value["record"]
+            assert isinstance(record_value, dict)
             record = JournalRecord(
                 record_id=record_value["record_id"],
                 kind=record_value["kind"],
@@ -1454,25 +1458,13 @@ def _verify_file_binding(root_fd: int, filename: str, file_fd: int) -> None:
 
 
 def _encode_file_row(entry: JournalEntry, previous_digest: str | None) -> bytes:
-    value = {
-        "version": JOURNAL_FILE_VERSION,
-        "position": entry.position,
-        "previous_digest": previous_digest,
-        "record_digest": entry.digest,
-        "record": {
-            "record_id": entry.record.record_id,
-            "kind": entry.record.kind,
-            "payload": _json_value(entry.record.payload),
-        },
-    }
-    return (
-        json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        ).encode("utf-8")
-        + b"\n"
+    return encode_row(
+        entry.position,
+        previous_digest,
+        entry.digest,
+        entry.record.record_id,
+        entry.record.kind,
+        entry.record.payload,
     )
 
 
@@ -2307,12 +2299,4 @@ def _freeze(value: object) -> object:
         return _freeze_mapping(value)
     if isinstance(value, (list, tuple)):
         return tuple(_freeze(item) for item in value)
-    return value
-
-
-def _json_value(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, tuple):
-        return [_json_value(item) for item in value]
     return value

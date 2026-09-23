@@ -54,6 +54,7 @@ class TestPrimeMakePresets(unittest.TestCase):
         """
 
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
+        self.assertNotIn("/Users/", makefile)
         recipe = _recipe(makefile, "asterion-prime-p7-solve")
         for literal in (
             '$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX',

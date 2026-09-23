@@ -139,11 +139,7 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
     operator_value = environment.get(_OPERATOR_ROOT_ENV, "").strip()
     private_value = environment.get(_PRIVATE_ROOT_ENV, "").strip()
     mode_value = environment.get(_MODE_ENV, "").strip()
-    if (
-        not operator_value
-        or not private_value
-        or mode_value not in _VALID_MODES
-    ):
+    if not operator_value or not private_value or mode_value not in _VALID_MODES:
         raise P5OperatorError()
     try:
         operator_root = Path(operator_value).resolve(strict=True)
@@ -361,9 +357,7 @@ async def _build_resources(preflight: _Preflight) -> _OperatorResources:
 # ---------------------------------------------------------------------------
 
 
-def _propose_callable_factory(
-    *, mode: str, run_id: str
-):
+def _propose_callable_factory(*, mode: str, run_id: str):
     """Build a deterministic propose callable for the given ``run_id``.
 
     Each call returns a fresh :class:`P5ProposeStep` whose
@@ -382,9 +376,7 @@ def _propose_callable_factory(
     return propose
 
 
-def _repair_callable_factory(
-    *, mode: str, run_id: str, same_as_propose: bool = False
-):
+def _repair_callable_factory(*, mode: str, run_id: str, same_as_propose: bool = False):
     """Build a deterministic repair callable for the given ``run_id``.
 
     When ``same_as_propose`` is True every repair call returns the
@@ -451,6 +443,109 @@ def _verify_callable_factory(
     return verify
 
 
+class _ComposedLoopHost:
+    """Own the same loop used by the operator's public composed execution."""
+
+    def __init__(self, loop, resources):
+        self.loop = loop
+        self.resources = resources
+        self.receipt = None
+
+    def validate_runtime_services(self, services):
+        from asterion.applications.prime.p5.runtime_binding import P5_HOST_CAPABILITIES
+
+        if (
+            set(services) != set(P5_HOST_CAPABILITIES)
+            or services["prime.ipython"] is not self.loop
+            or services["prime.pi-extension"] is not (self.resources.pi_extension or self)
+            or services["prime.session-backend"] is not self
+            or services["prime.p5-oracle"] is not self.resources.p5_oracle
+            or services["prime.private-trace"] is not self.resources.private_trace
+        ):
+            raise P5OperatorError()
+
+    async def run_loop(self, *, root_run_id, signal):
+        from asterion.applications.prime.p5.host import P5LoopResult
+
+        result = await self.loop.run_loop(root_run_id=root_run_id, signal=signal)
+        values = asdict(result)
+        values.pop("receipt_sha256")
+        self.receipt = seal_receipt(**values)
+        return P5LoopResult(**asdict(self.receipt))
+
+    def report_loop_stopped(self, *, terminal_reason, root_run_id):
+        pass
+
+    async def wait_finalization(self, *, signal):
+        from asterion.applications.prime.p5.host import P5Finalization
+
+        if self.receipt is None:
+            raise P5OperatorError()
+        return P5Finalization("completed", self.receipt.receipt_sha256)
+
+
+async def _run_composed_loop(loop, resources):
+    from asterion.applications.provider import compose_installed_provider
+    from asterion.applications.prime.provider import (
+        create_prime_bounded_autonomy_provider,
+    )
+    from asterion.applications.prime.p5.runtime_binding import (
+        build_p5_runtime,
+        P5_RUNTIME_OPTIONS,
+    )
+    from asterion.capabilities.prime_bounded_autonomy_native.provider import (
+        create_prime_bounded_autonomy_native_package,
+    )
+    from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
+    from asterion.runner.composed import run_composed_application
+
+    host = _ComposedLoopHost(loop, resources)
+    package = create_prime_bounded_autonomy_native_package()
+    provider = compose_installed_provider(
+        create_prime_bounded_autonomy_provider(),
+        runtime_factories=RuntimeFactoryRegistry(()),
+        installed_packages=(package,),
+    )
+    plan = provider.applications[0].assemblies[0].plan
+    services = {
+        "prime.ipython": loop,
+        "prime.pi-extension": resources.pi_extension or host,
+        "prime.session-backend": host,
+        "prime.p5-oracle": resources.p5_oracle,
+        "prime.private-trace": resources.private_trace,
+    }
+    runtime = build_p5_runtime(
+        RuntimeFactoryContext(
+            provider_id="prime-applications",
+            application_id="prime.bounded-autonomy",
+            application_version="1.0.0",
+            runtime_id="asterion.prime",
+            assembly_path=Path(__file__).resolve().parent.parent
+            / "assemblies/prime-bounded-autonomy.json",
+            options=P5_RUNTIME_OPTIONS,
+            host_services=services,
+        )
+    )
+    result = await run_composed_application(
+        plan,
+        implementations=tuple(
+            (b.capability_ref, b.implementation) for b in package.implementations
+        ),
+        runtime=runtime,
+        run_id=resources.root_run_id,
+        input_text="fixed-bounded-autonomy",
+        host_services=services,
+        signal=_NeverCancelled(),
+    )
+    if (
+        host.receipt is None
+        or len(result.artifacts) != 1
+        or result.artifacts[0]["value"]["receipt_sha256"] != host.receipt.receipt_sha256
+    ):
+        raise P5OperatorError()
+    return host.receipt
+
+
 async def _drive_success(resources: _OperatorResources) -> P5PublicResult:
     """Drive one bounded propose/verify/repair loop end-to-end on the
     success path.
@@ -478,7 +573,7 @@ async def _drive_success(resources: _OperatorResources) -> P5PublicResult:
     )
 
     loop = await _open_bounded_autonomy_loop(propose, verify, repair)
-    receipt = await loop.run_loop(root_run_id=root_run_id, signal=_NeverCancelled())
+    receipt = await _run_composed_loop(loop, resources)
 
     # Re-seal so the receipt's digest is the canonical-JSON SHA of all
     # other fields, exactly like the runtime binding would produce.
@@ -772,9 +867,8 @@ def run_limits_path(environment: Mapping[str, str]) -> int:
     if rc != 0:
         return rc
     _emit(records)
-    if (
-        len(records) == 3
-        and all(record.get("status") == "refused" for record in records)
+    if len(records) == 3 and all(
+        record.get("status") == "refused" for record in records
     ):
         return 0
     return 2

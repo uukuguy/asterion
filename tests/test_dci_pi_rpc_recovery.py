@@ -44,7 +44,44 @@ def _attach_transport(client: PiRpcClient) -> PiRpcSession:
     return transport
 
 
+def _settled_cycles(events, *, abort_prompt=None):
+    """Model Pi settlement and the DCI idle-state request after each cycle."""
+    request_number = 0
+    prompt_number = 0
+    for event in events:
+        if event["type"] == "response":
+            request_number += 1
+            prompt_number += 1
+            event = dict(event, id=f"py-{request_number}")
+        yield event
+        if event["type"] == "agent_end":
+            yield {"type": "agent_settled"}
+            if prompt_number == abort_prompt:
+                request_number += 1  # control.abort() is a separate request.
+            request_number += 1
+            yield {
+                "type": "response", "id": f"py-{request_number}",
+                "command": "get_state", "success": True,
+                "data": {"isStreaming": False, "isCompacting": False,
+                         "messageCount": 1, "pendingMessageCount": 0},
+            }
+
+
 class DciPiRpcRecoveryTests(unittest.TestCase):
+    def test_uncertain_direct_prompt_fences_the_shared_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client = _client(Path(directory).resolve())
+            transport = _attach_transport(client)
+            with (
+                patch.object(transport, "send") as send,
+                patch.object(transport, "read_json_line", return_value={"type": "response", "id": "wrong", "success": True}),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "did not match"):
+                    client.prompt_and_wait("first", max_turns=3)
+                with self.assertRaisesRegex(RuntimeError, "poisoned"):
+                    client.prompt_and_wait("never-sent", max_turns=3)
+            self.assertEqual(send.call_count, 1)
+
     def test_settled_validation_uses_common_control_and_shared_request_ids(
         self,
     ) -> None:
@@ -189,7 +226,7 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
             transport = _attach_transport(client)
             with (
                 patch.object(transport, "send") as send,
-                patch.object(transport, "read_json_line", side_effect=events),
+                patch.object(transport, "read_json_line", side_effect=_settled_cycles(events)),
             ):
                 answer = client.prompt_and_wait(
                     "question",
@@ -202,11 +239,13 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
             [call.args[0] for call in send.call_args_list],
             [
                 {"id": "py-1", "type": "prompt", "message": "question"},
+                {"id": "py-2", "type": "get_state"},
                 {
-                    "id": "py-2",
+                    "id": "py-3",
                     "type": "prompt",
                     "message": "recover final answer",
                 },
+                {"id": "py-4", "type": "get_state"},
             ],
         )
 
@@ -263,7 +302,7 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
             transport = _attach_transport(client)
             with (
                 patch.object(transport, "send") as send,
-                patch.object(transport, "read_json_line", side_effect=events),
+                patch.object(transport, "read_json_line", side_effect=_settled_cycles(events)),
             ):
                 answer = client.prompt_and_wait(
                     "question",
@@ -277,11 +316,13 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
             [call.args[0] for call in send.call_args_list],
             [
                 {"id": "py-1", "type": "prompt", "message": "question"},
+                {"id": "py-2", "type": "get_state"},
                 {
-                    "id": "py-2",
+                    "id": "py-3",
                     "type": "prompt",
                     "message": "recover final answer",
                 },
+                {"id": "py-4", "type": "get_state"},
             ],
         )
 
@@ -303,18 +344,19 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
             transport = _attach_transport(client)
             with (
                 patch.object(transport, "send") as send,
-                patch.object(transport, "read_json_line", side_effect=events),
+                patch.object(transport, "read_json_line", side_effect=_settled_cycles(events, abort_prompt=2)),
                 redirect_stderr(io.StringIO()) as stderr,
             ):
-                client.prompt_and_wait(
-                    "question",
-                    max_turns=None,
-                    final_answer_recovery="recover final answer",
-                )
+                with self.assertRaisesRegex(RuntimeError, "execution failed"):
+                    client.prompt_and_wait(
+                        "question",
+                        max_turns=None,
+                        final_answer_recovery="recover final answer",
+                    )
 
         self.assertEqual(
             [call.args[0]["type"] for call in send.call_args_list],
-            ["prompt", "prompt", "abort"],
+            ["prompt", "get_state", "prompt", "abort", "get_state"],
         )
         self.assertIn("Reached max_turns=1", stderr.getvalue())
 
@@ -331,7 +373,7 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
             transport = _attach_transport(client)
             with (
                 patch.object(transport, "send") as send,
-                patch.object(transport, "read_json_line", side_effect=events),
+                patch.object(transport, "read_json_line", side_effect=_settled_cycles(events)),
             ):
                 answer = client.prompt_and_wait(
                     "question",
@@ -342,7 +384,7 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
         self.assertEqual(answer, "")
         self.assertEqual(
             [call.args[0]["type"] for call in send.call_args_list],
-            ["prompt"],
+            ["prompt", "get_state"],
         )
 
     def test_empty_recovery_is_single_shot(self) -> None:
@@ -363,7 +405,7 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
             transport = _attach_transport(client)
             with (
                 patch.object(transport, "send") as send,
-                patch.object(transport, "read_json_line", side_effect=events),
+                patch.object(transport, "read_json_line", side_effect=_settled_cycles(events)),
             ):
                 answer = client.prompt_and_wait(
                     "question",
@@ -374,7 +416,7 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
         self.assertEqual(answer, "")
         self.assertEqual(
             [call.args[0]["type"] for call in send.call_args_list],
-            ["prompt", "prompt"],
+            ["prompt", "get_state", "prompt", "get_state"],
         )
 
     def test_cancellation_before_recovery_prevents_second_prompt(self) -> None:
@@ -415,7 +457,7 @@ class DciPiRpcRecoveryTests(unittest.TestCase):
 
         self.assertEqual(
             [call.args[0]["type"] for call in send.call_args_list],
-            ["prompt"],
+            ["prompt", "abort"],
         )
 
 

@@ -99,7 +99,11 @@ make asterion-prime-p7-solve
 make asterion-prime-p1-run
 ```
 
-**期望**:退出码 0;输出是固定 schema 的 JSON,包含 `setup`、`verification`、`post-compaction continuation` 三段(每个对应一次 Pi 会话,各自有 SHA-256 摘要)。
+**期望**:退出码 0;最终公开 JSON 包含 `run_id`、`status="completed"` 与 64 位 `receipt_sha256`。stderr 的阶段流应经过 `stage1.oracle.complete`、`compact.persist`、`resume.persist`、`stage2.complete`、`oracle.pass`、`runner.terminal`。
+
+**2026-09-24 当前证据**:旧 main (`cbe668f3`) 的一次有界 installed-wheel 实跑在 `stage1.oracle.start` 后返回 `recovery-required`;私有、只打印谓词名的诊断确认 oracle 当时只见 **1 个 cell**,要求是 2 个。评审分支 `43fea703` 用相同 operator 配置、相同入口与有界设置实跑到 `oracle.pass`,最终 `run_id=p1-9991055483f5334e0339320c`、`status=completed`、`receipt_sha256=ab24c3d0ca04b760d377fcd225bb222cea907aaea9fc2ff4316f5d773ac74354`。两次 wheel SHA-256 分别为 `376e1da1178ea72ecaa1bc3e2f7473d42be9ccc139e91aeb2a257218996f73bb` 与 `7e869fdb0ec6ef84c82fd4cd36b11ced9b04cda8be89332eb3e1b8f0bac39e0b`。私有安全日志在 `.asterion-private/p1-safe-run-20260924.log` 与 `.asterion-private/p1-review-safe-run-20260924.log`;本文件只记公开阶段与摘要。评审分支已合入 main,但合并后的 main 未再次执行付费 preset。这是一轮完成证据,不是稳定成功率统计。
+
+### 2026-09-19 历史诊断（以下路线判断已被后续修复取代）
 
 **2026-09-19 实测**(`make asterion-prime-p1-run` 现场跑):退出码 **1**,JSON 是 `{"receipt_sha256": null, "run_id": "p1-03b3eb6b55e94c5950aae07f", "status": "recovery-required"}`。stage 流:`backend.open → host1.open → runner.start → stage1.setup.start → stage1.setup.complete → stage1.verify.start → host1.close → worker.close → backend.close → runner.terminal` —— verify 阶段没 emit `stage1.verify.complete`,host/worker 立刻被关,runner 直接出 terminal。也就是说**verify 还没回,会话就被回收了**。
 
@@ -125,17 +129,11 @@ make asterion-prime-p1-run
 
 **修复进展**: 协议层完全通过(stage 流从 `verify.start → close` 进展到 `verify.start → verify.complete → oracle.start`)。**剩余 bug**: oracle.verify_stage_one 在 worker.snapshot 上拒收,因为 verify 那条 prompt 物理上没让 IPython cell 执行。**这条不是因为 Pi 0.85.1 不能连续 prompt**, 而是因为 Asterion 端跟 Pi session reuse 之间有未查清的状态污染(下一次 P1 真模型路径 session 应该走"verify 用独立 Pi 进程"策略, 见 D-2026-09-19-04)。
 
-### 边界与未验证项
+### 当前边界
 
-❌ **P1 当前没跑通**(2026-09-19 实测)——`recovery-required` + `receipt_sha256=null`。协议层 bug 已修 (A 修复 4 处);剩余 bug 在 Asterion→Pi session reuse 这一段, 不是 Pi 自身。
-⚠️ **2026-09-19 之前的描述(已撤回)**:之前写的"6 次完整跑通"指的是 takeover 实现之前的旧形态,**不能套到当前代码**。
-📝 **剩余 bug 的可能修复路径 (未尝试)**:
-  - **方案 D-2026-09-19-04 (用户推荐)**: 让 verify prompt 走**独立 Pi subprocess**。setup 跟 verify 不共享同一个 Pi session,绕过 reuse 状态污染。代价:跨进程的 worker checkpoint 协调要新设计(setup 写到 private_root,verify 从 private_root 读)。
-  - **方案 2**: 找出 Asterion→Pi reuse 状态污染的精确路径并修。代价:需要先 diff Asterion 两次 prompt 之间做了什么,定位 compact 或别的状态变更,可能改 session backend。
-  - **方案 3**: 检查上游 Pi 0.85.1 是否有 reuse mode 下"agent_settled 立即发"的已知 issue,等上游修或回退到 0.74.0。
-  - **方案 4**: 让 verify cell 在第一次 prompt 时**一起写完**(setup + verify 一个 prompt 里出两个 cell)。代价:违反 task_statement 的设计。
-ℹ️ **fake-worker 还是真模型**:P1 的 make 目标走**真 Pi 子进程**(`ASTERION_PRIME_PI_ENTRY` 必须指向真路径),不是 fake-worker。
-ℹ️ **为什么复杂**:压缩区域在开发过程中累计了 15 个 bug(2026-09-16/17),其中 6 个都是"合约比实际窄"——是 P1 整个 9 阶段里调试时间最长的部分。这次发现的 bug 是 Asterion→Pi session reuse 这一段的未查清状态污染,不在压缩区域,是独立路径。
+- P1 本次完成运行使用真实 Pi 子进程与模型;此前用户失败运行的内部临时记录已清理,不能当作可回放证据。
+- 一次成功不证明跨模型、跨任务或多次运行的稳定率。P2 的零 token witness 与 P3–P6 的确定性 worker witness 也不能替代各自的真实模型能力验证。
+- 2026-09-19 的独立 verify 进程提案是历史方向;后续精确 request-ID ack 与 settlement 屏障已修复本次复现的连续 prompt 缺陷,不应把旧提案当作当前必做修复。
 
 ---
 

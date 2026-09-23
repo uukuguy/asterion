@@ -5,19 +5,15 @@ from __future__ import annotations
 from importlib import resources
 from pathlib import Path
 
-from asterion.applications.first_party_packages import (
-    PRIME_ARC_AGI_3_SOLVER_PACKAGE,
-    PRIME_BOUNDED_AUTONOMY_NATIVE_PACKAGE,
-    PRIME_CONTINUAL_IMPROVEMENT_NATIVE_PACKAGE,
-    PRIME_IPYTHON_CODING_NATIVE_PACKAGE,
-    PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE,
-    PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE,
-    PRIME_RECURSIVE_WORKFLOW_NATIVE_PACKAGE,
-)
 from asterion.applications.provider import (
     APPLICATION_PROVIDER_PROTOCOL,
     InstalledApplication,
     InstalledApplicationProvider,
+)
+from asterion.applications.prime.inventory import (
+    PRIME_RELEASE_INVENTORY,
+    PrimeReleaseApplication,
+    prime_release_application,
 )
 from asterion.applications.prime.runtime_binding import (
     asterion_prime_runtime_binding,
@@ -26,6 +22,24 @@ from asterion.applications.prime.runtime_binding import (
 
 def _resource_root() -> Path:
     return Path(str(resources.files("asterion"))).resolve()
+
+
+def _installed_application(
+    item: PrimeReleaseApplication, root: Path
+) -> InstalledApplication:
+    return InstalledApplication(
+        application_id=item.application_id,
+        version=item.version,
+        assembly_paths=(root / item.assembly_identity,),
+        capability_packages=(item.capability_package,),
+        runtime_ids=("asterion.prime",),
+    )
+
+
+def _declared_application(application_id: str) -> InstalledApplication:
+    return _installed_application(
+        prime_release_application(application_id), _resource_root()
+    )
 
 
 def prime_ipython_coding_application() -> InstalledApplication:
@@ -39,16 +53,7 @@ def prime_ipython_coding_application() -> InstalledApplication:
     also published by :func:`create_provider` now that the witness has passed.
     """
 
-    root = _resource_root()
-    return InstalledApplication(
-        application_id="prime.ipython-coding",
-        version="1.0.0",
-        assembly_paths=(
-            root / "applications/prime/assemblies/prime-ipython-coding.json",
-        ),
-        capability_packages=(PRIME_IPYTHON_CODING_NATIVE_PACKAGE,),
-        runtime_ids=("asterion.prime",),
-    )
+    return _declared_application("prime.ipython-coding")
 
 
 def create_prime_ipython_coding_provider() -> InstalledApplicationProvider:
@@ -79,16 +84,7 @@ def prime_programmatic_long_context_application() -> InstalledApplication:
     only with its native package and installed-route witness" rule.
     """
 
-    root = _resource_root()
-    return InstalledApplication(
-        application_id="prime.programmatic-long-context",
-        version="1.0.0",
-        assembly_paths=(
-            root / "applications/prime/assemblies/prime-programmatic-long-context.json",
-        ),
-        capability_packages=(PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE,),
-        runtime_ids=("asterion.prime",),
-    )
+    return _declared_application("prime.programmatic-long-context")
 
 
 def create_prime_programmatic_long_context_provider() -> InstalledApplicationProvider:
@@ -117,16 +113,7 @@ def prime_long_session_continuity_application() -> InstalledApplication:
     installed-route witness passes (Phase 6, Task 17).
     """
 
-    root = _resource_root()
-    return InstalledApplication(
-        application_id="prime.long-session-continuity",
-        version="1.0.0",
-        assembly_paths=(
-            root / "applications/prime/assemblies/prime-long-session-continuity.json",
-        ),
-        capability_packages=(PRIME_LONG_SESSION_CONTINUITY_NATIVE_PACKAGE,),
-        runtime_ids=("asterion.prime",),
-    )
+    return _declared_application("prime.long-session-continuity")
 
 
 def create_prime_long_session_continuity_provider() -> InstalledApplicationProvider:
@@ -155,16 +142,7 @@ def prime_recursive_workflow_application() -> InstalledApplication:
     installed-route witness passes (Phase 7, Task 16).
     """
 
-    root = _resource_root()
-    return InstalledApplication(
-        application_id="prime.recursive-workflow",
-        version="1.0.0",
-        assembly_paths=(
-            root / "applications/prime/assemblies/prime-recursive-workflow.json",
-        ),
-        capability_packages=(PRIME_RECURSIVE_WORKFLOW_NATIVE_PACKAGE,),
-        runtime_ids=("asterion.prime",),
-    )
+    return _declared_application("prime.recursive-workflow")
 
 
 def create_prime_recursive_workflow_provider() -> InstalledApplicationProvider:
@@ -193,16 +171,7 @@ def prime_bounded_autonomy_application() -> InstalledApplication:
     installed-route witness passes (Phase 8, Task 16).
     """
 
-    root = _resource_root()
-    return InstalledApplication(
-        application_id="prime.bounded-autonomy",
-        version="1.0.0",
-        assembly_paths=(
-            root / "applications/prime/assemblies/prime-bounded-autonomy.json",
-        ),
-        capability_packages=(PRIME_BOUNDED_AUTONOMY_NATIVE_PACKAGE,),
-        runtime_ids=("asterion.prime",),
-    )
+    return _declared_application("prime.bounded-autonomy")
 
 
 def create_prime_bounded_autonomy_provider() -> InstalledApplicationProvider:
@@ -231,16 +200,7 @@ def prime_continual_improvement_application() -> InstalledApplication:
     installed-route witness passes (Phase 9, Task 16).
     """
 
-    root = _resource_root()
-    return InstalledApplication(
-        application_id="prime.continual-improvement",
-        version="1.0.0",
-        assembly_paths=(
-            root / "applications/prime/assemblies/prime-continual-improvement.json",
-        ),
-        capability_packages=(PRIME_CONTINUAL_IMPROVEMENT_NATIVE_PACKAGE,),
-        runtime_ids=("asterion.prime",),
-    )
+    return _declared_application("prime.continual-improvement")
 
 
 def create_prime_continual_improvement_provider() -> InstalledApplicationProvider:
@@ -293,72 +253,9 @@ def create_provider() -> InstalledApplicationProvider:
         protocol=APPLICATION_PROVIDER_PROTOCOL,
         provider_id="prime-applications",
         resource_root=root,
-        applications=(
-            InstalledApplication(
-                application_id="prime.arc-agi-3-solving",
-                version="1.0.0",
-                assembly_paths=(
-                    root / "applications/prime/assemblies/prime-arc-agi-3-solving.json",
-                ),
-                capability_packages=(PRIME_ARC_AGI_3_SOLVER_PACKAGE,),
-                runtime_ids=("asterion.prime",),
-            ),
-            # Phase 8, Task 16: published together with its installed-route
-            # bounded-autonomy propose/verify/repair + limits witness (exit 0
-            # from both ``make asterion-prime-p5-run`` and
-            # ``make asterion-prime-p5-run-limits``; the limits witness
-            # asserts iteration-cap-exceeded / duration-cap-exceeded /
-            # no-progress refusals, each with a sealed ``receipt_sha256``).
-            # The success witness asserts ``propose == 1``,
-            # ``verify == 2``, ``repair == 1``, and ``terminal_reason ==
-            # "success"`` over canonical-JSON of the bounded-turn transcript
-            # (Phase 8: P5NativeOracle + P5NativeReceipt with sealed
-            # ``receipt_sha256`` over canonical-JSON of the bounded turn).
-            prime_bounded_autonomy_application(),
-            # Phase 9, Task 16: published together with its installed-route
-            # continual-improvement preserved + limits witness (exit 0 from
-            # both ``make asterion-prime-p6-run`` and
-            # ``make asterion-prime-p6-run-limits``; the limits witness
-            # asserts rolled-back + global-rejected records, each with a
-            # sealed ``receipt_sha256``). The preserved witness asserts
-            # ``terminal_outcome == "preserved"``,
-            # ``global_activation_approved == false``, ``rollback_invocation_count == 0``,
-            # and a non-null ``task_b_result_digest`` over canonical-JSON of
-            # the holdout evidence (Phase 9: P6NativeReceipt with closed
-            # 2-element ``terminal_outcome`` enum + 10th ``failure_digest`` field;
-            # D-2026-09-19-02: prime.candidate-store wraps framework-owned
-            # HarnessCoordinator at src/asterion/control/harness.py:543).
-            prime_continual_improvement_application(),
-            # Published together with its witness (Phase 4, D-2026-09-12-01):
-            # the detachment spec requires an unmigrated selector to be omitted,
-            # so the selector returns only once the installed-route witness
-            # passes. Publishing it before that also made resolution impossible
-            # for the P7 route, because the closure is validated for every
-            # published application; the package it needs is now supplied.
-            prime_ipython_coding_application(),
-            # Phase 6, Task 17: published together with its installed-route
-            # cross-generation continuity witness (sealed receipt
-            # ``6b5a173d16d1d1a5382456284a7bbde1b0516120f13c1e9e4572e5f367757a0d``).
-            # The recover-mode invocation opens the prior's private_root at
-            # gen 2 and reads back the prior sealed checkpoint digest; the
-            # witness asserts cross-process continuity under a fresh Orb
-            # wheel build (D-2026-09-18-01).
-            prime_long_session_continuity_application(),
-            # Phase 7, Task 16: published together with its recursive-workflow
-            # depth + limits witness (exit 0 from both
-            # ``make asterion-prime-p3-run`` and
-            # ``make asterion-prime-p3-run-limits``; the limits witness
-            # asserts depth-exceeded / concurrency-exceeded / budget-exceeded
-            # / cancelled refusals, each with a sealed ``receipt_sha256``).
-            # The depth witness asserts ``depth_reached == 2``,
-            # ``child_generation == root_generation + 1``,
-            # ``child_result_sha256 != root_result_sha256``, and a non-null
-            # ``joined_result_sha256`` over canonical-JSON of the root+child
-            # result pair (D-2026-09-18-02: in-process child session factory).
-            prime_recursive_workflow_application(),
-            # Phase 5, Task 4: published together with its installed-route
-            # witness (``cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5``).
-            prime_programmatic_long_context_application(),
+        applications=tuple(
+            _installed_application(item, root)
+            for item in PRIME_RELEASE_INVENTORY
         ),
         runtime_factory_bindings=(asterion_prime_runtime_binding(),),
     )

@@ -1261,13 +1261,6 @@ class AsterionCliTests(unittest.TestCase):
             packaged["unbound_resources"],
             [
                 "applications/dci_agent_lite/assemblies/dci-local-research.json",
-                "applications/prime/assemblies/prime-arc-agi-3-solving.json",
-                "applications/prime/assemblies/prime-bounded-autonomy.json",
-                "applications/prime/assemblies/prime-continual-improvement.json",
-                "applications/prime/assemblies/prime-ipython-coding.json",
-                "applications/prime/assemblies/prime-long-session-continuity.json",
-                "applications/prime/assemblies/prime-programmatic-long-context.json",
-                "applications/prime/assemblies/prime-recursive-workflow.json",
             ],
         )
 

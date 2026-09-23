@@ -77,9 +77,11 @@ def main() -> int:
                 }
             )
             _emit({"type": "turn_end"})
-            # The native prime contract made agent_end the round terminal;
-            # agent_settled is no longer a recognized type on this path.
+            # Pi closes the agent cycle first, then settles the prompt.
+            # The settlement barrier keeps this session unavailable to the
+            # next prompt until the current request has actually stopped.
             _emit({"type": "agent_end"})
+            _emit({"type": "agent_settled"})
             return 0
         if request.get("type") == "abort":
             return 0

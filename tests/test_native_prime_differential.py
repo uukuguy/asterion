@@ -6,7 +6,6 @@ import re
 import unittest
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import cast
 
 from asterion.control.authority import BudgetLimit

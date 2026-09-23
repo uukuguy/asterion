@@ -681,6 +681,86 @@ class InstalledApplicationProviderTests(unittest.TestCase):
         self.assertEqual(discoveries, 1)
         self.assertEqual(resolved.applications[0].application_id, "example.research")
 
+    def test_bound_payload_rejects_same_ref_manifest_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            raw = provider(root)
+            payload_root = root / "payload"
+            shutil.copytree(
+                Path(__file__).parent / "fixtures/extensions/minimal/payload",
+                payload_root,
+            )
+            payload = open_portable_payload(payload_root)
+            application = raw.applications[0]
+            assembly = write_assembly(
+                root,
+                filename="bound.json",
+                capability_packages=(
+                    {
+                        "package_id": payload.manifest.package_ref.package_id,
+                        "version": payload.manifest.package_ref.version,
+                    },
+                ),
+            )
+            selected = InstalledApplicationProvider(
+                protocol=raw.protocol,
+                provider_id=raw.provider_id,
+                resource_root=raw.resource_root,
+                applications=(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=(assembly,),
+                        capability_packages=(payload.manifest.package_ref,),
+                        runtime_ids=application.runtime_ids,
+                    ),
+                ),
+            )
+            package = bind_prepared_package_authority(
+                InstalledCapabilityPackage(
+                    package_ref=payload.manifest.package_ref,
+                    payload_sha256=payload.payload_sha256,
+                    source_id="example.fixture",
+                    source_kind="local-directory",
+                    catalog_roots=(payload_root / "capabilities",),
+                    benchmark_suite_paths=(),
+                    implementations=(
+                        CapabilityImplementationBinding(
+                            CapabilityRef("example.research", "1.0.0"),
+                            FixtureImplementation(),
+                        ),
+                    ),
+                    benchmark_bindings=(),
+                ),
+                payload,
+            )
+            resolved = resolve_installed_provider(
+                selected,
+                runtime_factories=runtime_factories("pi.reference"),
+                installed_packages=(package,),
+            )
+            self.assertEqual(
+                resolved.applications[0].assemblies[0].plan.composition.emitted_events,
+                ("research.completed",),
+            )
+            document = payload_root / "capabilities/research.json"
+            original_bytes = document.read_bytes()
+            changed = json.loads(original_bytes)
+            changed["emits_events"] = ["probe.changed"]
+            for name, replacement in (
+                ("changed-manifest", json.dumps(changed).encode()),
+                ("changed-whitespace", original_bytes + b"\n"),
+            ):
+                with self.subTest(name=name):
+                    document.write_bytes(replacement)
+                    with self.assertRaises(ApplicationProviderError) as raised:
+                        resolve_installed_provider(
+                            selected,
+                            runtime_factories=runtime_factories("pi.reference"),
+                            installed_packages=(package,),
+                        )
+                    self.assertNotIn("probe.changed", str(raised.exception))
+
     def test_hostile_numeric_json_is_normalized_and_redacted(self) -> None:
         sentinel = "SECRET-HOSTILE-NUMERIC"
         with tempfile.TemporaryDirectory() as temp_dir:

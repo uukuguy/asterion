@@ -90,6 +90,7 @@ def compose_capabilities(
             if provider is None:
                 raise CapabilityCompositionError("required policy is unavailable")
             dependencies[capability_id].add(provider)
+        dependencies[capability_id].discard(capability_id)
         _add_provider_dependencies(
             dependencies[capability_id],
             _edges(manifest, "consumes_events"),
@@ -104,7 +105,6 @@ def compose_capabilities(
             artifact_providers,
             "required artifact is unavailable",
         )
-        dependencies[capability_id].discard(capability_id)
 
     ordered: list[str] = []
     remaining = {capability_id: set(values) for capability_id, values in dependencies.items()}

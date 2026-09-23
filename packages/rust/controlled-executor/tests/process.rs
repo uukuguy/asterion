@@ -4,8 +4,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dci_controlled_executor::policy::{AuthorizedExecution, PolicyConfig, TrustedPolicy};
-use dci_controlled_executor::process::{execute_bounded, execute_direct};
+use dci_controlled_executor::process::{
+    execute_bounded, execute_bounded_cancellable, execute_direct,
+};
 use dci_controlled_executor::protocol::ExecuteRequest;
+use tokio::sync::watch;
+use tokio::time::{Duration, Instant, sleep};
 
 static NEXT_WORKSPACE: AtomicU64 = AtomicU64::new(0);
 
@@ -53,6 +57,148 @@ fn authorize_with_limits(
             max_output_bytes,
         })
         .expect("authorized")
+}
+
+async fn wait_for_file(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while !path.exists() {
+        assert!(Instant::now() < deadline, "fixture did not start");
+        sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[cfg(unix)]
+fn process_alive(pid: i32) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+#[cfg(unix)]
+fn cleanup_group(group: i32) {
+    unsafe {
+        libc::kill(-group, libc::SIGKILL);
+    }
+}
+
+#[tokio::test]
+async fn cancellation_before_execution_does_not_spawn_a_child() {
+    let workspace_root = workspace();
+    let marker = workspace_root.join("nested/executed");
+    let authorized = authorize_with_limits(
+        &workspace_root,
+        "/usr/bin/python3",
+        vec![
+            "-c".to_owned(),
+            "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('executed')".to_owned(),
+            marker.display().to_string(),
+        ],
+        5_000,
+        1_024,
+    );
+    let (_cancel_tx, cancel_rx) = watch::channel(true);
+
+    let output = execute_bounded_cancellable(authorized, cancel_rx)
+        .await
+        .expect("cancelled execution");
+
+    assert!(output.cancelled);
+    assert!(
+        output.exit_status.is_none(),
+        "cancelled command was spawned"
+    );
+    assert!(!marker.exists(), "cancelled command had a side effect");
+    fs::remove_dir_all(workspace_root).expect("cleanup");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn aborting_execution_future_cleans_process_group() {
+    let workspace_root = workspace();
+    let parent_pid_path = workspace_root.join("nested/parent.pid");
+    let descendant_pid_path = workspace_root.join("nested/descendant.pid");
+    let authorized = authorize_with_limits(
+        &workspace_root,
+        "/usr/bin/python3",
+        vec![
+            "-c".to_owned(),
+            concat!(
+                "import os,sys,time; ",
+                "open(sys.argv[1], 'w').write(str(os.getpid())); ",
+                "descendant=os.fork(); ",
+                "(open(sys.argv[2], 'w').write(str(descendant)) if descendant else time.sleep(10)); ",
+                "os._exit(0) if descendant else None"
+            )
+            .to_owned(),
+            parent_pid_path.display().to_string(),
+            descendant_pid_path.display().to_string(),
+        ],
+        5_000,
+        1_024,
+    );
+    let (_cancel_tx, cancel_rx) = watch::channel(false);
+    let task = tokio::spawn(execute_bounded_cancellable(authorized, cancel_rx));
+
+    wait_for_file(&descendant_pid_path).await;
+    let group: i32 = fs::read_to_string(&parent_pid_path)
+        .expect("parent pid")
+        .parse()
+        .expect("pid integer");
+    let descendant: i32 = fs::read_to_string(&descendant_pid_path)
+        .expect("descendant pid")
+        .parse()
+        .expect("pid integer");
+    task.abort();
+    let _ = task.await;
+    sleep(Duration::from_millis(100)).await;
+    let survived = process_alive(descendant);
+    cleanup_group(group);
+    fs::remove_dir_all(workspace_root).expect("cleanup");
+    assert!(!survived, "aborted execution left descendant alive");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn completed_parent_does_not_leave_a_detached_descendant() {
+    let workspace_root = workspace();
+    let parent_pid_path = workspace_root.join("nested/parent.pid");
+    let descendant_pid_path = workspace_root.join("nested/descendant.pid");
+    let authorized = authorize_with_limits(
+        &workspace_root,
+        "/usr/bin/python3",
+        vec![
+            "-c".to_owned(),
+            concat!(
+                "import os,sys,time; ",
+                "open(sys.argv[1], 'w').write(str(os.getpid())); ",
+                "descendant=os.fork(); ",
+                "(os.close(1), os.close(2), time.sleep(10)) if descendant == 0 else ",
+                "(open(sys.argv[2], 'w').write(str(descendant)), os._exit(0))"
+            )
+            .to_owned(),
+            parent_pid_path.display().to_string(),
+            descendant_pid_path.display().to_string(),
+        ],
+        1_000,
+        1_024,
+    );
+
+    let output = execute_bounded(authorized).await.expect("execute");
+    let group: i32 = fs::read_to_string(&parent_pid_path)
+        .expect("parent pid")
+        .parse()
+        .expect("pid integer");
+    let descendant: i32 = fs::read_to_string(&descendant_pid_path)
+        .expect("descendant pid")
+        .parse()
+        .expect("pid integer");
+    sleep(Duration::from_millis(100)).await;
+    let survived = process_alive(descendant);
+    cleanup_group(group);
+    fs::remove_dir_all(workspace_root).expect("cleanup");
+
+    assert!(output.exit_status.expect("exit status").success());
+    assert!(!output.cancelled);
+    assert!(!output.timed_out);
+    assert!(!survived, "completed execution left descendant alive");
 }
 
 #[tokio::test]
@@ -130,6 +276,85 @@ async fn deadline_kills_and_reaps_the_child_before_returning() {
         .output()
         .expect("probe child");
     assert!(!alive.status.success(), "timed-out child is still alive");
+    fs::remove_dir_all(workspace_root).expect("cleanup");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn deadline_cleans_descendant_holding_inherited_pipes_after_parent_exit() {
+    let workspace_root = workspace();
+    let descendant_pid_path = workspace_root.join("nested/descendant.pid");
+    let authorized = authorize_with_limits(
+        &workspace_root,
+        "/usr/bin/python3",
+        vec![
+            "-c".to_owned(),
+            concat!(
+                "import os,sys,time; ",
+                "descendant=os.fork(); ",
+                "(open(sys.argv[1], 'w').write(str(descendant)) if descendant else time.sleep(10)); ",
+                "os._exit(0) if descendant else None"
+            )
+            .to_owned(),
+            descendant_pid_path.display().to_string(),
+        ],
+        500,
+        1_024,
+    );
+
+    let started = Instant::now();
+    let output = execute_bounded(authorized).await.expect("execute");
+
+    assert!(output.timed_out);
+    assert!(started.elapsed() < Duration::from_secs(2));
+    let descendant_pid = fs::read_to_string(&descendant_pid_path).expect("descendant pid");
+    let alive = std::process::Command::new("/bin/kill")
+        .args(["-0", descendant_pid.trim()])
+        .output()
+        .expect("probe descendant");
+    assert!(!alive.status.success(), "deadline left descendant alive");
+    fs::remove_dir_all(workspace_root).expect("cleanup");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cancellation_cleans_descendant_holding_inherited_pipes_after_parent_exit() {
+    let workspace_root = workspace();
+    let descendant_pid_path = workspace_root.join("nested/descendant.pid");
+    let authorized = authorize_with_limits(
+        &workspace_root,
+        "/usr/bin/python3",
+        vec![
+            "-c".to_owned(),
+            concat!(
+                "import os,sys,time; ",
+                "descendant=os.fork(); ",
+                "(open(sys.argv[1], 'w').write(str(descendant)) if descendant else time.sleep(10)); ",
+                "os._exit(0) if descendant else None"
+            )
+            .to_owned(),
+            descendant_pid_path.display().to_string(),
+        ],
+        5_000,
+        1_024,
+    );
+    let (cancel_tx, cancel_rx) = watch::channel(false);
+    let execution = tokio::spawn(execute_bounded_cancellable(authorized, cancel_rx));
+
+    wait_for_file(&descendant_pid_path).await;
+    cancel_tx.send(true).expect("cancel receiver");
+    let output = execution.await.expect("join").expect("execute");
+
+    assert!(output.cancelled);
+    let descendant_pid = fs::read_to_string(&descendant_pid_path).expect("descendant pid");
+    let alive = std::process::Command::new("/bin/kill")
+        .args(["-0", descendant_pid.trim()])
+        .output()
+        .expect("probe descendant");
+    assert!(
+        !alive.status.success(),
+        "cancellation left descendant alive"
+    );
     fs::remove_dir_all(workspace_root).expect("cleanup");
 }
 

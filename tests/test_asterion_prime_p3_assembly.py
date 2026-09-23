@@ -42,12 +42,12 @@ class TestPrimeP3Assembly(unittest.TestCase):
         self.assertEqual(
             data["capability_packages"][0]["version"], "1.0.0"
         )
-        self.assertEqual(len(data["capabilities"]), 1)
+        self.assertEqual(len(data["capabilities"]), 2)
         self.assertEqual(
-            data["capabilities"][0]["capability_id"],
-            "policy.recursive-loop",
+            [entry["capability_id"] for entry in data["capabilities"]],
+            ["policy.recursive-loop", "prime.recursive-workflow"],
         )
-        self.assertEqual(data["capabilities"][0]["version"], "1.0.0")
+        self.assertTrue(all(entry["version"] == "1.0.0" for entry in data["capabilities"]))
 
 
 if __name__ == "__main__":

@@ -37,15 +37,13 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p6-run-verbose
 .PHONY: asterion-prime-p7-solve
 
-# Operator-owned values for the Prime presets. Defaults below are this
-# machine's current install paths; pass any of them as `make <target>
-# VAR=value` to override (e.g. on a fresh install). Empty values fail
-# closed in the operator preflight, so unset defaults are surfaced
-# immediately rather than at the run boundary.
+# Operator-owned values for the Prime presets. External roots are supplied
+# through the environment or `make <target> VAR=value`. Empty values fail
+# closed in the operator preflight.
 ASTERION_PRIME_PI_ENTRY ?= /mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js
 ASTERION_PRIME_OPERATOR_ROOT ?= $(CURDIR)
 ASTERION_PRIME_P2_CORPUS ?= $(CURDIR)/tests/fixtures/prime_p2/small_corpus.json
-ASTERION_PRIME_ARC_ROOT ?= /Users/sujiangwen/sandbox/agentic-2026/external-prime/arc-agi-3
+ASTERION_PRIME_ARC_ROOT ?=
 ASTERION_PRIME_P4_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-witness
 ASTERION_PRIME_P3_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-witness
 ASTERION_PRIME_P5_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-witness

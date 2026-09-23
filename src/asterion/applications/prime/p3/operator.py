@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 from hashlib import sha256
 import json
@@ -38,15 +38,35 @@ import sys
 from asterion.agents.prime.state import PrimeBackendIdentity
 from asterion.agents.prime.store import private_root_identity
 from asterion.applications.prime.p3.oracle import P3Oracle
+from asterion.applications.prime.p3.host import (
+    P3AdmissionRefused,
+    P3ChildRequest,
+    P3Finalization,
+    P3RootResult,
+)
 from asterion.applications.prime.p3.receipt import seal as seal_receipt
+from asterion.applications.prime.p3.runtime_binding import (
+    P3_RUNTIME_OPTIONS,
+    build_p3_runtime,
+)
+from asterion.applications.prime.provider import create_prime_recursive_workflow_provider
+from asterion.applications.provider import compose_installed_provider
+from asterion.capabilities.prime_recursive_workflow_native.provider import (
+    P3_INPUT_PRESET,
+    create_prime_recursive_workflow_native_package,
+)
 from asterion.applications.prime.services import (
     ChildAdmissionRefused,
     ChildRunnerHostService,
     create_child_runner_host_service,
 )
 from asterion.services.progress import NOOP_HOST_PROGRESS_REPORTER
+from asterion.services.diagnostics import DiagnosticSink, capture_failure
 from asterion.services.presentation import NOOP_HOST_PRESENTATION_SINK
 from asterion.services.registry import HostServiceFactoryContext
+from asterion.runner.composed import run_composed_application
+from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
+from asterion.runtime.host import CancellationSignal
 
 
 _OPERATOR_ROOT_ENV = "ASTERION_PRIME_OPERATOR_ROOT"
@@ -260,6 +280,10 @@ class _AlwaysCancelled:
         return True
 
 
+class _FakeWorkerBoundary:
+    """Operator-owned marker for this preset's deterministic worker."""
+
+
 # ---------------------------------------------------------------------------
 # Operator resources — host services + identity the operator owns
 # ---------------------------------------------------------------------------
@@ -278,6 +302,7 @@ class _OperatorResources:
     p3_oracle: P3Oracle
     pi_extension: object
     private_trace: object
+    diagnostics: DiagnosticSink | None = None
 
 
 async def _open_child_runner() -> ChildRunnerHostService:
@@ -342,7 +367,7 @@ async def _build_resources(preflight: _Preflight) -> _OperatorResources:
         child_identity=child_identity,
         child_runner=child_runner,
         p3_oracle=p3_oracle,
-        pi_extension=None,
+        pi_extension=_FakeWorkerBoundary(),
         private_trace=None,
     )
 
@@ -392,7 +417,9 @@ def _refusal_receipt_sha(
     return sha256(encoded).hexdigest()
 
 
-async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
+async def _drive_success(
+    resources: _OperatorResources, signal: CancellationSignal | None = None
+) -> P3PublicResult:
     """Drive one admitted-child root run end-to-end."""
 
     root_run_id = resources.root_run_id
@@ -401,11 +428,12 @@ async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
     depth = 2
 
     # Stage 1: admission against the in-process child-runner.
+    active_signal = signal if signal is not None else _NeverCancelled()
     admission = await resources.child_runner.admit_child(
         parent_run_id=root_run_id,
         depth=depth,
         child_identity=resources.child_identity,
-        signal=_NeverCancelled(),
+        signal=active_signal,
     )
     if isinstance(admission, ChildAdmissionRefused):
         # On the success path a refusal is a programming error: the
@@ -413,15 +441,28 @@ async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
         # as operator error.
         raise P3OperatorError()
     child_run_id = admission.child_run_id
+    if active_signal.cancelled:
+        raise asyncio.CancelledError()
 
     # Stage 2: deterministic fake-worker payload.
-    child_result_sha = _fake_worker_payload_sha(
-        mode=resources.mode, depth=depth, run_id=child_run_id
-    )
+    try:
+        child_result_sha = _fake_worker_payload_sha(
+            mode=resources.mode, depth=depth, run_id=child_run_id
+        )
+    except Exception as error:
+        capture_failure(
+            resources.diagnostics,
+            stage="prime.worker",
+            error=error,
+            subject_id=child_run_id,
+        )
+        raise
     # Stage 3: close out the admission slot.
     resources.child_runner.record_child_cost(
         Decimal("0.05"), child_run_id=child_run_id
     )
+    if active_signal.cancelled:
+        raise asyncio.CancelledError()
     # Stage 4: closed-form join.
     root_result_sha = _fake_worker_payload_sha(
         mode=resources.mode, depth=1, run_id=root_run_id
@@ -432,16 +473,25 @@ async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
         depth_reached=depth,
     )
     # Stage 5: oracle check.
-    resources.p3_oracle.check(
-        root_run_id=root_run_id,
-        root_generation=root_generation,
-        child_run_id=child_run_id,
-        child_generation=child_generation,
-        child_result_sha256=child_result_sha,
-        joined_result_sha256=joined_sha,
-        depth_reached=depth,
-        refusal_reason=None,
-    )
+    try:
+        resources.p3_oracle.check(
+            root_run_id=root_run_id,
+            root_generation=root_generation,
+            child_run_id=child_run_id,
+            child_generation=child_generation,
+            child_result_sha256=child_result_sha,
+            joined_result_sha256=joined_sha,
+            depth_reached=depth,
+            refusal_reason=None,
+        )
+    except Exception as error:
+        capture_failure(
+            resources.diagnostics,
+            stage="prime.oracle",
+            error=error,
+            subject_id=root_run_id,
+        )
+        raise
     # Stage 6: receipt seal.
     receipt = seal_receipt(
         root_run_id=root_run_id,
@@ -465,6 +515,63 @@ async def _drive_success(resources: _OperatorResources) -> P3PublicResult:
         refusal_reason=None,
         receipt_sha256=receipt.sha256(),
     )
+
+
+class _OperatorP3RuntimeHost:
+    """Connect the selected runtime to the operator's actual child workflow."""
+
+    def __init__(self, resources: _OperatorResources) -> None:
+        self._resources = resources
+        self.result: P3PublicResult | None = None
+
+    def validate_runtime_services(self, services: Mapping[str, object]) -> None:
+        if (
+            set(services) != {
+                "prime.child-runner", "prime.p3-oracle", "prime.pi-extension",
+                "prime.private-trace", "prime.session-backend",
+            }
+            or services["prime.child-runner"] is not self._resources.child_runner
+            or services["prime.p3-oracle"] is not self._resources.p3_oracle
+            or services["prime.pi-extension"] is not self._resources.pi_extension
+            or services["prime.private-trace"] is not self._resources.private_trace
+            or services["prime.session-backend"] is not self
+        ):
+            raise P3OperatorError()
+
+    async def run_root(
+        self,
+        *,
+        parent_run_id: str,
+        child_request: P3ChildRequest | None,
+        signal: object,
+    ) -> P3RootResult:
+        if (
+            parent_run_id != self._resources.root_run_id
+            or child_request is not None
+            or getattr(signal, "cancelled", True)
+            or self.result is not None
+        ):
+            raise P3OperatorError()
+        result = await _drive_success(self._resources, signal)
+        self.result = result
+        return P3RootResult(
+            root_run_id=result.root_run_id,
+            root_generation=result.root_generation,
+            child_run_id=result.child_run_id,
+            child_generation=result.child_generation,
+            child_result_sha256=result.child_result_sha256,
+            joined_result_sha256=result.joined_result_sha256,
+            depth_reached=result.depth_reached,
+            refusal_reason=result.refusal_reason,
+        )
+
+    def report_admission_refused(self, *, refusal: P3AdmissionRefused) -> None:
+        raise P3OperatorError()
+
+    async def wait_finalization(self, *, signal: object) -> P3Finalization:
+        if self.result is None:
+            raise P3OperatorError()
+        return P3Finalization("completed", self.result.receipt_sha256)
 
 
 async def _drive_limits_async(resources: _OperatorResources) -> list[P3LimitsRecord]:
@@ -609,6 +716,55 @@ async def _drive_cancellation_scenario(
 # ---------------------------------------------------------------------------
 
 
+async def _invoke_composed_success(
+    resources: _OperatorResources, signal: CancellationSignal | None = None
+) -> P3PublicResult:
+    package = create_prime_recursive_workflow_native_package()
+    provider = compose_installed_provider(
+        create_prime_recursive_workflow_provider(),
+        runtime_factories=RuntimeFactoryRegistry(()),
+        installed_packages=(package,),
+    )
+    application = provider.applications[0]
+    assembly = application.assemblies[0]
+    session_backend = _OperatorP3RuntimeHost(resources)
+    host_services = {
+        "prime.child-runner": resources.child_runner,
+        "prime.p3-oracle": resources.p3_oracle,
+        "prime.pi-extension": resources.pi_extension,
+        "prime.private-trace": resources.private_trace,
+        "prime.session-backend": session_backend,
+    }
+    runtime = build_p3_runtime(
+        RuntimeFactoryContext(
+            "prime-applications",
+            "prime.recursive-workflow",
+            "1.0.0",
+            "asterion.prime",
+            assembly.path,
+            P3_RUNTIME_OPTIONS,
+            host_services,
+        )
+    )
+    result = await run_composed_application(
+        assembly.plan,
+        implementations=application.implementations,
+        runtime=runtime,
+        run_id=resources.root_run_id,
+        input_text=P3_INPUT_PRESET,
+        host_services=host_services,
+        signal=signal,
+    )
+    public = session_backend.result
+    if (
+        public is None
+        or len(result.artifacts) != 1
+        or result.artifacts[0]["value"]["receipt_sha256"] != public.receipt_sha256
+    ):
+        raise P3OperatorError()
+    return public
+
+
 async def _invoke_composed_root_async(
     resources: _OperatorResources,
 ) -> list[dict[str, object]]:
@@ -620,7 +776,7 @@ async def _invoke_composed_root_async(
     """
 
     if resources.mode == "success":
-        result = await _drive_success(resources)
+        result = await _invoke_composed_success(resources)
         return [asdict(result)]
     records = await _drive_limits_async(resources)
     return [asdict(record) for record in records]
@@ -634,6 +790,8 @@ def _emit(records: list[dict[str, object]]) -> None:
 
 async def _run_async(
     environment: Mapping[str, str],
+    *,
+    diagnostics: DiagnosticSink | None = None,
 ) -> tuple[int, list[dict[str, object]]]:
     """Top-level async driver used by the sync entry points.
 
@@ -647,6 +805,8 @@ async def _run_async(
         return 2, []
     try:
         resources = await _build_resources(preflight)
+        if diagnostics is not None:
+            resources = replace(resources, diagnostics=diagnostics)
         records = await _invoke_composed_root_async(resources)
     except P3OperatorError:
         return 2, []
@@ -655,13 +815,15 @@ async def _run_async(
     return 0, records
 
 
-def run_success_path(environment: Mapping[str, str]) -> int:
+def run_success_path(
+    environment: Mapping[str, str], *, diagnostics: DiagnosticSink | None = None
+) -> int:
     """Run the operator in ``success`` mode and emit one JSON record.
 
     Returns 0 on success, 2 on preflight failure, 1 on operator error.
     """
 
-    rc, records = asyncio.run(_run_async(environment))
+    rc, records = asyncio.run(_run_async(environment, diagnostics=diagnostics))
     if rc != 0:
         return rc
     _emit(records)

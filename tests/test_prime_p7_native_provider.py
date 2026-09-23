@@ -50,9 +50,6 @@ from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
 )
 from asterion.capabilities.prime_arc_agi_3_solver.provider import CAPABILITY_REF
-from asterion.capabilities.prime_ipython_coding_native.provider import (
-    create_prime_ipython_coding_native_package,
-)
 from asterion.applications.prime.runtime_binding import (
     PrimeLaunch,
     _P7SolveEventProjector,

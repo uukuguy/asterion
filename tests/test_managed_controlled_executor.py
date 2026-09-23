@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +12,7 @@ from asterion.services.controlled_executor import ControlledExecutorError
 from asterion.services.managed_controlled_executor import (
     ManagedControlledExecutor,
     OperatorExecutorConfig,
+    _discard_stderr,
     load_operator_executor_config,
 )
 from asterion.services.controlled_executor_jsonl import TrustedValidationConfig
@@ -33,14 +36,28 @@ class RecordingStderr:
         return self._chunks.pop(0)
 
 
+class BlockingStderr:
+    async def read(self, size: int = -1) -> bytes:
+        del size
+        await asyncio.Event().wait()
+        return b""
+
+
 class FakeProcess:
-    def __init__(self, *, returncode: int | None = None, wait_timeout: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        returncode: int | None = None,
+        wait_timeout: bool = False,
+        terminate_error: BaseException | None = None,
+    ) -> None:
         self.returncode = returncode
         self.stdin = FakePipe()
         self.stdout = __import__("asyncio").StreamReader()
         self.stderr = __import__("asyncio").StreamReader()
         self.stderr.feed_eof()
         self.wait_timeout = wait_timeout
+        self.terminate_error = terminate_error
         self.terminated = False
         self.killed = False
 
@@ -52,6 +69,8 @@ class FakeProcess:
 
     def terminate(self) -> None:
         self.terminated = True
+        if self.terminate_error is not None:
+            raise self.terminate_error
 
     def kill(self) -> None:
         self.killed = True
@@ -136,6 +155,31 @@ class ManagedControlledExecutorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create.await_args.kwargs["env"], {})
         self.assertTrue(process.stdin.closed)
 
+    async def test_shutdown_allows_bounded_sidecar_cleanup_after_stdin_eof(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            marker = root / "cleaned"
+            script = root / "sidecar.py"
+            script.write_text(
+                "import sys, time\n"
+                "sys.stdin.buffer.read()\n"
+                "time.sleep(1.2)\n"
+                f"open({str(marker)!r}, 'w').write('done')\n"
+            )
+            manager = ManagedControlledExecutor(
+                OperatorExecutorConfig(
+                    binary_path=Path(sys.executable),
+                    policy_path=script,
+                    validation_config=self.config().validation_config,
+                )
+            )
+
+            async with manager:
+                pass
+
+            self.assertTrue(marker.exists(), "sidecar cleanup was interrupted")
+            self.assertEqual(marker.read_text(), "done")
+
     async def test_immediate_exit_is_rejected_without_echoing_paths(self) -> None:
         process = FakeProcess(returncode=1)
         with patch(
@@ -159,6 +203,67 @@ class ManagedControlledExecutorTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
         self.assertEqual(stderr.read_sizes, [4096, 4096])
+
+    async def test_cancelled_entry_reaps_started_child_and_stderr_task(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            script = Path(temp_dir) / "sidecar.py"
+            script.write_text(
+                "import sys, time\n"
+                "sys.stderr.write('started\\n')\n"
+                "sys.stderr.flush()\n"
+                "time.sleep(30)\n"
+            )
+            manager = ManagedControlledExecutor(
+                OperatorExecutorConfig(
+                    binary_path=Path(sys.executable),
+                    policy_path=script,
+                    validation_config=self.config().validation_config,
+                )
+            )
+            entered_yield = asyncio.Event()
+            release_entry = asyncio.Event()
+
+            async def pause_entry(_: float) -> None:
+                entered_yield.set()
+                await release_entry.wait()
+
+            with patch(
+                "asterion.services.managed_controlled_executor.asyncio.sleep",
+                side_effect=pause_entry,
+            ):
+                entry = asyncio.create_task(manager.__aenter__())
+                await entered_yield.wait()
+                process = manager._process
+                stderr_task = manager._stderr_task
+                self.assertIsNotNone(process)
+                self.assertIsNotNone(stderr_task)
+
+                entry.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await entry
+
+            self.assertIsNotNone(process)
+            self.assertIsNotNone(stderr_task)
+            self.assertIsNotNone(process.returncode)
+            self.assertTrue(stderr_task.done())
+            self.assertIsNone(manager._process)
+            self.assertIsNone(manager._stderr_task)
+
+    async def test_shutdown_reaps_stderr_task_when_terminate_fails(self) -> None:
+        process = FakeProcess(
+            wait_timeout=True,
+            terminate_error=RuntimeError("terminate failed"),
+        )
+        stderr_task = asyncio.create_task(_discard_stderr(BlockingStderr()))
+        manager = ManagedControlledExecutor(self.config())
+        manager._process = process  # type: ignore[assignment]
+        manager._stderr_task = stderr_task
+
+        with self.assertRaisesRegex(RuntimeError, "terminate failed"):
+            await manager._shutdown()
+
+        self.assertTrue(stderr_task.done())
+        self.assertTrue(stderr_task.cancelled())
 
 
 if __name__ == "__main__":

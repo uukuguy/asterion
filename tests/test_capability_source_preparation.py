@@ -14,6 +14,7 @@ from asterion.capability_packages import (
 )
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.applications.first_party_packages import builtin_capability_registrations
+from asterion.services.diagnostics import MemoryDiagnosticSink
 
 
 PACKAGE = CapabilityPackageRef("dci", "1.0.0")
@@ -38,6 +39,8 @@ class RecordingSource:
         self.payload = payload
         self.discoveries = self.opens = self.loads = 0
         self.installed_digest = payload.payload_sha256
+        self.installed_source_id: str | None = None
+        self.installed_source_kind: str | None = None
         self.raw_package: InstalledCapabilityPackage | None = None
 
     def discover_metadata(self) -> tuple[CapabilityPackageCandidate, ...]:
@@ -69,8 +72,8 @@ class RecordingSource:
         self.raw_package = InstalledCapabilityPackage(
             package_ref=PACKAGE,
             payload_sha256=self.installed_digest,
-            source_id=candidate.source_id,
-            source_kind=candidate.source_kind,
+            source_id=self.installed_source_id or candidate.source_id,
+            source_kind=self.installed_source_kind or candidate.source_kind,
             catalog_roots=(),
             benchmark_suite_paths=(),
             implementations=(),
@@ -88,6 +91,24 @@ def payload() -> PortableCapabilityPayload:
 
 
 class CapabilitySourcePreparationTests(unittest.TestCase):
+    def test_private_diagnostic_links_redacted_source_failure(self) -> None:
+        source = RecordingSource("selected", payload())
+        source.discover_metadata = lambda: (_ for _ in ()).throw(
+            RuntimeError("SECRET-PATH")
+        )  # type: ignore[method-assign]
+        sink = MemoryDiagnosticSink()
+
+        with self.assertRaises(ValueError) as raised:
+            prepare_capability_source(PACKAGE, (source,), None, diagnostics=sink)
+
+        self.assertEqual(str(raised.exception), "capability source preparation failed")
+        diagnostic_id = raised.exception.diagnostic_id
+        self.assertIsNotNone(diagnostic_id)
+        record = sink.get(diagnostic_id)
+        self.assertEqual(record.stage, "package.prepare")
+        self.assertEqual(record.exception_type, "RuntimeError")
+        self.assertNotIn("SECRET-PATH", repr(record))
+
     def test_invalid_request_boundaries_fail_before_discovery(self) -> None:
         malformed_lock = object.__new__(CapabilitySourceLock)
         object.__setattr__(malformed_lock, "entries", (object(),))
@@ -180,6 +201,29 @@ class CapabilitySourcePreparationTests(unittest.TestCase):
             load_prepared_capability_source(prepared)
 
         self.assertEqual(str(raised.exception), "capability source preparation failed")
+
+    def test_load_rejects_installed_source_identity_mismatch(self) -> None:
+        for attribute, mismatched in (
+            ("installed_source_id", "wrong-source"),
+            ("installed_source_kind", "archive"),
+        ):
+            with self.subTest(attribute=attribute):
+                source = RecordingSource("selected", payload())
+                prepared = prepare_capability_source(PACKAGE, (source,), None)
+                setattr(source, attribute, mismatched)
+                sink = MemoryDiagnosticSink()
+
+                with self.assertRaises(ValueError) as raised:
+                    load_prepared_capability_source(prepared, diagnostics=sink)
+
+                self.assertEqual(
+                    str(raised.exception), "capability source preparation failed"
+                )
+                self.assertEqual(source.loads, 1)
+                self.assertIsNotNone(raised.exception.diagnostic_id)
+                self.assertEqual(
+                    sink.get(raised.exception.diagnostic_id).stage, "package.load"
+                )
 
     def test_load_returns_fresh_authoritative_package_snapshot(self) -> None:
         source = RecordingSource("selected", payload())

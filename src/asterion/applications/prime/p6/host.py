@@ -1,35 +1,18 @@
-"""Runtime-host Protocol + frozen dataclasses for native P6 continual-improvement.
+"""Typed candidate evidence and the operator-owned P6 workflow boundary.
 
-The P6 operator exercises the host surface in a single process: open a
-root ``HarnessCoordinator``, admit one candidate revision, evaluate one
-holdout task B, then either preserve the candidate (via an explicit
-promotion action) or apply an exact inverse rollback. There is no
-cross-process continuation and no recovery semantics — those belong
-to P4's ``prime.continuity-store`` host service and are not part of
-P6's contract. P6 has no recovery.
-
-This module mirrors P3 / P4 / P5's ``host.py`` shape (one
-``@runtime_checkable`` Protocol plus frozen dataclasses), but with P6's
-load-bearing surface: ``admit_candidate`` / ``evaluate_holdout`` /
-``promote_or_rollback`` instead of P5's ``run_loop`` /
-``report_loop_stopped`` and P3's ``run_root`` /
-``report_admission_refused``.
-
-The closed public ``terminal_outcome`` enum is a 2-element literal
-(``preserved`` | ``rolled-back``). The oracle's 3-element internal
-verdict enum (``preserved`` | ``rolled-back`` | ``global-rejected``)
-does NOT leak through this module — the public surface expresses the
-boundary rejection through ``terminal_outcome="rolled-back"`` plus a
-``global_activation_approved=False`` flag carried on the sealed
-``P6NativeReceipt``. The 2-element public enum is load-bearing; any
-addition is a breaking change.
+The host uses one CandidateStoreLoop/HarnessCoordinator for admission, holdout,
+promotion or rollback and oracle verification. The runtime invokes that whole
+bounded operation through run_candidate; it never reconstructs revisions.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Mapping, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from asterion.applications.prime.p6.receipt import P6NativeReceipt
 
 from asterion.control.harness import HarnessEntryDescriptor
 from asterion.runtime.host import CancellationSignal
@@ -137,58 +120,17 @@ class P6HoldoutResult:
 
 @runtime_checkable
 class P6RuntimeHost(Protocol):
-    """Protocol surface the P6 operator exercises against a built runtime.
+    """Operator-owned candidate workflow with explicit materials and authority.
 
-    Five methods, mirroring P3 / P4 / P5's shape but scoped to the
-    admit → holdout → preserve-or-rollback lifecycle:
-
-    - ``validate_runtime_services`` — pre-execution capability check
-      (set-equality on the six required services; fail-closed on
-      missing services).
-    - ``admit_candidate`` — admit one candidate through the wrapped
-      ``HarnessCoordinator``; the wrapper refuses a second admit
-      within the same run (single-candidate limit per spec L161–L164).
-    - ``evaluate_holdout`` — evaluate the candidate against task B;
-      the wrapper refuses a second evaluation within the same run
-      (single-holdout limit per spec L165–L168).
-    - ``promote_or_rollback`` — apply the explicit promotion OR exact
-      inverse rollback; the wrapper refuses a second rollback within
-      the same run (one rollback maximum per spec L169–L171).
-    - ``wait_finalization`` — bounded cleanup that transfers the
-      terminal classification to the host.
+    One host retains one CandidateStoreLoop and HarnessCoordinator, evaluates
+    the holdout, applies promotion or rollback and requires oracle acceptance.
     """
 
     def validate_runtime_services(self, services: Mapping[str, object]) -> None: ...
 
-    def admit_candidate(
-        self,
-        *,
-        root_run_id: str,
-        candidate_proposal: object,
-        signal: CancellationSignal,
-    ) -> P6AdmittedProposal: ...
-
-    def evaluate_holdout(
-        self,
-        *,
-        root_run_id: str,
-        candidate: P6CandidateRevision,
-        baseline: P6BaselineSnapshot,
-        signal: CancellationSignal,
-    ) -> P6HoldoutResult: ...
-
-    def promote_or_rollback(
-        self,
-        *,
-        root_run_id: str,
-        candidate: P6CandidateRevision,
-        holdout: P6HoldoutResult,
-        signal: CancellationSignal,
-    ) -> P6PromotionAction: ...
-
-    async def wait_finalization(
-        self, *, signal: CancellationSignal
-    ) -> None: ...
+    async def run_candidate(
+        self, *, root_run_id: str, signal: CancellationSignal
+    ) -> P6NativeReceipt: ...
 
 
 __all__ = (

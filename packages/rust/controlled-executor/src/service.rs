@@ -93,8 +93,8 @@ impl ExecutorService {
                             code: Some("execution_failed"),
                         },
                     };
-                    service.in_flight.lock().await.remove(&request_id);
                     let _ = service.responses.send(response);
+                    service.in_flight.lock().await.remove(&request_id);
                 });
             }
             Ok(ExecutorRequest::Cancel(request)) => self.cancel(request).await,
@@ -148,6 +148,12 @@ impl ExecutorService {
     async fn has_in_flight(&self) -> bool {
         !self.in_flight.lock().await.is_empty()
     }
+
+    async fn cancel_all(&self) {
+        for cancel in self.in_flight.lock().await.values() {
+            let _ = cancel.send(true);
+        }
+    }
 }
 
 pub async fn serve_jsonl<R, W>(policy: TrustedPolicy, reader: R, mut writer: W) -> io::Result<()>
@@ -168,7 +174,10 @@ where
         tokio::select! {
             line = lines.next_line(), if input_open => match line? {
                 Some(line) => service.submit_line(&line).await,
-                None => input_open = false,
+                None => {
+                    input_open = false;
+                    service.cancel_all().await;
+                },
             },
             response = responses.recv() => {
                 let Some(response) = response else { break };

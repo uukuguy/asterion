@@ -14,7 +14,6 @@ from tools.check_promotion import (
     _closed_npm_subprocess_environment,
     _default_runner,
     _resolve_promotion_npm_cache,
-    _run,
     main,
     run_promotion,
 )
@@ -470,9 +469,9 @@ class PromotionCheckTests(unittest.TestCase):
 
         rendered = tuple(" ".join(command) for command in commands)
         for expected in (
-            "uv sync --frozen --extra dci",
-            "uv run --extra dci python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification",
-            "uv run --extra dci python -m unittest discover -s tests -v",
+            "uv sync --frozen --extra dci --extra prime",
+            "uv run --extra dci --extra prime python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification",
+            "uv run --extra dci --extra prime python -m unittest discover -s tests -v",
             "uv run python -m compileall -q src tests tools",
             "uv run ruff check src tests tools",
             "uv build .",
@@ -497,7 +496,8 @@ class PromotionCheckTests(unittest.TestCase):
             if command[:3] == ("uv", "pip", "install")
         )
         self.assertEqual(len(installed_wheel), 1)
-        self.assertFalse(any("[dci]" in item or "[prime]" in item for item in installed_wheel[0]))
+        self.assertTrue(any(item.endswith(".whl[dci]") for item in installed_wheel[0]))
+        self.assertFalse(any("[prime]" in item for item in installed_wheel[0]))
         wheel_smoke = next(
             command
             for command in commands
@@ -518,8 +518,11 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertEqual(len(protocol_smokes), 1)
         smoke_source = protocol_smokes[0][2]
         self.assertIn("'applications/*/assemblies/*.json'", smoke_source)
+        self.assertIn("PRIME_RELEASE_INVENTORY", smoke_source)
         self.assertIn("'capabilities/*/capability-package.json'", smoke_source)
         self.assertIn("'capabilities/*/manifests/*.json'", smoke_source)
+        self.assertIn("'capabilities/prime_*/payload/capability-package.json'", smoke_source)
+        self.assertIn("'capabilities/prime_*/payload/capabilities/*.json'", smoke_source)
         self.assertIn(
             "'capabilities/dci/payload/capability-package.json'",
             smoke_source,

@@ -5,20 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from asterion.capability_sdk import (
+    CapabilityImplementationBinding,
     CapabilityPackageRef,
     CapabilityRef,
     InstalledCapabilityPackage,
     open_portable_payload,
 )
 
+from asterion.capabilities.prime_native_receipt import PrimeNativeReceiptImplementation
+
 
 PACKAGE_REF = CapabilityPackageRef("prime-bounded-autonomy-native", "1.0.0")
 CAPABILITY_REF = CapabilityRef("prime.bounded-autonomy", "1.0.0")
 P5_INPUT_PRESET = "fixed-bounded-autonomy"
 P5_ARTIFACT_ID = "prime.p5-native.receipt"
-P5_RECEIPT_MEDIA_TYPE = (
-    "application/vnd.asterion.prime.p5-native-receipt+json"
-)
+P5_RECEIPT_MEDIA_TYPE = "application/vnd.asterion.prime.p5-native-receipt+json"
 
 
 def create_prime_bounded_autonomy_native_package() -> InstalledCapabilityPackage:
@@ -33,7 +34,19 @@ def create_prime_bounded_autonomy_native_package() -> InstalledCapabilityPackage
         source_kind="builtin",
         catalog_roots=(payload_root / "capabilities",),
         benchmark_suite_paths=(),
-        implementations=(),  # operator-driven; no synchronous implementation
+        implementations=(
+            CapabilityImplementationBinding(
+                CAPABILITY_REF,
+                PrimeNativeReceiptImplementation(
+                    CAPABILITY_REF,
+                    P5_INPUT_PRESET,
+                    P5_ARTIFACT_ID,
+                    P5_RECEIPT_MEDIA_TYPE,
+                    "p5-native",
+                    120_000,
+                ),
+            ),
+        ),
         benchmark_bindings=(),
     )
 

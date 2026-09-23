@@ -11,6 +11,7 @@ surface that the operator exercises against a built runtime.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Mapping
 from types import MappingProxyType
 
@@ -23,7 +24,13 @@ from asterion.applications.prime.p3.host import (
     P3RuntimeHost,
 )
 from asterion.applications.prime.p3.oracle import P3Oracle
+from asterion.applications.prime.p3.receipt import seal as seal_receipt
 from asterion.applications.prime.services import ChildRunnerHostService
+from asterion.capabilities.prime_recursive_workflow_native.provider import (
+    P3_ARTIFACT_ID,
+    P3_INPUT_PRESET,
+    P3_RECEIPT_MEDIA_TYPE,
+)
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 from asterion.runtime.host import CancellationSignal, RunEvent, RunRequest
 from asterion.runtime.protocol import ProtocolError
@@ -53,6 +60,12 @@ P3_RUNTIME_OPTIONS: Mapping[str, str] = MappingProxyType(
     }
 )
 _ERROR = "Asterion-prime runtime configuration is invalid"
+
+
+class _NeverCancelled:
+    @property
+    def cancelled(self) -> bool:
+        return False
 
 
 class _P3RuntimeSession:
@@ -155,17 +168,77 @@ class _P3RuntimeSession:
         request.to_mapping()
         if self._active or self._consumed:
             raise ProtocolError("P3 runtime session is unavailable")
+        if (
+            request.input_text != P3_INPUT_PRESET
+            or request.requested_capabilities != ()
+            or request.deadline_ms is None
+            or request.deadline_ms > 60_000
+        ):
+            raise ProtocolError("P3 runtime request is invalid")
         self._active = self._consumed = True
-        # The P3 witness is operator-driven through Make; this surface
-        # exists so the runtime client is constructable end-to-end and
-        # yields a single terminal event so callers see a closed shape.
         try:
-            yield RunEvent(
-                request.run_id,
-                1,
-                "run.completed",
-                {"status": "completed"},
+            yield RunEvent(request.run_id, 1, "run.started", {"capabilities": []})
+            if signal is not None and signal.cancelled:
+                yield RunEvent(
+                    request.run_id, 2, "run.completed", {"status": "cancelled"}
+                )
+                return
+            active_signal = signal if signal is not None else _NeverCancelled()
+            async with asyncio.timeout((request.deadline_ms or 60_000) / 1000):
+                root = await self.run_root(
+                    parent_run_id=request.run_id,
+                    child_request=None,
+                    signal=active_signal,
+                )
+                final = await self.wait_finalization(signal=active_signal)
+            if active_signal.cancelled:
+                yield RunEvent(
+                    request.run_id, 2, "run.completed", {"status": "cancelled"}
+                )
+                return
+            if (
+                type(root) is not P3RootResult
+                or root.root_run_id != request.run_id
+                or root.depth_reached != 2
+                or root.refusal_reason is not None
+                or type(final) is not P3Finalization
+                or final.terminal_status != "completed"
+            ):
+                raise ProtocolError("P3 runtime result is invalid")
+            self._oracle.check(
+                root_run_id=root.root_run_id,
+                root_generation=root.root_generation,
+                child_run_id=root.child_run_id,
+                child_generation=root.child_generation,
+                child_result_sha256=root.child_result_sha256,
+                joined_result_sha256=root.joined_result_sha256,
+                depth_reached=root.depth_reached,
+                refusal_reason=root.refusal_reason,
             )
+            receipt = seal_receipt(
+                root_run_id=root.root_run_id,
+                root_generation=root.root_generation,
+                child_run_id=root.child_run_id,
+                child_generation=root.child_generation,
+                child_result_sha256=root.child_result_sha256,
+                joined_result_sha256=root.joined_result_sha256,
+                depth_reached=root.depth_reached,
+                refusal_reason=root.refusal_reason,
+            )
+            if final.receipt_sha256 != receipt.sha256():
+                raise ProtocolError("P3 runtime receipt mismatches finalization")
+            yield RunEvent(
+                request.run_id, 2, "artifact.created",
+                {"artifact": {
+                    "artifact_id": P3_ARTIFACT_ID,
+                    "kind": "p3-native",
+                    "media_type": P3_RECEIPT_MEDIA_TYPE,
+                    "sha256": receipt.sha256(),
+                }},
+            )
+            yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
+        except asyncio.CancelledError:
+            raise
         finally:
             self._active = False
 
@@ -213,6 +286,7 @@ def build_p3_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
         # Eagerly validate the 5-tuple so a malformed host-services
         # shape is rejected before the runtime is handed to callers.
         session.validate_runtime_services(host_services)
+        service.validate_runtime_services(host_services)
         return AsterionPrimeRuntimeClient(session)
     except Exception:
         raise RuntimeFactoryError(_ERROR) from None

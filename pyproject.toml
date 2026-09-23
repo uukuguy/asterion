@@ -84,6 +84,12 @@ artifacts = [
 "schemas/operation/v1/operation-receipt.schema.json" = "asterion/schemas/operation/v1/operation-receipt.schema.json"
 
 [tool.hatch.build.targets.sdist]
+exclude = [
+    "/packages/**/node_modules",
+    "/packages/**/node_modules/**",
+    "/packages/**/target",
+    "/packages/**/target/**",
+]
 artifacts = [
     ".asterion-prime-extension-build.json",
     "src/asterion/applications/prime/resources/ipython-extension.mjs",

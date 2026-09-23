@@ -250,6 +250,57 @@ def receipt(
 
 
 class TestSessionContextManager(unittest.IsolatedAsyncioTestCase):
+    async def test_refresh_position_uses_one_validated_replay(self) -> None:
+        from asterion.control import journal as journal_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "journal"
+            store = FileCanonicalJournal.open(root, "session-1")
+            system = store.append(
+                0,
+                JournalRecord.system_bound(
+                    system_id="research.system", system_version="1.0.0"
+                ),
+            )
+            store.append(
+                system.position,
+                JournalRecord.authority_bound(
+                    authority_id="authority-1", authority_revision=1
+                ),
+            )
+            with patch(
+                "asterion.control.journal._read_file_entries",
+                wraps=journal_module._read_file_entries,
+            ) as construction_reads:
+                manager = SessionContextManager(
+                    session_id="session-1",
+                    generation=1,
+                    authority=authority("session.tree.read"),
+                    journal=store,
+                    client=FakeSessionContextClient(),
+                    clock_ms=lambda: 100,
+                    cancellation_signal=MutableSignal(),
+                    session_status=lambda: "running",
+                )
+            self.assertEqual(construction_reads.call_count, 1)
+            other = FileCanonicalJournal.open(root, "session-1")
+            other.append(
+                2,
+                JournalRecord.fault_projected(
+                    fault_id="fault-1",
+                    code="provider-disconnected",
+                    recoverable=True,
+                    evidence_ref=None,
+                ),
+            )
+            with patch(
+                "asterion.control.journal._read_file_entries",
+                wraps=journal_module._read_file_entries,
+            ) as read_entries:
+                manager._refresh_position()
+            self.assertEqual(manager.snapshot().journal_position, 3)
+            self.assertEqual(read_entries.call_count, 1)
+
     async def test_file_journal_reopens_exact_terminal_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "journal"

@@ -17,15 +17,10 @@ import unittest
 
 from asterion.applications.prime.p6.host import (
     P6AdmittedProposal,
-    P6BaselineSnapshot,
-    P6CandidateRevision,
     P6HoldoutResult,
     P6PromotionAction,
 )
 from asterion.applications.prime.p6.oracle import P6Oracle
-from asterion.applications.prime.p6.receipt import (
-    P6NativeReceipt,
-)
 from asterion.applications.prime.p6.runtime_binding import (
     P6_HOST_CAPABILITIES,
     P6_RUNTIME_OPTIONS,
@@ -50,6 +45,9 @@ class _StubP6RuntimeHost:
     Protocol surface; the stub returns ``None`` for ``admit_candidate``
     and the binding's actual ``P6AdmittedProposal`` for the others.
     """
+
+    async def run_candidate(self, *, root_run_id, signal):
+        return None
 
     def validate_runtime_services(self, services) -> None:
         return None
@@ -247,15 +245,7 @@ class P6RuntimeBindingTests(unittest.TestCase):
             private_trace=None,
         )
         self.assertTrue(hasattr(session, "validate_runtime_services"))
-        self.assertTrue(hasattr(session, "admit_candidate"))
-        self.assertTrue(hasattr(session, "evaluate_holdout"))
-        self.assertTrue(hasattr(session, "promote_or_rollback"))
-        self.assertTrue(hasattr(session, "wait_finalization"))
-        self.assertTrue(callable(session.validate_runtime_services))
-        self.assertTrue(callable(session.admit_candidate))
-        self.assertTrue(callable(session.evaluate_holdout))
-        self.assertTrue(callable(session.promote_or_rollback))
-        self.assertTrue(callable(session.wait_finalization))
+        self.assertTrue(callable(session.run_candidate))
 
     def test_p6_runtime_binding_accepts_exact_capability_set(self) -> None:
         # Set-equality is the spec's contract. The exact 5-tuple
@@ -286,16 +276,12 @@ class P6RuntimeBindingTests(unittest.TestCase):
         )
         # Reject a missing key (subset).
         missing = {
-            name: object()
-            for name in P6_HOST_CAPABILITIES
-            if name != "prime.p6-oracle"
+            name: object() for name in P6_HOST_CAPABILITIES if name != "prime.p6-oracle"
         }
         with self.assertRaises(RuntimeFactoryError):
             session.validate_runtime_services(missing)
         # Reject an unknown key (superset).
-        services: dict[str, object] = {
-            name: object() for name in P6_HOST_CAPABILITIES
-        }
+        services: dict[str, object] = {name: object() for name in P6_HOST_CAPABILITIES}
         services["prime.unexpected"] = object()
         with self.assertRaises(RuntimeFactoryError):
             session.validate_runtime_services(services)
@@ -328,154 +314,27 @@ class P6RuntimeBindingTests(unittest.TestCase):
         # confirming no internal call to ``set_holdout_callable``.
         self.assertIs(session._candidate_store, stub)  # type: ignore[attr-defined]
 
-    def test_p6_runtime_session_uses_candidate_store_loop_under_the_hood(
-        self,
-    ) -> None:
-        # The adapter's ``admit_candidate`` invokes the wrapper from
-        # Task 3 (``create_candidate_store_host_service`` instance).
-        # The stub's ``admit_candidate`` records the call.
-        call_log: list[object] = []
+    def test_p6_runtime_delegates_exact_run_identity_to_host(self) -> None:
+        import asyncio
 
-        class _LoggingStub(_StubCandidateStoreLoop):
-            def admit_candidate(self, *, proposal, signal=None):
-                call_log.append(proposal)
-                return super().admit_candidate(
-                    proposal=proposal, signal=signal
-                )
+        calls = []
 
-        # Use a real ``HarnessProposal`` so the binding's
-        # ``admit_candidate`` type-check succeeds.
-        from asterion.control.harness import (
-            HarnessEdit,
-            HarnessEntryDescriptor,
-            HarnessProposal,
-            HarnessScope,
-        )
-
-        proposal = HarnessProposal(
-            proposal_id="proposal-1",
-            authority_id="prime.candidate-store",
-            authority_revision=1,
-            scope=HarnessScope.project("prime.continual-improvement"),
-            baseline_snapshot_id="snapshot-0",
-            edits=(
-                HarnessEdit.create(
-                    HarnessEntryDescriptor(
-                        entry_id="entry-1",
-                        kind="memory",
-                        title_digest="a" * 64,
-                        body_ref="private:entry-1",
-                        body_digest="b" * 64,
-                        grouping_path_digest=None,
-                        metadata_digest="c" * 64,
-                        version=1,
-                    )
-                ),
-            ),
-            evidence_ids=("evidence-1",),
-            rationale_ref="private:rationale-1",
-            rationale_digest="d" * 64,
-            expected_outcome_digest="e" * 64,
-        )
+        class Host(_StubP6RuntimeHost):
+            async def run_candidate(self, *, root_run_id, signal):
+                calls.append(root_run_id)
+                return "host-result"
 
         session = _P6RuntimeSession(
-            session_backend=object(),  # type: ignore[arg-type]
-            candidate_store=_LoggingStub(),  # type: ignore[arg-type]
-            oracle=object(),  # type: ignore[arg-type]
-            private_trace=None,
-        )
-        result = session.admit_candidate(
-            root_run_id="p6-test-1",
-            candidate_proposal=proposal,
-            signal=None,  # type: ignore[arg-type]
-        )
-        self.assertEqual(len(call_log), 1)
-        self.assertIs(call_log[0], proposal)
-        # The binding's return shape is ``P6AdmittedProposal``.
-        self.assertIsInstance(result, P6AdmittedProposal)
-        # ``proposal_id`` and ``proposal_digest`` come from the
-        # ``HarnessRevision`` returned by the stub.
-        self.assertEqual(result.proposal_id, proposal.proposal_id)
-        self.assertEqual(result.proposal_digest, proposal.digest)
-
-    def test_p6_runtime_session_uses_p6_oracle_under_the_hood(self) -> None:
-        # The adapter's ``evaluate_holdout`` invokes the oracle from
-        # Task 5 (``P6Oracle.check``) mid-round. Use a logging stub
-        # oracle that records the call signature.
-        oracle_calls: list[dict[str, object]] = []
-
-        class _LoggingOracle(P6Oracle):
-            def check(self, **kwargs):  # type: ignore[override]
-                oracle_calls.append(kwargs)
-                return super().check(**kwargs)
-
-        # Construct a session with the logging oracle. We use a
-        # logging candidate-store stub that returns a successful
-        # ``HoldoutResult`` so the binding's mid-round oracle call
-        # succeeds.
-        session = _P6RuntimeSession(
-            session_backend=object(),  # type: ignore[arg-type]
-            candidate_store=_StubCandidateStoreLoop(),  # type: ignore[arg-type]
-            oracle=_LoggingOracle(),
-            private_trace=None,
-        )
-        result = session.evaluate_holdout(
-            root_run_id="p6-test-oracle-1",
-            candidate=P6CandidateRevision(
-                revision_id="rev-1",
-                revision_digest="f" * 64,
-                parent_revision_id=None,
-            ),
-            baseline=P6BaselineSnapshot(
-                snapshot_id="snapshot-0",
-                entries=(),
-            ),
-            signal=None,  # type: ignore[arg-type]
-        )
-        # Oracle was consulted exactly once mid-round.
-        self.assertEqual(len(oracle_calls), 1)
-        # Oracle was called with ``root_run_id`` matching the binding's
-        # ``root_run_id`` argument.
-        self.assertEqual(
-            oracle_calls[0]["root_run_id"], "p6-test-oracle-1"
-        )
-        # Binding's return shape is ``P6HoldoutResult``.
-        self.assertIsInstance(result, P6HoldoutResult)
-
-    def test_p6_runtime_session_promote_or_rollback_seals_receipt_via_task_6_seal(
-        self,
-    ) -> None:
-        # The adapter's ``wait_finalization`` seals a ``P6NativeReceipt``
-        # via ``seal_p6_native_receipt`` (Task 6). Use a logging
-        # candidate-store stub that returns a non-None
-        # ``last_evaluation_digest`` so the success path is exercised.
-        class _StubWithDigest(_StubCandidateStoreLoop):
-            @property
-            def last_evaluation_digest(self):
-                return "a" * 64
-
-            @property
-            def rollback_invocation_count(self):
-                return 0
-
-        session = _P6RuntimeSession(
-            session_backend=object(),  # type: ignore[arg-type]
-            candidate_store=_StubWithDigest(),  # type: ignore[arg-type]
+            session_backend=Host(),
+            candidate_store=_stub_candidate_store(),
             oracle=P6Oracle(),
             private_trace=None,
         )
-        import asyncio
-
-        receipt = asyncio.run(
-            session.wait_finalization(signal=None)  # type: ignore[arg-type]
+        result = asyncio.run(
+            session.run_candidate(root_run_id="exact-run", signal=None)
         )
-        # The receipt is sealed (its ``receipt_sha256`` is a non-empty
-        # 64-hex string — proves ``seal_p6_native_receipt`` ran).
-        self.assertIsInstance(receipt, P6NativeReceipt)
-        self.assertEqual(len(receipt.receipt_sha256), 64)
-        # The receipt's ``task_b_result_digest`` is the stub's
-        # ``last_evaluation_digest`` (64 hex chars).
-        self.assertEqual(receipt.task_b_result_digest, "a" * 64)
+        self.assertEqual(result, "host-result")
+        self.assertEqual(calls, ["exact-run"])
 
     def test_p6_runtime_session_wait_finalization_cleans_up_async_resources(
         self,
