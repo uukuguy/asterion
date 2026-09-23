@@ -44,6 +44,7 @@ class TestP3LiveEntry(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(kwargs["binding_sha256"]), 64)
             session = kwargs["session_factory"]("child", root / "child")
             self.assertEqual(session._rpc.config.cwd, root / "child")
+            await session.close()
             self.assertNotIn("SECRET", str(result))
 
     async def test_missing_operator_inputs_fail_closed(self):

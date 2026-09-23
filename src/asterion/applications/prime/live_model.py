@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
+import tempfile
+import time
 from types import MappingProxyType
 from typing import Mapping
 
@@ -26,11 +29,12 @@ from asterion.runtimes.pi_rpc import (
 
 _DEADLINE_SECONDS = 120.0
 _MAX_PROMPTS = 4
-_MAX_INPUT_BYTES = 16_384
+_MAX_INPUT_BYTES = 8_192
 _MAX_OUTPUT_BYTES = 32_768
 _MAX_INPUT_TOKENS = 16_000
 _MAX_OUTPUT_TOKENS = 8_000
 _MAX_COST_MICROS = 3_000
+_PROVIDER_MAX_OUTPUT_TOKENS = 512
 _INPUT_PRICE_MICROS_PER_MILLION = 140_000
 _OUTPUT_PRICE_MICROS_PER_MILLION = 280_000
 
@@ -115,6 +119,10 @@ def resolve_live_model_launch(
             "--no-prompt-templates",
             "--no-themes",
             "--no-context-files",
+            "--system-prompt",
+            "Follow the user task exactly. Return only the requested JSON.",
+            "--thinking",
+            "off",
             "--provider",
             "deepseek",
             "--model",
@@ -154,16 +162,39 @@ class LiveModelSession:
         environment: Mapping[str, str],
         cwd: Path,
     ) -> None:
+        config_root = None
         try:
+            config_root = tempfile.TemporaryDirectory(prefix="asterion-prime-pi-")
+            models_path = Path(config_root.name) / "models.json"
+            models_path.write_text(
+                json.dumps(
+                    {
+                        "providers": {
+                            "deepseek": {
+                                "modelOverrides": {
+                                    "deepseek-v4-flash": {
+                                        "maxTokens": _PROVIDER_MAX_OUTPUT_TOKENS
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    separators=(",", ":"),
+                )
+            )
+            models_path.chmod(0o600)
             config = PiRpcConfig(
                 command=command,
-                environment=environment,
+                environment={**environment, "PI_CODING_AGENT_DIR": config_root.name},
                 cwd=cwd,
                 deadline_seconds=_DEADLINE_SECONDS,
                 compact_events=False,
             )
         except Exception:
+            if config_root is not None:
+                config_root.cleanup()
             raise LiveModelError() from None
+        self._config_root = config_root
         self._rpc = PiRpcSession(config)
         self._opened = False
         self._closed = False
@@ -181,11 +212,39 @@ class LiveModelSession:
         """Return the child handle for operator-owned cleanup verification."""
         return self._rpc.process
 
+    def _verify_model_cap(self) -> None:
+        request_id = self._rpc.next_id()
+        self._rpc.send({"id": request_id, "type": "get_state"})
+        deadline = time.monotonic() + 5
+        for _ in range(16):
+            response = self._rpc.read_json_line(
+                timeout_seconds=max(0.001, deadline - time.monotonic())
+            )
+            if response.get("type") != "response" or response.get("id") != request_id:
+                continue
+            data = response.get("data")
+            model = data.get("model") if isinstance(data, Mapping) else None
+            if (
+                response.get("command") != "get_state"
+                or response.get("success") is not True
+                or not isinstance(model, Mapping)
+                or model.get("provider") != "deepseek"
+                or model.get("id") != "deepseek-v4-flash"
+                or type(model.get("maxTokens")) is not int
+                or model.get("maxTokens") != _PROVIDER_MAX_OUTPUT_TOKENS
+            ):
+                raise LiveModelError()
+            return
+        raise LiveModelError()
+
     async def open(self, *, signal: CancellationSignal) -> None:
         if self._opened or self._closed or signal.cancelled:
             raise LiveModelError()
         try:
             await self._rpc.open(signal=signal)
+            await asyncio.to_thread(self._verify_model_cap)
+            if signal.cancelled:
+                raise LiveModelError()
         except BaseException as error:
             await self.close()
             if isinstance(error, (KeyboardInterrupt, SystemExit, GeneratorExit)):
@@ -234,7 +293,21 @@ class LiveModelSession:
                     usage = normalize_pi_usage(event.payload)
                     if usage is None:
                         raise LiveModelError()
-                    usage_events.append((usage["input_tokens"], usage["output_tokens"]))
+                    raw_usage = message.get("usage")
+                    if not isinstance(raw_usage, Mapping):
+                        raise LiveModelError()
+                    cached = []
+                    for name in ("cacheRead", "cacheWrite"):
+                        count = raw_usage.get(name, 0)
+                        if type(count) is not int or count < 0:
+                            raise LiveModelError()
+                        cached.append(count)
+                    # Pi's `input` excludes cache reads and writes. Budget
+                    # against all prompt tokens at the full input rate; this
+                    # intentionally overestimates discounted cache cost.
+                    usage_events.append(
+                        (usage["input_tokens"] + sum(cached), usage["output_tokens"])
+                    )
 
         try:
             result = await self._rpc.prompt(text, signal=signal, on_event=record)
@@ -286,3 +359,5 @@ class LiveModelSession:
             self._rpc.stop()
         except BaseException:
             raise LiveModelError() from None
+        finally:
+            self._config_root.cleanup()

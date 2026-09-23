@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import FrozenInstanceError
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -25,6 +26,10 @@ for line in sys.stdin:
     req = json.loads(line)
     if req["type"] == "abort":
         break
+    if req["type"] == "get_state":
+        emit({"type": "response", "id": req["id"], "command": "get_state", "success": True,
+              "data": {"model": {"provider": "deepseek", "id": "deepseek-v4-flash", "maxTokens": 512}}})
+        continue
     if req["type"] != "prompt":
         continue
     mode = req["message"]
@@ -43,6 +48,10 @@ for line in sys.stdin:
         usage["output"] = 6_000
     if mode == "over-output":
         emit({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "x" * 40_000}})
+    if mode == "cached":
+        usage = {"input": 100, "output": 100, "cacheRead": 2000, "cacheWrite": 100}
+    if mode == "bad-cache":
+        usage = {"input": 100, "output": 100, "cacheRead": -1}
     emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop", "usage": usage}})
     emit({"type": "agent_end", "messages": []})
     emit({"type": "agent_settled"})
@@ -84,12 +93,54 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
             reply.usage.input_tokens = 99
         self.assertNotIn("private answer", repr(reply))
 
+    async def test_provider_output_cap_is_installed_in_private_model_config(self):
+        config_root = Path(self.session._rpc.config.environment["PI_CODING_AGENT_DIR"])
+        model_config = json.loads((config_root / "models.json").read_text())
+        self.assertEqual(
+            model_config["providers"]["deepseek"]["modelOverrides"][
+                "deepseek-v4-flash"
+            ]["maxTokens"],
+            512,
+        )
+        self.assertNotIn("SECRET", (config_root / "models.json").read_text())
+        await self.session.close()
+        self.assertFalse(config_root.exists())
+
+    async def test_model_cap_mismatch_rejected_before_prompt(self):
+        script = Path(self.temp.name) / "bad-producer.py"
+        script.write_text(_PRODUCER.replace('"maxTokens": 512', '"maxTokens": 2048'))
+        other = LiveModelSession(
+            command=(sys.executable, "-I", str(script)),
+            environment={},
+            cwd=Path(self.temp.name),
+        )
+        try:
+            with self.assertRaises(LiveModelError):
+                await other.open(signal=_NeverCancelled())
+            self.assertIsNone(other.process)
+        finally:
+            await other.close()
+
     async def test_missing_usage_fails_closed_and_reaps(self):
         await self.session.open(signal=_NeverCancelled())
         process = self.session.process
         with self.assertRaises(LiveModelError) as caught:
             await self.session.prompt("missing-usage", signal=_NeverCancelled())
         self.assertNotIn("private", repr(caught.exception))
+        self.assertIsNotNone(process.poll())
+
+    async def test_cached_prompt_tokens_count_toward_usage_and_cost(self):
+        await self.session.open(signal=_NeverCancelled())
+        reply = await self.session.prompt("cached", signal=_NeverCancelled())
+        self.assertEqual(reply.usage.input_tokens, 2200)
+        self.assertEqual(reply.usage.output_tokens, 100)
+        self.assertEqual(reply.usage.cost_micros, 336)
+
+    async def test_invalid_cache_usage_fails_closed(self):
+        await self.session.open(signal=_NeverCancelled())
+        process = self.session.process
+        with self.assertRaises(LiveModelError):
+            await self.session.prompt("bad-cache", signal=_NeverCancelled())
         self.assertIsNotNone(process.poll())
 
     async def test_token_limit_fails_closed(self):

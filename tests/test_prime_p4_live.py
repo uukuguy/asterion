@@ -27,6 +27,10 @@ for line in sys.stdin:
     request = json.loads(line)
     if request["type"] == "abort":
         break
+    if request["type"] == "get_state":
+        emit({"type": "response", "id": request["id"], "command": "get_state", "success": True,
+              "data": {"model": {"provider": "deepseek", "id": "deepseek-v4-flash", "maxTokens": 512}}})
+        continue
     if request["type"] != "prompt":
         continue
     task = json.loads(request["message"].split("TASK_JSON=", 1)[1])

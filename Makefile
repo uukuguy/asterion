@@ -300,17 +300,9 @@ asterion-prime-p4-run:
 		recover_json="$$(ASTERION_PRIME_OPERATOR_ROOT="$(ASTERION_PRIME_OPERATOR_ROOT)" ASTERION_PRIME_P4_PRIVATE_ROOT="$$private_root" ASTERION_PRIME_P4_MODE=recover ASTERION_PRIME_NODE="$$(command -v node)" ASTERION_PRIME_PI_ENTRY="$(ASTERION_PRIME_LOCAL_PI_ENTRY)" $(UV_BIN) run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p4.live_entry)"; \
 		{ echo "$$commit_json"; echo "$$recover_json"; } | jq -e -s '\''select(length == 2 and .[0].status == "committed" and .[1].status == "recovered" and .[0].model_call_count == 1 and .[1].model_call_count == 1 and .[0].input_tokens > 0 and .[1].input_tokens > 0 and .[1].prior_checkpoint_sha256 == .[0].checkpoint_sha256 and .[1].recovered_payload_sha256 != null and .[1].new_generation == (.[0].generation + 1) and .[1].result_sha256 != .[0].result_sha256 and .[1].continuation_id == .[0].continuation_id and .[1].worker_identity_sha256 != .[0].worker_identity_sha256)'\'''
 
-# Diagnostic sibling of ``asterion-prime-p4-run``: identical command line,
-# without the ``@`` prefix on the orb invocation, so Orb / python stderr
-# surfaces to the host terminal for diagnosis only.
+# Diagnostic sibling runs the same bounded live P4 preset.
 asterion-prime-p4-run-verbose:
-	@printf '[asterion-prime-p4-run-verbose] native Asterion-prime P4 cross-generation continuity witness\n' >&2; \
-	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p4-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
-		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
-		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
-		rm -rf "$(ASTERION_PRIME_P4_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P4_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P4_PRIVATE_ROOT)"; \
-		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P4_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P4_MODE=commit; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p4.operator'\'' asterion-prime-p4-run-commit "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P4_PRIVATE_ROOT)"; \
-		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P4_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P4_MODE=recover; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p4.operator'\'' asterion-prime-p4-run-recover "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P4_PRIVATE_ROOT)"'
+	@$(MAKE) asterion-prime-p4-run
 
 # P3 cross-runner continuity witness: deterministic fake-worker that
 # admits exactly one child at depth 2, joins the child's result back into
@@ -375,17 +367,10 @@ asterion-prime-p3-run-limits:
 		echo "$$limits_json" | jq -e -s "(length == 4) and (.[0].scenario == \"depth\") and (.[0].refusal_reason == \"depth-exceeded\") and (.[1].scenario == \"concurrency\") and (.[1].refusal_reason == \"concurrency-exceeded\") and (.[2].scenario == \"budget\") and (.[2].refusal_reason == \"budget-exceeded\") and (.[3].scenario == \"cancellation\") and (.[3].refusal_reason == \"cancelled\") and (.[0].receipt_sha256 | length == 64) and (.[1].receipt_sha256 | length == 64) and (.[2].receipt_sha256 | length == 64) and (.[3].receipt_sha256 | length == 64)" >/dev/null || { echo "[asterion-prime-p3-run-limits] witness failed: $$limits_json" >&2; exit 2; }; \
 		echo "[asterion-prime-p3-run-limits] witness passed: depth / concurrency / budget / cancellation refusals, each with refusal_reason and receipt_sha256" >&2'
 
-# Diagnostic sibling of ``asterion-prime-p3-run`` + ``-limits``: identical
-# command line, without the ``@`` prefix on the orb invocation, so Orb /
-# python stderr surfaces to the host terminal for diagnosis only.
+# Diagnostic sibling runs the live P3 preset and deterministic refusal checks.
 asterion-prime-p3-run-verbose:
-	@printf '[asterion-prime-p3-run-verbose] native Asterion-prime P3 cross-runner continuity witness\n' >&2; \
-	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p3-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
-		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
-		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
-		rm -rf "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; mkdir -p "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; \
-		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P3_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P3_MODE=success; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p3.operator'\'' asterion-prime-p3-run-success "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"; \
-		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P3_PRIVATE_ROOT="$$4"; export ASTERION_PRIME_P3_MODE=limits; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p3.operator'\'' asterion-prime-p3-run-limits "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P3_PRIVATE_ROOT)"'
+	@$(MAKE) asterion-prime-p3-run
+	@$(MAKE) asterion-prime-p3-run-limits
 
 # P5 bounded-autonomy success-path witness: re-invokes the operator with
 # ``ASTERION_PRIME_P5_MODE=success``. The operator drives exactly one
