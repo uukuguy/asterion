@@ -4,6 +4,7 @@ import tempfile
 import contextlib
 import io
 import json
+from hashlib import sha256
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -54,6 +55,17 @@ class TestP6Live(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue((Path(temporary) / "candidate.json").is_file())
             self.assertTrue((Path(temporary) / "holdout-evidence.json").is_file())
+            self.assertEqual(result.model_call_count, 1)
+            self.assertEqual(
+                (result.input_tokens, result.output_tokens, result.cost_micros),
+                (1000, 500, 280),
+            )
+            self.assertEqual(
+                result.private_evidence_sha256,
+                sha256(
+                    (Path(temporary) / "holdout-evidence.json").read_bytes()
+                ).hexdigest(),
+            )
             self.assertNotIn("multiplier", repr(result))
 
     async def test_invalid_candidate_fails_before_admission_and_closes(self):
@@ -112,6 +124,8 @@ class TestP6LiveOperator(unittest.TestCase):
             self.assertEqual(
                 [record["status"] for record in records], ["completed", "completed"]
             )
+            self.assertEqual([record["model_call_count"] for record in records], [1, 1])
+            self.assertEqual([record["cost_micros"] for record in records], [280, 280])
             self.assertEqual(len(list(private.glob("*/candidate.json"))), 2)
             self.assertNotIn("multiplier", output.getvalue())
 

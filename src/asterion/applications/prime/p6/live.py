@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -59,6 +59,17 @@ _TASK_A_PROMPT = (
     "examples: 1 -> 4, 4 -> 13, 7 -> 22. Respond with only a JSON object "
     'having exactly integer keys "multiplier" and "offset". Bounds: -16 to 16.'
 )
+
+
+@dataclass(frozen=True, slots=True)
+class P6LivePublicResult(P6PublicResult):
+    """Public evidence that one bounded model turn produced the candidate."""
+
+    model_call_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_micros: int = 0
+    private_evidence_sha256: str = ""
 
 
 def _descriptor(
@@ -216,7 +227,7 @@ async def run_live_candidate(
     root_run_id: str,
     private_root: Path,
     signal: CancellationSignal | None = None,
-) -> P6PublicResult:
+) -> P6LivePublicResult:
     """Propose on task A, independently test task B, then compose the P6 run."""
 
     from asterion.applications.provider import compose_installed_provider
@@ -367,7 +378,16 @@ async def run_live_candidate(
         if host.receipt is None or host.receipt.terminal_outcome != "rolled-back":
             raise P6OperatorError() from None
         status = "refused"
-    return P6PublicResult(status=status, **asdict(host.receipt))
+    evidence_sha = sha256((root / "holdout-evidence.json").read_bytes()).hexdigest()
+    return P6LivePublicResult(
+        status=status,
+        **asdict(host.receipt),
+        model_call_count=1,
+        input_tokens=reply.usage.input_tokens,
+        output_tokens=reply.usage.output_tokens,
+        cost_micros=reply.usage.cost_micros,
+        private_evidence_sha256=evidence_sha,
+    )
 
 
 def run_operator_live(environment: Mapping[str, str]) -> int:
@@ -404,7 +424,7 @@ def main() -> int:
     return run_operator_live(dict(os.environ))
 
 
-__all__ = ("main", "run_live_candidate", "run_operator_live")
+__all__ = ("P6LivePublicResult", "main", "run_live_candidate", "run_operator_live")
 
 
 if __name__ == "__main__":
