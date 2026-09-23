@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol, cast
 
+from .game import DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
 
 
@@ -95,7 +96,7 @@ def _available_action_name(value: object) -> str:
     return _action_name(value)
 
 
-def _snapshot_observation(value: object) -> ArcObservation:
+def _snapshot_observation(value: object, *, win_levels: int) -> ArcObservation:
     if type(value) is not dict or set(value) != {
         "available_actions", "frame", "levels_completed", "state", "win_levels"
     }:
@@ -106,7 +107,7 @@ def _snapshot_observation(value: object) -> ArcObservation:
         or type(value["levels_completed"]) is not int
         or value["levels_completed"] < 0
         or type(value["win_levels"]) is not int
-        or value["win_levels"] != 7
+        or value["win_levels"] != win_levels
         or value["levels_completed"] > value["win_levels"]
         or type(value["state"]) is not str
         or not value["state"]
@@ -130,11 +131,11 @@ def _observation_digest(value: ArcObservation) -> str:
     )
 
 
-def _engine_identity(engine: object) -> tuple[str, int]:
+def _engine_identity(engine: object, game: P7GameSelection) -> tuple[str, int]:
     game_id, seed = getattr(engine, "game_id", None), getattr(engine, "seed", None)
     if type(game_id) is not str or type(seed) is not int or type(seed) is bool:
         raise ValueError
-    if game_id != P7_GAME_ID or seed != P7_SEED:
+    if game_id != game.game_id or seed != game.seed:
         raise ValueError
     return game_id, seed
 
@@ -142,20 +143,23 @@ def _engine_identity(engine: object) -> tuple[str, int]:
 class ArcBroker:
     """Journal bounded primitive actions and close at the first level transition."""
 
-    def __init__(self, *, engine: object) -> None:
+    def __init__(self, *, engine: object, game: P7GameSelection = DEFAULT_GAME) -> None:
+        if type(game) is not P7GameSelection:
+            raise ArcBrokerError("unavailable")
         if not callable(getattr(engine, "observe", None)) or not (
             callable(getattr(engine, "step", None)) or callable(getattr(engine, "act", None))
         ):
             raise ArcBrokerError("unavailable")
         typed_engine = cast(_ArcEngine, engine)
         try:
-            self._identity = _engine_identity(engine)
-            initial = _snapshot_observation(typed_engine.observe())
+            self._identity = _engine_identity(engine, game)
+            initial = _snapshot_observation(typed_engine.observe(), win_levels=game.win_levels)
             if initial.levels_completed != 0:
                 raise ValueError
         except BaseException:
             raise ArcBrokerError("unavailable") from None
         self._engine = typed_engine
+        self._game = game
         self._initial = initial
         self._current = initial
         self._journal: list[ArcTransition] = []
@@ -166,6 +170,10 @@ class ArcBroker:
     @property
     def journal(self) -> tuple[ArcTransition, ...]:
         return tuple(self._journal)
+
+    @property
+    def game(self) -> P7GameSelection:
+        return self._game
 
     def _require_open(self) -> None:
         if self._terminal_reason != "active":
@@ -220,7 +228,7 @@ class ArcBroker:
             before = self._current
             self._actions_dispatched += 1
             try:
-                after = _snapshot_observation(self._step(action))
+                after = _snapshot_observation(self._step(action), win_levels=self._game.win_levels)
             except BaseException:
                 self._failed_action = action
                 self._terminal_reason = "engine-uncertain"
@@ -255,8 +263,7 @@ class ArcBroker:
         if self._terminal_reason == "active":
             raise ArcBrokerError("unavailable")
         return ArcRunReceipt(
-            P7_GAME_ID,
-            P7_SEED,
+            *self._identity,
             self._primitive_actions,
             self._current.levels_completed - self._initial.levels_completed,
             self._terminal_reason,
@@ -266,7 +273,7 @@ class ArcBroker:
     def replay(self, engine_factory: Callable[[], object]) -> ArcRunReceipt:
         from .replay import replay_arc_run
 
-        return replay_arc_run(self.journal, self.seal(), engine_factory)
+        return replay_arc_run(self.journal, self.seal(), engine_factory, game=self._game)
 
 
 __all__ = (

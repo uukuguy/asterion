@@ -13,7 +13,8 @@ from .broker import (
     _observation_digest,
     _snapshot_observation,
 )
-from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, replay_sha256
+from .game import DEFAULT_GAME, P7GameSelection
+from .score import P7_ACTION_CAP, replay_sha256
 
 
 class _ArcEngine(Protocol):
@@ -31,7 +32,11 @@ def _step(engine: object, action: str) -> object:
 
 
 def replay_arc_run(
-    journal: object, receipt: object, engine_factory: Callable[[], object]
+    journal: object,
+    receipt: object,
+    engine_factory: Callable[[], object],
+    *,
+    game: P7GameSelection = DEFAULT_GAME,
 ) -> ArcRunReceipt:
     """Require a fresh adapter to reproduce every state digest and terminal count."""
 
@@ -39,8 +44,9 @@ def replay_arc_run(
         type(receipt) is not ArcRunReceipt
         or type(journal) is not tuple
         or not callable(engine_factory)
-        or receipt.game_id != P7_GAME_ID
-        or receipt.seed != P7_SEED
+        or type(game) is not P7GameSelection
+        or receipt.game_id != game.game_id
+        or receipt.seed != game.seed
         or not 0 <= receipt.primitive_actions <= P7_ACTION_CAP
         or receipt.levels_completed not in (0, 1)
         or receipt.terminal_reason not in {"level-completed", "action-cap"}
@@ -54,8 +60,8 @@ def replay_arc_run(
     engine = None
     try:
         engine = cast(_ArcEngine, engine_factory())
-        _engine_identity(engine)
-        current = _snapshot_observation(engine.observe())
+        _engine_identity(engine, game)
+        current = _snapshot_observation(engine.observe(), win_levels=game.win_levels)
         if current.levels_completed != 0:
             raise ValueError
         for sequence, transition in enumerate(journal, 1):
@@ -63,7 +69,9 @@ def replay_arc_run(
                 raise ValueError
             if _observation_digest(current) != transition.before_sha256:
                 raise ValueError
-            after = _snapshot_observation(_step(engine, transition.action))
+            after = _snapshot_observation(
+                _step(engine, transition.action), win_levels=game.win_levels
+            )
             if (
                 _observation_digest(after) != transition.after_sha256
                 or after.levels_completed != transition.levels_completed

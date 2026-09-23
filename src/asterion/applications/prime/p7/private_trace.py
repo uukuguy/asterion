@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_HALF_UP
 import re
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt
+from asterion.applications.prime.p7.score import partial_game_score
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
 )
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_SIX_PLACES = Decimal("0.000001")
 P7_TRACE_IDENTITIES = {
     "application_id": "prime.arc-agi-3-solving",
     "application_version": "1.0.0",
@@ -26,22 +25,6 @@ P7_TRACE_IDENTITIES = {
 
 class P7PrivateTraceReceiptError(RuntimeError):
     """The private trace cannot publish the requested public receipt."""
-
-
-def _partial_score(action_count: int) -> str:
-    if type(action_count) is not int or action_count <= 0:
-        raise ValueError
-    completed_fraction = Decimal(100) / Decimal(28)
-    efficiency = min(
-        Decimal(115),
-        (Decimal(22) / Decimal(action_count)) ** 2 * Decimal(100),
-    ) / Decimal(28)
-    return format(
-        min(completed_fraction, efficiency).quantize(
-            _SIX_PLACES, rounding=ROUND_HALF_UP
-        ),
-        ".6f",
-    )
 
 
 @dataclass(frozen=True, repr=False, slots=True)
@@ -129,6 +112,9 @@ class P7PrivateTraceReceipt:
                 "arc.run.completed",
                 P7_TRACE_IDENTITIES,
                 {
+                    "game_id": broker_receipt.game_id,
+                    "seed": broker_receipt.seed,
+                    "win_levels": self._broker.game.win_levels,
                     "levels_completed": broker_receipt.levels_completed,
                     "primitive_actions": broker_receipt.primitive_actions,
                     "replay_sha256": broker_receipt.replay_sha256,
@@ -155,12 +141,13 @@ class P7PrivateTraceReceipt:
                 "P7 solve receipt is unavailable"
             ) from None
 
-    @staticmethod
     def _receipt_for(
-        run_id: str, broker_receipt: ArcRunReceipt
+        self, run_id: str, broker_receipt: ArcRunReceipt
     ) -> PrimeArcAgi3SolveReceipt:
         if (
             type(broker_receipt) is not ArcRunReceipt
+            or (broker_receipt.game_id, broker_receipt.seed)
+            != (self._broker.game.game_id, self._broker.game.seed)
             or broker_receipt.levels_completed != 1
             or broker_receipt.terminal_reason != "level-completed"
         ):
@@ -169,7 +156,9 @@ class P7PrivateTraceReceipt:
             run_id=run_id,
             completed_level_count=broker_receipt.levels_completed,
             primitive_action_count=broker_receipt.primitive_actions,
-            partial_game_score=_partial_score(broker_receipt.primitive_actions),
+            partial_game_score=partial_game_score(
+                broker_receipt.primitive_actions, self._broker.game
+            ),
         )
 
 

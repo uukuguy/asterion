@@ -36,14 +36,15 @@ import tempfile
 import threading
 
 from asterion.agents.prime.trace import PrimeTraceEntry, validate_trace
+from asterion.applications.prime.p7.game import DEFAULT_GAME, P7GameSelection
 from asterion.applications.prime.p7.ipython_host import (
     IpythonWorkerResult,
     P7ClientFacade,
 )
 
 
-GAME_ID = "ls20-9607627b"
-SEED = 0
+GAME_ID = DEFAULT_GAME.game_id
+SEED = DEFAULT_GAME.seed
 WORKER_PROTOCOL = "asterion.prime-p7-worker/v1"
 _PRIVATE_ROOT = ".asterion-private/prime-p7-live"
 _CELL_LOG = "worker-cells.jsonl"
@@ -92,6 +93,8 @@ class P7LiveExecution:
     trace_root: Path
     receipt: Mapping[str, object]
     comparison_report: Path | None
+    game: P7GameSelection
+    broker_replay_sha256: str
 
 
 class NeverCancelled:
@@ -110,13 +113,20 @@ class ArcadeEngine:
     one. An operator-supplied ARC root is the only thing that names them.
     """
 
-    game_id = GAME_ID
-    seed = SEED
-
-    def __init__(self, *, arc_root: Path, recordings_dir: Path) -> None:
+    def __init__(
+        self,
+        *,
+        arc_root: Path,
+        recordings_dir: Path,
+        game: P7GameSelection = DEFAULT_GAME,
+    ) -> None:
         from arc_agi import Arcade, OperationMode
         from arcengine import GameAction
 
+        if type(game) is not P7GameSelection:
+            raise P7LiveSolveError("P7 game selection is unavailable")
+        self.game_id = game.game_id
+        self.seed = game.seed
         recordings_dir.mkdir(parents=True, exist_ok=True)
         self._logger = logging.getLogger(f"asterion.prime.p7.{id(self)}")
         self._logger.handlers = []
@@ -133,8 +143,8 @@ class ArcadeEngine:
             logger=self._logger,
         )
         self._environment = self._arcade.make(
-            GAME_ID,
-            seed=SEED,
+            game.game_id,
+            seed=game.seed,
             include_frame_data=True,
             save_recording=True,
         )
@@ -832,6 +842,7 @@ def write_summary(
     run_id: str,
     receipt: Mapping[str, object],
     broker_receipt: object,
+    game: P7GameSelection,
     replay_verified: bool,
     sealed_trace: bool,
     cleanup_complete: bool,
@@ -850,6 +861,9 @@ def write_summary(
         "broker": None
         if broker_receipt is None
         else {
+            "game_id": game.game_id,
+            "seed": game.seed,
+            "win_levels": game.win_levels,
             "levels_completed": levels,
             "primitive_actions": getattr(broker_receipt, "primitive_actions", None),
             "terminal_reason": getattr(broker_receipt, "terminal_reason", None),

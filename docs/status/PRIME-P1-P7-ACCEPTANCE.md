@@ -68,6 +68,17 @@ export ASTERION_PRIME_ARC_ROOT="$HOME/sandbox/agentic-2026/external-prime/arc-ag
 make asterion-prime-p7-solve
 ```
 
+上面的命令保留历史默认题 `ls20-9607627b` / seed `0`。要选择本地已准备的新题 `tu93-0768757b` / seed `0`，在同一条 preset 上设置精确身份：
+
+```bash
+export ASTERION_PRIME_ARC_ROOT="$HOME/sandbox/agentic-2026/external-prime/arc-agi-3"
+make asterion-prime-p7-solve \
+  ASTERION_PRIME_P7_GAME_ID=tu93-0768757b \
+  ASTERION_PRIME_P7_SEED=0
+```
+
+选择值由 Makefile 经 Orb 注入给应用；引擎、Broker、回放、密封 trace 和公开 receipt 使用同一 `game_id`/`seed`。公开 receipt 的 `selection_receipt_sha256` 还将题目身份、能力收据和 Broker 回放摘要绑定在一起；原 `receipt_sha256` 仍是能力层收据摘要。这个 preset 在完成**一关**后停止，内部上限为 500 个原始动作、128 次 callback 和 1 小时；它会实际调用模型。新题目前只做无模型预检，尚未启动该付费求解。
+
 **期望**:退出码 0;输出有 `receipt_sha256`、`partial_game_score`、`terminal_reason`。历史通过跑(receipt `c00e3263cb...`,2026-09-14)——20 个原始动作、40 个 IPython 单元、`ls20-9607627b` 第 1 关、`partial_game_score=3.571429`、`terminal_reason=level-completed`。
 
 ### 边界与未验证项

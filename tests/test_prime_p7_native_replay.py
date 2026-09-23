@@ -39,6 +39,20 @@ class TestNativeP7Replay(unittest.TestCase):
             replay_arc_run(broker.journal, broker.seal(), lambda: replay_engine)
         self.assertEqual(replay_engine.observe_calls, 0)
 
+    def test_replay_rejects_other_supported_game_before_observation(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection("tu93-0768757b", 0)
+        broker = ArcBroker(
+            engine=_Engine(game_id=game.game_id, win_levels=9, level_after=1), game=game
+        )
+        broker.act(("ACTION1",))
+        replay_engine = _Engine(level_after=1)
+        with self.assertRaises(ArcBrokerError):
+            broker.replay(lambda: replay_engine)
+        self.assertEqual(replay_engine.observe_calls, 0)
+
     def test_native_sources_are_detached_from_legacy_provider_stack(self) -> None:
         root = Path(__file__).resolve().parents[1] / "src/asterion/applications/prime/p7"
         source = "\n".join((root / name).read_text() for name in ("broker.py", "replay.py", "score.py"))

@@ -14,12 +14,14 @@ class _Engine:
         raises_on: int | None = None,
         game_id: str = "ls20-9607627b",
         seed: int = 0,
+        win_levels: int = 7,
         remove_second_after_first: bool = False,
     ) -> None:
         self.level_after = level_after
         self.raises_on = raises_on
         self.game_id = game_id
         self.seed = seed
+        self.win_levels = win_levels
         self.remove_second_after_first = remove_second_after_first
         self.calls: list[str] = []
         self.levels_completed = 0
@@ -35,7 +37,7 @@ class _Engine:
             "frame": [[[len(self.calls) % 10, 1]]],
             "levels_completed": self.levels_completed,
             "state": "NOT_FINISHED",
-            "win_levels": 7,
+            "win_levels": self.win_levels,
         }
 
     def step(self, action: str) -> dict[str, object]:
@@ -122,6 +124,34 @@ class TestNativeP7Broker(unittest.TestCase):
         with self.assertRaises(ArcBrokerError):
             ArcBroker(engine=engine)
         self.assertEqual(engine.observe_calls, 0)
+
+    def test_tu93_selection_seals_exact_identity_and_nine_level_count(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection("tu93-0768757b", 0)
+        engine = _Engine(game_id=game.game_id, seed=game.seed, win_levels=9, level_after=1)
+        broker = ArcBroker(engine=engine, game=game)
+        broker.act(("ACTION1",))
+        receipt = broker.seal()
+        self.assertEqual((receipt.game_id, receipt.seed), (game.game_id, game.seed))
+        self.assertEqual(
+            broker.replay(
+                lambda: _Engine(
+                    game_id=game.game_id, seed=game.seed, win_levels=9, level_after=1
+                )
+            ),
+            receipt,
+        )
+
+    def test_tu93_rejects_wrong_level_count_before_action(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        engine = _Engine(game_id="tu93-0768757b", win_levels=7)
+        with self.assertRaises(ArcBrokerError):
+            ArcBroker(engine=engine, game=P7GameSelection("tu93-0768757b", 0))
+        self.assertEqual(engine.calls, [])
 
     def test_later_action_loses_authority_when_first_changes_availability(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBrokerError

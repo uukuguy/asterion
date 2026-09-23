@@ -30,6 +30,15 @@ _SUMMARY_KEYS = {
     "sealed_trace",
 }
 _DIGEST_KEYS = ("summary", "trace", "trace_seal", "recording", "worker_cells")
+_LEGACY_GAME_ID = "ls20-9607627b"
+_LEGACY_WIN_LEVELS = 7
+_COMPLETED_KEYS = {
+    "levels_completed",
+    "primitive_actions",
+    "replay_sha256",
+    "terminal_reason",
+}
+_IDENTIFIED_COMPLETED_KEYS = _COMPLETED_KEYS | {"game_id", "seed", "win_levels"}
 
 
 def _reject() -> None:
@@ -162,6 +171,7 @@ class _RecordedObservation:
     timestamp: str
     state: str
     levels_completed: int
+    win_levels: int
     grids: tuple[tuple[tuple[int, ...], ...], ...]
     observation_sha256: str
 
@@ -194,10 +204,9 @@ def _recorded_observation(row: Mapping[str, object]) -> _RecordedObservation:
         _reject()
     grids = _grids(data["frame"])
     levels = _integer(data["levels_completed"])
+    win_levels = _integer(data["win_levels"], minimum=1)
     state = _text(data["state"])
     available = _available(data["available_actions"])
-    if _integer(data["win_levels"], minimum=1) != 7:
-        _reject()
     timestamp = row["timestamp"]
     if type(timestamp) is not str or not timestamp:
         _reject()
@@ -210,7 +219,7 @@ def _recorded_observation(row: Mapping[str, object]) -> _RecordedObservation:
             "frame": grids,
             "levels_completed": levels,
             "state": state,
-            "win_levels": 7,
+            "win_levels": win_levels,
         }
     )
     return _RecordedObservation(
@@ -219,6 +228,7 @@ def _recorded_observation(row: Mapping[str, object]) -> _RecordedObservation:
         timestamp,
         state,
         levels,
+        win_levels,
         grids,
         observation_sha,
     )
@@ -226,11 +236,12 @@ def _recorded_observation(row: Mapping[str, object]) -> _RecordedObservation:
 
 def _recording(
     path: Path,
-) -> tuple[str, tuple[FrameFact, ...], tuple[_RecordedAction, ...]]:
+) -> tuple[str, int, tuple[FrameFact, ...], tuple[_RecordedAction, ...]]:
     rows = _jsonl(path)
     parsed = [_recorded_observation(row) for row in rows]
     game_ids = {observation.game_id for observation in parsed}
-    if len(game_ids) != 1:
+    win_levels = {observation.win_levels for observation in parsed}
+    if len(game_ids) != 1 or len(win_levels) != 1:
         _reject()
     retained: list[_RecordedObservation] = []
     for observation in parsed:
@@ -278,7 +289,71 @@ def _recording(
                 )
             )
         previous = observation
-    return next(iter(game_ids)), tuple(frames), tuple(actions)
+    return (
+        next(iter(game_ids)),
+        next(iter(win_levels)),
+        tuple(frames),
+        tuple(actions),
+    )
+
+
+def _completed_identity(
+    trace: tuple[PrimeTraceEntry, ...],
+    broker: Mapping[str, object],
+    *,
+    game_id: str,
+    win_levels: int,
+) -> None:
+    completed = tuple(entry.payload for entry in trace if entry.kind == "arc.run.completed")
+    if len(completed) != 1:
+        _reject()
+    payload = completed[0]
+    if (
+        set(payload) != _COMPLETED_KEYS
+        and set(payload) != _IDENTIFIED_COMPLETED_KEYS
+    ):
+        _reject()
+    if (
+        set(broker) != _COMPLETED_KEYS
+        and set(broker) != _IDENTIFIED_COMPLETED_KEYS
+    ):
+        _reject()
+    payload_core = (
+        _integer(payload["levels_completed"]),
+        _integer(payload["primitive_actions"]),
+        _text(payload["replay_sha256"]),
+        _text(payload["terminal_reason"]),
+    )
+    broker_core = (
+        _integer(broker["levels_completed"]),
+        _integer(broker["primitive_actions"]),
+        _text(broker["replay_sha256"]),
+        _text(broker["terminal_reason"]),
+    )
+    if payload_core != broker_core:
+        _reject()
+    if set(payload) == _COMPLETED_KEYS and set(broker) == _COMPLETED_KEYS:
+        if (game_id, win_levels) != (_LEGACY_GAME_ID, _LEGACY_WIN_LEVELS):
+            _reject()
+        return
+    if set(payload) != _IDENTIFIED_COMPLETED_KEYS or set(broker) != _IDENTIFIED_COMPLETED_KEYS:
+        _reject()
+    trace_identity = (
+        _text(payload["game_id"]),
+        _integer(payload["seed"]),
+        _integer(payload["win_levels"], minimum=1),
+    )
+    broker_identity = (
+        _text(broker["game_id"]),
+        _integer(broker["seed"]),
+        _integer(broker["win_levels"], minimum=1),
+    )
+    if (
+        trace_identity != broker_identity
+        or trace_identity[0] != game_id
+        or trace_identity[2] != win_levels
+    ):
+        _reject()
 
 
 def _reasoning(path: Path) -> tuple[ReasoningCellFact, ...]:
@@ -331,7 +406,7 @@ def read_run_evidence(run_root: Path) -> RunEvidence:
     if set(summary) != _SUMMARY_KEYS or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1":
         _reject()
     trace = _trace(trace_path, seal_path)
-    game_id, frames, recording_actions = _recording(recording_path)
+    game_id, win_levels, frames, recording_actions = _recording(recording_path)
     cells = _reasoning(worker_path)
     action_entries = tuple(entry for entry in trace if entry.kind == "arc.action")
     if len(action_entries) != len(recording_actions):
@@ -375,6 +450,7 @@ def read_run_evidence(run_root: Path) -> RunEvidence:
     assert isinstance(receipt, Mapping)
     assert isinstance(broker, Mapping)
     assert isinstance(diagnostics, Mapping)
+    _completed_identity(trace, broker, game_id=game_id, win_levels=win_levels)
     action_count = _integer(receipt.get("primitive_action_count"))
     levels = _integer(receipt.get("completed_level_count"))
     worker_count = _integer(diagnostics.get("worker_cell_count"))

@@ -73,12 +73,18 @@ def resolve_game_selection(
         game_root = arc_root / "environment_files" / stem / version
         metadata_path = game_root / "metadata.json"
         source_path = game_root / f"{stem}.py"
+        resolved_root = arc_root.resolve(strict=True)
         if (
-            game_root.is_symlink()
+            (arc_root / "environment_files").is_symlink()
+            or (arc_root / "environment_files" / stem).is_symlink()
+            or game_root.is_symlink()
             or metadata_path.is_symlink()
             or source_path.is_symlink()
             or not metadata_path.is_file()
             or not source_path.is_file()
+            or not game_root.resolve(strict=True).is_relative_to(resolved_root)
+            or not metadata_path.resolve(strict=True).is_relative_to(resolved_root)
+            or not source_path.resolve(strict=True).is_relative_to(resolved_root)
         ):
             raise ValueError
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))

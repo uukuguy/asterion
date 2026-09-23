@@ -97,7 +97,7 @@ def _grid(changed: bool = False) -> list[list[int]]:
 
 
 def _observation_digest_frames(
-    grids: list[list[list[int]]], levels_completed: int
+    grids: list[list[list[int]]], levels_completed: int, *, win_levels: int = 7
 ) -> str:
     return digest(
         {
@@ -105,13 +105,17 @@ def _observation_digest_frames(
             "frame": tuple(tuple(tuple(row) for row in grid) for grid in grids),
             "levels_completed": levels_completed,
             "state": "FINISHED" if levels_completed else "NOT_FINISHED",
-            "win_levels": 7,
+            "win_levels": win_levels,
         }
     )
 
 
-def _observation_digest(grid: list[list[int]], levels_completed: int) -> str:
-    return _observation_digest_frames([grid], levels_completed)
+def _observation_digest(
+    grid: list[list[int]], levels_completed: int, *, win_levels: int = 7
+) -> str:
+    return _observation_digest_frames(
+        [grid], levels_completed, win_levels=win_levels
+    )
 
 
 def _recording_row(
@@ -121,6 +125,7 @@ def _recording_row(
     levels_completed: int,
     timestamp: str,
     animation: list[list[list[int]]] | None = None,
+    win_levels: int = 7,
 ) -> dict[str, object]:
     return {
         "timestamp": timestamp,
@@ -128,7 +133,7 @@ def _recording_row(
             "game_id": "fixture-game",
             "state": "FINISHED" if levels_completed else "NOT_FINISHED",
             "levels_completed": levels_completed,
-            "win_levels": 7,
+            "win_levels": win_levels,
             "action_input": {"id": action, "data": {}, "reasoning": None},
             "guid": "fixture-guid",
             "full_reset": action == "RESET",
@@ -139,7 +144,11 @@ def _recording_row(
 
 
 def write_completed_fixture(
-    root: Path, *, worker_secret: str = "private", animated: bool = False
+    root: Path,
+    *,
+    worker_secret: str = "private",
+    animated: bool = False,
+    win_levels: int = 7,
 ) -> Path:
     run_root = root / "fixture-run"
     trace_root = run_root / "trace"
@@ -152,8 +161,8 @@ def write_completed_fixture(
     middle[20][19] = 1
     middle[20][20] = 1
     animation = [middle, after] if animated else [after]
-    before_sha = _observation_digest(before, 0)
-    after_sha = _observation_digest_frames(animation, 1)
+    before_sha = _observation_digest(before, 0, win_levels=win_levels)
+    after_sha = _observation_digest_frames(animation, 1, win_levels=win_levels)
     recorder = PrimeTraceRecorder(trace_root)
     recorder.append(
         "arc.action",
@@ -175,10 +184,13 @@ def write_completed_fixture(
         "arc.run.completed",
         P7_TRACE_IDENTITIES,
         {
+            "game_id": "fixture-game",
             "levels_completed": 1,
             "primitive_actions": 1,
             "replay_sha256": "sha256:" + "a" * 64,
+            "seed": 0,
             "terminal_reason": "level-completed",
+            "win_levels": win_levels,
         },
     )
     recorder.seal()
@@ -188,12 +200,14 @@ def write_completed_fixture(
             grid=before,
             levels_completed=0,
             timestamp="2026-09-09T00:00:00+00:00",
+            win_levels=win_levels,
         ),
         _recording_row(
             action="RESET",
             grid=before,
             levels_completed=0,
             timestamp="2026-09-09T00:00:00.001000+00:00",
+            win_levels=win_levels,
         ),
         _recording_row(
             action="ACTION1",
@@ -201,6 +215,7 @@ def write_completed_fixture(
             levels_completed=1,
             timestamp="2026-09-09T00:00:01+00:00",
             animation=animation,
+            win_levels=win_levels,
         ),
     )
     recording = recording_root / "fixture-game-guid.jsonl"
@@ -235,10 +250,13 @@ def write_completed_fixture(
             "scope": "p7-solving",
         },
         "broker": {
+            "game_id": "fixture-game",
             "levels_completed": 1,
             "primitive_actions": 1,
             "replay_sha256": "sha256:" + "a" * 64,
+            "seed": 0,
             "terminal_reason": "level-completed",
+            "win_levels": win_levels,
         },
         "replay_verified": True,
         "sealed_trace": True,
@@ -274,6 +292,49 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
         )
         self.assertEqual(evidence.verification, "VERIFIED")
         self.assertNotIn("RAW-WORKER-SENTINEL", repr(evidence))
+
+    def test_reads_recording_with_nine_win_levels(self) -> None:
+        evidence = read_run_evidence(write_completed_fixture(self.root, win_levels=9))
+
+        self.assertEqual(evidence.game_id, "fixture-game")
+        self.assertEqual(tuple(action.name for action in evidence.actions), ("ACTION1",))
+
+    def test_rejects_recording_with_inconsistent_win_levels(self) -> None:
+        run_root = write_completed_fixture(self.root, win_levels=9)
+        recording = next((run_root / "recordings").glob("*/*.jsonl"))
+        rows = [json.loads(line) for line in recording.read_text().splitlines()]
+        rows[-1]["data"]["win_levels"] = 7
+        recording.write_text(
+            "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(RunStoryError, "evidence-invalid"):
+            read_run_evidence(run_root)
+
+    def test_rejects_recording_game_id_relabelled_from_sealed_identity(self) -> None:
+        run_root = write_completed_fixture(self.root, win_levels=9)
+        recording = next((run_root / "recordings").glob("*/*.jsonl"))
+        rows = [json.loads(line) for line in recording.read_text().splitlines()]
+        for row in rows:
+            row["data"]["game_id"] = "relabelled-game"
+        recording.write_text(
+            "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(RunStoryError, "evidence-invalid"):
+            read_run_evidence(run_root)
+
+    def test_rejects_broker_replay_digest_mismatch_from_sealed_completion(self) -> None:
+        run_root = write_completed_fixture(self.root, win_levels=9)
+        summary = run_root / "summary.json"
+        value = json.loads(summary.read_text())
+        value["broker"]["replay_sha256"] = "sha256:" + "b" * 64
+        summary.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+
+        with self.assertRaisesRegex(RunStoryError, "evidence-invalid"):
+            read_run_evidence(run_root)
 
     def test_rejects_ambiguous_recording(self) -> None:
         run_root = write_completed_fixture(self.root)

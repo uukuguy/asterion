@@ -18,6 +18,12 @@ from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime import create_provider
 from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt
 from asterion.applications.prime.p7.diagnostics import analyze_trace
+from asterion.applications.prime.p7.game import (
+    DEFAULT_GAME,
+    P7GameSelection,
+    P7GameSelectionError,
+    resolve_game_selection,
+)
 from asterion.applications.prime.p7.ipython_host import (
     PersistentIpythonHost,
     RestrictedPersistentIpythonWorker,
@@ -28,6 +34,7 @@ from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
     P7_TRACE_IDENTITIES,
 )
+from asterion.applications.prime.p7.score import digest
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 from asterion.applications.prime.runtime_binding import PrimeLaunch
 from asterion.applications.provider import resolve_installed_provider
@@ -333,6 +340,7 @@ def build_p7_operator_resources(
     worker: RestrictedPersistentIpythonWorker,
     engine: object,
     private_trace_root: Path,
+    game: P7GameSelection = DEFAULT_GAME,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -410,7 +418,7 @@ def build_p7_operator_resources(
             approved_environment=approved_environment,
         )
         trace = PrimeTraceRecorder(private_trace_root)
-        broker = ArcBroker(engine=engine)
+        broker = ArcBroker(engine=engine, game=game)
         ipython = PersistentIpythonHost(
             worker=worker, p7_client=p7_client_facade(_P7BrokerClient(broker, trace))
         )
@@ -451,6 +459,7 @@ class P7Invocation:
     arc_root: Path
     pi_base_command: tuple[str, ...]
     extension_path: Path
+    game: P7GameSelection
 
 
 def _preflight(environment: Mapping[str, str]) -> P7Invocation:
@@ -473,17 +482,19 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError("P7 operator root is invalid")
     try:
         resolved = live.load_operator_environment(root)
+        arc_root = live.resolve_arc_root(resolved)
         return P7Invocation(
             operator_root=root,
             environment=resolved,
-            arc_root=live.resolve_arc_root(resolved),
+            arc_root=arc_root,
             pi_base_command=live.pi_base_command(
                 node=live.resolve_node(resolved),
                 pi_entry=live.resolve_pi_entry(resolved),
             ),
             extension_path=live.extension_path(),
+            game=resolve_game_selection(resolved, arc_root),
         )
-    except live.P7LiveSolveError as error:
+    except (live.P7LiveSolveError, P7GameSelectionError) as error:
         raise P7OperatorError(str(error)) from None
 
 
@@ -503,7 +514,9 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     trace_root.mkdir(mode=0o700)
     worker = live.SubprocessPythonWorker(root=private)
     engine = live.ArcadeEngine(
-        arc_root=invocation.arc_root, recordings_dir=private / "recordings"
+        arc_root=invocation.arc_root,
+        recordings_dir=private / "recordings",
+        game=invocation.game,
     )
     print("[asterion-prime-p7] preflight", file=sys.stderr, flush=True)
     resources_ = build_p7_operator_resources(
@@ -514,6 +527,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         worker=worker,
         engine=engine,
         private_trace_root=trace_root,
+        game=invocation.game,
     )
     receipt: Mapping[str, object] = {}
     broker_receipt: ArcRunReceipt | None = None
@@ -566,6 +580,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             lambda: live.ArcadeEngine(
                 arc_root=invocation.arc_root,
                 recordings_dir=private / "replay-recordings",
+                game=invocation.game,
             )
         )
         replay_verified = True
@@ -607,6 +622,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                 run_id=run_id,
                 receipt=receipt,
                 broker_receipt=broker_receipt,
+                game=invocation.game,
                 replay_verified=replay_verified,
                 sealed_trace=sealed_trace,
                 cleanup_complete=cleanup_complete,
@@ -625,6 +641,8 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         trace_root=trace_root,
         receipt=receipt,
         comparison_report=comparison_report,
+        game=invocation.game,
+        broker_replay_sha256=broker_receipt.replay_sha256,
     )
 
 
@@ -651,6 +669,8 @@ def classify_live_result(result: live.P7LiveExecution) -> Mapping[str, object]:
         sealed_trace=result.sealed_trace,
         cleanup_complete=result.cleanup_complete,
         comparison_report=result.comparison_report,
+        game=result.game,
+        broker_replay_sha256=result.broker_replay_sha256,
     )
 
 
@@ -666,6 +686,8 @@ def _public_receipt(
     cleanup_complete: bool = False,
     comparison_report: Path | None = None,
     reason: str | None = None,
+    game: P7GameSelection = DEFAULT_GAME,
+    broker_replay_sha256: str | None = None,
 ) -> Mapping[str, object]:
     """Build the one public receipt; private evidence never crosses this line."""
 
@@ -676,8 +698,8 @@ def _public_receipt(
         "runtime_id": "asterion.prime",
         "provider": _PROVIDER,
         "model": _MODEL,
-        "game_id": live.GAME_ID,
-        "seed": live.SEED,
+        "game_id": game.game_id,
+        "seed": game.seed,
         "status": status,
         "run_id": run_id,
         "completed_level_count": completed_level_count,
@@ -689,6 +711,22 @@ def _public_receipt(
     for name in ("partial_game_score", "receipt_sha256", "promotion", "scope"):
         if name in source:
             safe[name] = source[name]
+    if status == "PASS":
+        capability_digest = source.get("receipt_sha256")
+        if (
+            type(capability_digest) is not str
+            or type(broker_replay_sha256) is not str
+        ):
+            raise live.P7LiveSolveError("P7 receipt identity is unavailable")
+        safe["selection_receipt_sha256"] = digest(
+            {
+                "game_id": game.game_id,
+                "seed": game.seed,
+                "win_levels": game.win_levels,
+                "capability_receipt_sha256": capability_digest,
+                "broker_replay_sha256": broker_replay_sha256,
+            }
+        )
     if comparison_report is not None:
         safe["comparison_report"] = "available"
     if reason is not None:
@@ -726,7 +764,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(
             json.dumps(
-                _public_receipt("unsuccessful", run_id, reason=reason),
+                _public_receipt(
+                    "unsuccessful", run_id, reason=reason, game=invocation.game
+                ),
                 allow_nan=False,
                 separators=(",", ":"),
                 sort_keys=True,

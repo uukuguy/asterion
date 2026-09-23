@@ -4,12 +4,34 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable, Protocol
 
+from .game import DEFAULT_GAME, P7GameSelection
 
-P7_GAME_ID = "ls20-9607627b"
-P7_SEED = 0
+
+P7_GAME_ID = DEFAULT_GAME.game_id
+P7_SEED = DEFAULT_GAME.seed
 P7_ACTION_CAP = 500
+_SIX_PLACES = Decimal("0.000001")
+
+
+def partial_game_score(action_count: int, game: P7GameSelection) -> str:
+    """Official first-level weighted score for one exact local game profile."""
+
+    if type(action_count) is not int or action_count <= 0 or type(game) is not P7GameSelection:
+        raise ValueError("P7 score inputs are invalid")
+    level_score = min(
+        Decimal(100),
+        (Decimal(game.baseline_actions[0]) / Decimal(action_count)) ** 2 * Decimal(100),
+    )
+    weight_sum = game.win_levels * (game.win_levels + 1) // 2
+    return format(
+        (level_score / Decimal(weight_sum)).quantize(
+            _SIX_PLACES, rounding=ROUND_HALF_UP
+        ),
+        ".6f",
+    )
 
 
 def canonical_bytes(value: object) -> bytes:
@@ -68,4 +90,4 @@ def replay_sha256(
     return digest({"terminal_reason": terminal_reason, "transitions": rows})
 
 
-__all__ = ("P7_ACTION_CAP", "P7_GAME_ID", "P7_SEED", "canonical_bytes", "digest", "replay_sha256")
+__all__ = ("P7_ACTION_CAP", "P7_GAME_ID", "P7_SEED", "canonical_bytes", "digest", "partial_game_score", "replay_sha256")
