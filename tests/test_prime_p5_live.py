@@ -7,6 +7,7 @@ from hashlib import sha256
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from asterion.applications.prime.live_model import LiveModelReply, LiveModelUsage
 from asterion.applications.prime.p5.receipt import seal
@@ -134,6 +135,34 @@ class P5LiveTests(unittest.TestCase):
                     )
                 )
         self.assertTrue(session.closed)
+
+    def test_operator_private_base_keeps_evidence_across_runs(self) -> None:
+        from asterion.applications.prime.live_model import LiveModelLaunch
+        from asterion.applications.prime.p5 import live
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "persistent"
+            environment = {
+                "ASTERION_PRIME_OPERATOR_ROOT": str(Path(tmp)),
+                "ASTERION_PRIME_P5_PRIVATE_ROOT": str(base),
+            }
+            launch = LiveModelLaunch(("fake-pi",), {}, Path(tmp))
+            sessions: list[_Session] = []
+
+            def make_session(**kwargs: object) -> _Session:
+                session = _Session(('{"offset":2}',))
+                sessions.append(session)
+                return session
+
+            with patch.object(live, "resolve_live_model_launch", return_value=launch), patch.object(
+                live, "LiveModelSession", side_effect=make_session
+            ):
+                first = asyncio.run(live.run_operator_live(environment))
+                second = asyncio.run(live.run_operator_live(environment))
+            self.assertNotEqual(first.root_run_id, second.root_run_id)
+            evidence = tuple(base.glob("*/live-evidence.json"))
+            self.assertEqual(len(evidence), 2)
+            self.assertTrue(all(session.closed for session in sessions))
 
 
 if __name__ == "__main__":

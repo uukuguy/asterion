@@ -267,6 +267,9 @@ async def run_operator_live(environment: dict[str, str]) -> P5LiveResult:
         private_text = environment["ASTERION_PRIME_P5_PRIVATE_ROOT"]
         if not root_text or not private_text:
             raise ValueError
+        private_base = Path(private_text).resolve()
+        private_base.mkdir(mode=0o700, parents=True, exist_ok=True)
+        private_root = private_base / ("live-" + secrets.token_hex(12))
         launch = resolve_live_model_launch(Path(root_text), environment)
         return await run_live_verification(
             session_factory=lambda role, cwd: LiveModelSession(
@@ -274,7 +277,7 @@ async def run_operator_live(environment: dict[str, str]) -> P5LiveResult:
                 environment=launch.environment,
                 cwd=launch.cwd,
             ),
-            private_root=Path(private_text),
+            private_root=private_root,
             command_sha256=_digest(launch.command),
             binding_sha256=_digest({"extension": "none", "task": "p5-offset"}),
         )
