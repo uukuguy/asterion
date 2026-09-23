@@ -717,7 +717,8 @@ async def _drive_cancellation_scenario(
 
 
 async def _invoke_composed_success(
-    resources: _OperatorResources, signal: CancellationSignal | None = None
+    resources: _OperatorResources, signal: CancellationSignal | None = None,
+    *, session_backend: _OperatorP3RuntimeHost | None = None,
 ) -> P3PublicResult:
     package = create_prime_recursive_workflow_native_package()
     provider = compose_installed_provider(
@@ -727,7 +728,8 @@ async def _invoke_composed_success(
     )
     application = provider.applications[0]
     assembly = application.assemblies[0]
-    session_backend = _OperatorP3RuntimeHost(resources)
+    if session_backend is None:
+        session_backend = _OperatorP3RuntimeHost(resources)
     host_services = {
         "prime.child-runner": resources.child_runner,
         "prime.p3-oracle": resources.p3_oracle,
