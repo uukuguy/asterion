@@ -25,6 +25,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p2-run
 .PHONY: asterion-prime-p2-run-verbose
 .PHONY: asterion-prime-p4-run
+.PHONY: asterion-prime-p4-witness
 .PHONY: asterion-prime-p4-run-verbose
 .PHONY: asterion-prime-p3-run
 .PHONY: asterion-prime-p3-witness
@@ -35,6 +36,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p5-run-limits
 .PHONY: asterion-prime-p5-run-verbose
 .PHONY: asterion-prime-p6-run
+.PHONY: asterion-prime-p6-witness
 .PHONY: asterion-prime-p6-run-limits
 .PHONY: asterion-prime-p6-run-verbose
 .PHONY: asterion-prime-p7-solve
@@ -47,12 +49,14 @@ ASTERION_PRIME_OPERATOR_ROOT ?= $(CURDIR)
 ASTERION_PRIME_P2_CORPUS ?= $(CURDIR)/tests/fixtures/prime_p2/small_corpus.json
 ASTERION_PRIME_ARC_ROOT ?=
 ASTERION_PRIME_P4_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-witness
+ASTERION_PRIME_P4_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-live
 ASTERION_PRIME_P3_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-witness
 ASTERION_PRIME_LOCAL_PI_ENTRY ?= /opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js
 ASTERION_PRIME_P3_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-live
 ASTERION_PRIME_P5_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-witness
 ASTERION_PRIME_P5_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-live
 ASTERION_PRIME_P6_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-witness
+ASTERION_PRIME_P6_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-live
 .PHONY: test.native-controller-core.provider-free
 
 help:
@@ -269,7 +273,7 @@ asterion-prime-p2-run-verbose:
 # authorization. Operator root, PI entry, P4 private root, Orb VM, and
 # node are operator-owned; the preset supplies no provider, model, cost,
 # or deadline knob.
-asterion-prime-p4-run:
+asterion-prime-p4-witness:
 	@printf '[asterion-prime-p4-run] native Asterion-prime P4 cross-generation continuity witness\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p4-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
@@ -282,6 +286,19 @@ asterion-prime-p4-run:
 		echo "$$recover_json" | jq -e ".status == \"recovered\" and (.prior_checkpoint_sha256 | length) == 64" >/dev/null || { echo "[asterion-prime-p4-run] recover witness failed: $$recover_json" >&2; exit 2; }; \
 		{ echo "$$commit_json"; echo "$$recover_json"; } | jq -e -s ".[1].prior_checkpoint_sha256 == .[0].checkpoint_sha256 and .[1].new_generation == (.[0].generation + 1) and .[1].result_sha256 != .[0].result_sha256 and .[1].continuation_id == .[0].continuation_id and .[1].worker_identity_sha256 != .[0].worker_identity_sha256" >/dev/null || { echo "[asterion-prime-p4-run] continuity invariants failed: $$recover_json (commit: $$commit_json)" >&2; exit 2; }; \
 		echo "[asterion-prime-p4-run] witness passed: gen 1 -> 2, prior_checkpoint_sha256 matches commit checkpoint, result_sha256 differs across modes" >&2'
+
+# Commit and recover run in separate installed-wheel processes. The checkpoint
+# and both private transcripts remain under the per-run local evidence root.
+asterion-prime-p4-run:
+	@printf '[asterion-prime-p4-run] bounded live P4 commit/recover verification\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p4-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		mkdir -p "$(ASTERION_PRIME_P4_LIVE_ROOT)"; chmod 700 "$(ASTERION_PRIME_P4_LIVE_ROOT)"; \
+		pair_dir="$$(mktemp -d "$(ASTERION_PRIME_P4_LIVE_ROOT)/pair.XXXXXX")"; private_root="$$pair_dir/store"; \
+		commit_json="$$(ASTERION_PRIME_OPERATOR_ROOT="$(ASTERION_PRIME_OPERATOR_ROOT)" ASTERION_PRIME_P4_PRIVATE_ROOT="$$private_root" ASTERION_PRIME_P4_MODE=commit ASTERION_PRIME_NODE="$$(command -v node)" ASTERION_PRIME_PI_ENTRY="$(ASTERION_PRIME_LOCAL_PI_ENTRY)" $(UV_BIN) run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p4.live_entry)"; \
+		recover_json="$$(ASTERION_PRIME_OPERATOR_ROOT="$(ASTERION_PRIME_OPERATOR_ROOT)" ASTERION_PRIME_P4_PRIVATE_ROOT="$$private_root" ASTERION_PRIME_P4_MODE=recover ASTERION_PRIME_NODE="$$(command -v node)" ASTERION_PRIME_PI_ENTRY="$(ASTERION_PRIME_LOCAL_PI_ENTRY)" $(UV_BIN) run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p4.live_entry)"; \
+		{ echo "$$commit_json"; echo "$$recover_json"; } | jq -e -s '\''select(length == 2 and .[0].status == "committed" and .[1].status == "recovered" and .[0].model_call_count == 1 and .[1].model_call_count == 1 and .[0].input_tokens > 0 and .[1].input_tokens > 0 and .[1].prior_checkpoint_sha256 == .[0].checkpoint_sha256 and .[1].recovered_payload_sha256 != null and .[1].new_generation == (.[0].generation + 1) and .[1].result_sha256 != .[0].result_sha256 and .[1].continuation_id == .[0].continuation_id and .[1].worker_identity_sha256 != .[0].worker_identity_sha256)'\'''
 
 # Diagnostic sibling of ``asterion-prime-p4-run``: identical command line,
 # without the ``@`` prefix on the orb invocation, so Orb / python stderr
@@ -470,7 +487,7 @@ asterion-prime-p5-run-verbose:
 # and ``Determinism``. Single-line jq is required (bash 3.2.57 macOS default
 # rejects multi-line ``\`` continuation; Phase 8 Task 14 fix-on-verify lesson,
 # commit ``5c07d9ff``).
-asterion-prime-p6-run:
+asterion-prime-p6-witness:
 	@printf '[asterion-prime-p6-run] native Asterion-prime P6 continual-improvement preserved-path witness\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p6-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
@@ -480,6 +497,17 @@ asterion-prime-p6-run:
 		[ -n "$$preserved_json" ] || { echo "[asterion-prime-p6-run] operator produced no JSON output" >&2; exit 2; }; \
 		echo "$$preserved_json" | jq -e ".status == \"completed\" and (.terminal_outcome == \"preserved\") and (.global_activation_approved == false) and (.rollback_invocation_count == 0) and (.baseline_snapshot_digest | length == 64) and (.candidate_revision_digest | length == 64) and (.task_b_result_digest | length == 64) and (.receipt_sha256 | length == 64) and (.candidate_revision_digest != .baseline_snapshot_digest) and (.task_b_result_digest != .baseline_snapshot_digest)" >/dev/null || { echo "[asterion-prime-p6-run] witness failed: $$preserved_json" >&2; exit 2; }; \
 		echo "[asterion-prime-p6-run] witness passed: terminal_outcome=preserved, rollback_invocation_count=0, candidate_revision_digest and task_b_result_digest differ from baseline_snapshot_digest" >&2'
+
+# One model-proposed candidate, actual train/holdout comparison, and explicit
+# project-scope promotion through the composed candidate-store application.
+asterion-prime-p6-run:
+	@printf '[asterion-prime-p6-run] bounded live P6 candidate/holdout verification\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p6-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		ASTERION_PRIME_OPERATOR_ROOT="$(ASTERION_PRIME_OPERATOR_ROOT)" ASTERION_PRIME_P6_PRIVATE_ROOT="$(ASTERION_PRIME_P6_LIVE_ROOT)" ASTERION_PRIME_NODE="$$(command -v node)" ASTERION_PRIME_PI_ENTRY="$(ASTERION_PRIME_LOCAL_PI_ENTRY)" \
+			$(UV_BIN) run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p6.live | \
+			jq -e '\''select(.status == "completed" and .terminal_outcome == "preserved" and .global_activation_approved == false and .rollback_invocation_count == 0 and .model_call_count == 1 and .input_tokens > 0 and .output_tokens > 0 and (.candidate_revision_digest | length) == 64 and (.task_b_result_digest | length) == 64 and (.receipt_sha256 | length) == 64)'\'''
 
 # P6 continual-improvement refusal-scenarios witness: re-invokes the operator
 # with ``ASTERION_PRIME_P6_MODE=limits``. The operator emits exactly two JSON
