@@ -149,14 +149,14 @@ class TestBoundedAutonomyLoop(unittest.TestCase):
                 terminal_reason="still-running",  # type: ignore[arg-type]
                 joined_workspace_digest=_digest("x"),
             )
-        # Failed verify count is enforced >= 1 by the spec witness.
+        # A repair cannot exist without a failed verify.
         with self.assertRaises(BoundedAutonomyServiceError):
             seal_p5_native_receipt(
                 root_run_id="root-run-1",
                 root_generation=1,
                 propose_step_count=1,
                 verify_step_count=1,
-                repair_step_count=0,
+                repair_step_count=1,
                 failed_verify_count=0,
                 terminal_reason="success",
                 joined_workspace_digest=_digest("x"),

@@ -47,7 +47,7 @@ class P5LoopResult:
     ``root_generation`` is always 1 — P5 has no continuity. ``propose_step_count``
     and ``verify_step_count`` are >= 1 by the spec witness; ``repair_step_count``
     is >= 0. ``failed_verify_count`` is the closed metric the oracle keys on
-    (>= 1). ``joined_workspace_digest`` is the closed digest the runtime seals
+    (>= 0; a first-pass success has 0). ``joined_workspace_digest`` is the closed digest the runtime seals
     over the final joined workspace; ``receipt_sha256`` is the canonical-JSON
     seal digest.
     """

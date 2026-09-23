@@ -94,7 +94,8 @@ class P5NativeReceipt:
             raise P5ReceiptError()
         if (
             type(self.failed_verify_count) is not int
-            or self.failed_verify_count < 1
+            or self.failed_verify_count < 0
+            or (self.repair_step_count > 0 and self.failed_verify_count == 0)
         ):
             raise P5ReceiptError()
         if self.terminal_reason not in _TERMINAL_REASONS:

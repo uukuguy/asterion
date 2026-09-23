@@ -446,10 +446,11 @@ def _verify_callable_factory(
 class _ComposedLoopHost:
     """Own the same loop used by the operator's public composed execution."""
 
-    def __init__(self, loop, resources):
+    def __init__(self, loop, resources, finalize=None):
         self.loop = loop
         self.resources = resources
         self.receipt = None
+        self.finalize = finalize
 
     def validate_runtime_services(self, services):
         from asterion.applications.prime.p5.runtime_binding import P5_HOST_CAPABILITIES
@@ -457,7 +458,8 @@ class _ComposedLoopHost:
         if (
             set(services) != set(P5_HOST_CAPABILITIES)
             or services["prime.ipython"] is not self.loop
-            or services["prime.pi-extension"] is not (self.resources.pi_extension or self)
+            or services["prime.pi-extension"]
+            is not (self.resources.pi_extension or self)
             or services["prime.session-backend"] is not self
             or services["prime.p5-oracle"] is not self.resources.p5_oracle
             or services["prime.private-trace"] is not self.resources.private_trace
@@ -481,10 +483,12 @@ class _ComposedLoopHost:
 
         if self.receipt is None:
             raise P5OperatorError()
+        if self.finalize is not None:
+            await self.finalize()
         return P5Finalization("completed", self.receipt.receipt_sha256)
 
 
-async def _run_composed_loop(loop, resources):
+async def _run_composed_loop(loop, resources, signal=None, finalize=None):
     from asterion.applications.provider import compose_installed_provider
     from asterion.applications.prime.provider import (
         create_prime_bounded_autonomy_provider,
@@ -499,7 +503,7 @@ async def _run_composed_loop(loop, resources):
     from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
     from asterion.runner.composed import run_composed_application
 
-    host = _ComposedLoopHost(loop, resources)
+    host = _ComposedLoopHost(loop, resources, finalize)
     package = create_prime_bounded_autonomy_native_package()
     provider = compose_installed_provider(
         create_prime_bounded_autonomy_provider(),
@@ -535,7 +539,7 @@ async def _run_composed_loop(loop, resources):
         run_id=resources.root_run_id,
         input_text="fixed-bounded-autonomy",
         host_services=services,
-        signal=_NeverCancelled(),
+        signal=signal if signal is not None else _NeverCancelled(),
     )
     if (
         host.receipt is None

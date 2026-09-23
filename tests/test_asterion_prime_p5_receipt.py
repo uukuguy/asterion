@@ -281,14 +281,14 @@ class TestP5Receipt(unittest.TestCase):
                 terminal_reason="still-running",  # type: ignore[arg-type]
                 joined_workspace_digest=joined,
             )
-        # failed_verify_count must be >= 1.
+        # A repair cannot exist without a failed verify.
         with self.assertRaises(P5ReceiptError):
             seal(
                 root_run_id="root-1",
                 root_generation=1,
                 propose_step_count=1,
                 verify_step_count=1,
-                repair_step_count=0,
+                repair_step_count=1,
                 failed_verify_count=0,
                 terminal_reason="success",
                 joined_workspace_digest=joined,

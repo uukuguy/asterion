@@ -1349,11 +1349,9 @@ class BoundedAutonomyLoop:
         """Seal the terminal receipt for one :meth:`run_loop` invocation.
 
         Mirrors :func:`seal_p5_native_receipt` while keeping the loop
-        body readable. Counters default to ``1`` when the loop
-        terminated before reaching the corresponding step — the spec
-        witness requires ``propose_step_count >= 1``,
-        ``verify_step_count >= 1``, and ``failed_verify_count >= 1`` on
-        every sealed receipt.
+        body readable. Propose and verify counters default to ``1`` when the loop
+        terminated before reaching the corresponding step. A correct first
+        proposal has zero failed verifies and no repair.
         """
 
         if joined_workspace_digest is None:
@@ -1364,9 +1362,11 @@ class BoundedAutonomyLoop:
             propose_step_count=propose_count if propose_count >= 1 else 1,
             verify_step_count=verify_count if verify_count >= 1 else 1,
             repair_step_count=repair_count,
-            failed_verify_count=failed_verify_count
-            if failed_verify_count >= 1
-            else 1,
+            failed_verify_count=(
+                failed_verify_count
+                if terminal_reason == "success"
+                else max(1, failed_verify_count)
+            ),
             terminal_reason=terminal_reason,
             joined_workspace_digest=joined_workspace_digest,
         )
