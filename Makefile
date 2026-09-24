@@ -42,6 +42,8 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p7-solve
 .PHONY: asterion-prime-p7-level-witness
 .PHONY: asterion-prime-p7-games
+.PHONY: asterion-prime-p7-official-preflight
+.PHONY: asterion-prime-p7-official-submit
 
 # Operator-owned values for the Prime presets. The P7 research assets live
 # beside this checkout; the operator preflight rejects missing assets.
@@ -99,6 +101,8 @@ help:
 	@echo "Asterion Prime ARC-AGI-3 full-game solve: asterion-prime-p7-solve GAME=<alias-or-exact-id> (default: tu93)"
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
+	@echo "Asterion Prime official ARC-AGI-3 catalog readiness: asterion-prime-p7-official-preflight"
+	@echo "Asterion Prime official Competition scorecard run: asterion-prime-p7-official-submit"
 	@echo "Asterion Prime deterministic diagnostics: asterion-prime-p3-witness p4-witness p5-witness p6-witness"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
@@ -266,6 +270,14 @@ asterion-prime-p7-solve asterion-prime-p7-level-witness:
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		ORBENV="ASTERION_PRIME_P7_GAME_ID:ASTERION_PRIME_P7_SEED:ASTERION_PRIME_P7_RUN_MODE"; ASTERION_PRIME_P7_RUN_MODE=solve; if [ "$@" = asterion-prime-p7-level-witness ]; then ORBENV="$$ORBENV:ASTERION_PRIME_P7_TARGET_LEVEL"; ASTERION_PRIME_P7_RUN_MODE=witness; fi; export ORBENV ASTERION_PRIME_P7_RUN_MODE; orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_ARC_ROOT="$$3"; export ASTERION_PRIME_PI_ENTRY="$$4"; export ASTERION_PRIME_P7_GAME_ID ASTERION_PRIME_P7_SEED ASTERION_PRIME_P7_RUN_MODE; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "$$3/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$3/wheels/arcengine-0.9.3-py3-none-any.whl" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p7.operator'\'' "$@" "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_ARC_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)"'
+
+asterion-prime-p7-official-preflight asterion-prime-p7-official-submit:
+	@exec /bin/sh -ec 'printf '\''[$@] official ARC-AGI-3 %s\n'\'' "$$(if [ "$@" = asterion-prime-p7-official-preflight ]; then printf preflight; else printf scorecard-run; fi)" >&2; \
+		build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		ASTERION_PRIME_P7_OFFICIAL_MODE=submit; if [ "$@" = asterion-prime-p7-official-preflight ]; then ASTERION_PRIME_P7_OFFICIAL_MODE=preflight; fi; export ASTERION_PRIME_P7_OFFICIAL_MODE; ORBENV=ASTERION_PRIME_P7_OFFICIAL_MODE; export ORBENV; \
+		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$4"; export ASTERION_PRIME_P7_OFFICIAL_MODE; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "$$3/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$3/wheels/arcengine-0.9.3-py3-none-any.whl" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p7.official_operator'\'' "$@" "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_ARC_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)"'
 
 # Diagnostic sibling of ``asterion-prime-p2-run``: identical command line,
 # without the ``@`` prefix on the orb invocation, so Orb / python stderr
