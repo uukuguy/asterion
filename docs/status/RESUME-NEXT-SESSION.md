@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 04:22 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 04:27 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
@@ -20,6 +20,7 @@ P7 面向完整 ARC-AGI-3 游戏与官方 Competition scorecard，而非单关�
 - 官方文档确认 Competition 对全部可见题计分，但可只对选定题调用 `make`；部分通关按关卡得分。OFFLINE 本地回执不能补传，正式成绩须在新官方会话执行动作。当前本地目录仅有 LS20、TU93 两题，历史验证记录只有 LS20 第一关。
 - 本地历史 trace 保存了动作与前后状态摘要，现有 `replay_arc_run` 只使用运行中的内存 journal，未提供历史解题计划导入。官方 `CompetitionSession.close` 和回执校验要求全部目录题目各有一条运行，阻止选题提交；必须区分完整目录、选中题目和未玩题目，并保留服务端总分。官方 seed 不能仅凭适配器写入的 0 推断，远端执行前须比对初始观测。
 - 已安装 ARC SDK 的 `NORMAL make` 可下载题目元数据和源码，但会先自动创建默认 scorecard；远端 Competition wrapper 不接收 `seed`，所以本地同版本、同 seed 也不能保证官方动作复现。扩展本地 2 题目录应设计独立受控下载路径；提交时逐动作比对，遇到分歧立即停止。
+- 在强制阻断网络的诊断中，现有 LS20 第一关历史封存 trace 的 20 个动作已从磁盘恢复，并在新本地引擎逐步核验通过。使用已配置官方 key 的只读 `/api/games` 与 `/source` 请求确认账号可见 25 题的源码全部可获取，共 3,969,790 字节；未建卡、未保存源码、未运行模型。可将源码下载纳入独立受控的本地题目同步入口。
 
 ## 当前判断与未完成边界
 
