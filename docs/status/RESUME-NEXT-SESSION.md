@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 07:34 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 07:45 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
@@ -8,15 +8,15 @@
 
 ## 已验证事实
 
-- `make asterion-prime-p7-games` 列出 25 题；目前只有 LS20 第 1 关是已验证前缀。官方既有卡 `14868b83-3f40-4afd-84b0-4d25176f97d0` 只有这一关的部分成绩，24 题未选，不能视为整题通关。
-- LS20 第 1 关的可计量运行记录为 20 步、输入 32,830、输出 36,418，共 69,248 旧口径 token，历时 272 秒。其余 24 题首关的人类上限合计 851 步，按每步消耗机械推算约 295 万 token、3 小时 13 分钟，旧记录漏计缓存输入。用户确认首轮总停止线为 350 万 token、4 小时；每次尝试时间按关卡步数估算，10 至 30 分钟；总上限在尝试间检查。
+- `make asterion-prime-p7-games` 列出 25 题；目前 LS20 与 AR25 各有已验证第 1 关前缀。官方既有卡 `14868b83-3f40-4afd-84b0-4d25176f97d0` 只有 LS20 第 1 关的部分成绩，其他题未选，不能视为整题通关。
+- LS20 第 1 关的可计量运行记录为 20 步、输入 32,830、输出 36,418，共 69,248 旧口径 token，历时 272 秒。其余 24 题首关的人类上限合计 851 步，按每步消耗机械推算约 295 万 token、3 小时 13 分钟，旧记录漏计缓存输入。用户确认首轮总停止线为 350 万 token、4 小时；每次尝试时间按关卡步数估算，10 至 30 分钟；运行中每 250 毫秒核对已上报用量，到上限即停止本次尝试。
 - 此前 LS20 第 2 关续解重放 20 个已验证第 1 关动作后，新记约 242 个第 2 关动作，超过 123 的人类基准才被人工停止；该运行未封存且没有用量事件，不复用作前缀，不推算其 token。
 - `1a178f4a` 将 Prime runtime 用量事件流式落到 trace，`f38143c4` 将 Pi 缓存读写计入输入 token；`987ca598` 加精确本地扫题动作上限，`a8ef4d53` 加轮转调度器，`3f1499ba` 将扫题接入 P7 operator/Make，`4d820313` 验证中断 trace 哈希链并在用量缺失时停机。
 - 刚构建 wheel 的隔离环境中，调度器 `--max-attempts 0` 预检成功：attempted=0、token=0。`make promotion-check` 完整通过：25 条命令、0 次 provider 操作、无完整数据集。`make lint`、`make docs-check` 和定向测试通过；独立复审批准付费首轮。
 - 首次付费 sweep 只尝试 AR25 第 1 关。运行 `p7-live-20260924230447-46fc1ea55b4041a6f56f8786` 的 broker 到 22 步过关并经离线 broker replay，但 usage/action 并发写 trace 导致序号 9 重复、哈希链断裂；summary 的 `sealed_trace=false`，不能成为已验证可复用前缀。调度器正确拒绝继续其他题并返回 `usage-missing-after-model-activity`，但其 `0 token` 汇总是假象：原始 27 条 usage 事件逐条合计输入 1,157,891、输出 39,235，共 1,197,126 token，因链损坏仅作保守预算扣减。没有遗留求解进程。
 - `4a030f99` 已串行化 trace 的写入、封存与快照，八线程并发回归前红后绿。`3fa408c1` 从原 trace 的 22 个连续动作、live/replay/prefix-replay 三份录制和新 OFFLINE 引擎中核对 AR25 L1，在全新目录 `p7-live-20260924232709-af0888dd036743f4566e6b7c` 封存带来源哈希的 22 步过关记录。原损坏 trace 字节保持不变；首次诊断恢复目录已无损移到 `.asterion-private/prime-p7-recovery-diagnostics/`。已安装 wheel 的 `load_best_prefix` 现选中最终恢复记录；`make asterion-prime-p7-games` 显示 AR25 已验证 1 关、分数 2.777778。
 - `d3f670f9` 每 250 毫秒读取当前子进程 hash-valid 用量，达到已回报 token 上限即终止进程组，并按总剩余时间截断单题。它不能限制模型当前尚未回报的用量；定向模拟子进程测试通过。完整 `make promotion-check` 在 trace 并发修复后再次通过（25 命令、0 provider 操作），恢复与调度器后续变更有聚焦测试。
-- 独立零模型 Orb 进程树探针发现 `killpg(SIGTERM)` 结束本机 Orb 和客体父 Python 后，客体子 Python 仍存活；探针残留已清理。因此 `d3f670f9` 的实时 token 停止线还不能可靠停止 VM 内的 Pi/worker 子进程，付费续跑处于明确阻断。正在实现并核验精确到单次尝试的客体侧清理，不能仅凭宿主进程退出宣布停止。
+- 独立零模型 Orb 进程树探针曾发现 `killpg(SIGTERM)` 只结束本机 Orb 和客体父 Python，客体子 Python 仍存活；探针残留已清理。`f8486f80` 改为每次尝试独立的来宾 systemd cgroup，在宿主预算停止后精确停止并核验该 cgroup。真实 Orb 零模型回归在 10 token 模拟上限达到 11 时，父进程与脱离会话的子进程均退出，无关进程保持运行；22 项定向测试、lint、docs-check、完整 promotion-check（25 命令、0 provider 操作）通过。刚构建 wheel 的零动作调度器预检返回 `attempted=0`、token=0；独立最终复审未发现付费续跑阻断项。
 - 官方 Competition 远端不接收 seed；本地 `seed=0` 是 OFFLINE 前缀身份。LS20 本地第 1 关初始观察在 seed 0 两次及 seed 1 一次零动作检查中相同，不能推断后续关卡或其他游戏。官方不能跳关；本轮按连续关进度轮转。
 
 ## 当前判断与未完成边界
@@ -27,7 +27,5 @@
 
 ## 下一动作
 
-1. 修复 Orb 客体进程取消传播；用零模型父子进程探针证明宿主预算停止能结束同次尝试所有客体进程，且不伤及其他进程。
-2. 运行恢复/扫题聚焦测试、lint、docs-check，安装 wheel 零模型预检；核对无遗留模型和探针进程。
-3. 只有取消契约通过后，才在同一总预算下继续本地 sweep：环境设置 `ASTERION_PRIME_P7_SWEEP_TOKEN_CAP=2200000`，`ASTERION_PRIME_P7_SWEEP_WALLCLOCK_SECONDS` 取 03:04 UTC 之前的剩余秒数；不得重新给出完整 350 万或 4 小时。
-4. 每次运行后用 `make asterion-prime-p7-games` 核对已验证进度；不得创建官方 scorecard。
+1. 再次核对无遗留模型/探针进程；在同一总预算下继续本地 sweep：环境设置 `ASTERION_PRIME_P7_SWEEP_TOKEN_CAP=2200000`，`ASTERION_PRIME_P7_SWEEP_WALLCLOCK_SECONDS` 取 03:04 UTC 之前的剩余秒数；不得重新给出完整 350 万或 4 小时。
+2. 每次运行后用 `make asterion-prime-p7-games` 核对已验证进度；不得创建官方 scorecard。
