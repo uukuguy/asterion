@@ -18,6 +18,9 @@ from asterion.applications.prime.inventory import (
 from asterion.applications.prime.runtime_binding import (
     asterion_prime_runtime_binding,
 )
+from asterion.capabilities.prime_arc_agi_3_gameplay.provider import (
+    create_prime_arc_agi_3_gameplay_package,
+)
 
 
 def _resource_root() -> Path:
@@ -61,6 +64,29 @@ def create_prime_arc_agi_3_solving_provider() -> InstalledApplicationProvider:
         provider_id="prime-applications",
         resource_root=_resource_root(),
         applications=(prime_arc_agi_3_solving_application(),),
+        runtime_factory_bindings=(asterion_prime_runtime_binding(),),
+    )
+
+
+def prime_arc_agi_3_gameplay_application() -> InstalledApplication:
+    """Return the internal scoreless official gameplay application record."""
+    root = _resource_root()
+    return InstalledApplication(
+        application_id="prime.arc-agi-3-gameplay",
+        version="1.0.0",
+        assembly_paths=(root / "applications/prime/assemblies/prime-arc-agi-3-gameplay.json",),
+        capability_packages=(create_prime_arc_agi_3_gameplay_package().package_ref,),
+        runtime_ids=("asterion.prime",),
+    )
+
+
+def create_prime_arc_agi_3_gameplay_provider() -> InstalledApplicationProvider:
+    """Return the scoreless gameplay route and its exact package only."""
+    return InstalledApplicationProvider(
+        protocol=APPLICATION_PROVIDER_PROTOCOL,
+        provider_id="prime-applications",
+        resource_root=_resource_root(),
+        applications=(prime_arc_agi_3_gameplay_application(),),
         runtime_factory_bindings=(asterion_prime_runtime_binding(),),
     )
 
@@ -286,6 +312,7 @@ def create_provider() -> InstalledApplicationProvider:
 
 __all__ = (
     "create_prime_arc_agi_3_solving_provider",
+    "create_prime_arc_agi_3_gameplay_provider",
     "create_prime_bounded_autonomy_provider",
     "create_prime_continual_improvement_provider",
     "create_prime_ipython_coding_provider",
@@ -294,6 +321,7 @@ __all__ = (
     "create_prime_recursive_workflow_provider",
     "create_provider",
     "prime_arc_agi_3_solving_application",
+    "prime_arc_agi_3_gameplay_application",
     "prime_bounded_autonomy_application",
     "prime_continual_improvement_application",
     "prime_ipython_coding_application",
