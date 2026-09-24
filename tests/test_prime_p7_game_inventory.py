@@ -10,6 +10,37 @@ from tools.list_prime_p7_games import inventory, main
 
 
 class TestPrimeP7GameInventory(unittest.TestCase):
+    def test_sealed_partial_prefix_contributes_progress_without_a_score(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc_root = root / "arc-agi-3"
+            runs_root = root / "runs"
+            self._metadata(arc_root, "alpha", "11111111", "Alpha", [4, 5, 6])
+            self._partial(runs_root / "failed-after-level-one", "alpha-11111111", 3)
+            rows = inventory(arc_root, runs_root)
+
+        self.assertEqual(rows[0]["completed_levels"], 1)
+        self.assertEqual(rows[0]["run_id"], "failed-after-level-one")
+        self.assertEqual(rows[0]["score"], "—")
+        self.assertEqual(rows[0]["status"], "verified level witness")
+
+    def test_partial_progress_requires_matching_summary_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc_root = root / "arc-agi-3"
+            runs_root = root / "runs"
+            self._metadata(arc_root, "alpha", "11111111", "Alpha", [4, 5, 6])
+            run = runs_root / "mismatched-prefix"
+            self._partial(run, "alpha-11111111", 3)
+            summary_path = run / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            summary["completed_prefix"]["primitive_actions"] = 1
+            summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+            rows = inventory(arc_root, runs_root)
+
+        self.assertEqual(rows[0]["completed_levels"], 0)
+
     def test_only_verified_run_with_unambiguous_game_identity_contributes_progress(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -255,6 +286,67 @@ class TestPrimeP7GameInventory(unittest.TestCase):
         recording_dir.mkdir(parents=True)
         for name in names:
             (recording_dir / name).write_text("private secret frame", encoding="utf-8")
+
+    @staticmethod
+    def _partial(directory: Path, game_id: str, win_levels: int) -> None:
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.broker import ArcTransition
+        from asterion.applications.prime.p7.score import replay_sha256
+
+        trace = directory / "trace"
+        trace.mkdir(parents=True)
+        transitions = tuple(
+            ArcTransition(sequence, "ACTION1", "a" * 64, "b" * 64, levels)
+            for sequence, levels in ((1, 0), (2, 1), (3, 1))
+        )
+        prefix = {
+            "game_id": game_id,
+            "seed": 0,
+            "win_levels": win_levels,
+            "levels_completed": 1,
+            "primitive_actions": 2,
+            "replay_sha256": replay_sha256(transitions[:2], terminal_reason="level-completed"),
+            "terminal_reason": "level-completed",
+        }
+        recorder = PrimeTraceRecorder(trace)
+        identities = {"application_id": "prime.arc-agi-3-solving"}
+        for transition in transitions:
+            recorder.append(
+                "arc.action",
+                identities,
+                {
+                    "action": "ACTION1",
+                    "before_sha256": "a" * 64,
+                    "after_sha256": "b" * 64,
+                    "levels_completed": transition.levels_completed,
+                    "sequence": transition.sequence,
+                },
+            )
+        recorder.append("arc.run.partial", identities, prefix)
+        recorder.seal()
+        recording = directory / "recordings" / "private-session"
+        recording.mkdir(parents=True)
+        rows = [
+            {"data": {"game_id": game_id, "win_levels": win_levels, "action_input": {"id": "RESET", "data": {}}}},
+            *({"data": {"game_id": game_id, "win_levels": win_levels, "action_input": {"id": "ACTION1", "data": {}}}} for _ in range(3)),
+        ]
+        (recording / "game.jsonl").write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+        (directory / "summary.json").write_text(
+            json.dumps(
+                {
+                    "schema": "asterion.prime.p7-live-private-summary/v1",
+                    "run_id": directory.name,
+                    "receipt": {},
+                    "broker": None,
+                    "completed_prefix": prefix,
+                    "replay_verified": True,
+                    "sealed_trace": True,
+                    "cleanup_complete": True,
+                    "failure": {"type": "RuntimeError"},
+                }
+            ),
+            encoding="utf-8",
+        )
 
 
 if __name__ == "__main__":

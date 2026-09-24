@@ -7,12 +7,18 @@ from decimal import Decimal, InvalidOperation
 import json
 from pathlib import Path
 import re
+from collections.abc import Mapping
 from typing import Any
+
+from asterion.applications.prime.p7.broker import ArcTransition
+from asterion.applications.prime.p7.live import read_trace_entries
+from asterion.applications.prime.p7.score import replay_sha256
 
 
 _GAME_ID = re.compile(r"^[A-Za-z0-9]+-[A-Za-z0-9]+$")
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SAFE_TEXT = re.compile(r"^[^\r\n\t]+$")
 _SCORE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
 _MISSING = "—"
@@ -162,6 +168,141 @@ def _verified_run(run_dir: Path, game_levels: dict[str, int | None]) -> dict[str
     }
 
 
+def _verified_partial_run(run_dir: Path, game_levels: dict[str, int | None]) -> dict[str, Any] | None:
+    """Project sealed failure evidence without loading or replaying game source."""
+
+    try:
+        if run_dir.is_symlink() or not _RUN_ID.fullmatch(run_dir.name):
+            return None
+        summary_path = run_dir / "summary.json"
+        trace_root = run_dir / "trace"
+        trace_path = trace_root / "prime-trace.jsonl"
+        seal_path = trace_root / "prime-trace.seal.json"
+        if any(path.is_symlink() for path in (summary_path, trace_root, trace_path, seal_path)):
+            return None
+        summary = _read_object(summary_path)
+        if (
+            summary is None
+            or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+            or summary.get("run_id") != run_dir.name
+            or summary.get("sealed_trace") is not True
+            or summary.get("replay_verified") is not True
+            or summary.get("cleanup_complete") is not True
+            or summary.get("receipt") != {}
+            or type(summary.get("failure")) is not dict
+            or not summary["failure"]
+        ):
+            return None
+        entries = read_trace_entries(trace_root)
+        seal = _read_object(seal_path)
+        if (
+            seal is None
+            or set(seal) != {"entry_count", "final_sha256", "sealed_at"}
+            or seal.get("entry_count") != len(entries)
+            or seal.get("final_sha256") != entries[-1].sha256
+            or type(seal.get("sealed_at")) is not str
+        ):
+            return None
+        markers = tuple(entry.payload for entry in entries if entry.kind == "arc.run.partial")
+        if len(markers) != 1 or any(entry.kind == "arc.run.completed" for entry in entries):
+            return None
+        marker = markers[0]
+        if not isinstance(marker, Mapping) or summary.get("completed_prefix") != dict(marker):
+            return None
+        required = {
+            "game_id", "seed", "win_levels", "levels_completed", "primitive_actions",
+            "replay_sha256", "terminal_reason",
+        }
+        if set(marker) != required:
+            return None
+        game_id = marker["game_id"]
+        levels, actions, win_levels = marker["levels_completed"], marker["primitive_actions"], marker["win_levels"]
+        if (
+            type(game_id) is not str
+            or game_id not in game_levels
+            or type(marker["seed"]) is not int
+            or type(win_levels) is not int
+            or type(levels) is not int
+            or type(actions) is not int
+            or not 1 <= levels <= win_levels
+            or actions < 1
+            or marker["terminal_reason"] != "level-completed"
+            or type(marker["replay_sha256"]) is not str
+            or _DIGEST.fullmatch(marker["replay_sha256"]) is None
+            or (game_levels[game_id] is not None and win_levels != game_levels[game_id])
+        ):
+            return None
+        transitions = _trace_transitions(entries, win_levels)
+        if transitions is None or len(transitions) < actions:
+            return None
+        prefix = transitions[:actions]
+        if prefix[-1].levels_completed != levels or replay_sha256(prefix, terminal_reason="level-completed") != marker["replay_sha256"]:
+            return None
+        if _partial_recording_identity(run_dir, game_id, win_levels, transitions) is False:
+            return None
+        return {"game_id": game_id, "run_id": run_dir.name, "completed_levels": levels, "score": _MISSING, "full_win": False}
+    except Exception:
+        return None
+
+
+def _trace_transitions(entries: tuple[object, ...], win_levels: int) -> tuple[ArcTransition, ...] | None:
+    transitions: list[ArcTransition] = []
+    for entry in entries:
+        if getattr(entry, "kind", None) != "arc.action":
+            continue
+        payload = entry.payload
+        if set(payload) not in ({"action", "after_sha256", "before_sha256", "levels_completed", "sequence"}, {"action", "after_sha256", "before_sha256", "levels_completed", "sequence", "data"}):
+            return None
+        data = payload.get("data", {})
+        if not isinstance(data, Mapping):
+            return None
+        transition = ArcTransition(payload["sequence"], payload["action"], payload["before_sha256"], payload["after_sha256"], payload["levels_completed"], tuple(data.items()))
+        if (
+            transition.sequence != len(transitions) + 1
+            or type(transition.levels_completed) is not int
+            or not 0 <= transition.levels_completed <= win_levels
+            or (transitions and not transitions[-1].levels_completed <= transition.levels_completed <= transitions[-1].levels_completed + 1)
+        ):
+            return None
+        transitions.append(transition)
+    return tuple(transitions) if transitions else None
+
+
+def _partial_recording_identity(run_dir: Path, game_id: str, win_levels: int, transitions: tuple[ArcTransition, ...]) -> bool:
+    recordings_root = run_dir / "recordings"
+    if recordings_root.is_symlink() or not recordings_root.is_dir():
+        return False
+    sessions = tuple(recordings_root.iterdir())
+    if len(sessions) != 1 or sessions[0].is_symlink() or not sessions[0].is_dir():
+        return False
+    files = tuple(sessions[0].glob("*.jsonl"))
+    if len(files) != 1 or files[0].is_symlink() or not files[0].is_file():
+        return False
+    rows = [json.loads(row) for row in files[0].read_text(encoding="utf-8").splitlines()]
+    actions: list[tuple[str, tuple[tuple[str, object], ...]]] = []
+    started = False
+    for row in rows:
+        data = row.get("data") if type(row) is dict else None
+        action = data.get("action_input") if type(data) is dict else None
+        if (
+            type(data) is not dict
+            or data.get("game_id") != game_id
+            or data.get("win_levels") != win_levels
+            or type(action) is not dict
+            or type(action.get("id")) is not str
+            or type(action.get("data")) is not dict
+        ):
+            return False
+        value = (action["id"], tuple(action["data"].items()))
+        if value[0] == "RESET" and not started:
+            if value[1]:
+                return False
+            continue
+        started = True
+        actions.append(value)
+    return tuple((item.action, item.data) for item in transitions) == tuple(actions)
+
+
 def _score(value: str) -> Decimal:
     try:
         return Decimal(value)
@@ -172,8 +313,8 @@ def _score(value: str) -> Decimal:
 def inventory(arc_root: Path, runs_root: Path) -> list[dict[str, object]]:
     """Return deterministic, redacted local game rows.
 
-    Only sealed, replay-verified, fully cleaned runs with a matching terminal
-    broker result contribute progress.  This function never reads game source.
+    Sealed, replay-verified, fully cleaned success receipts and failure prefixes
+    contribute progress. This function never reads game source.
     """
     metadata = _metadata(arc_root)
     game_levels = {
@@ -195,7 +336,7 @@ def inventory(arc_root: Path, runs_root: Path) -> list[dict[str, object]]:
         ]
     if runs_root.is_dir():
         for run_dir in sorted(path for path in runs_root.iterdir() if path.is_dir()):
-            run = _verified_run(run_dir, game_levels)
+            run = _verified_run(run_dir, game_levels) or _verified_partial_run(run_dir, game_levels)
             if run is None:
                 continue
             current = best.get(run["game_id"])
