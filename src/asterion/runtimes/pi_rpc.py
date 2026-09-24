@@ -61,6 +61,8 @@ def _normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
         raise ValueError("Pi usage event is invalid")
     input_tokens = usage.get("input")
     output_tokens = usage.get("output")
+    cache_read_tokens = usage.get("cacheRead", 0)
+    cache_write_tokens = usage.get("cacheWrite", 0)
     if (
         isinstance(input_tokens, bool)
         or type(input_tokens) is not int
@@ -68,9 +70,18 @@ def _normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
         or isinstance(output_tokens, bool)
         or type(output_tokens) is not int
         or output_tokens < 0
+        or isinstance(cache_read_tokens, bool)
+        or type(cache_read_tokens) is not int
+        or cache_read_tokens < 0
+        or isinstance(cache_write_tokens, bool)
+        or type(cache_write_tokens) is not int
+        or cache_write_tokens < 0
     ):
         raise ValueError("Pi usage event is invalid")
-    return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+    return {
+        "input_tokens": input_tokens + cache_read_tokens + cache_write_tokens,
+        "output_tokens": output_tokens,
+    }
 
 
 def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
@@ -98,7 +109,9 @@ def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
             usage = message.get("usage")
             if isinstance(usage, Mapping):
                 compact_message["usage"] = {
-                    key: usage[key] for key in ("input", "output") if key in usage
+                    key: usage[key]
+                    for key in ("input", "output", "cacheRead", "cacheWrite")
+                    if key in usage
                 }
         return {"type": event_type, "message": compact_message}
     if event_type == "tool_execution_start":
