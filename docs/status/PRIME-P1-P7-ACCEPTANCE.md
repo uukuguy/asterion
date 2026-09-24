@@ -67,6 +67,8 @@ make asterion-prime-p1-run
 make asterion-prime-p7-solve
 ```
 
+先用 `make asterion-prime-p7-games` 查看本地题目和已验证进度；完整题号、官方 scorecard 与其它关卡的当前边界见[操作指南](../guides/prime-p7-games-and-official-results.md)。该清单命令不启动模型。
+
 Makefile 已将下一题 `tu93-0768757b`、seed `0` 和本地题库位置设为默认值。操作者只需记住这条命令；以后换题时由项目维护者更新默认选题。历史题 `ls20-9607627b` 仍在受控选题列表中。
 
 选择值由 Makefile 经 Orb 注入给应用；引擎、Broker、回放、密封 trace 和公开 receipt 使用同一 `game_id`/`seed`。公开 receipt 的 `selection_receipt_sha256` 还将题目身份、能力收据和 Broker 回放摘要绑定在一起；原 `receipt_sha256` 仍是能力层收据摘要。这个 preset 在完成**一关**后停止，内部上限为 500 个原始动作、128 次 callback 和 1 小时；它会实际调用模型。新题目前只做无模型预检，尚未启动该付费求解。

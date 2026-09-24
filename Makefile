@@ -40,6 +40,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p6-run-limits
 .PHONY: asterion-prime-p6-run-verbose
 .PHONY: asterion-prime-p7-solve
+.PHONY: asterion-prime-p7-games
 
 # Operator-owned values for the Prime presets. The P7 research assets live
 # beside this checkout; the operator preflight rejects missing assets.
@@ -83,6 +84,7 @@ help:
 	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
 	@echo "Asterion Prime bounded live applications: asterion-prime-p3-run p4-run p5-run p6-run"
 	@echo "Asterion Prime next ARC-AGI-3 puzzle: asterion-prime-p7-solve"
+	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
 	@echo "Asterion Prime deterministic diagnostics: asterion-prime-p3-witness p4-witness p5-witness p6-witness"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
@@ -240,6 +242,9 @@ asterion-prime-p2-run:
 
 # The default P7 target selects the prepared next game and its sibling asset
 # root. The operator rejects missing or unusable assets before a model run.
+asterion-prime-p7-games:
+	@python3 tools/list_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --runs-root "$(CURDIR)/.asterion-private/prime-p7-live"
+
 asterion-prime-p7-solve:
 	@printf '[asterion-prime-p7-solve] native Asterion-prime ARC-AGI-3 first-level solve\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \

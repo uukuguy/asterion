@@ -25,6 +25,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `FRAMEWORK-PUBLIC-INVENTORY.md` | 🟢 active | Metadata-only inventory of application providers, capability refs, AgentRuntime IDs, separate control providers, and evidence boundaries. |
 | `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native Asterion Prime P7 live-run facts, digests, verification boundary, and remaining parity work. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
+| `../guides/prime-p7-games-and-official-results.md` | 🟢 active | P7 本地题目与完成进度、官方 scorecard 和排行榜操作指南。 |
 | `DECISIONS.md` | 🟢 active | Indexed architecture and trust-boundary decisions; D-2026-09-12-01 governs native P1-P7 work. |
 | `PRIME-P1-P7-ACCEPTANCE.md` | 🟢 active | P1–P7 验收指南；记录 P7 组合失败与专用 provider 修复，区分无模型验证与真实求解。 |
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
