@@ -167,6 +167,8 @@ class CompetitionSession:
         self._scratch = scratch
         self.card_id: str | None = None
         self.closure_result: Any = None
+        self.abort_result: Any = None
+        self._aborted = False
         self.recovery_required = False
         self._open_attempted = False
         self._close_attempted = False
@@ -181,6 +183,20 @@ class CompetitionSession:
     @property
     def preflight(self) -> OfficialPreflight:
         return self._preflight
+
+    @property
+    def aborted(self) -> bool:
+        return self._aborted
+
+    @property
+    def unattempted_game_ids(self) -> tuple[str, ...]:
+        """Exact missing IDs, retained after abort for private recovery evidence."""
+        return tuple(game_id for game_id in self.preflight.game_ids if game_id not in self._made)
+
+    @property
+    def normal_close_confirmed(self) -> bool:
+        """Lifecycle fact only; scorecard rows and scores still require validation."""
+        return self.closure_result is not None and not self._aborted
 
     @property
     def guids(self) -> Mapping[str, str]:
@@ -226,15 +242,29 @@ class CompetitionSession:
             raise OfficialError("official game unavailable") from None
 
     def close(self) -> Any:
+        """Close an ordinary attempt only after every selected game was attempted."""
+        if self.unattempted_game_ids:
+            raise OfficialError("official games unattempted")
+        return self._close(abort=False)
+
+    def abort_close(self) -> Any:
+        """Close interrupted work; its result cannot become a normal receipt."""
+        return self._close(abort=True)
+
+    def _close(self, *, abort: bool) -> Any:
         if self._disposed or self.card_id is None or self._close_attempted:
             raise OfficialError("official scorecard unavailable")
         self._close_attempted = True
+        self._aborted = abort
         try:
             _check_sdk(self._sdk)
             result = self._sdk.close_scorecard(self.card_id)
             if result is None or getattr(result, "card_id", None) != self.card_id:
                 raise ValueError
-            self.closure_result = result
+            if abort:
+                self.abort_result = result
+            else:
+                self.closure_result = result
             return result
         except Exception:
             self.recovery_required = True
@@ -245,7 +275,8 @@ class CompetitionSession:
             return
         if self.card_id is not None and not self._close_attempted:
             try:
-                self.close()
+                # Cleanup cannot prove the operator finished its game loop.
+                self.abort_close()
             except OfficialError:
                 pass
         self._disposed = True

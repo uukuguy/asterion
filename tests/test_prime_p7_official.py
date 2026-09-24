@@ -128,7 +128,11 @@ class TestOfficialAdapter(unittest.TestCase):
         self.assertEqual(self.sdk.environment.reset_count, 1)
         with self.assertRaises(official.OfficialError):
             session.make("ls20-9607627b")
+        session.make("tu93-0768757b")
         self.assertIs(session.close(), self.sdk.close_result)
+        self.assertTrue(session.normal_close_confirmed)
+        self.assertFalse(session.aborted)
+        self.assertEqual(session.unattempted_game_ids, ())
         with self.assertRaises(official.OfficialError):
             session.close()
         with self.assertRaises(official.OfficialError):
@@ -159,7 +163,7 @@ class TestOfficialAdapter(unittest.TestCase):
                 with self.assertRaises(official.OfficialError):
                     session.make("ls20-9607627b")
                 self.assertEqual(len([c for c in self.sdk.calls if isinstance(c, tuple) and c[0] == "make"]), 1)
-                session.close()
+                session.abort_close()
 
     def test_unknown_game_fails_before_make(self):
         session = self.prepare()
@@ -167,11 +171,13 @@ class TestOfficialAdapter(unittest.TestCase):
         with self.assertRaises(official.OfficialError):
             session.make("ls20-changed")
         self.assertEqual(self.sdk.calls, ["catalog", "open"])
-        session.close()
+        session.abort_close()
 
     def test_close_failure_is_one_attempt_and_safe(self):
         session = self.prepare()
         session.open()
+        session.make("ls20-9607627b")
+        session.make("tu93-0768757b")
         self.sdk.close_result = NS(card_id="wrong-private-card")
         with self.assertRaisesRegex(official.OfficialError, "recovery required"):
             session.close()
@@ -184,6 +190,70 @@ class TestOfficialAdapter(unittest.TestCase):
         session = self.prepare()
         session.open()
         session.dispose()
+        session.dispose()
+        self.assertEqual(self.sdk.calls.count(("close", "private-card")), 1)
+
+    def test_normal_close_rejects_unattempted_games_without_remote_close(self):
+        for attempted in ((), ("ls20-9607627b",)):
+            with self.subTest(attempted=attempted):
+                session = self.prepare()
+                session.open()
+                for game_id in attempted:
+                    session.make(game_id)
+                with self.assertRaisesRegex(official.OfficialError, "official games unattempted"):
+                    session.close()
+                self.assertNotIn(("close", "private-card"), self.sdk.calls)
+                self.assertFalse(session.normal_close_confirmed)
+                self.assertIsNone(session.closure_result)
+                for game_id in session.unattempted_game_ids:
+                    session.make(game_id)
+                session.close()
+                self.assertTrue(session.normal_close_confirmed)
+
+    def test_abort_close_records_missing_games_and_never_normal_result(self):
+        session = self.prepare()
+        session.open()
+        session.make("ls20-9607627b")
+        self.assertIs(session.abort_close(), self.sdk.close_result)
+        self.assertTrue(session.aborted)
+        self.assertEqual(session.unattempted_game_ids, ("tu93-0768757b",))
+        self.assertIsNone(session.closure_result)
+        self.assertIs(session.abort_result, self.sdk.close_result)
+        self.assertFalse(session.normal_close_confirmed)
+        with self.assertRaises(official.OfficialError):
+            session.abort_close()
+        with self.assertRaises(official.OfficialError):
+            session.close()
+        session.dispose()
+        self.assertEqual(self.sdk.calls.count(("close", "private-card")), 1)
+
+    def test_dispose_always_uses_abort_even_after_all_make_attempts(self):
+        for attempted in ((), ("ls20-9607627b",), ("ls20-9607627b", "tu93-0768757b")):
+            with self.subTest(attempted=attempted):
+                session = self.prepare()
+                session.open()
+                for game_id in attempted:
+                    session.make(game_id)
+                session.dispose()
+                self.assertTrue(session.aborted)
+                self.assertEqual(session.unattempted_game_ids,
+                                 tuple(game for game in session.preflight.game_ids if game not in attempted))
+                self.assertFalse(session.normal_close_confirmed)
+                self.assertIsNone(session.closure_result)
+                self.assertIs(session.abort_result, self.sdk.close_result)
+                self.assertEqual(self.sdk.calls.count(("close", "private-card")), 1)
+
+    def test_failed_abort_retains_missing_games_and_requires_recovery(self):
+        session = self.prepare()
+        session.open()
+        self.sdk.close_result = None
+        with self.assertRaisesRegex(official.OfficialError, "recovery required"):
+            session.abort_close()
+        self.assertTrue(session.aborted)
+        self.assertTrue(session.recovery_required)
+        self.assertEqual(session.unattempted_game_ids, session.preflight.game_ids)
+        self.assertIsNone(session.abort_result)
+        self.assertIsNone(session.closure_result)
         session.dispose()
         self.assertEqual(self.sdk.calls.count(("close", "private-card")), 1)
 
