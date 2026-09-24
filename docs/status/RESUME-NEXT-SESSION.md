@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 07:45 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 07:54 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
@@ -17,15 +17,18 @@
 - `4a030f99` 已串行化 trace 的写入、封存与快照，八线程并发回归前红后绿。`3fa408c1` 从原 trace 的 22 个连续动作、live/replay/prefix-replay 三份录制和新 OFFLINE 引擎中核对 AR25 L1，在全新目录 `p7-live-20260924232709-af0888dd036743f4566e6b7c` 封存带来源哈希的 22 步过关记录。原损坏 trace 字节保持不变；首次诊断恢复目录已无损移到 `.asterion-private/prime-p7-recovery-diagnostics/`。已安装 wheel 的 `load_best_prefix` 现选中最终恢复记录；`make asterion-prime-p7-games` 显示 AR25 已验证 1 关、分数 2.777778。
 - `d3f670f9` 每 250 毫秒读取当前子进程 hash-valid 用量，达到已回报 token 上限即终止进程组，并按总剩余时间截断单题。它不能限制模型当前尚未回报的用量；定向模拟子进程测试通过。完整 `make promotion-check` 在 trace 并发修复后再次通过（25 命令、0 provider 操作），恢复与调度器后续变更有聚焦测试。
 - 独立零模型 Orb 进程树探针曾发现 `killpg(SIGTERM)` 只结束本机 Orb 和客体父 Python，客体子 Python 仍存活；探针残留已清理。`f8486f80` 改为每次尝试独立的来宾 systemd cgroup，在宿主预算停止后精确停止并核验该 cgroup。真实 Orb 零模型回归在 10 token 模拟上限达到 11 时，父进程与脱离会话的子进程均退出，无关进程保持运行；22 项定向测试、lint、docs-check、完整 promotion-check（25 命令、0 provider 操作）通过。刚构建 wheel 的零动作调度器预检返回 `attempted=0`、token=0；独立最终复审未发现付费续跑阻断项。
+- 续跑 `p7-live-20260924234525-17d9c6c33b0fa14a39b1256f` 仅尝试 BP35 L1，在 18 个动作时触发本次 220 万已回报 token 上限；40 条 usage 共输入 2,213,365、输出 86,316，合计 2,299,681。58 条 trace 记录哈希链有效；但运行被预算中断，无 summary 或封存回执，BP35 不算过关。BP35 L1 人类基准是 21 步。调度器报告 `token-cap` 并退出，Orb 没有遗留 P7 求解进程或 systemd unit。
+- AR25 原始暂计 1,197,126 加 BP35 已核验 2,299,681，总计 3,496,807/3,500,000 已回报 token；离上限仅 3,193 token，不再启动任何付费尝试。此轮没有触及 4 小时上限。`make asterion-prime-p7-games` 仍仅有 LS20 L1 与 AR25 L1 已验证，其他 23 题尚无已验证前缀；官方既有 scorecard 未新增提交。
+- BP35 的前 10 次模型调用输入合计 170,107 token，后 10 次 1,004,287，显示随会话推进每次输入显著增加；trace 只存总输入/输出，不能区分缓存价格或直接断定增长根因。
 - 官方 Competition 远端不接收 seed；本地 `seed=0` 是 OFFLINE 前缀身份。LS20 本地第 1 关初始观察在 seed 0 两次及 seed 1 一次零动作检查中相同，不能推断后续关卡或其他游戏。官方不能跳关；本轮按连续关进度轮转。
 
 ## 当前判断与未完成边界
 
-- 这只是有限预算的首轮扫题，不保证 25 题或全部关卡在预算内过关；模型解题能力尚无新实跑证据。
+- 首轮已用尽 token 预算，实际只新增 AR25 L1 一个已验证首关，BP35 L1 未过；旧 LS20 样本每步外推严重低估新题消耗，不能再据此承诺扫完 24 题。后续需先分析每次模型调用及缓存用量并改进效率，任何新的付费预算须由用户另行决定。
 - 每次本地尝试保留独立运行目录；官方提交需要另开 Competition 会话并逐动作对照，当前预算不含官方运行。
-- 用户确认的 350 万 token 总预算须扣减 AR25 源 run 的 1,197,126 token；源 trace 因链断不作封存用量证据，恢复记录 diagnostics 保留该数且不重复计费。续跑计划保守使用 220 万已回报 token 上限，合计约 339.7 万，留约 10 万给在途未回报调用。总时长按首次 sweep 约 2026-09-24 23:04 UTC 启动，绝对截止设为 2026-09-25 03:04 UTC（北京时间 11:04）。指南为 `docs/guides/prime-p7-games-and-official-results.md`。
+- 用户确认的 350 万 token 总预算已用去 3,496,807 已回报 token；AR25 源 trace 因链断不作封存用量证据，但从原始事件保守扣减。BP35 中断 trace 的 2,299,681 用量通过完整哈希链核验，不等于已验证通关；provider 侧未回报 token 无法量化。绝对截止原设 2026-09-25 03:04 UTC，实际先触发 token 上限。指南为 `docs/guides/prime-p7-games-and-official-results.md`。
 
 ## 下一动作
 
-1. 再次核对无遗留模型/探针进程；在同一总预算下继续本地 sweep：环境设置 `ASTERION_PRIME_P7_SWEEP_TOKEN_CAP=2200000`，`ASTERION_PRIME_P7_SWEEP_WALLCLOCK_SECONDS` 取 03:04 UTC 之前的剩余秒数；不得重新给出完整 350 万或 4 小时。
-2. 每次运行后用 `make asterion-prime-p7-games` 核对已验证进度；不得创建官方 scorecard。
+1. 不再运行付费扫题。先只读分析 AR25 与 BP35 每次调用和缓存用量，找出新题 token 消耗远高于 LS20 的原因，并评估可验证的效率改进。
+2. 后续若继续扫题，需重新给出基于 AR25/BP35 实测的有限预算；每次运行后用 `make asterion-prime-p7-games` 核对已验证进度。未经另行安排，不创建官方 scorecard。
