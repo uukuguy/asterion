@@ -52,7 +52,7 @@ _GAMEPLAY_HOST_CAPABILITIES = frozenset(
     {"prime.arc-broker", "prime.arc-run-evidence", "prime.ipython", "prime.launch"}
 )
 _GAMEPLAY_OPTIONS = {
-    "deadline_ms": "1800000",
+    "deadline_ms": "3600000",
     "max_callbacks": "128",
     "model": "deepseek-v4-flash",
     "provider": "deepseek",

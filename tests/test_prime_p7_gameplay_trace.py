@@ -8,7 +8,10 @@ from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.game import ArcGameContract
 from asterion.applications.prime.p7.gameplay_trace import PrimeGameplayTrace
-from asterion.applications.prime.runtime_binding import _p7_gameplay_terminal
+from asterion.applications.prime.runtime_binding import (
+    _GAMEPLAY_OPTIONS,
+    _p7_gameplay_terminal,
+)
 
 
 class _WinningEngine:
@@ -55,6 +58,9 @@ class _ResetRequiredEngine:
 
 
 class TestPrimeP7GameplayTrace(unittest.TestCase):
+    def test_official_gameplay_uses_session_supported_deadline(self) -> None:
+        self.assertEqual(_GAMEPLAY_OPTIONS["deadline_ms"], "3600000")
+
     def test_reset_required_keeps_official_runtime_open_and_cannot_issue_evidence(self) -> None:
         with TemporaryDirectory() as directory:
             recorder = PrimeTraceRecorder(Path(directory))
