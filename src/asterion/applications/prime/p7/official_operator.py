@@ -77,13 +77,16 @@ async def run_official_games(
     return tuple(attempts)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, repr=False, slots=True)
 class OfficialInvocation:
     operator_root: Path
     environment: Mapping[str, str]
     pi_base_command: tuple[str, ...]
     extension_path: Path
     api_key: str
+
+    def __repr__(self) -> str:
+        return "<OfficialInvocation redacted>"
 
 
 def _preflight(process_environment: Mapping[str, str]) -> OfficialInvocation:

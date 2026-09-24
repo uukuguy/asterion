@@ -33,6 +33,16 @@ class TestOfficialOperator(unittest.TestCase):
         prepare.assert_not_called()
         self.assertNotIn("secret", output.getvalue())
 
+    def test_invocation_repr_redacts_both_credentials(self) -> None:
+        from asterion.applications.prime.p7.official_operator import OfficialInvocation
+
+        invocation = OfficialInvocation(
+            Path("/tmp"), {"DEEPSEEK_API_KEY": "model-secret"},
+            ("/usr/bin/pi",), Path("/tmp/extension"), "arc-secret",
+        )
+        self.assertNotIn("model-secret", repr(invocation))
+        self.assertNotIn("arc-secret", repr(invocation))
+
     def test_read_only_preflight_never_opens_card_or_model(self) -> None:
         from asterion.applications.prime.p7.official_operator import main
 
