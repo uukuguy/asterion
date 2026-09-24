@@ -152,7 +152,7 @@ class StandaloneRepositoryTests(unittest.TestCase):
         )
         self.assertTrue(expected.issubset(phony), sorted(expected - phony))
         self.assertIsNone(re.search(r"(?m)^asterion-verify:\s*$", text))
-        self.assertNotIn("eval ", text)
+        self.assertIsNone(re.search(r"(?<![A-Za-z0-9_-])eval[ \t]", text))
 
     def test_make_help_labels_cost_boundaries(self) -> None:
         completed = subprocess.run(

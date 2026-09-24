@@ -1,33 +1,28 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 04:27 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 05:04 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
-P7 面向完整 ARC-AGI-3 游戏与官方 Competition scorecard，而非单关见证。整题求解、官方逐题会话、回执校验和操作指南已在 `main` 的 `85177b5e` 合并；隔离 worktree 已核对并清理。
+实现 P7 本地选题选关、逐关保存可校验动作，以及只对本地已验证题目执行官方 Competition 提交。用户已明确选择该方向；真实付费评估/官方建卡仍须按仓库预算边界单独确认。
 
 ## 已验证事实
 
-- `make asterion-prime-p7-solve GAME=<短号或完整ID>` 从第 1 关按序解完整游戏，仅 SDK `WIN` 与关卡数一致才可签收。`asterion-prime-p7-level-witness GAME=<题号> LEVEL=N` 是独立的局部诊断命令，仍从第 1 关开始。
-- `make asterion-prime-p7-games` 从严格校验的本地题目元数据列目录，区分完整 `WIN` 与局部见证；每次本地运行保留独立 `run_id` 和目录。
-- 官方 `p7/official.py` 的假 SDK 测试覆盖 Competition 目录、单卡每题一次 `make`、SDK 自动首重置、身份绑定、ACTION6、当前关 RESET、正常关闭与中断关闭。官方 `ArcGameContract` 不借用本地 baseline、回放或局部分数。
-- 新的 `prime.arc-agi-3-gameplay` 能力、assembly、provider 与运行时只给出无分数逐题证据；`reset-required` 时会继续给模型机会重置当前关。官方 coordinator 在所有目录题目尝试后关闭 scorecard，按完整目录、guid、状态与有限分数校验 SDK 返回，再写私有正式回执；异常写恢复记录。官方 API key 不传入 Pi 模型进程。
-- 操作指南 `docs/guides/prime-p7-games-and-official-results.md` 记录本地和官方命令。主分支 83 项 P7 定向测试、`make lint`、`make docs-check`、`git diff --check` 已通过；关键代码独立复审未发现 Critical/Important。
-- 打包 `make promotion-check` 初次因新 gameplay assembly 未登记资源清单失败；`8bfc7009` 修复后完整复跑通过：25 条隔离命令、provider 操作 0、`full_dataset=no`。
-- `19fd0772` 新增多游戏贯通测试：同一张卡、一题 `WIN`、一题 `GAME_OVER`，缺少服务端行时仅留恢复记录。`ee8d5787` 使用真实 `arc_agi==0.9.9` SDK、完全拦截 HTTP，核对目录、建卡、`make` 自动首 RESET、关闭及回执解析。`9d33cb5d` 让预检公开逐题和总动作、模型回调、期限上界，测试与实际运行时固定值一致。
-- `32c508db` 修复 host 初始化失败时官方游戏引擎未关闭的问题。`2d81c767` 使用离线 wheel、已安装 assembly 和假 Pi 执行真实 `_run_game`，确认确定性整题 `WIN`、trace 封存和引擎清理。最新 35 项官方定向测试、`make lint`、`make docs-check` 通过；无网络或付费模型调用。
-- Operator 已在仓库 `.env` 配置 `ARC_API_KEY`。`make asterion-prime-p7-official-preflight` 实际通过，官方账号目录返回 25 题，合计上界 38,142 动作、3,200 模型回调和 90,000 秒逐题期限。该检查只读取官方目录；没有创建 scorecard、游戏实例或调用模型，也没有真实整题通关证据。
-- 官方文档确认 Competition 对全部可见题计分，但可只对选定题调用 `make`；部分通关按关卡得分。OFFLINE 本地回执不能补传，正式成绩须在新官方会话执行动作。当前本地目录仅有 LS20、TU93 两题，历史验证记录只有 LS20 第一关。
-- 本地历史 trace 保存了动作与前后状态摘要，现有 `replay_arc_run` 只使用运行中的内存 journal，未提供历史解题计划导入。官方 `CompetitionSession.close` 和回执校验要求全部目录题目各有一条运行，阻止选题提交；必须区分完整目录、选中题目和未玩题目，并保留服务端总分。官方 seed 不能仅凭适配器写入的 0 推断，远端执行前须比对初始观测。
-- 已安装 ARC SDK 的 `NORMAL make` 可下载题目元数据和源码，但会先自动创建默认 scorecard；远端 Competition wrapper 不接收 `seed`，所以本地同版本、同 seed 也不能保证官方动作复现。扩展本地 2 题目录应设计独立受控下载路径；提交时逐动作比对，遇到分歧立即停止。
-- 在强制阻断网络的诊断中，现有 LS20 第一关历史封存 trace 的 20 个动作已从磁盘恢复，并在新本地引擎逐步核验通过。使用已配置官方 key 的只读 `/api/games` 与 `/source` 请求确认账号可见 25 题的源码全部可获取，共 3,969,790 字节；未建卡、未保存源码、未运行模型。可将源码下载纳入独立受控的本地题目同步入口。
+- `make asterion-prime-p7-solve GAME=ls20 LEVEL=2` 现在接受显式 `LEVEL`；不传 `LEVEL` 仍是整题。每次新本地运行会在模型前把先前已验证前缀重新执行进当前 broker 和 trace。新的 `run_id` 保留独立时间戳目录，不覆盖旧运行。
+- `p7/solutions.py` 从私有封存 trace、summary、recording 复原动作，核验身份/哈希链/软链接边界/RESET/ACTION6，再经新 OFFLINE 引擎逐动作复现；支持旧版 LS20 历史记录和长记录截断。已安装 wheel、阻断网络的诊断确认 LS20 第 1 关 20 动作可恢复。本地第 2 关 broker 预热实测完成第 1 关并记入 20 动作，未启动模型。
+- `make asterion-prime-p7-sync-games` 经只读 GET 同步官方账号可见 25 题；`make asterion-prime-p7-games` 现列出 25 题，只有 LS20 本地第 1 关是已验证进度。旧 TU93 本地同 ID 源码与当前官方源码不同，已无损移到 `../external-prime/arc-agi-3/archived-local-games/tu93-0768757b-source-0768757bb4b3/`，官方当前源码落入正常目录。同步器不覆盖同 ID 不同内容，并可续写匹配的中断元数据。
+- 官方 selected session、跳过题目 scorecard 解析、已存动作初始/逐步摘要核验、RESET 与不确定操作即停均已实现。`make asterion-prime-p7-official-submit GAME=ls20` 和 `GAME=all` 是无 Pi/模型的已存动作执行入口；缺少显式 `GAME` 在构建前拒绝。旧全目录模型路径改名 `asterion-prime-p7-official-live-eval`。
+- 官方目录只读 `make asterion-prime-p7-official-preflight` 实跑通过：25 题，上界 38,142 动作、3,200 模型回调、90,000 秒。未创建 card 或调用模型。已安装 wheel 的已存 LS20 前缀预检在阻断网络下通过。
+- P7 聚焦测试、Make dry-run、`make lint`、`make docs-check` 已通过。第一次 `make promotion-check` 的完整测试阶段失败，主要原因是旧 Make 测试把现在合法的 `LEVEL=2` 当错误并实际触发解题；该测试已改为 dry-run，12 个 Make 定向测试通过。完整 3208 测试复跑后还剩 3 项失败：两个安装版测试、一个误判 `live-eval` 为 shell `eval` 的静态测试。安装版缺失加载器资源和静态误判已修复，另一安装版 gameplay 失败仍在诊断；promotion-check 尚未通过。
 
 ## 当前判断与未完成边界
 
-- 官方 Competition 命令的安装包路径与打包门禁已验证。真实官方运行是有费用的完整评估，按仓库授权边界另行进行。
-- 如官方某题初始化失败，协调器继续后续游戏，但缺少对应服务端运行行时最终回执会失败并保留恢复记录；不能虚构 0 分或官方链接。
+- 本地证据不能补传为官方成绩；正式提交必须在新的官方游戏实例重新执行动作，按远端初始和每一步状态核验。若有差异，保留 recovery 记录，不生成有效官方回执。
+- 尚未创建真实官方 scorecard，没有官方分数或 URL；只完成了只读预检与无模型本地/假 SDK 验证。
+- 当前完整测试及 `promotion-check` 尚未最终通过。旧测试曾意外触发一次真实本地模型尝试：新私有运行目录 `p7-live-20260924205419-06503ae29454ae2cb6950224` 有 6 条 worker-cell 记录、0 个 ARC 游戏动作；没有留下运行进程。不要再执行旧版 `tests.test_prime_make_presets` 或未修复的旧完整门禁。
 
 ## 下一动作
 
-1. 用户提出本地按 `GAME`、`LEVEL` 选题选关，保存已验证动作，再只对已解题目形成官方成绩。已说明官方新会话必须重新执行动作；`brainstorming` 技能要求设计获确认后才修改行为。确认后实现严格历史 trace 导入、顺序关卡前缀、选题官方执行和未玩题回执校验；无模型测试先行。
-2. 仓库 `AGENTS.md` 要求完整付费评估另行授权和有限预算。真实官方 scorecard 操作须在设计实现、边界测试与单独授权后执行。
+1. 收取安装版 gameplay 单测诊断与修复，跑 3 项定向回归，再重跑必要门禁；检查无遗留进程与 Git 状态。
+2. 无网络/无模型验证已存 LS20 前缀从公开命令到假 Competition card 的安装包路径，核对回执和恢复分支；复审最后改动。
+3. 确认真实官方执行的外部提交范围与费用边界，再执行选题提交；未经确认不创建真实 scorecard。

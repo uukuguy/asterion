@@ -203,7 +203,7 @@ def sync_games(
     """Fetch and safely persist every exact ID in the public official catalog."""
     if not isinstance(api_key, str) or not api_key:
         raise SyncError("ARC API key is unavailable")
-    if not isinstance(base_url, str) or not base_url.startswith(("https://", "http://")):
+    if not isinstance(base_url, str) or not base_url.startswith("https://"):
         raise SyncError("ARC base URL is invalid")
     # Fail before contacting the operator service when the root is unsafe.
     if arc_root.is_symlink() or (arc_root / "environment_files").is_symlink():
@@ -284,7 +284,6 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Synchronize public ARC-AGI-3 game sources safely")
     parser.add_argument("--arc-root", type=Path, default=Path.cwd().parent / "external-prime" / "arc-agi-3")
     parser.add_argument("--env-file", type=Path, default=Path.cwd() / ".env")
-    parser.add_argument("--base-url", default=_DEFAULT_BASE_URL)
     return parser
 
 
@@ -295,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
         print("P7 game sync unavailable")
         return 1
     try:
-        game_ids = sync_games(args.arc_root, api_key=api_key, base_url=args.base_url)
+        game_ids = sync_games(args.arc_root, api_key=api_key)
     except SyncError:
         print("P7 game sync unavailable")
         return 1

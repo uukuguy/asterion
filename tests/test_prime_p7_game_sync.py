@@ -23,6 +23,14 @@ class _Response:
 
 
 class TestPrimeP7GameSync(unittest.TestCase):
+    def test_rejects_non_https_endpoint_before_sending_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(SyncError, "base URL"):
+                sync_games(
+                    Path(directory), api_key="private-key", base_url="http://arc.example",
+                    get=lambda *_args, **_kwargs: self.fail("key sent over HTTP"),
+                )
+
     def test_syncs_exact_catalog_metadata_and_class_sources_with_get_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "arc-agi-3"

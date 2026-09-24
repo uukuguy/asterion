@@ -83,7 +83,11 @@ def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_l
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         if type(summary) is not dict or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1":
             return None
-        if summary.get("replay_verified") is not True or summary.get("sealed_trace") is not True:
+        if (
+            summary.get("replay_verified") is not True
+            or summary.get("sealed_trace") is not True
+            or summary.get("cleanup_complete") is not True
+        ):
             return None
         run_id = summary.get("run_id")
         if type(run_id) is not str or run_id != run.name:

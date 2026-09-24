@@ -94,28 +94,31 @@ class TestPrimeMakePresets(unittest.TestCase):
         )
         self.assertEqual(completed.stdout.strip(), "3")
 
-    def test_p7_normal_solve_rejects_level_before_wheel_build(self) -> None:
+    def test_p7_normal_solve_accepts_explicit_level_in_dry_run(self) -> None:
         root = Path(__file__).resolve().parents[1]
         completed = subprocess.run(
-            ["make", "--no-print-directory", "-s", "asterion-prime-p7-solve", "LEVEL=2"],
+            ["make", "--no-print-directory", "-n", "asterion-prime-p7-solve", "GAME=ls20", "LEVEL=2"],
             cwd=root, text=True, capture_output=True,
         )
-        self.assertEqual(completed.returncode, 2)
-        self.assertIn("LEVEL is only available", completed.stderr)
-        self.assertNotIn("Building wheel", completed.stdout)
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn('"1" = 1', completed.stdout)
+        self.assertIn("ASTERION_PRIME_P7_TARGET_LEVEL", completed.stdout)
 
-    def test_p7_routes_target_level_only_to_witness(self) -> None:
+    def test_p7_routes_target_level_when_explicit(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        for target in ("asterion-prime-p7-solve", "asterion-prime-p7-level-witness"):
-            with self.subTest(target=target):
+        for target, args, explicit in (
+            ("asterion-prime-p7-solve", [], "0"),
+            ("asterion-prime-p7-solve", ["LEVEL=2"], "1"),
+            ("asterion-prime-p7-level-witness", ["LEVEL=2"], "1"),
+        ):
+            with self.subTest(target=target, args=args):
                 completed = subprocess.run(
-                    ["make", "--no-print-directory", "-n", target, "GAME=ls20"],
+                    ["make", "--no-print-directory", "-n", target, "GAME=ls20", *args],
                     cwd=root, text=True, capture_output=True, check=True,
                 )
-                self.assertIn('if [ "' + target + '" = asterion-prime-p7-level-witness ]', completed.stdout)
                 self.assertIn("ORBENV", completed.stdout)
                 self.assertIn(
-                    'if [ "' + target + '" = asterion-prime-p7-level-witness ]; then ORBENV=',
+                    f'[ "{explicit}" = 1 ]; then ORBENV="$ORBENV:ASTERION_PRIME_P7_TARGET_LEVEL"',
                     completed.stdout,
                 )
 
@@ -128,7 +131,21 @@ class TestPrimeMakePresets(unittest.TestCase):
             capture_output=True,
             check=True,
         )
-        self.assertIn("Asterion Prime ARC-AGI-3 full-game solve", completed.stdout)
+        self.assertIn("Asterion Prime ARC-AGI-3 solve", completed.stdout)
+
+    def test_official_saved_submission_requires_explicit_game_before_build(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        missing = subprocess.run(
+            ["make", "--no-print-directory", "-n", "asterion-prime-p7-official-submit"],
+            cwd=root, text=True, capture_output=True,
+        )
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("requires GAME", missing.stderr)
+        selected = subprocess.run(
+            ["make", "--no-print-directory", "-n", "asterion-prime-p7-official-submit", "GAME=ls20"],
+            cwd=root, text=True, capture_output=True, check=True,
+        )
+        self.assertIn("saved-submit", selected.stdout)
 
     def test_p7_invalid_witness_level_stops_before_wheel_build(self) -> None:
         root = Path(__file__).resolve().parents[1]

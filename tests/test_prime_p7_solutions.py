@@ -35,6 +35,25 @@ class _Engine:
 
 
 class TestP7SavedSolutions(unittest.TestCase):
+    def test_rejects_run_without_completed_cleanup(self) -> None:
+        from asterion.applications.prime.p7.solutions import load_best_prefix
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc_root = self._arc_root(root)
+            runs_root = root / "runs"
+            run = runs_root / "p7-unclean"
+            self._write_run(run)
+            summary_path = run / "summary.json"
+            summary = json.loads(summary_path.read_text())
+            summary["cleanup_complete"] = False
+            summary_path.write_text(json.dumps(summary))
+            with patch(
+                "asterion.applications.prime.p7.solutions._fresh_engine",
+                side_effect=lambda _root, _game, _recordings: _Engine(),
+            ):
+                self.assertIsNone(load_best_prefix(arc_root, runs_root, "ls20-9607627b", 0))
+
     def test_loads_sealed_click_prefix_and_replays_it(self) -> None:
         from asterion.applications.prime.p7.solutions import load_best_prefix
 
