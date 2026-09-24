@@ -16,7 +16,14 @@ from typing import cast
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
-from asterion.applications.prime.p7.broker import ArcAction, ArcBroker, ArcBrokerError, ArcRunReceipt
+from asterion.applications.prime.p7.broker import (
+    ArcAction,
+    ArcBroker,
+    ArcBrokerError,
+    ArcRunReceipt,
+    ArcTransition,
+    _observation_digest,
+)
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
     ArcGameContract,
@@ -217,6 +224,7 @@ class _P7BrokerClient:
             "win_levels": observation.win_levels,
         }
 
+
     def status(self) -> Mapping[str, object]:
         status = self._broker.status()
         return {
@@ -306,6 +314,32 @@ class _P7BrokerClient:
                 for transition in result.transitions
             ],
         }
+
+
+def _apply_saved_prefix(
+    broker: ArcBroker,
+    recorder: PrimeTraceRecorder,
+    transitions: tuple[ArcTransition, ...],
+) -> None:
+    """Re-execute a verified prefix into this run's broker and private trace."""
+
+    if not transitions or any(type(item) is not ArcTransition for item in transitions):
+        raise P7OperatorError("P7 saved prefix is unavailable")
+    client = _P7BrokerClient(broker, recorder)
+    try:
+        for expected in transitions:
+            if (
+                expected.sequence != len(broker.journal) + 1
+                or _observation_digest(broker.observe()) != expected.before_sha256
+            ):
+                raise ValueError
+            client.act([{"name": expected.action, "data": dict(expected.data)}])
+            if broker.journal[-1] != expected:
+                raise ValueError
+        if broker.status().levels_completed != transitions[-1].levels_completed:
+            raise ValueError
+    except Exception:
+        raise P7OperatorError("P7 saved prefix is unavailable") from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -587,16 +621,19 @@ def _select_game_for_mode(
     resolved_environment: Mapping[str, str],
     arc_root: Path,
 ) -> P7GameSelection:
-    """Keep dotenv configuration from changing a normal solve into a witness."""
+    """Use only an explicitly forwarded level; otherwise solve the full game."""
 
     mode = process_environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve")
     if mode not in {"solve", "witness"}:
         raise P7OperatorError("P7 run mode is unavailable")
-    if mode == "solve" and TARGET_LEVEL_ENV in resolved_environment:
-        raise P7OperatorError(_LEVEL_WITNESS_ONLY)
     if mode == "witness" and TARGET_LEVEL_ENV not in process_environment:
         raise P7OperatorError("P7 level witness requires explicit LEVEL")
-    return resolve_game_selection(resolved_environment, arc_root)
+    selection_environment = dict(resolved_environment)
+    if TARGET_LEVEL_ENV in process_environment:
+        selection_environment[TARGET_LEVEL_ENV] = process_environment[TARGET_LEVEL_ENV]
+    else:
+        selection_environment.pop(TARGET_LEVEL_ENV, None)
+    return resolve_game_selection(selection_environment, arc_root)
 
 
 def _preflight(environment: Mapping[str, str]) -> P7Invocation:
@@ -688,6 +725,29 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     diagnostics: dict[str, object] = {}
     broker_status = None
     try:
+        if invocation.game.target_level > 1:
+            from .solutions import load_best_prefix
+
+            prefix = load_best_prefix(
+                invocation.arc_root,
+                root / ".asterion-private" / "prime-p7-live",
+                invocation.game.game_id,
+                invocation.game.seed,
+                max_level=invocation.game.target_level - 1,
+            )
+            if prefix is not None:
+                broker = resources_.host_services["prime.arc-broker"]
+                evidence = resources_.host_services["prime.private-trace"]
+                if (
+                    type(broker) is not ArcBroker
+                    or type(evidence) is not P7PrivateTraceReceipt
+                    or prefix.game_id != invocation.game.game_id
+                    or prefix.seed != invocation.game.seed
+                    or prefix.win_levels != invocation.game.win_levels
+                    or not 0 < prefix.levels_completed < invocation.game.target_level
+                ):
+                    raise P7OperatorError("P7 saved prefix is unavailable")
+                _apply_saved_prefix(broker, evidence.runtime_recorder, prefix.transitions)
         print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
         application = _resolve_p7_application()
         assembly = application.assemblies[0]

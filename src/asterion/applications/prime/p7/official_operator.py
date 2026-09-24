@@ -22,7 +22,7 @@ from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext
 
-from .game import ArcGameContract
+from .game import ArcGameContract, GAME_ID_ENV, SEED_ENV, _read_catalog, resolve_game_selection
 from . import live
 from .official import CompetitionEngine, CompetitionSession, OfficialError, prepare_session
 from .official_result import (
@@ -31,6 +31,7 @@ from .official_result import (
     write_recovery_record,
 )
 from .operator import build_p7_operator_resources
+from .official_replay import execute_saved_prefix
 from .prompt import P7_SOLVE_PROMPT
 
 
@@ -89,6 +90,44 @@ class OfficialInvocation:
         return "<OfficialInvocation redacted>"
 
 
+@dataclass(frozen=True, repr=False, slots=True)
+class SavedInvocation:
+    operator_root: Path
+    arc_root: Path
+    api_key: str
+    prefixes: tuple[object, ...]
+
+    def __repr__(self) -> str:
+        return "<SavedInvocation redacted>"
+
+
+@dataclass(frozen=True, repr=False, slots=True)
+class CatalogInvocation:
+    operator_root: Path
+    api_key: str
+
+    def __repr__(self) -> str:
+        return "<CatalogInvocation redacted>"
+
+
+def _preflight_catalog(process_environment: Mapping[str, str]) -> CatalogInvocation:
+    """Resolve only the credential needed for the read-only official catalog."""
+    import asterion
+
+    try:
+        root = Path(process_environment[live.OPERATOR_ROOT_ENV]).resolve(strict=True)
+        package = Path(str(asterion.__file__)).resolve(strict=True)
+        if package.is_relative_to(root) or "site-packages" not in package.parts:
+            raise ValueError
+        environment = {**live._dotenv_values(root / ".env"), **process_environment}
+        api_key = environment.get("ARC_API_KEY", "").strip()
+        if not api_key:
+            raise ValueError
+        return CatalogInvocation(root, api_key)
+    except Exception:
+        raise OfficialError("official preflight unavailable") from None
+
+
 def _preflight(process_environment: Mapping[str, str]) -> OfficialInvocation:
     """Resolve an installed operator and both credentials before card creation."""
     import asterion
@@ -114,6 +153,41 @@ def _preflight(process_environment: Mapping[str, str]) -> OfficialInvocation:
         )
     except Exception:
         raise OfficialError("official preflight unavailable") from None
+
+
+def _preflight_saved(process_environment: Mapping[str, str]) -> SavedInvocation:
+    """Verify local actions and ARC credentials before any scorecard operation."""
+    import asterion
+    from .solutions import load_best_prefix, list_verified_prefixes
+
+    try:
+        root = Path(process_environment[live.OPERATOR_ROOT_ENV]).resolve(strict=True)
+        package = Path(str(asterion.__file__)).resolve(strict=True)
+        if package.is_relative_to(root) or "site-packages" not in package.parts:
+            raise ValueError
+        environment = {**live._dotenv_values(root / ".env"), **process_environment}
+        api_key = environment.get("ARC_API_KEY", "").strip()
+        if not api_key:
+            raise ValueError
+        arc_root = live.resolve_arc_root(environment)
+        runs_root = root / ".asterion-private" / "prime-p7-live"
+        requested = process_environment.get(GAME_ID_ENV, "")
+        if type(requested) is not str or not requested:
+            raise ValueError
+        if requested == "all":
+            catalog_ids = tuple(str(row["game_id"]) for row in _read_catalog(arc_root))
+            prefixes = list_verified_prefixes(arc_root, runs_root, catalog_ids, 0)
+        else:
+            game = resolve_game_selection(
+                {GAME_ID_ENV: requested, SEED_ENV: "0"}, arc_root
+            )
+            prefix = load_best_prefix(arc_root, runs_root, game.game_id, 0)
+            prefixes = () if prefix is None else (prefix,)
+        if not prefixes:
+            raise ValueError
+        return SavedInvocation(root, arc_root, api_key, tuple(prefixes))
+    except Exception:
+        raise OfficialError("official saved preflight unavailable") from None
 
 
 def _private_root(operator_root: Path, run_id: str) -> Path:
@@ -217,25 +291,58 @@ async def _submit(
     return receipt.to_dict()
 
 
+def _submit_saved(
+    session: CompetitionSession,
+    evidence_root: Path,
+    prefixes: tuple[object, ...],
+) -> dict[str, object]:
+    """Play selected, locally verified actions once under one official card."""
+    if (
+        not prefixes
+        or tuple(getattr(prefix, "game_id", None) for prefix in prefixes)
+        != session.selected_game_ids
+    ):
+        raise OfficialError("official saved selection unavailable")
+    session.open()
+    for prefix in prefixes:
+        engine = session.make(prefix.game_id)
+        try:
+            execute_saved_prefix(engine, prefix)
+        finally:
+            engine.close()
+    session.close()
+    receipt = validate_closed_scorecard(session)
+    write_official_receipt(receipt, evidence_root)
+    return receipt.to_dict()
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run a read-only catalog preflight or one explicit paid submission."""
     if sys.argv[1:] if argv is None else argv:
         print('{"status":"preflight-rejected"}')
         return 2
     mode = os.environ.get("ASTERION_PRIME_P7_OFFICIAL_MODE", "")
-    if mode not in {"preflight", "submit"}:
+    if mode not in {"preflight", "submit", "saved-submit", "live-eval"}:
         print('{"status":"preflight-rejected"}')
         return 2
     session: CompetitionSession | None = None
     evidence_root: Path | None = None
     try:
-        invocation = _preflight(os.environ)
+        invocation = (
+            _preflight_catalog(os.environ) if mode == "preflight" else
+            _preflight_saved(os.environ) if mode == "saved-submit" else
+            _preflight(os.environ)
+        )
         run_id = live.safe_run_id()
         evidence_root = _private_root(invocation.operator_root, run_id)
         with prepare_session(
             api_key=invocation.api_key,
             evidence_root=evidence_root,
             model_host_ready=True,
+            **(
+                {"selected_game_ids": tuple(prefix.game_id for prefix in invocation.prefixes)}
+                if isinstance(invocation, SavedInvocation) else {}
+            ),
         ) as session:
             if mode == "preflight":
                 value = {
@@ -255,6 +362,10 @@ def main(argv: list[str] | None = None) -> int:
                         for game in session.preflight.games
                     ],
                 }
+            elif mode == "saved-submit":
+                if not isinstance(invocation, SavedInvocation):
+                    raise OfficialError("official saved selection unavailable")
+                value = _submit_saved(session, evidence_root, invocation.prefixes)
             else:
                 value = asyncio.run(_submit(invocation, session, evidence_root))
         print(json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True))
@@ -264,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
         print('{"status":"recovery-required"}')
         return 130
     except Exception:
-        if mode == "submit":
+        if mode in {"submit", "saved-submit", "live-eval"}:
             _retain_recovery(session, evidence_root)
         before_session = session is None
         rejected = mode == "preflight" or before_session

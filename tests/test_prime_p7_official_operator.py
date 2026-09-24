@@ -16,6 +16,36 @@ from asterion.applications.prime.p7.operator import p7_runtime_options, resolve_
 
 
 class TestOfficialOperator(unittest.TestCase):
+    def test_saved_submit_routes_without_model_preflight(self) -> None:
+        from asterion.applications.prime.p7.official_operator import SavedInvocation, main
+
+        class Session:
+            def __enter__(self) -> "Session":
+                return self
+
+            def __exit__(self, *args: object) -> None:
+                pass
+
+        with TemporaryDirectory() as directory:
+            invocation = SavedInvocation(
+                Path(directory), Path(directory), "private",
+                (SimpleNamespace(game_id="ab12-12345678"),),
+            )
+            output = StringIO()
+            with (
+                mock.patch.dict("os.environ", {"ASTERION_PRIME_P7_OFFICIAL_MODE": "saved-submit"}, clear=True),
+                mock.patch("asterion.applications.prime.p7.official_operator._preflight", side_effect=AssertionError("model preflight used")),
+                mock.patch("asterion.applications.prime.p7.official_operator._preflight_saved", return_value=invocation),
+                mock.patch("asterion.applications.prime.p7.official_operator.prepare_session", return_value=Session()) as prepare,
+                mock.patch("asterion.applications.prime.p7.official_operator._submit_saved", return_value={"status": "closed-confirmed"}) as submit,
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main([]), 0)
+            self.assertIn('"status":"closed-confirmed"', output.getvalue())
+            self.assertNotIn("private", output.getvalue())
+            self.assertEqual(prepare.call_args.kwargs["selected_game_ids"], ("ab12-12345678",))
+            submit.assert_called_once()
+
     def test_submit_without_credentials_rejects_before_card_or_recovery(self) -> None:
         from asterion.applications.prime.p7.official import OfficialError
         from asterion.applications.prime.p7.official_operator import main
@@ -67,7 +97,7 @@ class TestOfficialOperator(unittest.TestCase):
         with (
             TemporaryDirectory() as directory,
             mock.patch.dict("os.environ", {"ASTERION_PRIME_P7_OFFICIAL_MODE": "preflight"}, clear=True),
-            mock.patch("asterion.applications.prime.p7.official_operator._preflight", return_value=SimpleNamespace(operator_root=Path(directory), api_key="private")),
+            mock.patch("asterion.applications.prime.p7.official_operator._preflight_catalog", return_value=SimpleNamespace(operator_root=Path(directory), api_key="private")),
             mock.patch("asterion.applications.prime.p7.official_operator.prepare_session", return_value=Session()),
             redirect_stdout(output),
         ):

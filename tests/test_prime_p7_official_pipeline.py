@@ -43,7 +43,7 @@ class FakeCompetitionEnvironment:
 class FakeCompetitionSDK:
     """Only official SDK response fields consumed by the adapter are represented."""
 
-    def __init__(self, *, malformed_close: bool = False, **_kwargs: object) -> None:
+    def __init__(self, *, malformed_close: bool = False, skip_unmade: bool = False, **_kwargs: object) -> None:
         self.operation_mode = "COMPETITION"
         self.arc_base_url = official.OFFICIAL_BASE_URL
         self.games = [
@@ -51,6 +51,7 @@ class FakeCompetitionSDK:
             NS(game_id="cd34-87654321", baseline_actions=None),
         ]
         self.malformed_close = malformed_close
+        self.skip_unmade = skip_unmade
         self.calls: list[object] = []
         self.environments: dict[str, FakeCompetitionEnvironment] = {}
 
@@ -72,6 +73,9 @@ class FakeCompetitionSDK:
         self.calls.append(("close-scorecard", card_id))
         rows = []
         for game_id in ("ab12-12345678", "cd34-87654321"):
+            if self.skip_unmade and game_id not in self.environments:
+                rows.append(NS(id=game_id, runs=[]))
+                continue
             # EnvironmentScoreList.id / .runs and EnvironmentScore fields match
             # arc_agi.scorecard's public model fields.
             state = "WIN" if game_id == "ab12-12345678" else "GAME_OVER"
@@ -94,14 +98,14 @@ class TestOfficialPipeline(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.sdk: FakeCompetitionSDK | None = None
 
-    def _session(self, *, malformed_close: bool = False):
+    def _session(self, *, malformed_close: bool = False, selected_game_ids: tuple[str, ...] | None = None):
         def factory(**kwargs: object) -> FakeCompetitionSDK:
-            self.sdk = FakeCompetitionSDK(malformed_close=malformed_close, **kwargs)
+            self.sdk = FakeCompetitionSDK(malformed_close=malformed_close, skip_unmade=selected_game_ids is not None, **kwargs)
             return self.sdk
 
         return prepare_session(
             api_key="private-arc-key", evidence_root=Path(self.directory.name),
-            model_host_ready=True, sdk_factory=factory,
+            model_host_ready=True, sdk_factory=factory, selected_game_ids=selected_game_ids,
         )
 
     @staticmethod
@@ -150,6 +154,25 @@ class TestOfficialPipeline(unittest.TestCase):
         self.assertEqual(self.sdk.calls.count(("close-scorecard", "card-123")), 1)
         self.assertTrue(all(environment.reset_calls == 0 for environment in self.sdk.environments.values()))
         self.assertEqual(session.guids, {game_id: f"guid-{game_id}" for game_id in session.preflight.game_ids})
+
+    def test_saved_submission_attempts_only_selected_prefix_without_model(self) -> None:
+        from asterion.applications.prime.p7.official_operator import _submit_saved
+
+        evidence_root = Path(self.directory.name) / "saved"
+        evidence_root.mkdir(mode=0o700)
+        with (
+            self._session(selected_game_ids=("ab12-12345678",)) as session,
+            mock.patch("asterion.applications.prime.p7.official_operator.execute_saved_prefix") as execute,
+            mock.patch("asterion.applications.prime.p7.official_operator._resolve_gameplay_application", side_effect=AssertionError("model launched")),
+        ):
+            selected = session.preflight.game_ids[0]
+            prefix = NS(game_id=selected, levels_completed=1)
+            result = _submit_saved(session, evidence_root, (prefix,))
+        assert self.sdk is not None
+        self.assertEqual(result["selected_count"], 1)
+        self.assertEqual(result["skipped_count"], 1)
+        self.assertEqual([call[1] for call in self.sdk.calls if isinstance(call, tuple) and call[0] == "make"], [selected])
+        execute.assert_called_once()
 
     def test_missing_scorecard_row_writes_recovery_without_scorecard_url(self) -> None:
         evidence_root = Path(self.directory.name) / "recovery"

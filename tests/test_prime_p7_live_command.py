@@ -40,6 +40,38 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_saved_level_prefix_reenters_broker_and_rejects_mismatch(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcTransition
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.operator import (
+            P7OperatorError,
+            _apply_saved_prefix,
+        )
+        from tests.test_prime_p7_native_broker import _FullGameEngine
+
+        game = P7GameSelection("ls20-9607627b", 0, 2)
+        source = ArcBroker(engine=_FullGameEngine(), game=game)
+        source.act(("ACTION1",))
+        expected = source.journal
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            engine = _FullGameEngine()
+            broker = ArcBroker(engine=engine, game=game)
+            _apply_saved_prefix(broker, recorder, expected)
+            self.assertEqual(broker.journal, expected)
+            self.assertEqual(broker.status().levels_completed, 1)
+            self.assertEqual(engine.calls, ["ACTION1"])
+            recorder.close()
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            engine = _FullGameEngine()
+            broker = ArcBroker(engine=engine, game=game)
+            forged = ArcTransition(1, "ACTION1", "sha256:" + "0" * 64, expected[0].after_sha256, 1)
+            with self.assertRaisesRegex(P7OperatorError, "saved prefix"):
+                _apply_saved_prefix(broker, recorder, (forged,))
+            self.assertEqual(engine.calls, [])
+            recorder.close()
+
     def test_game_over_act_returns_terminal_view_without_closed_reads(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.operator import _P7BrokerClient
@@ -243,9 +275,9 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 ArcadeEngine(arc_root=Path(temporary), recordings_dir=Path(temporary) / "recordings", game=DEFAULT_GAME)
         self.assertEqual(constructed, [])
 
-    def test_normal_mode_rejects_dotenv_level_override(self) -> None:
+    def test_solve_level_requires_explicit_selection_and_ignores_dotenv_default(self) -> None:
         import os
-        from asterion.applications.prime.p7.operator import P7OperatorError, _select_game_for_mode
+        from asterion.applications.prime.p7.operator import _select_game_for_mode
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -256,8 +288,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             (root / ".env").write_text("ASTERION_PRIME_P7_TARGET_LEVEL=1\n")
             with mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "fixture", "ASTERION_PRIME_P7_GAME_ID": "zx42"}, clear=True):
                 resolved = live_module.load_operator_environment(root)
-            with self.assertRaisesRegex(P7OperatorError, "LEVEL"):
-                _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "solve"}, resolved, root)
+            whole = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "solve"}, resolved, root)
+            selected = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "solve", "ASTERION_PRIME_P7_TARGET_LEVEL": "2"}, resolved, root)
+            self.assertEqual(whole.target_level, 3)
+            self.assertEqual(selected.target_level, 2)
             witness = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "witness", "ASTERION_PRIME_P7_TARGET_LEVEL": "1"}, resolved, root)
             self.assertEqual(witness.target_level, 1)
 
