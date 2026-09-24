@@ -19,10 +19,16 @@ from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
 from asterion.applications.prime.p7.broker import ArcAction, ArcBroker, ArcBrokerError, ArcRunReceipt
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
+    ArcGameContract,
     DEFAULT_GAME,
     P7GameSelection,
     P7GameSelectionError,
+    TARGET_LEVEL_ENV,
     resolve_game_selection,
+)
+from asterion.applications.prime.p7.gameplay_trace import (
+    GAMEPLAY_TRACE_IDENTITIES,
+    PrimeGameplayTrace,
 )
 from asterion.applications.prime.p7.ipython_host import (
     PersistentIpythonHost,
@@ -52,11 +58,11 @@ from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 _RUNTIME_ID = "asterion.prime"
 _PROVIDER = "deepseek"
 _MODEL = "deepseek-v4-flash"
-_MAX_ACTIONS = 500
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
 _BRIDGE_JOIN_SECONDS = 1.0
+_LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
 class P7OperatorError(RuntimeError):
     """The fixed P7 model host is unavailable."""
 
@@ -189,11 +195,17 @@ class _IpythonBridgeServer:
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder")
+    __slots__ = ("_broker", "_recorder", "_identities")
 
-    def __init__(self, broker: ArcBroker, recorder: PrimeTraceRecorder) -> None:
+    def __init__(
+        self,
+        broker: ArcBroker,
+        recorder: PrimeTraceRecorder,
+        identities: Mapping[str, str] = P7_TRACE_IDENTITIES,
+    ) -> None:
         self._broker = broker
         self._recorder = recorder
+        self._identities = identities
 
     def observe(self) -> Mapping[str, object]:
         observation = self._broker.observe()
@@ -255,7 +267,7 @@ class _P7BrokerClient:
                 action_evidence["data"] = dict(transition.data)
             self._recorder.append(
                 "arc.action",
-                P7_TRACE_IDENTITIES,
+                self._identities,
                 action_evidence,
             )
         try:
@@ -306,16 +318,24 @@ class P7RuntimeSelection:
     deadline_ms: int
 
     def __post_init__(self) -> None:
-        if self != P7RuntimeSelection.fixed():
+        if (
+            self.runtime_id != _RUNTIME_ID
+            or self.provider != _PROVIDER
+            or self.model != _MODEL
+            or type(self.max_actions) is not int
+            or not 500 <= self.max_actions <= 5000
+            or self.max_callbacks != _MAX_CALLBACKS
+            or self.deadline_ms != _DEADLINE_MS
+        ):
             raise P7OperatorError("P7 runtime selection is invalid")
 
     @classmethod
-    def fixed(cls) -> P7RuntimeSelection:
+    def fixed(cls, game: P7GameSelection | ArcGameContract = DEFAULT_GAME) -> P7RuntimeSelection:
         value = object.__new__(cls)
         object.__setattr__(value, "runtime_id", _RUNTIME_ID)
         object.__setattr__(value, "provider", _PROVIDER)
         object.__setattr__(value, "model", _MODEL)
-        object.__setattr__(value, "max_actions", _MAX_ACTIONS)
+        object.__setattr__(value, "max_actions", game.action_cap)
         object.__setattr__(value, "max_callbacks", _MAX_CALLBACKS)
         object.__setattr__(value, "deadline_ms", _DEADLINE_MS)
         return value
@@ -346,7 +366,9 @@ class P7OperatorResources:
         self._bridge.close()
         ipython = cast(PersistentIpythonHost, self.host_services["prime.ipython"])
         await ipython.close()
-        trace = cast(P7PrivateTraceReceipt, self.host_services["prime.private-trace"])
+        trace = self.host_services.get("prime.private-trace") or self.host_services.get("prime.arc-run-evidence")
+        if trace is None:
+            raise P7OperatorError("P7 host services are unavailable")
         trace.close()
         launch = cast(PrimeLaunch, self.host_services["prime.launch"])
         launch.extension_lease.close()
@@ -368,7 +390,9 @@ def resolve_pi_provider(environment: Mapping[str, str], *, model: str) -> str:
     return _PROVIDER
 
 
-def resolve_p7_runtime(environment: Mapping[str, str]) -> P7RuntimeSelection:
+def resolve_p7_runtime(
+    environment: Mapping[str, str], game: P7GameSelection | ArcGameContract = DEFAULT_GAME
+) -> P7RuntimeSelection:
     """Resolve the one fixed model/runtime preset without exposing tuning knobs."""
 
     provider = resolve_pi_provider(environment, model=_MODEL)
@@ -376,18 +400,20 @@ def resolve_p7_runtime(environment: Mapping[str, str]) -> P7RuntimeSelection:
         runtime_id=_RUNTIME_ID,
         provider=provider,
         model=_MODEL,
-        max_actions=_MAX_ACTIONS,
+        max_actions=game.action_cap,
         max_callbacks=_MAX_CALLBACKS,
         deadline_ms=_DEADLINE_MS,
     )
 
 
-def p7_runtime_options(selection: P7RuntimeSelection) -> Mapping[str, str]:
+def p7_runtime_options(
+    selection: P7RuntimeSelection, game: P7GameSelection | ArcGameContract = DEFAULT_GAME
+) -> Mapping[str, str]:
     """Return immutable private factory options for the fixed selection."""
 
     if (
         type(selection) is not P7RuntimeSelection
-        or selection != P7RuntimeSelection.fixed()
+        or selection != P7RuntimeSelection.fixed(game)
     ):
         raise P7OperatorError("P7 runtime selection is invalid")
     return MappingProxyType(
@@ -410,7 +436,7 @@ def build_p7_operator_resources(
     worker: RestrictedPersistentIpythonWorker,
     engine: object,
     private_trace_root: Path,
-    game: P7GameSelection = DEFAULT_GAME,
+    game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -420,8 +446,13 @@ def build_p7_operator_resources(
     trace: PrimeTraceRecorder | None = None
     bridge: _IpythonBridgeServer | None = None
     try:
-        selection = resolve_p7_runtime(environment)
-        provider_environment = dict(environment)
+        selection = resolve_p7_runtime(environment, game)
+        # The ARC credential belongs only to the SDK session. The Pi model
+        # subprocess needs the model host key, never the scorecard key.
+        provider_environment = {
+            name: value for name, value in environment.items()
+            if name not in {"ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE"}
+        }
         if (
             type(pi_base_command) is not tuple
             or not pi_base_command
@@ -489,10 +520,21 @@ def build_p7_operator_resources(
         )
         trace = PrimeTraceRecorder(private_trace_root)
         broker = ArcBroker(engine=engine, game=game)
+        official = type(game) is ArcGameContract
         ipython = PersistentIpythonHost(
-            worker=worker, p7_client=p7_client_facade(_P7BrokerClient(broker, trace))
+            worker=worker,
+            p7_client=p7_client_facade(
+                _P7BrokerClient(
+                    broker,
+                    trace,
+                    GAMEPLAY_TRACE_IDENTITIES if official else P7_TRACE_IDENTITIES,
+                )
+            ),
         )
-        private_trace = P7PrivateTraceReceipt(broker, trace)
+        private_trace = (
+            PrimeGameplayTrace(broker, trace, engine.guid)
+            if official else P7PrivateTraceReceipt(broker, trace)
+        )
         bridge = _IpythonBridgeServer(parent, ipython)
         bridge.start()
         parent = None
@@ -501,9 +543,11 @@ def build_p7_operator_resources(
                 "prime.arc-broker": broker,
                 "prime.ipython": ipython,
                 "prime.launch": launch,
-                "prime.private-trace": private_trace,
+                (
+                    "prime.arc-run-evidence" if official else "prime.private-trace"
+                ): private_trace,
             },
-            runtime_options=p7_runtime_options(selection),
+            runtime_options=p7_runtime_options(selection, game),
             _bridge=bridge,
         )
     except Exception:
@@ -530,6 +574,23 @@ class P7Invocation:
     pi_base_command: tuple[str, ...]
     extension_path: Path
     game: P7GameSelection
+
+
+def _select_game_for_mode(
+    process_environment: Mapping[str, str],
+    resolved_environment: Mapping[str, str],
+    arc_root: Path,
+) -> P7GameSelection:
+    """Keep dotenv configuration from changing a normal solve into a witness."""
+
+    mode = process_environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve")
+    if mode not in {"solve", "witness"}:
+        raise P7OperatorError("P7 run mode is unavailable")
+    if mode == "solve" and TARGET_LEVEL_ENV in resolved_environment:
+        raise P7OperatorError(_LEVEL_WITNESS_ONLY)
+    if mode == "witness" and TARGET_LEVEL_ENV not in process_environment:
+        raise P7OperatorError("P7 level witness requires explicit LEVEL")
+    return resolve_game_selection(resolved_environment, arc_root)
 
 
 def _preflight(environment: Mapping[str, str]) -> P7Invocation:
@@ -562,9 +623,9 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
                 pi_entry=live.resolve_pi_entry(resolved),
             ),
             extension_path=live.extension_path(),
-            game=resolve_game_selection(resolved, arc_root),
+            game=_select_game_for_mode(environment, resolved, arc_root),
         )
-    except (live.P7LiveSolveError, P7GameSelectionError) as error:
+    except (live.P7LiveSolveError, P7GameSelectionError, P7OperatorError) as error:
         raise P7OperatorError(str(error)) from None
 
 
@@ -765,6 +826,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         comparison_report=comparison_report,
         game=invocation.game,
         broker_replay_sha256=broker_receipt.replay_sha256,
+        terminal_reason=broker_receipt.terminal_reason,
     )
 
 
@@ -773,8 +835,10 @@ def classify_live_result(result: live.P7LiveExecution) -> Mapping[str, object]:
 
     if result.completed_level_count != result.game.target_level:
         raise live.P7LiveSolveError("target level completion was not observed")
-    if not 1 <= result.primitive_action_count <= _MAX_ACTIONS:
+    if not 1 <= result.primitive_action_count <= result.game.action_cap:
         raise live.P7LiveSolveError("primitive action count is invalid")
+    if result.game.is_full_game and result.terminal_reason != "game-won":
+        raise live.P7LiveSolveError("full-game WIN was not observed")
     if not result.replay_verified:
         raise live.P7LiveSolveError("replay verification did not pass")
     if not result.sealed_trace:
@@ -824,6 +888,8 @@ def _public_receipt(
         "game_id": game.game_id,
         "seed": game.seed,
         "target_level": game.target_level,
+        "win_levels": game.win_levels,
+        "completion_scope": "full-game" if game.is_full_game else "level-witness",
         "status": status,
         "run_id": run_id,
         "completed_level_count": completed_level_count,
@@ -861,8 +927,11 @@ def _public_receipt(
     return safe
 
 
-def _reject() -> int:
-    print('{"status":"preflight-rejected"}')
+def _reject(*, reason: str | None = None) -> int:
+    public = {"status": "preflight-rejected"}
+    if reason == _LEVEL_WITNESS_ONLY:
+        public["reason"] = _LEVEL_WITNESS_ONLY
+    print(json.dumps(public, separators=(",", ":"), sort_keys=True))
     return 2
 
 
@@ -870,14 +939,18 @@ def main(argv: list[str] | None = None) -> int:
     """The only external input is the literal Make preset invocation."""
 
     invocation: P7Invocation | None = None
+    preflight_reason: str | None = None
     try:
         if sys.argv[1:] if argv is None else argv:
             raise P7OperatorError("P7 operator arguments are rejected")
         invocation = _preflight(os.environ)
+    except P7OperatorError as error:
+        if str(error) == _LEVEL_WITNESS_ONLY:
+            preflight_reason = _LEVEL_WITNESS_ONLY
     except BaseException:
         pass
     if invocation is None:
-        return _reject()
+        return _reject(reason=preflight_reason)
     run_id = live.safe_run_id()
     try:
         result = classify_live_result(asyncio.run(run_live(invocation, run_id)))

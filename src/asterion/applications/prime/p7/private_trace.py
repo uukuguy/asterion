@@ -7,6 +7,7 @@ import re
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt, ArcTransition
+from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.score import partial_game_score
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
@@ -38,6 +39,7 @@ class P7PrivateTraceReceipt:
     def __post_init__(self) -> None:
         if (
             type(self._broker) is not ArcBroker
+            or type(self._broker.game) is not P7GameSelection
             or type(self._recorder) is not PrimeTraceRecorder
         ):
             raise P7PrivateTraceReceiptError("P7 solve receipt is unavailable")
@@ -149,7 +151,13 @@ class P7PrivateTraceReceipt:
             or (broker_receipt.game_id, broker_receipt.seed)
             != (self._broker.game.game_id, self._broker.game.seed)
             or broker_receipt.levels_completed != self._broker.game.target_level
-            or broker_receipt.terminal_reason != "level-completed"
+            or broker_receipt.terminal_reason != (
+                "game-won" if self._broker.game.is_full_game else "level-completed"
+            )
+            or (
+                self._broker.game.is_full_game
+                and self._broker.terminal_snapshot().observation.state != "WIN"
+            )
         ):
             raise ValueError
         action_counts = self._completed_level_action_counts(broker_receipt)

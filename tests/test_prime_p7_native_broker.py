@@ -88,6 +88,24 @@ class _ResetEngine:
         return self.observe()
 
 
+class _FullGameEngine(_Engine):
+    def __init__(self, *, final_state: str = "WIN", actions_per_level: int = 1) -> None:
+        super().__init__()
+        self.final_state = final_state
+        self.actions_per_level = actions_per_level
+
+    def observe(self) -> dict[str, object]:
+        value = super().observe()
+        if self.levels_completed == 7:
+            value["state"] = self.final_state
+        return value
+
+    def step(self, action: str) -> dict[str, object]:
+        self.calls.append(action)
+        self.levels_completed = len(self.calls) // self.actions_per_level
+        return self.observe()
+
+
 def _broker(*, level_after: int | None = None, raises_on: int | None = None):
     from asterion.applications.prime.p7.broker import ArcBroker
 
@@ -96,6 +114,31 @@ def _broker(*, level_after: int | None = None, raises_on: int | None = None):
 
 
 class TestNativeP7Broker(unittest.TestCase):
+    def test_full_game_requires_win_and_dynamic_cap(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection("ls20-9607627b", 0, 7)
+        self.assertEqual(sum(game.baseline_actions), 776)
+        self.assertEqual(game.action_cap, 1552)
+        for state, reason in (("WIN", "game-won"), ("NOT_FINISHED", "game-incomplete")):
+            with self.subTest(state=state):
+                broker = ArcBroker(engine=_FullGameEngine(final_state=state, actions_per_level=100), game=game)
+                for _ in range(7):
+                    broker.act(("ACTION1",) * 100)
+                self.assertEqual(broker.seal().primitive_actions, 700)
+                self.assertEqual(broker.seal().terminal_reason, reason)
+                self.assertEqual(broker.terminal_snapshot().observation.state, state)
+
+    def test_full_game_cap_bounds_and_legacy_partial_cap(self) -> None:
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        for baseline, cap in (((1,), 1000), ((3000,), 5000)):
+            with self.subTest(baseline=baseline):
+                game = P7GameSelection("new-v1", 0, 1, baseline, 1)
+                self.assertEqual(game.action_cap, cap)
+        self.assertEqual(P7GameSelection("ls20-9607627b", 0, 2).action_cap, 500)
+
     def test_initial_game_over_is_rejected_before_any_action(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 

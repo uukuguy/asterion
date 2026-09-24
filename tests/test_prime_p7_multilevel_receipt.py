@@ -33,6 +33,32 @@ class _TwoLevelEngine:
 
 
 class TestP7MultilevelReceipt(unittest.TestCase):
+    def test_full_game_receipt_requires_terminal_win(self) -> None:
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt, P7PrivateTraceReceiptError
+        from tests.test_prime_p7_native_broker import _FullGameEngine
+
+        game = P7GameSelection("ls20-9607627b", 0, 7)
+        for state in ("WIN", "NOT_FINISHED"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
+                broker = ArcBroker(engine=_FullGameEngine(final_state=state), game=game)
+                for _ in range(7):
+                    broker.act(("ACTION1",))
+                trace = P7PrivateTraceReceipt(broker, PrimeTraceRecorder(Path(directory)))
+                try:
+                    if state == "WIN":
+                        expected = trace.expected_receipt_sha256(run_id="p7-full")
+                        receipt = trace.get_receipt(run_id="p7-full", receipt_sha256=expected)
+                        self.assertEqual(receipt.completed_level_count, 7)
+                        self.assertEqual(receipt.partial_game_score, "100.000000")
+                    else:
+                        with self.assertRaises(P7PrivateTraceReceiptError):
+                            trace.expected_receipt_sha256(run_id="p7-full")
+                finally:
+                    trace.close()
+
     def test_failed_attempt_and_reset_count_toward_completed_level(self) -> None:
         from asterion.agents.prime.trace import PrimeTraceRecorder
         from asterion.applications.prime.p7.broker import ArcBroker
@@ -101,10 +127,24 @@ class TestP7MultilevelReceipt(unittest.TestCase):
             partial_game_score="10.714286",
         )
         validate_prime_arc_agi_3_solve_receipt(receipt)
+        larger = PrimeArcAgi3SolveReceipt.create(
+            run_id="p7-twelve-levels",
+            completed_level_count=12,
+            primitive_action_count=20,
+            partial_game_score="100.000000",
+        )
+        validate_prime_arc_agi_3_solve_receipt(larger)
         with self.assertRaises(PrimeArcAgi3SolveReceiptError):
             PrimeArcAgi3SolveReceipt.create(
                 run_id="p7-ten-levels",
                 completed_level_count=10,
                 primitive_action_count=5,
+                partial_game_score="100.000000",
+            )
+        with self.assertRaises(PrimeArcAgi3SolveReceiptError):
+            PrimeArcAgi3SolveReceipt.create(
+                run_id="p7-unbounded-levels",
+                completed_level_count=5001,
+                primitive_action_count=5001,
                 partial_game_score="100.000000",
             )

@@ -96,6 +96,7 @@ class P7LiveExecution:
     comparison_report: Path | None
     game: P7GameSelection
     broker_replay_sha256: str
+    terminal_reason: str
 
 
 class NeverCancelled:
@@ -126,6 +127,10 @@ class ArcadeEngine:
 
         if type(game) is not P7GameSelection:
             raise P7LiveSolveError("P7 game selection is unavailable")
+        # The SDK gives COMPETITION in the process environment precedence over
+        # the OFFLINE constructor argument and may contact the API in __init__.
+        if os.environ.get("OPERATION_MODE", "").strip().lower() == "competition":
+            raise P7LiveSolveError("offline ARC mode is unavailable")
         self.game_id = game.game_id
         self.seed = game.seed
         recordings_dir.mkdir(parents=True, exist_ok=True)
@@ -144,6 +149,8 @@ class ArcadeEngine:
             recordings_dir=str(recordings_dir),
             logger=self._logger,
         )
+        if self._arcade.operation_mode != OperationMode.OFFLINE:
+            raise P7LiveSolveError("offline ARC mode is unavailable")
         self._environment = self._arcade.make(
             game.game_id,
             seed=game.seed,
@@ -592,9 +599,11 @@ def act(actions):
     remaining = current["actions_remaining"]
     reason = current["terminal_reason"]
     terminal = (
-        "LEVEL_SOLVED" if levels >= target
+        "GAME_SOLVED" if view["state"] == "WIN" and levels >= target
+        else "LEVEL_SOLVED" if reason == "level-completed" and levels >= target
         else "ACTION_CAP" if remaining <= 0
         else "RESET_REQUIRED" if reason == "reset-required"
+        else "GAME_OVER" if reason == "game-incomplete"
         else "GAME_OVER" if reason == "game-over"
         else "LEVEL_ADVANCED" if batch["level_advanced"]
         else "ACTIVE"

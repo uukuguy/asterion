@@ -113,7 +113,7 @@ def _verified_run(run_dir: Path, game_levels: dict[str, int | None]) -> dict[str
         or summary.get("replay_verified") is not True
         or summary.get("cleanup_complete") is not True
         or type(broker) is not dict
-        or broker.get("terminal_reason") != "level-completed"
+        or broker.get("terminal_reason") not in {"level-completed", "game-won"}
         or type(receipt.get("completed_level_count")) is not int
         or receipt["completed_level_count"] < 1
         or broker.get("levels_completed") != receipt["completed_level_count"]
@@ -141,6 +141,7 @@ def _verified_run(run_dir: Path, game_levels: dict[str, int | None]) -> dict[str
         return None
     run_id = summary.get("run_id")
     score = receipt.get("partial_game_score")
+    full_win = broker["terminal_reason"] == "game-won"
     if (
         type(run_id) is not str
         or run_id != run_dir.name
@@ -149,6 +150,7 @@ def _verified_run(run_dir: Path, game_levels: dict[str, int | None]) -> dict[str
         or _SCORE.fullmatch(score) is None
         or not Decimal("0") <= _score(score) <= Decimal("100")
         or (game_levels[game_id] is not None and receipt["completed_level_count"] > game_levels[game_id])
+        or (full_win and receipt["completed_level_count"] != game_levels[game_id])
     ):
         return None
     return {
@@ -156,6 +158,7 @@ def _verified_run(run_dir: Path, game_levels: dict[str, int | None]) -> dict[str
         "run_id": run_id,
         "completed_levels": receipt["completed_level_count"],
         "score": str(score),
+        "full_win": full_win,
     }
 
 
@@ -186,6 +189,7 @@ def inventory(arc_root: Path, runs_root: Path) -> list[dict[str, object]]:
                 "run_id": _MISSING,
                 "score": _MISSING,
                 "status": "no verified run",
+                "full_win": False,
             }
             for row in sorted(metadata, key=lambda item: str(item["game_id"]))
         ]
@@ -195,9 +199,9 @@ def inventory(arc_root: Path, runs_root: Path) -> list[dict[str, object]]:
             if run is None:
                 continue
             current = best.get(run["game_id"])
-            rank = (run["completed_levels"], _score(run["score"]), run["run_id"])
+            rank = (run["full_win"], run["completed_levels"], _score(run["score"]), run["run_id"])
             if current is None or rank > (
-                current["completed_levels"], _score(current["score"]), current["run_id"]
+                current["full_win"], current["completed_levels"], _score(current["score"]), current["run_id"]
             ):
                 best[run["game_id"]] = run
     rows: list[dict[str, object]] = []
@@ -209,7 +213,11 @@ def inventory(arc_root: Path, runs_root: Path) -> list[dict[str, object]]:
                 "completed_levels": run["completed_levels"] if run else 0,
                 "run_id": run["run_id"] if run else _MISSING,
                 "score": run["score"] if run else _MISSING,
-                "status": "verified" if run else "no verified run",
+                "status": (
+                    "full-game WIN" if run and run["full_win"]
+                    else "verified level witness" if run else "no verified run"
+                ),
+                "full_win": bool(run and run["full_win"]),
             }
         )
     return rows
@@ -232,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     if not rows:
         print("P7 local inventory unavailable")
         return 1
-    columns = ("game_id", "title", "tags", "total_levels", "completed_levels", "run_id", "score", "status")
+    columns = ("game_id", "title", "tags", "total_levels", "completed_levels", "run_id", "score", "status", "full_win")
     widths = {column: max(len(column), *(len(str(row[column])) for row in rows)) for column in columns}
     print("  ".join(column.ljust(widths[column]) for column in columns))
     for row in rows:

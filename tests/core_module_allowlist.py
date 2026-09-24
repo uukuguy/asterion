@@ -178,6 +178,7 @@ NON_CORE_MODULE_PREFIXES = (
     "asterion.capabilities.builtin",
     "asterion.capabilities.controlled_code",
     "asterion.capabilities.dci",
+    "asterion.capabilities.prime_arc_agi_3_gameplay",
     "asterion.capabilities.prime_arc_agi_3_solver",
     "asterion.capabilities.prime_bounded_autonomy_native",
     "asterion.capabilities.prime_continual_improvement_native",

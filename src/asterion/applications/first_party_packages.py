@@ -18,6 +18,7 @@ from asterion.capability_packages.sources.builtin import BuiltinCapabilityRegist
 CONTROLLED_CODE_PACKAGE = CapabilityPackageRef("controlled-code", "1.0.0")
 CONTROLLED_CODE_SOURCE_ID = "controlled-code.builtin"
 DCI_PACKAGE = CapabilityPackageRef("dci", "1.0.0")
+PRIME_ARC_AGI_3_GAMEPLAY_PACKAGE = CapabilityPackageRef("prime-arc-agi-3-gameplay", "1.0.0")
 PRIME_ARC_AGI_3_SOLVER_PACKAGE = CapabilityPackageRef("prime-arc-agi-3-solver", "1.0.0")
 PRIME_IPYTHON_CODING_NATIVE_PACKAGE = CapabilityPackageRef(
     "prime-ipython-coding-native", "1.0.0"
@@ -53,6 +54,11 @@ def builtin_capability_registrations() -> tuple[BuiltinCapabilityRegistration, .
             DCI_PACKAGE,
             package_root / "dci/payload",
             create_dci_package,
+        ),
+        BuiltinCapabilityRegistration(
+            PRIME_ARC_AGI_3_GAMEPLAY_PACKAGE,
+            package_root / "prime_arc_agi_3_gameplay/payload",
+            create_prime_arc_agi_3_gameplay_package,
         ),
         BuiltinCapabilityRegistration(
             PRIME_ARC_AGI_3_SOLVER_PACKAGE,
@@ -130,6 +136,14 @@ def create_dci_package() -> InstalledCapabilityPackage:
     return create_provider()
 
 
+def create_prime_arc_agi_3_gameplay_package() -> InstalledCapabilityPackage:
+    """Load the selected scoreless gameplay provider after source selection."""
+    from asterion.capabilities.prime_arc_agi_3_gameplay import (
+        create_prime_arc_agi_3_gameplay_package as create,
+    )
+    return create()
+
+
 def create_prime_arc_agi_3_solver_package() -> InstalledCapabilityPackage:
     """Load the selected finite P7 solving package after source selection."""
 
@@ -204,6 +218,7 @@ __all__ = (
     "CONTROLLED_CODE_PACKAGE",
     "CONTROLLED_CODE_SOURCE_ID",
     "DCI_PACKAGE",
+    "PRIME_ARC_AGI_3_GAMEPLAY_PACKAGE",
     "PRIME_ARC_AGI_3_SOLVER_PACKAGE",
     "PRIME_IPYTHON_CODING_NATIVE_PACKAGE",
     "PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE_PACKAGE",
@@ -214,6 +229,7 @@ __all__ = (
     "builtin_capability_registrations",
     "create_controlled_code_package",
     "create_dci_package",
+    "create_prime_arc_agi_3_gameplay_package",
     "create_prime_arc_agi_3_solver_package",
     "create_prime_ipython_coding_native_package",
     "create_prime_programmatic_long_context_native_package",

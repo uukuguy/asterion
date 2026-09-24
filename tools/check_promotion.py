@@ -129,6 +129,12 @@ for name in schema_paths:
     payload = json.loads(path.read_text(encoding='utf-8'))
     assert payload.get('$id', '').endswith(name.removeprefix('asterion/')), name
 expected = {
+    'capabilities/prime_arc_agi_3_gameplay/payload/capability-package.json':
+        'asterion.capability-package/v1',
+    'capabilities/prime_arc_agi_3_gameplay/payload/capabilities/arc-agi-3-gameplay.json':
+        'asterion.capability/v1',
+    'applications/prime/assemblies/prime-arc-agi-3-gameplay.json':
+        'asterion.application-assembly/v1',
     'applications/controlled_code/assemblies/controlled-code-validation.json':
         'asterion.application-assembly/v1',
     'applications/dci_agent_lite/assemblies/dci-complete-application-claude.json':

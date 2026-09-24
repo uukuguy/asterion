@@ -101,12 +101,13 @@ class TestPrimeP7NativeInstalled(unittest.TestCase):
             source = '''
 import asyncio
 import json
+import os
 import sys
 from importlib import resources
 from pathlib import Path
 
 from asterion.agents.prime.trace import validate_trace
-from asterion.applications.prime.p7.game import P7GameSelection
+from asterion.applications.prime.p7.game import P7GameSelection, resolve_game_selection
 from asterion.applications.prime.p7.ipython_host import IpythonWorkerResult
 from asterion.applications.prime.p7.operator import _resolve_p7_application, build_p7_operator_resources
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
@@ -117,6 +118,7 @@ class Engine:
     game_id = "ls20-9607627b"
     seed = 0
     def __init__(self):
+        self.target_level = int(os.environ["P7_TEST_TARGET_LEVEL"])
         self.count = 0
         self.levels = 0
         self.level_actions = 0
@@ -135,7 +137,13 @@ class Engine:
         else:
             assert action == "ACTION1" and self.state == "NOT_FINISHED"
             self.level_actions += 1
-            if self.levels == 0 and self.level_actions == 13:
+            if self.target_level == 7:
+                if self.level_actions == 13:
+                    self.levels += 1
+                    self.level_actions = 0
+                    if self.levels == 7:
+                        self.state = "WIN"
+            elif self.levels == 0 and self.level_actions == 13:
                 self.levels = 1
                 self.level_actions = 0
             elif self.levels == 1 and not self.failed_second:
@@ -151,6 +159,9 @@ class Worker:
     async def execute_cell(self, code, *, signal):
         assert code == "fixture.solve()"
         self.broker.act(tuple("ACTION1" for _ in range(13)))
+        if self.target_level == 7:
+            for _ in range(6):
+                self.broker.act(tuple("ACTION1" for _ in range(13)))
         if self.target_level == 2:
             self.broker.act(("ACTION1",))
             self.broker.act(("RESET",))
@@ -160,6 +171,14 @@ class Worker:
 
 async def main():
     root = Path.cwd()
+    catalog = root / "arc" / "environment_files" / "zx42" / "abc123"
+    catalog.mkdir(parents=True, exist_ok=True)
+    (catalog / "zx42.py").write_text("# fixture source is never imported\\n")
+    (catalog / "metadata.json").write_text(json.dumps({"game_id": "zx42-abc123", "baseline_actions": [10, 20, 30], "win_levels": 3}))
+    selected = resolve_game_selection({"ASTERION_PRIME_P7_GAME_ID": "zx42"}, root / "arc")
+    assert selected.game_id == "zx42-abc123" and selected.target_level == 3
+    witness = resolve_game_selection({"ASTERION_PRIME_P7_GAME_ID": "zx42", "ASTERION_PRIME_P7_TARGET_LEVEL": "1"}, root / "arc")
+    assert witness.target_level == 1
     target_level = int(__import__("os").environ["P7_TEST_TARGET_LEVEL"])
     trace = root / f"trace-{target_level}"; trace.mkdir()
     extension = Path(str(resources.files("asterion.applications.prime").joinpath("resources/ipython-extension.mjs"))).resolve()
@@ -174,18 +193,24 @@ async def main():
         worker=worker, engine=engine, private_trace_root=trace,
         game=P7GameSelection("ls20-9607627b", 0, target_level),
     )
+    if target_level == 7:
+        assert int(resources_.runtime_options["max_actions"]) > 500
     worker.broker = resources_.host_services["prime.arc-broker"]
     receipt = None
     try:
         application = _resolve_p7_application()
         assembly = application.assemblies[0]
         runtime = assembly.runtime_binding.factory(RuntimeFactoryContext(provider_id="prime-applications", application_id="prime.arc-agi-3-solving", application_version="1.0.0", runtime_id="asterion.prime", assembly_path=assembly.path, options=resources_.runtime_options, host_services=resources_.host_services))
-        result = await run_composed_application(assembly.plan, implementations=application.implementations, runtime=runtime, run_id="p7-installed-fixture", input_text=P7_SOLVE_PROMPT, host_services=resources_.host_services)
+        try:
+            result = await run_composed_application(assembly.plan, implementations=application.implementations, runtime=runtime, run_id="p7-installed-fixture", input_text=P7_SOLVE_PROMPT, host_services=resources_.host_services)
+        except Exception:
+            print(f"fixture progress: levels={engine.levels} state={engine.state} actions={engine.count}", file=sys.stderr)
+            raise
         broker = resources_.host_services["prime.arc-broker"]
         replay = broker.replay(Engine)
         entries = validate_trace(resources_.host_services["prime.private-trace"].runtime_recorder.entries)
         artifact = result.artifacts[0]["value"]
-        receipt = {"levels_completed": artifact["completed_level_count"], "primitive_actions": artifact["primitive_action_count"], "promotion_state": "development-only", "solver_evidence": "deterministic-double", "replay": replay.levels_completed, "resets": engine.resets, "trace_entries": len(entries)}
+        receipt = {"levels_completed": artifact["completed_level_count"], "primitive_actions": artifact["primitive_action_count"], "promotion_state": "development-only", "solver_evidence": "deterministic-double", "replay": replay.levels_completed, "resets": engine.resets, "trace_entries": len(entries), "terminal_reason": broker.seal().terminal_reason}
     finally:
         await resources_.close()
     assert receipt is not None and worker.closed is True
@@ -198,7 +223,7 @@ asyncio.run(main())
                 source.replace("__NODE__", str(Path(node).resolve())),
                 encoding="utf-8",
             )
-            for target_level in (1, 2):
+            for target_level in (1, 2, 7):
                 with self.subTest(target_level=target_level):
                     result = _run(
                         (str(python), "-I", str(script)),
@@ -214,9 +239,10 @@ asyncio.run(main())
                     self.assertEqual(receipt["levels_completed"], target_level)
                     self.assertEqual(receipt["promotion_state"], "development-only")
                     self.assertEqual(receipt["solver_evidence"], "deterministic-double")
-                    self.assertEqual(receipt["primitive_actions"], 13 if target_level == 1 else 28)
+                    self.assertEqual(receipt["primitive_actions"], 13 if target_level == 1 else 28 if target_level == 2 else 91)
                     self.assertEqual(receipt["replay"], target_level)
-                    self.assertEqual(receipt["resets"], target_level - 1)
+                    self.assertEqual(receipt["resets"], 1 if target_level == 2 else 0)
+                    self.assertEqual(receipt["terminal_reason"], "game-won" if target_level == 7 else "level-completed")
                     self.assertGreaterEqual(receipt["trace_entries"], 2)
                     self.assertTrue(receipt["worker_cleanup"])
 

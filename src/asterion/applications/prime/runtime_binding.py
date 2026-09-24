@@ -15,6 +15,10 @@ from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
     P7PrivateTraceReceiptError,
 )
+from asterion.applications.prime.p7.gameplay_trace import (
+    PrimeGameplayTrace,
+    PrimeGameplayTraceError,
+)
 from asterion.runtime.factory import (
     RuntimeFactoryBinding,
     RuntimeFactoryContext,
@@ -37,7 +41,6 @@ _HOST_CAPABILITIES = frozenset(
 )
 _RUNTIME_OPTIONS = {
     "deadline_ms": "3600000",
-    "max_actions": "500",
     "max_callbacks": "128",
     "model": "deepseek-v4-flash",
     "provider": "deepseek",
@@ -45,6 +48,17 @@ _RUNTIME_OPTIONS = {
 _ERROR = "Asterion-prime runtime configuration is invalid"
 _RECEIPT_ARTIFACT = "prime.p7-solving.receipt"
 _RECEIPT_MEDIA_TYPE = "application/vnd.asterion.prime.p7-solving-receipt+json"
+_GAMEPLAY_HOST_CAPABILITIES = frozenset(
+    {"prime.arc-broker", "prime.arc-run-evidence", "prime.ipython", "prime.launch"}
+)
+_GAMEPLAY_OPTIONS = {
+    "deadline_ms": "3600000",
+    "max_callbacks": "128",
+    "model": "deepseek-v4-flash",
+    "provider": "deepseek",
+}
+_GAMEPLAY_ARTIFACT = "prime.p7-gameplay-run.evidence"
+_GAMEPLAY_MEDIA_TYPE = "application/vnd.asterion.prime.p7-gameplay-run+json"
 
 
 def _p7_terminal(broker: ArcBroker) -> bool:
@@ -55,6 +69,15 @@ def _p7_terminal(broker: ArcBroker) -> bool:
     except Exception:
         return False
     return True
+
+
+def _p7_gameplay_terminal(broker: ArcBroker) -> bool:
+    """Keep official gameplay open while the current level requires RESET."""
+
+    try:
+        return broker.status().terminal_reason not in {"active", "reset-required"}
+    except Exception:
+        return True
 
 
 @dataclass(frozen=True, repr=False, slots=True)
@@ -237,6 +260,91 @@ class _P7SolveEventProjector:
             )
 
 
+class _P7GameplayEventProjector:
+    """Project native tool traffic into one private gameplay evidence artifact."""
+
+    __slots__ = ("_trace",)
+
+    def __init__(self, trace: PrimeGameplayTrace) -> None:
+        self._trace = trace
+
+    async def __call__(
+        self, request: RunRequest, events: AsyncIterator[RunEvent]
+    ) -> AsyncIterator[RunEvent]:
+        sequence = 0
+        async for event in events:
+            if event.type in {"run.started", "run.failed"}:
+                sequence += 1
+                yield RunEvent(
+                    request.run_id,
+                    sequence,
+                    event.type,
+                    cast(Mapping[str, object], event.to_mapping()["payload"]),
+                )
+                continue
+            if event.type == "usage.reported":
+                try:
+                    self._trace.record_usage(
+                        input_tokens=cast(int, event.payload["input_tokens"]),
+                        output_tokens=cast(int, event.payload["output_tokens"]),
+                    )
+                except (KeyError, PrimeGameplayTraceError):
+                    sequence += 1
+                    yield RunEvent(
+                        request.run_id,
+                        sequence,
+                        "run.failed",
+                        {"code": "p7_usage_invalid", "message": "P7 usage evidence is invalid."},
+                    )
+                    return
+                continue
+            if event.type != "run.completed":
+                continue
+            if event.payload != {"status": "completed"}:
+                sequence += 1
+                yield RunEvent(
+                    request.run_id,
+                    sequence,
+                    event.type,
+                    cast(Mapping[str, object], event.to_mapping()["payload"]),
+                )
+                continue
+            try:
+                evidence_sha256 = self._trace.expected_evidence_sha256(
+                    run_id=request.run_id
+                )
+            except PrimeGameplayTraceError:
+                sequence += 1
+                yield RunEvent(
+                    request.run_id,
+                    sequence,
+                    "run.failed",
+                    {"code": "p7_gameplay_unavailable", "message": "P7 gameplay evidence is unavailable."},
+                )
+                return
+            sequence += 1
+            yield RunEvent(
+                request.run_id,
+                sequence,
+                "artifact.created",
+                {
+                    "artifact": {
+                        "artifact_id": _GAMEPLAY_ARTIFACT,
+                        "kind": "p7-gameplay-run",
+                        "media_type": _GAMEPLAY_MEDIA_TYPE,
+                        "sha256": evidence_sha256.removeprefix("sha256:"),
+                    }
+                },
+            )
+            sequence += 1
+            yield RunEvent(
+                request.run_id,
+                sequence,
+                event.type,
+                cast(Mapping[str, object], event.to_mapping()["payload"]),
+            )
+
+
 def build_p7_runtime(
     context: RuntimeFactoryContext,
 ) -> AgentRuntimeClient:
@@ -260,13 +368,16 @@ def build_p7_runtime(
             or context.application_version != "1.0.0"
             or context.runtime_id != "asterion.prime"
             or set(context.host_services) != _HOST_CAPABILITIES
-            or dict(context.options) != _RUNTIME_OPTIONS
             or launch is None
             or type(ipython) is not PersistentIpythonHost
             or getattr(ipython, "_closed", True)
             or getattr(ipython, "_lost", True)
             or type(broker) is not ArcBroker
-            or broker.status() != ArcStatus(0, 0, 500, "active")
+            or dict(context.options) != {
+                **_RUNTIME_OPTIONS,
+                "max_actions": str(broker.game.action_cap),
+            }
+            or broker.status() != ArcStatus(0, 0, broker.game.action_cap, "active")
             or trace_adapter is None
             or trace is None
             or not trace_adapter.matches_runtime_broker(broker)
@@ -317,6 +428,81 @@ def build_p7_runtime(
             launch.extension_lease.close()
 
 
+def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeClient:
+    """Assemble the scoreless official gameplay route."""
+    if type(context) is not RuntimeFactoryContext:
+        raise RuntimeFactoryError(_ERROR)
+    launch_value = context.host_services.get("prime.launch")
+    launch = launch_value if type(launch_value) is PrimeLaunch else None
+    try:
+        ipython = context.host_services.get("prime.ipython")
+        broker = context.host_services.get("prime.arc-broker")
+        trace_value = context.host_services.get("prime.arc-run-evidence")
+        trace_adapter = trace_value if type(trace_value) is PrimeGameplayTrace else None
+        trace = None if trace_adapter is None else trace_adapter.runtime_recorder
+        if (
+            context.provider_id != "prime-applications"
+            or context.application_id != "prime.arc-agi-3-gameplay"
+            or context.application_version != "1.0.0"
+            or context.runtime_id != "asterion.prime"
+            or set(context.host_services) != _GAMEPLAY_HOST_CAPABILITIES
+            or launch is None
+            or type(ipython) is not PersistentIpythonHost
+            or getattr(ipython, "_closed", True)
+            or getattr(ipython, "_lost", True)
+            or type(broker) is not ArcBroker
+            or not getattr(broker.game, "is_full_game", False)
+            or dict(context.options) != {
+                **_GAMEPLAY_OPTIONS,
+                "max_actions": str(broker.game.action_cap),
+            }
+            or broker.status() != ArcStatus(0, 0, broker.game.action_cap, "active")
+            or trace_adapter is None
+            or trace is None
+            or not trace_adapter.matches_runtime_broker(broker)
+            or type(trace) is not PrimeTraceRecorder
+            or trace._seal is not None
+            or trace._trace_fd is None
+        ):
+            raise RuntimeFactoryError(_ERROR)
+        binding = ExtensionBinding(
+            extension_id=launch.extension_id,
+            path=launch.extension_path,
+            capabilities=launch.extension_capabilities,
+            inherited_fds=launch.binding_inherited_fds,
+            environment=launch.binding_environment,
+        )
+        if binding.binding_fingerprint != launch.extension_lease.binding_fingerprint:
+            raise RuntimeFactoryError(_ERROR)
+        rpc_session = build_rpc_session(
+            command=launch.approved_command,
+            cwd=launch.working_directory,
+            environment=launch.approved_environment or {},
+            deadline_seconds=launch.deadline_seconds,
+            inherited_fds=launch.extension_lease.inherited_fds,
+            compact_events=launch.compact_events,
+        )
+        session = AsterionPrimeSession(
+            rpc_session=rpc_session,
+            extension_binding=binding,
+            extension_lease=launch.extension_lease,
+            approved_command=launch.approved_command,
+            approved_environment=launch.approved_environment,
+            completion_predicate=lambda: _p7_gameplay_terminal(broker),
+        )
+        launch = None
+        return AsterionPrimeRuntimeClient(
+            session, event_projector=_P7GameplayEventProjector(trace_adapter)
+        )
+    except RuntimeFactoryError:
+        raise
+    except Exception:
+        raise RuntimeFactoryError(_ERROR) from None
+    finally:
+        if launch is not None:
+            launch.extension_lease.close()
+
+
 def build_asterion_prime_runtime(
     context: RuntimeFactoryContext,
 ) -> AgentRuntimeClient:
@@ -351,6 +537,8 @@ def build_asterion_prime_runtime(
         return build_p6_runtime(context)
     if key == ("prime.arc-agi-3-solving", "1.0.0"):
         return build_p7_runtime(context)
+    if key == ("prime.arc-agi-3-gameplay", "1.0.0"):
+        return build_p7_gameplay_runtime(context)
     raise RuntimeFactoryError(_ERROR)
 
 
@@ -359,4 +547,6 @@ __all__ = (
     "asterion_prime_runtime_binding",
     "build_asterion_prime_runtime",
     "build_p7_runtime",
+    "build_p7_gameplay_runtime",
+    "_p7_gameplay_terminal",
 )

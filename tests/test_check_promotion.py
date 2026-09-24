@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -10,6 +11,7 @@ from unittest import mock
 
 from tools.check_promotion import (
     PromotionError,
+    WHEEL_PROTOCOL_RESOURCE_SMOKE,
     _closed_prime_subprocess_environment,
     _closed_npm_subprocess_environment,
     _default_runner,
@@ -56,6 +58,42 @@ def completed(
 
 
 class PromotionCheckTests(unittest.TestCase):
+    def test_resource_smoke_accepts_standalone_gameplay_package(self) -> None:
+        from importlib import resources
+
+        statements = ast.parse(WHEEL_PROTOCOL_RESOURCE_SMOKE).body
+        expected = next(
+            ast.literal_eval(statement.value)
+            for statement in statements
+            if isinstance(statement, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "expected"
+                    for target in statement.targets)
+        )
+        root = Path(str(resources.files("asterion")))
+        paths = tuple((root / "capabilities/prime_arc_agi_3_gameplay/payload").rglob("*.json"))
+        self.assertEqual(len(paths), 2)
+        for path in paths:
+            with self.subTest(path=path.name):
+                relative = str(path.relative_to(root))
+                self.assertIn(relative, expected)
+                self.assertEqual(json.loads(path.read_text())["protocol"], expected[relative])
+
+    def test_resource_smoke_declares_gameplay_application_assembly(self) -> None:
+        statements = ast.parse(WHEEL_PROTOCOL_RESOURCE_SMOKE).body
+        expected = next(
+            ast.literal_eval(statement.value)
+            for statement in statements
+            if isinstance(statement, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "expected"
+                for target in statement.targets
+            )
+        )
+        self.assertEqual(
+            expected["applications/prime/assemblies/prime-arc-agi-3-gameplay.json"],
+            "asterion.application-assembly/v1",
+        )
+
     def test_main_uses_only_the_declared_node_executable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary = Path(temporary_directory)

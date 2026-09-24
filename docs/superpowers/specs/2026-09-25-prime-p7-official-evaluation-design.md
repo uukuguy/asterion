@@ -76,13 +76,20 @@ the current level. Completed levels remain monotonic. Normal game completion
 requires SDK `WIN`, not merely a target-level counter.
 
 Each game uses the P7 solver through an injected, narrow broker interface.
+Official gameplay uses a distinct, scoreless capability and assembly sharing
+the existing Pi and broker loop. The local solving capability remains closed
+around its baseline-derived `partial_game_score`; official games may have no
+baseline and must never fabricate one. A small broker game contract carries
+identity, `win_levels`, target, and action cap after the SDK's initial frame.
 The framework runner receives resolved implementations and host services;
 it never opens a scorecard, discovers games, selects a model, or stores
 credentials. The operator owns game scheduling, the official SDK adapter,
 credential injection, finite controls, and private evidence.
 
-The session always attempts to close the opened scorecard once on orderly
-completion or handled failure. If scorecard closure cannot be confirmed, it
+Normal closure requires every bound official game to have been attempted.
+Handled failure uses a separate abort closure with the missing game IDs; its
+result cannot be presented as a complete official submission. If scorecard
+closure cannot be confirmed, it
 records `recovery-required` with the private card ID and last known game/guid;
 it never creates a replacement card automatically. An interrupted process
 cannot reconstruct a local environment from an Asterion receipt. Official

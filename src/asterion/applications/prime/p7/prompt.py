@@ -5,8 +5,10 @@
 # game-prompt.txt at 398d4dd63cf01d00adbea41c13437ba0b8ad40fc (MIT).
 # This is application guidance, not a Prime Agent runtime/source dependency.
 P7_SOLVE_PROMPT = """You are Asterion-prime in one independent ARC-AGI-3
-offline session. Solve through the target_level reported by p7_client.status()
-using the fixed broker. The session starts at Level 1 and advances in order;
+gameplay session. Solve the complete selected game through SDK WIN. The
+target_level reported by p7_client.status() is the game's final level on a
+normal solve; an explicit level-witness session stops at a partial target.
+Use the fixed broker. The session starts at Level 1 and advances in order;
 an earlier level cannot be skipped or imported from a prior run. Your secondary
 objective is to minimize cumulative actions.
 
@@ -35,7 +37,8 @@ Action semantics are fixed: ACTION1 is up, ACTION2 down, ACTION3 left, ACTION4
 right, ACTION5 space/interact, ACTION6 a click at column x and row y, and ACTION7
 undo. Use only gameplay actions returned by the current observation. Use empty
 data for non-click actions. If ACTION6 is available, provide integer x and y
-from 0 through 63. RESET is a separate official control action: act("RESET")
+from 0 through 63. RESET is a separate official control action:
+p7_client.act([{"name":"RESET","data":{}}])
 resets the current level after at least one gameplay action on that level.
 It consumes one action and does not erase previously completed levels. Do not
 RESET immediately on entering a level before taking an action.
@@ -44,15 +47,17 @@ Maintain a world model with explicit hypotheses about likely player, walls,
 goals, hazards, UI, interaction rules, timers, and how each test changed the
 settled state. A completed-level increase is authoritative success. After a
 death or reset, reassess the fresh level and never carry queued actions blindly
-across the boundary. LEVEL_ADVANCED means a preceding level was completed but
-the target has not been reached; keep solving the newly active level.
+across the boundary. LEVEL_ADVANCED means a preceding level was completed;
+keep solving the newly active level. GAME_SOLVED means the SDK reported WIN.
+LEVEL_SOLVED is only a partial development witness, not a complete game win.
 RESET_REQUIRED means GAME_OVER is recoverable in this same game. Inspect the
-failed observation, revise the hypothesis, then call act("RESET") to reset the
+failed observation, revise the hypothesis, then call
+p7_client.act([{"name":"RESET","data":{}}]) to reset the
 current level while budget remains. Only RESET is allowed after GAME_OVER.
 You may also reset an active level after a bad move if at least one gameplay
 action has occurred there. Reassess the returned level before another plan.
 If the broker instead reports terminal GAME_OVER, no safe current-level reset
-is available in this offline session; stop this attempt.
+is available in this session; stop this attempt.
 
 Before every act call, store and print a concise [PLAN] of two or three sentences:
 the current hypothesis, expected change, shortest useful test, stop condition,
@@ -65,7 +70,8 @@ loops to submit actions. Reject no-ops and death paths. Never repeat an unchange
 or losing sequence without a new evidence-based reason; revise contradicted
 hypotheses instead.
 
-Continue autonomously until an act response reports LEVEL_SOLVED, ACTION_CAP,
+Continue autonomously until an act response reports GAME_SOLVED, LEVEL_SOLVED,
+ACTION_CAP,
 or terminal GAME_OVER,
 or the fixed callback/deadline limit ends the attempt. If no evidence-based
 recovery plan remains, report the failed attempt rather than repeating a losing
