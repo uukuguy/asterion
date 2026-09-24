@@ -74,9 +74,11 @@ def list_verified_prefixes(
 
 def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_level: int | None) -> VerifiedPrefix | None:
     try:
-        summary_path = run / "summary.json"
-        seal_path = run / "trace" / "prime-trace.seal.json"
-        if any(path.is_symlink() or not path.is_file() for path in (summary_path, seal_path)):
+        summary_path = _private_path(run, "summary.json")
+        trace_root = _private_path(run, "trace")
+        trace_path = _private_path(run, "trace", "prime-trace.jsonl")
+        seal_path = _private_path(run, "trace", "prime-trace.seal.json")
+        if not all(path.is_file() for path in (summary_path, trace_path, seal_path)):
             return None
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         if type(summary) is not dict or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1":
@@ -86,7 +88,7 @@ def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_l
         run_id = summary.get("run_id")
         if type(run_id) is not str or run_id != run.name:
             return None
-        entries = read_trace_entries(run / "trace")
+        entries = read_trace_entries(trace_root)
         seal = json.loads(seal_path.read_text(encoding="utf-8"))
         if (
             type(seal) is not dict or set(seal) != {"entry_count", "final_sha256", "sealed_at"}
@@ -157,9 +159,17 @@ def _transitions(entries: tuple[object, ...]) -> tuple[ArcTransition, ...]:
 
 
 def _recording_identity(run: Path, transitions: tuple[ArcTransition, ...]) -> tuple[str, int] | None:
-    recordings = tuple((run / "recordings").glob("*/*.jsonl"))
+    recordings_root = _private_path(run, "recordings")
+    sessions = tuple(recordings_root.iterdir())
+    if len(sessions) != 1:
+        return None
+    session = _private_path(run, "recordings", sessions[0].name)
+    if not session.is_dir():
+        return None
+    recordings = tuple(session.glob("*.jsonl"))
     if len(recordings) != 1 or recordings[0].is_symlink() or not recordings[0].is_file():
         return None
+    _private_path(run, "recordings", session.name, recordings[0].name)
     rows = [json.loads(row) for row in recordings[0].read_text(encoding="utf-8").splitlines()]
     data = [row.get("data") for row in rows if type(row) is dict and type(row.get("data")) is dict]
     if not data or type(data[0].get("game_id")) is not str or type(data[0].get("win_levels")) is not int:
@@ -181,6 +191,24 @@ def _recording_identity(run: Path, transitions: tuple[ArcTransition, ...]) -> tu
     if tuple((item.action, item.data) for item in transitions) != tuple(actions):
         return None
     return game_id, win_levels
+
+
+def _private_path(run: Path, *parts: str) -> Path:
+    """Resolve one evidence component without traversing symlinks or escaping run."""
+
+    root = run.resolve(strict=True)
+    if run.is_symlink() or not root.is_dir():
+        raise ValueError
+    path = run
+    for part in parts:
+        if not part or Path(part).name != part:
+            raise ValueError
+        path = path / part
+        if path.is_symlink():
+            raise ValueError
+    if not path.resolve(strict=True).is_relative_to(root):
+        raise ValueError
+    return path
 
 
 def _truncate(transitions: tuple[ArcTransition, ...], level: int) -> tuple[ArcTransition, ...]:

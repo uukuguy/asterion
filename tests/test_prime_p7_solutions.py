@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -89,6 +90,36 @@ class TestP7SavedSolutions(unittest.TestCase):
         self.assertEqual(full.levels_completed, 2)
         self.assertEqual([item.action for item in full.transitions], ["ACTION6", "ACTION1", "ACTION1", "RESET", "ACTION1"])
         self.assertEqual((truncated.levels_completed, len(truncated.transitions)), (1, 2))
+
+    def test_rejects_trace_or_recording_directory_symlink_escape(self) -> None:
+        from asterion.applications.prime.p7.solutions import load_best_prefix
+
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
+            root = Path(directory)
+            arc_root = self._arc_root(root)
+            runs_root = root / "runs"
+            run = runs_root / "p7-old"
+            self._write_run(run)
+            trace = run / "trace"
+            moved_trace = Path(outside) / "trace"
+            shutil.move(trace, moved_trace)
+            trace.symlink_to(moved_trace, target_is_directory=True)
+            with patch(
+                "asterion.applications.prime.p7.solutions._fresh_engine",
+                side_effect=lambda _root, _game, _recordings: _Engine(),
+            ):
+                self.assertIsNone(load_best_prefix(arc_root, runs_root, "ls20-9607627b", 0))
+            trace.unlink()
+            shutil.move(moved_trace, trace)
+            session = run / "recordings" / "session"
+            moved_session = Path(outside) / "session"
+            shutil.move(session, moved_session)
+            session.symlink_to(moved_session, target_is_directory=True)
+            with patch(
+                "asterion.applications.prime.p7.solutions._fresh_engine",
+                side_effect=lambda _root, _game, _recordings: _Engine(),
+            ):
+                self.assertIsNone(load_best_prefix(arc_root, runs_root, "ls20-9607627b", 0))
 
     @staticmethod
     def _arc_root(root: Path) -> Path:
