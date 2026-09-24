@@ -78,6 +78,22 @@ class PromotionCheckTests(unittest.TestCase):
                 self.assertIn(relative, expected)
                 self.assertEqual(json.loads(path.read_text())["protocol"], expected[relative])
 
+    def test_resource_smoke_declares_gameplay_application_assembly(self) -> None:
+        statements = ast.parse(WHEEL_PROTOCOL_RESOURCE_SMOKE).body
+        expected = next(
+            ast.literal_eval(statement.value)
+            for statement in statements
+            if isinstance(statement, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "expected"
+                for target in statement.targets
+            )
+        )
+        self.assertEqual(
+            expected["applications/prime/assemblies/prime-arc-agi-3-gameplay.json"],
+            "asterion.application-assembly/v1",
+        )
+
     def test_main_uses_only_the_declared_node_executable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary = Path(temporary_directory)
