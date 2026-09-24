@@ -45,6 +45,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p7-sync-games
 .PHONY: asterion-prime-p7-official-preflight
 .PHONY: asterion-prime-p7-official-submit
+.PHONY: asterion-prime-p7-official-recover
 .PHONY: asterion-prime-p7-official-live-eval
 
 # Operator-owned values for the Prime presets. The P7 research assets live
@@ -67,6 +68,8 @@ ASTERION_PRIME_P6_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-live
 # tu93-0768757b
 GAME ?= tu93
 ASTERION_PRIME_P7_GAME_ID := $(GAME)
+RUN ?=
+export ASTERION_PRIME_P7_RECOVERY_RUN := $(RUN)
 ifneq ($(filter asterion-prime-p7-official-submit,$(MAKECMDGOALS)),)
 ifneq ($(origin GAME),command line)
 $(error asterion-prime-p7-official-submit requires GAME=<alias-or-all>)
@@ -106,6 +109,7 @@ help:
 	@echo "Asterion Prime sync official public games without a scorecard: asterion-prime-p7-sync-games"
 	@echo "Asterion Prime official ARC-AGI-3 catalog readiness: asterion-prime-p7-official-preflight"
 	@echo "Asterion Prime submit saved verified actions: asterion-prime-p7-official-submit GAME=<alias-or-all>"
+	@echo "Asterion Prime read-only closed-card recovery: asterion-prime-p7-official-recover RUN=<run-id>"
 	@echo "Asterion Prime full-catalog model evaluation: asterion-prime-p7-official-live-eval"
 	@echo "Asterion Prime deterministic diagnostics: asterion-prime-p3-witness p4-witness p5-witness p6-witness"
 	@echo "Cost boundary: full execution requires separate authorization"
@@ -285,6 +289,13 @@ asterion-prime-p7-official-preflight asterion-prime-p7-official-submit asterion-
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		case "$@" in asterion-prime-p7-official-preflight) ASTERION_PRIME_P7_OFFICIAL_MODE=preflight ;; asterion-prime-p7-official-submit) ASTERION_PRIME_P7_OFFICIAL_MODE=saved-submit ;; *) ASTERION_PRIME_P7_OFFICIAL_MODE=live-eval ;; esac; export ASTERION_PRIME_P7_OFFICIAL_MODE; ORBENV=ASTERION_PRIME_P7_OFFICIAL_MODE; if [ "$$ASTERION_PRIME_P7_OFFICIAL_MODE" = saved-submit ]; then ORBENV="$$ORBENV:ASTERION_PRIME_P7_GAME_ID"; fi; export ORBENV; \
 		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_ARC_ROOT="$$3"; export ASTERION_PRIME_P7_OFFICIAL_MODE; if [ "$$ASTERION_PRIME_P7_OFFICIAL_MODE" = live-eval ]; then export ASTERION_PRIME_PI_ENTRY="$$4"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; fi; exec /root/.local/bin/uv run --isolated --with "$$1" --with "$$3/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$3/wheels/arcengine-0.9.3-py3-none-any.whl" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p7.official_operator'\'' "$@" "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_ARC_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)"'
+
+asterion-prime-p7-official-recover:
+	@exec /bin/sh -ec 'case "$$ASTERION_PRIME_P7_RECOVERY_RUN" in ""|*[!A-Za-z0-9_-]*) printf '\''[asterion-prime-p7-official-recover] RUN must be a run ID\n'\'' >&2; exit 2 ;; esac; \
+		build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		$(UV_BIN) run --isolated --with "$$1" python -I -m asterion.applications.prime.p7.official_recovery "$(abspath $(ASTERION_PRIME_OPERATOR_ROOT))/.asterion-private/prime-p7-official/$$ASTERION_PRIME_P7_RECOVERY_RUN/official-recovery.json"'
 
 # Diagnostic sibling of ``asterion-prime-p2-run``: identical command line,
 # without the ``@`` prefix on the orb invocation, so Orb / python stderr

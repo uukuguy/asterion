@@ -147,6 +147,20 @@ class TestPrimeMakePresets(unittest.TestCase):
         )
         self.assertIn("saved-submit", selected.stdout)
 
+    def test_official_recovery_uses_operator_root(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        operator_root = root / "operator-fixture"
+        completed = subprocess.run(
+            ["make", "--no-print-directory", "-n", "asterion-prime-p7-official-recover",
+             "RUN=run-1", f"ASTERION_PRIME_OPERATOR_ROOT={operator_root}"],
+            cwd=root, text=True, capture_output=True, check=True,
+        )
+        self.assertIn(
+            f"{operator_root}/.asterion-private/prime-p7-official/"
+            "$ASTERION_PRIME_P7_RECOVERY_RUN/official-recovery.json",
+            completed.stdout,
+        )
+
     def test_p7_invalid_witness_level_stops_before_wheel_build(self) -> None:
         root = Path(__file__).resolve().parents[1]
         completed = subprocess.run(
