@@ -28,6 +28,34 @@ def session():
 
 
 class TestOfficialResult(unittest.TestCase):
+    def test_selected_card_accepts_absent_or_empty_skipped_rows(self):
+        current = session()
+        current.selected_game_ids = ("aa-v1",)
+        current.unattempted_game_ids = ()
+        current.guids = {"aa-v1": "guid-aa-v1"}
+        current.closure_result.environments[0].runs[0].guid = "guid-aa-v1"
+        current.closure_result.environments = [current.closure_result.environments[0],
+                                               NS(id="bb-v2", runs=[])]
+        receipt = validate_closed_scorecard(current)
+        self.assertEqual(receipt.catalog_count, 2)
+        self.assertEqual(receipt.selected_count, 1)
+        self.assertEqual(receipt.played_runs, 1)
+        self.assertEqual(receipt.skipped_count, 1)
+        self.assertEqual(receipt.games_attempted, 1)
+
+        current.closure_result.environments = [current.closure_result.environments[0]]
+        receipt = validate_closed_scorecard(current)
+        self.assertEqual(receipt.skipped_count, 1)
+
+    def test_selected_card_rejects_extra_played_row(self):
+        current = session()
+        current.selected_game_ids = ("aa-v1",)
+        current.unattempted_game_ids = ()
+        current.guids = {"aa-v1": "guid-aa-v1"}
+        current.closure_result.environments[0].runs[0].guid = "guid-aa-v1"
+        with self.assertRaisesRegex(OfficialError, "official result unverified"):
+            validate_closed_scorecard(current)
+
     def test_closed_card_preserves_honest_unsolved_score_and_redacts(self):
         current = session()
         receipt = validate_closed_scorecard(current)

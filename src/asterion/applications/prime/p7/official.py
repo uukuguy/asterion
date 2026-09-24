@@ -112,7 +112,9 @@ def _catalog(sdk: Any) -> OfficialPreflight:
 
 
 def prepare_session(*, api_key: str, evidence_root: Path, model_host_ready: bool,
-                    sdk_factory: Callable[..., Any] | None = None) -> CompetitionSession:
+                    sdk_factory: Callable[..., Any] | None = None,
+                    selected_game_ids: tuple[str, ...] | list[str] | None = None
+                    ) -> CompetitionSession:
     """Discover and seal the official catalog, without opening a scorecard.
 
     The private scratch directory probes evidence writability and provides an
@@ -141,7 +143,8 @@ def prepare_session(*, api_key: str, evidence_root: Path, model_host_ready: bool
         )
         _check_sdk(sdk)
         readiness = _catalog(sdk)
-        return CompetitionSession(sdk, readiness, scratch)
+        return CompetitionSession(sdk, readiness, scratch,
+                                  selected_game_ids=selected_game_ids)
     except Exception:
         _dispose_sdk(sdk)
         if scratch is not None:
@@ -169,10 +172,23 @@ def _dispose_sdk(sdk: Any) -> None:
 class CompetitionSession:
     """One catalog, one create attempt, one make per exact game, one close attempt."""
 
-    def __init__(self, sdk: Any, readiness: OfficialPreflight, scratch: TemporaryDirectory) -> None:
+    def __init__(self, sdk: Any, readiness: OfficialPreflight, scratch: TemporaryDirectory,
+                 *, selected_game_ids: tuple[str, ...] | list[str] | None = None) -> None:
         self._sdk = sdk
         self._preflight = readiness
         self._scratch = scratch
+        catalog_ids = readiness.game_ids
+        if selected_game_ids is None:
+            selected = catalog_ids
+        else:
+            if (type(selected_game_ids) not in (tuple, list)
+                    or not selected_game_ids
+                    or any(type(game_id) is not str for game_id in selected_game_ids)
+                    or len(set(selected_game_ids)) != len(selected_game_ids)
+                    or not set(selected_game_ids).issubset(catalog_ids)):
+                raise ValueError
+            selected = tuple(sorted(selected_game_ids))
+        self._selected_game_ids = tuple(selected)
         self.card_id: str | None = None
         self.closure_result: Any = None
         self.abort_result: Any = None
@@ -193,13 +209,22 @@ class CompetitionSession:
         return self._preflight
 
     @property
+    def selected_game_ids(self) -> tuple[str, ...]:
+        return self._selected_game_ids
+
+    @property
+    def catalog_unselected_game_ids(self) -> tuple[str, ...]:
+        return tuple(game_id for game_id in self.preflight.game_ids
+                     if game_id not in self._selected_game_ids)
+
+    @property
     def aborted(self) -> bool:
         return self._aborted
 
     @property
     def unattempted_game_ids(self) -> tuple[str, ...]:
         """Exact missing IDs, retained after abort for private recovery evidence."""
-        return tuple(game_id for game_id in self.preflight.game_ids if game_id not in self._made)
+        return tuple(game_id for game_id in self._selected_game_ids if game_id not in self._made)
 
     @property
     def normal_close_confirmed(self) -> bool:
@@ -235,7 +260,7 @@ class CompetitionSession:
     def make(self, game_id: str) -> CompetitionEngine:
         try:
             self._require_open()
-            if game_id not in self.preflight.game_ids or game_id in self._made:
+            if game_id not in self._selected_game_ids or game_id in self._made:
                 raise ValueError
             self._made.add(game_id)
             environment = self._sdk.make(game_id, scorecard_id=self.card_id,
@@ -247,6 +272,11 @@ class CompetitionSession:
             self._guids[game_id] = engine.guid
             return engine
         except Exception:
+            if game_id in self._made:
+                # The remote make may have created a run even when its return
+                # value was lost or failed identity validation.  It cannot be
+                # retried safely and must remain recovery-only.
+                self.recovery_required = True
             raise OfficialError("official game unavailable") from None
 
     def close(self) -> Any:

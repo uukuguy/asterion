@@ -183,6 +183,36 @@ class TestOfficialAdapter(unittest.TestCase):
         self.assertEqual(self.sdk.calls, ["catalog", "open"])
         session.abort_close()
 
+    def test_selected_session_makes_only_selected_games(self):
+        session = self.prepare(selected_game_ids=("ls20-9607627b",))
+        self.assertEqual(session.selected_game_ids, ("ls20-9607627b",))
+        session.open()
+        session.make("ls20-9607627b")
+        with self.assertRaises(official.OfficialError):
+            session.make("tu93-0768757b")
+        session.close()
+        self.assertEqual(session.unattempted_game_ids, ())
+        self.assertEqual(session.catalog_unselected_game_ids, ("tu93-0768757b",))
+
+    def test_selected_ids_must_be_nonempty_exact_and_unique(self):
+        for selected in ((), ("unknown-12345678",), ("ls20-9607627b", "ls20-9607627b")):
+            with self.subTest(selected=selected), self.assertRaises(official.OfficialError):
+                self.prepare(selected_game_ids=selected)
+
+    def test_uncertain_make_is_not_retryable_or_receipt_eligible(self):
+        session = self.prepare(selected_game_ids=("ls20-9607627b",))
+        session.open()
+        def uncertain(*args, **kwargs):
+            raise RuntimeError("transport lost after remote make")
+        self.sdk.make = uncertain
+        with self.assertRaises(official.OfficialError):
+            session.make("ls20-9607627b")
+        self.assertTrue(session.recovery_required)
+        self.assertEqual(session.unattempted_game_ids, ())
+        with self.assertRaises(official.OfficialError):
+            session.make("ls20-9607627b")
+        session.abort_close()
+
     def test_close_failure_is_one_attempt_and_safe(self):
         session = self.prepare()
         session.open()
