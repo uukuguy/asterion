@@ -152,6 +152,32 @@ class TestOfficialSavedReplay(unittest.TestCase):
 
         self.assertEqual(engine.actions, [])
 
+    def test_rejects_ordinary_action_after_game_over_even_if_advertised(self) -> None:
+        from asterion.applications.prime.p7.solutions import VerifiedPrefix
+
+        states = (
+            {"available_actions": ["ACTION1"], "frame": [[[0]]], "levels_completed": 0,
+             "state": "NOT_FINISHED", "win_levels": 2},
+            {"available_actions": ["ACTION1"], "frame": [[[1]]], "levels_completed": 0,
+             "state": "GAME_OVER", "win_levels": 2},
+            {"available_actions": ["ACTION1"], "frame": [[[2]]], "levels_completed": 1,
+             "state": "NOT_FINISHED", "win_levels": 2},
+        )
+        prefix = VerifiedPrefix(
+            game_id="ls20-9607627b", seed=0, win_levels=2, levels_completed=1,
+            transitions=(
+                ArcTransition(1, "ACTION1", _digest(states[0]), _digest(states[1]), 0),
+                ArcTransition(2, "ACTION1", _digest(states[1]), _digest(states[2]), 1),
+            ),
+            source_run_id="private-source-run", replay_sha256="sha256:" + "a" * 64,
+        )
+        engine = _Engine(observations=states)
+
+        with self.assertRaisesRegex(OfficialReplayError, "official saved replay unavailable"):
+            execute_saved_prefix(engine, prefix)
+
+        self.assertEqual(engine.actions, [("ACTION1", None)])
+
 
 if __name__ == "__main__":
     unittest.main()
