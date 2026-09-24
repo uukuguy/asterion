@@ -9,9 +9,10 @@ import os
 from pathlib import Path
 import re
 
-from .official import CompetitionSession, OFFICIAL_BASE_URL, OfficialError
+from .official import CompetitionSession, OfficialError
 
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}", re.ASCII)
+_PUBLIC_SCORECARD_BASE_URL = "https://arcprize.org"
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +38,7 @@ class OfficialReceipt:
 
     @property
     def scorecard_url(self) -> str:
-        return f"{OFFICIAL_BASE_URL}/scorecards/{self.card_id}"
+        return f"{_PUBLIC_SCORECARD_BASE_URL}/scorecards/{self.card_id}"
 
     @property
     def games_completed(self) -> int:
@@ -91,6 +92,8 @@ def validate_closed_scorecard(session: CompetitionSession) -> OfficialReceipt:
     SDK EnvironmentScoreList holds one run per make. A normal baseline-backed
     EnvironmentScore may omit its optional id; the list id and run guid bind it.
     NOT_PLAYED and NOT_FINISHED are honest unsolved states on a closed card.
+    The official SDK may add a zero-action NOT_FINISHED run when closing an
+    unselected catalog game; it is a skipped placeholder, not a played game.
     """
     try:
         if (session.normal_close_confirmed is not True or session.aborted
@@ -128,7 +131,23 @@ def validate_closed_scorecard(session: CompetitionSession) -> OfficialReceipt:
                     raise ValueError
                 results[game_id] = None
                 continue
-            if game_id not in selected or len(runs) != 1:
+            if game_id not in selected:
+                if len(runs) != 1:
+                    raise ValueError
+                run = runs[0]
+                state = getattr(run.state, "name", run.state)
+                if (getattr(run, "id", None) not in (None, game_id)
+                        or type(run.guid) is not str or not run.guid
+                        or state != "NOT_FINISHED"
+                        or type(run.completed) is not bool or run.completed
+                        or _number(run.score) != 0.0
+                        or _count(run.levels_completed) != 0
+                        or _count(run.actions) != 0
+                        or _count(run.resets) != 0):
+                    raise ValueError
+                results[game_id] = None
+                continue
+            if len(runs) != 1:
                 raise ValueError
             run = runs[0]
             if (getattr(run, "id", None) not in (None, game_id)

@@ -64,7 +64,7 @@ class TestOfficialResult(unittest.TestCase):
         self.assertEqual(receipt.games_completed, 1)
         self.assertEqual(value["mode"], "official")
         self.assertEqual(receipt.scorecard_url,
-                         "https://three.arcprize.org/scorecards/card-123")
+                         "https://arcprize.org/scorecards/card-123")
         self.assertNotIn("SECRET-SENTINEL", json.dumps(value))
         self.assertNotIn("guid-", json.dumps(value))
         current.closure_result.score = 0.0
