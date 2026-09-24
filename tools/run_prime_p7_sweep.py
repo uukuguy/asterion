@@ -301,8 +301,10 @@ class SweepScheduler:
             usage = read_run_usage(run)
             self._input_tokens += usage[0]
             self._output_tokens += usage[1]
-            if usage[2] or usage[3]:
-                self._stop_reason = "usage-missing-after-model-activity" if usage[2] else "usage-trace-integrity-error"
+            if usage[3]:
+                self._stop_reason = "usage-trace-integrity-error"
+            elif usage[2]:
+                self._stop_reason = "usage-missing-after-model-activity"
             if len(new_runs) == 1 and self._stop_reason == "completed":
                 summary = _read_json(run / "summary.json")
                 try:
@@ -324,7 +326,9 @@ class SweepScheduler:
         games = self._selected_games()
         if not games:
             return SweepResult(0, (), (), (), 0, 0, "no-games", ())
-        active = list(games)
+        # A resumed sweep must finish untouched first levels before advancing
+        # a previously verified game to its second level.
+        active = sorted(games, key=lambda game_id: (self._next_level(game_id), game_id))
         blocked: list[str] = []
         completed: list[str] = []
         deferred: list[str] = []

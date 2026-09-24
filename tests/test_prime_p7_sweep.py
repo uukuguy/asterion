@@ -37,6 +37,22 @@ class TestPrimeP7Sweep(unittest.TestCase):
         self.assertEqual(attempts, [("a-1", 1), ("b-2", 1)])
         self.assertEqual(result.attempted, 2)
 
+    def test_resume_attempts_first_levels_before_saved_second_level(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(
+                arc_root=root / "arc", runs_root=root / "runs", games=("a-1", "b-2"), max_attempts=2,
+            ))
+            attempts: list[tuple[str, int]] = []
+            scheduler._next_level = lambda game_id: 2 if game_id == "a-1" else 1  # type: ignore[method-assign]
+            scheduler._is_complete = lambda _game_id, _level: False  # type: ignore[method-assign]
+            scheduler._attempt = lambda game_id, level, _timeout: attempts.append((game_id, level)) or 1  # type: ignore[method-assign]
+            scheduler._attempt_result = lambda _game_id, _level: False  # type: ignore[method-assign]
+            scheduler.run()
+        self.assertEqual(attempts, [("b-2", 1), ("a-1", 2)])
+
     def test_failed_game_is_blocked_until_the_sweep_ends(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
 
