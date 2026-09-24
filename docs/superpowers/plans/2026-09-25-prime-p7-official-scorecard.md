@@ -12,7 +12,7 @@
 
 - The official scorecard path is a distinct application mode and does not reinterpret historical OFFLINE receipts.
 - `get_environments()` must bind the full official game set before opening the card; all returned games are attempted under finite controls.
-- One Competition card, one `make` per game, one initial `reset`, then the same remote `guid` for gameplay and level resets.
+- One Competition card and one `make` per game. The installed SDK performs the initial remote `reset` inside `make`; read `observation_space` afterward, then use the same remote `guid` for gameplay and level resets.
 - No fresh-engine replay or second `make` in Competition mode.
 - Official score and URL are exposed only from a validated closed scorecard response.
 - The API key and raw frames/prompts/actions remain private.
@@ -28,7 +28,7 @@
 
 - [ ] Add fake SDK tests asserting that preflight does not call `create_scorecard`, `make`, or model; malformed/empty/duplicate game lists fail closed. Run red.
 - [ ] Implement read-only preflight with safe public status and private exact IDs; run focused tests green.
-- [ ] Add fake SDK tests for one card, one `make` per game, first reset, same instance, `ACTION6(x,y)`, current-level reset, and close exactly once. Run red.
+- [ ] Add fake SDK tests for one card, one `make` per game, exactly one SDK-performed initial reset, no second operator reset, same instance, `ACTION6(x,y)`, current-level reset, and close exactly once. Run red.
 - [ ] Implement `CompetitionSession` and a narrow remote adapter satisfying the broker action interface; run tests and commit.
 
 ### Task 2: Solver integration and official evidence

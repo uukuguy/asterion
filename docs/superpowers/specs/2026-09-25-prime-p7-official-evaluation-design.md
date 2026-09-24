@@ -66,8 +66,11 @@ authority. No paid solve runs as part of verification.
 
 The application owns a Competition session. After complete preflight, it
 creates exactly one scorecard, then calls `make(game_id, scorecard_id=card_id)`
-at most once for each official game. The first `reset()` starts that game and
-captures its server `guid`; subsequent gameplay actions and `ACTION6(x,y)`
+at most once for each official game. The installed SDK's remote wrapper calls
+`reset()` during `make` construction; the operator reads its
+`observation_space` and must not issue a second initial reset. That first
+remote reset starts the game and captures its server `guid`; subsequent
+gameplay actions and `ACTION6(x,y)`
 use the same instance. After a recoverable `GAME_OVER`, `RESET` restarts only
 the current level. Completed levels remain monotonic. Normal game completion
 requires SDK `WIN`, not merely a target-level counter.
@@ -103,6 +106,11 @@ operator checks its card ID, returned game IDs, completion fields, and final
 closed status before exposing the URL. Mismatch, missing fields, or a network
 failure leaves an explicit unverified result. Official scorecard URL generation
 never derives from a local receipt alone.
+
+The SDK allows `OPERATION_MODE=COMPETITION` in the process environment to
+override a constructor request for OFFLINE. P7 must verify the effective mode
+before each engine's first action and never let an inherited environment value
+silently switch local evidence into an online scorecard.
 
 ## Verification and delivery boundary
 
