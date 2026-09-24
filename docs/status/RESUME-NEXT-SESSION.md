@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-24 19:38 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-24 19:42 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
@@ -14,6 +14,7 @@
 - 定向测试 51 项、Ruff lint、docs-check 通过；证据查看器现拒绝录制题目换标及 broker 回放摘要篡改。`make promotion-check` 已通过：25 条隔离发行命令，模型操作 0。另一个重复的 `make test` 已主动停止，以免重复消耗；它不能记为通过。
 - `e858b084` 已把 Makefile 默认题设为 tu93/seed 0，并从仓库旁定位 ARC 题库。旧 shell 环境选题值不会覆盖此 preset；显式 Make 参数仍可复现旧题。Orb 无模型检查确认默认身份和题库文件可见；Make preset 3 项测试、lint、docs-check 通过。
 - 最新两次 P7 私有摘要 `p7-live-20260924094143`、`p7-live-20260924112844` 均是 `ApplicationProviderError`，动作数、IPython 单元数均为 0，没有能力收据；公开 provider 已包含 7 个应用，但 P7 入口只注入 1 个能力包。将 P7 入口改用只含 P7 的 provider 后，安装 wheel 在 Orb 中无模型组合通过；P7 相关定向测试 41 项通过，`make promotion-check` 25 条隔离命令通过且模型操作 0。
+- `de619f03` 已提交这项修复及回归测试；真实付费求解未重跑。
 
 ## 边界与下一动作
 
