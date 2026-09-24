@@ -102,8 +102,10 @@ safe identities, status, aggregate counts, scores, and URL. Existing local
 receipt schemas and past run directories are not rewritten.
 
 The final scorecard response is authoritative for the official score. The
-operator checks its card ID, returned game IDs, completion fields, and final
-closed status before exposing the URL. Mismatch, missing fields, or a network
+installed `EnvironmentScorecard` has no separate `closed` field; a successful
+`close_scorecard(card_id)` call with a matching returned `card_id` is closure
+evidence. The operator also checks returned game IDs and completion fields
+before exposing the URL. Mismatch, missing fields, or a network
 failure leaves an explicit unverified result. Official scorecard URL generation
 never derives from a local receipt alone.
 
