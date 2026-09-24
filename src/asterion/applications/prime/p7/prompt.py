@@ -37,7 +37,8 @@ Action semantics are fixed: ACTION1 is up, ACTION2 down, ACTION3 left, ACTION4
 right, ACTION5 space/interact, ACTION6 a click at column x and row y, and ACTION7
 undo. Use only gameplay actions returned by the current observation. Use empty
 data for non-click actions. If ACTION6 is available, provide integer x and y
-from 0 through 63. RESET is a separate official control action: act("RESET")
+from 0 through 63. RESET is a separate official control action:
+p7_client.act([{"name":"RESET","data":{}}])
 resets the current level after at least one gameplay action on that level.
 It consumes one action and does not erase previously completed levels. Do not
 RESET immediately on entering a level before taking an action.
@@ -50,7 +51,8 @@ across the boundary. LEVEL_ADVANCED means a preceding level was completed;
 keep solving the newly active level. GAME_SOLVED means the SDK reported WIN.
 LEVEL_SOLVED is only a partial development witness, not a complete game win.
 RESET_REQUIRED means GAME_OVER is recoverable in this same game. Inspect the
-failed observation, revise the hypothesis, then call act("RESET") to reset the
+failed observation, revise the hypothesis, then call
+p7_client.act([{"name":"RESET","data":{}}]) to reset the
 current level while budget remains. Only RESET is allowed after GAME_OVER.
 You may also reset an active level after a bad move if at least one gameplay
 action has occurred there. Reassess the returned level before another plan.

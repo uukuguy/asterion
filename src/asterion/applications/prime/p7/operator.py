@@ -19,11 +19,16 @@ from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
 from asterion.applications.prime.p7.broker import ArcAction, ArcBroker, ArcBrokerError, ArcRunReceipt
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
+    ArcGameContract,
     DEFAULT_GAME,
     P7GameSelection,
     P7GameSelectionError,
     TARGET_LEVEL_ENV,
     resolve_game_selection,
+)
+from asterion.applications.prime.p7.gameplay_trace import (
+    GAMEPLAY_TRACE_IDENTITIES,
+    PrimeGameplayTrace,
 )
 from asterion.applications.prime.p7.ipython_host import (
     PersistentIpythonHost,
@@ -190,11 +195,17 @@ class _IpythonBridgeServer:
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder")
+    __slots__ = ("_broker", "_recorder", "_identities")
 
-    def __init__(self, broker: ArcBroker, recorder: PrimeTraceRecorder) -> None:
+    def __init__(
+        self,
+        broker: ArcBroker,
+        recorder: PrimeTraceRecorder,
+        identities: Mapping[str, str] = P7_TRACE_IDENTITIES,
+    ) -> None:
         self._broker = broker
         self._recorder = recorder
+        self._identities = identities
 
     def observe(self) -> Mapping[str, object]:
         observation = self._broker.observe()
@@ -256,7 +267,7 @@ class _P7BrokerClient:
                 action_evidence["data"] = dict(transition.data)
             self._recorder.append(
                 "arc.action",
-                P7_TRACE_IDENTITIES,
+                self._identities,
                 action_evidence,
             )
         try:
@@ -319,7 +330,7 @@ class P7RuntimeSelection:
             raise P7OperatorError("P7 runtime selection is invalid")
 
     @classmethod
-    def fixed(cls, game: P7GameSelection = DEFAULT_GAME) -> P7RuntimeSelection:
+    def fixed(cls, game: P7GameSelection | ArcGameContract = DEFAULT_GAME) -> P7RuntimeSelection:
         value = object.__new__(cls)
         object.__setattr__(value, "runtime_id", _RUNTIME_ID)
         object.__setattr__(value, "provider", _PROVIDER)
@@ -355,7 +366,9 @@ class P7OperatorResources:
         self._bridge.close()
         ipython = cast(PersistentIpythonHost, self.host_services["prime.ipython"])
         await ipython.close()
-        trace = cast(P7PrivateTraceReceipt, self.host_services["prime.private-trace"])
+        trace = self.host_services.get("prime.private-trace") or self.host_services.get("prime.arc-run-evidence")
+        if trace is None:
+            raise P7OperatorError("P7 host services are unavailable")
         trace.close()
         launch = cast(PrimeLaunch, self.host_services["prime.launch"])
         launch.extension_lease.close()
@@ -378,7 +391,7 @@ def resolve_pi_provider(environment: Mapping[str, str], *, model: str) -> str:
 
 
 def resolve_p7_runtime(
-    environment: Mapping[str, str], game: P7GameSelection = DEFAULT_GAME
+    environment: Mapping[str, str], game: P7GameSelection | ArcGameContract = DEFAULT_GAME
 ) -> P7RuntimeSelection:
     """Resolve the one fixed model/runtime preset without exposing tuning knobs."""
 
@@ -394,7 +407,7 @@ def resolve_p7_runtime(
 
 
 def p7_runtime_options(
-    selection: P7RuntimeSelection, game: P7GameSelection = DEFAULT_GAME
+    selection: P7RuntimeSelection, game: P7GameSelection | ArcGameContract = DEFAULT_GAME
 ) -> Mapping[str, str]:
     """Return immutable private factory options for the fixed selection."""
 
@@ -423,7 +436,7 @@ def build_p7_operator_resources(
     worker: RestrictedPersistentIpythonWorker,
     engine: object,
     private_trace_root: Path,
-    game: P7GameSelection = DEFAULT_GAME,
+    game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -434,7 +447,12 @@ def build_p7_operator_resources(
     bridge: _IpythonBridgeServer | None = None
     try:
         selection = resolve_p7_runtime(environment, game)
-        provider_environment = dict(environment)
+        # The ARC credential belongs only to the SDK session. The Pi model
+        # subprocess needs the model host key, never the scorecard key.
+        provider_environment = {
+            name: value for name, value in environment.items()
+            if name not in {"ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE"}
+        }
         if (
             type(pi_base_command) is not tuple
             or not pi_base_command
@@ -502,10 +520,21 @@ def build_p7_operator_resources(
         )
         trace = PrimeTraceRecorder(private_trace_root)
         broker = ArcBroker(engine=engine, game=game)
+        official = type(game) is ArcGameContract
         ipython = PersistentIpythonHost(
-            worker=worker, p7_client=p7_client_facade(_P7BrokerClient(broker, trace))
+            worker=worker,
+            p7_client=p7_client_facade(
+                _P7BrokerClient(
+                    broker,
+                    trace,
+                    GAMEPLAY_TRACE_IDENTITIES if official else P7_TRACE_IDENTITIES,
+                )
+            ),
         )
-        private_trace = P7PrivateTraceReceipt(broker, trace)
+        private_trace = (
+            PrimeGameplayTrace(broker, trace, engine.guid)
+            if official else P7PrivateTraceReceipt(broker, trace)
+        )
         bridge = _IpythonBridgeServer(parent, ipython)
         bridge.start()
         parent = None
@@ -514,7 +543,9 @@ def build_p7_operator_resources(
                 "prime.arc-broker": broker,
                 "prime.ipython": ipython,
                 "prime.launch": launch,
-                "prime.private-trace": private_trace,
+                (
+                    "prime.arc-run-evidence" if official else "prime.private-trace"
+                ): private_trace,
             },
             runtime_options=p7_runtime_options(selection, game),
             _bridge=bridge,

@@ -30,7 +30,7 @@ class OfficialGamePolicy:
     action_cap: int
     baseline_actions: tuple[int, ...] | None
     model_callback_cap: int = 128
-    deadline_seconds: int = 1800
+    deadline_seconds: int = 3600
 
 
 @dataclass(frozen=True, slots=True)
