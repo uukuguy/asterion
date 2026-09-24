@@ -4,7 +4,7 @@
 
 **Goal:** Run P7 against all official ARC-AGI-3 Competition environments on one scorecard and retain the server-confirmed result and URL.
 
-**Architecture:** A new application-owned Competition coordinator preflights all dependencies, creates one scorecard, enumerates official games, passes each exact environment once into the existing solver through an injected engine, and closes the card once. Official evidence uses the live SDK response and server scorecard; the local fresh-engine replay is never invoked for a Competition environment.
+**Architecture:** A new application-owned Competition coordinator preflights all dependencies, creates one scorecard, enumerates official games, and passes each exact environment once into a scoreless gameplay capability sharing the existing broker and Pi runtime. It closes the card once. Official evidence uses the live SDK response and server scorecard; the local scored solve receipt and fresh-engine replay are never invoked for a Competition environment.
 
 **Tech Stack:** Python 3.12, official `arc_agi` SDK, Asterion Prime runner/Pi host, `unittest` fake SDK, Make.
 
@@ -17,6 +17,9 @@
 - Official score and URL are exposed only from a validated closed scorecard response.
 - The API key and raw frames/prompts/actions remain private.
 - No real scorecard or model call in tests; live submission waits until code and preflight are reviewable.
+- The local `PrimeArcAgi3SolveReceipt` contract requires a baseline-derived score. Preserve it; create a distinct scoreless gameplay capability/assembly for official runs. The Broker accepts a narrow game contract assembled after the remote initial frame, including games with no baseline.
+- The installed SDK merges local metadata with fetched API games and silently catches fetch errors. Construct it with a controlled empty local catalog and reject empty/ambiguous official discovery. Its remote `make()` may fetch a different version by short alias; reject any wrapper identity mismatch before gameplay.
+- Normal scorecard close requires every discovered game attempted; abort close records missing IDs and never yields a normal confirmed result.
 
 ---
 
@@ -33,12 +36,12 @@
 
 ### Task 2: Solver integration and official evidence
 
-**Files:** `src/asterion/applications/prime/p7/operator.py`, `live.py`, `private_trace.py`, `broker.py`; `src/asterion/capabilities/prime_arc_agi_3_solver/host.py`; `tests/test_prime_p7_official.py`, `tests/test_prime_p7_live_command.py`.
+**Files:** `src/asterion/applications/prime/p7/operator.py`, `live.py`, `broker.py`, a new scoreless gameplay evidence adapter; a distinct P7 gameplay capability package/assembly/provider/runtime binding; `tests/test_prime_p7_official.py`, gameplay capability and installed-route tests.
 
-**Interface:** The operator runs one resolved P7 solver per official game using an injected Competition engine. No component below the operator creates a scorecard. Official receipts explicitly say `official` and contain server-confirmed card ID, URL, overall score, per-game completion, and a closure digest. They never claim local replay verification.
+**Interface:** The operator runs one resolved scoreless P7 gameplay capability per official game using an injected Competition engine. No component below the operator creates a scorecard. Per-game evidence has terminal state and action counts but no `partial_game_score`; the separate official receipt explicitly says `official` and contains server-confirmed card ID, URL, overall score, per-game completion, and a closure digest. It never claims local replay verification.
 
 - [ ] Write a fake multi-game test in which one game wins and another fails; assert the card still closes, per-game status is honest, and there is no second `make`. Run red.
-- [ ] Refactor the solver launch to accept the injected engine and skip only the OFFLINE replay path for official mode. Keep ordered action/observation and private trace verification; run focused tests green.
+- [ ] Add a narrow broker game contract and distinct scoreless gameplay capability/assembly. Refactor the launch to accept the injected engine, and omit the OFFLINE replay path for official mode. Keep ordered action/observation and private trace verification; run focused tests green.
 - [ ] Write tests for interrupted/failed game, card close failure, returned card-ID mismatch, missing game row, secret sentinel redaction, and duplicate close; run red.
 - [ ] Implement versioned official receipt, private recovery record, server-result validation, and one-shot close logic. Run focused tests and commit.
 
