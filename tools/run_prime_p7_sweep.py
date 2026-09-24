@@ -11,6 +11,7 @@ import argparse
 from dataclasses import asdict
 from dataclasses import dataclass, field
 import json
+from hashlib import sha256
 import os
 from pathlib import Path
 import re
@@ -21,7 +22,6 @@ import time
 from typing import Any
 
 from asterion.applications.prime.p7.game import _read_catalog
-from asterion.applications.prime.p7.live import read_trace_entries
 from asterion.applications.prime.p7.solutions import load_best_prefix
 
 
@@ -36,8 +36,12 @@ class SweepConfig:
     seed: int = 0
     command: tuple[str, ...] = ("make", "asterion-prime-p7-sweep-attempt")
     repo_root: Path = field(default_factory=lambda: Path(__file__).resolve().parents[1])
-    global_token_cap: int = 1_000_000
-    wallclock_cap: float = 2 * 60 * 60
+    # Provisional first-sweep budget: the measured LS20 L1 run used 69,248
+    # recorded tokens in 272s.  Extrapolating 24 new games gives roughly
+    # 1.66M tokens and 109 minutes; failed attempts can take longer.  Cache
+    # input was absent from older telemetry, so this is a ceiling, not a fit.
+    global_token_cap: int = 2_000_000
+    wallclock_cap: float = 3 * 60 * 60
     run_timeout: float = 10 * 60
     max_attempts: int | None = None
 
@@ -84,14 +88,14 @@ def read_run_usage(run: Path) -> tuple[int, int, bool, bool]:
     try:
         if trace.is_symlink() or not trace.is_file():
             raise ValueError
-        entries = read_trace_entries(trace.parent)
+        entries = _read_hash_chained_trace(trace)
     except Exception:
         entries = ()
         integrity_error = True
     for entry in entries:
-        if entry.kind != "arc.usage.reported":
+        if entry["kind"] != "arc.usage.reported":
             continue
-        payload = entry.payload
+        payload = entry["payload"]
         incoming, outgoing = payload.get("input_tokens"), payload.get("output_tokens")
         if (
             isinstance(incoming, bool)
@@ -113,6 +117,38 @@ def read_run_usage(run: Path) -> tuple[int, int, bool, bool]:
     except (OSError, UnicodeError):
         model_activity = False
     return input_tokens, output_tokens, bool(model_activity and usage_count == 0), integrity_error
+
+
+def _read_hash_chained_trace(path: Path) -> tuple[dict[str, Any], ...]:
+    """Validate a trace chain while permitting an interrupted unsealed prefix."""
+
+    if path.is_symlink() or not path.is_file():
+        raise ValueError
+    rows: list[dict[str, Any]] = []
+    previous: str | None = None
+    identities: dict[str, Any] | None = None
+    for expected_sequence, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        row = json.loads(line)
+        if type(row) is not dict or set(row) != {"identities", "kind", "payload", "previous_sha256", "sequence", "sha256"}:
+            raise ValueError
+        if row["sequence"] != expected_sequence or row["previous_sha256"] != previous:
+            raise ValueError
+        if type(row["identities"]) is not dict or type(row["payload"]) is not dict or type(row["kind"]) is not str:
+            raise ValueError
+        if identities is None:
+            identities = row["identities"]
+        elif row["identities"] != identities:
+            raise ValueError
+        digest_input = {"identities": row["identities"], "kind": row["kind"], "payload": row["payload"], "previous_sha256": previous, "sequence": expected_sequence}
+        encoded = json.dumps(digest_input, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        digest = "sha256:" + sha256(encoded).hexdigest()
+        if row["sha256"] != digest:
+            raise ValueError
+        rows.append(row)
+        previous = digest
+    if not rows:
+        raise ValueError
+    return tuple(rows)
 
 
 class SweepScheduler:
@@ -327,8 +363,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-root", type=Path)
     parser.add_argument("--game", action="append", dest="games", default=[])
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--token-cap", type=int, default=1_000_000)
-    parser.add_argument("--wallclock-seconds", type=float, default=2 * 60 * 60)
+    parser.add_argument("--token-cap", type=int, default=2_000_000)
+    parser.add_argument("--wallclock-seconds", type=float, default=3 * 60 * 60)
     parser.add_argument("--run-timeout", type=float, default=10 * 60)
     parser.add_argument("--max-attempts", type=int)
     args = parser.parse_args(argv)
