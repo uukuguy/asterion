@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-24. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
-用户希望用易记命令重跑上一题 `ls20-9607627b`，以及挑战该题第 2 关。此前 tu93 失败及逐次留存修复见下文；此前 P1–P6 真实运行和边界见 `docs/status/PRIME-P1-P7-ACCEPTANCE.md` 与 JOURNAL。此轮未启动新的付费解题。
+用户要求 P7 按官方游戏行为在 `GAME_OVER` 后重置当前关，不要无故重做已过关卡。此前 tu93 失败及逐次留存修复见下文；此前 P1–P6 真实运行和边界见 `docs/status/PRIME-P1-P7-ACCEPTANCE.md` 与 JOURNAL。此轮未启动新的付费解题。
 
 ## 已验证事实
 
@@ -22,9 +22,11 @@
 - 此轮最终 P7 相关 58 项无模型测试通过；新增 500 动作上限、第 500 动作 `GAME_OVER`、同一步过关与 `GAME_OVER` 的回放边界测试通过。`make lint` 和 `make docs-check` 在最终源码上通过；提示词与打包摘要改动后 `make promotion-check` 通过 25 条隔离发行命令、provider 操作 0。随后调整的终局谓词与回放边界由最终 58 项测试覆盖。无付费求解，因此不能宣称 tu93 已通关。
 - `07d2c63d` 新增 `GAME=ls20|tu93` 与 `LEVEL=N`：`make asterion-prime-p7-solve GAME=ls20` 重跑首关，`make asterion-prime-p7-solve GAME=ls20 LEVEL=2` 在新尝试中从第 1 关顺序做到第 2 关；官方离线 SDK 不提供从历史运行直接跳关。目标级别进入题目选择、Broker、worker 状态、逐关计分、能力收据、回放与公开回执。历史成功收据不重写。独立运行目录继续保留每次尝试。
 - 本轮定向测试 79 项、安装 wheel 无模型第 1/2 关集成测试、`make lint`、`make docs-check` 已通过；`make promotion-check` 通过 25 条隔离发行命令，provider 操作 0。真实 LS20 第 2 关付费解题未运行。
+- 2026-09-25 本地 SDK 核验：`GameAction.RESET` 在 `GAME_OVER` 后仍可送入同一游戏实例；已有游戏动作时它重置当前关并保留已过关数，零动作时 OFFLINE 模式可能重置整局。P7 据此加入受控 `RESET`：当前关至少执行过一个普通动作才允许重置，失败后仅允许 `RESET`，重置计入 500 个原始动作，同局保留已过关卡。官方 `ACTION6` 的整数 `x,y` 坐标也已贯通 SDK、私有 trace、摘要和回放；旧无数据动作摘要保持兼容。设计和实施计划见 `docs/superpowers/specs/2026-09-25-prime-p7-level-reset-design.md` 与 `docs/superpowers/plans/2026-09-25-prime-p7-official-level-reset.md`。
+- `cd1f918b` 提交上述 P7 实现和指南。本轮新增先失败后通过的边界测试覆盖 `GAME_OVER` 后重置、点击坐标、初始状态异常、同步过关与死亡、回放及分数。最终 P7 定向测试 83 项通过；安装 wheel 假引擎的第 1 关通过→第 2 关失败→同一实例重置→第 2 关通过路径包含在内。`make lint`、`make docs-check` 通过。首次 `make promotion-check` 在无关的 Rust `service` 测试失败；该测试单独复跑 5 项通过，完整发行检查再次运行通过 25 条隔离命令，provider 操作 0。真实 LS20/TU93 未付费重跑，不能宣称真实解题能力已提高。
 
 ## 边界与下一动作
 
-- 当前修复已通过代码复审并提交。由用户按需再次运行付费求解；新回执应显示实际动作数与 `game-over` 终局。能否通关取决于新一轮求解，不能由无模型测试推断。
-- P7 现在在指定目标关卡完成时停止，且 ARC SDK 使用 OFFLINE；第 2 关需在同次新运行中先过第 1 关，500 原始动作上限跨关共用。本地 receipt 不是官方在线 scorecard。指南记录了官方在线及 Competition Mode 的生成流程；Asterion 在线 scorecard 集成尚未实现。无模型集成测试不能推断真实 LS20 第 2 关能通关。
-- 用户在 Makefile 增加的两条题号注释保留为未提交工作区改动，未纳入 `d1c094cd`。
+- 当前修复支持同局失败重置；真实付费求解尚未重跑。模型是否能识别题目并通关，不能由无模型测试推断。命令 `make asterion-prime-p7-solve GAME=ls20 LEVEL=2` 从第 1 关新开局，同局里第 2 关失败可只重置第 2 关。命令结束后 SDK 无可恢复的游戏存档，下次运行仍从第 1 关开始。
+- P7 在指定目标关卡完成时停止，且 ARC SDK 仍使用 OFFLINE；500 原始动作上限跨关与重置共用。本地 receipt 不是官方在线 scorecard。指南记录了官方在线及 Competition Mode 的生成流程；Asterion 在线 scorecard 集成尚未实现。
+- 用户在 Makefile 增加的两条题号注释保留为未提交工作区改动，未纳入本轮提交。
