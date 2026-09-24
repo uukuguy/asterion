@@ -17,8 +17,9 @@ class _Engine:
     seed = 0
     win_levels = 2
 
-    def __init__(self, *, initial: dict[str, object] | None = None, fail_action: bool = False) -> None:
-        self._observations = (
+    def __init__(self, *, initial: dict[str, object] | None = None, fail_action: bool = False,
+                 observations: tuple[dict[str, object], ...] | None = None) -> None:
+        self._observations = observations or (
             initial or {"available_actions": ["ACTION6"], "frame": [[[0]]], "levels_completed": 0,
                         "state": "NOT_FINISHED", "win_levels": 2},
             {"available_actions": ["ACTION1"], "frame": [[[1]]], "levels_completed": 0,
@@ -106,6 +107,50 @@ class TestOfficialSavedReplay(unittest.TestCase):
             execute_saved_prefix(engine, bad_prefix)
 
         self.assertEqual(len(engine.actions), 1)
+
+    def test_replays_level_retry_reset_after_an_ordinary_action(self) -> None:
+        from asterion.applications.prime.p7.solutions import VerifiedPrefix
+
+        states = (
+            {"available_actions": ["ACTION1"], "frame": [[[0]]], "levels_completed": 0,
+             "state": "NOT_FINISHED", "win_levels": 2},
+            {"available_actions": ["ACTION1"], "frame": [[[1]]], "levels_completed": 0,
+             "state": "NOT_FINISHED", "win_levels": 2},
+            {"available_actions": ["ACTION1"], "frame": [[[0]]], "levels_completed": 0,
+             "state": "NOT_FINISHED", "win_levels": 2},
+            {"available_actions": ["ACTION1"], "frame": [[[2]]], "levels_completed": 1,
+             "state": "NOT_FINISHED", "win_levels": 2},
+        )
+        prefix = VerifiedPrefix(
+            game_id="ls20-9607627b", seed=0, win_levels=2, levels_completed=1,
+            transitions=tuple(
+                ArcTransition(sequence, action, _digest(states[sequence - 1]), _digest(states[sequence]), levels)
+                for sequence, (action, levels) in enumerate((("ACTION1", 0), ("RESET", 0), ("ACTION1", 1)), 1)
+            ),
+            source_run_id="private-source-run", replay_sha256="sha256:" + "a" * 64,
+        )
+        engine = _Engine(observations=states)
+
+        execute_saved_prefix(engine, prefix)
+
+        self.assertEqual(engine.actions, [("ACTION1", None), ("RESET", None), ("ACTION1", None)])
+        self.assertEqual(engine.reset_calls, 0)
+
+    def test_rejects_reset_before_an_ordinary_action_in_the_level(self) -> None:
+        prefix = self._prefix()
+        reset = ArcTransition(1, "RESET", prefix.transitions[0].before_sha256,
+                              prefix.transitions[0].after_sha256, 0)
+        invalid = type(prefix)(
+            game_id=prefix.game_id, seed=prefix.seed, win_levels=prefix.win_levels,
+            levels_completed=prefix.levels_completed, transitions=(reset, *prefix.transitions[1:]),
+            source_run_id=prefix.source_run_id, replay_sha256=prefix.replay_sha256,
+        )
+        engine = _Engine()
+
+        with self.assertRaisesRegex(OfficialReplayError, "official saved replay unavailable"):
+            execute_saved_prefix(engine, invalid)
+
+        self.assertEqual(engine.actions, [])
 
 
 if __name__ == "__main__":

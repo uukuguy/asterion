@@ -53,11 +53,15 @@ def execute_saved_prefix(engine: object, prefix: VerifiedPrefix) -> None:
         current = _snapshot(engine.observe(), win_levels=verified.win_levels)
         if current.levels_completed != 0 or current.state != "NOT_FINISHED":
             raise ValueError
+        level_gameplay_actions = 0
         for sequence, transition in enumerate(verified.transitions, 1):
             if type(transition) is not ArcTransition or transition.sequence != sequence:
                 raise ValueError
             action = _canonical_action(ArcAction(transition.action, transition.data))
-            if action.name == "RESET" or action.name not in current.available_actions:
+            if action.name == "RESET":
+                if level_gameplay_actions == 0:
+                    raise ValueError
+            elif current.state == "GAME_OVER" or action.name not in current.available_actions:
                 raise ValueError
             if _observation_digest(current) != transition.before_sha256:
                 raise ValueError
@@ -71,6 +75,14 @@ def execute_saved_prefix(engine: object, prefix: VerifiedPrefix) -> None:
                 or (after.levels_completed >= verified.levels_completed and sequence != len(verified.transitions))
             ):
                 raise ValueError
+            if action.name == "RESET":
+                if after.levels_completed != current.levels_completed or after.state != "NOT_FINISHED":
+                    raise ValueError
+                level_gameplay_actions = 0
+            elif after.levels_completed > current.levels_completed:
+                level_gameplay_actions = 0
+            else:
+                level_gameplay_actions += 1
             current = after
         if current.levels_completed != verified.levels_completed:
             raise ValueError
