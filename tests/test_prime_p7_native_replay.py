@@ -9,6 +9,21 @@ from tests.test_prime_p7_native_broker import _Engine
 
 
 class TestNativeP7Replay(unittest.TestCase):
+    def test_second_level_replays_full_cross_level_journal(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection("ls20-9607627b", 0, 2)
+        broker = ArcBroker(engine=_Engine(level_after=2, second_level_after=4), game=game)
+        broker.act(("ACTION1", "ACTION1", "ACTION1"))
+        broker.act(("ACTION1", "ACTION1"))
+
+        self.assertEqual(broker.seal().levels_completed, 2)
+        self.assertEqual(
+            broker.replay(lambda: _Engine(level_after=2, second_level_after=4)),
+            broker.seal(),
+        )
+
     def test_action_cap_replays_without_being_mistaken_for_game_over(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.score import P7_ACTION_CAP

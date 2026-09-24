@@ -16,20 +16,41 @@ P7_ACTION_CAP = 500
 _SIX_PLACES = Decimal("0.000001")
 
 
-def partial_game_score(action_count: int, game: P7GameSelection) -> str:
-    """Official first-level weighted score for one exact local game profile."""
+def partial_game_score(action_count: int | tuple[int, ...], game: P7GameSelection) -> str:
+    """Cumulative bounded score for the selected local target level."""
 
-    if type(action_count) is not int or action_count <= 0 or type(game) is not P7GameSelection:
+    if type(game) is not P7GameSelection:
         raise ValueError("P7 score inputs are invalid")
-    level_score = min(
-        Decimal(100),
-        (Decimal(game.baseline_actions[0]) / Decimal(action_count)) ** 2 * Decimal(100),
-    )
+    if type(action_count) is int and action_count > 0:
+        action_counts = (action_count,)
+    elif (
+        type(action_count) is tuple
+        and action_count
+        and all(type(count) is int and count > 0 for count in action_count)
+    ):
+        action_counts = action_count
+    else:
+        raise ValueError("P7 score inputs are invalid")
+    if len(action_counts) != game.target_level:
+        raise ValueError("P7 score inputs are invalid")
+
     weight_sum = game.win_levels * (game.win_levels + 1) // 2
+    completed_weight_sum = sum(range(1, len(action_counts) + 1))
+    weighted_score = sum(
+        min(
+            Decimal(115),
+            (Decimal(game.baseline_actions[index]) / Decimal(count)) ** 2
+            * Decimal(100),
+        )
+        * Decimal(index + 1)
+        for index, count in enumerate(action_counts)
+    )
+    score = min(
+        weighted_score / Decimal(weight_sum),
+        Decimal(completed_weight_sum) / Decimal(weight_sum) * Decimal(100),
+    )
     return format(
-        (level_score / Decimal(weight_sum)).quantize(
-            _SIX_PLACES, rounding=ROUND_HALF_UP
-        ),
+        score.quantize(_SIX_PLACES, rounding=ROUND_HALF_UP),
         ".6f",
     )
 

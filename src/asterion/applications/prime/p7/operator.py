@@ -69,19 +69,23 @@ class P7LiveAttemptFailure(live.P7LiveSolveError):
         *,
         primitive_actions: int | None,
         levels_completed: int | None,
+        target_level: int,
         terminal_reason: str | None,
         replay_verified: bool,
         sealed_trace: bool,
         cleanup_complete: bool,
     ) -> None:
         reason = (
-            "game over before the first level was completed"
-            if terminal_reason == "game-over" and levels_completed == 0
+            "game over before the target level was completed"
+            if terminal_reason == "game-over"
+            and levels_completed is not None
+            and levels_completed < target_level
             else "P7 live solve unsuccessful"
         )
         super().__init__(reason)
         self.primitive_actions = primitive_actions
         self.levels_completed = levels_completed
+        self.target_level = target_level
         self.terminal_reason = terminal_reason
         self.replay_verified = replay_verified
         self.sealed_trace = sealed_trace
@@ -207,6 +211,7 @@ class _P7BrokerClient:
             "actions_remaining": status.actions_remaining,
             "levels_completed": status.levels_completed,
             "primitive_actions": status.primitive_actions,
+            "target_level": self._broker.game.target_level,
             "terminal_reason": status.terminal_reason,
         }
 
@@ -223,6 +228,7 @@ class _P7BrokerClient:
             )
         ):
             raise P7OperatorError("P7 host services are unavailable")
+        prior_levels = self._broker.status().levels_completed
         result = self._broker.act(tuple(str(action["name"]) for action in actions))
         for transition in result.transitions:
             self._recorder.append(
@@ -244,6 +250,7 @@ class _P7BrokerClient:
             observation, status = snapshot.observation, snapshot.status
         return {
             "applied_count": result.applied_count,
+            "level_advanced": result.levels_completed > prior_levels,
             "levels_completed": result.levels_completed,
             "observation": {
                 "available_actions": list(observation.available_actions),
@@ -256,6 +263,7 @@ class _P7BrokerClient:
                 "actions_remaining": status.actions_remaining,
                 "levels_completed": status.levels_completed,
                 "primitive_actions": status.primitive_actions,
+                "target_level": self._broker.game.target_level,
                 "terminal_reason": status.terminal_reason,
             },
             "transitions": [
@@ -657,6 +665,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                         "actions_remaining": status.actions_remaining,
                         "levels_completed": status.levels_completed,
                         "primitive_actions": status.primitive_actions,
+                        "target_level": invocation.game.target_level,
                         "terminal_reason": status.terminal_reason,
                     }
                 except Exception:
@@ -717,6 +726,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         raise P7LiveAttemptFailure(
             primitive_actions=None if broker_status is None else broker_status.primitive_actions,
             levels_completed=None if broker_status is None else broker_status.levels_completed,
+            target_level=invocation.game.target_level,
             terminal_reason=None if broker_status is None else broker_status.terminal_reason,
             replay_verified=replay_verified,
             sealed_trace=sealed_trace,
@@ -740,8 +750,8 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
 def classify_live_result(result: live.P7LiveExecution) -> Mapping[str, object]:
     """Project one completed solve into the public receipt, or fail closed."""
 
-    if result.completed_level_count != 1:
-        raise live.P7LiveSolveError("authoritative level transition was not observed")
+    if result.completed_level_count != result.game.target_level:
+        raise live.P7LiveSolveError("target level completion was not observed")
     if not 1 <= result.primitive_action_count <= _MAX_ACTIONS:
         raise live.P7LiveSolveError("primitive action count is invalid")
     if not result.replay_verified:
@@ -792,6 +802,7 @@ def _public_receipt(
         "model": _MODEL,
         "game_id": game.game_id,
         "seed": game.seed,
+        "target_level": game.target_level,
         "status": status,
         "run_id": run_id,
         "completed_level_count": completed_level_count,
@@ -814,6 +825,7 @@ def _public_receipt(
             {
                 "game_id": game.game_id,
                 "seed": game.seed,
+                "target_level": game.target_level,
                 "win_levels": game.win_levels,
                 "capability_receipt_sha256": capability_digest,
                 "broker_replay_sha256": broker_replay_sha256,

@@ -106,6 +106,7 @@ from importlib import resources
 from pathlib import Path
 
 from asterion.agents.prime.trace import validate_trace
+from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.ipython_host import IpythonWorkerResult
 from asterion.applications.prime.p7.operator import _resolve_p7_application, build_p7_operator_resources
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
@@ -121,27 +122,32 @@ class Engine:
     def step(self, action):
         assert action == "ACTION1"
         self.count += 1
-        return {"available_actions": ["ACTION1"], "frame": [[[self.count]]], "levels_completed": int(self.count == 13), "state": "FINISHED" if self.count == 13 else "NOT_FINISHED", "win_levels": 7}
+        return {"available_actions": ["ACTION1"], "frame": [[[self.count]]], "levels_completed": int(self.count >= 13) + int(self.count >= 26), "state": "FINISHED" if self.count == 26 else "NOT_FINISHED", "win_levels": 7}
 
 class Worker:
     async def start(self, client, *, signal): self.client = client
     async def execute_cell(self, code, *, signal):
         assert code == "fixture.solve()"
         self.broker.act(tuple("ACTION1" for _ in range(13)))
+        if self.target_level == 2:
+            self.broker.act(tuple("ACTION1" for _ in range(13)))
         return IpythonWorkerResult("ok", "completed")
     async def close(self): self.closed = True
 
 async def main():
     root = Path.cwd()
-    trace = root / "trace"; trace.mkdir()
+    target_level = int(__import__("os").environ["P7_TEST_TARGET_LEVEL"])
+    trace = root / f"trace-{target_level}"; trace.mkdir()
     extension = Path(str(resources.files("asterion.applications.prime").joinpath("resources/ipython-extension.mjs"))).resolve()
     worker = Worker()
+    worker.target_level = target_level
     resources_ = build_p7_operator_resources(
         environment={"DEEPSEEK_API_KEY": "fixture-only"},
         pi_base_command=(sys.executable, str(root / "fake_pi_rpc.py"), "__NODE__"),
         extension_path=extension,
         working_directory=root,
         worker=worker, engine=Engine(), private_trace_root=trace,
+        game=P7GameSelection("ls20-9607627b", 0, target_level),
     )
     worker.broker = resources_.host_services["prime.arc-broker"]
     receipt = None
@@ -167,20 +173,26 @@ asyncio.run(main())
                 source.replace("__NODE__", str(Path(node).resolve())),
                 encoding="utf-8",
             )
-            result = _run(
-                (str(python), "-I", str(script)),
-                cwd=root,
-                environment={**environment, "ASTERION_TEST_FORBID_PRIME_SOURCE": "1"},
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            receipt = json.loads(result.stdout)
-            self.assertEqual(receipt["levels_completed"], 1)
-            self.assertEqual(receipt["promotion_state"], "development-only")
-            self.assertEqual(receipt["solver_evidence"], "deterministic-double")
-            self.assertEqual(receipt["primitive_actions"], 13)
-            self.assertEqual(receipt["replay"], 1)
-            self.assertGreaterEqual(receipt["trace_entries"], 2)
-            self.assertTrue(receipt["worker_cleanup"])
+            for target_level in (1, 2):
+                with self.subTest(target_level=target_level):
+                    result = _run(
+                        (str(python), "-I", str(script)),
+                        cwd=root,
+                        environment={
+                            **environment,
+                            "ASTERION_TEST_FORBID_PRIME_SOURCE": "1",
+                            "P7_TEST_TARGET_LEVEL": str(target_level),
+                        },
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    receipt = json.loads(result.stdout)
+                    self.assertEqual(receipt["levels_completed"], target_level)
+                    self.assertEqual(receipt["promotion_state"], "development-only")
+                    self.assertEqual(receipt["solver_evidence"], "deterministic-double")
+                    self.assertEqual(receipt["primitive_actions"], 13 * target_level)
+                    self.assertEqual(receipt["replay"], target_level)
+                    self.assertGreaterEqual(receipt["trace_entries"], 2)
+                    self.assertTrue(receipt["worker_cleanup"])
 
 
 if __name__ == "__main__":

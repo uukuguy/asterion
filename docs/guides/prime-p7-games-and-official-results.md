@@ -52,11 +52,19 @@ make asterion-prime-p7-games
 make asterion-prime-p7-solve
 ```
 
-想重解 `ls20-9607627b`，可在命令中指定完整题号；再次执行同一命令就是第二次独立尝试：
+想重解上一题 `ls20-9607627b` 的第 1 关，运行：
 
 ```bash
-make asterion-prime-p7-solve ASTERION_PRIME_P7_GAME_ID=ls20-9607627b
+make asterion-prime-p7-solve GAME=ls20
 ```
+
+要挑战同一题的第 2 关，运行：
+
+```bash
+make asterion-prime-p7-solve GAME=ls20 LEVEL=2
+```
+
+`LEVEL=2` 表示以第 2 关为成功终点。官方离线引擎每次都从第 1 关开始，因此这条命令须在**同一次新尝试**中先解第 1 关，再继续解第 2 关；不能直接跳关，也不能接续历史运行。默认 `GAME=tu93 LEVEL=1`。当前短题号只支持 `ls20` 和 `tu93`，可用 `make asterion-prime-p7-games` 查询它们的完整题号和本地已验证进度。`LEVEL` 必须在所选游戏的总关卡范围内。每次真实求解都会启动模型并产生费用，运行前可先核对命令中的题号与目标关卡。
 
 每次尝试都有独立的 `run_id`，格式为 `p7-live-UTC时间戳-唯一后缀`，分别保存在 `./.asterion-private/prime-p7-live/<run_id>/`。同一秒发起的重试也使用不同目录；创建目录时拒绝覆盖已有目录。目录中的 `summary.json` 是私有诊断文件，可能包含不宜公开的运行细节，请勿直接贴到公开渠道。可只列目录名查看历次尝试：
 
@@ -64,7 +72,7 @@ make asterion-prime-p7-solve ASTERION_PRIME_P7_GAME_ID=ls20-9607627b
 ls -1dt .asterion-private/prime-p7-live/p7-live-*
 ```
 
-失败尝试也保留独立目录和安全终端回执。Broker 可用时，回执中的 `primitive_action_count` 是已记录的实际动作数；若尚未取得 Broker 证据，该字段为 `null`。`GAME_OVER` 会显示为 `terminal_reason: game-over` 和 `status: unsuccessful`。`make asterion-prime-p7-games` 只汇总通过封存与回放校验的成功运行，因此失败重试不会覆盖或冲掉此前的已验证成绩。重新运行会从第一关开始，不会续接上一轮的游戏状态。
+失败尝试也保留独立目录和安全终端回执。Broker 可用时，回执中的 `primitive_action_count` 是已记录的实际动作数；若尚未取得 Broker 证据，该字段为 `null`。`GAME_OVER` 会显示为 `terminal_reason: game-over` 和 `status: unsuccessful`。若在第 1 关完成后、第 2 关完成前失败，仍是目标 `LEVEL=2` 的失败尝试，不会记作成功完成两关。`make asterion-prime-p7-games` 只汇总通过封存与回放校验的成功运行，因此失败重试不会覆盖或冲掉此前的已验证成绩。重新运行会从第一关开始，不会续接上一轮的游戏状态。整次尝试共用 500 个原始动作的上限。
 
 可视化回放和派生制品在：
 
@@ -73,9 +81,9 @@ artifacts/arc-agi-3/catalog.json
 artifacts/arc-agi-3/games/ls20-9607627b/runs/p7-live-20260909065351/
 ```
 
-当前 P7 preset 使用 `OperationMode.OFFLINE`，并在第一关完成后停止。改变 Make 的题目 ID 只能选择已准备的本地题目，不能把一次 Level 1 的本地 receipt 变成全游戏结果，也不能生成官方 scorecard。要进行多关继续运行或官方评分，必须另行实现对应的应用边界并单独授权真实运行。
+当前 P7 preset 使用 `OperationMode.OFFLINE`，到指定 `LEVEL` 完成时停止。单次运行的本地 partial score 按已完成关卡的逐关动作数计算，但它不能变成官方 scorecard 或全游戏结果。已有的 Level 1 receipt 也不能用于跳过第 1 关。官方评分仍需另行接入在线评估流程。
 
-**其它关卡现在怎么做：**在 [ARC 官方任务页面](https://arcprize.org/tasks)可以人工选择 ARC-AGI-3 游戏并继续玩完整游戏。当前 `make asterion-prime-p7-solve` 是固定的“首关完成即停止”研究 preset：Broker 在关卡数增加时终止，能力 receipt 也只接受完成一关。若要让 Asterion 自动做第 2 关及之后的关卡，需要改 Broker 的停止条件、跨关卡上下文与动作上限、逐关计分和 receipt、回放校验，再用无模型假引擎验证各关边界。单纯重跑首关命令会从初始状态开始，不能接着上一关玩。
+**其它关卡怎么做：**把 `LEVEL=2` 换成所需目标关卡数；每次都会从第 1 关按顺序解到目标关卡。目标越远，越可能受共用动作、模型回调和运行时限约束而未完成。也可在 [ARC 官方任务页面](https://arcprize.org/tasks)人工游玩。多关自动运行目前只有无模型假引擎验证，尚无 `ls20` 第 2 关真实付费通关证据。
 
 ## 查看官方完整题目集合
 

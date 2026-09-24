@@ -70,6 +70,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             if method != "act":
                 raise AssertionError("terminal state must come from act response")
             return {
+                "level_advanced": False,
                 "observation": {
                     "available_actions": ["ACTION1"],
                     "frame": [[[1]]],
@@ -81,6 +82,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     "actions_remaining": 499,
                     "levels_completed": 0,
                     "primitive_actions": 1,
+                    "target_level": 1,
                     "terminal_reason": "game-over",
                 },
             }
@@ -92,6 +94,44 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(namespace["summary"](view)["status"]["terminal_reason"], "game-over")  # type: ignore[operator]
         self.assertEqual(calls, ["act"])
 
+    def test_worker_act_reports_intermediate_level_then_target(self) -> None:
+        namespace: dict[str, object] = {}
+        exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
+        responses = [
+            {
+                "level_advanced": True,
+                "observation": {
+                    "available_actions": ["ACTION1"], "frame": [[[1]]],
+                    "levels_completed": 1, "state": "NOT_FINISHED", "win_levels": 7,
+                },
+                "terminal": {
+                    "actions_remaining": 498, "levels_completed": 1,
+                    "primitive_actions": 2, "target_level": 2,
+                    "terminal_reason": "active",
+                },
+            },
+            {
+                "level_advanced": True,
+                "observation": {
+                    "available_actions": ["ACTION1"], "frame": [[[2]]],
+                    "levels_completed": 2, "state": "NOT_FINISHED", "win_levels": 7,
+                },
+                "terminal": {
+                    "actions_remaining": 496, "levels_completed": 2,
+                    "primitive_actions": 4, "target_level": 2,
+                    "terminal_reason": "level-completed",
+                },
+            },
+        ]
+        namespace["_call"] = lambda method, *args: responses.pop(0)
+
+        first = namespace["act"]("ACTION1")  # type: ignore[operator]
+        self.assertEqual(first["terminal"], "LEVEL_ADVANCED")
+        self.assertEqual(first["status"]["target_level"], 2)
+        second = namespace["act"]("ACTION1")  # type: ignore[operator]
+        self.assertEqual(second["terminal"], "LEVEL_SOLVED")
+        self.assertEqual(responses, [])
+
     def test_unsuccessful_public_receipt_preserves_safe_game_over_evidence(self) -> None:
         from asterion.applications.prime.p7.game import DEFAULT_GAME
         from asterion.applications.prime.p7.operator import P7LiveAttemptFailure, main
@@ -99,6 +139,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         error = P7LiveAttemptFailure(
             primitive_actions=50,
             levels_completed=0,
+            target_level=1,
             terminal_reason="game-over",
             replay_verified=True,
             sealed_trace=False,

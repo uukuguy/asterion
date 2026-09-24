@@ -393,7 +393,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "before/after",
             "no-ops",
             "death paths",
-            "one completed level",
+            "target_level",
             "action1 is up",
             "never use python or shell loops to submit actions",
             "[plan]",

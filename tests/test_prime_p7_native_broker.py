@@ -11,6 +11,7 @@ class _Engine:
         self,
         *,
         level_after: int | None = None,
+        second_level_after: int | None = None,
         raises_on: int | None = None,
         game_id: str = "ls20-9607627b",
         seed: int = 0,
@@ -19,6 +20,7 @@ class _Engine:
         game_over_after: int | None = None,
     ) -> None:
         self.level_after = level_after
+        self.second_level_after = second_level_after
         self.raises_on = raises_on
         self.game_id = game_id
         self.seed = seed
@@ -46,7 +48,7 @@ class _Engine:
         self.calls.append(action)
         if self.raises_on == len(self.calls):
             raise RuntimeError("engine interrupted after dispatch")
-        if self.level_after == len(self.calls):
+        if self.level_after == len(self.calls) or self.second_level_after == len(self.calls):
             self.levels_completed += 1
         return self.observe()
 
@@ -59,6 +61,28 @@ def _broker(*, level_after: int | None = None, raises_on: int | None = None):
 
 
 class TestNativeP7Broker(unittest.TestCase):
+    def test_target_second_level_keeps_broker_open_after_first_transition(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection("ls20-9607627b", 0, 2)
+        engine = _Engine(level_after=2, second_level_after=4)
+        broker = ArcBroker(engine=engine, game=game)
+
+        first = broker.act(("ACTION1", "ACTION1", "ACTION1"))
+        self.assertEqual(first.applied_count, 2)
+        self.assertEqual(broker.status().levels_completed, 1)
+        self.assertEqual(broker.status().terminal_reason, "active")
+        self.assertEqual(engine.calls, ["ACTION1", "ACTION1"])
+        with self.assertRaises(ArcBrokerError):
+            broker.seal()
+
+        second = broker.act(("ACTION1", "ACTION1", "ACTION1"))
+        self.assertEqual(second.applied_count, 2)
+        self.assertEqual(broker.seal().levels_completed, 2)
+        self.assertEqual(broker.seal().terminal_reason, "level-completed")
+        self.assertEqual(engine.calls, ["ACTION1"] * 4)
+
     def test_batch_stops_at_first_level_transition(self) -> None:
         broker, engine = _broker(level_after=2)
 

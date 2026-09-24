@@ -587,9 +587,16 @@ def act(actions):
     view = batch["observation"]
     current = batch["terminal"]
     levels = current["levels_completed"]
+    target = current["target_level"]
     remaining = current["actions_remaining"]
     reason = current["terminal_reason"]
-    terminal = "LEVEL_SOLVED" if levels > 0 else ("GAME_OVER" if reason == "game-over" else ("ACTION_CAP" if remaining <= 0 else "ACTIVE"))
+    terminal = (
+        "LEVEL_SOLVED" if levels >= target
+        else "GAME_OVER" if reason == "game-over"
+        else "ACTION_CAP" if remaining <= 0
+        else "LEVEL_ADVANCED" if batch["level_advanced"]
+        else "ACTIVE"
+    )
     return {{
         **view,
         "actions_taken": current["primitive_actions"],

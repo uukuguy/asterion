@@ -18,6 +18,118 @@ def _recipe(makefile: str, target: str) -> str:
 
 
 class TestPrimeMakePresets(unittest.TestCase):
+    def test_p7_short_game_aliases_select_exact_ids(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        probe = "p7-game-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_P7_GAME_ID)'\n"
+
+        for game, expected in (("ls20", "ls20-9607627b"), ("tu93", "tu93-0768757b")):
+            with self.subTest(game=game):
+                completed = subprocess.run(
+                    [
+                        "make",
+                        "--no-print-directory",
+                        "-s",
+                        "-f",
+                        "Makefile",
+                        "-f",
+                        "-",
+                        "p7-game-probe",
+                        f"GAME={game}",
+                    ],
+                    cwd=root,
+                    text=True,
+                    input=probe,
+                    capture_output=True,
+                    check=True,
+                )
+                self.assertEqual(completed.stdout.strip(), expected)
+
+    def test_p7_target_level_defaults_and_can_be_selected(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        probe = "p7-level-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_P7_TARGET_LEVEL)'\n"
+
+        for arguments, expected in (([], "1"), (["LEVEL=2"], "2")):
+            with self.subTest(arguments=arguments):
+                completed = subprocess.run(
+                    [
+                        "make",
+                        "--no-print-directory",
+                        "-s",
+                        "-f",
+                        "Makefile",
+                        "-f",
+                        "-",
+                        "p7-level-probe",
+                        *arguments,
+                    ],
+                    cwd=root,
+                    text=True,
+                    input=probe,
+                    capture_output=True,
+                    check=True,
+                )
+                self.assertEqual(completed.stdout.strip(), expected)
+
+    def test_p7_explicit_target_level_override_still_wins(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        probe = "p7-target-override-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_P7_TARGET_LEVEL)'\n"
+        completed = subprocess.run(
+            [
+                "make",
+                "--no-print-directory",
+                "-s",
+                "-f",
+                "Makefile",
+                "-f",
+                "-",
+                "p7-target-override-probe",
+                "LEVEL=2",
+                "ASTERION_PRIME_P7_TARGET_LEVEL=3",
+            ],
+            cwd=root,
+            text=True,
+            input=probe,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(completed.stdout.strip(), "3")
+
+    def test_p7_unknown_game_stops_before_any_recipe(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            ["make", "--no-print-directory", "-s", "asterion-prime-p7-solve", "GAME=unknown"],
+            cwd=root,
+            text=True,
+            capture_output=True,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("Unknown P7 GAME 'unknown'", completed.stderr)
+        self.assertNotIn("Building wheel", completed.stdout)
+        self.assertNotIn("[asterion-prime-p7-solve]", completed.stderr)
+
+    def test_unknown_game_does_not_block_unrelated_make_targets(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            ["make", "--no-print-directory", "-n", "help", "GAME=unknown"],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn("Asterion Prime ARC-AGI-3 solve", completed.stdout)
+
+    def test_p7_invalid_target_level_stops_before_wheel_build(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            ["make", "--no-print-directory", "-s", "asterion-prime-p7-solve", "LEVEL=zero"],
+            cwd=root,
+            text=True,
+            capture_output=True,
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("LEVEL must be a positive integer; got zero", completed.stderr)
+        self.assertNotIn("Building wheel", completed.stdout)
+
     def test_p7_one_command_ignores_stale_shell_selection(self) -> None:
         root = Path(__file__).resolve().parents[1]
         probe = (
@@ -47,6 +159,30 @@ class TestPrimeMakePresets(unittest.TestCase):
                 str((root.parent / "external-prime" / "arc-agi-3").resolve()),
             ],
         )
+
+    def test_p7_explicit_game_id_override_still_wins_over_alias(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        probe = "p7-override-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_P7_GAME_ID)'\n"
+        completed = subprocess.run(
+            [
+                "make",
+                "--no-print-directory",
+                "-s",
+                "-f",
+                "Makefile",
+                "-f",
+                "-",
+                "p7-override-probe",
+                "GAME=ls20",
+                "ASTERION_PRIME_P7_GAME_ID=custom-123",
+            ],
+            cwd=root,
+            text=True,
+            input=probe,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(completed.stdout.strip(), "custom-123")
 
     def test_native_p1_builds_installed_wheel_in_shared_mount(self) -> None:
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()

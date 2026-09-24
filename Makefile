@@ -57,13 +57,27 @@ ASTERION_PRIME_P5_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-witness
 ASTERION_PRIME_P5_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-live
 ASTERION_PRIME_P6_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-witness
 ASTERION_PRIME_P6_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-live
-# The selected next puzzle is a repo-owned preset; callers need only the target.
+# Short P7 aliases keep the normal selection command memorable.  A command-line
+# ASTERION_PRIME_P7_GAME_ID still has Make's normal higher precedence, while a
+# stale shell value remains ignored by the preset assignment below.
+GAME ?= tu93
+ifeq ($(GAME),ls20)
+ASTERION_PRIME_P7_GAME_ID := ls20-9607627b
+else ifeq ($(GAME),tu93)
 ASTERION_PRIME_P7_GAME_ID := tu93-0768757b
+else ifneq ($(filter asterion-prime-p7-solve,$(MAKECMDGOALS)),)
+$(error Unknown P7 GAME '$(GAME)'; use GAME=ls20 or GAME=tu93)
+else
+ASTERION_PRIME_P7_GAME_ID := tu93-0768757b
+endif
+LEVEL ?= 1
+ASTERION_PRIME_P7_TARGET_LEVEL := $(LEVEL)
 ASTERION_PRIME_P7_SEED := 0
 
 # P7 selection is forwarded through Orb by variable name, never by expanding
 # an operator-supplied value into its command line.
 export ASTERION_PRIME_P7_GAME_ID
+export ASTERION_PRIME_P7_TARGET_LEVEL
 export ASTERION_PRIME_P7_SEED
 .PHONY: test.native-controller-core.provider-free
 
@@ -83,7 +97,7 @@ help:
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
 	@echo "Asterion Prime bounded live applications: asterion-prime-p3-run p4-run p5-run p6-run"
-	@echo "Asterion Prime next ARC-AGI-3 puzzle: asterion-prime-p7-solve"
+	@echo "Asterion Prime ARC-AGI-3 solve: asterion-prime-p7-solve GAME=ls20|tu93 LEVEL=N (defaults: tu93, 1)"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
 	@echo "Asterion Prime deterministic diagnostics: asterion-prime-p3-witness p4-witness p5-witness p6-witness"
 	@echo "Cost boundary: full execution requires separate authorization"
@@ -246,11 +260,12 @@ asterion-prime-p7-games:
 	@python3 tools/list_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --runs-root "$(CURDIR)/.asterion-private/prime-p7-live"
 
 asterion-prime-p7-solve:
-	@printf '[asterion-prime-p7-solve] native Asterion-prime ARC-AGI-3 first-level solve\n' >&2; \
-	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+	@exec /bin/sh -ec 'case "$$ASTERION_PRIME_P7_TARGET_LEVEL" in '\''\'\''|*[^0-9]*|0) printf '\''[asterion-prime-p7-solve] LEVEL must be a positive integer; got %s\n'\'' "$$ASTERION_PRIME_P7_TARGET_LEVEL" >&2; exit 2 ;; esac; \
+		printf '\''[asterion-prime-p7-solve] native Asterion-prime ARC-AGI-3 solve through target level %s\n'\'' "$$ASTERION_PRIME_P7_TARGET_LEVEL" >&2; \
+		build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
-		ORBENV=ASTERION_PRIME_P7_GAME_ID:ASTERION_PRIME_P7_SEED orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_ARC_ROOT="$$3"; export ASTERION_PRIME_PI_ENTRY="$$4"; export ASTERION_PRIME_P7_GAME_ID ASTERION_PRIME_P7_SEED; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "$$3/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$3/wheels/arcengine-0.9.3-py3-none-any.whl" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p7.operator'\'' asterion-prime-p7-solve "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_ARC_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)"'
+		ORBENV=ASTERION_PRIME_P7_GAME_ID:ASTERION_PRIME_P7_TARGET_LEVEL:ASTERION_PRIME_P7_SEED orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_ARC_ROOT="$$3"; export ASTERION_PRIME_PI_ENTRY="$$4"; export ASTERION_PRIME_P7_GAME_ID ASTERION_PRIME_P7_TARGET_LEVEL ASTERION_PRIME_P7_SEED; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "$$3/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$3/wheels/arcengine-0.9.3-py3-none-any.whl" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p7.operator'\'' asterion-prime-p7-solve "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_ARC_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)"'
 
 # Diagnostic sibling of ``asterion-prime-p2-run``: identical command line,
 # without the ``@`` prefix on the orb invocation, so Orb / python stderr

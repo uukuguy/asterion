@@ -11,6 +11,7 @@ from types import MappingProxyType
 
 GAME_ID_ENV = "ASTERION_PRIME_P7_GAME_ID"
 SEED_ENV = "ASTERION_PRIME_P7_SEED"
+TARGET_LEVEL_ENV = "ASTERION_PRIME_P7_TARGET_LEVEL"
 DEFAULT_GAME_ID = "ls20-9607627b"
 _MAX_SEED = 2**31 - 1
 _BASELINES = MappingProxyType(
@@ -29,6 +30,7 @@ class P7GameSelectionError(RuntimeError):
 class P7GameSelection:
     game_id: str
     seed: int
+    target_level: int = 1
 
     def __post_init__(self) -> None:
         if (
@@ -36,6 +38,8 @@ class P7GameSelection:
             or self.game_id not in _BASELINES
             or type(self.seed) is not int
             or not 0 <= self.seed <= _MAX_SEED
+            or type(self.target_level) is not int
+            or not 1 <= self.target_level <= len(_BASELINES[self.game_id])
         ):
             raise P7GameSelectionError("P7 game selection is unavailable")
 
@@ -59,6 +63,7 @@ def resolve_game_selection(
     try:
         game_id = environment.get(GAME_ID_ENV, DEFAULT_GAME_ID)
         raw_seed = environment.get(SEED_ENV, "0")
+        raw_target_level = environment.get(TARGET_LEVEL_ENV, "1")
         if (
             type(game_id) is not str
             or type(raw_seed) is not str
@@ -66,6 +71,11 @@ def resolve_game_selection(
             or not raw_seed.isascii()
             or not raw_seed.isdecimal()
             or len(raw_seed) > 10
+            or type(raw_target_level) is not str
+            or not raw_target_level
+            or not raw_target_level.isascii()
+            or not raw_target_level.isdecimal()
+            or len(raw_target_level) > 10
         ):
             raise ValueError
         selected = P7GameSelection(game_id, int(raw_seed))
@@ -94,7 +104,7 @@ def resolve_game_selection(
             or metadata.get("baseline_actions") != list(selected.baseline_actions)
         ):
             raise ValueError
-        return selected
+        return P7GameSelection(game_id, int(raw_seed), int(raw_target_level))
     except Exception:
         raise P7GameSelectionError("P7 game selection is unavailable") from None
 
@@ -106,5 +116,6 @@ __all__ = (
     "P7GameSelection",
     "P7GameSelectionError",
     "SEED_ENV",
+    "TARGET_LEVEL_ENV",
     "resolve_game_selection",
 )

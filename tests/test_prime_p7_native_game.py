@@ -37,12 +37,41 @@ class TestP7GameSelection(unittest.TestCase):
             {
                 "ASTERION_PRIME_P7_GAME_ID": "tu93-0768757b",
                 "ASTERION_PRIME_P7_SEED": "17",
+                "ASTERION_PRIME_P7_TARGET_LEVEL": "2",
             },
             self.arc_root,
         )
-        self.assertEqual((old.game_id, old.seed, old.win_levels), ("ls20-9607627b", 0, 7))
-        self.assertEqual((new.game_id, new.seed, new.win_levels), ("tu93-0768757b", 17, 9))
+        self.assertEqual(
+            (old.game_id, old.seed, old.target_level, old.win_levels),
+            ("ls20-9607627b", 0, 1, 7),
+        )
+        self.assertEqual(
+            (new.game_id, new.seed, new.target_level, new.win_levels),
+            ("tu93-0768757b", 17, 2, 9),
+        )
         self.assertEqual(new.baseline_actions[0], 19)
+
+    def test_target_level_requires_ascii_decimal_in_selected_game_range(self) -> None:
+        from asterion.applications.prime.p7.game import (
+            P7GameSelectionError,
+            resolve_game_selection,
+        )
+
+        selected = resolve_game_selection(
+            {
+                "ASTERION_PRIME_P7_GAME_ID": "ls20-9607627b",
+                "ASTERION_PRIME_P7_TARGET_LEVEL": "2",
+            },
+            self.arc_root,
+        )
+        self.assertEqual(selected.target_level, 2)
+        for raw_target in ("0", "8", "-1", "1.0", " 2", "２", ""):
+            with self.subTest(raw_target=raw_target), self.assertRaisesRegex(
+                P7GameSelectionError, "P7 game selection is unavailable"
+            ):
+                resolve_game_selection(
+                    {"ASTERION_PRIME_P7_TARGET_LEVEL": raw_target}, self.arc_root
+                )
 
     def test_unknown_game_or_malformed_seed_is_rejected(self) -> None:
         from asterion.applications.prime.p7.game import (

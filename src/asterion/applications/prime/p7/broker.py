@@ -149,7 +149,7 @@ def _engine_identity(engine: object, game: P7GameSelection) -> tuple[str, int]:
 
 
 class ArcBroker:
-    """Journal bounded primitive actions and close at the first level transition."""
+    """Journal bounded actions through the selected target level."""
 
     def __init__(self, *, engine: object, game: P7GameSelection = DEFAULT_GAME) -> None:
         if type(game) is not P7GameSelection:
@@ -269,7 +269,7 @@ class ArcBroker:
             self._journal.append(transition)
             transitions.append(transition)
             self._current = after
-            if after.levels_completed > before.levels_completed:
+            if after.levels_completed == self._game.target_level:
                 self._terminal_reason = "level-completed"
                 break
             if after.state == "GAME_OVER":
@@ -277,6 +277,8 @@ class ArcBroker:
                 break
             if self._primitive_actions == P7_ACTION_CAP:
                 self._terminal_reason = "action-cap"
+                break
+            if after.levels_completed > before.levels_completed:
                 break
         return ArcActResult(len(transitions), self._current.levels_completed - self._initial.levels_completed, tuple(transitions))
 

@@ -86,7 +86,8 @@ def _validate_unsigned(unsigned: object) -> None:
     if (
         type(run_id) is not str or _RUN_ID.fullmatch(run_id) is None
         or unsigned["scope"] != "p7-solving" or unsigned["promotion"] != "unpromoted"
-        or type(unsigned["completed_level_count"]) is not int or unsigned["completed_level_count"] != 1
+        or type(unsigned["completed_level_count"]) is not int
+        or not 1 <= unsigned["completed_level_count"] <= 9
         or type(unsigned["primitive_action_count"]) is not int or unsigned["primitive_action_count"] < 0
         or type(score) is not str or _SCORE.fullmatch(score) is None
     ):

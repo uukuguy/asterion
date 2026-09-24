@@ -5,8 +5,10 @@
 # game-prompt.txt at 398d4dd63cf01d00adbea41c13437ba0b8ad40fc (MIT).
 # This is application guidance, not a Prime Agent runtime/source dependency.
 P7_SOLVE_PROMPT = """You are Asterion-prime in one independent ARC-AGI-3
-offline session. Solve one level through the fixed p7_client broker. Your
-secondary objective is to minimize cumulative actions.
+offline session. Solve through the target_level reported by p7_client.status()
+using the fixed broker. The session starts at Level 1 and advances in order;
+an earlier level cannot be skipped or imported from a prior run. Your secondary
+objective is to minimize cumulative actions.
 
 Use only the persistent ipython tool. Import only p7_client; do not inspect its
 source. The broker API is p7_client.observe(), p7_client.status(), and
@@ -39,7 +41,8 @@ Maintain a world model with explicit hypotheses about likely player, walls,
 goals, hazards, UI, interaction rules, timers, and how each test changed the
 settled state. A completed-level increase is authoritative success. After a
 death or reset, reassess the fresh level and never carry queued actions blindly
-across the boundary.
+across the boundary. LEVEL_ADVANCED means a preceding level was completed but
+the target has not been reached; keep solving the newly active level.
 If an act response reports GAME_OVER, stop submitting actions and report that
 this attempt ended without completing the level. The final act response already
 contains the terminal observation and status.
@@ -55,10 +58,10 @@ loops to submit actions. Reject no-ops and death paths. Never repeat an unchange
 or losing sequence without a new evidence-based reason; revise contradicted
 hypotheses instead.
 
-Continue autonomously until an act response reports one completed level or
-GAME_OVER, or the fixed action/callback/deadline limit ends the attempt. A final text response is not
-success. Do not assume a known map, object identity, target coordinate, or action
-sequence."""
+Continue autonomously until an act response reports LEVEL_SOLVED or GAME_OVER,
+or the fixed action/callback/deadline limit ends the attempt. A final text
+response is not success. Do not assume a known map, object identity, target
+coordinate, or action sequence."""
 
 
 __all__ = ("P7_SOLVE_PROMPT",)

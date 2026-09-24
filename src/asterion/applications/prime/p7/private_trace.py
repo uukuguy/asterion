@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import re
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
-from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt
+from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt, ArcTransition
 from asterion.applications.prime.p7.score import partial_game_score
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
@@ -148,18 +148,47 @@ class P7PrivateTraceReceipt:
             type(broker_receipt) is not ArcRunReceipt
             or (broker_receipt.game_id, broker_receipt.seed)
             != (self._broker.game.game_id, self._broker.game.seed)
-            or broker_receipt.levels_completed != 1
+            or broker_receipt.levels_completed != self._broker.game.target_level
             or broker_receipt.terminal_reason != "level-completed"
         ):
             raise ValueError
+        action_counts = self._completed_level_action_counts(broker_receipt)
         return PrimeArcAgi3SolveReceipt.create(
             run_id=run_id,
             completed_level_count=broker_receipt.levels_completed,
             primitive_action_count=broker_receipt.primitive_actions,
-            partial_game_score=partial_game_score(
-                broker_receipt.primitive_actions, self._broker.game
-            ),
+            partial_game_score=partial_game_score(action_counts, self._broker.game),
         )
+
+    def _completed_level_action_counts(
+        self, broker_receipt: ArcRunReceipt
+    ) -> tuple[int, ...]:
+        """Recover each completed level's action count from ordered transitions."""
+
+        previous_sequence = 0
+        previous_completion_sequence = 0
+        levels_completed = 0
+        counts: list[int] = []
+        for transition in self._broker.journal:
+            if (
+                type(transition) is not ArcTransition
+                or transition.sequence != previous_sequence + 1
+                or transition.levels_completed < levels_completed
+                or transition.levels_completed > levels_completed + 1
+            ):
+                raise ValueError
+            previous_sequence = transition.sequence
+            if transition.levels_completed == levels_completed + 1:
+                counts.append(transition.sequence - previous_completion_sequence)
+                previous_completion_sequence = transition.sequence
+                levels_completed = transition.levels_completed
+        if (
+            previous_sequence != broker_receipt.primitive_actions
+            or levels_completed != broker_receipt.levels_completed
+            or len(counts) != self._broker.game.target_level
+        ):
+            raise ValueError
+        return tuple(counts)
 
 
 __all__ = (
