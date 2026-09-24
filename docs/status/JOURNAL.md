@@ -2899,3 +2899,5 @@
 - 09:40 Extended the real SDK lifecycle test through complete close scorecard parsing and validated official receipt fields [277061bc]
 - 03:25 a33bd7a7 更新活跃会话检查点，保留真实 SDK 无网络验证与未提交边界。
 - 03:25 更正上一节 SDK 测试条目的时间：`ee8d5787` 提交于 03:23 CST，非 09:30。
+- 03:30 32c508db 资源初始化失败时关闭官方游戏引擎，避免泄漏会话。
+- 03:30 更正 SDK 回执测试条目的时间：`277061bc` 提交于 03:26 CST，非 09:40。
