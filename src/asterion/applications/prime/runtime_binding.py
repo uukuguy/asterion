@@ -71,6 +71,15 @@ def _p7_terminal(broker: ArcBroker) -> bool:
     return True
 
 
+def _p7_gameplay_terminal(broker: ArcBroker) -> bool:
+    """Keep official gameplay open while the current level requires RESET."""
+
+    try:
+        return broker.status().terminal_reason not in {"active", "reset-required"}
+    except Exception:
+        return True
+
+
 @dataclass(frozen=True, repr=False, slots=True)
 class PrimeLaunch:
     """Plain-data launch material crossing the application-runtime seam.
@@ -479,7 +488,7 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             extension_lease=launch.extension_lease,
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
-            completion_predicate=lambda: _p7_terminal(broker),
+            completion_predicate=lambda: _p7_gameplay_terminal(broker),
         )
         launch = None
         return AsterionPrimeRuntimeClient(
@@ -539,4 +548,5 @@ __all__ = (
     "build_asterion_prime_runtime",
     "build_p7_runtime",
     "build_p7_gameplay_runtime",
+    "_p7_gameplay_terminal",
 )

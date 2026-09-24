@@ -8,6 +8,7 @@ from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.game import ArcGameContract
 from asterion.applications.prime.p7.gameplay_trace import PrimeGameplayTrace
+from asterion.applications.prime.runtime_binding import _p7_gameplay_terminal
 
 
 class _WinningEngine:
@@ -31,7 +32,43 @@ class _WinningEngine:
         return self.observe()
 
 
+class _ResetRequiredEngine:
+    game_id = "zz99-abcdef12"
+    seed = 0
+
+    def __init__(self) -> None:
+        self.state = "NOT_FINISHED"
+
+    def observe(self) -> dict[str, object]:
+        return {
+            "available_actions": ["ACTION1"],
+            "frame": [[[1]]],
+            "levels_completed": 0,
+            "state": self.state,
+            "win_levels": 2,
+        }
+
+    def step(self, action: str) -> dict[str, object]:
+        del action
+        self.state = "GAME_OVER"
+        return self.observe()
+
+
 class TestPrimeP7GameplayTrace(unittest.TestCase):
+    def test_reset_required_keeps_official_runtime_open_and_cannot_issue_evidence(self) -> None:
+        with TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(
+                engine=_ResetRequiredEngine(),
+                game=ArcGameContract("zz99-abcdef12", win_levels=2),
+            )
+            trace = PrimeGameplayTrace(broker, recorder, "guid-zz99")
+            broker.act(("ACTION1",))
+            self.assertEqual(broker.status().terminal_reason, "reset-required")
+            self.assertFalse(_p7_gameplay_terminal(broker))
+            with self.assertRaisesRegex(RuntimeError, "evidence is unavailable"):
+                trace.expected_evidence_sha256(run_id="official-run")
+
     def test_valid_digest_round_trips_after_trace_seal(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -51,4 +88,3 @@ class TestPrimeP7GameplayTrace(unittest.TestCase):
             self.assertRegex(evidence.trace_sha256, r"^sha256:[0-9a-f]{64}$")
             self.assertEqual(evidence.evidence_sha256, digest)
             self.assertEqual(evidence.sdk_state, "WIN")
-
