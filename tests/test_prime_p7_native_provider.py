@@ -493,6 +493,95 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             self.assertFalse(launch.extension_lease.closed)
             cast(AsterionPrimeRuntimeClient, runtime)._session.close()
 
+    def test_runtime_factory_accepts_only_consistently_recorded_active_prefix(self) -> None:
+        from dataclasses import replace
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
+
+        cases = (
+            "valid", "missing-actions", "extra-action", "forged-action",
+            "wrong-identities", "wrong-count", "wrong-level", "reset-required",
+            "at-target", "at-cap", "cold-extra-action", "broken-chain",
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                game = P7GameSelection("ls20-9607627b", 0, 7)
+                broker = ArcBroker(engine=_CompletingEngine(), game=game)
+                launch, trace = self._launch(root, broker)
+                recorder = trace.runtime_recorder
+                if case in {"missing-actions", "forged-action", "wrong-identities"}:
+                    transition = broker.act(("ACTION1",)).transitions[0]
+                    if case != "missing-actions":
+                        recorder.append(
+                            "arc.action",
+                            {**P7_TRACE_IDENTITIES, **(
+                                {"application_id": "other-app"}
+                                if case == "wrong-identities" else {}
+                            )},
+                            {
+                                "action": "ACTION2" if case == "forged-action" else transition.action,
+                                "after_sha256": transition.after_sha256,
+                                "before_sha256": transition.before_sha256,
+                                "levels_completed": transition.levels_completed,
+                                "sequence": transition.sequence,
+                            },
+                        )
+                else:
+                    _P7BrokerClient(broker, recorder).act([{"name": "ACTION1", "data": {}}])
+                if case == "extra-action":
+                    recorder.append("arc.action", P7_TRACE_IDENTITIES, recorder.snapshot()[-1].payload)
+                elif case == "cold-extra-action":
+                    broker._journal.clear()
+                    broker._actions_dispatched = 0
+                    broker._current = broker._initial
+                elif case == "broken-chain":
+                    broker._journal[0] = replace(broker._journal[0], before_sha256="sha256:" + "0" * 64)
+                elif case == "wrong-count":
+                    broker._actions_dispatched += 1
+                elif case == "wrong-level":
+                    broker._current = replace(broker._current, levels_completed=2)
+                elif case == "reset-required":
+                    broker._terminal_reason = "reset-required"
+                elif case == "at-target":
+                    broker._current = replace(broker._current, levels_completed=7)
+                elif case == "at-cap":
+                    broker._actions_dispatched = game.action_cap
+                worker = _Worker()
+                ipython = PersistentIpythonHost(worker=worker, p7_client=p7_client_facade(broker))
+                context = RuntimeFactoryContext(
+                    provider_id="prime-applications",
+                    application_id="prime.arc-agi-3-solving",
+                    application_version="1.0.0",
+                    runtime_id="asterion.prime",
+                    assembly_path=ASSEMBLY.resolve(),
+                    options=p7_runtime_options(resolve_p7_runtime({"DEEPSEEK_API_KEY": "fixture"}, game), game),
+                    host_services={
+                        "prime.arc-broker": broker,
+                        "prime.ipython": ipython,
+                        "prime.launch": launch,
+                        "prime.private-trace": trace,
+                    },
+                )
+                try:
+                    if case == "valid":
+                        try:
+                            runtime = asterion_prime_runtime_binding().factory(context)
+                        except RuntimeFactoryError:
+                            self.fail("runtime factory rejected a recorded active prefix")
+                        self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
+                        cast(AsterionPrimeRuntimeClient, runtime)._session.close()
+                        self.assertEqual(broker.status().primitive_actions, 1)
+                        self.assertEqual(broker.status().levels_completed, 1)
+                    else:
+                        with self.assertRaisesRegex(RuntimeFactoryError, "configuration is invalid"):
+                            asterion_prime_runtime_binding().factory(context)
+                        self.assertTrue(launch.extension_lease.closed)
+                    self.assertEqual(worker.starts, 0)
+                finally:
+                    launch.extension_lease.close()
+                    trace.close()
+
     def test_operator_builds_composed_native_runtime_without_starting_edges(
         self,
     ) -> None:

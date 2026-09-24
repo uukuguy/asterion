@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 import re
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
-from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt, ArcTransition
+from asterion.applications.prime.p7.broker import (
+    ArcBroker, ArcRunReceipt, ArcTransition, _observation_digest,
+)
 from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.score import partial_game_score
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
@@ -57,6 +59,59 @@ class P7PrivateTraceReceipt:
         """Confirm that runtime and receipt paths share one exact broker."""
 
         return broker is self._broker
+
+    def runtime_ready(self) -> bool:
+        """Require an active broker whose entire prefix has matching evidence."""
+
+        if self._accessed or self._recorder._seal is not None or self._recorder._trace_fd is None:
+            return False
+        try:
+            status = self._broker.status()
+            journal = self._broker.journal
+            entries = self._recorder.snapshot()
+            recorded = tuple(entry.payload for entry in entries if entry.kind == "arc.action")
+            if (
+                status.terminal_reason != "active"
+                or type(status.primitive_actions) is not int
+                or not 0 <= status.primitive_actions < self._broker.game.action_cap
+                or status.actions_remaining != self._broker.game.action_cap - status.primitive_actions
+                or type(status.levels_completed) is not int
+                or not 0 <= status.levels_completed < self._broker.game.target_level
+                or len(journal) != status.primitive_actions
+                or len(recorded) != len(journal)
+                or any(entry.identities != P7_TRACE_IDENTITIES for entry in entries)
+            ):
+                return False
+            previous_digest = _observation_digest(self._broker._initial)
+            levels_completed = 0
+            for sequence, (transition, payload) in enumerate(zip(journal, recorded), 1):
+                if (
+                    type(transition) is not ArcTransition
+                    or type(transition.sequence) is not int
+                    or transition.sequence != sequence
+                    or transition.before_sha256 != previous_digest
+                    or type(transition.levels_completed) is not int
+                    or not levels_completed <= transition.levels_completed <= levels_completed + 1
+                    or type(payload.get("sequence")) is not int
+                    or type(payload.get("levels_completed")) is not int
+                    or payload != {
+                        "action": transition.action,
+                        "after_sha256": transition.after_sha256,
+                        "before_sha256": transition.before_sha256,
+                        "levels_completed": transition.levels_completed,
+                        "sequence": transition.sequence,
+                        **({"data": dict(transition.data)} if transition.data else {}),
+                    }
+                ):
+                    return False
+                previous_digest = transition.after_sha256
+                levels_completed = transition.levels_completed
+            return (
+                levels_completed == status.levels_completed
+                and previous_digest == _observation_digest(self._broker.observe())
+            )
+        except Exception:
+            return False
 
     def record_usage(self, *, input_tokens: int, output_tokens: int) -> None:
         """Append one validated public runtime usage event to private evidence."""

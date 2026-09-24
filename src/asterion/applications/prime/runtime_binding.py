@@ -377,10 +377,10 @@ def build_p7_runtime(
                 **_RUNTIME_OPTIONS,
                 "max_actions": str(broker.game.action_cap),
             }
-            or broker.status() != ArcStatus(0, 0, broker.game.action_cap, "active")
             or trace_adapter is None
             or trace is None
             or not trace_adapter.matches_runtime_broker(broker)
+            or not trace_adapter.runtime_ready()
             or type(trace) is not PrimeTraceRecorder
             or trace._seal is not None
             or trace._trace_fd is None
