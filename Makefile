@@ -60,6 +60,8 @@ ASTERION_PRIME_P6_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-live
 # Short P7 aliases keep the normal selection command memorable.  A command-line
 # ASTERION_PRIME_P7_GAME_ID still has Make's normal higher precedence, while a
 # stale shell value remains ignored by the preset assignment below.
+# ls20-9607627b
+# tu93-0768757b
 GAME ?= tu93
 ifeq ($(GAME),ls20)
 ASTERION_PRIME_P7_GAME_ID := ls20-9607627b
