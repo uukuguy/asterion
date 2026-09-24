@@ -8,8 +8,10 @@ P7_SOLVE_PROMPT = """You are Asterion-prime in one independent ARC-AGI-3
 gameplay session. Solve the complete selected game through SDK WIN. The
 target_level reported by p7_client.status() is the game's final level on a
 normal solve; an explicit level-witness session stops at a partial target.
-Use the fixed broker. The session starts at Level 1 and advances in order;
-an earlier level cannot be skipped or imported from a prior run. Your secondary
+Use the fixed broker. The game starts at Level 1 and advances in order. Before
+you begin, verified earlier-level actions may already have been replayed into
+this fresh game. Read p7_client.status() and observe() first, then continue
+from the current level; do not repeat completed levels. Your secondary
 objective is to minimize cumulative actions.
 
 Use only the persistent ipython tool. Import only p7_client; do not inspect its
