@@ -112,6 +112,10 @@ def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_l
             return None
         if actions != len(transitions) or not 1 <= levels <= win_levels:
             return None
+        if replay_sha256(transitions, terminal_reason=terminal) != recorded_digest:
+            return None
+        if not _summary_matches(summary, recorded_game_id, seed, win_levels, levels, len(transitions), terminal, recorded_digest):
+            return None
         if max_level is not None:
             if type(max_level) is not int or max_level < 1:
                 return None
@@ -121,10 +125,6 @@ def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_l
                 return None
             terminal = "level-completed"
             recorded_digest = replay_sha256(transitions, terminal_reason=terminal)
-        if replay_sha256(transitions, terminal_reason=terminal) != recorded_digest:
-            return None
-        if not _summary_matches(summary, recorded_game_id, seed, win_levels, levels, len(transitions), terminal, recorded_digest):
-            return None
         game = resolve_game_selection({GAME_ID_ENV: recorded_game_id, SEED_ENV: str(seed), TARGET_LEVEL_ENV: str(levels)}, arc_root)
         if game.win_levels != win_levels:
             return None
@@ -166,12 +166,18 @@ def _recording_identity(run: Path, transitions: tuple[ArcTransition, ...]) -> tu
         return None
     game_id, win_levels = data[0]["game_id"], data[0]["win_levels"]
     actions = []
+    started = False
     for item in data:
         action = item.get("action_input")
         if type(action) is not dict or type(action.get("id")) is not str or type(action.get("data")) is not dict:
             return None
-        if action["id"] != "RESET":
-            actions.append((action["id"], tuple(action["data"].items())))
+        name, action_data = action["id"], tuple(action["data"].items())
+        if name == "RESET" and not started:
+            if action_data:
+                return None
+            continue
+        started = True
+        actions.append((name, action_data))
     if tuple((item.action, item.data) for item in transitions) != tuple(actions):
         return None
     return game_id, win_levels

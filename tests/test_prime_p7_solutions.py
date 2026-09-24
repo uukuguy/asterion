@@ -20,7 +20,7 @@ class _Engine:
         return {
             "available_actions": ["ACTION1", "ACTION6"],
             "frame": [[[self.calls]]],
-            "levels_completed": int(self.calls >= 2),
+            "levels_completed": self.calls // 2,
             "state": "NOT_FINISHED",
             "win_levels": 7,
         }
@@ -28,7 +28,8 @@ class _Engine:
     def step(self, action: str, data: dict[str, int] | None = None) -> dict[str, object]:
         if action == "ACTION6":
             assert data == {"x": 12, "y": 34}
-        self.calls += 1
+        if action != "RESET":
+            self.calls += 1
         return self.observe()
 
 
@@ -68,6 +69,27 @@ class TestP7SavedSolutions(unittest.TestCase):
             linked.symlink_to(run, target_is_directory=True)
             self.assertIsNone(load_best_prefix(arc_root, runs_root, "ls20-9607627b", 0))
 
+    def test_preserves_reset_and_can_truncate_a_verified_longer_prefix(self) -> None:
+        from asterion.applications.prime.p7.solutions import load_best_prefix
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc_root = self._arc_root(root)
+            runs_root = root / "runs"
+            self._write_run(runs_root / "p7-two-level", target_level=2)
+            with patch(
+                "asterion.applications.prime.p7.solutions._fresh_engine",
+                side_effect=lambda _root, _game, _recordings: _Engine(),
+            ):
+                full = load_best_prefix(arc_root, runs_root, "ls20-9607627b", 0)
+                truncated = load_best_prefix(
+                    arc_root, runs_root, "ls20-9607627b", 0, max_level=1
+                )
+        assert full is not None and truncated is not None
+        self.assertEqual(full.levels_completed, 2)
+        self.assertEqual([item.action for item in full.transitions], ["ACTION6", "ACTION1", "ACTION1", "RESET", "ACTION1"])
+        self.assertEqual((truncated.levels_completed, len(truncated.transitions)), (1, 2))
+
     @staticmethod
     def _arc_root(root: Path) -> Path:
         game = root / "arc" / "environment_files" / "ls20" / "9607627b"
@@ -79,7 +101,7 @@ class TestP7SavedSolutions(unittest.TestCase):
         return root / "arc"
 
     @staticmethod
-    def _write_run(run: Path) -> None:
+    def _write_run(run: Path, *, target_level: int = 1) -> None:
         from asterion.agents.prime.trace import PrimeTraceRecorder
         from asterion.applications.prime.p7.broker import ArcAction, ArcBroker
         from asterion.applications.prime.p7.game import P7GameSelection
@@ -87,9 +109,13 @@ class TestP7SavedSolutions(unittest.TestCase):
 
         trace_root = run / "trace"
         trace_root.mkdir(parents=True)
-        game = P7GameSelection("ls20-9607627b", 0, 1)
+        game = P7GameSelection("ls20-9607627b", 0, target_level)
         broker = ArcBroker(engine=_Engine(), game=game)
         broker.act((ArcAction("ACTION6", (("x", 12), ("y", 34))), "ACTION1"))
+        if target_level == 2:
+            broker.act(("ACTION1",))
+            broker.act(("RESET",))
+            broker.act(("ACTION1",))
         receipt = broker.seal()
         recorder = PrimeTraceRecorder(trace_root)
         for transition in broker.journal:
@@ -97,7 +123,7 @@ class TestP7SavedSolutions(unittest.TestCase):
             if transition.data:
                 payload["data"] = dict(transition.data)
             recorder.append("arc.action", P7_TRACE_IDENTITIES, payload)
-        recorder.append("arc.run.completed", P7_TRACE_IDENTITIES, {"game_id": game.game_id, "seed": 0, "win_levels": 7, "levels_completed": 1, "primitive_actions": 2, "replay_sha256": receipt.replay_sha256, "terminal_reason": receipt.terminal_reason})
+        recorder.append("arc.run.completed", P7_TRACE_IDENTITIES, {"game_id": game.game_id, "seed": 0, "win_levels": 7, "levels_completed": target_level, "primitive_actions": len(broker.journal), "replay_sha256": receipt.replay_sha256, "terminal_reason": receipt.terminal_reason})
         recorder.seal()
         recording = run / "recordings" / "session"
         recording.mkdir(parents=True)
@@ -105,4 +131,4 @@ class TestP7SavedSolutions(unittest.TestCase):
         rows.extend({"data": {"game_id": game.game_id, "win_levels": 7, "action_input": {"id": item.action, "data": dict(item.data)}}} for item in broker.journal)
         (recording / "ls20.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         (run / "worker-cells.jsonl").write_text("")
-        (run / "summary.json").write_text(json.dumps({"schema": "asterion.prime.p7-live-private-summary/v1", "run_id": run.name, "receipt": {"completed_level_count": 1, "primitive_action_count": 2}, "broker": {"game_id": game.game_id, "seed": 0, "win_levels": 7, "levels_completed": 1, "primitive_actions": 2, "terminal_reason": receipt.terminal_reason, "replay_sha256": receipt.replay_sha256}, "replay_verified": True, "sealed_trace": True, "cleanup_complete": True, "comparison_report": None, "reason": None, "failure": None, "diagnostics": {"worker_cell_count": 0}}))
+        (run / "summary.json").write_text(json.dumps({"schema": "asterion.prime.p7-live-private-summary/v1", "run_id": run.name, "receipt": {"completed_level_count": target_level, "primitive_action_count": len(broker.journal)}, "broker": {"game_id": game.game_id, "seed": 0, "win_levels": 7, "levels_completed": target_level, "primitive_actions": len(broker.journal), "terminal_reason": receipt.terminal_reason, "replay_sha256": receipt.replay_sha256}, "replay_verified": True, "sealed_trace": True, "cleanup_complete": True, "comparison_report": None, "reason": None, "failure": None, "diagnostics": {"worker_cell_count": 0}}))
