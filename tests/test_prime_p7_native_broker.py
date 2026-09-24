@@ -139,6 +139,20 @@ class TestNativeP7Broker(unittest.TestCase):
                 self.assertEqual(game.action_cap, cap)
         self.assertEqual(P7GameSelection("ls20-9607627b", 0, 2).action_cap, 500)
 
+    def test_sweep_budget_seals_with_human_baseline_reason(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection("ls20-9607627b", 0, 2, action_cap_override=2)
+        engine = _Engine()
+        broker = ArcBroker(engine=engine, game=game)
+        result = broker.act(("ACTION1", "ACTION1"))
+        self.assertEqual(result.applied_count, 2)
+        receipt = broker.seal()
+        self.assertEqual(receipt.primitive_actions, 2)
+        self.assertEqual(receipt.terminal_reason, "human-baseline")
+        self.assertEqual(engine.calls, ["ACTION1", "ACTION1"])
+
     def test_initial_game_over_is_rejected_before_any_action(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 

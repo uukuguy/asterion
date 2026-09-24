@@ -73,6 +73,9 @@ class P7GameSelection:
     target_level: int = 1
     _metadata_baseline_actions: tuple[int, ...] | None = None
     _metadata_win_levels: int | None = None
+    # A local sweep may supply the exact remaining budget for a run.  Keeping
+    # this opt-in leaves the normal solve and official contracts unchanged.
+    action_cap_override: int | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -92,6 +95,11 @@ class P7GameSelection:
                 type(self._metadata_win_levels) is not int
                 or self._metadata_win_levels != len(self._metadata_baseline_actions or ())
             )
+            or self.action_cap_override is not None
+            and (
+                type(self.action_cap_override) is not int
+                or self.action_cap_override <= 0
+            )
             or not 1 <= self.target_level <= self._win_levels
         ):
             raise P7GameSelectionError("P7 game selection is unavailable")
@@ -102,6 +110,8 @@ class P7GameSelection:
 
     @property
     def action_cap(self) -> int:
+        if self.action_cap_override is not None:
+            return self.action_cap_override
         if self.is_full_game:
             return min(5000, max(1000, 2 * sum(self.baseline_actions)))
         return 500

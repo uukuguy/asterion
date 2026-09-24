@@ -317,7 +317,12 @@ class ArcBroker:
                 )
                 break
             if self._primitive_actions == self._game.action_cap:
-                self._terminal_reason = "action-cap"
+                self._terminal_reason = (
+                    "human-baseline"
+                    if isinstance(self._game, P7GameSelection)
+                    and self._game.action_cap_override is not None
+                    else "action-cap"
+                )
                 break
             if after.state == "GAME_OVER":
                 self._terminal_reason = (

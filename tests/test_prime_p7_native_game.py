@@ -179,6 +179,17 @@ class TestP7GameSelection(unittest.TestCase):
                     {"ASTERION_PRIME_P7_TARGET_LEVEL": raw_target}, self.arc_root
                 )
 
+    def test_optional_sweep_action_cap_is_exact_and_opt_in(self) -> None:
+        from asterion.applications.prime.p7.game import P7GameSelection, P7GameSelectionError
+
+        normal = P7GameSelection("ls20-9607627b", 0, 2)
+        sweep = P7GameSelection("ls20-9607627b", 0, 2, action_cap_override=145)
+        self.assertEqual(normal.action_cap, 500)
+        self.assertEqual(sweep.action_cap, 145)
+        for invalid in (0, -1, True, "145"):
+            with self.subTest(invalid=invalid), self.assertRaises(P7GameSelectionError):
+                P7GameSelection("ls20-9607627b", 0, 2, action_cap_override=invalid)
+
     def test_unknown_game_or_malformed_seed_is_rejected(self) -> None:
         from asterion.applications.prime.p7.game import (
             P7GameSelectionError,
