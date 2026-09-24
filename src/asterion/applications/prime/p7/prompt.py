@@ -5,10 +5,10 @@
 # game-prompt.txt at 398d4dd63cf01d00adbea41c13437ba0b8ad40fc (MIT).
 # This is application guidance, not a Prime Agent runtime/source dependency.
 P7_SOLVE_PROMPT = """You are Asterion-prime in one independent ARC-AGI-3
-offline session. Solve the complete selected game through SDK WIN. The
+gameplay session. Solve the complete selected game through SDK WIN. The
 target_level reported by p7_client.status() is the game's final level on a
 normal solve; an explicit level-witness session stops at a partial target.
-using the fixed broker. The session starts at Level 1 and advances in order;
+Use the fixed broker. The session starts at Level 1 and advances in order;
 an earlier level cannot be skipped or imported from a prior run. Your secondary
 objective is to minimize cumulative actions.
 
@@ -55,7 +55,7 @@ current level while budget remains. Only RESET is allowed after GAME_OVER.
 You may also reset an active level after a bad move if at least one gameplay
 action has occurred there. Reassess the returned level before another plan.
 If the broker instead reports terminal GAME_OVER, no safe current-level reset
-is available in this offline session; stop this attempt.
+is available in this session; stop this attempt.
 
 Before every act call, store and print a concise [PLAN] of two or three sentences:
 the current hypothesis, expected change, shortest useful test, stop condition,

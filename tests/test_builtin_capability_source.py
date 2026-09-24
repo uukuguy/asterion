@@ -30,6 +30,7 @@ from asterion.capability_sdk import run_capability_conformance
 
 CONTROLLED_CODE = CapabilityPackageRef("controlled-code", "1.0.0")
 DCI = CapabilityPackageRef("dci", "1.0.0")
+PRIME_ARC_AGI_3_GAMEPLAY = CapabilityPackageRef("prime-arc-agi-3-gameplay", "1.0.0")
 PRIME_ARC_AGI_3_SOLVER = CapabilityPackageRef("prime-arc-agi-3-solver", "1.0.0")
 PRIME_IPYTHON_CODING_NATIVE = CapabilityPackageRef("prime-ipython-coding-native", "1.0.0")
 PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE = CapabilityPackageRef(
@@ -56,6 +57,7 @@ RUNTIME_READY_PACKAGE_IDS = frozenset(
     {
         "controlled-code",
         "dci",
+        "prime-arc-agi-3-gameplay",
         "prime-arc-agi-3-solver",
         "prime-ipython-coding-native",
         "prime-programmatic-long-context-native",
@@ -137,6 +139,7 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
             (
                 CONTROLLED_CODE,
                 DCI,
+                PRIME_ARC_AGI_3_GAMEPLAY,
                 PRIME_ARC_AGI_3_SOLVER,
                 PRIME_IPYTHON_CODING_NATIVE,
                 PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE,
@@ -289,6 +292,7 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
         declared_conformance = {
             CONTROLLED_CODE: ("externalization.json",),
             DCI: ("externalization.json",),
+            PRIME_ARC_AGI_3_GAMEPLAY: (),
             PRIME_ARC_AGI_3_SOLVER: (),
             PRIME_IPYTHON_CODING_NATIVE: (),
             PRIME_PROGRAMMATIC_LONG_CONTEXT_NATIVE: (),
