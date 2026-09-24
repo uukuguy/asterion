@@ -1,34 +1,28 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 05:56 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 07:00 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
-实现 P7 本地选题选关、逐关保存可校验动作，以及只对本地已验证题目执行官方 Competition 提交。用户已明确选择该方向；真实付费评估/官方建卡仍须按仓库预算边界单独确认。
+按用户要求，对 ARC-AGI-3 目录中的 25 题做本地 OFFLINE 广度优先扫题：每题只试下一连续关；一关成功并验证后下轮再进一关，失败本轮转到其他题。每关新增动作到该关公布的人类基准数就停止。LS20 第 2 关旧实验已超过 123 步，因此本轮暂缓。只保存本地证据，不创建新的官方 scorecard。
 
 ## 已验证事实
 
-- `make asterion-prime-p7-solve GAME=ls20 LEVEL=2` 现在接受显式 `LEVEL`；不传 `LEVEL` 仍是整题。每次新本地运行会在模型前把先前已验证前缀重新执行进当前 broker 和 trace。新的 `run_id` 保留独立时间戳目录，不覆盖旧运行。
-- `p7/solutions.py` 从私有封存 trace、summary、recording 复原动作，核验身份/哈希链/软链接边界/RESET/ACTION6，再经新 OFFLINE 引擎逐动作复现；支持旧版 LS20 历史记录和长记录截断。已安装 wheel、阻断网络的诊断确认 LS20 第 1 关 20 动作可恢复。本地第 2 关 broker 预热实测完成第 1 关并记入 20 动作，未启动模型。
-- 后续关卡失败时，运行器现从逐动作 trace 截取最后已过关卡，使用新本地引擎核验并封存 `arc.run.partial`；读取器要求与 summary、完整 recording 和封存链一致，只复用已完成的关卡。整题失败不会抹去先前可验证进度。定向跨模块测试已通过。
-- `make asterion-prime-p7-games` 现以只读方式显示正常已过关卡和失败后已封存的部分进度，不运行题目源码；后者 score 显示为 `—`。真实公开命令实测列出 25 题，LS20 第 1 关与既有分数仍显示。初次清单实现曾因脚本导入路径失败，已修复并增加真实 Make 子进程测试。
-- `make asterion-prime-p7-sync-games` 经只读 GET 同步官方账号可见 25 题；`make asterion-prime-p7-games` 现列出 25 题，只有 LS20 本地第 1 关是已验证进度。旧 TU93 本地同 ID 源码与当前官方源码不同，已无损移到 `../external-prime/arc-agi-3/archived-local-games/tu93-0768757b-source-0768757bb4b3/`，官方当前源码落入正常目录。同步器不覆盖同 ID 不同内容，并可续写匹配的中断元数据。
-- 官方 selected session、跳过题目 scorecard 解析、已存动作初始/逐步摘要核验、RESET 与不确定操作即停均已实现。`make asterion-prime-p7-official-submit GAME=ls20` 和 `GAME=all` 是无 Pi/模型的已存动作执行入口；缺少显式 `GAME` 在构建前拒绝。旧全目录模型路径改名 `asterion-prime-p7-official-live-eval`。
-- 官方目录只读 `make asterion-prime-p7-official-preflight` 实跑通过：25 题，上界 38,142 动作、3,200 模型回调、90,000 秒。未创建 card 或调用模型。已安装 wheel 的已存 LS20 前缀预检在阻断网络下通过。
-- P7 聚焦 78 项、`make lint`、`make docs-check` 已通过；`make promotion-check` 完整通过，报告 25 个命令、0 次 provider 操作、无完整数据集。首次完整测试剩余的两项安装版问题和一项 Make 静态误判已修复。旧 Make 测试曾意外触发本地模型；现已改为无模型 dry-run。
-- 清单公开命令修复后，43 项关卡/清单/提交定向测试、lint 和 docs-check 再次通过；独立关键代码复审未发现实质阻塞问题。`promotion-check` 的完整通过发生在最后的清单 Make 入口改动之前，该入口已用真实命令和子进程测试单独验证。
-- `c065a3c0` 修复历史 LS20 已完成 trace 前缀读取；安装 wheel 在阻断网络下恢复第 1 关 20 动作，已存提交预检仅选 LS20。正式提交前 `make promotion-check` 再次通过 25 条命令、0 次 provider 操作。
-- 用户明确同意一次 LS20 官方提交。`make asterion-prime-p7-official-submit GAME=ls20` 创建并正常关闭卡 `14868b83-3f40-4afd-84b0-4d25176f97d0`，但当时的结果校验误拒官方为 24 个未选题生成的零动作 `NOT_FINISHED` 占位行，命令返回 `recovery-required`。本次未调用模型，且没有再次建卡或重复动作。
-- `94de8936` 修正占位校验和公开卡链接；真实版本 SDK 的无网络测试覆盖正常与异常占位。`3ac7790f`、`d972e1b6` 增加只读恢复与 CLI。公开成绩 API 的 GET 与本地正常关闭记录逐项匹配卡号、25 题目录和 LS20 GUID；`make asterion-prime-p7-official-recover RUN=p7-live-20260924214021-c2ecd3a365d00be962ac0a31` 成功写入权限 0600 的 `closed-confirmed` 回执：LS20 20 动作、完成 1 关、题目分 3.571428571428571；服务端总分 0.14285714285714285，24 题跳过。公开页面：`https://arcprize.org/scorecards/14868b83-3f40-4afd-84b0-4d25176f97d0`。
-- 独立复审找出恢复入口自定义 operator root 和 FIFO 阻塞边界，均已修复；13 项恢复/结果测试与 Make root 定向测试通过。`make lint`、`make docs-check`、`make promotion-check` 均通过；promotion 报告 25 条命令、0 次 provider 操作、无完整数据集。实际 Make 恢复入口已从已安装 wheel 成功执行。
+- `make asterion-prime-p7-games` 列出 25 题；目前只有 LS20 第 1 关是已验证前缀。官方既有卡 `14868b83-3f40-4afd-84b0-4d25176f97d0` 只有这一关的部分成绩，24 题未选，不能视为整题通关。
+- LS20 第 1 关的可计量运行记录为 20 步、输入 32,830、输出 36,418，共 69,248 旧口径 token，历时 272 秒。其余 24 题首关的人类上限合计 851 步，按每步消耗机械推算约 295 万 token、3 小时 13 分钟，旧记录漏计缓存输入。默认 200 万 token、3 小时只是可续跑的第一批；用户预算选项答复尚待接收。每次尝试时间按关卡步数估算，10 至 30 分钟；总上限在尝试间检查。
+- 此前 LS20 第 2 关续解重放 20 个已验证第 1 关动作后，新记约 242 个第 2 关动作，超过 123 的人类基准才被人工停止；该运行未封存且没有用量事件，不复用作前缀，不推算其 token。
+- `1a178f4a` 将 Prime runtime 用量事件流式落到 trace，`f38143c4` 将 Pi 缓存读写计入输入 token；`987ca598` 加精确本地扫题动作上限，`a8ef4d53` 加轮转调度器，`3f1499ba` 将扫题接入 P7 operator/Make，`4d820313` 验证中断 trace 哈希链并在用量缺失时停机。
+- 刚构建 wheel 的隔离环境中，调度器 `--max-attempts 0` 预检成功：attempted=0、token=0。110 项 P7/Prime 定向测试、`make lint`、`make docs-check` 已通过。首次 `make promotion-check` 在 3,246 项测试后仅报两项：Pi 缓存输入被双计和 Make 静态目标名过时；代码与测试已修正，59 项相关测试通过，完整门禁待重跑。独立复审另发现无运行证据误报完成、首关失败未封存、单题时间不随步数调整等问题；调度器修复已有定向测试，`5fde504c` 已封存经回放的首关失败。仍未启动付费批量求解。
+- 官方 Competition 远端不接收 seed；本地 `seed=0` 是 OFFLINE 前缀身份。LS20 本地第 1 关初始观察在 seed 0 两次及 seed 1 一次零动作检查中相同，不能推断后续关卡或其他游戏。官方不能跳关；本轮按连续关进度轮转。
 
 ## 当前判断与未完成边界
 
-- 本地证据不能补传为官方成绩；正式提交必须在新的官方游戏实例重新执行动作，按远端初始和每一步状态核验。若有差异，保留 recovery 记录，不生成有效官方回执。
-- 已验证的是 LS20 第 1 关的**部分**官方成绩，不是整题通关，也不是全部 25 题解答。官方总分包括 24 个零分未选题。原提交命令在正常关闭后失败，私有回执是后来经只读公开成绩与本地正常关闭证据绑定恢复的；未来正常提交仍需以修复后的关闭结果校验为准。
-- 旧测试曾意外触发一次真实本地模型尝试：私有运行目录 `p7-live-20260924205419-06503ae29454ae2cb6950224` 有 6 条 worker-cell 记录、0 个 ARC 游戏动作；没有留下运行进程。当前测试已改为无模型 dry-run。
+- 这只是有限预算的首轮扫题，不保证 25 题或全部关卡在预算内过关；模型解题能力尚无新实跑证据。
+- 每次本地尝试保留独立运行目录；官方提交需要另开 Competition 会话并逐动作对照，当前预算不含官方运行。
+- 尚需重跑 promotion-check、集成审查修复、按用户预算答复设置首轮上限，并在付费运行中监视进度与实际用量。指南为 `docs/guides/prime-p7-games-and-official-results.md`。
 
 ## 下一动作
 
-1. 如继续本地解题，执行 `make asterion-prime-p7-solve GAME=ls20 LEVEL=2`，会在模型前重放第 1 关的 20 个已存动作，然后继续第 2 关。
-2. 任何新的真实官方 scorecard 或模型评估都需要单独明确范围；此前同意的**一次**提交已用完。现有部分成绩及私有回执无需再次提交。
+1. 重跑 promotion-check 并修复剩余门禁问题。
+2. 按用户答复确定预算；完成无模型的安装 wheel/Make 入口检查，提交指南与状态更新。
+3. 若用户选择付费扫题，运行 `make asterion-prime-p7-sweep`；每次尝试后核对结果、token 和进程，依首轮停止线收口，并用 `make asterion-prime-p7-games` 核对已验证进度。

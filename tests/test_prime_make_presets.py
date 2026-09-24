@@ -266,7 +266,7 @@ class TestPrimeMakePresets(unittest.TestCase):
 
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
         self.assertNotIn("/Users/", makefile)
-        recipe = _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness")
+        recipe = _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt")
         for literal in (
             '$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX',
             "trap",

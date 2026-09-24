@@ -293,21 +293,10 @@ class LiveModelSession:
                     usage = normalize_pi_usage(event.payload)
                     if usage is None:
                         raise LiveModelError()
-                    raw_usage = message.get("usage")
-                    if not isinstance(raw_usage, Mapping):
-                        raise LiveModelError()
-                    cached = []
-                    for name in ("cacheRead", "cacheWrite"):
-                        count = raw_usage.get(name, 0)
-                        if type(count) is not int or count < 0:
-                            raise LiveModelError()
-                        cached.append(count)
-                    # Pi's `input` excludes cache reads and writes. Budget
-                    # against all prompt tokens at the full input rate; this
-                    # intentionally overestimates discounted cache cost.
-                    usage_events.append(
-                        (usage["input_tokens"] + sum(cached), usage["output_tokens"])
-                    )
+                    # The shared Pi normalizer already includes cache reads
+                    # and writes in input_tokens. Budget all of them at the
+                    # full input rate to conservatively bound cost.
+                    usage_events.append((usage["input_tokens"], usage["output_tokens"]))
 
         try:
             result = await self._rpc.prompt(text, signal=signal, on_event=record)

@@ -278,7 +278,10 @@ asterion-prime-p7-sync-games:
 	@python3 tools/sync_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --env-file "$(CURDIR)/.env"
 
 asterion-prime-p7-sweep:
-	@$(UV_BIN) run --isolated --with . --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_sweep.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)"
+	@exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_sweep.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)"'
 
 asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt:
 	@exec /bin/sh -ec 'if [ "$@" = asterion-prime-p7-level-witness ] || [ "$@" = asterion-prime-p7-sweep-attempt ] || [ "$(ASTERION_PRIME_P7_LEVEL_EXPLICIT)" = 1 ]; then case "$$ASTERION_PRIME_P7_TARGET_LEVEL" in '\''\'\''|*[^0-9]*|0) printf '\''[$@] LEVEL must be a positive integer; got %s\n'\'' "$$ASTERION_PRIME_P7_TARGET_LEVEL" >&2; exit 2 ;; esac; fi; \

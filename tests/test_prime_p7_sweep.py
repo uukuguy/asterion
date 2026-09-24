@@ -79,6 +79,9 @@ class TestPrimeP7Sweep(unittest.TestCase):
             (run / "worker-cells.jsonl").write_text("{}\n", encoding="utf-8")
             self.assertEqual(read_run_usage(run), (0, 0, True, True))
 
+            (run / "worker-cells.jsonl").unlink()
+            self.assertEqual(read_run_usage(run), (0, 0, True, True))
+
     def test_nested_broker_status_defers_known_overbaseline_attempt(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
 
@@ -100,6 +103,48 @@ class TestPrimeP7Sweep(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             main(["--arc-root", "/tmp/arc", "--seed", "1"])
+
+    def test_child_without_run_evidence_stops_sweep(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(
+                arc_root=root / "arc", runs_root=root / "runs", games=("a-1",),
+                repo_root=root, command=("/usr/bin/false",),
+            ))
+            scheduler._catalog = lambda: ({"game_id": "a-1", "baseline_actions": (20,), "win_levels": 1},)  # type: ignore[method-assign]
+            result = scheduler.run()
+        self.assertEqual(result.attempted, 1)
+        self.assertEqual(result.stopped_reason, "child-evidence-missing")
+
+    def test_attempt_summary_requires_matching_verified_terminal(self) -> None:
+        from tools.run_prime_p7_sweep import _valid_attempt_summary
+
+        base = {
+            "schema": "asterion.prime.p7-live-private-summary/v1",
+            "run_id": "run-1", "replay_verified": True, "sealed_trace": True,
+            "cleanup_complete": True,
+            "broker": {"game_id": "a-1", "seed": 0, "levels_completed": 0,
+                       "primitive_actions": 20, "terminal_reason": "human-baseline"},
+            "diagnostics": {"sweep": {"scope": "offline-research", "target_level": 1,
+                                      "level_action_cap": 20, "run_action_cap": 20}},
+        }
+        self.assertTrue(_valid_attempt_summary(base, "run-1", "a-1", 1, 2))
+        self.assertFalse(_valid_attempt_summary(base, "run-1", "b-2", 1, 2))
+        self.assertFalse(_valid_attempt_summary(base, "run-1", "a-1", 2, 2))
+        self.assertFalse(_valid_attempt_summary(base, "run-1", "a-1", 1, 0))
+        self.assertFalse(_valid_attempt_summary({**base, "sealed_trace": False}, "run-1", "a-1", 1, 2))
+        self.assertFalse(_valid_attempt_summary({**base, "broker": {**base["broker"], "terminal_reason": "active"}}, "run-1", "a-1", 1, 2))
+
+    def test_longer_human_baseline_gets_longer_bounded_attempt(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        scheduler = SweepScheduler(SweepConfig(Path("arc"), Path("runs")))
+        scheduler._catalog = lambda: ({"game_id": "a-1", "baseline_actions": (20, 78), "win_levels": 2},)  # type: ignore[method-assign]
+        self.assertEqual(scheduler._timeout_for_level("a-1", 1), 600)
+        self.assertGreater(scheduler._timeout_for_level("a-1", 2), 1200)
+        self.assertLessEqual(scheduler._timeout_for_level("a-1", 2), 1800)
 
 
 if __name__ == "__main__":

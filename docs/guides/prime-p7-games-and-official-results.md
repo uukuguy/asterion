@@ -53,11 +53,33 @@ make asterion-prime-p7-level-witness GAME=ls20 LEVEL=2
 
 ```bash
 find .asterion-private/prime-p7-live/<run_id> -maxdepth 2 -type f -print
-jq '{run_id, game_id, status, replay_verified, completed_level_count, primitive_action_count}' \
+jq '{run_id, replay_verified, sealed_trace, cleanup_complete, completed_prefix, broker, diagnostics}' \
   .asterion-private/prime-p7-live/<run_id>/summary.json
 ```
 
 不同时间的重跑是不同的运行，不会覆盖旧记录。保存的动作记录用于本地校验、关卡续解和之后的官方重新执行；它不是官方上传文件。
+
+### 25 题广度优先本地扫题
+
+```bash
+make asterion-prime-p7-sweep
+make asterion-prime-p7-games
+```
+
+扫题按题号轮转：每题只尝试当前最早未解的一关；成功并经重放校验后，下一轮再试该题的下一关；失败则本次扫题先转到别题。每关新增动作（包括 RESET）达到目录给出的人类基准步数就停止；已验证的前几关动作会在新本地游戏里先重放，它们不占本关步数。已有 LS20 第 2 关超基准的失败尝试会暂缓，不再作为这轮的付费重试。每次尝试保存在单独的私有运行目录，扫题仅使用 OFFLINE 游戏，不创建官方 scorecard。
+
+LS20 第 1 关的可计量样本用了 20 步、32,830 输入和 36,418 输出，共 69,248 旧口径 token，耗时 4 分 32 秒。其余 24 题首关的人类步数上限合计 851；按样本的每步消耗机械外推，约需 295 万 token、3 小时 13 分钟。旧样本未计缓存输入，且不同题难度不同，这不是完成首轮的保证。当前默认 200 万已回报 token、3 小时是可续跑的第一批停止线；每题时间按人类步数及样本速度估算，最少 10 分钟、最多 30 分钟。总 token 上限在每次尝试结束后检查，最后一次可能使总量略高于上限。子进程没有有效运行证据、运行回放或封存失败，以及尝试没有任何可记录用量时，调度器均停止后续尝试。新用量来自 DeepSeek Flash 经 Pi 返回的计数：`input_tokens` 包括缓存读写 token，`output_tokens` 为输出 token；旧的中断运行若没有 usage 事件，准确 token 数保持未知。扫题结束的 JSON 列出运行 ID、已解题号、暂缓题号和 token 总量。实际费用受缓存命中、时段和服务商价格影响，token 总量不是账单金额。
+
+查看单次运行中已落盘的 token 事件：
+
+```bash
+jq -s '[.[] | select(.kind == "arc.usage.reported") | .payload] |
+  {input_tokens: (map(.input_tokens) | add // 0),
+   output_tokens: (map(.output_tokens) | add // 0)}' \
+  .asterion-private/prime-p7-live/<run_id>/trace/prime-trace.jsonl
+```
+
+本地固定 `seed=0` 只属于 OFFLINE 游戏和本地动作前缀身份。官方 Competition 远端会话不提供玩家选 seed 的操作；P7 官方适配器的 `seed=0` 是 broker 兼容字段，不证明官方局面由该 seed 控制。官方提交只凭实际返回的初始观察及每一步观察与本地记录严格一致才继续。
 
 ## 3. 官方提交前检查
 

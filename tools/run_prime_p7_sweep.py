@@ -42,7 +42,7 @@ class SweepConfig:
     # input was absent from older telemetry, so this is a ceiling, not a fit.
     global_token_cap: int = 2_000_000
     wallclock_cap: float = 3 * 60 * 60
-    run_timeout: float = 10 * 60
+    run_timeout: float = 30 * 60
     max_attempts: int | None = None
 
 
@@ -76,9 +76,9 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 def read_run_usage(run: Path) -> tuple[int, int, bool, bool]:
     """Read only allowlisted token counters from one private run.
 
-    The third value is true when worker activity exists but no valid usage
-    event exists.  That condition is deliberately treated as a hard stop by
-    the sweep so a missing accounting event cannot silently spend more.
+    The third value is true when an attempted run has no valid usage event.
+    That condition stops the sweep so missing accounting cannot silently
+    spend more, including a model call that never produced a worker cell.
     """
 
     trace = run / "trace" / "prime-trace.jsonl"
@@ -110,13 +110,7 @@ def read_run_usage(run: Path) -> tuple[int, int, bool, bool]:
         input_tokens += incoming
         output_tokens += outgoing
         usage_count += 1
-    worker_cells = run / "worker-cells.jsonl"
-    model_activity = False
-    try:
-        model_activity = worker_cells.is_file() and bool(worker_cells.read_text(encoding="utf-8").strip())
-    except (OSError, UnicodeError):
-        model_activity = False
-    return input_tokens, output_tokens, bool(model_activity and usage_count == 0), integrity_error
+    return input_tokens, output_tokens, usage_count == 0, integrity_error
 
 
 def _read_hash_chained_trace(path: Path) -> tuple[dict[str, Any], ...]:
@@ -149,6 +143,43 @@ def _read_hash_chained_trace(path: Path) -> tuple[dict[str, Any], ...]:
     if not rows:
         raise ValueError
     return tuple(rows)
+
+
+def _valid_attempt_summary(
+    summary: dict[str, Any] | None, run_id: str, game_id: str, level: int, returncode: int,
+) -> bool:
+    """Accept only a verified puzzle terminal for the requested sweep attempt."""
+
+    if not summary or any(summary.get(key) is not True for key in (
+        "replay_verified", "sealed_trace", "cleanup_complete",
+    )):
+        return False
+    broker = summary.get("broker")
+    diagnostics = summary.get("diagnostics")
+    sweep = diagnostics.get("sweep") if type(diagnostics) is dict else None
+    if (
+        summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+        or summary.get("run_id") != run_id
+        or type(broker) is not dict
+        or type(sweep) is not dict
+        or broker.get("game_id") != game_id
+        or broker.get("seed") != 0
+        or sweep.get("scope") != "offline-research"
+        or sweep.get("target_level") != level
+        or type(sweep.get("run_action_cap")) is not int
+        or type(sweep.get("level_action_cap")) is not int
+        or not 0 < sweep["level_action_cap"] <= sweep["run_action_cap"]
+        or type(broker.get("primitive_actions")) is not int
+        or not 0 <= broker["primitive_actions"] <= sweep["run_action_cap"]
+        or type(broker.get("levels_completed")) is not int
+    ):
+        return False
+    if returncode == 0:
+        return broker["levels_completed"] >= level and broker.get("terminal_reason") in {"level-completed", "game-won"}
+    return (
+        broker["levels_completed"] == level - 1
+        and broker.get("terminal_reason") in {"human-baseline", "game-over"}
+    )
 
 
 class SweepScheduler:
@@ -189,6 +220,17 @@ class SweepScheduler:
     def _is_complete(self, game_id: str, level: int) -> bool:
         metadata = self._metadata()[game_id]
         return level > int(metadata["win_levels"])
+
+    def _timeout_for_level(self, game_id: str, level: int) -> float:
+        """Scale the attempt window from the measured 272s / 20 actions."""
+
+        metadata = self._metadata().get(game_id)
+        baselines = metadata.get("baseline_actions") if metadata else None
+        if type(baselines) is tuple and 0 < level <= len(baselines):
+            baseline = baselines[level - 1]
+            if type(baseline) is int and baseline > 0:
+                return min(self.config.run_timeout, max(600, baseline * (272 / 20) * 1.2))
+        return self.config.run_timeout
 
     def _find_deferred_levels(self) -> frozenset[tuple[str, int]]:
         """Safely defer a known over-baseline, unsealed LS20 L2 attempt."""
@@ -252,12 +294,23 @@ class SweepScheduler:
             return 127
         new_runs = sorted(_run_names(self.config.runs_root) - before)
         self._new_runs.extend(new_runs)
+        if len(new_runs) != 1 and self._stop_reason == "completed":
+            self._stop_reason = "child-evidence-missing" if not new_runs else "child-evidence-ambiguous"
         for run_id in new_runs:
-            usage = read_run_usage(self.config.runs_root / run_id)
+            run = self.config.runs_root / run_id
+            usage = read_run_usage(run)
             self._input_tokens += usage[0]
             self._output_tokens += usage[1]
             if usage[2] or usage[3]:
                 self._stop_reason = "usage-missing-after-model-activity" if usage[2] else "usage-trace-integrity-error"
+            if len(new_runs) == 1 and self._stop_reason == "completed":
+                summary = _read_json(run / "summary.json")
+                try:
+                    sealed = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl")[-1]["kind"] == "trace.sealed"
+                except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+                    sealed = False
+                if not sealed or not _valid_attempt_summary(summary, run_id, game_id, level, returncode):
+                    self._stop_reason = "child-evidence-invalid"
         return returncode
 
     def _attempt_result(self, game_id: str, level: int) -> bool:
@@ -301,11 +354,14 @@ class SweepScheduler:
                     continue
                 attempted += 1
                 print(f"[p7-sweep] attempt game={game_id} level={level}", file=sys.stderr, flush=True)
-                self._attempt(game_id, level, self.config.run_timeout)
+                returncode = self._attempt(game_id, level, self._timeout_for_level(game_id, level))
                 if self._stop_reason != "completed":
                     print(f"[p7-sweep] stopped game={game_id} level={level} reason={self._stop_reason}", file=sys.stderr, flush=True)
                     break
                 succeeded = self._attempt_result(game_id, level)
+                if returncode == 0 and not succeeded:
+                    self._stop_reason = "verified-prefix-missing"
+                    break
                 print(
                     f"[p7-sweep] result game={game_id} level={level} success={str(succeeded).lower()} "
                     f"input_tokens={self._input_tokens} output_tokens={self._output_tokens}",
@@ -365,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--token-cap", type=int, default=2_000_000)
     parser.add_argument("--wallclock-seconds", type=float, default=3 * 60 * 60)
-    parser.add_argument("--run-timeout", type=float, default=10 * 60)
+    parser.add_argument("--run-timeout", type=float, default=30 * 60)
     parser.add_argument("--max-attempts", type=int)
     args = parser.parse_args(argv)
     if args.seed != 0:
