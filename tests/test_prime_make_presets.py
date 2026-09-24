@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+import os
+import subprocess
 
 
 def _recipe(makefile: str, target: str) -> str:
@@ -16,6 +18,36 @@ def _recipe(makefile: str, target: str) -> str:
 
 
 class TestPrimeMakePresets(unittest.TestCase):
+    def test_p7_one_command_ignores_stale_shell_selection(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        probe = (
+            "p7-default-probe:\n"
+            "\t@printf '%s\\n' '$(ASTERION_PRIME_P7_GAME_ID)' "
+            "'$(ASTERION_PRIME_P7_SEED)' '$(ASTERION_PRIME_ARC_ROOT)'\n"
+        )
+        completed = subprocess.run(
+            ["make", "--no-print-directory", "-s", "-f", "Makefile", "-f", "-", "p7-default-probe"],
+            cwd=root,
+            env={
+                **os.environ,
+                "ASTERION_PRIME_P7_GAME_ID": "ls20-9607627b",
+                "ASTERION_PRIME_P7_SEED": "123",
+                "ASTERION_PRIME_ARC_ROOT": "/unexpected/old/arc-root",
+            },
+            input=probe,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual(
+            completed.stdout.splitlines(),
+            [
+                "tu93-0768757b",
+                "0",
+                str((root.parent / "external-prime" / "arc-agi-3").resolve()),
+            ],
+        )
+
     def test_native_p1_builds_installed_wheel_in_shared_mount(self) -> None:
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
         recipe = _recipe(makefile, "asterion-prime-p1-run")

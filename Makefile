@@ -41,13 +41,12 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p6-run-verbose
 .PHONY: asterion-prime-p7-solve
 
-# Operator-owned values for the Prime presets. External roots are supplied
-# through the environment or `make <target> VAR=value`. Empty values fail
-# closed in the operator preflight.
+# Operator-owned values for the Prime presets. The P7 research assets live
+# beside this checkout; the operator preflight rejects missing assets.
 ASTERION_PRIME_PI_ENTRY ?= /mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js
 ASTERION_PRIME_OPERATOR_ROOT ?= $(CURDIR)
 ASTERION_PRIME_P2_CORPUS ?= $(CURDIR)/tests/fixtures/prime_p2/small_corpus.json
-ASTERION_PRIME_ARC_ROOT ?=
+ASTERION_PRIME_ARC_ROOT := $(abspath $(CURDIR)/../external-prime/arc-agi-3)
 ASTERION_PRIME_P4_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-witness
 ASTERION_PRIME_P4_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-live
 ASTERION_PRIME_P3_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-witness
@@ -57,8 +56,9 @@ ASTERION_PRIME_P5_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-witness
 ASTERION_PRIME_P5_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p5-live
 ASTERION_PRIME_P6_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-witness
 ASTERION_PRIME_P6_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-live
-ASTERION_PRIME_P7_GAME_ID ?= ls20-9607627b
-ASTERION_PRIME_P7_SEED ?= 0
+# The selected next puzzle is a repo-owned preset; callers need only the target.
+ASTERION_PRIME_P7_GAME_ID := tu93-0768757b
+ASTERION_PRIME_P7_SEED := 0
 
 # P7 selection is forwarded through Orb by variable name, never by expanding
 # an operator-supplied value into its command line.
@@ -82,6 +82,7 @@ help:
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
 	@echo "Asterion Prime bounded live applications: asterion-prime-p3-run p4-run p5-run p6-run"
+	@echo "Asterion Prime next ARC-AGI-3 puzzle: asterion-prime-p7-solve"
 	@echo "Asterion Prime deterministic diagnostics: asterion-prime-p3-witness p4-witness p5-witness p6-witness"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
@@ -237,11 +238,8 @@ asterion-prime-p2-run:
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P2_CORPUS="$$4"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated --with "$$1" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p2.operator'\'' asterion-prime-p2-run "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P2_CORPUS)"'
 
-# ARC root, Pi entry and node are operator-owned resources, exactly like
-# ASTERION_PRIME_OPERATOR_ROOT above. The preset supplies no provider, model,
-# cost or deadline knob, and it names no checkout layout: the operator exports
-# ASTERION_PRIME_ARC_ROOT and ASTERION_PRIME_PI_ENTRY, and the operator module
-# rejects the invocation when either is missing or unusable.
+# The default P7 target selects the prepared next game and its sibling asset
+# root. The operator rejects missing or unusable assets before a model run.
 asterion-prime-p7-solve:
 	@printf '[asterion-prime-p7-solve] native Asterion-prime ARC-AGI-3 first-level solve\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \

@@ -2,11 +2,11 @@
 
 ## Goal
 
-Select a supported, exact ARC-AGI-3 game and seed for the native P7 first-level solve without editing source for each run. Preserve the existing `ls20-9607627b` seed 0 default and prepare `tu93-0768757b` seed 0 as the next puzzle. This change does not run a model.
+Select a supported, exact ARC-AGI-3 game and seed for the native P7 first-level solve. The operator-facing preset is one command, `make asterion-prime-p7-solve`; it currently defaults to the prepared next puzzle `tu93-0768757b` seed 0 and locates ARC assets beside the checkout. The historical `ls20-9607627b` remains supported for explicit recovery or comparison. This change does not run a model.
 
 ## Design
 
-The operator owns `ASTERION_PRIME_P7_GAME_ID` and `ASTERION_PRIME_P7_SEED`. The Make preset forwards both to Orb. The installed application resolves them once during preflight into an immutable game selection. Selection is restricted to the two versions verified for P7's current name-only action protocol: `ls20-9607627b` and `tu93-0768757b`. Seed is a bounded nonnegative decimal integer. Preflight checks the selected game's exact local files and metadata under `ASTERION_PRIME_ARC_ROOT`; no online game discovery occurs.
+The Make preset owns default `ASTERION_PRIME_P7_GAME_ID`, `ASTERION_PRIME_P7_SEED`, and a checkout-relative `ASTERION_PRIME_ARC_ROOT`. These Make assignments ignore stale shell environment values; explicit `make VAR=value` arguments remain an operator diagnostic override. The preset forwards game ID and seed to Orb. The installed application resolves them once during preflight into an immutable game selection. Selection is restricted to the two versions verified for P7's current name-only action protocol: `ls20-9607627b` and `tu93-0768757b`. Seed is a bounded nonnegative decimal integer. Preflight checks the selected game's exact local files and metadata under the ARC root; no online game discovery occurs.
 
 The same selection is passed to the ARC engine, broker, fresh replay engine, sealed trace, private summary, and public receipt. The broker validates the engine identity before observation, accepts the selected game's level count, and seals the selected identity. Replay rejects a different identity before observation. A separate public selection receipt digest binds the game, seed, capability receipt digest, and broker replay digest without changing the closed capability receipt contract. The first-level partial score uses the official weighted-level denominator `N(N+1)/2` and the selected game's first-level human action baseline (22 for ls20, 19 for tu93). The run still stops after one completed level, with 500 primitive actions, 128 callbacks, and a one-hour deadline.
 

@@ -53,7 +53,7 @@ make asterion-prime-p1-run
 
 ### 怎么设计的
 
-- **离线题库 + 在线推理**:ARC-AGI-3 的题通过 `ASTERION_PRIME_ARC_ROOT` 注入(operator 拥有的目录,带两个 wheel:`arc_agi-0.9.9-py3-none-any.whl` 和 `arcengine-0.9.3-py3-none-any.whl`)。
+- **离线题库 + 在线推理**:ARC-AGI-3 题库位于仓库旁的 `external-prime/arc-agi-3`；Makefile 自动定位，并使用其中两个 ARC wheel。缺失资源会在运行前被拒绝。
 - **可观测、可回放**:每次跑都封一条带 SHA-256 摘要的 trace,事后能用 `compare_prime_p7_runs.py` 对比历史日志。
 - **资源隔离**:动作通过 IPython worker 跑,worker 是受限的(`prime.ipython` host service),不能任意访问文件系统。
 
@@ -64,18 +64,10 @@ make asterion-prime-p1-run
 ### 怎么验收
 
 ```bash
-export ASTERION_PRIME_ARC_ROOT="$HOME/sandbox/agentic-2026/external-prime/arc-agi-3"
 make asterion-prime-p7-solve
 ```
 
-上面的命令保留历史默认题 `ls20-9607627b` / seed `0`。要选择本地已准备的新题 `tu93-0768757b` / seed `0`，在同一条 preset 上设置精确身份：
-
-```bash
-export ASTERION_PRIME_ARC_ROOT="$HOME/sandbox/agentic-2026/external-prime/arc-agi-3"
-make asterion-prime-p7-solve \
-  ASTERION_PRIME_P7_GAME_ID=tu93-0768757b \
-  ASTERION_PRIME_P7_SEED=0
-```
+Makefile 已将下一题 `tu93-0768757b`、seed `0` 和本地题库位置设为默认值。操作者只需记住这条命令；以后换题时由项目维护者更新默认选题。历史题 `ls20-9607627b` 仍在受控选题列表中。
 
 选择值由 Makefile 经 Orb 注入给应用；引擎、Broker、回放、密封 trace 和公开 receipt 使用同一 `game_id`/`seed`。公开 receipt 的 `selection_receipt_sha256` 还将题目身份、能力收据和 Broker 回放摘要绑定在一起；原 `receipt_sha256` 仍是能力层收据摘要。这个 preset 在完成**一关**后停止，内部上限为 500 个原始动作、128 次 callback 和 1 小时；它会实际调用模型。新题目前只做无模型预检，尚未启动该付费求解。
 

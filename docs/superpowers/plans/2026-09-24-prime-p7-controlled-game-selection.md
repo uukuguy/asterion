@@ -43,9 +43,9 @@
 
 **Files:** Modify `Makefile`, `docs/status/PRIME-P1-P7-ACCEPTANCE.md`, and `src/asterion/applications/prime/p7/run_story/evidence.py`; test the Make recipe, installed application, and `tests/test_prime_arc_agi_3_run_story.py`.
 
-**Interfaces:** `ASTERION_PRIME_P7_GAME_ID` and `ASTERION_PRIME_P7_SEED` are forwarded from Make to Orb; omitted values select ls20 seed 0.
+**Interfaces:** `ASTERION_PRIME_P7_GAME_ID` and `ASTERION_PRIME_P7_SEED` are forwarded from Make to Orb; the current one-command preset selects tu93 seed 0 and locates the sibling ARC asset root. Historical ls20 remains an explicit diagnostic override.
 
-- [ ] Correct the P7 recipe's literal `@exec`, forward both variables through shell arguments, and document the exact tu93 command.
+- [ ] Correct the P7 recipe's literal `@exec`, forward both variables through Orb, and document the one-command tu93 preset.
 - [ ] Add a 9-level run-story recording test that fails against the current 7-level reader, then preserve the recorded level count in validation and hashing.
 - [ ] Run `make -n asterion-prime-p7-solve` and inspect the generated shell command for the two forwarded values and absence of `@exec`.
 - [ ] Run P7-focused unittest modules and `make promotion-check` for the packaged application change.
