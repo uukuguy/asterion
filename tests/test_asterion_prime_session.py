@@ -41,6 +41,7 @@ class FakePiRpcSession:
         failure: BaseException | None = None,
         entered: asyncio.Event | None = None,
         release: asyncio.Event | None = None,
+        release_after_events: bool = False,
     ) -> None:
         self.config = config
         self.events = events
@@ -49,6 +50,7 @@ class FakePiRpcSession:
         self.failure = failure
         self.entered = entered
         self.release = release
+        self.release_after_events = release_after_events
         self.calls = 0
 
     async def run(
@@ -62,10 +64,12 @@ class FakePiRpcSession:
         self.calls += 1
         if self.entered is not None:
             self.entered.set()
-        if self.release is not None:
+        if self.release is not None and not self.release_after_events:
             await self.release.wait()
         for event in self.events:
             on_event(event)
+        if self.release is not None and self.release_after_events:
+            await self.release.wait()
         if self.failure is not None:
             raise self.failure
         return PiRpcResult(
@@ -193,6 +197,7 @@ class SessionFixture:
         failure: BaseException | None = None,
         entered: asyncio.Event | None = None,
         release: asyncio.Event | None = None,
+        release_after_events: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
     ) -> tuple[AsterionPrimeSession, FakePiRpcSession, PiExtensionLease]:
         lease = self.binding.preflight()
@@ -211,6 +216,7 @@ class SessionFixture:
             failure=failure,
             entered=entered,
             release=release,
+            release_after_events=release_after_events,
         )
         session = AsterionPrimeSession(
             rpc_session=rpc,  # type: ignore[arg-type]
@@ -318,6 +324,38 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertNotIn("solved", repr(events))
         self.assertEqual(rpc.calls, 1)
         self.assertTrue(lease.closed)
+
+    def test_usage_is_streamed_before_invoke_finishes(self) -> None:
+        async def exercise() -> list[RunEvent]:
+            entered = asyncio.Event()
+            release = asyncio.Event()
+            session, _rpc, _lease = self.fixture.make(
+                entered=entered,
+                release=release,
+                release_after_events=True,
+            )
+            stream = session.run(
+                RunRequest(
+                    run_id="prime-run-streaming-usage",
+                    input_text="solve level one",
+                    requested_capabilities=("prime.tool.ipython",),
+                )
+            )
+            started = await stream.__anext__()
+            self.assertEqual(started.type, "run.started")
+            next_event = asyncio.create_task(stream.__anext__())
+            await entered.wait()
+            usage = await asyncio.wait_for(next_event, timeout=1)
+            self.assertEqual(usage.type, "usage.reported")
+            release.set()
+            completed = await stream.__anext__()
+            self.assertEqual(completed.type, "run.completed")
+            with self.assertRaises(StopAsyncIteration):
+                await stream.__anext__()
+            return [started, usage, completed]
+
+        events = asyncio.run(exercise())
+        validate_event_stream([event.to_mapping() for event in events])
 
     def test_unsatisfied_completion_predicate_continues_next_round(self) -> None:
         checks = 0

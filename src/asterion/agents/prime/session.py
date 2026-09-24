@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import weakref
 from collections.abc import AsyncIterator, Callable, Mapping
 
@@ -127,35 +128,83 @@ class AsterionPrimeSession:
         self._consumed = True
         self._used_run_ids.add(request.run_id)
         public: list[RunEvent] = []
+        pending: asyncio.Queue[RunEvent] = asyncio.Queue()
 
         def emit(event_type: str, payload: Mapping[str, object]) -> None:
-            public.append(
-                RunEvent(
-                    run_id=request.run_id,
-                    sequence=len(public) + 1,
-                    type=event_type,
-                    payload=payload,
-                )
+            event = RunEvent(
+                run_id=request.run_id,
+                sequence=len(public) + 1,
+                type=event_type,
+                payload=payload,
             )
+            public.append(event)
+            pending.put_nowait(event)
 
-        emit("run.started", {"capabilities": list(ASTERION_PRIME_CAPABILITIES)})
+        task: asyncio.Task[None] | None = None
         try:
-            if any(
-                capability not in ASTERION_PRIME_CAPABILITIES
-                for capability in request.requested_capabilities
-            ):
-                raise ProtocolError("Asterion-prime capability is unavailable")
-            if request.deadline_ms not in {None, self._limits.deadline_ms}:
-                raise ProtocolError("Asterion-prime uses a fixed deadline")
-            if signal is not None and signal.cancelled:
-                emit("run.completed", {"status": "cancelled"})
-            else:
-                await self._invoke(request, signal, emit)
+            emit("run.started", {"capabilities": list(ASTERION_PRIME_CAPABILITIES)})
+            yield await pending.get()
+            task = asyncio.create_task(self._execute(request, signal, emit))
+            while True:
+                if not pending.empty():
+                    yield pending.get_nowait()
+                    continue
+                if task.done():
+                    await task
+                    break
+                event_task = asyncio.create_task(pending.get())
+                done, _ = await asyncio.wait(
+                    (task, event_task), return_when=asyncio.FIRST_COMPLETED
+                )
+                if event_task in done:
+                    yield event_task.result()
+                    continue
+                event_task.cancel()
+                try:
+                    await event_task
+                except asyncio.CancelledError:
+                    pass
+                if not pending.empty():
+                    yield pending.get_nowait()
+                    continue
+                await task
+                break
         finally:
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
             self._active = False
             self.close()
-        for event in public:
-            yield event
+
+    async def _execute(
+        self,
+        request: RunRequest,
+        signal: CancellationSignal | None,
+        emit: Callable[[str, Mapping[str, object]], None],
+    ) -> None:
+        if any(
+            capability not in ASTERION_PRIME_CAPABILITIES
+            for capability in request.requested_capabilities
+        ):
+            raise ProtocolError("Asterion-prime capability is unavailable")
+        if request.deadline_ms not in {None, self._limits.deadline_ms}:
+            raise ProtocolError("Asterion-prime uses a fixed deadline")
+        if signal is not None and signal.cancelled:
+            emit("run.completed", {"status": "cancelled"})
+        else:
+            try:
+                await self._invoke(request, signal, emit)
+            except asyncio.CancelledError:
+                raise
+            except ProtocolError:
+                raise
+            except BaseException:
+                raise ProtocolError(
+                    "Asterion-prime execution failed"
+                ) from None
 
     async def _invoke(
         self,
