@@ -492,6 +492,141 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(summary["broker"]["terminal_reason"], "game-over")
             self.assertTrue(summary["replay_verified"])
 
+    def test_failed_later_level_seals_only_verified_completed_prefix(self) -> None:
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.live import read_trace_entries
+        from asterion.applications.prime.p7.operator import _P7BrokerClient, _seal_verified_partial_run
+        from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
+        from tests.test_prime_p7_solutions import _Engine
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace_root = root / "trace"
+            trace_root.mkdir()
+            game = P7GameSelection("ls20-9607627b", 0, 7)
+            broker = ArcBroker(engine=_Engine(), game=game)
+            recorder = PrimeTraceRecorder(trace_root)
+            evidence = P7PrivateTraceReceipt(broker, recorder)
+            client = _P7BrokerClient(broker, recorder)
+            client.act([{"name": "ACTION1", "data": {}}] * 2)
+            client.act([{"name": "ACTION1", "data": {}}])
+            self.assertEqual((broker.journal[-1].levels_completed, len(broker.journal)), (1, 3))
+            with mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=lambda **_: _Engine()):
+                prefix = _seal_verified_partial_run(broker, evidence, root, root)
+            assert prefix is not None
+            self.assertEqual((prefix["levels_completed"], prefix["primitive_actions"]), (1, 2))
+            entries = read_trace_entries(trace_root)
+            self.assertEqual([entry.kind for entry in entries][-2:], ["arc.run.partial", "trace.sealed"])
+            self.assertEqual(len([entry for entry in entries if entry.kind == "arc.action"]), 3)
+
+            incomplete_trace_root = root / "incomplete-trace"
+            incomplete_trace_root.mkdir()
+            other_broker = ArcBroker(engine=_Engine(), game=game)
+            other_recorder = PrimeTraceRecorder(incomplete_trace_root)
+            other_client = _P7BrokerClient(other_broker, other_recorder)
+            other_client.act([{"name": "ACTION1", "data": {}}] * 2)
+            other_broker.act(("ACTION1",))
+            with mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=lambda **_: _Engine()):
+                self.assertIsNone(_seal_verified_partial_run(
+                    other_broker, P7PrivateTraceReceipt(other_broker, other_recorder), root, root
+                ))
+            self.assertFalse((incomplete_trace_root / "prime-trace.seal.json").exists())
+            other_recorder.close()
+
+    def test_run_live_retains_completed_level_when_model_fails_later(self) -> None:
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.operator import P7Invocation, P7LiveAttemptFailure, _P7BrokerClient, run_live
+        from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
+        from tests.test_prime_p7_solutions import _Engine
+
+        class Engine(_Engine):
+            def close(self) -> None:
+                pass
+
+        class Worker:
+            closed = False
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            game = P7GameSelection("ls20-9607627b", 0, 7)
+            worker = Worker()
+            client = None
+
+            def build_resources(**kwargs: object) -> SimpleNamespace:
+                nonlocal client
+                broker = ArcBroker(engine=kwargs["engine"], game=game)
+                evidence = P7PrivateTraceReceipt(broker, PrimeTraceRecorder(kwargs["private_trace_root"]))
+                client = _P7BrokerClient(broker, evidence.runtime_recorder)
+
+                async def close_resources() -> None:
+                    evidence.close()
+                    worker.closed = True
+
+                return SimpleNamespace(
+                    runtime_options={},
+                    host_services={"prime.arc-broker": broker, "prime.private-trace": evidence},
+                    close=close_resources,
+                )
+
+            async def composed(*args: object, **kwargs: object) -> None:
+                assert client is not None
+                client.act([{"name": "ACTION1", "data": {}}] * 2)
+                client.act([{"name": "ACTION1", "data": {}}])
+                raise RuntimeError("private model detail")
+
+            assembly = SimpleNamespace(
+                runtime_binding=SimpleNamespace(factory=lambda context: object()),
+                path=root,
+                plan=object(),
+            )
+            application = SimpleNamespace(assemblies=[assembly], implementations=())
+            invocation = P7Invocation(root, {}, root, (), root, game)
+            with (
+                mock.patch("asterion.applications.prime.p7.operator.live.SubprocessPythonWorker", return_value=worker),
+                mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=lambda **_: Engine()),
+                mock.patch("asterion.applications.prime.p7.operator.build_p7_operator_resources", side_effect=build_resources),
+                mock.patch("asterion.applications.prime.p7.operator._resolve_p7_application", return_value=application),
+                mock.patch("asterion.applications.prime.p7.operator.run_composed_application", new_callable=mock.AsyncMock, side_effect=composed),
+                mock.patch("asterion.applications.prime.p7.operator.live.worker_cell_count", return_value=0),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                with self.assertRaises(P7LiveAttemptFailure) as caught:
+                    asyncio.run(run_live(invocation, "p7-live-partial"))
+
+            failure = caught.exception
+            self.assertTrue(failure.replay_verified)
+            self.assertTrue(failure.sealed_trace)
+            self.assertTrue(failure.cleanup_complete)
+            run = root / ".asterion-private/prime-p7-live/p7-live-partial"
+            summary = json.loads((run / "summary.json").read_text())
+            self.assertEqual(summary["completed_prefix"]["levels_completed"], 1)
+            self.assertEqual(summary["completed_prefix"]["primitive_actions"], 2)
+            self.assertEqual(summary["receipt"], {})
+            arc_game = root / "environment_files/ls20/9607627b"
+            arc_game.mkdir(parents=True)
+            (arc_game / "ls20.py").write_text("# fixture\n")
+            (arc_game / "metadata.json").write_text(json.dumps({
+                "game_id": game.game_id,
+                "baseline_actions": [22, 123, 73, 84, 96, 192, 186],
+                "win_levels": 7,
+            }))
+            recording = run / "recordings/session/ls20.jsonl"
+            recording.parent.mkdir(parents=True)
+            recording.write_text("\n".join(json.dumps({"data": {
+                "game_id": game.game_id,
+                "win_levels": 7,
+                "action_input": {"id": action, "data": {}},
+            }}) for action in ("RESET", "ACTION1", "ACTION1", "ACTION1")) + "\n")
+            from asterion.applications.prime.p7.solutions import load_best_prefix
+            with mock.patch("asterion.applications.prime.p7.solutions._fresh_engine", side_effect=lambda *_: Engine()):
+                prefix = load_best_prefix(root, run.parent, game.game_id, 0)
+            assert prefix is not None
+            self.assertEqual((prefix.levels_completed, len(prefix.transitions)), (1, 2))
+
     def test_safe_run_id_keeps_utc_timestamp_and_separates_same_second_retries(
         self,
     ) -> None:

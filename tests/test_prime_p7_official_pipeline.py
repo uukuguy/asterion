@@ -174,6 +174,53 @@ class TestOfficialPipeline(unittest.TestCase):
         self.assertEqual([call[1] for call in self.sdk.calls if isinstance(call, tuple) and call[0] == "make"], [selected])
         execute.assert_called_once()
 
+    def test_saved_submission_dispatches_real_verified_actions_without_model(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcAction, ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.official_operator import _submit_saved
+        from asterion.applications.prime.p7.solutions import VerifiedPrefix
+        from tests.test_prime_p7_solutions import _Engine
+
+        game_id = "ls20-9607627b"
+        game = P7GameSelection(game_id, 0, 1)
+        source = ArcBroker(engine=_Engine(), game=game)
+        source.act((ArcAction("ACTION6", (("x", 12), ("y", 34))), "ACTION1"))
+        prefix = VerifiedPrefix(game_id, 0, 7, 1, source.journal, "saved-run", source.seal().replay_sha256)
+
+        class Engine(_Engine):
+            win_levels = 7
+
+            def close(self) -> None:
+                pass
+
+        class Session:
+            selected_game_ids = (game_id,)
+
+            def __init__(self) -> None:
+                self.engine = Engine()
+                self.calls: list[str] = []
+
+            def open(self) -> None:
+                self.calls.append("open")
+
+            def make(self, game_id: str) -> Engine:
+                self.calls.append(game_id)
+                return self.engine
+
+            def close(self) -> None:
+                self.calls.append("close")
+
+        session = Session()
+        with (
+            mock.patch("asterion.applications.prime.p7.official_operator._resolve_gameplay_application", side_effect=AssertionError("model launched")),
+            mock.patch("asterion.applications.prime.p7.official_operator.validate_closed_scorecard", return_value=NS(to_dict=lambda: {"status": "closed-confirmed"})),
+            mock.patch("asterion.applications.prime.p7.official_operator.write_official_receipt"),
+        ):
+            result = _submit_saved(session, Path(self.directory.name), (prefix,))  # type: ignore[arg-type]
+        self.assertEqual(result["status"], "closed-confirmed")
+        self.assertEqual(session.calls, ["open", game_id, "close"])
+        self.assertEqual(session.engine.calls, 2)
+
     def test_missing_scorecard_row_writes_recovery_without_scorecard_url(self) -> None:
         evidence_root = Path(self.directory.name) / "recovery"
         evidence_root.mkdir(mode=0o700)

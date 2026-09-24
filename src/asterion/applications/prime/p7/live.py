@@ -875,6 +875,7 @@ def write_summary(
     reason: str | None,
     failure: BaseException | None,
     diagnostics: Mapping[str, object],
+    completed_prefix: Mapping[str, object] | None = None,
 ) -> None:
     """Write the private per-run summary; never a public surface."""
 
@@ -896,6 +897,7 @@ def write_summary(
         },
         "replay_verified": replay_verified,
         "sealed_trace": sealed_trace,
+        "completed_prefix": None if completed_prefix is None else dict(completed_prefix),
         "cleanup_complete": cleanup_complete,
         "comparison_report": None
         if comparison_report is None

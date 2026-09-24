@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path
@@ -47,7 +47,8 @@ from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
     P7_TRACE_IDENTITIES,
 )
-from asterion.applications.prime.p7.score import digest
+from asterion.applications.prime.p7.replay import replay_arc_run
+from asterion.applications.prime.p7.score import digest, replay_sha256
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 from asterion.applications.prime.runtime_binding import PrimeLaunch
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
@@ -340,6 +341,77 @@ def _apply_saved_prefix(
             raise ValueError
     except Exception:
         raise P7OperatorError("P7 saved prefix is unavailable") from None
+
+
+def _seal_verified_partial_run(
+    broker: ArcBroker,
+    evidence: P7PrivateTraceReceipt,
+    arc_root: Path,
+    private: Path,
+) -> dict[str, object] | None:
+    """Retain completed levels when a later solve step fails."""
+
+    if not evidence.matches_runtime_broker(broker):
+        return None
+    try:
+        journal = broker.journal
+        recorded_actions = tuple(
+            entry.payload
+            for entry in evidence.runtime_recorder.snapshot()
+            if entry.kind == "arc.action"
+        )
+        if len(recorded_actions) != len(journal) or any(
+            row.get("sequence") != item.sequence
+            or row.get("action") != item.action
+            or row.get("before_sha256") != item.before_sha256
+            or row.get("after_sha256") != item.after_sha256
+            or row.get("levels_completed") != item.levels_completed
+            or row.get("data", {}) != dict(item.data)
+            for row, item in zip(recorded_actions, journal)
+        ):
+            return None
+        level = max(item.levels_completed for item in journal)
+        if not 0 < level < broker.game.win_levels:
+            return None
+        stop = next(index for index, item in enumerate(journal, 1) if item.levels_completed == level)
+        prefix = journal[:stop]
+        game = replace(broker.game, target_level=level)
+        receipt = ArcRunReceipt(
+            game.game_id,
+            game.seed,
+            len(prefix),
+            level,
+            "level-completed",
+            replay_sha256(prefix, terminal_reason="level-completed"),
+        )
+        replay_arc_run(
+            prefix,
+            receipt,
+            lambda: live.ArcadeEngine(
+                arc_root=arc_root,
+                recordings_dir=private / "prefix-replay-recordings",
+                game=game,
+            ),
+            game=game,
+        )
+        payload = {
+            "game_id": receipt.game_id,
+            "seed": receipt.seed,
+            "win_levels": game.win_levels,
+            "levels_completed": receipt.levels_completed,
+            "primitive_actions": receipt.primitive_actions,
+            "replay_sha256": receipt.replay_sha256,
+            "terminal_reason": receipt.terminal_reason,
+        }
+        evidence.runtime_recorder.append(
+            "arc.run.partial",
+            P7_TRACE_IDENTITIES,
+            payload,
+        )
+        evidence.runtime_recorder.seal()
+        return payload
+    except Exception:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -724,6 +796,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     failure: BaseException | None = None
     diagnostics: dict[str, object] = {}
     broker_status = None
+    completed_prefix: dict[str, object] | None = None
     try:
         if invocation.game.target_level > 1:
             from .solutions import load_best_prefix
@@ -831,6 +904,18 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                         replay_verified = True
                     except Exception:
                         pass
+                evidence_value = resources_.host_services.get("prime.private-trace")
+                if (
+                    failure is not None
+                    and not sealed_trace
+                    and type(evidence_value) is P7PrivateTraceReceipt
+                ):
+                    completed_prefix = _seal_verified_partial_run(
+                        broker_value, evidence_value, invocation.arc_root, private
+                    )
+                    if completed_prefix is not None:
+                        replay_verified = True
+                        sealed_trace = True
             # The launch seam carries plain data only, so there is no live Pi
             # session object left to read a failure or an stderr tail from.
             diagnostics["worker_cell_count"] = live.worker_cell_count(private)
@@ -865,6 +950,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                 reason=reason,
                 failure=failure,
                 diagnostics=diagnostics,
+                completed_prefix=completed_prefix,
             )
     if failure is not None:
         raise P7LiveAttemptFailure(
