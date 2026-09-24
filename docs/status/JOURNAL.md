@@ -2896,5 +2896,6 @@
 ## 2026-09-25
 
 - 09:30 Added a no-network P7 lifecycle test against the real arc-agi 0.9.9 SDK; verified catalog, scorecard, make, and close compatibility [ee8d5787]
+- 09:40 Extended the real SDK lifecycle test through complete close scorecard parsing and validated official receipt fields [277061bc]
 - 03:25 a33bd7a7 更新活跃会话检查点，保留真实 SDK 无网络验证与未提交边界。
 - 03:25 更正上一节 SDK 测试条目的时间：`ee8d5787` 提交于 03:23 CST，非 09:30。
