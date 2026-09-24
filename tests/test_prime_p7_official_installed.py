@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import tempfile
 import textwrap
 import unittest
@@ -183,15 +182,13 @@ class TestPrimeP7OfficialInstalled(unittest.TestCase):
 
             node = shutil.which("node")
             self.assertIsNotNone(node)
-            loader_dir = (
-                virtual
-                / "lib"
-                / f"python{sys.version_info.major}.{sys.version_info.minor}"
-                / "site-packages"
-                / "asterion"
-                / "runtimes"
-                / "resources"
+            resource_dirs = tuple(
+                (virtual / "lib").glob(
+                    "python*/site-packages/asterion/runtimes/resources"
+                )
             )
+            self.assertEqual(len(resource_dirs), 1)
+            loader_dir = resource_dirs[0]
             earendil_host = Path(
                 "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent"
             )
