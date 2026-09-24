@@ -43,7 +43,6 @@ class TestPrimeP7GameSync(unittest.TestCase):
                         "game_id": game_id,
                         "title": game_id,
                         "tags": ["keyboard"],
-                        "class_name": class_name,
                     }
                 )
 
@@ -58,6 +57,7 @@ class TestPrimeP7GameSync(unittest.TestCase):
                 short, version = game_id.split("-", 1)
                 destination = root / "environment_files" / short / version
                 self.assertEqual(json.loads((destination / "metadata.json").read_text())["game_id"], game_id)
+                self.assertNotIn("class_name", json.loads((destination / "metadata.json").read_text()))
                 self.assertIn(f"class {short[0].upper() + short[1:]}:",
                               (destination / f"{short}.py").read_text())
 
@@ -85,11 +85,79 @@ class TestPrimeP7GameSync(unittest.TestCase):
                     return _Response(payload=[{"game_id": "ls20-9607627b"}])
                 if url.endswith("/source"):
                     return _Response(content=b"class Ls20:\n    pass\n")
-                return _Response(payload={"game_id": "ls20-9607627b", "title": "LS20", "tags": [], "class_name": "Ls20"})
+                return _Response(payload={"game_id": "ls20-9607627b", "title": "LS20", "tags": []})
 
             with self.assertRaisesRegex(SyncError, "existing"):
                 sync_games(root, api_key="private-key", get=get)
             self.assertEqual(source.read_text(encoding="utf-8"), "old private source")
+
+    def test_existing_sdk_metadata_extras_are_tolerated_only_when_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "arc-agi-3"
+            destination = root / "environment_files" / "ls20" / "9607627b"
+            destination.mkdir(parents=True)
+            remote = {"game_id": "ls20-9607627b", "title": "LS20", "tags": [], "default_fps": 30,
+                      "baseline_actions": [1, 2]}
+            (destination / "metadata.json").write_text(json.dumps({
+                **remote, "date_downloaded": "2026-09-25T00:00:00+00:00",
+                "local_dir": str(destination), "class_name": "Ls20",
+            }), encoding="utf-8")
+            (destination / "ls20.py").write_text("class Ls20:\n    pass\n", encoding="utf-8")
+
+            def get(url: str, **_kwargs: object) -> _Response:
+                if url.endswith("/api/games"):
+                    return _Response(payload=[{"game_id": "ls20-9607627b"}])
+                if url.endswith("/source"):
+                    return _Response(content=b"class Ls20:\n    pass\n")
+                return _Response(payload=remote)
+
+            self.assertEqual(sync_games(root, api_key="private-key", get=get), ("ls20-9607627b",))
+
+    def test_accepts_official_metadata_without_optional_tags(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "arc-agi-3"
+            metadata = {"game_id": "ft09-0d8bbf25", "title": "FT09", "default_fps": 8,
+                        "baseline_actions": [43, 12, 23]}
+
+            def get(url: str, **_kwargs: object) -> _Response:
+                if url.endswith("/api/games"):
+                    return _Response(payload=[{"game_id": "ft09-0d8bbf25"}])
+                if url.endswith("/source"):
+                    return _Response(content=b"class Ft09:\n    pass\n")
+                return _Response(payload=metadata)
+
+            self.assertEqual(sync_games(root, api_key="private-key", get=get), ("ft09-0d8bbf25",))
+
+    def test_retries_a_valid_metadata_only_interrupted_sync_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "arc-agi-3"
+            metadata = {"game_id": "ls20-9607627b", "title": "LS20", "tags": []}
+
+            def get(url: str, **_kwargs: object) -> _Response:
+                if url.endswith("/api/games"):
+                    return _Response(payload=[{"game_id": "ls20-9607627b"}])
+                if url.endswith("/source"):
+                    return _Response(content=b"class Ls20:\n    pass\n")
+                return _Response(payload=metadata)
+
+            from tools import sync_prime_p7_games as sync_module
+
+            original_create = sync_module._create_atomic
+
+            def interrupted(path: Path, contents: bytes) -> None:
+                if path.name == "ls20.py":
+                    raise OSError("interrupted private write")
+                original_create(path, contents)
+
+            with patch("tools.sync_prime_p7_games._create_atomic", side_effect=interrupted):
+                with self.assertRaises(SyncError):
+                    sync_games(root, api_key="private-key", get=get)
+            destination = root / "environment_files" / "ls20" / "9607627b"
+            self.assertTrue((destination / "metadata.json").is_file())
+            self.assertFalse((destination / "ls20.py").exists())
+
+            self.assertEqual(sync_games(root, api_key="private-key", get=get), ("ls20-9607627b",))
+            self.assertEqual((destination / "ls20.py").read_text(encoding="utf-8"), "class Ls20:\n    pass\n")
 
     def test_cli_reads_operator_key_without_printing_it_or_private_paths(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

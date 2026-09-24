@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -117,17 +118,50 @@ def _metadata(value: object, game_id: str) -> dict[str, Any]:
         raise SyncError("official metadata identity does not match catalog")
     short_id, version = game_id.split("-", 1)
     class_name = value.get("class_name")
+    baseline_actions = value.get("baseline_actions")
+    default_fps = value.get("default_fps")
     if (
         type(value.get("title")) is not str
-        or type(value.get("tags")) is not list
-        or any(type(tag) is not str for tag in value["tags"])
-        or type(class_name) is not str
-        or _CLASS_NAME.fullmatch(class_name) is None
-        or class_name != _expected_class_name(short_id)
+        or ("tags" in value and (
+            type(value["tags"]) is not list or any(type(tag) is not str for tag in value["tags"])
+        ))
+        or (baseline_actions is not None and (
+            type(baseline_actions) is not list
+            or any(type(action) is not int or isinstance(action, bool) or action < 0 for action in baseline_actions)
+        ))
+        or (default_fps is not None and (type(default_fps) is not int or isinstance(default_fps, bool) or default_fps < 1))
+        or (class_name is not None and (
+            type(class_name) is not str
+            or _CLASS_NAME.fullmatch(class_name) is None
+            or class_name != _expected_class_name(short_id)
+        ))
         or ("version" in value and value["version"] != version)
     ):
         raise SyncError("official metadata is invalid")
     return value
+
+
+def _matches_existing_metadata(existing: object, remote: dict[str, Any], *, destination: Path, class_name: str) -> bool:
+    """Accept only the ARC SDK's validated local additions to remote metadata."""
+    if type(existing) is not dict or any(existing.get(key) != value for key, value in remote.items()):
+        return False
+    extras = set(existing) - set(remote)
+    if not extras.issubset({"date_downloaded", "local_dir", "class_name"}):
+        return False
+    if "date_downloaded" in extras:
+        try:
+            if type(existing["date_downloaded"]) is not str:
+                return False
+            datetime.fromisoformat(existing["date_downloaded"].replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    if "local_dir" in extras:
+        if (
+            type(existing["local_dir"]) is not str
+            or os.path.abspath(existing["local_dir"]) != os.path.abspath(destination)
+        ):
+            return False
+    return "class_name" not in extras or existing["class_name"] == class_name
 
 
 def _source(value: bytes, class_name: str) -> bytes:
@@ -176,32 +210,40 @@ def sync_games(
         raise SyncError("symlinked destination is not allowed")
     base_url = base_url.rstrip("/")
     headers = {"X-API-Key": api_key, "Accept": "application/json"}
+    current_game_id: str | None = None
     try:
         catalog = get(f"{base_url}/api/games", headers=headers, timeout=_TIMEOUT_SECONDS)
         catalog.raise_for_status()
         game_ids = _catalog_ids(catalog.json())
         for game_id in game_ids:
+            current_game_id = game_id
             metadata_response = get(f"{base_url}/api/games/{game_id}", headers=headers, timeout=_TIMEOUT_SECONDS)
             metadata_response.raise_for_status()
             metadata = _metadata(metadata_response.json(), game_id)
             source_response = get(f"{base_url}/api/games/{game_id}/source", headers=headers, timeout=_TIMEOUT_SECONDS)
             source_response.raise_for_status()
-            source = _source(source_response.content, metadata["class_name"])
+            short_id = game_id.split("-", 1)[0]
+            source = _source(source_response.content, _expected_class_name(short_id))
             game_root, metadata_path, source_path = _destination(arc_root, game_id)
             del game_root  # The safe-directory checks above establish both output parents.
             metadata_bytes = (json.dumps(metadata, sort_keys=True, indent=2) + "\n").encode("utf-8")
             _check_file(metadata_path)
             _check_file(source_path)
             if metadata_path.exists() or source_path.exists():
-                if not (metadata_path.exists() and source_path.exists()):
+                if source_path.exists() and not metadata_path.exists():
                     raise SyncError("existing game version differs")
                 try:
-                    same_metadata = json.loads(metadata_path.read_text(encoding="utf-8")) == metadata
-                    same_source = source_path.read_bytes() == source
+                    same_metadata = _matches_existing_metadata(
+                        json.loads(metadata_path.read_text(encoding="utf-8")), metadata,
+                        destination=metadata_path.parent, class_name=_expected_class_name(short_id),
+                    )
+                    same_source = not source_path.exists() or source_path.read_bytes() == source
                 except (OSError, UnicodeError, ValueError) as error:
                     raise SyncError("existing game version differs") from error
                 if not (same_metadata and same_source):
                     raise SyncError("existing game version differs")
+                if not source_path.exists():
+                    _create_atomic(source_path, source)
                 continue
             _create_atomic(metadata_path, metadata_bytes)
             try:
@@ -209,9 +251,13 @@ def sync_games(
             except Exception:
                 # Preserve the complete metadata as a conservative record; never delete or overwrite it.
                 raise
-    except SyncError:
+    except SyncError as error:
+        if current_game_id is not None:
+            raise SyncError(f"official game sync failed: {current_game_id}: {error}") from error
         raise
     except Exception as error:
+        if current_game_id is not None:
+            raise SyncError(f"official game request failed: {current_game_id}") from error
         raise SyncError("official catalog request failed") from error
     return game_ids
 
