@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-24 20:17 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-24 20:19 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
@@ -16,6 +16,7 @@
 - 最新两次 P7 私有摘要 `p7-live-20260924094143`、`p7-live-20260924112844` 均是 `ApplicationProviderError`，动作数、IPython 单元数均为 0，没有能力收据；公开 provider 已包含 7 个应用，但 P7 入口只注入 1 个能力包。将 P7 入口改用只含 P7 的 provider 后，安装 wheel 在 Orb 中无模型组合通过；P7 相关定向测试 41 项通过，`make promotion-check` 25 条隔离命令通过且模型操作 0。
 - `de619f03` 已提交这项修复及回归测试；真实付费求解未重跑。
 - `30950d1c` 已提交 `make asterion-prime-p7-games` 和 `docs/guides/prime-p7-games-and-official-results.md`。本地清单显示 ls20 已验证 1/7 关（最佳 20 动作、3.571429），tu93 当前无已验证完成记录；8 项定向测试、lint、docs-check 通过。此命令只读、不启动模型或访问网络。
+- `cbb33b86` 已修复清单对未知历史题号的异常，以及负分、超界分数误算为已验证的问题；9 项定向测试与 lint 通过。
 
 ## 边界与下一动作
 
