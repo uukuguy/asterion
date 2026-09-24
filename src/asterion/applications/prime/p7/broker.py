@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol, cast
 
-from .game import DEFAULT_GAME, P7GameSelection
+from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
 
 
@@ -167,7 +167,7 @@ def _observation_digest(value: ArcObservation) -> str:
     )
 
 
-def _engine_identity(engine: object, game: P7GameSelection) -> tuple[str, int]:
+def _engine_identity(engine: object, game: P7GameSelection | ArcGameContract) -> tuple[str, int]:
     game_id, seed = getattr(engine, "game_id", None), getattr(engine, "seed", None)
     if type(game_id) is not str or type(seed) is not int or type(seed) is bool:
         raise ValueError
@@ -179,8 +179,8 @@ def _engine_identity(engine: object, game: P7GameSelection) -> tuple[str, int]:
 class ArcBroker:
     """Journal bounded actions through the selected target level."""
 
-    def __init__(self, *, engine: object, game: P7GameSelection = DEFAULT_GAME) -> None:
-        if type(game) is not P7GameSelection:
+    def __init__(self, *, engine: object, game: P7GameSelection | ArcGameContract = DEFAULT_GAME) -> None:
+        if type(game) not in (P7GameSelection, ArcGameContract):
             raise ArcBrokerError("unavailable")
         if not callable(getattr(engine, "observe", None)) or not (
             callable(getattr(engine, "step", None)) or callable(getattr(engine, "act", None))
@@ -209,7 +209,7 @@ class ArcBroker:
         return tuple(self._journal)
 
     @property
-    def game(self) -> P7GameSelection:
+    def game(self) -> P7GameSelection | ArcGameContract:
         return self._game
 
     def _require_open(self) -> None:
@@ -344,6 +344,8 @@ class ArcBroker:
     def replay(self, engine_factory: Callable[[], object]) -> ArcRunReceipt:
         from .replay import replay_arc_run
 
+        if type(self._game) is not P7GameSelection:
+            raise ArcBrokerError("unavailable")
         return replay_arc_run(self.journal, self.seal(), engine_factory, game=self._game)
 
 

@@ -7,6 +7,7 @@ import re
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt, ArcTransition
+from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.score import partial_game_score
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
@@ -38,6 +39,7 @@ class P7PrivateTraceReceipt:
     def __post_init__(self) -> None:
         if (
             type(self._broker) is not ArcBroker
+            or type(self._broker.game) is not P7GameSelection
             or type(self._recorder) is not PrimeTraceRecorder
         ):
             raise P7PrivateTraceReceiptError("P7 solve receipt is unavailable")

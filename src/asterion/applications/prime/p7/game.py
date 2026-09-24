@@ -29,6 +29,44 @@ class P7GameSelectionError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class ArcGameContract:
+    """Official full-game bounds derived from the SDK's first observation.
+
+    The application supplies the observed win-level count. This contract carries
+    no local baseline or authority to replay an official competition session.
+    """
+
+    game_id: str
+    win_levels: int
+    seed: int = 0
+    action_cap: int = 1000
+    mode: str = "official"
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.game_id) is not str
+            or _GAME_ID.fullmatch(self.game_id) is None
+            or type(self.win_levels) is not int
+            or self.win_levels < 1
+            or type(self.seed) is not int
+            or self.seed != 0
+            or type(self.action_cap) is not int
+            or not 1000 <= self.action_cap <= 5000
+            or type(self.mode) is not str
+            or self.mode != "official"
+        ):
+            raise P7GameSelectionError("P7 game selection is unavailable")
+
+    @property
+    def target_level(self) -> int:
+        return self.win_levels
+
+    @property
+    def is_full_game(self) -> bool:
+        return True
+
+
+@dataclass(frozen=True, slots=True)
 class P7GameSelection:
     game_id: str
     seed: int
@@ -189,6 +227,7 @@ def _read_catalog(arc_root: Path) -> tuple[dict[str, object], ...]:
 
 
 __all__ = (
+    "ArcGameContract",
     "DEFAULT_GAME",
     "DEFAULT_GAME_ID",
     "GAME_ID_ENV",
