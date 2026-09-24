@@ -14,7 +14,7 @@ from asterion.capabilities.prime_arc_agi_3_gameplay.host import (
 )
 
 
-_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\\Z")
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 GAMEPLAY_TRACE_IDENTITIES = {
     "application_id": "prime.arc-agi-3-gameplay",
     "application_version": "1.0.0",
