@@ -71,6 +71,36 @@ class TestP7SavedSolutions(unittest.TestCase):
         self.assertEqual((prefix.levels_completed, len(prefix.transitions)), (1, 2))
         self.assertEqual(prefix.transitions[0].data, (("x", 12), ("y", 34)))
 
+    def test_loads_legacy_completed_marker_without_identity_fields(self) -> None:
+        from asterion.applications.prime.p7.solutions import load_best_prefix
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc_root = self._arc_root(root)
+            runs_root = root / "runs"
+            self._write_run(runs_root / "p7-legacy", legacy=True)
+            with patch(
+                "asterion.applications.prime.p7.solutions._fresh_engine",
+                side_effect=lambda _root, _game, _recordings: _Engine(),
+            ):
+                prefix = load_best_prefix(arc_root, runs_root, "ls20-9607627b", 0)
+        assert prefix is not None
+        self.assertEqual((prefix.levels_completed, len(prefix.transitions)), (1, 2))
+        self.assertEqual(prefix.source_run_id, "p7-legacy")
+
+    def test_partial_marker_still_requires_full_identity(self) -> None:
+        from asterion.applications.prime.p7.solutions import _prefix_values
+
+        legacy_fields = {
+            "levels_completed": 1,
+            "primitive_actions": 2,
+            "replay_sha256": "sha256:example",
+            "terminal_reason": "level-completed",
+        }
+        self.assertIsNone(
+            _prefix_values(legacy_fields, "ls20-9607627b", 0, 7, is_partial=True)
+        )
+
     def test_rejects_changed_digest_wrong_game_and_symlinked_run(self) -> None:
         from asterion.applications.prime.p7.solutions import load_best_prefix
 
@@ -208,7 +238,7 @@ class TestP7SavedSolutions(unittest.TestCase):
         return root / "arc"
 
     @staticmethod
-    def _write_run(run: Path, *, target_level: int = 1) -> None:
+    def _write_run(run: Path, *, target_level: int = 1, legacy: bool = False) -> None:
         from asterion.agents.prime.trace import PrimeTraceRecorder
         from asterion.applications.prime.p7.broker import ArcAction, ArcBroker
         from asterion.applications.prime.p7.game import P7GameSelection
@@ -230,7 +260,9 @@ class TestP7SavedSolutions(unittest.TestCase):
             if transition.data:
                 payload["data"] = dict(transition.data)
             recorder.append("arc.action", P7_TRACE_IDENTITIES, payload)
-        recorder.append("arc.run.completed", P7_TRACE_IDENTITIES, {"game_id": game.game_id, "seed": 0, "win_levels": 7, "levels_completed": target_level, "primitive_actions": len(broker.journal), "replay_sha256": receipt.replay_sha256, "terminal_reason": receipt.terminal_reason})
+        result_fields = {"levels_completed": target_level, "primitive_actions": len(broker.journal), "replay_sha256": receipt.replay_sha256, "terminal_reason": receipt.terminal_reason}
+        identity_fields = {"game_id": game.game_id, "seed": 0, "win_levels": 7}
+        recorder.append("arc.run.completed", P7_TRACE_IDENTITIES, result_fields if legacy else identity_fields | result_fields)
         recorder.seal()
         recording = run / "recordings" / "session"
         recording.mkdir(parents=True)
@@ -238,7 +270,7 @@ class TestP7SavedSolutions(unittest.TestCase):
         rows.extend({"data": {"game_id": game.game_id, "win_levels": 7, "action_input": {"id": item.action, "data": dict(item.data)}}} for item in broker.journal)
         (recording / "ls20.jsonl").write_text("\n".join(json.dumps(row) for row in rows) + "\n")
         (run / "worker-cells.jsonl").write_text("")
-        (run / "summary.json").write_text(json.dumps({"schema": "asterion.prime.p7-live-private-summary/v1", "run_id": run.name, "receipt": {"completed_level_count": target_level, "primitive_action_count": len(broker.journal)}, "broker": {"game_id": game.game_id, "seed": 0, "win_levels": 7, "levels_completed": target_level, "primitive_actions": len(broker.journal), "terminal_reason": receipt.terminal_reason, "replay_sha256": receipt.replay_sha256}, "replay_verified": True, "sealed_trace": True, "cleanup_complete": True, "comparison_report": None, "reason": None, "failure": None, "diagnostics": {"worker_cell_count": 0}}))
+        (run / "summary.json").write_text(json.dumps({"schema": "asterion.prime.p7-live-private-summary/v1", "run_id": run.name, "receipt": {"completed_level_count": target_level, "primitive_action_count": len(broker.journal)}, "broker": result_fields if legacy else identity_fields | result_fields, "replay_verified": True, "sealed_trace": True, "cleanup_complete": True, "comparison_report": None, "reason": None, "failure": None, "diagnostics": {"worker_cell_count": 0}}))
 
     @staticmethod
     def _write_partial_run(run: Path, *, completed_levels: int = 1) -> None:

@@ -116,7 +116,7 @@ def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_l
         if recorded_game_id != expected_game_id:
             return None
         values = _prefix_values(
-            evidence, recorded_game_id, seed, win_levels, require_completed_terminal=is_partial
+            evidence, recorded_game_id, seed, win_levels, is_partial=is_partial
         )
         if values is None:
             return None
@@ -235,34 +235,37 @@ def _truncate(transitions: tuple[ArcTransition, ...], level: int) -> tuple[ArcTr
 
 
 def _prefix_values(
-    value: Mapping[object, object], game_id: str, seed: int, win_levels: int, *, require_completed_terminal: bool
+    value: Mapping[object, object], game_id: str, seed: int, win_levels: int, *, is_partial: bool
 ) -> tuple[int, int, str, str] | None:
-    """Validate the one self-contained, completed-level prefix declaration."""
+    """Validate a strict partial marker or either completed marker format."""
 
-    required = {
-        "game_id",
-        "seed",
-        "win_levels",
+    result_fields = {
         "levels_completed",
         "primitive_actions",
         "replay_sha256",
         "terminal_reason",
     }
-    if set(value) != required:
+    identity_fields = {"game_id", "seed", "win_levels"}
+    fields = set(value)
+    has_identity = fields == result_fields | identity_fields
+    if not has_identity and (is_partial or fields != result_fields):
+        return None
+    if has_identity and (
+        value["game_id"] != game_id
+        or value["seed"] != seed
+        or value["win_levels"] != win_levels
+    ):
         return None
     levels, actions = value["levels_completed"], value["primitive_actions"]
     terminal, digest = value["terminal_reason"], value["replay_sha256"]
     if (
-        value["game_id"] != game_id
-        or value["seed"] != seed
-        or value["win_levels"] != win_levels
-        or type(levels) is not int
+        type(levels) is not int
         or type(actions) is not int
         or type(terminal) is not str
         or type(digest) is not str
         or not 1 <= levels <= win_levels
         or actions < 1
-        or (require_completed_terminal and terminal != "level-completed")
+        or (is_partial and terminal != "level-completed")
     ):
         return None
     return levels, actions, terminal, digest
