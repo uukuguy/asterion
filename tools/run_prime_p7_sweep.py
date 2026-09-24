@@ -74,7 +74,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return value if type(value) is dict else None
 
 
-def read_run_usage(run: Path) -> tuple[int, int, bool, bool]:
+def read_run_usage(run: Path, *, in_progress: bool = False) -> tuple[int, int, bool, bool]:
     """Read only allowlisted token counters from one private run.
 
     The third value is true when an attempted run has no valid usage event.
@@ -89,7 +89,10 @@ def read_run_usage(run: Path) -> tuple[int, int, bool, bool]:
     try:
         if trace.is_symlink() or not trace.is_file():
             raise ValueError
-        entries = _read_hash_chained_trace(trace)
+        entries = _read_hash_chained_trace(trace, in_progress=in_progress)
+    except _TraceIntegrityError as error:
+        entries = error.rows
+        integrity_error = True
     except Exception:
         entries = ()
         integrity_error = True
@@ -114,7 +117,13 @@ def read_run_usage(run: Path) -> tuple[int, int, bool, bool]:
     return input_tokens, output_tokens, usage_count == 0, integrity_error
 
 
-def _read_hash_chained_trace(path: Path) -> tuple[dict[str, Any], ...]:
+class _TraceIntegrityError(ValueError):
+    def __init__(self, rows: tuple[dict[str, Any], ...]) -> None:
+        super().__init__("trace integrity error")
+        self.rows = rows
+
+
+def _read_hash_chained_trace(path: Path, *, in_progress: bool = False) -> tuple[dict[str, Any], ...]:
     """Validate a trace chain while permitting an interrupted unsealed prefix."""
 
     if path.is_symlink() or not path.is_file():
@@ -122,26 +131,33 @@ def _read_hash_chained_trace(path: Path) -> tuple[dict[str, Any], ...]:
     rows: list[dict[str, Any]] = []
     previous: str | None = None
     identities: dict[str, Any] | None = None
-    for expected_sequence, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        row = json.loads(line)
-        if type(row) is not dict or set(row) != {"identities", "kind", "payload", "previous_sha256", "sequence", "sha256"}:
-            raise ValueError
-        if row["sequence"] != expected_sequence or row["previous_sha256"] != previous:
-            raise ValueError
-        if type(row["identities"]) is not dict or type(row["payload"]) is not dict or type(row["kind"]) is not str:
-            raise ValueError
-        if identities is None:
-            identities = row["identities"]
-        elif row["identities"] != identities:
-            raise ValueError
-        digest_input = {"identities": row["identities"], "kind": row["kind"], "payload": row["payload"], "previous_sha256": previous, "sequence": expected_sequence}
-        encoded = json.dumps(digest_input, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        digest = "sha256:" + sha256(encoded).hexdigest()
-        if row["sha256"] != digest:
-            raise ValueError
-        rows.append(row)
-        previous = digest
-    if not rows:
+    data = path.read_bytes()
+    # A recorder can be between partial writes. Only complete lines are evidence.
+    if in_progress and not data.endswith(b"\n"):
+        data = data[:data.rfind(b"\n") + 1]
+    for expected_sequence, line in enumerate(data.splitlines(), 1):
+        try:
+            row = json.loads(line)
+            if type(row) is not dict or set(row) != {"identities", "kind", "payload", "previous_sha256", "sequence", "sha256"}:
+                raise ValueError
+            if row["sequence"] != expected_sequence or row["previous_sha256"] != previous:
+                raise ValueError
+            if type(row["identities"]) is not dict or type(row["payload"]) is not dict or type(row["kind"]) is not str:
+                raise ValueError
+            if identities is None:
+                identities = row["identities"]
+            elif row["identities"] != identities:
+                raise ValueError
+            digest_input = {"identities": row["identities"], "kind": row["kind"], "payload": row["payload"], "previous_sha256": previous, "sequence": expected_sequence}
+            encoded = json.dumps(digest_input, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+            digest = "sha256:" + sha256(encoded).hexdigest()
+            if row["sha256"] != digest:
+                raise ValueError
+            rows.append(row)
+            previous = digest
+        except (ValueError, UnicodeError, TypeError, KeyError) as error:
+            raise _TraceIntegrityError(tuple(rows)) from error
+    if not rows and not in_progress:
         raise ValueError
     return tuple(rows)
 
@@ -276,6 +292,43 @@ class SweepScheduler:
     def _attempt(self, game_id: str, level: int, timeout: float) -> int:
         before = _run_names(self.config.runs_root)
         process: subprocess.Popen[str] | None = None
+        observed: dict[str, tuple[int, int]] = {}
+        deadline = time.monotonic() + timeout
+
+        def stop_child() -> None:
+            assert process is not None
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.communicate()
+
+        def monitor() -> None:
+            new = sorted(_run_names(self.config.runs_root) - before)
+            if len(new) > 1:
+                self._stop_reason = "child-evidence-ambiguous"
+            for run_id in new:
+                run = self.config.runs_root / run_id
+                trace = run / "trace" / "prime-trace.jsonl"
+                # Startup creates directories before opening the trace.
+                if not trace.exists() and not trace.is_symlink():
+                    continue
+                usage = read_run_usage(run, in_progress=True)
+                old = observed.get(run_id, (0, 0))
+                if usage[3] or usage[0] < old[0] or usage[1] < old[1]:
+                    self._stop_reason = "usage-trace-integrity-error"
+                observed[run_id] = (max(old[0], usage[0]), max(old[1], usage[1]))
+            reported = self._input_tokens + self._output_tokens + sum(sum(value) for value in observed.values())
+            if reported >= self.config.global_token_cap and self._stop_reason == "completed":
+                self._stop_reason = "token-cap"
+
         try:
             process = subprocess.Popen(
                 [*self.config.command, f"GAME={game_id}", f"LEVEL={level}"],
@@ -287,34 +340,46 @@ class SweepScheduler:
                 start_new_session=True,
             )
             try:
-                process.communicate(timeout=timeout)
+                # Usage is reported after calls; this stops on reported tokens.
+                # Provider-side in-flight/unreported usage can exceed that ceiling.
+                while True:
+                    monitor()
+                    if self._stop_reason != "completed":
+                        stop_child()
+                        break
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self._stop_reason = "run-timeout"
+                        stop_child()
+                        break
+                    try:
+                        process.communicate(timeout=min(0.25, remaining))
+                        monitor()
+                        break
+                    except subprocess.TimeoutExpired:
+                        continue
                 returncode = process.returncode
-            except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.communicate()
-                if isinstance(error, KeyboardInterrupt):
-                    raise
-                self._stop_reason = "run-timeout"
-                returncode = 124
+            except KeyboardInterrupt:
+                stop_child()
+                raise
         except OSError:
+            if process is not None:
+                stop_child()
             self._stop_reason = "child-launch-failed"
             return 127
-        new_runs = sorted(_run_names(self.config.runs_root) - before)
+        new_runs = sorted((_run_names(self.config.runs_root) - before) | observed.keys())
         self._new_runs.extend(new_runs)
         if len(new_runs) != 1 and self._stop_reason == "completed":
             self._stop_reason = "child-evidence-missing" if not new_runs else "child-evidence-ambiguous"
         for run_id in new_runs:
             run = self.config.runs_root / run_id
             usage = read_run_usage(run)
-            self._input_tokens += usage[0]
-            self._output_tokens += usage[1]
-            if usage[3]:
+            previous = observed.get(run_id, (0, 0))
+            self._input_tokens += max(previous[0], usage[0])
+            self._output_tokens += max(previous[1], usage[1])
+            if usage[3] and self._stop_reason == "completed":
                 self._stop_reason = "usage-trace-integrity-error"
-            elif usage[2]:
+            elif usage[2] and self._stop_reason == "completed":
                 self._stop_reason = "usage-missing-after-model-activity"
             if len(new_runs) == 1 and self._stop_reason == "completed":
                 summary = _read_json(run / "summary.json")
@@ -369,7 +434,10 @@ class SweepScheduler:
                     continue
                 attempted += 1
                 print(f"[p7-sweep] attempt game={game_id} level={level}", file=sys.stderr, flush=True)
-                returncode = self._attempt(game_id, level, self._timeout_for_level(game_id, level))
+                remaining = self.config.wallclock_cap - (time.monotonic() - started)
+                returncode = self._attempt(game_id, level, min(self._timeout_for_level(game_id, level), remaining))
+                if self._stop_reason == "run-timeout" and time.monotonic() - started >= self.config.wallclock_cap:
+                    self._stop_reason = "wallclock-cap"
                 if self._stop_reason != "completed":
                     print(f"[p7-sweep] stopped game={game_id} level={level} reason={self._stop_reason}", file=sys.stderr, flush=True)
                     break

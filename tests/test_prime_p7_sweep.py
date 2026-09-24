@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import tempfile
+import sys
+import time
+from unittest.mock import patch
 import unittest
 from pathlib import Path
 
@@ -97,6 +100,63 @@ class TestPrimeP7Sweep(unittest.TestCase):
 
             (run / "worker-cells.jsonl").unlink()
             self.assertEqual(read_run_usage(run), (0, 0, True, True))
+
+    def test_running_child_is_stopped_at_reported_token_cap(self) -> None:
+        self._assert_monitored_child("budget", "token-cap", 11)
+
+    def test_corrupt_running_trace_stops_and_preserves_valid_usage(self) -> None:
+        self._assert_monitored_child("corrupt", "usage-trace-integrity-error", 11)
+
+    def _assert_monitored_child(self, mode: str, reason: str, total: int) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+        import os
+
+        source = str(Path(__file__).resolve().parents[1] / "src")
+        script = """
+import sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from asterion.agents.prime.trace import PrimeTraceRecorder
+trace = Path(sys.argv[2]) / 'run-1' / 'trace'
+trace.mkdir(parents=True)
+recorder = PrimeTraceRecorder(trace)
+recorder.append('arc.usage.reported', {'runtime': 'test'}, {'input_tokens': 3, 'output_tokens': 4})
+if sys.argv[3] == 'corrupt':
+    with (trace / 'prime-trace.jsonl').open('a') as handle:
+        handle.write('{}\\n')
+time.sleep(10)
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(
+                arc_root=root / "arc", runs_root=root / "runs", repo_root=root,
+                global_token_cap=10 if mode == "budget" else 100,
+                command=(sys.executable, "-c", script, source, str(root / "runs"), mode),
+            ))
+            scheduler._input_tokens = 4
+            started = time.monotonic()
+            with patch("tools.run_prime_p7_sweep.os.killpg", wraps=os.killpg) as kill:
+                scheduler._attempt("a-1", 1, 4)
+            self.assertLess(time.monotonic() - started, 3)
+            self.assertTrue(kill.called)
+            self.assertEqual(scheduler._stop_reason, reason)
+            self.assertEqual(scheduler._input_tokens + scheduler._output_tokens, total)
+            self.assertEqual(scheduler._new_runs, ["run-1"])
+
+    def test_live_reader_ignores_only_unfinished_last_row(self) -> None:
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from tools.run_prime_p7_sweep import read_run_usage
+
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            (run / "trace").mkdir()
+            recorder = PrimeTraceRecorder(run / "trace")
+            recorder.append("arc.usage.reported", {"runtime": "test"}, {"input_tokens": 3, "output_tokens": 4})
+            recorder.close()
+            with (run / "trace" / "prime-trace.jsonl").open("ab") as handle:
+                handle.write(b'{"unfinished":')
+            self.assertEqual(read_run_usage(run, in_progress=True), (3, 4, False, False))
+            self.assertEqual(read_run_usage(run), (3, 4, False, True))
 
     def test_nested_broker_status_defers_known_overbaseline_attempt(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
