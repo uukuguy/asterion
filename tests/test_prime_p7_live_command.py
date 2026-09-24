@@ -440,10 +440,16 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(receipt["status"], "unsuccessful")
         self.assertNotIn("receipt_sha256", receipt)
 
-    def test_run_live_seals_and_replays_game_over_failure_before_cleanup(self) -> None:
+    def test_run_live_seals_replayed_first_level_failure_without_reusable_prefix(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import DEFAULT_GAME
-        from asterion.applications.prime.p7.operator import P7Invocation, P7LiveAttemptFailure, run_live
+        from asterion.applications.prime.p7.operator import (
+            P7Invocation,
+            P7LiveAttemptFailure,
+            _P7BrokerClient,
+            run_live,
+        )
+        from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
         from tests.test_prime_p7_native_broker import _Engine
 
         class Engine(_Engine):
@@ -457,22 +463,36 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             closed = False
 
         async def composed(*args: object, **kwargs: object) -> None:
-            broker.act(("ACTION1",))
+            assert client is not None
+            client.act([{"name": "ACTION1", "data": {}}])
             raise RuntimeError("private model detail")
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             worker = Worker()
-            broker = ArcBroker(engine=Engine())
+            broker = None
+            client = None
 
-            async def close_resources() -> None:
-                worker.closed = True
+            def build_resources(**kwargs: object) -> SimpleNamespace:
+                nonlocal broker, client
+                broker = ArcBroker(engine=kwargs["engine"])
+                evidence = P7PrivateTraceReceipt(
+                    broker, PrimeTraceRecorder(kwargs["private_trace_root"])
+                )
+                client = _P7BrokerClient(broker, evidence.runtime_recorder)
 
-            resources = SimpleNamespace(
-                runtime_options={},
-                host_services={"prime.arc-broker": broker},
-                close=close_resources,
-            )
+                async def close_resources() -> None:
+                    evidence.close()
+                    worker.closed = True
+
+                return SimpleNamespace(
+                    runtime_options={},
+                    host_services={
+                        "prime.arc-broker": broker,
+                        "prime.private-trace": evidence,
+                    },
+                    close=close_resources,
+                )
             assembly = SimpleNamespace(
                 runtime_binding=SimpleNamespace(factory=lambda context: object()),
                 path=root,
@@ -490,7 +510,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             with (
                 mock.patch("asterion.applications.prime.p7.operator.live.SubprocessPythonWorker", return_value=worker),
                 mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=Engine),
-                mock.patch("asterion.applications.prime.p7.operator.build_p7_operator_resources", return_value=resources),
+                mock.patch(
+                    "asterion.applications.prime.p7.operator.build_p7_operator_resources",
+                    side_effect=build_resources,
+                ),
                 mock.patch("asterion.applications.prime.p7.operator._resolve_p7_application", return_value=application),
                 mock.patch("asterion.applications.prime.p7.operator.run_composed_application", new_callable=mock.AsyncMock, side_effect=composed),
                 mock.patch("asterion.applications.prime.p7.operator.live.worker_cell_count", return_value=0),
@@ -504,11 +527,28 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(failure.terminal_reason, "game-over")
             self.assertTrue(failure.replay_verified)
             self.assertTrue(failure.cleanup_complete)
-            self.assertFalse(failure.sealed_trace)
-            summary = json.loads((root / ".asterion-private/prime-p7-live/p7-live-test/summary.json").read_text())
+            self.assertTrue(failure.sealed_trace)
+            run = root / ".asterion-private/prime-p7-live/p7-live-test"
+            entries = live_module.read_trace_entries(run / "trace")
+            self.assertEqual(
+                [entry.kind for entry in entries][-2:],
+                ["arc.run.failed", "trace.sealed"],
+            )
+            self.assertFalse(
+                any(
+                    entry.kind in {"arc.run.completed", "arc.run.partial"}
+                    for entry in entries
+                )
+            )
+            failure_entry = entries[-2]
+            self.assertEqual(failure_entry.payload["primitive_actions"], 1)
+            self.assertEqual(failure_entry.payload["levels_completed"], 0)
+            self.assertEqual(failure_entry.payload["terminal_reason"], "game-over")
+            summary = json.loads((run / "summary.json").read_text())
             self.assertEqual(summary["broker"]["primitive_actions"], 1)
             self.assertEqual(summary["broker"]["terminal_reason"], "game-over")
             self.assertTrue(summary["replay_verified"])
+            self.assertTrue(summary["sealed_trace"])
 
     def test_failed_later_level_seals_only_verified_completed_prefix(self) -> None:
         from asterion.agents.prime.trace import PrimeTraceRecorder

@@ -414,6 +414,59 @@ def _seal_verified_partial_run(
         return None
 
 
+def _seal_replay_verified_first_level_failure(
+    broker: ArcBroker,
+    evidence: P7PrivateTraceReceipt,
+    receipt: ArcRunReceipt,
+) -> bool:
+    """Seal a replayed terminal failure without publishing reusable progress."""
+
+    if not evidence.matches_runtime_broker(broker):
+        return False
+    try:
+        journal = broker.journal
+        recorded_actions = tuple(
+            entry.payload
+            for entry in evidence.runtime_recorder.snapshot()
+            if entry.kind == "arc.action"
+        )
+        if (
+            broker.game.target_level != 1
+            or receipt != broker.seal()
+            or receipt.levels_completed != 0
+            or receipt.terminal_reason
+            not in {"action-cap", "game-over", "human-baseline"}
+            or len(recorded_actions) != len(journal)
+            or any(
+                row.get("sequence") != item.sequence
+                or row.get("action") != item.action
+                or row.get("before_sha256") != item.before_sha256
+                or row.get("after_sha256") != item.after_sha256
+                or row.get("levels_completed") != item.levels_completed
+                or row.get("data", {}) != dict(item.data)
+                for row, item in zip(recorded_actions, journal)
+            )
+        ):
+            return False
+        evidence.runtime_recorder.append(
+            "arc.run.failed",
+            P7_TRACE_IDENTITIES,
+            {
+                "game_id": receipt.game_id,
+                "seed": receipt.seed,
+                "win_levels": broker.game.win_levels,
+                "levels_completed": receipt.levels_completed,
+                "primitive_actions": receipt.primitive_actions,
+                "replay_sha256": receipt.replay_sha256,
+                "terminal_reason": receipt.terminal_reason,
+            },
+        )
+        evidence.runtime_recorder.seal()
+        return True
+    except Exception:
+        return False
+
+
 @dataclass(frozen=True, slots=True)
 class P7RuntimeSelection:
     runtime_id: str
@@ -959,6 +1012,14 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                     )
                     if completed_prefix is not None:
                         replay_verified = True
+                        sealed_trace = True
+                    elif (
+                        replay_verified
+                        and broker_receipt is not None
+                        and _seal_replay_verified_first_level_failure(
+                            broker_value, evidence_value, broker_receipt
+                        )
+                    ):
                         sealed_trace = True
             # The launch seam carries plain data only, so there is no live Pi
             # session object left to read a failure or an stderr tail from.
