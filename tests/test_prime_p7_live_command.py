@@ -261,6 +261,22 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             witness = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "witness", "ASTERION_PRIME_P7_TARGET_LEVEL": "1"}, resolved, root)
             self.assertEqual(witness.target_level, 1)
 
+    def test_preflight_reports_safe_level_routing_error_without_secret(self) -> None:
+        from asterion.applications.prime.p7.operator import P7OperatorError, main
+
+        for error, expected in (
+            (P7OperatorError("LEVEL is only available with the P7 level-witness command"), True),
+            (P7OperatorError("private-token sentinel-secret"), False),
+        ):
+            with self.subTest(expected=expected), mock.patch(
+                "asterion.applications.prime.p7.operator._preflight", side_effect=error
+            ), contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(main([]), 2)
+            public = json.loads(output.getvalue())
+            self.assertEqual(public["status"], "preflight-rejected")
+            self.assertEqual("LEVEL is only available" in public.get("reason", ""), expected)
+            self.assertNotIn("sentinel-secret", output.getvalue())
+
     def test_worker_act_reports_intermediate_level_then_target(self) -> None:
         namespace: dict[str, object] = {}
         exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)

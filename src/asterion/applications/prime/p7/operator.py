@@ -57,6 +57,7 @@ _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
 _BRIDGE_JOIN_SECONDS = 1.0
+_LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
 class P7OperatorError(RuntimeError):
     """The fixed P7 model host is unavailable."""
 
@@ -555,7 +556,7 @@ def _select_game_for_mode(
     if mode not in {"solve", "witness"}:
         raise P7OperatorError("P7 run mode is unavailable")
     if mode == "solve" and TARGET_LEVEL_ENV in resolved_environment:
-        raise P7OperatorError("LEVEL is only available with the P7 level-witness command")
+        raise P7OperatorError(_LEVEL_WITNESS_ONLY)
     if mode == "witness" and TARGET_LEVEL_ENV not in process_environment:
         raise P7OperatorError("P7 level witness requires explicit LEVEL")
     return resolve_game_selection(resolved_environment, arc_root)
@@ -895,8 +896,11 @@ def _public_receipt(
     return safe
 
 
-def _reject() -> int:
-    print('{"status":"preflight-rejected"}')
+def _reject(*, reason: str | None = None) -> int:
+    public = {"status": "preflight-rejected"}
+    if reason == _LEVEL_WITNESS_ONLY:
+        public["reason"] = _LEVEL_WITNESS_ONLY
+    print(json.dumps(public, separators=(",", ":"), sort_keys=True))
     return 2
 
 
@@ -904,14 +908,18 @@ def main(argv: list[str] | None = None) -> int:
     """The only external input is the literal Make preset invocation."""
 
     invocation: P7Invocation | None = None
+    preflight_reason: str | None = None
     try:
         if sys.argv[1:] if argv is None else argv:
             raise P7OperatorError("P7 operator arguments are rejected")
         invocation = _preflight(os.environ)
+    except P7OperatorError as error:
+        if str(error) == _LEVEL_WITNESS_ONLY:
+            preflight_reason = _LEVEL_WITNESS_ONLY
     except BaseException:
         pass
     if invocation is None:
-        return _reject()
+        return _reject(reason=preflight_reason)
     run_id = live.safe_run_id()
     try:
         result = classify_live_result(asyncio.run(run_live(invocation, run_id)))

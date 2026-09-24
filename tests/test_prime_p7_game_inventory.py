@@ -47,7 +47,8 @@ class TestPrimeP7GameInventory(unittest.TestCase):
                         "completed_levels": 2,
                         "run_id": "run-alpha",
                         "score": "12.5",
-                        "status": "verified",
+                        "status": "verified level witness",
+                        "full_win": False,
                     },
                     {
                         "game_id": "beta-22222222",
@@ -58,6 +59,7 @@ class TestPrimeP7GameInventory(unittest.TestCase):
                         "run_id": "—",
                         "score": "—",
                         "status": "no verified run",
+                        "full_win": False,
                     },
                 ],
             )
@@ -176,6 +178,23 @@ class TestPrimeP7GameInventory(unittest.TestCase):
             rows = inventory(arc_root, runs_root)
             self.assertEqual(rows[0]["completed_levels"], 0)
 
+    def test_full_game_win_requires_exact_total_and_outranks_level_witness(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc_root = root / "arc-agi-3"
+            runs_root = root / "runs"
+            self._metadata(arc_root, "alpha", "11111111", "Alpha", [1, 2, 3])
+            self._summary(runs_root / "invalid-win", run_id="invalid-win", levels=2,
+                          score="100", game_id="alpha-11111111", terminal_reason="game-won")
+            self._summary(runs_root / "level-only", run_id="level-only", levels=3,
+                          score="99", game_id="alpha-11111111")
+            self._summary(runs_root / "full-win", run_id="full-win", levels=3,
+                          score="90", game_id="alpha-11111111", terminal_reason="game-won")
+            row = inventory(arc_root, runs_root)[0]
+            self.assertEqual(row["run_id"], "full-win")
+            self.assertEqual(row["status"], "full-game WIN")
+            self.assertIs(row["full_win"], True)
+
     @staticmethod
     def _metadata(root: Path, short_id: str, version: str, title: str, baseline: list[int]) -> None:
         path = root / "environment_files" / short_id / version
@@ -204,6 +223,7 @@ class TestPrimeP7GameInventory(unittest.TestCase):
         verified: bool = True,
         recording_names: tuple[str, ...] | None = None,
         receipt_sha256: str = "a" * 64,
+        terminal_reason: str = "level-completed",
     ) -> None:
         directory.mkdir(parents=True)
         (directory / "summary.json").write_text(
@@ -223,7 +243,7 @@ class TestPrimeP7GameInventory(unittest.TestCase):
                     "broker": {
                         "levels_completed": levels,
                         "primitive_actions": 3,
-                        "terminal_reason": "level-completed",
+                        "terminal_reason": terminal_reason,
                         **({"game_id": game_id} if game_id else {}),
                     },
                 }
