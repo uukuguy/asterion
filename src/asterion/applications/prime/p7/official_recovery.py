@@ -225,3 +225,24 @@ def recover_official_receipt(recovery_path: Path | str) -> OfficialReceipt:
     finally:
         if directory is not None:
             os.close(directory)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Minimal one-path CLI; never routes through the submission operator."""
+    import sys
+
+    arguments = sys.argv[1:] if argv is None else argv
+    try:
+        if len(arguments) != 1 or not Path(arguments[0]).is_absolute():
+            raise ValueError
+        receipt = recover_official_receipt(Path(arguments[0]))
+        output = receipt.to_dict()
+    except Exception:
+        print(_json({'status': 'recovery-required'}))
+        return 1
+    print(_json(output))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

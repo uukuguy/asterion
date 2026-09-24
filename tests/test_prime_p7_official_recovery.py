@@ -116,3 +116,30 @@ class TestOfficialRecovery(unittest.TestCase):
         self.assertEqual(request.get_method(), 'GET')
         self.assertEqual(request.full_url, 'https://arcprize.org/api/v3/scorecards/card-1')
         self.assertIsNone(request.data)
+
+
+class TestOfficialRecoveryCLI(unittest.TestCase):
+    def test_cli_only_calls_readonly_recovery_and_prints_allowlist(self):
+        from contextlib import redirect_stdout
+        from asterion.applications.prime.p7.official_recovery import main
+        output = io.StringIO()
+        with patch('asterion.applications.prime.p7.official_recovery.recover_official_receipt') as recover:
+            recover.return_value.to_dict.return_value = {'status': 'closed-confirmed'}
+            with redirect_stdout(output):
+                self.assertEqual(main(['/private/official-recovery.json']), 0)
+            recover.assert_called_once_with(Path('/private/official-recovery.json'))
+        self.assertEqual(json.loads(output.getvalue()), {'status': 'closed-confirmed'})
+
+    def test_cli_rejects_relative_or_multiple_paths_and_redacts_failures(self):
+        from contextlib import redirect_stdout
+        from asterion.applications.prime.p7.official_recovery import main
+        for argv in ([], ['relative'], ['/one', '/two'], ['/absolute']):
+            with self.subTest(argv=argv):
+                output = io.StringIO()
+                with patch('asterion.applications.prime.p7.official_recovery.recover_official_receipt',
+                           side_effect=RuntimeError('SECRET-SENTINEL')) as recover:
+                    with redirect_stdout(output):
+                        self.assertEqual(main(argv), 1)
+                    if argv != ['/absolute']:
+                        recover.assert_not_called()
+                self.assertEqual(json.loads(output.getvalue()), {'status': 'recovery-required'})
