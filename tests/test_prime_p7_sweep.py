@@ -131,7 +131,7 @@ time.sleep(10)
             scheduler = SweepScheduler(SweepConfig(
                 arc_root=root / "arc", runs_root=root / "runs", repo_root=root,
                 global_token_cap=10 if mode == "budget" else 100,
-                command=(sys.executable, "-c", script, source, str(root / "runs"), mode),
+                command=(sys.executable, "-c", script, source, str(root / "runs"), mode), guest_machine=None,
             ))
             scheduler._input_tokens = 4
             started = time.monotonic()
@@ -193,12 +193,26 @@ time.sleep(10)
             root = Path(directory)
             scheduler = SweepScheduler(SweepConfig(
                 arc_root=root / "arc", runs_root=root / "runs", games=("a-1",),
-                repo_root=root, command=("/usr/bin/false",),
+                repo_root=root, command=("/usr/bin/false",), guest_machine=None,
             ))
             scheduler._catalog = lambda: ({"game_id": "a-1", "baseline_actions": (20,), "win_levels": 1},)  # type: ignore[method-assign]
             result = scheduler.run()
         self.assertEqual(result.attempted, 1)
         self.assertEqual(result.stopped_reason, "child-evidence-missing")
+
+    def test_unconfirmed_guest_cleanup_halts_sweep(self) -> None:
+        import subprocess
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(
+                arc_root=root / "arc", runs_root=root / "runs", repo_root=root,
+                command=("/usr/bin/false",), guest_machine="ubuntu",
+            ))
+            with patch("tools.run_prime_p7_sweep.subprocess.run", return_value=subprocess.CompletedProcess([], 1)):
+                scheduler._attempt("a-1", 1, 1)
+            self.assertEqual(scheduler._stop_reason, "guest-cleanup-unconfirmed")
 
     def test_attempt_summary_requires_matching_verified_terminal(self) -> None:
         from tools.run_prime_p7_sweep import _valid_attempt_summary

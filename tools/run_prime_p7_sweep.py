@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import secrets
 import subprocess
 import sys
 import time
@@ -45,6 +46,7 @@ class SweepConfig:
     wallclock_cap: float = 4 * 60 * 60
     run_timeout: float = 30 * 60
     max_attempts: int | None = None
+    guest_machine: str | None = "ubuntu"
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +215,8 @@ class SweepScheduler:
             or (config.max_attempts is not None and (type(config.max_attempts) is not int or config.max_attempts < 0))
         ):
             raise ValueError("P7 sweep budget is invalid")
+        if config.guest_machine is None and config.command == ("make", "asterion-prime-p7-sweep-attempt"):
+            raise ValueError("P7 sweep guest containment is required")
         self.config = config
         self._progress: dict[str, int] = {}
         self._new_runs: list[str] = []
@@ -294,6 +298,27 @@ class SweepScheduler:
         process: subprocess.Popen[str] | None = None
         observed: dict[str, tuple[int, int]] = {}
         deadline = time.monotonic() + timeout
+        unit = "asterion-p7-" + secrets.token_hex(16) + ".service"
+        cleaned = False
+
+        def cleanup_guest() -> None:
+            nonlocal cleaned
+            if cleaned or self.config.guest_machine is None:
+                return
+            try:
+                result = subprocess.run(
+                    ["orb", "-m", self.config.guest_machine, "-u", "root", "-w", "/tmp",
+                     "python3", str(self.config.repo_root / "tools/run_prime_p7_guest.py"),
+                     "cleanup", "--unit", unit],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    timeout=20, check=False,
+                )
+                cleaned = result.returncode == 0
+            except (OSError, subprocess.TimeoutExpired):
+                cleaned = False
+            if not cleaned:
+                self._stop_reason = "guest-cleanup-unconfirmed"
+
 
         def stop_child() -> None:
             assert process is not None
@@ -309,6 +334,7 @@ class SweepScheduler:
                 except ProcessLookupError:
                     pass
                 process.communicate()
+            cleanup_guest()
 
         def monitor() -> None:
             new = sorted(_run_names(self.config.runs_root) - before)
@@ -331,9 +357,12 @@ class SweepScheduler:
 
         try:
             process = subprocess.Popen(
-                [*self.config.command, f"GAME={game_id}", f"LEVEL={level}"],
+                [*self.config.command, f"GAME={game_id}", f"LEVEL={level}",
+                 *([f"PRIME_ORB_MACHINE={self.config.guest_machine}"] if self.config.guest_machine else [])],
                 cwd=self.config.repo_root,
-                env={**os.environ, "ASTERION_PRIME_P7_SEED": "0"},
+                env={**os.environ, "ASTERION_PRIME_P7_SEED": "0",
+                     "ASTERION_PRIME_P7_ATTEMPT_UNIT": unit,
+                     "ASTERION_PRIME_P7_ATTEMPT_SECONDS": str(min(timeout, 4 * 60 * 60))},
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -358,6 +387,7 @@ class SweepScheduler:
                         break
                     except subprocess.TimeoutExpired:
                         continue
+                cleanup_guest()
                 returncode = process.returncode
             except KeyboardInterrupt:
                 stop_child()
@@ -365,7 +395,8 @@ class SweepScheduler:
         except OSError:
             if process is not None:
                 stop_child()
-            self._stop_reason = "child-launch-failed"
+            if self._stop_reason != "guest-cleanup-unconfirmed":
+                self._stop_reason = "child-launch-failed"
             return 127
         new_runs = sorted((_run_names(self.config.runs_root) - before) | observed.keys())
         self._new_runs.extend(new_runs)
@@ -504,6 +535,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--token-cap", type=int, default=int(os.environ.get("ASTERION_PRIME_P7_SWEEP_TOKEN_CAP", "3500000")))
     parser.add_argument("--wallclock-seconds", type=float, default=float(os.environ.get("ASTERION_PRIME_P7_SWEEP_WALLCLOCK_SECONDS", "14400")))
+    parser.add_argument("--guest-machine", default=os.environ.get("PRIME_ORB_MACHINE", "ubuntu"))
     parser.add_argument("--run-timeout", type=float, default=30 * 60)
     parser.add_argument("--max-attempts", type=int)
     args = parser.parse_args(argv)
@@ -521,6 +553,7 @@ def main(argv: list[str] | None = None) -> int:
             run_timeout=args.run_timeout,
             max_attempts=args.max_attempts,
             repo_root=args.operator_root,
+            guest_machine=args.guest_machine,
         )
     ).run()
     print(json.dumps({"schema": "asterion.prime.p7-sweep/v1", **asdict(result)}, sort_keys=True))
