@@ -91,7 +91,7 @@ make asterion-prime-p7-official-submit GAME=all
 
 这个入口不启动 Pi，也不调用模型。它会先读取并重新验证本地动作前缀，然后创建一张新的官方 Competition scorecard；对每个选定题目只调用一次官方 `make`，从官方返回的初始状态开始逐动作执行，并检查每次动作后的状态。远端初始状态或中间状态和本地证据不一致时立即停止，不重试不确定动作，也不伪造成功回执。
 
-本地动作不会被上传。官方端实际发生的是一组新的动作执行，因此官方 receipt 的动作数、关卡状态和分数以 ARC 服务返回值为准。未选题目保持未运行；不会为它们伪造 run 或 score。
+本地动作不会被上传。官方端实际发生的是一组新的动作执行，因此官方 receipt 的动作数、关卡状态和分数以 ARC 服务返回值为准。Competition 关闭 scorecard 时，官方 SDK 会为未选题目建立零动作、零分的 `NOT_FINISHED` 占位 run；这些占位不表示 Asterion 执行过该题。回执分别报告实际执行的 `played_runs` 和未选题目的 `skipped_count`。
 
 旧的全目录模型评估入口改名为：
 
@@ -120,9 +120,17 @@ jq '{status, card_id, overall_score, catalog_count, selected_count,
 只有 `status` 为 `closed-confirmed` 时，`scorecard_url` 才是已验证的官方链接：
 
 ```text
-https://three.arcprize.org/scorecards/<card_id>
+https://arcprize.org/scorecards/<card_id>
 ```
 
 `overall_score` 是服务端 scorecard 的值；本地估算、部分关卡分数和 replay 成功都不能替代它。中断、关闭失败、远端状态分歧或字段校验失败只会留下 `official-recovery.json`，不能当作官方成绩。
+
+如果提交命令在官方卡**已正常关闭**后因结果校验失败而留下恢复记录，可只读核对官方公开成绩并补写回执。把该次运行目录名填入 `RUN`：
+
+```bash
+make asterion-prime-p7-official-recover RUN=<run_id>
+```
+
+此命令只对 `https://arcprize.org/api/v3/scorecards/<card_id>` 发起一次不带密钥的 GET，不建新卡、不重放动作。它要求私有恢复记录确认正常关闭，并逐项核对卡号、完整题目目录、已选题目的运行 ID 及未选题目的零动作占位；校验通过才在同一目录创建 `official-receipt.json`，不会覆盖已有回执。只有 `recovery-required` 或 GET 不可用时，不能把公开页面或本地记录单独当作有效回执。
 
 ARC Competition 的官方说明见 [Competition mode](https://docs.arcprize.org/toolkit/competition_mode) 和 [methodology](https://docs.arcprize.org/methodology)。社区排行榜与 Kaggle 提交是后续独立流程，当前命令不会自动发布排行榜。

@@ -1,7 +1,7 @@
 # Asterion Prime P7 Evidence
 
-> Updated: 2026-09-10. Scope: first native `asterion.prime` AgentRuntime slice
-> and the `prime.arc-agi-3-solving@1.0.0` application.
+> Original slice: 2026-09-10, first native `asterion.prime` AgentRuntime
+> and `prime.arc-agi-3-solving@1.0.0`. Official result appended 2026-09-25.
 
 ## Claim
 
@@ -81,3 +81,10 @@ work for its control-plane client, durable sessions and recovery, context
 accounting and compaction, child-agent coordination, bounded autonomy,
 continual improvement, and native P1-P6 application routes. Historical
 Prime-Agent-backed development evidence remains historical evidence only.
+
+## 2026-09-25 official Competition partial result
+
+One operator-authorized `GAME=ls20` saved-action submission created and normally
+closed official card [`14868b83-3f40-4afd-84b0-4d25176f97d0`](https://arcprize.org/scorecards/14868b83-3f40-4afd-84b0-4d25176f97d0). The original command returned `recovery-required` because its result validator rejected the official zero-action placeholders for unselected games. After correcting that rule, a GET-only public result recovery bound the card ID, complete 25-game catalog, and selected LS20 run ID to the private normal-close record. The private `official-receipt.json` is `closed-confirmed`, with closure digest `07d24be4adebe5667631aaa94bab491f056532cb39602a1d35b6c76a0e4ab9b3`.
+
+The service reports LS20 score `3.571428571428571`, one completed level, 20 actions, and state `NOT_FINISHED`. The overall Competition score is `0.14285714285714285`; the other 24 games are zero-action, zero-score placeholders. This verifies a partial official score and the saved-action submission path. It does not establish a full LS20 win, all-game solving, or a live model Competition run. The recovery used no new card, game action, or model call. See the [operator guide](../guides/prime-p7-games-and-official-results.md) and [live checkpoint](RESUME-NEXT-SESSION.md) for commands and the current verification boundary.
