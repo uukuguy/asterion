@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 03:24 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 03:44 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
@@ -14,7 +14,8 @@ P7 面向完整 ARC-AGI-3 游戏与官方 Competition scorecard，而非单关�
 - 新的 `prime.arc-agi-3-gameplay` 能力、assembly、provider 与运行时只给出无分数逐题证据；`reset-required` 时会继续给模型机会重置当前关。官方 coordinator 在所有目录题目尝试后关闭 scorecard，按完整目录、guid、状态与有限分数校验 SDK 返回，再写私有正式回执；异常写恢复记录。官方 API key 不传入 Pi 模型进程。
 - 操作指南 `docs/guides/prime-p7-games-and-official-results.md` 记录本地和官方命令。主分支 83 项 P7 定向测试、`make lint`、`make docs-check`、`git diff --check` 已通过；关键代码独立复审未发现 Critical/Important。
 - 打包 `make promotion-check` 初次因新 gameplay assembly 未登记资源清单失败；`8bfc7009` 修复后完整复跑通过：25 条隔离命令、provider 操作 0、`full_dataset=no`。
-- `19fd0772` 新增多游戏贯通测试：同一张卡、一题 `WIN`、一题 `GAME_OVER`，缺少服务端行时仅留恢复记录。`ee8d5787` 使用真实 `arc_agi==0.9.9` SDK、完全拦截 HTTP，核对目录、建卡、`make` 自动首 RESET、关闭；与其他官方测试合计 33 项通过，全程无网络。`9d33cb5d` 让预检公开逐题和总动作、模型回调、期限上界，测试与实际运行时固定值一致。
+- `19fd0772` 新增多游戏贯通测试：同一张卡、一题 `WIN`、一题 `GAME_OVER`，缺少服务端行时仅留恢复记录。`ee8d5787` 使用真实 `arc_agi==0.9.9` SDK、完全拦截 HTTP，核对目录、建卡、`make` 自动首 RESET、关闭及回执解析。`9d33cb5d` 让预检公开逐题和总动作、模型回调、期限上界，测试与实际运行时固定值一致。
+- `32c508db` 修复 host 初始化失败时官方游戏引擎未关闭的问题。`2d81c767` 使用离线 wheel、已安装 assembly 和假 Pi 执行真实 `_run_game`，确认确定性整题 `WIN`、trace 封存和引擎清理。最新 35 项官方定向测试、`make lint`、`make docs-check` 通过；无网络或付费模型调用。
 - 仓库 `.env` 和当前进程环境均没有 `ARC_API_KEY`。本轮没有实际官方 API、模型求解或 scorecard 提交；没有真实整题通关证据。假 SDK、拦截 HTTP 的真实 SDK 与安装包装配均不能被表述为官方成绩。
 
 ## 当前判断与未完成边界
