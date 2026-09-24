@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-24 20:55 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-24. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
-用户贴出 `make asterion-prime-p7-solve` 对 `tu93-0768757b` / seed 0 的失败输出，并要求修复本地解题及保证再次解题的记录逐次留存。用户明确选择按时间戳分开，不能覆盖。此前 P1–P6 真实运行和边界见 `docs/status/PRIME-P1-P7-ACCEPTANCE.md` 与 JOURNAL。此轮未启动新的付费解题。
+用户希望用易记命令重跑上一题 `ls20-9607627b`，以及挑战该题第 2 关。此前 tu93 失败及逐次留存修复见下文；此前 P1–P6 真实运行和边界见 `docs/status/PRIME-P1-P7-ACCEPTANCE.md` 与 JOURNAL。此轮未启动新的付费解题。
 
 ## 已验证事实
 
@@ -20,9 +20,11 @@
 - 新失败运行 `p7-live-20260924115415` 的私有证据显示 50 个已记录动作、0 关完成、官方离线引擎在第 50 步返回 `GAME_OVER`；此前终端回执的 0 动作和 cleanup false 是异常路径默认值，不是实际结果。原因是 Broker 未将 `GAME_OVER` 当终局、worker 在终局动作后再次调用已关闭的 Broker，以及失败路径丢弃了 Broker 证据。
 - `d1c094cd` 已提交 `GAME_OVER` 终局与严格回放、终局动作响应的状态快照、失败回执的安全动作数/终局/清理投影，以及 `p7-live-UTC时间戳-唯一后缀` 独立运行目录。既有目录仍使用拒绝覆盖创建。运行器在任何 Broker 终局后停止继续请求模型，但能力 PASS 仍只接受首关完成。指南增补了重解和查找历次运行的命令。
 - 此轮最终 P7 相关 58 项无模型测试通过；新增 500 动作上限、第 500 动作 `GAME_OVER`、同一步过关与 `GAME_OVER` 的回放边界测试通过。`make lint` 和 `make docs-check` 在最终源码上通过；提示词与打包摘要改动后 `make promotion-check` 通过 25 条隔离发行命令、provider 操作 0。随后调整的终局谓词与回放边界由最终 58 项测试覆盖。无付费求解，因此不能宣称 tu93 已通关。
+- `07d2c63d` 新增 `GAME=ls20|tu93` 与 `LEVEL=N`：`make asterion-prime-p7-solve GAME=ls20` 重跑首关，`make asterion-prime-p7-solve GAME=ls20 LEVEL=2` 在新尝试中从第 1 关顺序做到第 2 关；官方离线 SDK 不提供从历史运行直接跳关。目标级别进入题目选择、Broker、worker 状态、逐关计分、能力收据、回放与公开回执。历史成功收据不重写。独立运行目录继续保留每次尝试。
+- 本轮定向测试 79 项、安装 wheel 无模型第 1/2 关集成测试、`make lint`、`make docs-check` 已通过；`make promotion-check` 通过 25 条隔离发行命令，provider 操作 0。真实 LS20 第 2 关付费解题未运行。
 
 ## 边界与下一动作
 
 - 当前修复已通过代码复审并提交。由用户按需再次运行付费求解；新回执应显示实际动作数与 `game-over` 终局。能否通关取决于新一轮求解，不能由无模型测试推断。
-- P7 当前在首关完成时停止，且 ARC SDK 使用 OFFLINE；本地 receipt 不是官方在线 scorecard。指南记录了官方在线及 Competition Mode 的生成流程；Asterion 在线 scorecard 集成和多关延续尚未实现。
+- P7 现在在指定目标关卡完成时停止，且 ARC SDK 使用 OFFLINE；第 2 关需在同次新运行中先过第 1 关，500 原始动作上限跨关共用。本地 receipt 不是官方在线 scorecard。指南记录了官方在线及 Competition Mode 的生成流程；Asterion 在线 scorecard 集成尚未实现。无模型集成测试不能推断真实 LS20 第 2 关能通关。
 - 用户在 Makefile 增加的两条题号注释保留为未提交工作区改动，未纳入 `d1c094cd`。
