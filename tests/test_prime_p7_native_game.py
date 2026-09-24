@@ -99,6 +99,42 @@ class TestP7GameSelection(unittest.TestCase):
                 {"ASTERION_PRIME_P7_GAME_ID": "za99-abcdef12"}, self.arc_root
             )
 
+    def test_malformed_new_baseline_metadata_is_not_selectable(self) -> None:
+        from asterion.applications.prime.p7.game import (
+            P7GameSelectionError,
+            resolve_game_selection,
+        )
+
+        metadata_path = (
+            self.arc_root
+            / "environment_files"
+            / "za99"
+            / "abcdef12"
+            / "metadata.json"
+        )
+        for baseline, win_levels in (
+            ([], 0),
+            ("3,7,5", 3),
+            ([3, 0, 5], 3),
+            ([3, True, 5], 3),
+            ([3, 7, 5], 2),
+        ):
+            with self.subTest(baseline=baseline, win_levels=win_levels):
+                metadata_path.write_text(
+                    json.dumps(
+                        {
+                            "game_id": "za99-abcdef12",
+                            "baseline_actions": baseline,
+                            "win_levels": win_levels,
+                        }
+                    )
+                )
+                with self.assertRaises(P7GameSelectionError):
+                    resolve_game_selection(
+                        {"ASTERION_PRIME_P7_GAME_ID": "za99-abcdef12"},
+                        self.arc_root,
+                    )
+
     def test_default_and_explicit_tu93_preserve_exact_identity(self) -> None:
         from asterion.applications.prime.p7.game import resolve_game_selection
 
