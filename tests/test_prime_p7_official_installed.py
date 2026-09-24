@@ -1,0 +1,18 @@
+"""Installed official gameplay proof with a deterministic local engine."""
+from __future__ import annotations
+import json, os, shutil, subprocess, sys, tempfile, unittest, zipfile
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[1]; FAKE_PI=ROOT/"tests/fixtures/asterion_prime/fake_pi_rpc.py"
+def run(c,cwd,e): return subprocess.run(c,cwd=cwd,env=e,check=False,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+class TestPrimeP7OfficialInstalled(unittest.TestCase):
+ def test_installed_official_gameplay_runs_and_seals_evidence(self):
+  with tempfile.TemporaryDirectory(prefix="asterion-prime-p7-official-installed-",dir="/tmp") as t:
+   root=Path(t); dist=root/"dist"; dist.mkdir(); env=dict(os.environ); env.pop("PYTHONPATH",None)
+   r=run(("uv","build","--wheel","--out-dir",str(dist),str(ROOT)),root,env); self.assertEqual(r.returncode,0,r.stderr); wheel=next(dist.glob("asterion-*.whl"))
+   with zipfile.ZipFile(wheel) as z: self.assertIn("asterion/applications/prime/resources/ipython-extension.mjs",z.namelist())
+   v=root/"venv"; r=run(("uv","venv","--seed",str(v)),root,env); self.assertEqual(r.returncode,0,r.stderr); py=v/"bin"/"python"
+   r=run(("uv","pip","install","--python",str(py),"--no-deps",str(wheel)),root,env); self.assertEqual(r.returncode,0,r.stderr)
+   node=shutil.which("node"); self.assertIsNotNone(node); ld=py.parent.parent/"lib"/f"python{sys.version_info.major}.{sys.version_info.minor}"/"site-packages/asterion/runtimes/resources"; ear=Path("/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent"); self.assertTrue(ear.is_dir()); link=ld/"node_modules/@earendil-works/pi-coding-agent"; link.parent.mkdir(parents=True); link.symlink_to(ear)
+   fake=root/"fake_pi_rpc.py"; fake.write_text(FAKE_PI.read_text().replace("fixture.solve()","import p7_client; [p7_client.act([{'name': 'ACTION1', 'data': {}}]) for _ in range(13)]"))
+   script=root/"run.py"; script.write_text('''import asyncio,json,sys\nfrom importlib import resources\nfrom pathlib import Path\nfrom asterion.applications.prime.p7.game import ArcGameContract\nfrom asterion.applications.prime.p7.official_operator import OfficialInvocation,_resolve_gameplay_application,_run_game\nclass E:\n game_id="ab12-12345678";guid="fixture-guid";seed=0;win_levels=1\n def __init__(s,m):s.n=0;s.m=m\n def observe(s):return {"available_actions":["ACTION1"],"frame":[[[s.n]]],"levels_completed":int(s.n>=13),"state":"WIN" if s.n>=13 else "NOT_FINISHED","win_levels":1}\n def step(s,a,data=None):assert a=="ACTION1";s.n+=1;return s.observe()\n def close(s):s.m.write_text("closed")\nasync def f():\n r=Path.cwd();m=r/"closed";e=r/"evidence";e.mkdir();x=Path(str(resources.files("asterion.applications.prime").joinpath("resources/ipython-extension.mjs"))).resolve();i=OfficialInvocation(r,{"DEEPSEEK_API_KEY":"fixture-only"},(sys.executable,str(r/"fake_pi_rpc.py"),str(Path(sys.argv[1]).resolve())),x,"arc-fixture-only");g=E(m);await _run_game(i,_resolve_gameplay_application(),e,g,ArcGameContract("ab12-12345678",1),"official-fixture");q=e/"official-fixture/trace/prime-trace.jsonl";a=[json.loads(z) for z in q.read_text().splitlines()];print(json.dumps({"actions":g.n,"closed":m.read_text(),"trace_entries":len(a),"terminal":a[-1]["payload"]["terminal_reason"]}))\nasyncio.run(f())\n''')
+   r=run((str(py),"-I",str(script),str(node)),root,{**env,"ASTERION_TEST_FORBID_PRIME_SOURCE":"1"}); self.assertEqual(r.returncode,0,r.stderr); q=json.loads(r.stdout); self.assertEqual(q["actions"],13); self.assertEqual(q["closed"],"closed"); self.assertEqual(q["terminal"],"game-won"); self.assertGreaterEqual(q["trace_entries"],2)
