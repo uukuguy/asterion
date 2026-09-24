@@ -227,6 +227,33 @@ class TestOfficialOperator(unittest.TestCase):
                     ))
             engine.close.assert_called_once_with()
 
+    def test_host_cleanup_releases_trace_and_extension_after_worker_failure(self) -> None:
+        from asterion.applications.prime.p7.operator import P7OperatorResources
+
+        bridge = SimpleNamespace(close=mock.Mock())
+        ipython = SimpleNamespace(
+            close=mock.AsyncMock(side_effect=RuntimeError("private worker failure"))
+        )
+        trace = SimpleNamespace(close=mock.Mock())
+        lease = SimpleNamespace(close=mock.Mock())
+        launch = SimpleNamespace(extension_lease=lease)
+        resources = P7OperatorResources(
+            host_services={
+                "prime.ipython": ipython,
+                "prime.private-trace": trace,
+                "prime.launch": launch,
+            },
+            runtime_options={},
+            _bridge=bridge,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "private worker failure"):
+            asyncio.run(resources.close())
+        bridge.close.assert_called_once_with()
+        ipython.close.assert_awaited_once_with()
+        trace.close.assert_called_once_with()
+        lease.close.assert_called_once_with()
+
     def test_one_card_attempts_every_game_despite_one_game_failure(self) -> None:
         from asterion.applications.prime.p7.official_operator import run_official_games
 

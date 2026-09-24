@@ -363,15 +363,21 @@ class P7OperatorResources:
     async def close(self) -> None:
         """Boundedly release all resources retained by the operator."""
 
-        self._bridge.close()
         ipython = cast(PersistentIpythonHost, self.host_services["prime.ipython"])
-        await ipython.close()
         trace = self.host_services.get("prime.private-trace") or self.host_services.get("prime.arc-run-evidence")
-        if trace is None:
-            raise P7OperatorError("P7 host services are unavailable")
-        trace.close()
         launch = cast(PrimeLaunch, self.host_services["prime.launch"])
-        launch.extension_lease.close()
+        try:
+            self._bridge.close()
+        finally:
+            try:
+                await ipython.close()
+            finally:
+                try:
+                    if trace is None:
+                        raise P7OperatorError("P7 host services are unavailable")
+                    trace.close()
+                finally:
+                    launch.extension_lease.close()
 
 
 def resolve_pi_provider(environment: Mapping[str, str], *, model: str) -> str:
