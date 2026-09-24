@@ -222,6 +222,45 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         engine.step("ACTION6", {"x": 12, "y": 34})
         self.assertEqual(environment.calls, [("sdk-click", {"x": 12, "y": 34})])
 
+    def test_competition_mode_rejected_before_arcade_constructor(self) -> None:
+        import os
+        import sys
+        from types import ModuleType
+
+        from asterion.applications.prime.p7.game import DEFAULT_GAME
+        from asterion.applications.prime.p7.live import ArcadeEngine, P7LiveSolveError
+
+        arc = ModuleType("arc_agi")
+        arc.OperationMode = SimpleNamespace(OFFLINE="offline")  # type: ignore[attr-defined]
+        constructed: list[bool] = []
+        arc.Arcade = lambda **kwargs: constructed.append(True)  # type: ignore[attr-defined]
+        engine = ModuleType("arcengine")
+        engine.GameAction = SimpleNamespace(**{f"ACTION{i}": i for i in range(1, 8)}, RESET=0)  # type: ignore[attr-defined]
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            sys.modules, {"arc_agi": arc, "arcengine": engine}
+        ), mock.patch.dict(os.environ, {"OPERATION_MODE": "competition"}):
+            with self.assertRaises(P7LiveSolveError):
+                ArcadeEngine(arc_root=Path(temporary), recordings_dir=Path(temporary) / "recordings", game=DEFAULT_GAME)
+        self.assertEqual(constructed, [])
+
+    def test_normal_mode_rejects_dotenv_level_override(self) -> None:
+        import os
+        from asterion.applications.prime.p7.operator import P7OperatorError, _select_game_for_mode
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            catalog = root / "environment_files" / "zx42" / "abc123"
+            catalog.mkdir(parents=True)
+            (catalog / "zx42.py").write_text("# source not imported\n")
+            (catalog / "metadata.json").write_text(json.dumps({"game_id": "zx42-abc123", "baseline_actions": [10, 20, 30], "win_levels": 3}))
+            (root / ".env").write_text("ASTERION_PRIME_P7_TARGET_LEVEL=1\n")
+            with mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "fixture", "ASTERION_PRIME_P7_GAME_ID": "zx42"}, clear=True):
+                resolved = live_module.load_operator_environment(root)
+            with self.assertRaisesRegex(P7OperatorError, "LEVEL"):
+                _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "solve"}, resolved, root)
+            witness = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "witness", "ASTERION_PRIME_P7_TARGET_LEVEL": "1"}, resolved, root)
+            self.assertEqual(witness.target_level, 1)
+
     def test_worker_act_reports_intermediate_level_then_target(self) -> None:
         namespace: dict[str, object] = {}
         exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
@@ -259,6 +298,46 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         second = namespace["act"]("ACTION1")  # type: ignore[operator]
         self.assertEqual(second["terminal"], "LEVEL_SOLVED")
         self.assertEqual(responses, [])
+
+    def test_worker_reports_game_solved_only_for_sdk_win(self) -> None:
+        namespace: dict[str, object] = {}
+        exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
+        namespace["_call"] = lambda method, *args: {
+            "level_advanced": True,
+            "observation": {
+                "available_actions": [], "frame": [[[1]]],
+                "levels_completed": 7, "state": "WIN", "win_levels": 7,
+            },
+            "terminal": {
+                "actions_remaining": 100, "levels_completed": 7,
+                "primitive_actions": 900, "target_level": 7,
+                "terminal_reason": "game-won",
+            },
+        }
+        self.assertEqual(namespace["act"]("ACTION1")["terminal"], "GAME_SOLVED")  # type: ignore[operator]
+
+    def test_full_game_public_classification_requires_game_won_and_uses_game_cap(self) -> None:
+        from dataclasses import replace
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.live import P7LiveExecution, P7LiveSolveError
+        from asterion.applications.prime.p7.operator import classify_live_result, resolve_p7_runtime
+
+        game = P7GameSelection("ls20-9607627b", 0, 7)
+        self.assertGreater(game.action_cap, 500)
+        self.assertEqual(resolve_p7_runtime({"DEEPSEEK_API_KEY": "fixture"}, game).max_actions, game.action_cap)
+        result = P7LiveExecution(
+            run_id="test-run", completed_level_count=7, primitive_action_count=700,
+            replay_verified=True, sealed_trace=True, cleanup_complete=True,
+            trace_root=Path("/tmp"), receipt={"receipt_sha256": "0" * 64},
+            comparison_report=None, game=game, broker_replay_sha256="1" * 64,
+            terminal_reason="game-won",
+        )
+        public = classify_live_result(result)
+        self.assertEqual(public["status"], "PASS")
+        self.assertEqual(public["completion_scope"], "full-game")
+        self.assertEqual(public["win_levels"], 7)
+        with self.assertRaisesRegex(P7LiveSolveError, "WIN"):
+            classify_live_result(replace(result, terminal_reason="game-incomplete"))
 
     def test_unsuccessful_public_receipt_preserves_safe_game_over_evidence(self) -> None:
         from asterion.applications.prime.p7.game import DEFAULT_GAME

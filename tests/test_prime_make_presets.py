@@ -18,11 +18,11 @@ def _recipe(makefile: str, target: str) -> str:
 
 
 class TestPrimeMakePresets(unittest.TestCase):
-    def test_p7_short_game_aliases_select_exact_ids(self) -> None:
+    def test_p7_game_selection_forwards_alias_or_exact_id(self) -> None:
         root = Path(__file__).resolve().parents[1]
         probe = "p7-game-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_P7_GAME_ID)'\n"
 
-        for game, expected in (("ls20", "ls20-9607627b"), ("tu93", "tu93-0768757b")):
+        for game in ("ls20", "tu93", "ls20-9607627b"):
             with self.subTest(game=game):
                 completed = subprocess.run(
                     [
@@ -42,9 +42,9 @@ class TestPrimeMakePresets(unittest.TestCase):
                     capture_output=True,
                     check=True,
                 )
-                self.assertEqual(completed.stdout.strip(), expected)
+                self.assertEqual(completed.stdout.strip(), game)
 
-    def test_p7_target_level_defaults_and_can_be_selected(self) -> None:
+    def test_p7_level_witness_forwards_explicit_level(self) -> None:
         root = Path(__file__).resolve().parents[1]
         probe = "p7-level-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_P7_TARGET_LEVEL)'\n"
 
@@ -94,18 +94,30 @@ class TestPrimeMakePresets(unittest.TestCase):
         )
         self.assertEqual(completed.stdout.strip(), "3")
 
-    def test_p7_unknown_game_stops_before_any_recipe(self) -> None:
+    def test_p7_normal_solve_rejects_level_before_wheel_build(self) -> None:
         root = Path(__file__).resolve().parents[1]
         completed = subprocess.run(
-            ["make", "--no-print-directory", "-s", "asterion-prime-p7-solve", "GAME=unknown"],
-            cwd=root,
-            text=True,
-            capture_output=True,
+            ["make", "--no-print-directory", "-s", "asterion-prime-p7-solve", "LEVEL=2"],
+            cwd=root, text=True, capture_output=True,
         )
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("Unknown P7 GAME 'unknown'", completed.stderr)
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("LEVEL is only available", completed.stderr)
         self.assertNotIn("Building wheel", completed.stdout)
-        self.assertNotIn("[asterion-prime-p7-solve]", completed.stderr)
+
+    def test_p7_routes_target_level_only_to_witness(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        for target in ("asterion-prime-p7-solve", "asterion-prime-p7-level-witness"):
+            with self.subTest(target=target):
+                completed = subprocess.run(
+                    ["make", "--no-print-directory", "-n", target, "GAME=ls20"],
+                    cwd=root, text=True, capture_output=True, check=True,
+                )
+                self.assertIn('if [ "' + target + '" = asterion-prime-p7-level-witness ]', completed.stdout)
+                self.assertIn("ORBENV", completed.stdout)
+                self.assertIn(
+                    'if [ "' + target + '" = asterion-prime-p7-level-witness ]; then ORBENV=',
+                    completed.stdout,
+                )
 
     def test_unknown_game_does_not_block_unrelated_make_targets(self) -> None:
         root = Path(__file__).resolve().parents[1]
@@ -116,12 +128,12 @@ class TestPrimeMakePresets(unittest.TestCase):
             capture_output=True,
             check=True,
         )
-        self.assertIn("Asterion Prime ARC-AGI-3 solve", completed.stdout)
+        self.assertIn("Asterion Prime ARC-AGI-3 full-game solve", completed.stdout)
 
-    def test_p7_invalid_target_level_stops_before_wheel_build(self) -> None:
+    def test_p7_invalid_witness_level_stops_before_wheel_build(self) -> None:
         root = Path(__file__).resolve().parents[1]
         completed = subprocess.run(
-            ["make", "--no-print-directory", "-s", "asterion-prime-p7-solve", "LEVEL=zero"],
+            ["make", "--no-print-directory", "-s", "asterion-prime-p7-level-witness", "LEVEL=zero"],
             cwd=root,
             text=True,
             capture_output=True,
@@ -154,7 +166,7 @@ class TestPrimeMakePresets(unittest.TestCase):
         self.assertEqual(
             completed.stdout.splitlines(),
             [
-                "tu93-0768757b",
+                "tu93",
                 "0",
                 str((root.parent / "external-prime" / "arc-agi-3").resolve()),
             ],
@@ -223,7 +235,7 @@ class TestPrimeMakePresets(unittest.TestCase):
 
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
         self.assertNotIn("/Users/", makefile)
-        recipe = _recipe(makefile, "asterion-prime-p7-solve")
+        recipe = _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness")
         for literal in (
             '$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX',
             "trap",

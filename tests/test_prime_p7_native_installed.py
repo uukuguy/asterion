@@ -106,7 +106,7 @@ from importlib import resources
 from pathlib import Path
 
 from asterion.agents.prime.trace import validate_trace
-from asterion.applications.prime.p7.game import P7GameSelection
+from asterion.applications.prime.p7.game import P7GameSelection, resolve_game_selection
 from asterion.applications.prime.p7.ipython_host import IpythonWorkerResult
 from asterion.applications.prime.p7.operator import _resolve_p7_application, build_p7_operator_resources
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
@@ -160,6 +160,14 @@ class Worker:
 
 async def main():
     root = Path.cwd()
+    catalog = root / "arc" / "environment_files" / "zx42" / "abc123"
+    catalog.mkdir(parents=True, exist_ok=True)
+    (catalog / "zx42.py").write_text("# fixture source is never imported\\n")
+    (catalog / "metadata.json").write_text(json.dumps({"game_id": "zx42-abc123", "baseline_actions": [10, 20, 30], "win_levels": 3}))
+    selected = resolve_game_selection({"ASTERION_PRIME_P7_GAME_ID": "zx42"}, root / "arc")
+    assert selected.game_id == "zx42-abc123" and selected.target_level == 3
+    witness = resolve_game_selection({"ASTERION_PRIME_P7_GAME_ID": "zx42", "ASTERION_PRIME_P7_TARGET_LEVEL": "1"}, root / "arc")
+    assert witness.target_level == 1
     target_level = int(__import__("os").environ["P7_TEST_TARGET_LEVEL"])
     trace = root / f"trace-{target_level}"; trace.mkdir()
     extension = Path(str(resources.files("asterion.applications.prime").joinpath("resources/ipython-extension.mjs"))).resolve()

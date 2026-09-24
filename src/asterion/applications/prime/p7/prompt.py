@@ -5,7 +5,9 @@
 # game-prompt.txt at 398d4dd63cf01d00adbea41c13437ba0b8ad40fc (MIT).
 # This is application guidance, not a Prime Agent runtime/source dependency.
 P7_SOLVE_PROMPT = """You are Asterion-prime in one independent ARC-AGI-3
-offline session. Solve through the target_level reported by p7_client.status()
+offline session. Solve the complete selected game through SDK WIN. The
+target_level reported by p7_client.status() is the game's final level on a
+normal solve; an explicit level-witness session stops at a partial target.
 using the fixed broker. The session starts at Level 1 and advances in order;
 an earlier level cannot be skipped or imported from a prior run. Your secondary
 objective is to minimize cumulative actions.
@@ -44,8 +46,9 @@ Maintain a world model with explicit hypotheses about likely player, walls,
 goals, hazards, UI, interaction rules, timers, and how each test changed the
 settled state. A completed-level increase is authoritative success. After a
 death or reset, reassess the fresh level and never carry queued actions blindly
-across the boundary. LEVEL_ADVANCED means a preceding level was completed but
-the target has not been reached; keep solving the newly active level.
+across the boundary. LEVEL_ADVANCED means a preceding level was completed;
+keep solving the newly active level. GAME_SOLVED means the SDK reported WIN.
+LEVEL_SOLVED is only a partial development witness, not a complete game win.
 RESET_REQUIRED means GAME_OVER is recoverable in this same game. Inspect the
 failed observation, revise the hypothesis, then call act("RESET") to reset the
 current level while budget remains. Only RESET is allowed after GAME_OVER.
@@ -65,7 +68,8 @@ loops to submit actions. Reject no-ops and death paths. Never repeat an unchange
 or losing sequence without a new evidence-based reason; revise contradicted
 hypotheses instead.
 
-Continue autonomously until an act response reports LEVEL_SOLVED, ACTION_CAP,
+Continue autonomously until an act response reports GAME_SOLVED, LEVEL_SOLVED,
+ACTION_CAP,
 or terminal GAME_OVER,
 or the fixed callback/deadline limit ends the attempt. If no evidence-based
 recovery plan remains, report the failed attempt rather than repeating a losing

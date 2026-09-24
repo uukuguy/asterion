@@ -22,6 +22,7 @@ from asterion.applications.prime.p7.game import (
     DEFAULT_GAME,
     P7GameSelection,
     P7GameSelectionError,
+    TARGET_LEVEL_ENV,
     resolve_game_selection,
 )
 from asterion.applications.prime.p7.ipython_host import (
@@ -52,7 +53,6 @@ from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 _RUNTIME_ID = "asterion.prime"
 _PROVIDER = "deepseek"
 _MODEL = "deepseek-v4-flash"
-_MAX_ACTIONS = 500
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
@@ -306,16 +306,24 @@ class P7RuntimeSelection:
     deadline_ms: int
 
     def __post_init__(self) -> None:
-        if self != P7RuntimeSelection.fixed():
+        if (
+            self.runtime_id != _RUNTIME_ID
+            or self.provider != _PROVIDER
+            or self.model != _MODEL
+            or type(self.max_actions) is not int
+            or not 500 <= self.max_actions <= 5000
+            or self.max_callbacks != _MAX_CALLBACKS
+            or self.deadline_ms != _DEADLINE_MS
+        ):
             raise P7OperatorError("P7 runtime selection is invalid")
 
     @classmethod
-    def fixed(cls) -> P7RuntimeSelection:
+    def fixed(cls, game: P7GameSelection = DEFAULT_GAME) -> P7RuntimeSelection:
         value = object.__new__(cls)
         object.__setattr__(value, "runtime_id", _RUNTIME_ID)
         object.__setattr__(value, "provider", _PROVIDER)
         object.__setattr__(value, "model", _MODEL)
-        object.__setattr__(value, "max_actions", _MAX_ACTIONS)
+        object.__setattr__(value, "max_actions", game.action_cap)
         object.__setattr__(value, "max_callbacks", _MAX_CALLBACKS)
         object.__setattr__(value, "deadline_ms", _DEADLINE_MS)
         return value
@@ -368,7 +376,9 @@ def resolve_pi_provider(environment: Mapping[str, str], *, model: str) -> str:
     return _PROVIDER
 
 
-def resolve_p7_runtime(environment: Mapping[str, str]) -> P7RuntimeSelection:
+def resolve_p7_runtime(
+    environment: Mapping[str, str], game: P7GameSelection = DEFAULT_GAME
+) -> P7RuntimeSelection:
     """Resolve the one fixed model/runtime preset without exposing tuning knobs."""
 
     provider = resolve_pi_provider(environment, model=_MODEL)
@@ -376,18 +386,20 @@ def resolve_p7_runtime(environment: Mapping[str, str]) -> P7RuntimeSelection:
         runtime_id=_RUNTIME_ID,
         provider=provider,
         model=_MODEL,
-        max_actions=_MAX_ACTIONS,
+        max_actions=game.action_cap,
         max_callbacks=_MAX_CALLBACKS,
         deadline_ms=_DEADLINE_MS,
     )
 
 
-def p7_runtime_options(selection: P7RuntimeSelection) -> Mapping[str, str]:
+def p7_runtime_options(
+    selection: P7RuntimeSelection, game: P7GameSelection = DEFAULT_GAME
+) -> Mapping[str, str]:
     """Return immutable private factory options for the fixed selection."""
 
     if (
         type(selection) is not P7RuntimeSelection
-        or selection != P7RuntimeSelection.fixed()
+        or selection != P7RuntimeSelection.fixed(game)
     ):
         raise P7OperatorError("P7 runtime selection is invalid")
     return MappingProxyType(
@@ -420,7 +432,7 @@ def build_p7_operator_resources(
     trace: PrimeTraceRecorder | None = None
     bridge: _IpythonBridgeServer | None = None
     try:
-        selection = resolve_p7_runtime(environment)
+        selection = resolve_p7_runtime(environment, game)
         provider_environment = dict(environment)
         if (
             type(pi_base_command) is not tuple
@@ -503,7 +515,7 @@ def build_p7_operator_resources(
                 "prime.launch": launch,
                 "prime.private-trace": private_trace,
             },
-            runtime_options=p7_runtime_options(selection),
+            runtime_options=p7_runtime_options(selection, game),
             _bridge=bridge,
         )
     except Exception:
@@ -530,6 +542,23 @@ class P7Invocation:
     pi_base_command: tuple[str, ...]
     extension_path: Path
     game: P7GameSelection
+
+
+def _select_game_for_mode(
+    process_environment: Mapping[str, str],
+    resolved_environment: Mapping[str, str],
+    arc_root: Path,
+) -> P7GameSelection:
+    """Keep dotenv configuration from changing a normal solve into a witness."""
+
+    mode = process_environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve")
+    if mode not in {"solve", "witness"}:
+        raise P7OperatorError("P7 run mode is unavailable")
+    if mode == "solve" and TARGET_LEVEL_ENV in resolved_environment:
+        raise P7OperatorError("LEVEL is only available with the P7 level-witness command")
+    if mode == "witness" and TARGET_LEVEL_ENV not in process_environment:
+        raise P7OperatorError("P7 level witness requires explicit LEVEL")
+    return resolve_game_selection(resolved_environment, arc_root)
 
 
 def _preflight(environment: Mapping[str, str]) -> P7Invocation:
@@ -562,9 +591,9 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
                 pi_entry=live.resolve_pi_entry(resolved),
             ),
             extension_path=live.extension_path(),
-            game=resolve_game_selection(resolved, arc_root),
+            game=_select_game_for_mode(environment, resolved, arc_root),
         )
-    except (live.P7LiveSolveError, P7GameSelectionError) as error:
+    except (live.P7LiveSolveError, P7GameSelectionError, P7OperatorError) as error:
         raise P7OperatorError(str(error)) from None
 
 
@@ -765,6 +794,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         comparison_report=comparison_report,
         game=invocation.game,
         broker_replay_sha256=broker_receipt.replay_sha256,
+        terminal_reason=broker_receipt.terminal_reason,
     )
 
 
@@ -773,8 +803,10 @@ def classify_live_result(result: live.P7LiveExecution) -> Mapping[str, object]:
 
     if result.completed_level_count != result.game.target_level:
         raise live.P7LiveSolveError("target level completion was not observed")
-    if not 1 <= result.primitive_action_count <= _MAX_ACTIONS:
+    if not 1 <= result.primitive_action_count <= result.game.action_cap:
         raise live.P7LiveSolveError("primitive action count is invalid")
+    if result.game.is_full_game and result.terminal_reason != "game-won":
+        raise live.P7LiveSolveError("full-game WIN was not observed")
     if not result.replay_verified:
         raise live.P7LiveSolveError("replay verification did not pass")
     if not result.sealed_trace:
@@ -824,6 +856,8 @@ def _public_receipt(
         "game_id": game.game_id,
         "seed": game.seed,
         "target_level": game.target_level,
+        "win_levels": game.win_levels,
+        "completion_scope": "full-game" if game.is_full_game else "level-witness",
         "status": status,
         "run_id": run_id,
         "completed_level_count": completed_level_count,
