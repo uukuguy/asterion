@@ -16,7 +16,7 @@ from typing import cast
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
-from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt
+from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError, ArcRunReceipt
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
     DEFAULT_GAME,
@@ -59,6 +59,33 @@ _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
 _BRIDGE_JOIN_SECONDS = 1.0
 class P7OperatorError(RuntimeError):
     """The fixed P7 model host is unavailable."""
+
+
+class P7LiveAttemptFailure(live.P7LiveSolveError):
+    """Public-safe evidence retained when a live attempt does not pass."""
+
+    def __init__(
+        self,
+        *,
+        primitive_actions: int | None,
+        levels_completed: int | None,
+        terminal_reason: str | None,
+        replay_verified: bool,
+        sealed_trace: bool,
+        cleanup_complete: bool,
+    ) -> None:
+        reason = (
+            "game over before the first level was completed"
+            if terminal_reason == "game-over" and levels_completed == 0
+            else "P7 live solve unsuccessful"
+        )
+        super().__init__(reason)
+        self.primitive_actions = primitive_actions
+        self.levels_completed = levels_completed
+        self.terminal_reason = terminal_reason
+        self.replay_verified = replay_verified
+        self.sealed_trace = sealed_trace
+        self.cleanup_complete = cleanup_complete
 
 
 class _BridgeSignal:
@@ -209,10 +236,28 @@ class _P7BrokerClient:
                     "sequence": transition.sequence,
                 },
             )
+        try:
+            observation = self._broker.observe()
+            status = self._broker.status()
+        except ArcBrokerError:
+            snapshot = self._broker.terminal_snapshot()
+            observation, status = snapshot.observation, snapshot.status
         return {
             "applied_count": result.applied_count,
             "levels_completed": result.levels_completed,
-            "terminal": self.status(),
+            "observation": {
+                "available_actions": list(observation.available_actions),
+                "frame": observation.frame,
+                "levels_completed": observation.levels_completed,
+                "state": observation.state,
+                "win_levels": observation.win_levels,
+            },
+            "terminal": {
+                "actions_remaining": status.actions_remaining,
+                "levels_completed": status.levels_completed,
+                "primitive_actions": status.primitive_actions,
+                "terminal_reason": status.terminal_reason,
+            },
             "transitions": [
                 {
                     "action": transition.action,
@@ -549,6 +594,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     reason: str | None = None
     failure: BaseException | None = None
     diagnostics: dict[str, object] = {}
+    broker_status = None
     try:
         print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
         application = _resolve_p7_application()
@@ -597,13 +643,16 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             if isinstance(error, live.P7LiveSolveError)
             else "P7 live solve unsuccessful"
         )
-        raise
     finally:
         try:
             broker_value = resources_.host_services.get("prime.arc-broker")
             if isinstance(broker_value, ArcBroker):
                 try:
-                    status = broker_value.status()
+                    try:
+                        status = broker_value.status()
+                    except ArcBrokerError:
+                        status = broker_value.terminal_snapshot().status
+                    broker_status = status
                     diagnostics["broker_status"] = {
                         "actions_remaining": status.actions_remaining,
                         "levels_completed": status.levels_completed,
@@ -612,12 +661,42 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                     }
                 except Exception:
                     pass
+                if broker_receipt is None:
+                    try:
+                        broker_receipt = broker_value.seal()
+                    except Exception:
+                        pass
+                if broker_receipt is not None and not replay_verified:
+                    try:
+                        broker_value.replay(
+                            lambda: live.ArcadeEngine(
+                                arc_root=invocation.arc_root,
+                                recordings_dir=private / "replay-recordings",
+                                game=invocation.game,
+                            )
+                        )
+                        replay_verified = True
+                    except Exception:
+                        pass
             # The launch seam carries plain data only, so there is no live Pi
             # session object left to read a failure or an stderr tail from.
             diagnostics["worker_cell_count"] = live.worker_cell_count(private)
-            await resources_.close()
-            engine.close()
-            cleanup_complete = worker.closed
+            cleanup_failed = False
+            try:
+                await resources_.close()
+            except Exception as error:
+                cleanup_failed = True
+                if failure is None:
+                    failure = error
+                    reason = "P7 live solve unsuccessful"
+            try:
+                engine.close()
+            except Exception as error:
+                cleanup_failed = True
+                if failure is None:
+                    failure = error
+                    reason = "P7 live solve unsuccessful"
+            cleanup_complete = worker.closed and not cleanup_failed
         finally:
             live.write_summary(
                 root,
@@ -634,6 +713,15 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                 failure=failure,
                 diagnostics=diagnostics,
             )
+    if failure is not None:
+        raise P7LiveAttemptFailure(
+            primitive_actions=None if broker_status is None else broker_status.primitive_actions,
+            levels_completed=None if broker_status is None else broker_status.levels_completed,
+            terminal_reason=None if broker_status is None else broker_status.terminal_reason,
+            replay_verified=replay_verified,
+            sealed_trace=sealed_trace,
+            cleanup_complete=cleanup_complete,
+        ) from None
     return live.P7LiveExecution(
         run_id=run_id,
         completed_level_count=int(receipt.get("completed_level_count", 0)),
@@ -682,13 +770,14 @@ def _public_receipt(
     run_id: str,
     *,
     receipt: Mapping[str, object] | None = None,
-    completed_level_count: int = 0,
-    primitive_action_count: int = 0,
+    completed_level_count: int | None = None,
+    primitive_action_count: int | None = None,
     replay_verified: bool = False,
     sealed_trace: bool = False,
     cleanup_complete: bool = False,
     comparison_report: Path | None = None,
     reason: str | None = None,
+    terminal_reason: str | None = None,
     game: P7GameSelection = DEFAULT_GAME,
     broker_replay_sha256: str | None = None,
 ) -> Mapping[str, object]:
@@ -734,6 +823,8 @@ def _public_receipt(
         safe["comparison_report"] = "available"
     if reason is not None:
         safe["reason"] = reason
+    if terminal_reason is not None:
+        safe["terminal_reason"] = terminal_reason
     return safe
 
 
@@ -765,10 +856,21 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(error, live.P7LiveSolveError)
             else "P7 live solve unsuccessful"
         )
+        failure_evidence = {}
+        if isinstance(error, P7LiveAttemptFailure):
+            failure_evidence = {
+                "completed_level_count": error.levels_completed,
+                "primitive_action_count": error.primitive_actions,
+                "terminal_reason": error.terminal_reason,
+                "replay_verified": error.replay_verified,
+                "sealed_trace": error.sealed_trace,
+                "cleanup_complete": error.cleanup_complete,
+            }
         print(
             json.dumps(
                 _public_receipt(
-                    "unsuccessful", run_id, reason=reason, game=invocation.game
+                    "unsuccessful", run_id, reason=reason, game=invocation.game,
+                    **failure_evidence,
                 ),
                 allow_nan=False,
                 separators=(",", ":"),

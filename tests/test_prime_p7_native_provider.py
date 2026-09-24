@@ -175,6 +175,16 @@ class _CompletingRuntime:
 
 
 class TestPrimeP7NativeProvider(unittest.TestCase):
+    def test_p7_runtime_terminal_predicate_stops_after_game_over(self) -> None:
+        from asterion.applications.prime.runtime_binding import _p7_terminal
+        from tests.test_prime_p7_native_broker import _Engine as TerminalEngine
+
+        broker = ArcBroker(engine=TerminalEngine(game_over_after=1))
+        self.assertFalse(_p7_terminal(broker))
+        broker.act(("ACTION1",))
+        self.assertTrue(_p7_terminal(broker))
+        self.assertEqual(broker.seal().levels_completed, 0)
+
     def test_p7_projector_persists_usage_without_widening_public_stream(
         self,
     ) -> None:

@@ -29,7 +29,7 @@ make asterion-prime-p7-games
 | 完整 `game_id` | 本地标题 | 输入标签 | 总关卡 | 本地状态 | 官方 scorecard |
 |---|---|---|---:|---|---|
 | `ls20-9607627b` | LS20 | `keyboard` | 7 | 已验证完成 Level 1；没有全游戏完成证据 | 无 |
-| `tu93-0768757b` | TU93 | `keyboard_click` | 9 | 截至本指南编写时只做过零动作加载预检；以清单命令为准 | 无 |
+| `tu93-0768757b` | TU93 | `keyboard_click` | 9 | 曾运行 50 个动作后进入 `GAME_OVER`，未完成首关；以清单命令为准 | 无 |
 
 清单命令只会把满足以下条件的运行计入“已验证”：存在 receipt、trace 已封存、replay 已验证、cleanup 已完成，并且 Broker 的完成关卡、动作数和终止原因与 receipt 一致。失败、进行中、字段缺失或身份冲突的摘要不会计入。终端输出只显示安全摘要，不显示 prompt、原始帧、密钥、私有路径或 worker 内容。
 
@@ -43,6 +43,28 @@ make asterion-prime-p7-games
 | `p7-live-20260914141314` | 1 | 20 | `3.571429` | `c00e3263…` |
 
 两次运行均为 sealed trace、replay verified、cleanup complete，并标记为 `unpromoted`。它们是本地 Asterion 证据，不是 ARC 官方排行榜成绩。
+
+## 重新解同一题与保留每次结果
+
+仓库当前选中的题目是 `tu93-0768757b`。在仓库根目录运行一次以下命令，就从该题的第一关、seed 0 开始一次**全新**尝试：
+
+```bash
+make asterion-prime-p7-solve
+```
+
+想重解 `ls20-9607627b`，可在命令中指定完整题号；再次执行同一命令就是第二次独立尝试：
+
+```bash
+make asterion-prime-p7-solve ASTERION_PRIME_P7_GAME_ID=ls20-9607627b
+```
+
+每次尝试都有独立的 `run_id`，格式为 `p7-live-UTC时间戳-唯一后缀`，分别保存在 `./.asterion-private/prime-p7-live/<run_id>/`。同一秒发起的重试也使用不同目录；创建目录时拒绝覆盖已有目录。目录中的 `summary.json` 是私有诊断文件，可能包含不宜公开的运行细节，请勿直接贴到公开渠道。可只列目录名查看历次尝试：
+
+```bash
+ls -1dt .asterion-private/prime-p7-live/p7-live-*
+```
+
+失败尝试也保留独立目录和安全终端回执。Broker 可用时，回执中的 `primitive_action_count` 是已记录的实际动作数；若尚未取得 Broker 证据，该字段为 `null`。`GAME_OVER` 会显示为 `terminal_reason: game-over` 和 `status: unsuccessful`。`make asterion-prime-p7-games` 只汇总通过封存与回放校验的成功运行，因此失败重试不会覆盖或冲掉此前的已验证成绩。重新运行会从第一关开始，不会续接上一轮的游戏状态。
 
 可视化回放和派生制品在：
 

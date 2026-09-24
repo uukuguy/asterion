@@ -16,6 +16,7 @@ class _Engine:
         seed: int = 0,
         win_levels: int = 7,
         remove_second_after_first: bool = False,
+        game_over_after: int | None = None,
     ) -> None:
         self.level_after = level_after
         self.raises_on = raises_on
@@ -23,6 +24,7 @@ class _Engine:
         self.seed = seed
         self.win_levels = win_levels
         self.remove_second_after_first = remove_second_after_first
+        self.game_over_after = game_over_after
         self.calls: list[str] = []
         self.levels_completed = 0
         self.observe_calls = 0
@@ -36,7 +38,7 @@ class _Engine:
             "available_actions": available,
             "frame": [[[len(self.calls) % 10, 1]]],
             "levels_completed": self.levels_completed,
-            "state": "NOT_FINISHED",
+            "state": "GAME_OVER" if self.game_over_after == len(self.calls) else "NOT_FINISHED",
             "win_levels": self.win_levels,
         }
 
@@ -75,6 +77,35 @@ class TestNativeP7Broker(unittest.TestCase):
         for call in (lambda: broker.act(("ACTION1",)), broker.observe, broker.status):
             with self.subTest(call=call), self.assertRaisesRegex(ArcBrokerError, "closed"):
                 call()
+
+    def test_game_over_records_the_action_then_closes_with_terminal_snapshot(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBrokerError
+
+        engine = _Engine(game_over_after=2)
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        broker = ArcBroker(engine=engine)
+        result = broker.act(("ACTION1", "ACTION2", "ACTION3"))
+
+        self.assertEqual(result.applied_count, 2)
+        self.assertEqual(engine.calls, ["ACTION1", "ACTION2"])
+        self.assertEqual(broker.seal().terminal_reason, "game-over")
+        snapshot = broker.terminal_snapshot()
+        self.assertEqual(snapshot.observation.state, "GAME_OVER")
+        self.assertEqual(snapshot.status.primitive_actions, 2)
+        self.assertEqual(snapshot.status.levels_completed, 0)
+        self.assertEqual(snapshot.status.actions_remaining, 498)
+        self.assertEqual(snapshot.status.terminal_reason, "game-over")
+        for call in (broker.observe, broker.status, lambda: broker.act(("ACTION1",))):
+            with self.subTest(call=call), self.assertRaisesRegex(ArcBrokerError, "closed"):
+                call()
+
+    def test_terminal_snapshot_is_rejected_while_active(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBrokerError
+
+        broker, _ = _broker()
+        with self.assertRaisesRegex(ArcBrokerError, "unavailable"):
+            broker.terminal_snapshot()
 
     def test_malformed_unavailable_or_oversized_batch_never_dispatches(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBrokerError, P7_ACTION_CAP

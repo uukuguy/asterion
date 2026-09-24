@@ -9,6 +9,40 @@ from tests.test_prime_p7_native_broker import _Engine
 
 
 class TestNativeP7Replay(unittest.TestCase):
+    def test_action_cap_replays_without_being_mistaken_for_game_over(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.score import P7_ACTION_CAP
+
+        broker = ArcBroker(engine=_Engine())
+        broker.act(("ACTION1",) * P7_ACTION_CAP)
+
+        self.assertEqual(broker.seal().terminal_reason, "action-cap")
+        self.assertEqual(broker.replay(lambda: _Engine()), broker.seal())
+
+    def test_game_over_on_last_allowed_action_replays_as_game_over(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.score import P7_ACTION_CAP
+
+        broker = ArcBroker(engine=_Engine(game_over_after=P7_ACTION_CAP))
+        broker.act(("ACTION1",) * P7_ACTION_CAP)
+
+        self.assertEqual(broker.seal().terminal_reason, "game-over")
+        self.assertEqual(
+            broker.replay(lambda: _Engine(game_over_after=P7_ACTION_CAP)), broker.seal()
+        )
+
+    def test_level_completion_takes_precedence_over_simultaneous_game_over(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        broker = ArcBroker(engine=_Engine(level_after=1, game_over_after=1))
+        broker.act(("ACTION1",))
+
+        self.assertEqual(broker.seal().terminal_reason, "level-completed")
+        self.assertEqual(
+            broker.replay(lambda: _Engine(level_after=1, game_over_after=1)),
+            broker.seal(),
+        )
+
     def test_seal_replays_journal_against_a_fresh_engine(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.replay import replay_arc_run
@@ -27,6 +61,20 @@ class TestNativeP7Replay(unittest.TestCase):
         broker.act(("ACTION1", "ACTION2"))
         with self.assertRaises(ArcBrokerError):
             replay_arc_run(broker.journal, broker.seal(), lambda: _Engine(level_after=1))
+
+    def test_game_over_replays_against_a_fresh_engine_and_requires_terminal_state(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.replay import replay_arc_run
+
+        broker = ArcBroker(engine=_Engine(game_over_after=2))
+        broker.act(("ACTION1", "ACTION2", "ACTION3"))
+        receipt = broker.seal()
+
+        self.assertEqual(
+            replay_arc_run(broker.journal, receipt, lambda: _Engine(game_over_after=2)), receipt
+        )
+        with self.assertRaises(ArcBrokerError):
+            replay_arc_run(broker.journal, receipt, lambda: _Engine())
 
     def test_replay_rejects_identity_mismatch_before_observation(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError

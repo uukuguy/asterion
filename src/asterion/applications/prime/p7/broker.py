@@ -35,6 +35,14 @@ class ArcStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class ArcTerminalSnapshot:
+    """Final broker state available only after execution has closed."""
+
+    observation: ArcObservation
+    status: ArcStatus
+
+
+@dataclass(frozen=True, slots=True)
 class ArcTransition:
     sequence: int
     action: str
@@ -189,12 +197,22 @@ class ArcBroker:
 
     def status(self) -> ArcStatus:
         self._require_open()
+        return self._status()
+
+    def _status(self) -> ArcStatus:
         return ArcStatus(
             self._primitive_actions,
             self._current.levels_completed - self._initial.levels_completed,
             P7_ACTION_CAP - self._primitive_actions,
             self._terminal_reason,
         )
+
+    def terminal_snapshot(self) -> ArcTerminalSnapshot:
+        """Return the final recorded observation and status after broker closure."""
+
+        if self._terminal_reason == "active":
+            raise ArcBrokerError("unavailable")
+        return ArcTerminalSnapshot(self._current, self._status())
 
     def _validate_actions(self, actions: object) -> tuple[str, ...]:
         if type(actions) is not tuple or not actions or len(actions) > P7_ACTION_CAP - self._primitive_actions:
@@ -254,6 +272,9 @@ class ArcBroker:
             if after.levels_completed > before.levels_completed:
                 self._terminal_reason = "level-completed"
                 break
+            if after.state == "GAME_OVER":
+                self._terminal_reason = "game-over"
+                break
             if self._primitive_actions == P7_ACTION_CAP:
                 self._terminal_reason = "action-cap"
                 break
@@ -283,6 +304,7 @@ __all__ = (
     "ArcObservation",
     "ArcRunReceipt",
     "ArcStatus",
+    "ArcTerminalSnapshot",
     "ArcTransition",
     "P7_ACTION_CAP",
     "P7_GAME_ID",

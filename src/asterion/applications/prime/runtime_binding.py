@@ -47,14 +47,14 @@ _RECEIPT_ARTIFACT = "prime.p7-solving.receipt"
 _RECEIPT_MEDIA_TYPE = "application/vnd.asterion.prime.p7-solving-receipt+json"
 
 
-def _p7_level_completed(broker: ArcBroker) -> bool:
+def _p7_terminal(broker: ArcBroker) -> bool:
+    """Stop model continuation once the broker can no longer accept actions."""
+
     try:
-        receipt = broker.seal()
+        broker.seal()
     except Exception:
         return False
-    return (
-        receipt.levels_completed == 1 and receipt.terminal_reason == "level-completed"
-    )
+    return True
 
 
 @dataclass(frozen=True, repr=False, slots=True)
@@ -302,7 +302,7 @@ def build_p7_runtime(
             extension_lease=launch.extension_lease,
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
-            completion_predicate=lambda: _p7_level_completed(broker),
+            completion_predicate=lambda: _p7_terminal(broker),
         )
         launch = None
         return AsterionPrimeRuntimeClient(

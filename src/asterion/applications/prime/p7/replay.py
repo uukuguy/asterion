@@ -49,10 +49,15 @@ def replay_arc_run(
         or receipt.seed != game.seed
         or not 0 <= receipt.primitive_actions <= P7_ACTION_CAP
         or receipt.levels_completed not in (0, 1)
-        or receipt.terminal_reason not in {"level-completed", "action-cap"}
+        or receipt.terminal_reason not in {"level-completed", "action-cap", "game-over"}
         or (receipt.terminal_reason == "level-completed") != (receipt.levels_completed == 1)
-        or (receipt.terminal_reason == "action-cap") != (
-            receipt.primitive_actions == P7_ACTION_CAP and receipt.levels_completed == 0
+        or (
+            receipt.terminal_reason == "action-cap"
+            and not (receipt.primitive_actions == P7_ACTION_CAP and receipt.levels_completed == 0)
+        )
+        or (
+            receipt.terminal_reason == "game-over"
+            and not (1 <= receipt.primitive_actions <= P7_ACTION_CAP and receipt.levels_completed == 0)
         )
         or len(journal) != receipt.primitive_actions
     ):
@@ -82,8 +87,13 @@ def replay_arc_run(
             current = after
             if current.levels_completed > 0 and sequence != len(journal):
                 raise ValueError
+            if current.state == "GAME_OVER" and sequence != len(journal):
+                raise ValueError
         if (
             current.levels_completed != receipt.levels_completed
+            or (receipt.terminal_reason == "game-over") != (
+                current.state == "GAME_OVER" and current.levels_completed == 0
+            )
             or replay_sha256(journal, terminal_reason=receipt.terminal_reason) != receipt.replay_sha256
         ):
             raise ValueError

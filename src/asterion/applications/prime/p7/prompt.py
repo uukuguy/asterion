@@ -40,6 +40,9 @@ goals, hazards, UI, interaction rules, timers, and how each test changed the
 settled state. A completed-level increase is authoritative success. After a
 death or reset, reassess the fresh level and never carry queued actions blindly
 across the boundary.
+If an act response reports GAME_OVER, stop submitting actions and report that
+this attempt ended without completing the level. The final act response already
+contains the terminal observation and status.
 
 Before every act call, store and print a concise [PLAN] of two or three sentences:
 the current hypothesis, expected change, shortest useful test, stop condition,
@@ -52,8 +55,8 @@ loops to submit actions. Reject no-ops and death paths. Never repeat an unchange
 or losing sequence without a new evidence-based reason; revise contradicted
 hypotheses instead.
 
-Continue autonomously until status reports one completed level or the fixed
-action/callback/deadline limit ends the attempt. A final text response is not
+Continue autonomously until an act response reports one completed level or
+GAME_OVER, or the fixed action/callback/deadline limit ends the attempt. A final text response is not
 success. Do not assume a known map, object identity, target coordinate, or action
 sequence."""
 

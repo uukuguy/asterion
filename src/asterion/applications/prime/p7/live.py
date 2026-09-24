@@ -29,6 +29,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import secrets
 import socket
 import subprocess
 import sys
@@ -540,6 +541,9 @@ def diff(before, after):
 def summary(obs=None):
     value = observe() if obs is None else obs
     grid = _grid(value)
+    current_status = value.get("status")
+    if current_status is None:
+        current_status = status()
     return {{
         "available_actions": value["available_actions"],
         "counts": _counts(grid),
@@ -548,7 +552,7 @@ def summary(obs=None):
         "positions_0_1": positions([0, 1], value),
         "shape": _shape(value["frame"]),
         "state": value["state"],
-        "status": status(),
+        "status": current_status,
         "win_levels": value["win_levels"],
     }}
 
@@ -580,15 +584,17 @@ def act(actions):
     elif isinstance(actions, list) and all(isinstance(action, str) for action in actions):
         actions = [{{"name": action, "data": {{}}}} for action in actions]
     batch = _call("act", actions)
-    view = observe()
-    current = status()
+    view = batch["observation"]
+    current = batch["terminal"]
     levels = current["levels_completed"]
     remaining = current["actions_remaining"]
-    terminal = "LEVEL_SOLVED" if levels > 0 else ("ACTION_CAP" if remaining <= 0 else "ACTIVE")
+    reason = current["terminal_reason"]
+    terminal = "LEVEL_SOLVED" if levels > 0 else ("GAME_OVER" if reason == "game-over" else ("ACTION_CAP" if remaining <= 0 else "ACTIVE"))
     return {{
         **view,
         "actions_taken": current["primitive_actions"],
         "actions_remaining": remaining,
+        "status": current,
         "terminal": terminal,
         "batch": batch,
     }}
@@ -709,14 +715,15 @@ def private_root(operator_root: Path, run_id: str) -> Path:
 
 
 def safe_run_id() -> str:
-    """Return a UTC-stamped run identity; no operator knob selects it."""
+    """Return a UTC-stamped, collision-resistant run identity."""
 
-    return "p7-live-" + subprocess.run(
+    timestamp = subprocess.run(
         ("date", "-u", "+%Y%m%d%H%M%S"),
         check=True,
         stdout=subprocess.PIPE,
         text=True,
     ).stdout.strip().lower()
+    return "p7-live-" + timestamp + "-" + secrets.token_hex(12)
 
 
 def receipt_value(result_artifacts: tuple[Mapping[str, object], ...]) -> Mapping[str, object]:
