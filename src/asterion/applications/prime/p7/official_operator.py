@@ -241,8 +241,15 @@ def main(argv: list[str] | None = None) -> int:
                     "status": "ready",
                     "game_count": session.preflight.game_count,
                     "total_action_cap": session.preflight.total_action_cap,
+                    "total_model_callback_cap": session.preflight.total_model_callback_cap,
+                    "total_deadline_seconds": session.preflight.total_deadline_seconds,
                     "games": [
-                        {"game_id": game.game_id, "action_cap": game.action_cap}
+                        {
+                            "game_id": game.game_id,
+                            "action_cap": game.action_cap,
+                            "model_callback_cap": game.model_callback_cap,
+                            "deadline_seconds": game.deadline_seconds,
+                        }
                         for game in session.preflight.games
                     ],
                 }

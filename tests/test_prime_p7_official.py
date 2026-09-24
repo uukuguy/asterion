@@ -6,6 +6,8 @@ import unittest
 from unittest.mock import patch
 
 from asterion.applications.prime.p7 import official
+from asterion.applications.prime.p7.game import ArcGameContract
+from asterion.applications.prime.p7.operator import P7RuntimeSelection
 
 
 class FakeEnvironment:
@@ -84,6 +86,14 @@ class TestOfficialAdapter(unittest.TestCase):
         self.assertEqual(session.preflight.game_ids, ("ls20-9607627b", "tu93-0768757b"))
         self.assertEqual(tuple(p.action_cap for p in session.preflight.games), (1552, 1000))
         self.assertEqual(session.preflight.total_action_cap, 2552)
+        self.assertEqual(session.preflight.total_model_callback_cap, 256)
+        self.assertEqual(session.preflight.total_deadline_seconds, 7200)
+        for policy in session.preflight.games:
+            runtime = P7RuntimeSelection.fixed(
+                ArcGameContract(policy.game_id, 1, action_cap=policy.action_cap)
+            )
+            self.assertEqual(policy.model_callback_cap, runtime.max_callbacks)
+            self.assertEqual(policy.deadline_seconds, runtime.deadline_ms // 1000)
         self.assertEqual(list(Path(self.sdk.kwargs["environments_dir"]).iterdir()), [])
         self.assertNotIn("sentinel-secret", repr(session))
         self.assertNotIn("sentinel-secret", repr(session.preflight))

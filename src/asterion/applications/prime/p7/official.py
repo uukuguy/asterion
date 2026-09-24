@@ -46,6 +46,14 @@ class OfficialPreflight:
         return sum(game.action_cap for game in self.games)
 
     @property
+    def total_model_callback_cap(self) -> int:
+        return sum(game.model_callback_cap for game in self.games)
+
+    @property
+    def total_deadline_seconds(self) -> int:
+        return sum(game.deadline_seconds for game in self.games)
+
+    @property
     def game_count(self) -> int:
         return len(self.games)
 

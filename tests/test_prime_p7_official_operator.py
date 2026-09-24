@@ -47,8 +47,11 @@ class TestOfficialOperator(unittest.TestCase):
         from asterion.applications.prime.p7.official_operator import main
 
         class Session:
-            preflight = SimpleNamespace(game_count=1, total_action_cap=1000, games=(
-                SimpleNamespace(game_id="ab12-12345678", action_cap=1000),
+            preflight = SimpleNamespace(game_count=1, total_action_cap=1000,
+                                        total_model_callback_cap=128,
+                                        total_deadline_seconds=3600, games=(
+                SimpleNamespace(game_id="ab12-12345678", action_cap=1000,
+                                model_callback_cap=128, deadline_seconds=3600),
             ))
 
             def __enter__(self) -> "Session":
@@ -71,6 +74,8 @@ class TestOfficialOperator(unittest.TestCase):
             status = main([])
         self.assertEqual(status, 0)
         self.assertIn('"status":"ready"', output.getvalue())
+        self.assertIn('"total_model_callback_cap":128', output.getvalue())
+        self.assertIn('"total_deadline_seconds":3600', output.getvalue())
         self.assertNotIn("private", output.getvalue())
 
     def test_recovery_record_is_written_after_abort_close(self) -> None:
