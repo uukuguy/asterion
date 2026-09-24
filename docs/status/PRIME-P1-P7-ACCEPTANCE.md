@@ -71,6 +71,8 @@ Makefile 已将下一题 `tu93-0768757b`、seed `0` 和本地题库位置设为�
 
 选择值由 Makefile 经 Orb 注入给应用；引擎、Broker、回放、密封 trace 和公开 receipt 使用同一 `game_id`/`seed`。公开 receipt 的 `selection_receipt_sha256` 还将题目身份、能力收据和 Broker 回放摘要绑定在一起；原 `receipt_sha256` 仍是能力层收据摘要。这个 preset 在完成**一关**后停止，内部上限为 500 个原始动作、128 次 callback 和 1 小时；它会实际调用模型。新题目前只做无模型预检，尚未启动该付费求解。
 
+2026-09-24 的两次 P7 运行分别留下 `p7-live-20260924094143` 和 `p7-live-20260924112844` 私有摘要：均在应用组合校验阶段失败，原始动作与 IPython 单元均为 0，尚未生成能力收据；摘要不能证明当时选了哪道题，也不能算求解成功。原因是 P7 入口拿包含 P1–P7 的公开 provider 配仅 P7 能力包。入口现改用只包含 P7 的专用 provider；安装 wheel 在 Orb 中无模型通过相同组合校验，安装版假 Pi 回归测试通过。相关定向测试 41 项与 `make promotion-check` 25 条隔离发行命令均通过，模型操作 0。tu93 真实求解仍未验证。
+
 **期望**:退出码 0;输出有 `receipt_sha256`、`partial_game_score`、`terminal_reason`。历史通过跑(receipt `c00e3263cb...`,2026-09-14)——20 个原始动作、40 个 IPython 单元、`ls20-9607627b` 第 1 关、`partial_game_score=3.571429`、`terminal_reason=level-completed`。
 
 ### 边界与未验证项

@@ -15,7 +15,7 @@ from types import MappingProxyType
 from typing import cast
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
-from asterion.applications.prime import create_provider
+from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
 from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
@@ -37,7 +37,7 @@ from asterion.applications.prime.p7.private_trace import (
 from asterion.applications.prime.p7.score import digest
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 from asterion.applications.prime.runtime_binding import PrimeLaunch
-from asterion.applications.provider import resolve_installed_provider
+from asterion.applications.provider import InstalledApplication, resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
     CAPABILITY_REF,
     PACKAGE_REF,
@@ -498,6 +498,17 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError(str(error)) from None
 
 
+def _resolve_p7_application() -> InstalledApplication:
+    """Resolve only P7 against the one package this live route owns."""
+
+    provider = resolve_installed_provider(
+        create_prime_arc_agi_3_solving_provider(),
+        runtime_factories=default_runtime_factory_registry(),
+        installed_packages=(create_prime_arc_agi_3_solver_package(),),
+    )
+    return provider.applications[0]
+
+
 async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecution:
     """Run the one fixed solve and seal its private evidence.
 
@@ -540,15 +551,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     diagnostics: dict[str, object] = {}
     try:
         print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
-        provider = resolve_installed_provider(
-            create_provider(),
-            runtime_factories=default_runtime_factory_registry(),
-            # Only P7 is published now, so the closure validates against this
-            # one package. It previously needed P1's package too, purely because
-            # P1 was published without a witness.
-            installed_packages=(create_prime_arc_agi_3_solver_package(),),
-        )
-        application = provider.applications[0]
+        application = _resolve_p7_application()
         assembly = application.assemblies[0]
         runtime = assembly.runtime_binding.factory(
             RuntimeFactoryContext(

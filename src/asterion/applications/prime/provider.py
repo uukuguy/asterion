@@ -42,6 +42,29 @@ def _declared_application(application_id: str) -> InstalledApplication:
     )
 
 
+def prime_arc_agi_3_solving_application() -> InstalledApplication:
+    """Return the exact P7 application record."""
+
+    return _declared_application("prime.arc-agi-3-solving")
+
+
+def create_prime_arc_agi_3_solving_provider() -> InstalledApplicationProvider:
+    """Return the provider carrying P7's own record alone.
+
+    P7 installs only its own capability package during a live solve. Resolving
+    the public multi-application provider would require every other Prime
+    application's package before P7 can start.
+    """
+
+    return InstalledApplicationProvider(
+        protocol=APPLICATION_PROVIDER_PROTOCOL,
+        provider_id="prime-applications",
+        resource_root=_resource_root(),
+        applications=(prime_arc_agi_3_solving_application(),),
+        runtime_factory_bindings=(asterion_prime_runtime_binding(),),
+    )
+
+
 def prime_ipython_coding_application() -> InstalledApplication:
     """Return the exact P1 application record.
 
@@ -262,6 +285,7 @@ def create_provider() -> InstalledApplicationProvider:
 
 
 __all__ = (
+    "create_prime_arc_agi_3_solving_provider",
     "create_prime_bounded_autonomy_provider",
     "create_prime_continual_improvement_provider",
     "create_prime_ipython_coding_provider",
@@ -269,6 +293,7 @@ __all__ = (
     "create_prime_programmatic_long_context_provider",
     "create_prime_recursive_workflow_provider",
     "create_provider",
+    "prime_arc_agi_3_solving_application",
     "prime_bounded_autonomy_application",
     "prime_continual_improvement_application",
     "prime_ipython_coding_application",

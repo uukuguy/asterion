@@ -28,8 +28,11 @@ from asterion.applications.first_party_packages import (
     create_prime_programmatic_long_context_native_package,
     create_prime_recursive_workflow_native_package,
 )
-from asterion.applications.provider import compose_installed_provider
-from asterion.applications.prime import create_provider
+from asterion.applications.provider import (
+    compose_installed_provider,
+    resolve_installed_provider,
+)
+from asterion.applications.prime import create_prime_arc_agi_3_solving_provider, create_provider
 from asterion.applications.prime.p7.ipython_host import (
     IpythonWorkerResult,
     P7ClientFacade,
@@ -62,6 +65,7 @@ from asterion.runtime.factory import (
     RuntimeFactoryError,
     RuntimeFactoryRegistry,
 )
+from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.host import (
     CancellationSignal,
     RunEvent,
@@ -256,6 +260,18 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         self.assertEqual(
             application.capability_packages,
             (CapabilityPackageRef("prime-arc-agi-3-solver", "1.0.0"),),
+        )
+
+    def test_p7_only_provider_resolves_with_only_its_capability_package(self) -> None:
+        provider = resolve_installed_provider(
+            create_prime_arc_agi_3_solving_provider(),
+            runtime_factories=default_runtime_factory_registry(),
+            installed_packages=(create_prime_arc_agi_3_solver_package(),),
+        )
+
+        self.assertEqual(
+            tuple(application.application_id for application in provider.applications),
+            ("prime.arc-agi-3-solving",),
         )
 
     def test_p7_application_composes_package_over_runtime_tool_capability(self) -> None:
