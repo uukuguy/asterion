@@ -143,22 +143,23 @@ async def _run_game(
     run_id: str,
 ) -> None:
     """Run one exact official engine through the installed gameplay assembly."""
-    game_root = evidence_root / run_id
-    game_root.mkdir(mode=0o700)
-    trace_root = game_root / "trace"
-    trace_root.mkdir(mode=0o700)
-    worker = live.SubprocessPythonWorker(root=game_root)
-    resources = build_p7_operator_resources(
-        environment=invocation.environment,
-        pi_base_command=invocation.pi_base_command,
-        extension_path=invocation.extension_path,
-        working_directory=invocation.operator_root,
-        worker=worker,
-        engine=engine,
-        private_trace_root=trace_root,
-        game=game,
-    )
+    resources = None
     try:
+        game_root = evidence_root / run_id
+        game_root.mkdir(mode=0o700)
+        trace_root = game_root / "trace"
+        trace_root.mkdir(mode=0o700)
+        worker = live.SubprocessPythonWorker(root=game_root)
+        resources = build_p7_operator_resources(
+            environment=invocation.environment,
+            pi_base_command=invocation.pi_base_command,
+            extension_path=invocation.extension_path,
+            working_directory=invocation.operator_root,
+            worker=worker,
+            engine=engine,
+            private_trace_root=trace_root,
+            game=game,
+        )
         assembly = application.assemblies[0]
         runtime = assembly.runtime_binding.factory(
             RuntimeFactoryContext(
@@ -192,7 +193,8 @@ async def _run_game(
             raise OfficialError("official gameplay evidence unavailable")
     finally:
         try:
-            await resources.close()
+            if resources is not None:
+                await resources.close()
         finally:
             engine.close()
 

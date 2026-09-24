@@ -196,6 +196,37 @@ class TestOfficialOperator(unittest.TestCase):
             self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
             asyncio.run(resources.close())
 
+    def test_game_engine_closes_if_host_resources_fail_to_initialize(self) -> None:
+        from asterion.applications.prime.p7.official_operator import (
+            OfficialInvocation,
+            _run_game,
+        )
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            invocation = OfficialInvocation(
+                operator_root=root,
+                environment={"DEEPSEEK_API_KEY": "private"},
+                pi_base_command=("pi",),
+                extension_path=root / "extension.mjs",
+                api_key="arc-private",
+            )
+            engine = mock.Mock()
+            with mock.patch(
+                "asterion.applications.prime.p7.official_operator.build_p7_operator_resources",
+                side_effect=RuntimeError("private host failure"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "private host failure"):
+                    asyncio.run(_run_game(
+                        invocation,
+                        mock.Mock(),
+                        root,
+                        engine,
+                        ArcGameContract("ab12-12345678", 2),
+                        "p7-official-cleanup",
+                    ))
+            engine.close.assert_called_once_with()
+
     def test_one_card_attempts_every_game_despite_one_game_failure(self) -> None:
         from asterion.applications.prime.p7.official_operator import run_official_games
 
