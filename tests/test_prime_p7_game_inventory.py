@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,26 @@ from tools.list_prime_p7_games import inventory, main
 
 
 class TestPrimeP7GameInventory(unittest.TestCase):
+    def test_make_entrypoint_runs_without_an_installed_package(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc_root = root / "arc-agi-3"
+            self._metadata(arc_root, "alpha", "11111111", "Alpha", [4])
+            result = subprocess.run(
+                [
+                    "make",
+                    "asterion-prime-p7-games",
+                    f"ASTERION_PRIME_ARC_ROOT={arc_root}",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                cwd=Path(__file__).parents[1],
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("alpha-11111111", result.stdout)
+
     def test_sealed_partial_prefix_contributes_progress_without_a_score(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -265,7 +265,7 @@ asterion-prime-p2-run:
 # The default P7 target selects the prepared next game and its sibling asset
 # root. The operator rejects missing or unusable assets before a model run.
 asterion-prime-p7-games:
-	@python3 tools/list_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --runs-root "$(CURDIR)/.asterion-private/prime-p7-live"
+	@PYTHONPATH="$(CURDIR)/src" python3 tools/list_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --runs-root "$(CURDIR)/.asterion-private/prime-p7-live"
 
 asterion-prime-p7-sync-games:
 	@python3 tools/sync_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --env-file "$(CURDIR)/.env"
