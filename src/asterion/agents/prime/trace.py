@@ -11,6 +11,7 @@ import math
 import os
 from pathlib import Path
 from stat import S_ISDIR
+from threading import Lock
 from types import MappingProxyType
 from typing import NoReturn, cast
 
@@ -216,9 +217,9 @@ def validate_trace(entries: object) -> tuple[PrimeTraceEntry, ...]:
 
 
 class PrimeTraceRecorder:
-    """Create one private, hash-chained trace in a pinned existing directory."""
+    """Create one private trace; serialize append, seal, and close across threads."""
 
-    __slots__ = ("_directory_fd", "_entries", "_identities", "_seal", "_trace_fd")
+    __slots__ = ("_directory_fd", "_entries", "_identities", "_lock", "_seal", "_trace_fd")
 
     def __init__(self, directory: Path | str) -> None:
         if not isinstance(directory, (Path, str)):
@@ -250,6 +251,7 @@ class PrimeTraceRecorder:
         if trace_descriptor is None:
             os.close(descriptor)
             _reject()
+        self._lock = Lock()
         self._directory_fd: int | None = descriptor
         self._entries: list[PrimeTraceEntry] = []
         self._identities: Mapping[str, str] | None = None
@@ -295,31 +297,32 @@ class PrimeTraceRecorder:
         identities: Mapping[str, str],
         private_payload: Mapping[str, object],
     ) -> PrimeTraceEntry:
-        trace_descriptor = self._trace_fd
-        if (
-            self._seal is not None
-            or self._directory_fd is None
-            or trace_descriptor is None
-        ):
-            _reject()
-        if type(kind) is not str or not kind or len(kind) > 128:
-            _reject()
-        if kind == "trace.sealed":
-            _reject()
-        try:
-            kind.encode("utf-8")
-        except UnicodeEncodeError:
-            _reject()
-        stable_identities = _identities(identities)
-        payload = _payload(private_payload)
-        if self._identities is not None and dict(self._identities) != dict(
-            stable_identities
-        ):
-            _reject()
-        entry = self._append_entry(kind, stable_identities, payload)
-        if self._identities is None:
-            self._identities = stable_identities
-        return entry
+        with self._lock:
+            trace_descriptor = self._trace_fd
+            if (
+                self._seal is not None
+                or self._directory_fd is None
+                or trace_descriptor is None
+            ):
+                _reject()
+            if type(kind) is not str or not kind or len(kind) > 128:
+                _reject()
+            if kind == "trace.sealed":
+                _reject()
+            try:
+                kind.encode("utf-8")
+            except UnicodeEncodeError:
+                _reject()
+            stable_identities = _identities(identities)
+            payload = _payload(private_payload)
+            if self._identities is not None and dict(self._identities) != dict(
+                stable_identities
+            ):
+                _reject()
+            entry = self._append_entry(kind, stable_identities, payload)
+            if self._identities is None:
+                self._identities = stable_identities
+            return entry
 
     def _append_entry(
         self, kind: str, identities: Mapping[str, str], payload: Mapping[str, object]
@@ -355,55 +358,59 @@ class PrimeTraceRecorder:
     def snapshot(self) -> tuple[PrimeTraceEntry, ...]:
         """Return the current private snapshot; only a sealed one is analyzable."""
 
-        return tuple(self._entries)
+        with self._lock:
+            return tuple(self._entries)
 
     @property
     def entries(self) -> tuple[PrimeTraceEntry, ...]:
-        if self._seal is None:
-            _reject()
-        return tuple(self._entries)
+        with self._lock:
+            if self._seal is None:
+                _reject()
+            return tuple(self._entries)
 
     def seal(self) -> PrimeTraceSeal:
-        if self._seal is not None:
-            return self._seal
-        if not self._entries or self._identities is None:
-            _reject()
-        previous_sha256 = self._entries[-1].sha256
-        final_entry = self._append_entry(
-            "trace.sealed",
-            self._identities,
-            {"entry_count": len(self._entries), "final_sha256": previous_sha256},
-        )
-        seal = PrimeTraceSeal(
-            entry_count=len(self._entries),
-            final_sha256=final_entry.sha256,
-            sealed_at=datetime.now(timezone.utc).isoformat(),
-        )
-        self._write_seal(
-            {
-                "entry_count": seal.entry_count,
-                "final_sha256": seal.final_sha256,
-                "sealed_at": seal.sealed_at,
-            },
-        )
-        self._seal = seal
-        if self._trace_fd is not None:
-            os.close(self._trace_fd)
-            self._trace_fd = None
-        if self._directory_fd is not None:
-            os.close(self._directory_fd)
-            self._directory_fd = None
-        return seal
+        with self._lock:
+            if self._seal is not None:
+                return self._seal
+            if not self._entries or self._identities is None:
+                _reject()
+            previous_sha256 = self._entries[-1].sha256
+            final_entry = self._append_entry(
+                "trace.sealed",
+                self._identities,
+                {"entry_count": len(self._entries), "final_sha256": previous_sha256},
+            )
+            seal = PrimeTraceSeal(
+                entry_count=len(self._entries),
+                final_sha256=final_entry.sha256,
+                sealed_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self._write_seal(
+                {
+                    "entry_count": seal.entry_count,
+                    "final_sha256": seal.final_sha256,
+                    "sealed_at": seal.sealed_at,
+                },
+            )
+            self._seal = seal
+            if self._trace_fd is not None:
+                os.close(self._trace_fd)
+                self._trace_fd = None
+            if self._directory_fd is not None:
+                os.close(self._directory_fd)
+                self._directory_fd = None
+            return seal
 
     def close(self) -> None:
         """Release an unsealed operator-owned trace without publishing it."""
 
-        if self._trace_fd is not None:
-            os.close(self._trace_fd)
-            self._trace_fd = None
-        if self._directory_fd is not None:
-            os.close(self._directory_fd)
-            self._directory_fd = None
+        with self._lock:
+            if self._trace_fd is not None:
+                os.close(self._trace_fd)
+                self._trace_fd = None
+            if self._directory_fd is not None:
+                os.close(self._directory_fd)
+                self._directory_fd = None
 
 
 __all__ = (
