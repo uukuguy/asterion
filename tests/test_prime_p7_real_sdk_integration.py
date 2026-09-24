@@ -16,6 +16,7 @@ from unittest import mock
 
 from asterion.applications.prime.p7 import official
 from asterion.applications.prime.p7.official import prepare_session
+from asterion.applications.prime.p7.official_result import validate_closed_scorecard
 
 
 try:
@@ -81,8 +82,19 @@ class TestP7RealSdkIntegration(unittest.TestCase):
                 return _Response({
                     "card_id": "card-sdk-fixture",
                     "competition_mode": True,
-                    "score": 0.0,
-                    "environments": [{"id": game_id, "runs": []}],
+                    "score": 100.0,
+                    "environments": [{
+                        "id": game_id,
+                        "runs": [{
+                            "id": None,
+                            "guid": "guid-sdk-fixture",
+                            "score": 100.0,
+                            "state": "WIN",
+                            "completed": True,
+                            "levels_completed": 1,
+                            "actions": 1,
+                        }],
+                    }],
                 })
             raise AssertionError(f"unexpected POST: {url}")
 
@@ -106,6 +118,26 @@ class TestP7RealSdkIntegration(unittest.TestCase):
                 self.assertEqual(observation["win_levels"], 1)
                 closed = session.close()
                 self.assertEqual(closed.card_id, "card-sdk-fixture")
+                receipt = validate_closed_scorecard(session)
+                self.assertEqual(receipt.to_dict(), {
+                    "schema": "asterion.prime.p7-official-receipt/v1",
+                    "mode": "official",
+                    "status": "closed-confirmed",
+                    "card_id": "card-sdk-fixture",
+                    "scorecard_url": f"{official.OFFICIAL_BASE_URL}/scorecards/card-sdk-fixture",
+                    "overall_score": 100.0,
+                    "games_attempted": 1,
+                    "games_completed": 1,
+                    "games": [{
+                        "game_id": game_id,
+                        "score": 100.0,
+                        "state": "WIN",
+                        "completed": True,
+                        "levels_completed": 1,
+                        "actions": 1,
+                    }],
+                    "closure_digest": receipt.closure_digest,
+                })
 
         self.assertEqual([method for method, _, _ in requests_seen], [
             "GET", "POST", "GET", "POST", "POST",
