@@ -150,6 +150,32 @@ class TestPrimeP7GameInventory(unittest.TestCase):
                 output = "".join(call.args[0] for call in write.call_args_list)
             self.assertEqual(output.strip(), "P7 local inventory unavailable")
 
+    def test_old_unknown_game_and_invalid_scores_do_not_break_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc_root = root / "arc-agi-3"
+            runs_root = root / "runs"
+            self._metadata(arc_root, "alpha", "11111111", "Alpha", [1])
+            self._summary(
+                runs_root / "unknown-game",
+                run_id="unknown-game",
+                levels=1,
+                score="9",
+                game_id=None,
+                recording_names=("other-22222222-recording.jsonl",),
+            )
+            for name, score in (("negative", "-999"), ("high", "999"), ("multiline", "1\n2")):
+                with self.subTest(score=score):
+                    self._summary(
+                        runs_root / name,
+                        run_id=name,
+                        levels=1,
+                        score=score,
+                        game_id="alpha-11111111",
+                    )
+            rows = inventory(arc_root, runs_root)
+            self.assertEqual(rows[0]["completed_levels"], 0)
+
     @staticmethod
     def _metadata(root: Path, short_id: str, version: str, title: str, baseline: list[int]) -> None:
         path = root / "environment_files" / short_id / version

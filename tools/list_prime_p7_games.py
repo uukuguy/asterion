@@ -14,6 +14,7 @@ _GAME_ID = re.compile(r"^[A-Za-z0-9]+-[A-Za-z0-9]+$")
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 _SAFE_TEXT = re.compile(r"^[^\r\n\t]+$")
+_SCORE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
 _MISSING = "—"
 
 
@@ -134,7 +135,7 @@ def _verified_run(run_dir: Path, game_levels: dict[str, int | None]) -> dict[str
         if recording_game_id is not None and recording_game_id != summary_game_id:
             return None
         game_id = summary_game_id
-    elif recording_game_id is not None:
+    elif recording_game_id in game_levels:
         game_id = recording_game_id
     else:
         return None
@@ -144,9 +145,9 @@ def _verified_run(run_dir: Path, game_levels: dict[str, int | None]) -> dict[str
         type(run_id) is not str
         or run_id != run_dir.name
         or _RUN_ID.fullmatch(run_id) is None
-        or type(score) not in (str, int, float)
-        or isinstance(score, bool)
-        or not _score(str(score)).is_finite()
+        or type(score) is not str
+        or _SCORE.fullmatch(score) is None
+        or not Decimal("0") <= _score(score) <= Decimal("100")
         or (game_levels[game_id] is not None and receipt["completed_level_count"] > game_levels[game_id])
     ):
         return None
