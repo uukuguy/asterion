@@ -101,8 +101,13 @@ def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_l
         ):
             return None
         transitions = _transitions(entries)
-        completed = next((entry.payload for entry in entries if entry.kind == "arc.run.completed"), None)
-        if not isinstance(completed, Mapping):
+        completed = tuple(entry.payload for entry in entries if entry.kind == "arc.run.completed")
+        partial = tuple(entry.payload for entry in entries if entry.kind == "arc.run.partial")
+        if (len(completed), len(partial)) not in {(1, 0), (0, 1)}:
+            return None
+        is_partial = bool(partial)
+        evidence = partial[0] if is_partial else completed[0]
+        if not isinstance(evidence, Mapping):
             return None
         identity = _recording_identity(run, transitions)
         if identity is None:
@@ -110,18 +115,25 @@ def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_l
         recorded_game_id, win_levels = identity
         if recorded_game_id != expected_game_id:
             return None
-        levels = completed.get("levels_completed")
-        actions = completed.get("primitive_actions")
-        terminal = completed.get("terminal_reason")
-        recorded_digest = completed.get("replay_sha256")
-        if not all(type(value) is int for value in (levels, actions)) or type(terminal) is not str or type(recorded_digest) is not str:
+        values = _prefix_values(
+            evidence, recorded_game_id, seed, win_levels, require_completed_terminal=is_partial
+        )
+        if values is None:
             return None
-        if actions != len(transitions) or not 1 <= levels <= win_levels:
-            return None
-        if replay_sha256(transitions, terminal_reason=terminal) != recorded_digest:
-            return None
-        if not _summary_matches(summary, recorded_game_id, seed, win_levels, levels, len(transitions), terminal, recorded_digest):
-            return None
+        levels, actions, terminal, recorded_digest = values
+        if is_partial:
+            if not _partial_summary_matches(summary, evidence):
+                return None
+            transitions = _truncate(transitions, levels)
+            if len(transitions) != actions or not transitions:
+                return None
+            if replay_sha256(transitions, terminal_reason=terminal) != recorded_digest:
+                return None
+        else:
+            if actions != len(transitions) or replay_sha256(transitions, terminal_reason=terminal) != recorded_digest:
+                return None
+            if not _summary_matches(summary, recorded_game_id, seed, win_levels, levels, actions, terminal, recorded_digest):
+                return None
         if max_level is not None:
             if type(max_level) is not int or max_level < 1:
                 return None
@@ -222,6 +234,40 @@ def _truncate(transitions: tuple[ArcTransition, ...], level: int) -> tuple[ArcTr
     return ()
 
 
+def _prefix_values(
+    value: Mapping[object, object], game_id: str, seed: int, win_levels: int, *, require_completed_terminal: bool
+) -> tuple[int, int, str, str] | None:
+    """Validate the one self-contained, completed-level prefix declaration."""
+
+    required = {
+        "game_id",
+        "seed",
+        "win_levels",
+        "levels_completed",
+        "primitive_actions",
+        "replay_sha256",
+        "terminal_reason",
+    }
+    if set(value) != required:
+        return None
+    levels, actions = value["levels_completed"], value["primitive_actions"]
+    terminal, digest = value["terminal_reason"], value["replay_sha256"]
+    if (
+        value["game_id"] != game_id
+        or value["seed"] != seed
+        or value["win_levels"] != win_levels
+        or type(levels) is not int
+        or type(actions) is not int
+        or type(terminal) is not str
+        or type(digest) is not str
+        or not 1 <= levels <= win_levels
+        or actions < 1
+        or (require_completed_terminal and terminal != "level-completed")
+    ):
+        return None
+    return levels, actions, terminal, digest
+
+
 def _summary_matches(summary: dict[object, object], game_id: str, seed: int, win_levels: int, levels: int, actions: int, terminal: str, digest: str) -> bool:
     broker, receipt = summary.get("broker"), summary.get("receipt")
     if type(broker) is not dict or type(receipt) is not dict:
@@ -233,6 +279,17 @@ def _summary_matches(summary: dict[object, object], game_id: str, seed: int, win
         if receipt.get(key) != value:
             return False
     return all(broker.get(key, value) == value for key, value in (("game_id", game_id), ("seed", seed), ("win_levels", win_levels)))
+
+
+def _partial_summary_matches(summary: dict[object, object], evidence: Mapping[object, object]) -> bool:
+    """Require failure evidence to independently repeat the sealed prefix."""
+
+    return (
+        summary.get("completed_prefix") == dict(evidence)
+        and summary.get("receipt") == {}
+        and type(summary.get("failure")) is dict
+        and bool(summary["failure"])
+    )
 
 
 __all__ = ("VerifiedPrefix", "list_verified_prefixes", "load_best_prefix")
