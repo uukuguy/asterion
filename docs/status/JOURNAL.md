@@ -2892,3 +2892,7 @@
 - 03:14 已核对分支日志逐行进入主工作区并清理隔离 worktree。
 - 03:18 官方多题提交管线测试覆盖收据与缺行恢复 [19fd0772]
 - 03:22 9d33cb5d 预检公开逐题及总运行上界，便于正式提交前评估规模。
+
+## 2026-09-25
+
+- 09:30 Added a no-network P7 lifecycle test against the real arc-agi 0.9.9 SDK; verified catalog, scorecard, make, and close compatibility [ee8d5787]
