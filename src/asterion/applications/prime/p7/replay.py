@@ -6,10 +6,12 @@ from collections.abc import Callable
 from typing import Protocol, cast
 
 from .broker import (
+    ArcAction,
     ArcBrokerError,
     ArcRunReceipt,
     ArcTransition,
     _engine_identity,
+    _canonical_action,
     _observation_digest,
     _snapshot_observation,
 )
@@ -21,14 +23,16 @@ class _ArcEngine(Protocol):
     def observe(self) -> object: ...
 
 
-def _step(engine: object, action: str) -> object:
+def _step(engine: object, action: ArcAction) -> object:
     step = getattr(engine, "step", None)
     if callable(step):
-        return step(action)
+        if action.data:
+            return step(action.name, dict(action.data))
+        return step(action.name)
     act = getattr(engine, "act", None)
     if not callable(act):
         raise ValueError
-    return act({"name": action, "data": {}})
+    return act({"name": action.name, "data": dict(action.data)})
 
 
 def replay_arc_run(
@@ -63,7 +67,7 @@ def replay_arc_run(
         or (
             receipt.terminal_reason == "game-over"
             and not (
-                1 <= receipt.primitive_actions <= P7_ACTION_CAP
+                1 <= receipt.primitive_actions < P7_ACTION_CAP
                 and receipt.levels_completed < game.target_level
             )
         )
@@ -75,35 +79,43 @@ def replay_arc_run(
         engine = cast(_ArcEngine, engine_factory())
         _engine_identity(engine, game)
         current = _snapshot_observation(engine.observe(), win_levels=game.win_levels)
-        if current.levels_completed != 0:
+        if current.levels_completed != 0 or current.state != "NOT_FINISHED":
             raise ValueError
+        level_gameplay_actions = 0
         for sequence, transition in enumerate(journal, 1):
             if type(transition) is not ArcTransition or transition.sequence != sequence:
+                raise ValueError
+            action = _canonical_action(ArcAction(transition.action, transition.data))
+            if action.name == "RESET":
+                if level_gameplay_actions == 0:
+                    raise ValueError
+            elif current.state == "GAME_OVER" or action.name not in current.available_actions:
                 raise ValueError
             if _observation_digest(current) != transition.before_sha256:
                 raise ValueError
             after = _snapshot_observation(
-                _step(engine, transition.action), win_levels=game.win_levels
+                _step(engine, action), win_levels=game.win_levels
             )
             if (
                 _observation_digest(after) != transition.after_sha256
                 or after.levels_completed != transition.levels_completed
-                or after.levels_completed < current.levels_completed
-                or after.levels_completed > current.levels_completed + 1
+                or (action.name == "RESET" and (after.levels_completed != current.levels_completed or after.state != "NOT_FINISHED"))
+                or (action.name != "RESET" and (after.levels_completed < current.levels_completed or after.levels_completed > current.levels_completed + 1))
             ):
                 raise ValueError
+            if action.name == "RESET" or after.levels_completed > current.levels_completed:
+                level_gameplay_actions = 0
+            else:
+                level_gameplay_actions += 1
             current = after
             if current.levels_completed >= game.target_level and sequence != len(journal):
                 raise ValueError
-            if current.state == "GAME_OVER" and sequence != len(journal):
-                raise ValueError
         if (
             current.levels_completed != receipt.levels_completed
-            or (receipt.terminal_reason == "game-over") != (
-                current.state == "GAME_OVER"
-                and current.levels_completed < game.target_level
-            )
+            or (receipt.terminal_reason == "game-over" and current.state != "GAME_OVER")
+            or (receipt.terminal_reason == "level-completed" and current.levels_completed != game.target_level)
             or replay_sha256(journal, terminal_reason=receipt.terminal_reason) != receipt.replay_sha256
+            or (receipt.terminal_reason == "action-cap" and receipt.primitive_actions != P7_ACTION_CAP)
         ):
             raise ValueError
         return receipt

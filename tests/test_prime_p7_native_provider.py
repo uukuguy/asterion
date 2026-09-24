@@ -395,6 +395,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "death paths",
             "target_level",
             "action1 is up",
+            "reset_required",
+            "reset the current level",
             "never use python or shell loops to submit actions",
             "[plan]",
         ):

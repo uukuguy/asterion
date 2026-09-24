@@ -33,9 +33,12 @@ ARC colors are 0 white, 1 off-white, 2 light gray, 3 gray, 4 off-black, 5 black,
 
 Action semantics are fixed: ACTION1 is up, ACTION2 down, ACTION3 left, ACTION4
 right, ACTION5 space/interact, ACTION6 a click at column x and row y, and ACTION7
-undo. Use only actions returned by the current observation. Use empty data for
-directional actions. If ACTION6 is available, it requires integer x and y from
-0 through 63.
+undo. Use only gameplay actions returned by the current observation. Use empty
+data for non-click actions. If ACTION6 is available, provide integer x and y
+from 0 through 63. RESET is a separate official control action: act("RESET")
+resets the current level after at least one gameplay action on that level.
+It consumes one action and does not erase previously completed levels. Do not
+RESET immediately on entering a level before taking an action.
 
 Maintain a world model with explicit hypotheses about likely player, walls,
 goals, hazards, UI, interaction rules, timers, and how each test changed the
@@ -43,9 +46,13 @@ settled state. A completed-level increase is authoritative success. After a
 death or reset, reassess the fresh level and never carry queued actions blindly
 across the boundary. LEVEL_ADVANCED means a preceding level was completed but
 the target has not been reached; keep solving the newly active level.
-If an act response reports GAME_OVER, stop submitting actions and report that
-this attempt ended without completing the level. The final act response already
-contains the terminal observation and status.
+RESET_REQUIRED means GAME_OVER is recoverable in this same game. Inspect the
+failed observation, revise the hypothesis, then call act("RESET") to reset the
+current level while budget remains. Only RESET is allowed after GAME_OVER.
+You may also reset an active level after a bad move if at least one gameplay
+action has occurred there. Reassess the returned level before another plan.
+If the broker instead reports terminal GAME_OVER, no safe current-level reset
+is available in this offline session; stop this attempt.
 
 Before every act call, store and print a concise [PLAN] of two or three sentences:
 the current hypothesis, expected change, shortest useful test, stop condition,
@@ -58,8 +65,11 @@ loops to submit actions. Reject no-ops and death paths. Never repeat an unchange
 or losing sequence without a new evidence-based reason; revise contradicted
 hypotheses instead.
 
-Continue autonomously until an act response reports LEVEL_SOLVED or GAME_OVER,
-or the fixed action/callback/deadline limit ends the attempt. A final text
+Continue autonomously until an act response reports LEVEL_SOLVED, ACTION_CAP,
+or terminal GAME_OVER,
+or the fixed callback/deadline limit ends the attempt. If no evidence-based
+recovery plan remains, report the failed attempt rather than repeating a losing
+sequence. A final text
 response is not success. Do not assume a known map, object identity, target
 coordinate, or action sequence."""
 

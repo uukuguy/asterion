@@ -27,6 +27,12 @@ class ArcObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class ArcAction:
+    name: str
+    data: tuple[tuple[str, int], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ArcStatus:
     primitive_actions: int
     levels_completed: int
@@ -49,6 +55,7 @@ class ArcTransition:
     before_sha256: str
     after_sha256: str
     levels_completed: int
+    data: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +101,27 @@ def _frame(value: object) -> tuple[tuple[tuple[int, ...], ...], ...]:
 
 def _action_name(value: object) -> str:
     if type(value) is not str or value not in {f"ACTION{number}" for number in range(1, 8)}:
+        raise ValueError
+    return value
+
+
+def _canonical_action(value: object) -> ArcAction:
+    if type(value) is str:
+        value = ArcAction(value)
+    if type(value) is not ArcAction or type(value.name) is not str:
+        raise ValueError
+    if value.name != "RESET" and value.name not in {f"ACTION{number}" for number in range(1, 8)}:
+        raise ValueError
+    if value.name == "ACTION6":
+        if (
+            type(value.data) is not tuple
+            or len(value.data) != 2
+            or any(type(item) is not tuple or len(item) != 2 for item in value.data)
+            or tuple(item[0] for item in value.data) != ("x", "y")
+            or any(type(item[1]) is not int or not 0 <= item[1] <= 63 for item in value.data)
+        ):
+            raise ValueError
+    elif value.data != ():
         raise ValueError
     return value
 
@@ -162,7 +190,7 @@ class ArcBroker:
         try:
             self._identity = _engine_identity(engine, game)
             initial = _snapshot_observation(typed_engine.observe(), win_levels=game.win_levels)
-            if initial.levels_completed != 0:
+            if initial.levels_completed != 0 or initial.state != "NOT_FINISHED":
                 raise ValueError
         except BaseException:
             raise ArcBrokerError("unavailable") from None
@@ -174,6 +202,7 @@ class ArcBroker:
         self._terminal_reason = "active"
         self._actions_dispatched = 0
         self._failed_action: str | None = None
+        self._level_gameplay_actions = 0
 
     @property
     def journal(self) -> tuple[ArcTransition, ...]:
@@ -184,7 +213,7 @@ class ArcBroker:
         return self._game
 
     def _require_open(self) -> None:
-        if self._terminal_reason != "active":
+        if self._terminal_reason not in {"active", "reset-required"}:
             raise ArcBrokerError("closed")
 
     @property
@@ -210,37 +239,44 @@ class ArcBroker:
     def terminal_snapshot(self) -> ArcTerminalSnapshot:
         """Return the final recorded observation and status after broker closure."""
 
-        if self._terminal_reason == "active":
+        if self._terminal_reason in {"active", "reset-required"}:
             raise ArcBrokerError("unavailable")
         return ArcTerminalSnapshot(self._current, self._status())
 
-    def _validate_actions(self, actions: object) -> tuple[str, ...]:
+    def _validate_actions(self, actions: object) -> tuple[ArcAction, ...]:
         if type(actions) is not tuple or not actions or len(actions) > P7_ACTION_CAP - self._primitive_actions:
             raise ArcBrokerError("unavailable")
         try:
-            validated = tuple(_action_name(action) for action in actions)
+            validated = tuple(_canonical_action(action) for action in actions)
         except ValueError:
             raise ArcBrokerError("unavailable") from None
-        if any(action not in self._current.available_actions for action in validated):
+        if any(action.name != "RESET" and action.name not in self._current.available_actions for action in validated):
             raise ArcBrokerError("unavailable")
         return validated
 
-    def _step(self, action: str) -> object:
+    def _step(self, action: ArcAction) -> object:
         step = getattr(self._engine, "step", None)
         if callable(step):
-            return step(action)
+            if action.data:
+                return step(action.name, dict(action.data))
+            return step(action.name)
         act = getattr(self._engine, "act", None)
         if not callable(act):
             raise ValueError
-        return act({"name": action, "data": {}})
+        return act({"name": action.name, "data": dict(action.data)})
 
-    def act(self, actions: tuple[str, ...]) -> ArcActResult:
+    def act(self, actions: tuple[str | ArcAction, ...]) -> ArcActResult:
         self._require_open()
         validated = self._validate_actions(actions)
         transitions: list[ArcTransition] = []
         for action in validated:
-            if action not in self._current.available_actions:
-                self._failed_action = action
+            if action.name == "RESET":
+                if self._level_gameplay_actions == 0:
+                    raise ArcBrokerError("unavailable")
+            elif self._terminal_reason == "reset-required":
+                raise ArcBrokerError("unavailable")
+            elif action.name not in self._current.available_actions:
+                self._failed_action = action.name
                 self._terminal_reason = "action-unavailable"
                 raise ArcBrokerError("unavailable")
             before = self._current
@@ -248,49 +284,58 @@ class ArcBroker:
             try:
                 after = _snapshot_observation(self._step(action), win_levels=self._game.win_levels)
             except BaseException:
-                self._failed_action = action
+                self._failed_action = action.name
                 self._terminal_reason = "engine-uncertain"
                 raise ArcBrokerError("uncertain") from None
             if (
                 after.win_levels != before.win_levels
-                or after.levels_completed < before.levels_completed
-                or after.levels_completed > before.levels_completed + 1
+                or (action.name == "RESET" and (after.levels_completed != before.levels_completed or after.state != "NOT_FINISHED"))
+                or (action.name != "RESET" and (after.levels_completed < before.levels_completed or after.levels_completed > before.levels_completed + 1))
             ):
-                self._failed_action = action
+                self._failed_action = action.name
                 self._terminal_reason = "engine-invalid"
                 raise ArcBrokerError("unavailable")
             transition = ArcTransition(
                 self._primitive_actions,
-                action,
+                action.name,
                 _observation_digest(before),
                 _observation_digest(after),
                 after.levels_completed - self._initial.levels_completed,
+                action.data,
             )
             self._journal.append(transition)
             transitions.append(transition)
             self._current = after
+            if action.name == "RESET" or after.levels_completed > before.levels_completed:
+                self._level_gameplay_actions = 0
+            else:
+                self._level_gameplay_actions += 1
             if after.levels_completed == self._game.target_level:
                 self._terminal_reason = "level-completed"
-                break
-            if after.state == "GAME_OVER":
-                self._terminal_reason = "game-over"
                 break
             if self._primitive_actions == P7_ACTION_CAP:
                 self._terminal_reason = "action-cap"
                 break
-            if after.levels_completed > before.levels_completed:
+            if after.state == "GAME_OVER":
+                self._terminal_reason = (
+                    "reset-required" if self._level_gameplay_actions > 0 else "game-over"
+                )
+                break
+            self._terminal_reason = "active"
+            if action.name == "RESET" or after.levels_completed > before.levels_completed:
                 break
         return ArcActResult(len(transitions), self._current.levels_completed - self._initial.levels_completed, tuple(transitions))
 
     def seal(self) -> ArcRunReceipt:
         if self._terminal_reason == "active":
             raise ArcBrokerError("unavailable")
+        reason = "game-over" if self._terminal_reason == "reset-required" else self._terminal_reason
         return ArcRunReceipt(
             *self._identity,
             self._primitive_actions,
             self._current.levels_completed - self._initial.levels_completed,
-            self._terminal_reason,
-            replay_sha256(self._journal, terminal_reason=self._terminal_reason, uncertain_action=self._failed_action),
+            reason,
+            replay_sha256(self._journal, terminal_reason=reason, uncertain_action=self._failed_action),
         )
 
     def replay(self, engine_factory: Callable[[], object]) -> ArcRunReceipt:
@@ -301,6 +346,7 @@ class ArcBroker:
 
 __all__ = (
     "ArcActResult",
+    "ArcAction",
     "ArcBroker",
     "ArcBrokerError",
     "ArcObservation",

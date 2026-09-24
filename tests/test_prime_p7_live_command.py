@@ -56,11 +56,11 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(batch["applied_count"], 1)
             self.assertEqual(observation["state"], "GAME_OVER")
             self.assertEqual(terminal["primitive_actions"], 1)
-            self.assertEqual(terminal["terminal_reason"], "game-over")
+            self.assertEqual(terminal["terminal_reason"], "reset-required")
             self.assertEqual(len(broker.journal), 1)
             recorder.close()
 
-    def test_worker_act_uses_terminal_batch_without_followup_calls(self) -> None:
+    def test_worker_act_reports_recoverable_game_over_without_followup_calls(self) -> None:
         namespace: dict[str, object] = {}
         exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
         calls: list[str] = []
@@ -83,16 +83,144 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     "levels_completed": 0,
                     "primitive_actions": 1,
                     "target_level": 1,
-                    "terminal_reason": "game-over",
+                    "terminal_reason": "reset-required",
                 },
             }
 
         namespace["_call"] = fake_call
         view = namespace["act"]("ACTION1")  # type: ignore[operator]
-        self.assertEqual(view["terminal"], "GAME_OVER")
+        self.assertEqual(view["terminal"], "RESET_REQUIRED")
         self.assertEqual(view["actions_taken"], 1)
-        self.assertEqual(namespace["summary"](view)["status"]["terminal_reason"], "game-over")  # type: ignore[operator]
+        self.assertEqual(namespace["summary"](view)["status"]["terminal_reason"], "reset-required")  # type: ignore[operator]
         self.assertEqual(calls, ["act"])
+
+    def test_worker_reset_returns_active_view_and_cap_remains_final(self) -> None:
+        namespace: dict[str, object] = {}
+        exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
+        requests: list[object] = []
+
+        def fake_call(method: str, actions: object) -> object:
+            self.assertEqual(method, "act")
+            requests.append(actions)
+            remaining = 0 if len(requests) == 2 else 498
+            return {
+                "level_advanced": False,
+                "observation": {
+                    "available_actions": ["ACTION1"], "frame": [[[1]]],
+                    "levels_completed": 1, "state": "NOT_FINISHED", "win_levels": 7,
+                },
+                "terminal": {
+                    "actions_remaining": remaining, "levels_completed": 1,
+                    "primitive_actions": 500 - remaining, "target_level": 2,
+                    "terminal_reason": "action-cap" if remaining == 0 else "active",
+                },
+            }
+
+        namespace["_call"] = fake_call
+        reset = namespace["act"]("RESET")  # type: ignore[operator]
+        self.assertEqual(reset["terminal"], "ACTIVE")
+        capped = namespace["act"]("ACTION1")  # type: ignore[operator]
+        self.assertEqual(capped["terminal"], "ACTION_CAP")
+        self.assertEqual(requests[0], [{"name": "RESET", "data": {}}])
+
+    def test_worker_does_not_offer_reset_for_unrecoverable_game_over(self) -> None:
+        namespace: dict[str, object] = {}
+        exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
+        namespace["_call"] = lambda method, *args: {
+            "level_advanced": True,
+            "observation": {
+                "available_actions": ["ACTION1"], "frame": [[[1]]],
+                "levels_completed": 1, "state": "GAME_OVER", "win_levels": 7,
+            },
+            "terminal": {
+                "actions_remaining": 498, "levels_completed": 1,
+                "primitive_actions": 2, "target_level": 2,
+                "terminal_reason": "game-over",
+            },
+        }
+        view = namespace["act"]("ACTION1")  # type: ignore[operator]
+        self.assertEqual(view["terminal"], "GAME_OVER")
+
+    def test_client_passes_click_coordinates_to_broker_and_journal(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import P7OperatorError, _P7BrokerClient
+
+        class Engine:
+            game_id = "ls20-9607627b"
+            seed = 0
+
+            def __init__(self) -> None:
+                self.clicks: list[tuple[str, dict[str, int]]] = []
+
+            def observe(self) -> dict[str, object]:
+                return {
+                    "available_actions": ["ACTION6"], "frame": [[[1]]],
+                    "levels_completed": 0, "state": "NOT_FINISHED", "win_levels": 7,
+                }
+
+            def step(self, action: str, data: dict[str, int]) -> dict[str, object]:
+                self.clicks.append((action, data))
+                return self.observe()
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            engine = Engine()
+            broker = ArcBroker(engine=engine)
+            client = _P7BrokerClient(broker, recorder)
+            client.act([{"name": "ACTION6", "data": {"x": 12, "y": 34}}])
+            self.assertEqual(engine.clicks, [("ACTION6", {"x": 12, "y": 34})])
+            self.assertEqual(broker.journal[0].data, (("x", 12), ("y", 34)))
+            for data in ({"x": True, "y": 1}, {"x": 64, "y": 1}, {"x": 1}, {"x": 1, "y": 2, "z": 3}):
+                with self.subTest(data=data), self.assertRaises(P7OperatorError):
+                    client.act([{"name": "ACTION6", "data": data}])
+            self.assertEqual(len(broker.journal), 1)
+            recorder.close()
+
+    def test_client_resets_failed_second_level_on_same_engine(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _ResetEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            engine = _ResetEngine()
+            broker = ArcBroker(
+                engine=engine,
+                game=P7GameSelection("ls20-9607627b", 0, 2),
+            )
+            client = _P7BrokerClient(broker, recorder)
+            client.act([{"name": "ACTION1", "data": {}}])
+            failed = client.act([{"name": "ACTION1", "data": {}}])
+            self.assertEqual(failed["terminal"]["terminal_reason"], "reset-required")
+            recovered = client.act([{"name": "RESET", "data": {}}])
+            self.assertEqual(recovered["observation"]["levels_completed"], 1)
+            self.assertEqual(recovered["observation"]["state"], "NOT_FINISHED")
+            self.assertEqual(recovered["terminal"]["terminal_reason"], "active")
+            self.assertEqual(engine.calls[-1], ("RESET", {}))
+            self.assertEqual(len(broker.journal), 3)
+            recorder.close()
+
+    def test_arcade_adapter_forwards_click_data(self) -> None:
+        from asterion.applications.prime.p7.live import ArcadeEngine
+
+        class Environment:
+            def __init__(self) -> None:
+                self.calls: list[tuple[object, object]] = []
+
+            def step(self, action: object, data: object) -> SimpleNamespace:
+                self.calls.append((action, data))
+                return SimpleNamespace(
+                    available_actions=[6], frame=[[[1]]],
+                    levels_completed=0, state="NOT_FINISHED", win_levels=7,
+                )
+
+        engine = object.__new__(ArcadeEngine)
+        environment = Environment()
+        engine._actions = {"ACTION6": "sdk-click", "RESET": "sdk-reset"}
+        engine._environment = environment
+        engine.step("ACTION6", {"x": 12, "y": 34})
+        self.assertEqual(environment.calls, [("sdk-click", {"x": 12, "y": 34})])
 
     def test_worker_act_reports_intermediate_level_then_target(self) -> None:
         namespace: dict[str, object] = {}

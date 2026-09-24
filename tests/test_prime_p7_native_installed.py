@@ -116,13 +116,35 @@ from asterion.runtime.factory import RuntimeFactoryContext
 class Engine:
     game_id = "ls20-9607627b"
     seed = 0
-    def __init__(self): self.count = 0
+    def __init__(self):
+        self.count = 0
+        self.levels = 0
+        self.level_actions = 0
+        self.failed_second = False
+        self.resets = 0
+        self.state = "NOT_FINISHED"
     def observe(self):
-        return {"available_actions": ["ACTION1"], "frame": [[[self.count]]], "levels_completed": 0, "state": "NOT_FINISHED", "win_levels": 7}
+        return {"available_actions": ["ACTION1"], "frame": [[[self.count]]], "levels_completed": self.levels, "state": self.state, "win_levels": 7}
     def step(self, action):
-        assert action == "ACTION1"
         self.count += 1
-        return {"available_actions": ["ACTION1"], "frame": [[[self.count]]], "levels_completed": int(self.count >= 13) + int(self.count >= 26), "state": "FINISHED" if self.count == 26 else "NOT_FINISHED", "win_levels": 7}
+        if action == "RESET":
+            assert self.state == "GAME_OVER" and self.levels == 1
+            self.resets += 1
+            self.level_actions = 0
+            self.state = "NOT_FINISHED"
+        else:
+            assert action == "ACTION1" and self.state == "NOT_FINISHED"
+            self.level_actions += 1
+            if self.levels == 0 and self.level_actions == 13:
+                self.levels = 1
+                self.level_actions = 0
+            elif self.levels == 1 and not self.failed_second:
+                self.failed_second = True
+                self.state = "GAME_OVER"
+            elif self.levels == 1 and self.level_actions == 13:
+                self.levels = 2
+                self.state = "FINISHED"
+        return self.observe()
 
 class Worker:
     async def start(self, client, *, signal): self.client = client
@@ -130,6 +152,8 @@ class Worker:
         assert code == "fixture.solve()"
         self.broker.act(tuple("ACTION1" for _ in range(13)))
         if self.target_level == 2:
+            self.broker.act(("ACTION1",))
+            self.broker.act(("RESET",))
             self.broker.act(tuple("ACTION1" for _ in range(13)))
         return IpythonWorkerResult("ok", "completed")
     async def close(self): self.closed = True
@@ -141,12 +165,13 @@ async def main():
     extension = Path(str(resources.files("asterion.applications.prime").joinpath("resources/ipython-extension.mjs"))).resolve()
     worker = Worker()
     worker.target_level = target_level
+    engine = Engine()
     resources_ = build_p7_operator_resources(
         environment={"DEEPSEEK_API_KEY": "fixture-only"},
         pi_base_command=(sys.executable, str(root / "fake_pi_rpc.py"), "__NODE__"),
         extension_path=extension,
         working_directory=root,
-        worker=worker, engine=Engine(), private_trace_root=trace,
+        worker=worker, engine=engine, private_trace_root=trace,
         game=P7GameSelection("ls20-9607627b", 0, target_level),
     )
     worker.broker = resources_.host_services["prime.arc-broker"]
@@ -160,7 +185,7 @@ async def main():
         replay = broker.replay(Engine)
         entries = validate_trace(resources_.host_services["prime.private-trace"].runtime_recorder.entries)
         artifact = result.artifacts[0]["value"]
-        receipt = {"levels_completed": artifact["completed_level_count"], "primitive_actions": artifact["primitive_action_count"], "promotion_state": "development-only", "solver_evidence": "deterministic-double", "replay": replay.levels_completed, "trace_entries": len(entries)}
+        receipt = {"levels_completed": artifact["completed_level_count"], "primitive_actions": artifact["primitive_action_count"], "promotion_state": "development-only", "solver_evidence": "deterministic-double", "replay": replay.levels_completed, "resets": engine.resets, "trace_entries": len(entries)}
     finally:
         await resources_.close()
     assert receipt is not None and worker.closed is True
@@ -189,8 +214,9 @@ asyncio.run(main())
                     self.assertEqual(receipt["levels_completed"], target_level)
                     self.assertEqual(receipt["promotion_state"], "development-only")
                     self.assertEqual(receipt["solver_evidence"], "deterministic-double")
-                    self.assertEqual(receipt["primitive_actions"], 13 * target_level)
+                    self.assertEqual(receipt["primitive_actions"], 13 if target_level == 1 else 28)
                     self.assertEqual(receipt["replay"], target_level)
+                    self.assertEqual(receipt["resets"], target_level - 1)
                     self.assertGreaterEqual(receipt["trace_entries"], 2)
                     self.assertTrue(receipt["worker_cleanup"])
 

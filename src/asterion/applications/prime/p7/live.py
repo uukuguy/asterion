@@ -137,6 +137,7 @@ class ArcadeEngine:
             f"ACTION{number}": getattr(GameAction, f"ACTION{number}")
             for number in range(1, 8)
         }
+        self._actions["RESET"] = GameAction.RESET
         self._arcade = Arcade(
             operation_mode=OperationMode.OFFLINE,
             environments_dir=str(arc_root / "environment_files"),
@@ -159,10 +160,10 @@ class ArcadeEngine:
     def observe(self) -> Mapping[str, object]:
         return self._snapshot(self._current)
 
-    def step(self, action: str) -> Mapping[str, object]:
+    def step(self, action: str, data: Mapping[str, int] | None = None) -> Mapping[str, object]:
         if action not in self._actions:
             raise P7LiveSolveError("ARC action is unavailable")
-        self._current = self._environment.step(self._actions[action], {})
+        self._current = self._environment.step(self._actions[action], {} if data is None else dict(data))
         return self._snapshot(self._current)
 
     def close(self) -> None:
@@ -592,8 +593,9 @@ def act(actions):
     reason = current["terminal_reason"]
     terminal = (
         "LEVEL_SOLVED" if levels >= target
-        else "GAME_OVER" if reason == "game-over"
         else "ACTION_CAP" if remaining <= 0
+        else "RESET_REQUIRED" if reason == "reset-required"
+        else "GAME_OVER" if reason == "game-over"
         else "LEVEL_ADVANCED" if batch["level_advanced"]
         else "ACTIVE"
     )

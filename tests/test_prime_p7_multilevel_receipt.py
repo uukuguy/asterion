@@ -33,6 +33,28 @@ class _TwoLevelEngine:
 
 
 class TestP7MultilevelReceipt(unittest.TestCase):
+    def test_failed_attempt_and_reset_count_toward_completed_level(self) -> None:
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
+        from asterion.applications.prime.p7.score import partial_game_score
+        from tests.test_prime_p7_native_broker import _ResetEngine
+
+        game = P7GameSelection("ls20-9607627b", 0, target_level=2)
+        broker = ArcBroker(engine=_ResetEngine(), game=game)
+        broker.act(("ACTION1",))
+        broker.act(("ACTION1",))
+        broker.act(("RESET",))
+        broker.act(("ACTION1",))
+        with tempfile.TemporaryDirectory() as directory:
+            trace = P7PrivateTraceReceipt(broker, PrimeTraceRecorder(Path(directory)))
+            expected = trace.expected_receipt_sha256(run_id="p7-reset")
+            receipt = trace.get_receipt(run_id="p7-reset", receipt_sha256=expected)
+
+        self.assertEqual(receipt.primitive_action_count, 4)
+        self.assertEqual(receipt.partial_game_score, partial_game_score((1, 3), game))
+
     def test_target_two_receipt_scores_each_completed_level_from_journal(self) -> None:
         from asterion.agents.prime.trace import PrimeTraceRecorder
         from asterion.applications.prime.p7.broker import ArcBroker

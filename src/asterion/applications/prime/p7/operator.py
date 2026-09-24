@@ -16,7 +16,7 @@ from typing import cast
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
-from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError, ArcRunReceipt
+from asterion.applications.prime.p7.broker import ArcAction, ArcBroker, ArcBrokerError, ArcRunReceipt
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
     DEFAULT_GAME,
@@ -216,31 +216,47 @@ class _P7BrokerClient:
         }
 
     def act(self, actions: object) -> Mapping[str, object]:
-        if (
-            type(actions) is not list
-            or not actions
-            or any(
+        if type(actions) is not list or not actions:
+            raise P7OperatorError("P7 host services are unavailable")
+        validated: list[ArcAction] = []
+        for action in actions:
+            if (
                 type(action) is not dict
                 or set(action) != {"data", "name"}
-                or action.get("data") != {}
                 or type(action.get("name")) is not str
-                for action in actions
-            )
-        ):
-            raise P7OperatorError("P7 host services are unavailable")
+                or type(action.get("data")) is not dict
+            ):
+                raise P7OperatorError("P7 host services are unavailable")
+            name = action["name"]
+            data = action["data"]
+            if name == "ACTION6":
+                if (
+                    set(data) != {"x", "y"}
+                    or any(type(data[coordinate]) is not int or not 0 <= data[coordinate] <= 63 for coordinate in ("x", "y"))
+                ):
+                    raise P7OperatorError("P7 host services are unavailable")
+                canonical_data = (("x", data["x"]), ("y", data["y"]))
+            elif data == {}:
+                canonical_data = ()
+            else:
+                raise P7OperatorError("P7 host services are unavailable")
+            validated.append(ArcAction(name, canonical_data))
         prior_levels = self._broker.status().levels_completed
-        result = self._broker.act(tuple(str(action["name"]) for action in actions))
+        result = self._broker.act(tuple(validated))
         for transition in result.transitions:
+            action_evidence: dict[str, object] = {
+                "action": transition.action,
+                "after_sha256": transition.after_sha256,
+                "before_sha256": transition.before_sha256,
+                "levels_completed": transition.levels_completed,
+                "sequence": transition.sequence,
+            }
+            if transition.data:
+                action_evidence["data"] = dict(transition.data)
             self._recorder.append(
                 "arc.action",
                 P7_TRACE_IDENTITIES,
-                {
-                    "action": transition.action,
-                    "after_sha256": transition.after_sha256,
-                    "before_sha256": transition.before_sha256,
-                    "levels_completed": transition.levels_completed,
-                    "sequence": transition.sequence,
-                },
+                action_evidence,
             )
         try:
             observation = self._broker.observe()
@@ -273,6 +289,7 @@ class _P7BrokerClient:
                     "before_sha256": transition.before_sha256,
                     "levels_completed": transition.levels_completed,
                     "sequence": transition.sequence,
+                    **({"data": dict(transition.data)} if transition.data else {}),
                 }
                 for transition in result.transitions
             ],
@@ -727,7 +744,11 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             primitive_actions=None if broker_status is None else broker_status.primitive_actions,
             levels_completed=None if broker_status is None else broker_status.levels_completed,
             target_level=invocation.game.target_level,
-            terminal_reason=None if broker_status is None else broker_status.terminal_reason,
+            terminal_reason=(
+                broker_receipt.terminal_reason
+                if broker_receipt is not None
+                else None if broker_status is None else broker_status.terminal_reason
+            ),
             replay_verified=replay_verified,
             sealed_trace=sealed_trace,
             cleanup_complete=cleanup_complete,

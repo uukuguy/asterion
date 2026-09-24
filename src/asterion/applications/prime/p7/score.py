@@ -86,6 +86,9 @@ class _TransitionEvidence(Protocol):
     @property
     def sequence(self) -> int: ...
 
+    @property
+    def data(self) -> tuple[tuple[str, int], ...]: ...
+
 
 def replay_sha256(
     transitions: Iterable[_TransitionEvidence], *, terminal_reason: str, uncertain_action: object = None
@@ -95,15 +98,16 @@ def replay_sha256(
     rows = []
     for transition in transitions:
         try:
-            rows.append(
-                {
+            row = {
                     "action": transition.action,
                     "after_sha256": transition.after_sha256,
                     "before_sha256": transition.before_sha256,
                     "levels_completed": transition.levels_completed,
                     "sequence": transition.sequence,
                 }
-            )
+            if transition.data:
+                row["data"] = dict(transition.data)
+            rows.append(row)
         except AttributeError:
             raise ValueError("P7 evidence is invalid") from None
     if uncertain_action is not None:

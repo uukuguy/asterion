@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 import unittest
 
-from tests.test_prime_p7_native_broker import _Engine
+from tests.test_prime_p7_native_broker import _Engine, _ResetEngine
 
 
 class TestNativeP7Replay(unittest.TestCase):
@@ -34,17 +35,49 @@ class TestNativeP7Replay(unittest.TestCase):
         self.assertEqual(broker.seal().terminal_reason, "action-cap")
         self.assertEqual(broker.replay(lambda: _Engine()), broker.seal())
 
-    def test_game_over_on_last_allowed_action_replays_as_game_over(self) -> None:
+    def test_game_over_on_last_allowed_action_replays_as_action_cap(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.score import P7_ACTION_CAP
 
         broker = ArcBroker(engine=_Engine(game_over_after=P7_ACTION_CAP))
         broker.act(("ACTION1",) * P7_ACTION_CAP)
 
-        self.assertEqual(broker.seal().terminal_reason, "game-over")
+        self.assertEqual(broker.seal().terminal_reason, "action-cap")
         self.assertEqual(
             broker.replay(lambda: _Engine(game_over_after=P7_ACTION_CAP)), broker.seal()
         )
+
+    def test_replay_reproduces_reset_and_click_data(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcAction, ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.replay import replay_arc_run
+
+        game = P7GameSelection("ls20-9607627b", 0, 2)
+        broker = ArcBroker(engine=_ResetEngine(), game=game)
+        broker.act(("ACTION1",))
+        broker.act(("ACTION1",))
+        broker.act(("RESET",))
+        broker.act((ArcAction("ACTION6", (("x", 12), ("y", 34))),))
+        broker.act(("ACTION1",))
+        self.assertEqual(broker.replay(lambda: _ResetEngine()), broker.seal())
+        self.assertEqual([item.action for item in broker.journal], ["ACTION1", "ACTION1", "RESET", "ACTION6", "ACTION1"])
+        forged = list(broker.journal)
+        forged[3] = replace(forged[3], data=(("x", 13), ("y", 34)))
+        with self.assertRaises(ArcBrokerError):
+            replay_arc_run(tuple(forged), broker.seal(), lambda: _ResetEngine(), game=game)
+
+    def test_replay_rejects_reset_that_loses_completed_level(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection("ls20-9607627b", 0, 2)
+        broker = ArcBroker(engine=_ResetEngine(), game=game)
+        broker.act(("ACTION1",))
+        broker.act(("ACTION1",))
+        broker.act(("RESET",))
+        broker.act(("ACTION1",))
+        with self.assertRaises(ArcBrokerError):
+            broker.replay(lambda: _ResetEngine(reset_loses_level=True))
 
     def test_level_completion_takes_precedence_over_simultaneous_game_over(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker

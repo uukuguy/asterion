@@ -53,6 +53,41 @@ class _Engine:
         return self.observe()
 
 
+class _ResetEngine:
+    game_id = "ls20-9607627b"
+    seed = 0
+
+    def __init__(self, *, reset_loses_level: bool = False, reset_stays_dead: bool = False) -> None:
+        self.calls: list[tuple[str, dict[str, int]]] = []
+        self.levels_completed = 0
+        self.state = "NOT_FINISHED"
+        self.reset_loses_level = reset_loses_level
+        self.reset_stays_dead = reset_stays_dead
+
+    def observe(self) -> dict[str, object]:
+        return {
+            "available_actions": ["ACTION1", "ACTION6"],
+            "frame": [[[len(self.calls)]]],
+            "levels_completed": self.levels_completed,
+            "state": self.state,
+            "win_levels": 7,
+        }
+
+    def step(self, action: str, data: dict[str, int] | None = None) -> dict[str, object]:
+        self.calls.append((action, data or {}))
+        if action == "RESET":
+            self.state = "GAME_OVER" if self.reset_stays_dead else "NOT_FINISHED"
+            if self.reset_loses_level:
+                self.levels_completed = 0
+        elif self.levels_completed == 0:
+            self.levels_completed = 1
+        elif action == "ACTION1" and len(self.calls) == 2:
+            self.state = "GAME_OVER"
+        elif action == "ACTION1":
+            self.levels_completed = 2
+        return self.observe()
+
+
 def _broker(*, level_after: int | None = None, raises_on: int | None = None):
     from asterion.applications.prime.p7.broker import ArcBroker
 
@@ -61,6 +96,35 @@ def _broker(*, level_after: int | None = None, raises_on: int | None = None):
 
 
 class TestNativeP7Broker(unittest.TestCase):
+    def test_initial_game_over_is_rejected_before_any_action(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+
+        engine = _ResetEngine()
+        engine.state = "GAME_OVER"
+        with self.assertRaises(ArcBrokerError):
+            ArcBroker(engine=engine)
+        self.assertEqual(engine.calls, [])
+
+    def test_level_advance_with_game_over_is_not_falsely_resettable(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        class Engine(_ResetEngine):
+            def step(self, action: str, data: dict[str, int] | None = None) -> dict[str, object]:
+                super().step(action, data)
+                if self.levels_completed == 1:
+                    self.state = "GAME_OVER"
+                return self.observe()
+
+        engine = Engine()
+        game = P7GameSelection(engine.game_id, 0, 2)
+        broker = ArcBroker(engine=engine, game=game)
+        broker.act(("ACTION1",))
+        self.assertEqual(broker.seal().terminal_reason, "game-over")
+        with self.assertRaisesRegex(ArcBrokerError, "closed"):
+            broker.act(("RESET",))
+        self.assertEqual(broker.replay(Engine).levels_completed, 1)
+
     def test_target_second_level_keeps_broker_open_after_first_transition(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
         from asterion.applications.prime.p7.game import P7GameSelection
@@ -102,7 +166,7 @@ class TestNativeP7Broker(unittest.TestCase):
             with self.subTest(call=call), self.assertRaisesRegex(ArcBrokerError, "closed"):
                 call()
 
-    def test_game_over_records_the_action_then_closes_with_terminal_snapshot(self) -> None:
+    def test_game_over_records_the_action_and_requires_reset(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBrokerError
 
         engine = _Engine(game_over_after=2)
@@ -113,16 +177,88 @@ class TestNativeP7Broker(unittest.TestCase):
 
         self.assertEqual(result.applied_count, 2)
         self.assertEqual(engine.calls, ["ACTION1", "ACTION2"])
-        self.assertEqual(broker.seal().terminal_reason, "game-over")
-        snapshot = broker.terminal_snapshot()
-        self.assertEqual(snapshot.observation.state, "GAME_OVER")
-        self.assertEqual(snapshot.status.primitive_actions, 2)
-        self.assertEqual(snapshot.status.levels_completed, 0)
-        self.assertEqual(snapshot.status.actions_remaining, 498)
-        self.assertEqual(snapshot.status.terminal_reason, "game-over")
-        for call in (broker.observe, broker.status, lambda: broker.act(("ACTION1",))):
-            with self.subTest(call=call), self.assertRaisesRegex(ArcBrokerError, "closed"):
-                call()
+        self.assertEqual(broker.observe().state, "GAME_OVER")
+        self.assertEqual(broker.status().primitive_actions, 2)
+        self.assertEqual(broker.status().terminal_reason, "reset-required")
+        with self.assertRaisesRegex(ArcBrokerError, "unavailable"):
+            broker.act(("ACTION1",))
+
+    def test_same_engine_resets_failed_second_level_and_counts_action(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        engine = _ResetEngine()
+        broker = ArcBroker(engine=engine, game=P7GameSelection(engine.game_id, 0, 2))
+        broker.act(("ACTION1",))
+        broker.act(("ACTION1", "ACTION1"))
+        self.assertEqual(broker.status().terminal_reason, "reset-required")
+        result = broker.act(("RESET", "ACTION1"))
+        self.assertEqual(result.applied_count, 1)
+        self.assertEqual(broker.observe().state, "NOT_FINISHED")
+        self.assertEqual(broker.status().levels_completed, 1)
+        broker.act(("ACTION1",))
+        self.assertEqual(broker.seal().primitive_actions, 4)
+        self.assertEqual(broker.seal().levels_completed, 2)
+        self.assertEqual([call[0] for call in engine.calls], ["ACTION1", "ACTION1", "RESET", "ACTION1"])
+
+    def test_reset_requires_gameplay_in_current_level_and_preserves_progress(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        engine = _ResetEngine()
+        broker = ArcBroker(engine=engine, game=P7GameSelection(engine.game_id, 0, 2))
+        with self.assertRaises(ArcBrokerError):
+            broker.act(("RESET",))
+        broker.act(("ACTION1",))
+        with self.assertRaises(ArcBrokerError):
+            broker.act(("RESET",))
+        broker.act(("ACTION1",))
+        broker.act(("RESET",))
+        with self.assertRaises(ArcBrokerError):
+            broker.act(("RESET",))
+
+        for kwargs in ({"reset_loses_level": True}, {"reset_stays_dead": True}):
+            with self.subTest(kwargs=kwargs):
+                bad = _ResetEngine(**kwargs)
+                test_broker = ArcBroker(engine=bad, game=P7GameSelection(bad.game_id, 0, 2))
+                test_broker.act(("ACTION1",))
+                test_broker.act(("ACTION1",))
+                with self.assertRaises(ArcBrokerError):
+                    test_broker.act(("RESET",))
+
+    def test_proactive_reset_stops_batch_and_keeps_level(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcAction, ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        engine = _ResetEngine()
+        broker = ArcBroker(engine=engine, game=P7GameSelection(engine.game_id, 0, 2))
+        broker.act(("ACTION1",))
+        broker.act((ArcAction("ACTION6", (("x", 1), ("y", 2))),))
+        result = broker.act(("RESET", "ACTION1"))
+        self.assertEqual(result.applied_count, 1)
+        self.assertEqual(broker.status().levels_completed, 1)
+        self.assertEqual(broker.status().terminal_reason, "active")
+        self.assertEqual(engine.calls[-1], ("RESET", {}))
+
+    def test_action6_requires_exact_coordinates_and_journals_them(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcAction, ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        for data in ((), (("x", True), ("y", 1)), (("x", -1), ("y", 1)), (("x", 64), ("y", 1)), (("y", 1), ("x", 2)), (("x", 1), ("y", 2), ("z", 3))):
+            with self.subTest(data=data):
+                engine = _ResetEngine()
+                broker = ArcBroker(engine=engine, game=P7GameSelection(engine.game_id, 0, 2))
+                with self.assertRaises(ArcBrokerError):
+                    broker.act((ArcAction("ACTION6", data),))
+                self.assertEqual(engine.calls, [])
+        engine = _ResetEngine()
+        broker = ArcBroker(engine=engine, game=P7GameSelection(engine.game_id, 0, 2))
+        action = ArcAction("ACTION6", (("x", 0), ("y", 63)))
+        broker.act((action,))
+        self.assertEqual(engine.calls, [("ACTION6", {"x": 0, "y": 63})])
+        self.assertEqual(broker.journal[0].data, action.data)
+        with self.assertRaises(FrozenInstanceError):
+            action.name = "ACTION1"  # type: ignore[misc]
 
     def test_terminal_snapshot_is_rejected_while_active(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBrokerError
