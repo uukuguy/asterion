@@ -73,15 +73,13 @@ class TestPrimeP7NativeInstalled(unittest.TestCase):
             # so stage a symlink next to the installed loader. ``NODE_PATH`` is
             # not honored by ESM and is not used. This is environment wiring
             # owned by the test, not a change to the loader or its import.
-            loader_dir = (
-                python.parent.parent
-                / "lib"
-                / f"python{sys.version_info.major}.{sys.version_info.minor}"
-                / "site-packages"
-                / "asterion"
-                / "runtimes"
-                / "resources"
+            purelib = _run(
+                (str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"),
+                cwd=root,
+                environment=environment,
             )
+            self.assertEqual(purelib.returncode, 0, purelib.stderr)
+            loader_dir = Path(purelib.stdout.strip()) / "asterion" / "runtimes" / "resources"
             self.assertTrue(loader_dir.is_dir(), f"loader dir missing: {loader_dir}")
             earendil_host = Path(
                 "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent"

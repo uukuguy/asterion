@@ -54,6 +54,7 @@ prime-applications = "asterion.applications.prime:create_provider"
 packages = ["src/asterion"]
 artifacts = [
     "src/asterion/applications/prime/resources/*.mjs",
+    "src/asterion/runtimes/resources/*.mjs",
     "src/asterion/applications/prime/p7/run_story/assets/*",
     "src/asterion/capabilities/dci/resources/pi/*.ts",
     "src/asterion/capabilities/dci/resources/pi/*.mjs",
