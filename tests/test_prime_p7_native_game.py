@@ -12,6 +12,7 @@ import unittest
 _GAMES = {
     "ls20-9607627b": [22, 123, 73, 84, 96, 192, 186],
     "tu93-0768757b": [19, 16, 34, 42, 123, 80, 14, 23, 111],
+    "za99-abcdef12": [3, 7, 5],
 }
 
 
@@ -26,7 +27,76 @@ class TestP7GameSelection(unittest.TestCase):
             game_root.mkdir(parents=True)
             (game_root / f"{stem}.py").write_text("# game fixture\n")
             (game_root / "metadata.json").write_text(
-                json.dumps({"game_id": game_id, "baseline_actions": baselines})
+                json.dumps(
+                    {
+                        "game_id": game_id,
+                        "baseline_actions": baselines,
+                        "win_levels": len(baselines),
+                    }
+                )
+            )
+
+    def test_unique_short_alias_loads_a_new_metadata_game_and_full_target(self) -> None:
+        from asterion.applications.prime.p7.game import resolve_game_selection
+
+        selected = resolve_game_selection(
+            {"ASTERION_PRIME_P7_GAME_ID": "za99"}, self.arc_root
+        )
+
+        self.assertEqual(
+            (selected.game_id, selected.baseline_actions, selected.win_levels, selected.target_level),
+            ("za99-abcdef12", (3, 7, 5), 3, 3),
+        )
+
+    def test_short_alias_must_be_unique(self) -> None:
+        from asterion.applications.prime.p7.game import (
+            P7GameSelectionError,
+            resolve_game_selection,
+        )
+
+        duplicate = self.arc_root / "environment_files" / "za99" / "fedcba21"
+        duplicate.mkdir()
+        (duplicate / "za99.py").write_text("# game fixture\n")
+        (duplicate / "metadata.json").write_text(
+            json.dumps(
+                {
+                    "game_id": "za99-fedcba21",
+                    "baseline_actions": [4, 5, 6],
+                    "win_levels": 3,
+                }
+            )
+        )
+
+        with self.assertRaises(P7GameSelectionError):
+            resolve_game_selection(
+                {"ASTERION_PRIME_P7_GAME_ID": "za99"}, self.arc_root
+            )
+
+    def test_invalid_new_metadata_is_not_selectable(self) -> None:
+        from asterion.applications.prime.p7.game import (
+            P7GameSelectionError,
+            resolve_game_selection,
+        )
+
+        metadata = (
+            self.arc_root
+            / "environment_files"
+            / "za99"
+            / "abcdef12"
+            / "metadata.json"
+        )
+        metadata.write_text(
+            json.dumps(
+                {
+                    "game_id": "other-abcdef12",
+                    "baseline_actions": [3, 7, 5],
+                    "win_levels": 3,
+                }
+            )
+        )
+        with self.assertRaises(P7GameSelectionError):
+            resolve_game_selection(
+                {"ASTERION_PRIME_P7_GAME_ID": "za99-abcdef12"}, self.arc_root
             )
 
     def test_default_and_explicit_tu93_preserve_exact_identity(self) -> None:
@@ -43,7 +113,7 @@ class TestP7GameSelection(unittest.TestCase):
         )
         self.assertEqual(
             (old.game_id, old.seed, old.target_level, old.win_levels),
-            ("ls20-9607627b", 0, 1, 7),
+            ("ls20-9607627b", 0, 7, 7),
         )
         self.assertEqual(
             (new.game_id, new.seed, new.target_level, new.win_levels),
