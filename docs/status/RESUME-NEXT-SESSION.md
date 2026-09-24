@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 03:44 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 04:08 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
@@ -16,7 +16,7 @@ P7 面向完整 ARC-AGI-3 游戏与官方 Competition scorecard，而非单关�
 - 打包 `make promotion-check` 初次因新 gameplay assembly 未登记资源清单失败；`8bfc7009` 修复后完整复跑通过：25 条隔离命令、provider 操作 0、`full_dataset=no`。
 - `19fd0772` 新增多游戏贯通测试：同一张卡、一题 `WIN`、一题 `GAME_OVER`，缺少服务端行时仅留恢复记录。`ee8d5787` 使用真实 `arc_agi==0.9.9` SDK、完全拦截 HTTP，核对目录、建卡、`make` 自动首 RESET、关闭及回执解析。`9d33cb5d` 让预检公开逐题和总动作、模型回调、期限上界，测试与实际运行时固定值一致。
 - `32c508db` 修复 host 初始化失败时官方游戏引擎未关闭的问题。`2d81c767` 使用离线 wheel、已安装 assembly 和假 Pi 执行真实 `_run_game`，确认确定性整题 `WIN`、trace 封存和引擎清理。最新 35 项官方定向测试、`make lint`、`make docs-check` 通过；无网络或付费模型调用。
-- 仓库 `.env` 和当前进程环境均没有 `ARC_API_KEY`。本轮没有实际官方 API、模型求解或 scorecard 提交；没有真实整题通关证据。假 SDK、拦截 HTTP 的真实 SDK 与安装包装配均不能被表述为官方成绩。
+- Operator 已在仓库 `.env` 配置 `ARC_API_KEY`。`make asterion-prime-p7-official-preflight` 实际通过，官方账号目录返回 25 题，合计上界 38,142 动作、3,200 模型回调和 90,000 秒逐题期限。该检查只读取官方目录；没有创建 scorecard、游戏实例或调用模型，也没有真实整题通关证据。
 
 ## 当前判断与未完成边界
 
@@ -25,4 +25,4 @@ P7 面向完整 ARC-AGI-3 游戏与官方 Competition scorecard，而非单关�
 
 ## 下一动作
 
-1. operator 配置 `ARC_API_KEY` 后先运行只读 `make asterion-prime-p7-official-preflight`，记录官方目录与逐题/总上界。仓库 `AGENTS.md` 要求完整付费评估另行授权；取得有限预算授权后再执行 `make asterion-prime-p7-official-submit`，报告服务端真实结果。
+1. 仓库 `AGENTS.md` 要求完整付费评估另行授权和有限预算。官方预检已完成；明确本次运行预算后，方可执行 `make asterion-prime-p7-official-submit` 并报告服务端真实结果。

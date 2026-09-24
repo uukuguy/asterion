@@ -50,9 +50,9 @@ Witness 同样从第 1 关开始，并依序完成到 `LEVEL` 指定的目标关
 make asterion-prime-p7-official-preflight
 ```
 
-Preflight 检查 operator 环境、模型 host readiness、官方 API key 和 ARC Competition SDK 返回的游戏目录，并输出账号当前可见的游戏 ID、每款游戏及总计的动作上限、模型回调上限和运行时限。总运行时限是各游戏限额相加的保守上界，并非预计耗时；模型回调上限也不能直接换算成费用，因为每次调用的 token 用量不同。它不创建 scorecard、不创建游戏实例、不调用模型。输出 `ready` 只说明当前检查通过，不表示已经提交或获得成绩。
+Preflight 检查 operator 环境中的模型配置和 Pi/Node 入口、官方 API key，以及 ARC Competition SDK 返回的游戏目录，并输出账号当前可见的游戏 ID、每款游戏及总计的动作上限、模型回调上限和运行时限。总运行时限是各游戏限额相加的保守上界，并非预计耗时；模型回调上限也不能直接换算成费用，因为每次调用的 token 用量不同。它不创建 scorecard、不创建游戏实例、不调用模型，因此不能证明模型服务实际可调用。输出 `ready` 只说明当前检查通过，不表示已经提交或获得成绩。
 
-官方 API key 必须由 operator 在仓库已有的 operator 环境配置中设置为 `ARC_API_KEY`，并确保运行容器能读取该配置。不要把 key 写进命令参数、文档、提交或聊天记录；缺少 key 时 preflight 会拒绝运行。API key 与本地模型 host readiness 是两项独立的运行前提。
+官方 API key 在 [ARC Prize 平台](https://arcprize.org/platform) 创建：用 Google 或 GitHub 登录，点击右上角头像，在个人资料的 **API Keys** 中创建并复制。详见[官方 API Keys 指南](https://docs.arcprize.org/api-keys)。把 key 存入仓库已有的 operator `.env`，格式为 `ARC_API_KEY=...`，并确保运行容器能读取。不要把 key 写进命令参数、文档、提交或聊天记录；缺少 key 时 preflight 会拒绝运行。API key 与本地模型 host 配置是两项独立的运行前提。
 
 ## 4. 官方 Competition scorecard 提交
 
