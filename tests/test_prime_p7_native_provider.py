@@ -39,6 +39,7 @@ from asterion.applications.prime.p7.ipython_host import (
     PersistentIpythonHost,
     p7_client_facade,
 )
+from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.operator import (
     P7OperatorError,
     P7RuntimeSelection,
@@ -618,6 +619,33 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             with self.assertRaisesRegex(
                 RuntimeFactoryError, "Asterion-prime runtime configuration is invalid"
             ):
+                asterion_prime_runtime_binding().factory(context)
+            self.assertTrue(launch.extension_lease.closed)
+
+    def test_runtime_factory_rejects_cap_different_from_selected_full_game(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            game = P7GameSelection("ls20-9607627b", 0, 7)
+            broker = ArcBroker(engine=_Engine(), game=game)
+            launch, trace = self._launch(root, broker)
+            ipython = PersistentIpythonHost(worker=_Worker(), p7_client=p7_client_facade(broker))
+            options = dict(p7_runtime_options(resolve_p7_runtime({"DEEPSEEK_API_KEY": "fixture"}, game), game))
+            options["max_actions"] = "500"
+            context = RuntimeFactoryContext(
+                provider_id="prime-applications",
+                application_id="prime.arc-agi-3-solving",
+                application_version="1.0.0",
+                runtime_id="asterion.prime",
+                assembly_path=ASSEMBLY.resolve(),
+                options=options,
+                host_services={
+                    "prime.arc-broker": broker,
+                    "prime.ipython": ipython,
+                    "prime.launch": launch,
+                    "prime.private-trace": trace,
+                },
+            )
+            with self.assertRaisesRegex(RuntimeFactoryError, "configuration is invalid"):
                 asterion_prime_runtime_binding().factory(context)
             self.assertTrue(launch.extension_lease.closed)
 

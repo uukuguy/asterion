@@ -18,6 +18,7 @@ _FIELDS: frozenset[str] = frozenset((
     "partial_game_score", "receipt_sha256",
 ))
 _UNSIGNED_FIELDS = _FIELDS - {"receipt_sha256"}
+_MAX_ACTIONS = 5000
 
 
 class PrimeArcAgi3SolveReceiptError(ValueError):
@@ -87,8 +88,9 @@ def _validate_unsigned(unsigned: object) -> None:
         type(run_id) is not str or _RUN_ID.fullmatch(run_id) is None
         or unsigned["scope"] != "p7-solving" or unsigned["promotion"] != "unpromoted"
         or type(unsigned["completed_level_count"]) is not int
-        or not 1 <= unsigned["completed_level_count"] <= 9
-        or type(unsigned["primitive_action_count"]) is not int or unsigned["primitive_action_count"] < 0
+        or not 1 <= unsigned["completed_level_count"] <= _MAX_ACTIONS
+        or type(unsigned["primitive_action_count"]) is not int
+        or not unsigned["completed_level_count"] <= unsigned["primitive_action_count"] <= _MAX_ACTIONS
         or type(score) is not str or _SCORE.fullmatch(score) is None
     ):
         raise PrimeArcAgi3SolveReceiptError("P7 solve receipt is invalid")

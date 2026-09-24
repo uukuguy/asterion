@@ -37,7 +37,6 @@ _HOST_CAPABILITIES = frozenset(
 )
 _RUNTIME_OPTIONS = {
     "deadline_ms": "3600000",
-    "max_actions": "500",
     "max_callbacks": "128",
     "model": "deepseek-v4-flash",
     "provider": "deepseek",
@@ -260,13 +259,16 @@ def build_p7_runtime(
             or context.application_version != "1.0.0"
             or context.runtime_id != "asterion.prime"
             or set(context.host_services) != _HOST_CAPABILITIES
-            or dict(context.options) != _RUNTIME_OPTIONS
             or launch is None
             or type(ipython) is not PersistentIpythonHost
             or getattr(ipython, "_closed", True)
             or getattr(ipython, "_lost", True)
             or type(broker) is not ArcBroker
-            or broker.status() != ArcStatus(0, 0, 500, "active")
+            or dict(context.options) != {
+                **_RUNTIME_OPTIONS,
+                "max_actions": str(broker.game.action_cap),
+            }
+            or broker.status() != ArcStatus(0, 0, broker.game.action_cap, "active")
             or trace_adapter is None
             or trace is None
             or not trace_adapter.matches_runtime_broker(broker)

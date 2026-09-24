@@ -127,10 +127,24 @@ class TestP7MultilevelReceipt(unittest.TestCase):
             partial_game_score="10.714286",
         )
         validate_prime_arc_agi_3_solve_receipt(receipt)
+        larger = PrimeArcAgi3SolveReceipt.create(
+            run_id="p7-twelve-levels",
+            completed_level_count=12,
+            primitive_action_count=20,
+            partial_game_score="100.000000",
+        )
+        validate_prime_arc_agi_3_solve_receipt(larger)
         with self.assertRaises(PrimeArcAgi3SolveReceiptError):
             PrimeArcAgi3SolveReceipt.create(
                 run_id="p7-ten-levels",
                 completed_level_count=10,
                 primitive_action_count=5,
+                partial_game_score="100.000000",
+            )
+        with self.assertRaises(PrimeArcAgi3SolveReceiptError):
+            PrimeArcAgi3SolveReceipt.create(
+                run_id="p7-unbounded-levels",
+                completed_level_count=5001,
+                primitive_action_count=5001,
                 partial_game_score="100.000000",
             )
