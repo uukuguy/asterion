@@ -12,6 +12,7 @@ from dataclasses import asdict
 from dataclasses import dataclass, field
 import json
 from hashlib import sha256
+import math
 import os
 from pathlib import Path
 import re
@@ -186,6 +187,16 @@ class SweepScheduler:
     def __init__(self, config: SweepConfig) -> None:
         if config.seed != 0:
             raise ValueError("P7 sweep seed must be zero")
+        if (
+            type(config.global_token_cap) is not int
+            or config.global_token_cap <= 0
+            or not math.isfinite(config.wallclock_cap)
+            or config.wallclock_cap <= 0
+            or not math.isfinite(config.run_timeout)
+            or config.run_timeout <= 0
+            or (config.max_attempts is not None and (type(config.max_attempts) is not int or config.max_attempts < 0))
+        ):
+            raise ValueError("P7 sweep budget is invalid")
         self.config = config
         self._progress: dict[str, int] = {}
         self._new_runs: list[str] = []
@@ -423,8 +434,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-root", type=Path)
     parser.add_argument("--game", action="append", dest="games", default=[])
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--token-cap", type=int, default=3_500_000)
-    parser.add_argument("--wallclock-seconds", type=float, default=4 * 60 * 60)
+    parser.add_argument("--token-cap", type=int, default=int(os.environ.get("ASTERION_PRIME_P7_SWEEP_TOKEN_CAP", "3500000")))
+    parser.add_argument("--wallclock-seconds", type=float, default=float(os.environ.get("ASTERION_PRIME_P7_SWEEP_WALLCLOCK_SECONDS", "14400")))
     parser.add_argument("--run-timeout", type=float, default=30 * 60)
     parser.add_argument("--max-attempts", type=int)
     args = parser.parse_args(argv)

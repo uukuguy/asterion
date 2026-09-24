@@ -120,6 +120,12 @@ class TestPrimeP7Sweep(unittest.TestCase):
         with self.assertRaises(SystemExit):
             main(["--arc-root", "/tmp/arc", "--seed", "1"])
 
+    def test_nonfinite_wallclock_cannot_disable_budget(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with self.assertRaises(ValueError):
+            SweepScheduler(SweepConfig(Path("arc"), Path("runs"), wallclock_cap=float("nan")))
+
     def test_child_without_run_evidence_stops_sweep(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
 
