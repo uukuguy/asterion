@@ -2,6 +2,8 @@
 from copy import deepcopy
 import io
 import json
+import os
+import signal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -75,6 +77,28 @@ class TestOfficialRecovery(unittest.TestCase):
                 with self.assertRaisesRegex(OfficialError, '^official recovery unavailable$'):
                     self.recover(value)
                 self.assertFalse((self.directory / 'official-receipt.json').exists())
+
+    def test_fifo_rejected_without_waiting_for_writer_or_http(self):
+        self.path.unlink()
+        os.mkfifo(self.path, 0o600)
+        timed_out = []
+
+        def interrupt_open(*_):
+            timed_out.append(True)
+            raise TimeoutError
+
+        previous = signal.signal(signal.SIGALRM, interrupt_open)
+        try:
+            signal.setitimer(signal.ITIMER_REAL, 1)
+            with patch('asterion.applications.prime.p7.official_recovery._fetch') as fetch:
+                with self.assertRaisesRegex(OfficialError, '^official recovery unavailable$'):
+                    recover_official_receipt(self.path)
+                fetch.assert_not_called()
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous)
+        self.assertFalse(timed_out, 'FIFO open blocked until the regression deadline')
+        self.assertFalse((self.directory / 'official-receipt.json').exists())
 
     def test_invalid_local_record_rejected_before_http(self):
         for change in ({'normal_close_confirmed':False}, {'aborted':True},

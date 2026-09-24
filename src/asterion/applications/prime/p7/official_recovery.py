@@ -100,8 +100,8 @@ def _directory(path: Path) -> int:
 
 
 def _record(directory: int) -> dict:
-    descriptor = os.open('official-recovery.json', os.O_RDONLY | os.O_NOFOLLOW,
-                         dir_fd=directory)
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, 'O_CLOEXEC', 0)
+    descriptor = os.open('official-recovery.json', flags, dir_fd=directory)
     with os.fdopen(descriptor, 'rb') as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError
