@@ -429,7 +429,7 @@ class P7RuntimeSelection:
             or self.provider != _PROVIDER
             or self.model != _MODEL
             or type(self.max_actions) is not int
-            or not 500 <= self.max_actions <= 5000
+            or not 1 <= self.max_actions <= 5000
             or self.max_callbacks != _MAX_CALLBACKS
             or self.deadline_ms != _DEADLINE_MS
         ):
@@ -686,6 +686,7 @@ class P7Invocation:
     pi_base_command: tuple[str, ...]
     extension_path: Path
     game: P7GameSelection
+    sweep_mode: bool = False
 
 
 def _select_game_for_mode(
@@ -696,10 +697,12 @@ def _select_game_for_mode(
     """Use only an explicitly forwarded level; otherwise solve the full game."""
 
     mode = process_environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve")
-    if mode not in {"solve", "witness"}:
+    if mode not in {"solve", "witness", "sweep"}:
         raise P7OperatorError("P7 run mode is unavailable")
     if mode == "witness" and TARGET_LEVEL_ENV not in process_environment:
         raise P7OperatorError("P7 level witness requires explicit LEVEL")
+    if mode == "sweep" and TARGET_LEVEL_ENV not in process_environment:
+        raise P7OperatorError("P7 sweep requires explicit LEVEL")
     selection_environment = dict(resolved_environment)
     if TARGET_LEVEL_ENV in process_environment:
         selection_environment[TARGET_LEVEL_ENV] = process_environment[TARGET_LEVEL_ENV]
@@ -739,6 +742,7 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
             ),
             extension_path=live.extension_path(),
             game=_select_game_for_mode(environment, resolved, arc_root),
+            sweep_mode=environment.get("ASTERION_PRIME_P7_RUN_MODE") == "sweep",
         )
     except (live.P7LiveSolveError, P7GameSelectionError, P7OperatorError) as error:
         raise P7OperatorError(str(error)) from None
@@ -755,6 +759,33 @@ def _resolve_p7_application() -> InstalledApplication:
     return provider.applications[0]
 
 
+def _sweep_game(game: P7GameSelection, prefix: object) -> P7GameSelection:
+    """Bound one OFFLINE attempt to the next level's human action baseline."""
+
+    from .solutions import VerifiedPrefix
+
+    if game.action_cap_override is not None:
+        raise P7OperatorError("P7 sweep selection is unavailable")
+    if game.target_level == 1:
+        if prefix is not None:
+            raise P7OperatorError("P7 sweep prefix is unavailable")
+        prefix_actions = 0
+    elif (
+        type(prefix) is VerifiedPrefix
+        and prefix.game_id == game.game_id
+        and prefix.seed == game.seed
+        and prefix.win_levels == game.win_levels
+        and prefix.levels_completed == game.target_level - 1
+    ):
+        prefix_actions = len(prefix.transitions)
+    else:
+        raise P7OperatorError("P7 sweep prefix is unavailable")
+    action_cap = prefix_actions + game.baseline_actions[game.target_level - 1]
+    if action_cap > 5000:
+        raise P7OperatorError("P7 sweep action budget is unavailable")
+    return replace(game, action_cap_override=action_cap)
+
+
 async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecution:
     """Run the one fixed solve and seal its private evidence.
 
@@ -765,7 +796,21 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     :mod:`asterion.applications.prime.p7.live`.
     """
 
+    from .solutions import load_best_prefix
+
     root = invocation.operator_root
+    prefix = (
+        load_best_prefix(
+            invocation.arc_root,
+            root / ".asterion-private" / "prime-p7-live",
+            invocation.game.game_id,
+            invocation.game.seed,
+            max_level=invocation.game.target_level - 1,
+        )
+        if invocation.game.target_level > 1 else None
+    )
+    if invocation.sweep_mode:
+        invocation = replace(invocation, game=_sweep_game(invocation.game, prefix))
     private = live.private_root(root, run_id)
     trace_root = private / "trace"
     trace_root.mkdir(mode=0o700)
@@ -795,19 +840,18 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     reason: str | None = None
     failure: BaseException | None = None
     diagnostics: dict[str, object] = {}
+    if invocation.sweep_mode:
+        diagnostics["sweep"] = {
+            "scope": "offline-research",
+            "target_level": invocation.game.target_level,
+            "prefix_actions": 0 if prefix is None else len(prefix.transitions),
+            "level_action_cap": invocation.game.baseline_actions[invocation.game.target_level - 1],
+            "run_action_cap": invocation.game.action_cap,
+        }
     broker_status = None
     completed_prefix: dict[str, object] | None = None
     try:
         if invocation.game.target_level > 1:
-            from .solutions import load_best_prefix
-
-            prefix = load_best_prefix(
-                invocation.arc_root,
-                root / ".asterion-private" / "prime-p7-live",
-                invocation.game.game_id,
-                invocation.game.seed,
-                max_level=invocation.game.target_level - 1,
-            )
             if prefix is not None:
                 broker = resources_.host_services["prime.arc-broker"]
                 evidence = resources_.host_services["prime.private-trace"]

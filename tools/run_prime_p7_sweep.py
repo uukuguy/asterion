@@ -14,11 +14,14 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
+import sys
 import time
 from typing import Any
 
 from asterion.applications.prime.p7.game import _read_catalog
+from asterion.applications.prime.p7.live import read_trace_entries
 from asterion.applications.prime.p7.solutions import load_best_prefix
 
 
@@ -66,7 +69,7 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return value if type(value) is dict else None
 
 
-def read_run_usage(run: Path) -> tuple[int, int, bool]:
+def read_run_usage(run: Path) -> tuple[int, int, bool, bool]:
     """Read only allowlisted token counters from one private run.
 
     The third value is true when worker activity exists but no valid usage
@@ -77,23 +80,18 @@ def read_run_usage(run: Path) -> tuple[int, int, bool]:
     trace = run / "trace" / "prime-trace.jsonl"
     input_tokens = output_tokens = 0
     usage_count = 0
+    integrity_error = False
     try:
         if trace.is_symlink() or not trace.is_file():
-            rows: list[dict[str, Any]] = []
-        else:
-            rows = []
-            for line in trace.read_text(encoding="utf-8").splitlines():
-                value = json.loads(line)
-                if type(value) is dict:
-                    rows.append(value)
-    except (OSError, UnicodeError, ValueError):
-        rows = []
-    for row in rows:
-        if row.get("kind") != "arc.usage.reported":
+            raise ValueError
+        entries = read_trace_entries(trace.parent)
+    except Exception:
+        entries = ()
+        integrity_error = True
+    for entry in entries:
+        if entry.kind != "arc.usage.reported":
             continue
-        payload = row.get("payload")
-        if type(payload) is not dict:
-            continue
+        payload = entry.payload
         incoming, outgoing = payload.get("input_tokens"), payload.get("output_tokens")
         if (
             isinstance(incoming, bool)
@@ -103,6 +101,7 @@ def read_run_usage(run: Path) -> tuple[int, int, bool]:
             or type(outgoing) is not int
             or outgoing < 0
         ):
+            integrity_error = True
             continue
         input_tokens += incoming
         output_tokens += outgoing
@@ -113,11 +112,13 @@ def read_run_usage(run: Path) -> tuple[int, int, bool]:
         model_activity = worker_cells.is_file() and bool(worker_cells.read_text(encoding="utf-8").strip())
     except (OSError, UnicodeError):
         model_activity = False
-    return input_tokens, output_tokens, bool(model_activity and usage_count == 0)
+    return input_tokens, output_tokens, bool(model_activity and usage_count == 0), integrity_error
 
 
 class SweepScheduler:
     def __init__(self, config: SweepConfig) -> None:
+        if config.seed != 0:
+            raise ValueError("P7 sweep seed must be zero")
         self.config = config
         self._progress: dict[str, int] = {}
         self._new_runs: list[str] = []
@@ -165,46 +166,63 @@ class SweepScheduler:
         for run in runs:
             summary = _read_json(run / "summary.json")
             diagnostics = summary.get("diagnostics") if summary else None
+            broker_status = diagnostics.get("broker_status") if type(diagnostics) is dict else None
             if (
                 not summary
                 or summary.get("replay_verified") is True
                 or type(diagnostics) is not dict
-                or diagnostics.get("levels_completed") != 1
-                or type(diagnostics.get("primitive_actions")) is not int
+                or type(broker_status) is not dict
+                or broker_status.get("levels_completed") != 1
+                or type(broker_status.get("primitive_actions")) is not int
             ):
                 continue
             game_id = _recorded_game_id(run, set(metadata))
             if game_id is None:
                 continue
             baseline = tuple(metadata[game_id]["baseline_actions"])
-            if len(baseline) >= 2 and diagnostics["primitive_actions"] > sum(baseline[:2]):
+            if len(baseline) >= 2 and broker_status["primitive_actions"] > sum(baseline[:2]):
                 result.add((game_id, 2))
         return frozenset(result)
 
     def _attempt(self, game_id: str, level: int, timeout: float) -> int:
         before = _run_names(self.config.runs_root)
+        process: subprocess.Popen[str] | None = None
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 [*self.config.command, f"GAME={game_id}", f"LEVEL={level}"],
                 cwd=self.config.repo_root,
-                env={**os.environ, "ASTERION_PRIME_P7_SEED": str(self.config.seed)},
-                check=False,
-                capture_output=True,
+                env={**os.environ, "ASTERION_PRIME_P7_SEED": "0"},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
+                start_new_session=True,
             )
-        except subprocess.TimeoutExpired:
-            self._stop_reason = "run-timeout"
-            return 124
+            try:
+                process.communicate(timeout=timeout)
+                returncode = process.returncode
+            except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate()
+                if isinstance(error, KeyboardInterrupt):
+                    raise
+                self._stop_reason = "run-timeout"
+                returncode = 124
+        except OSError:
+            self._stop_reason = "child-launch-failed"
+            return 127
         new_runs = sorted(_run_names(self.config.runs_root) - before)
         self._new_runs.extend(new_runs)
         for run_id in new_runs:
             usage = read_run_usage(self.config.runs_root / run_id)
             self._input_tokens += usage[0]
             self._output_tokens += usage[1]
-            if usage[2]:
-                self._stop_reason = "usage-missing-after-model-activity"
-        return completed.returncode
+            if usage[2] or usage[3]:
+                self._stop_reason = "usage-missing-after-model-activity" if usage[2] else "usage-trace-integrity-error"
+        return returncode
 
     def _attempt_result(self, game_id: str, level: int) -> bool:
         prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
@@ -246,10 +264,19 @@ class SweepScheduler:
                     blocked.append(game_id)
                     continue
                 attempted += 1
+                print(f"[p7-sweep] attempt game={game_id} level={level}", file=sys.stderr, flush=True)
                 self._attempt(game_id, level, self.config.run_timeout)
                 if self._stop_reason != "completed":
+                    print(f"[p7-sweep] stopped game={game_id} level={level} reason={self._stop_reason}", file=sys.stderr, flush=True)
                     break
-                if self._attempt_result(game_id, level):
+                succeeded = self._attempt_result(game_id, level)
+                print(
+                    f"[p7-sweep] result game={game_id} level={level} success={str(succeeded).lower()} "
+                    f"input_tokens={self._input_tokens} output_tokens={self._output_tokens}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                if succeeded:
                     next_level = self._next_level(game_id)
                     if self._is_complete(game_id, next_level):
                         completed.append(game_id)
@@ -305,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-timeout", type=float, default=10 * 60)
     parser.add_argument("--max-attempts", type=int)
     args = parser.parse_args(argv)
+    if args.seed != 0:
+        parser.error("--seed must be 0; the P7 Makefile fixes the official game seed")
     runs_root = args.runs_root or args.operator_root / ".asterion-private" / "prime-p7-live"
     result = SweepScheduler(
         SweepConfig(
@@ -316,6 +345,7 @@ def main(argv: list[str] | None = None) -> int:
             wallclock_cap=args.wallclock_seconds,
             run_timeout=args.run_timeout,
             max_attempts=args.max_attempts,
+            repo_root=args.operator_root,
         )
     ).run()
     print(json.dumps({"schema": "asterion.prime.p7-sweep/v1", **asdict(result)}, sort_keys=True))

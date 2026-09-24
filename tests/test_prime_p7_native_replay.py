@@ -10,6 +10,26 @@ from tests.test_prime_p7_native_broker import _Engine, _ResetEngine
 
 
 class TestNativeP7Replay(unittest.TestCase):
+    def test_human_baseline_replays_only_with_exact_sweep_cap(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.replay import replay_arc_run
+        from asterion.applications.prime.p7.score import replay_sha256
+
+        game = P7GameSelection("ls20-9607627b", 0, 1, action_cap_override=3)
+        broker = ArcBroker(engine=_Engine(), game=game)
+        broker.act(("ACTION1", "ACTION1", "ACTION1"))
+        receipt = broker.seal()
+        self.assertEqual(receipt.terminal_reason, "human-baseline")
+        self.assertEqual(broker.replay(_Engine), receipt)
+        forged = replace(
+            receipt,
+            primitive_actions=2,
+            replay_sha256=replay_sha256(broker.journal, terminal_reason="human-baseline"),
+        )
+        with self.assertRaises(ArcBrokerError):
+            replay_arc_run(broker.journal, forged, _Engine, game=game)
+
     def test_full_game_terminal_and_budget_replay(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
         from asterion.applications.prime.p7.game import P7GameSelection

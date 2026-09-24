@@ -60,21 +60,40 @@ class TestPrimeP7Sweep(unittest.TestCase):
             run = Path(directory)
             trace = run / "trace"
             trace.mkdir()
-            (trace / "prime-trace.jsonl").write_text(
-                "\n".join(
-                    [
-                        json.dumps({"kind": "arc.usage.reported", "payload": {"input_tokens": 4, "output_tokens": 6}}),
-                        json.dumps({"kind": "arc.usage.reported", "payload": {"input_tokens": 3, "output_tokens": 2}}),
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            self.assertEqual(read_run_usage(run), (7, 8, False))
+            from asterion.agents.prime.trace import PrimeTraceRecorder
+
+            recorder = PrimeTraceRecorder(trace)
+            recorder.append("arc.usage.reported", {"runtime": "test"}, {"input_tokens": 4, "output_tokens": 6})
+            recorder.append("arc.usage.reported", {"runtime": "test"}, {"input_tokens": 3, "output_tokens": 2})
+            recorder.seal()
+            recorder.close()
+            self.assertEqual(read_run_usage(run), (7, 8, False, False))
 
             (trace / "prime-trace.jsonl").write_text("", encoding="utf-8")
             (run / "worker-cells.jsonl").write_text("{}\n", encoding="utf-8")
-            self.assertEqual(read_run_usage(run), (0, 0, True))
+            self.assertEqual(read_run_usage(run), (0, 0, True, True))
+
+    def test_nested_broker_status_defers_known_overbaseline_attempt(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(arc_root=root / "arc", runs_root=root / "runs", games=("ls20-1",)))
+            scheduler._catalog = lambda: ({"game_id": "ls20-1", "baseline_actions": (20, 123), "win_levels": 2},)  # type: ignore[method-assign]
+            run = root / "runs" / "old"
+            (run / "recordings").mkdir(parents=True)
+            (run / "recordings" / "ls20-1-session.jsonl").write_text("", encoding="utf-8")
+            (run / "summary.json").write_text(json.dumps({
+                "replay_verified": False,
+                "diagnostics": {"broker_status": {"levels_completed": 1, "primitive_actions": 200}},
+            }), encoding="utf-8")
+            self.assertIn(("ls20-1", 2), scheduler._find_deferred_levels())
+
+    def test_nonzero_seed_is_rejected(self) -> None:
+        from tools.run_prime_p7_sweep import main
+
+        with self.assertRaises(SystemExit):
+            main(["--arc-root", "/tmp/arc", "--seed", "1"])
 
 
 if __name__ == "__main__":

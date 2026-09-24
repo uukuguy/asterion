@@ -41,6 +41,8 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p6-run-verbose
 .PHONY: asterion-prime-p7-solve
 .PHONY: asterion-prime-p7-level-witness
+.PHONY: asterion-prime-p7-sweep
+.PHONY: asterion-prime-p7-sweep-attempt
 .PHONY: asterion-prime-p7-games
 .PHONY: asterion-prime-p7-sync-games
 .PHONY: asterion-prime-p7-official-preflight
@@ -104,6 +106,7 @@ help:
 	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
 	@echo "Asterion Prime bounded live applications: asterion-prime-p3-run p4-run p5-run p6-run"
 	@echo "Asterion Prime ARC-AGI-3 solve: asterion-prime-p7-solve GAME=<alias-or-exact-id> [LEVEL=N] (default: tu93)"
+	@echo "Asterion Prime local ARC-AGI-3 breadth sweep: asterion-prime-p7-sweep"
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
 	@echo "Asterion Prime sync official public games without a scorecard: asterion-prime-p7-sync-games"
@@ -274,13 +277,16 @@ asterion-prime-p7-games:
 asterion-prime-p7-sync-games:
 	@python3 tools/sync_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --env-file "$(CURDIR)/.env"
 
-asterion-prime-p7-solve asterion-prime-p7-level-witness:
-	@exec /bin/sh -ec 'if [ "$@" = asterion-prime-p7-level-witness ] || [ "$(ASTERION_PRIME_P7_LEVEL_EXPLICIT)" = 1 ]; then case "$$ASTERION_PRIME_P7_TARGET_LEVEL" in '\''\'\''|*[^0-9]*|0) printf '\''[$@] LEVEL must be a positive integer; got %s\n'\'' "$$ASTERION_PRIME_P7_TARGET_LEVEL" >&2; exit 2 ;; esac; fi; \
+asterion-prime-p7-sweep:
+	@$(UV_BIN) run --isolated --with . --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_sweep.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)"
+
+asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt:
+	@exec /bin/sh -ec 'if [ "$@" = asterion-prime-p7-level-witness ] || [ "$@" = asterion-prime-p7-sweep-attempt ] || [ "$(ASTERION_PRIME_P7_LEVEL_EXPLICIT)" = 1 ]; then case "$$ASTERION_PRIME_P7_TARGET_LEVEL" in '\''\'\''|*[^0-9]*|0) printf '\''[$@] LEVEL must be a positive integer; got %s\n'\'' "$$ASTERION_PRIME_P7_TARGET_LEVEL" >&2; exit 2 ;; esac; fi; \
 		printf '\''[$@] native Asterion-prime ARC-AGI-3 %s\n'\'' "$$(if [ "$@" = asterion-prime-p7-solve ]; then printf full-game-solve; else printf level-witness; fi)" >&2; \
 		build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
-		ORBENV="ASTERION_PRIME_P7_GAME_ID:ASTERION_PRIME_P7_SEED:ASTERION_PRIME_P7_RUN_MODE"; ASTERION_PRIME_P7_RUN_MODE=solve; if [ "$@" = asterion-prime-p7-level-witness ]; then ASTERION_PRIME_P7_RUN_MODE=witness; fi; if [ "$@" = asterion-prime-p7-level-witness ] || [ "$(ASTERION_PRIME_P7_LEVEL_EXPLICIT)" = 1 ]; then ORBENV="$$ORBENV:ASTERION_PRIME_P7_TARGET_LEVEL"; fi; export ORBENV ASTERION_PRIME_P7_RUN_MODE; orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_ARC_ROOT="$$3"; export ASTERION_PRIME_PI_ENTRY="$$4"; export ASTERION_PRIME_P7_GAME_ID ASTERION_PRIME_P7_SEED ASTERION_PRIME_P7_RUN_MODE; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "$$3/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$3/wheels/arcengine-0.9.3-py3-none-any.whl" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p7.operator'\'' "$@" "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_ARC_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)"'
+		ORBENV="ASTERION_PRIME_P7_GAME_ID:ASTERION_PRIME_P7_SEED:ASTERION_PRIME_P7_RUN_MODE"; ASTERION_PRIME_P7_RUN_MODE=solve; if [ "$@" = asterion-prime-p7-level-witness ]; then ASTERION_PRIME_P7_RUN_MODE=witness; fi; if [ "$@" = asterion-prime-p7-sweep-attempt ]; then ASTERION_PRIME_P7_RUN_MODE=sweep; fi; if [ "$@" = asterion-prime-p7-level-witness ] || [ "$@" = asterion-prime-p7-sweep-attempt ] || [ "$(ASTERION_PRIME_P7_LEVEL_EXPLICIT)" = 1 ]; then ORBENV="$$ORBENV:ASTERION_PRIME_P7_TARGET_LEVEL"; fi; export ORBENV ASTERION_PRIME_P7_RUN_MODE; orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_ARC_ROOT="$$3"; export ASTERION_PRIME_PI_ENTRY="$$4"; export ASTERION_PRIME_P7_GAME_ID ASTERION_PRIME_P7_SEED ASTERION_PRIME_P7_RUN_MODE; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --isolated --with "$$1" --with "$$3/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$3/wheels/arcengine-0.9.3-py3-none-any.whl" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p7.operator'\'' "$@" "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_ARC_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)"'
 
 asterion-prime-p7-official-preflight asterion-prime-p7-official-submit asterion-prime-p7-official-live-eval:
 	@exec /bin/sh -ec 'printf '\''[$@] official ARC-AGI-3 %s\n'\'' "$$(if [ "$@" = asterion-prime-p7-official-preflight ]; then printf preflight; else printf scorecard-run; fi)" >&2; \

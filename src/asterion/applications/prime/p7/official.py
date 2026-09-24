@@ -337,6 +337,8 @@ class CompetitionEngine:
         self._session = session
         self._environment = environment
         self.game_id = game_id
+        # Compatibility identity for the broker's local replay contract. The
+        # Competition server does not accept or attest a caller-chosen seed.
         self.seed = 0
         self._current = environment.observation_space
         self.guid = getattr(self._current, "guid", None)

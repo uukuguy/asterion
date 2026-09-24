@@ -294,6 +294,24 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(selected.target_level, 2)
             witness = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "witness", "ASTERION_PRIME_P7_TARGET_LEVEL": "1"}, resolved, root)
             self.assertEqual(witness.target_level, 1)
+            sweep = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "sweep", "ASTERION_PRIME_P7_TARGET_LEVEL": "2"}, resolved, root)
+            self.assertEqual(sweep.target_level, 2)
+            with self.assertRaises(Exception):
+                _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "sweep"}, resolved, root)
+
+    def test_sweep_budget_counts_saved_prefix_and_current_human_baseline(self) -> None:
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.operator import P7OperatorError, _sweep_game, resolve_p7_runtime
+        from asterion.applications.prime.p7.solutions import VerifiedPrefix
+
+        game = P7GameSelection("ls20-9607627b", 0, 2)
+        prefix = VerifiedPrefix(game.game_id, 0, 7, 1, (object(),) * 20, "prior", "sha256:test")
+        bounded = _sweep_game(game, prefix)
+        self.assertEqual(bounded.action_cap, 143)
+        self.assertEqual(bounded.target_level, 2)
+        self.assertEqual(resolve_p7_runtime({"DEEPSEEK_API_KEY": "fixture"}, bounded).max_actions, 143)
+        with self.assertRaises(P7OperatorError):
+            _sweep_game(game, None)
 
     def test_preflight_reports_safe_level_routing_error_without_secret(self) -> None:
         from asterion.applications.prime.p7.operator import P7OperatorError, main

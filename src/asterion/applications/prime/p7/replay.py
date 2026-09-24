@@ -54,14 +54,15 @@ def replay_arc_run(
         or not 0 <= receipt.primitive_actions <= game.action_cap
         or not 0 <= receipt.levels_completed <= game.target_level
         or receipt.terminal_reason not in (
-            {"game-won", "game-incomplete", "action-cap", "game-over"}
-            if game.is_full_game else {"level-completed", "action-cap", "game-over"}
+            ({"game-won", "game-incomplete", "action-cap", "game-over"}
+             if game.is_full_game else {"level-completed", "action-cap", "game-over"})
+            | ({"human-baseline"} if game.action_cap_override is not None else set())
         )
         or (receipt.terminal_reason in {"level-completed", "game-won", "game-incomplete"}) != (
             receipt.levels_completed == game.target_level
         )
         or (
-            receipt.terminal_reason == "action-cap"
+            receipt.terminal_reason in {"action-cap", "human-baseline"}
             and not (
                 receipt.primitive_actions == game.action_cap
                 and receipt.levels_completed < game.target_level
@@ -120,7 +121,7 @@ def replay_arc_run(
             or (receipt.terminal_reason == "game-incomplete" and current.state == "WIN")
             or (receipt.terminal_reason in {"level-completed", "game-won", "game-incomplete"} and current.levels_completed != game.target_level)
             or replay_sha256(journal, terminal_reason=receipt.terminal_reason) != receipt.replay_sha256
-            or (receipt.terminal_reason == "action-cap" and receipt.primitive_actions != game.action_cap)
+            or (receipt.terminal_reason in {"action-cap", "human-baseline"} and receipt.primitive_actions != game.action_cap)
         ):
             raise ValueError
         return receipt
