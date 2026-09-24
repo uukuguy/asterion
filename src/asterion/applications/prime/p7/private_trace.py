@@ -149,7 +149,13 @@ class P7PrivateTraceReceipt:
             or (broker_receipt.game_id, broker_receipt.seed)
             != (self._broker.game.game_id, self._broker.game.seed)
             or broker_receipt.levels_completed != self._broker.game.target_level
-            or broker_receipt.terminal_reason != "level-completed"
+            or broker_receipt.terminal_reason != (
+                "game-won" if self._broker.game.is_full_game else "level-completed"
+            )
+            or (
+                self._broker.game.is_full_game
+                and self._broker.terminal_snapshot().observation.state != "WIN"
+            )
         ):
             raise ValueError
         action_counts = self._completed_level_action_counts(broker_receipt)

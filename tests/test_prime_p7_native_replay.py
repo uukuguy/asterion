@@ -10,6 +10,39 @@ from tests.test_prime_p7_native_broker import _Engine, _ResetEngine
 
 
 class TestNativeP7Replay(unittest.TestCase):
+    def test_full_game_terminal_and_budget_replay(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.replay import replay_arc_run
+        from asterion.applications.prime.p7.score import replay_sha256
+        from tests.test_prime_p7_native_broker import _FullGameEngine
+
+        game = P7GameSelection("ls20-9607627b", 0, 7)
+        for state in ("WIN", "NOT_FINISHED"):
+            with self.subTest(state=state):
+                def factory() -> _FullGameEngine:
+                    return _FullGameEngine(final_state=state, actions_per_level=100)
+                broker = ArcBroker(engine=factory(), game=game)
+                for _ in range(7):
+                    broker.act(("ACTION1",) * 100)
+                self.assertEqual(broker.replay(factory), broker.seal())
+                forged = replace(broker.seal(), terminal_reason="game-won", replay_sha256=replay_sha256(broker.journal, terminal_reason="game-won"))
+                if state != "WIN":
+                    with self.assertRaises(ArcBrokerError):
+                        replay_arc_run(broker.journal, forged, factory, game=game)
+        broker = ArcBroker(engine=_Engine(), game=game)
+        broker.act(("ACTION1",) * 1552)
+        self.assertEqual(broker.seal().terminal_reason, "action-cap")
+        self.assertEqual(broker.replay(_Engine), broker.seal())
+
+    def test_historical_partial_journal_digest_is_unchanged(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        broker = ArcBroker(engine=_Engine(level_after=2))
+        broker.act(("ACTION1", "ACTION2"))
+        self.assertEqual(broker.seal().replay_sha256, "sha256:6ec90e9f7e39977912320516ef2ebda7f3d08f7facace7911d90281530775350")
+        self.assertEqual(broker.replay(lambda: _Engine(level_after=2)), broker.seal())
+
     def test_second_level_replays_full_cross_level_journal(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import P7GameSelection

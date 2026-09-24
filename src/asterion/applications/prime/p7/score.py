@@ -12,7 +12,7 @@ from .game import DEFAULT_GAME, P7GameSelection
 
 P7_GAME_ID = DEFAULT_GAME.game_id
 P7_SEED = DEFAULT_GAME.seed
-P7_ACTION_CAP = 500
+P7_ACTION_CAP = DEFAULT_GAME.action_cap
 _SIX_PLACES = Decimal("0.000001")
 
 

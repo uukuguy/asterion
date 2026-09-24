@@ -232,7 +232,7 @@ class ArcBroker:
         return ArcStatus(
             self._primitive_actions,
             self._current.levels_completed - self._initial.levels_completed,
-            P7_ACTION_CAP - self._primitive_actions,
+            self._game.action_cap - self._primitive_actions,
             self._terminal_reason,
         )
 
@@ -244,7 +244,7 @@ class ArcBroker:
         return ArcTerminalSnapshot(self._current, self._status())
 
     def _validate_actions(self, actions: object) -> tuple[ArcAction, ...]:
-        if type(actions) is not tuple or not actions or len(actions) > P7_ACTION_CAP - self._primitive_actions:
+        if type(actions) is not tuple or not actions or len(actions) > self._game.action_cap - self._primitive_actions:
             raise ArcBrokerError("unavailable")
         try:
             validated = tuple(_canonical_action(action) for action in actions)
@@ -311,9 +311,12 @@ class ArcBroker:
             else:
                 self._level_gameplay_actions += 1
             if after.levels_completed == self._game.target_level:
-                self._terminal_reason = "level-completed"
+                self._terminal_reason = (
+                    ("game-won" if after.state == "WIN" else "game-incomplete")
+                    if self._game.is_full_game else "level-completed"
+                )
                 break
-            if self._primitive_actions == P7_ACTION_CAP:
+            if self._primitive_actions == self._game.action_cap:
                 self._terminal_reason = "action-cap"
                 break
             if after.state == "GAME_OVER":

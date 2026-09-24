@@ -59,6 +59,16 @@ class P7GameSelection:
             raise P7GameSelectionError("P7 game selection is unavailable")
 
     @property
+    def is_full_game(self) -> bool:
+        return self.target_level == self.win_levels
+
+    @property
+    def action_cap(self) -> int:
+        if self.is_full_game:
+            return min(5000, max(1000, 2 * sum(self.baseline_actions)))
+        return 500
+
+    @property
     def baseline_actions(self) -> tuple[int, ...]:
         return self._metadata_baseline_actions or _BASELINES[self.game_id]
 
