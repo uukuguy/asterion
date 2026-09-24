@@ -91,6 +91,6 @@ https://three.arcprize.org/scorecards/<card_id>
 
 当前实现提供本地清单、离线整题求解、partial witness、官方只读 preflight 和官方整目录 Competition 提交命令。官方目录、scorecard 生命周期与回执校验已经有本地假 SDK 测试覆盖；这些测试不创建真实 scorecard，也不证明模型实际解出游戏。**目前没有 API key 支持下的真实官方提交证据，因此没有 Asterion 官方 scorecard URL 或官方成绩可报告。**
 
-ARC Community Leaderboard 和 Kaggle 是独立后续流程：Community Leaderboard 使用公开仓库的提交 PR，并要求官方 scorecard URL；Kaggle 比赛则需要单独制作并按其规则提交比赛包。它们都不能接收或把本地 OFFLINE receipt 转成官方成绩。
+ARC Community Leaderboard 和 Kaggle 是独立的后续流程，当前命令没有自动提交排行榜或 Kaggle 包。它们都不能接收或把本地 OFFLINE receipt 转成官方成绩。
 
-参考资料：[ARC-AGI Toolkit](https://github.com/arcprize/ARC-AGI)、[ARC 任务浏览器](https://arcprize.org/tasks)、[ARC Prize 2026 ARC-AGI-3 比赛](https://arcprize.org/competitions/2026/arc-agi-3)。
+参考资料：[ARC Competition Mode](https://docs.arcprize.org/toolkit/competition_mode)、[Full Play Test 与 scorecard](https://docs.arcprize.org/full-play-test)、[ARC-AGI Toolkit](https://github.com/arcprize/ARC-AGI)、[ARC Prize 2026 ARC-AGI-3 比赛](https://arcprize.org/competitions/2026/arc-agi-3)。

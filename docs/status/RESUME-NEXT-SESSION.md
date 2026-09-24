@@ -1,30 +1,27 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 02:26 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 03:13 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
-完整实现 P7 的 ARC-AGI-3 整题求解和官方 Competition scorecard 提交能力。用户纠正了先前把单关见证当作 P7 完成的设计错误。工作在隔离 worktree `.worktrees/p7-official-submission`、分支 `p7-official-submission`；尚未合入主工作区。主工作区用户自有的两条 Makefile 注释不得覆盖。
+P7 面向完整 ARC-AGI-3 游戏与官方 Competition scorecard，而非单关见证。整题求解、官方逐题会话、回执校验和操作指南已在 `main` 的 `85177b5e` 合并；正在收尾状态核对。
 
 ## 已验证事实
 
-- `f3a6b14a`/`dadc431d` 让本地选题从严格校验的元数据目录解析；普通选择目标为整题 `win_levels`，短题号仅在唯一时有效。
-- `d6f64306` 把整题成功限定为关卡数吻合且 SDK 状态为 `WIN`；Broker、回放和私有回执遵循按题目计算的有限动作上限。旧单关回执摘要保留。
-- `21e2b3cd`/`b8097439` 把 `make asterion-prime-p7-solve GAME=<题号>` 改为整题，单关验证移至 `asterion-prime-p7-level-witness GAME=<题号> LEVEL=N`。旧 `.env` 目标关卡会被明确拒绝，避免静默降级。清单区分已验证单关与整题 WIN。
-- `e9aea673` 修正运行时工厂的 500 动作硬编码；安装 wheel 的假引擎通过真实运行时装配完成 LS20 七关并达到 `WIN`。118 项 P7 测试、lint、docs-check 通过；独立复审无 Critical/Important。
-- `d3a0bad6`/`bcc981a1` 新增 `p7/official.py`，假 SDK 的 19 项测试覆盖官方目录、受控空本地目录、Competition 模式、单卡每题一次 make、SDK 自动初始 reset、精确 game_id/guid、ACTION6/RESET、完整关闭与中断关闭分离。独立复审通过。此适配层尚未接入求解器。
-- `70930aa8` 更新设计与计划：官方 baseline 可缺失，本地强制计算 `partial_game_score` 的能力合同不可用于官方。需要独立的无分数 gameplay 能力与回执，由关闭后的服务端 scorecard 决定官方分数。
-- 当前没有 `ARC_API_KEY` 可用；尚未执行真实官方 API/model 调用，也未真实验证任一游戏整题通关。以上均为无模型或假 SDK 证据。
+- `make asterion-prime-p7-solve GAME=<短号或完整ID>` 从第 1 关按序解完整游戏，仅 SDK `WIN` 与关卡数一致才可签收。`asterion-prime-p7-level-witness GAME=<题号> LEVEL=N` 是独立的局部诊断命令，仍从第 1 关开始。
+- `make asterion-prime-p7-games` 从严格校验的本地题目元数据列目录，区分完整 `WIN` 与局部见证；每次本地运行保留独立 `run_id` 和目录。
+- 官方 `p7/official.py` 的假 SDK 测试覆盖 Competition 目录、单卡每题一次 `make`、SDK 自动首重置、身份绑定、ACTION6、当前关 RESET、正常关闭与中断关闭。官方 `ArcGameContract` 不借用本地 baseline、回放或局部分数。
+- 新的 `prime.arc-agi-3-gameplay` 能力、assembly、provider 与运行时只给出无分数逐题证据；`reset-required` 时会继续给模型机会重置当前关。官方 coordinator 在所有目录题目尝试后关闭 scorecard，按完整目录、guid、状态与有限分数校验 SDK 返回，再写私有正式回执；异常写恢复记录。官方 API key 不传入 Pi 模型进程。
+- 操作指南 `docs/guides/prime-p7-games-and-official-results.md` 记录本地和官方命令。主分支 83 项 P7 定向测试、`make lint`、`make docs-check`、`git diff --check` 已通过；关键代码独立复审未发现 Critical/Important。
+- 打包 `make promotion-check` 初次因新 gameplay assembly 未登记资源清单失败；`8bfc7009` 修复后完整复跑通过：25 条隔离命令、provider 操作 0、`full_dataset=no`。
+- 仓库 `.env` 当前没有 `ARC_API_KEY`。本轮没有实际官方 API、模型求解或 scorecard 提交；没有真实整题通关证据。假 SDK 与安装包装配不能被表述为官方成绩。
 
-## 当前判断
+## 当前判断与未完成边界
 
-- 用新的应用层 gameplay 能力共享 P7 Broker 与 Pi 运行循环，提供无本地分数的逐题证据；官方 coordinator 在全部可见游戏尝试后关闭一张 scorecard，并严格核对服务端结果。历史 OFFLINE 回执及打包合同保持不变。
-- 官方 SDK 会混合本地目录与 API 游戏，并可能在 `make(exact_id)` 时按短题号取到不同版本；适配层已用空目录和实际 wrapper 身份校验关闭风险。
+- 官方 Competition 命令的安装包路径与打包门禁已验证。真实官方运行是有费用的完整评估，按仓库授权边界另行进行。
+- 如官方某题初始化失败，协调器继续后续游戏，但缺少对应服务端运行行时最终回执会失败并保留恢复记录；不能虚构 0 分或官方链接。
 
-## 未完成边界与下一动作
+## 下一动作
 
-1. 实现 `ArcBroker` 的窄游戏合同、无分数 gameplay 能力/assembly/runtime/trace，并用 baseline 缺失的假官方游戏跑通安装包装配。
-2. 实现官方 coordinator：逐题运行、有限控制、异常后继续或中断、服务端逐题结果和总分校验、私有恢复记录与官方回执。不得用第二次 `make` 回放远程游戏。
-3. 加入 `official-preflight` 与 `official-submit` Make 命令，更新操作指南，运行 P7 测试、lint、docs-check、promotion-check 和全分支关键复审。
-4. 合并隔离分支到主工作区时保留用户 Makefile 注释，并核对主工作区现有 JOURNAL 改动；提交且保持 Git 状态清楚。
-5. 真实 Competition 运行属于有费用的全套评估；目前无 API key。假 SDK 通过不能写成官方 scorecard 已生成或真实解题完成。
+1. 收齐本轮 JOURNAL、`CURRENT-STATE.md` 与指南更新，提交状态文件并清理隔离 worktree，确保主工作区干净。
+2. 真实 Competition scorecard 仍未执行；若日后获得 `ARC_API_KEY` 和有费用运行授权，先运行 `make asterion-prime-p7-official-preflight`，再执行 `make asterion-prime-p7-official-submit`，报告服务端真实结果。
