@@ -36,12 +36,12 @@ class SweepConfig:
     seed: int = 0
     command: tuple[str, ...] = ("make", "asterion-prime-p7-sweep-attempt")
     repo_root: Path = field(default_factory=lambda: Path(__file__).resolve().parents[1])
-    # Provisional first-sweep budget: the measured LS20 L1 run used 69,248
-    # recorded tokens in 272s.  Extrapolating 24 new games gives roughly
-    # 1.66M tokens and 109 minutes; failed attempts can take longer.  Cache
-    # input was absent from older telemetry, so this is a ceiling, not a fit.
-    global_token_cap: int = 2_000_000
-    wallclock_cap: float = 3 * 60 * 60
+    # LS20 L1 used 69,248 recorded tokens in 272s for 20 actions.  The 24
+    # remaining first-level human baselines total 851 actions, implying ~2.95M
+    # tokens and 3h13m at that rate.  Old telemetry omitted cache input; the
+    # operator authorized a bounded 3.5M-token / 4h first sweep.
+    global_token_cap: int = 3_500_000
+    wallclock_cap: float = 4 * 60 * 60
     run_timeout: float = 30 * 60
     max_attempts: int | None = None
 
@@ -419,8 +419,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-root", type=Path)
     parser.add_argument("--game", action="append", dest="games", default=[])
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--token-cap", type=int, default=2_000_000)
-    parser.add_argument("--wallclock-seconds", type=float, default=3 * 60 * 60)
+    parser.add_argument("--token-cap", type=int, default=3_500_000)
+    parser.add_argument("--wallclock-seconds", type=float, default=4 * 60 * 60)
     parser.add_argument("--run-timeout", type=float, default=30 * 60)
     parser.add_argument("--max-attempts", type=int)
     args = parser.parse_args(argv)

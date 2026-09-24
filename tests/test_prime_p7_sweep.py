@@ -7,12 +7,12 @@ from pathlib import Path
 
 
 class TestPrimeP7Sweep(unittest.TestCase):
-    def test_default_budget_is_provisional_three_hour_two_million_ceiling(self) -> None:
+    def test_default_budget_matches_authorized_first_sweep(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig
 
         config = SweepConfig(Path("arc"), Path("runs"))
-        self.assertEqual(config.global_token_cap, 2_000_000)
-        self.assertEqual(config.wallclock_cap, 3 * 60 * 60)
+        self.assertEqual(config.global_token_cap, 3_500_000)
+        self.assertEqual(config.wallclock_cap, 4 * 60 * 60)
 
     def test_round_robin_attempts_one_next_level_per_game(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
