@@ -556,6 +556,59 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
         self.assertEqual(rejected.story["kind"], "factual-fallback")
         self.assertNotEqual(accepted.analysis_id, rejected.analysis_id)
 
+    def test_operator_narrator_accepts_only_approved_flash_names(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+        from asterion.applications.prime.p7.run_story.operator_narrator import load_operator_narrator
+
+        for model in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-0731"):
+            with self.subTest(model=model), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".env").write_text(
+                    f"ASTERION_PRIME_EXPERIMENT_MODEL={model}\nDEEPSEEK_API_KEY=sentinel-private-key\n",
+                    encoding="utf-8",
+                )
+                session = SimpleNamespace(run=AsyncMock(return_value=SimpleNamespace(final_text="{}")))
+                with patch.dict(os.environ, {}, clear=True), patch(
+                    "asterion.applications.prime.p7.run_story.operator_narrator.build_rpc_session",
+                    return_value=session,
+                ) as build:
+                    try:
+                        narrator = load_operator_narrator(root)
+                    except RunStoryError:
+                        self.fail(f"approved Flash model {model} was rejected")
+                    build.assert_not_called()
+                    self.assertEqual(narrator.model_id, model)
+                    self.assertNotIn("sentinel-private-key", repr(narrator))
+                    self.assertEqual(narrator._invoke("fixture prompt"), "{}")
+                    config = build.call_args.kwargs
+                    command = config["command"]
+                    self.assertEqual(command[-4:], ("--provider", "deepseek", "--model", model))
+                    self.assertEqual(config["deadline_seconds"], 300)
+                    for flag in ("--no-tools", "--no-session", "--no-extensions", "--no-skills", "--no-context-files"):
+                        self.assertIn(flag, command)
+                    self.assertNotIn("sentinel-private-key", repr(command))
+                    session.run.assert_awaited_once()
+
+    def test_operator_narrator_rejects_unapproved_model_or_missing_key(self) -> None:
+        from unittest.mock import patch
+        from asterion.applications.prime.p7.run_story.operator_narrator import load_operator_narrator
+
+        for model, key in (("deepseek-pro", "sentinel-private-key"), ("deepseek-flash", "")):
+            with self.subTest(model=model, key_present=bool(key)), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / ".env").write_text(
+                    f"ASTERION_PRIME_EXPERIMENT_MODEL={model}\nDEEPSEEK_API_KEY={key}\n",
+                    encoding="utf-8",
+                )
+                with patch.dict(os.environ, {}, clear=True), patch(
+                    "asterion.applications.prime.p7.run_story.operator_narrator.build_rpc_session"
+                ) as build:
+                    with self.assertRaises(RunStoryError) as error:
+                        load_operator_narrator(root)
+                    self.assertEqual(str(error.exception), "narrator-unavailable")
+                    build.assert_not_called()
+
     def test_pi_narrator_accepts_one_json_response_without_exposing_config(self) -> None:
         calls: list[str] = []
         narrator = RunStoryNarrator(

@@ -18,7 +18,11 @@ from .model import RunStoryError, canonical_json
 
 _DEADLINE_SECONDS = 300.0
 _MODEL_ENV = "ASTERION_PRIME_EXPERIMENT_MODEL"
-_PROVIDERS = {"deepseek-v4-flash": "deepseek", "deepseek-v4-flash-0731": "deepseek"}
+_PROVIDERS = {
+    "deepseek-flash": "deepseek",
+    "deepseek-v4-flash": "deepseek",
+    "deepseek-v4-flash-0731": "deepseek",
+}
 
 
 class _NeverCancelled:
