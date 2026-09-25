@@ -240,7 +240,12 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as error:
         print(f"[p7-next-level] {error}", file=sys.stderr)
         return 1
-    print(json.dumps(result, sort_keys=True))
+    public = {key: result[key] for key in (
+        "status", "game_id", "target_level", "stop_reason", "run_ids",
+    )}
+    if result["status"] == "verified":
+        public["level_actions"] = result["level_actions"]
+    print(json.dumps(public, sort_keys=True))
     return 0 if result["status"] == "verified" else 1
 
 

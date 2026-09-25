@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -13,12 +16,32 @@ GAME = "lp85-305b61c3"
 
 
 class TestPrimeP7NextLevel(unittest.TestCase):
+    def test_cli_output_omits_private_manifest_path(self) -> None:
+        from tools.run_prime_p7_next_level import main
+
+        private_path = "/private/SENTINEL-OPERATOR-ROOT/.asterion-private/next.json"
+        result = {"status": "unverified", "game_id": GAME, "target_level": 3,
+                  "stop_reason": "execution-stalled-evidence-invalid",
+                  "run_ids": ["p7-live-20260925000000-" + "a" * 24],
+                  "manifest": private_path, "prefix_replay_sha256": "sha256:private"}
+        output = StringIO()
+        with patch("tools.run_prime_p7_next_level.run_next_level", return_value=result), \
+             redirect_stdout(output):
+            exit_code = main(["--arc-root", "/tmp/arc", "--game", "lp85"])
+        self.assertEqual(exit_code, 1)
+        self.assertNotIn("SENTINEL-OPERATOR-ROOT", output.getvalue())
+        self.assertNotIn("sha256:private", output.getvalue())
+        self.assertEqual(json.loads(output.getvalue()), {
+            "status": "unverified", "game_id": GAME, "target_level": 3,
+            "stop_reason": "execution-stalled-evidence-invalid",
+            "run_ids": result["run_ids"],
+        })
+
     def test_success_needs_new_sealed_replay_and_cleanup(self) -> None:
         from tools.run_prime_p7_next_level import _verified_success
         from tests.test_prime_p7_targeted_ab import TestPrimeP7TargetedAB
         from asterion.applications.prime.p7.broker import ArcTransition
         from tools.run_prime_p7_sweep import _read_hash_chained_trace
-        import json
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
