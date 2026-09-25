@@ -47,6 +47,8 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p7-breadth-preflight
 .PHONY: asterion-prime-p7-breadth
 .PHONY: p7-breadth-preflight p7-breadth
+.PHONY: p7-retry-preflight p7-retry
+.PHONY: asterion-prime-p7-retry-preflight asterion-prime-p7-retry
 .PHONY: asterion-prime-p7-targeted-ab
 .PHONY: asterion-prime-p7-next
 .PHONY: asterion-prime-p7-sweep-attempt
@@ -119,6 +121,7 @@ help:
 	@echo "Asterion Prime local L2 sweep of verified L1 games: asterion-prime-p7-second-round"
 	@echo "Asterion Prime local ARC-AGI-3 L1/L2 breadth resweep preflight: p7-breadth-preflight"
 	@echo "Asterion Prime local ARC-AGI-3 L1/L2 breadth resweep: p7-breadth"
+	@echo "Asterion Prime one supervised same-game retry: p7-retry GAME=<alias-or-exact-id>"
 	@echo "Asterion Prime one offline next-level attempt: asterion-prime-p7-next GAME=<alias-or-exact-id>"
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
@@ -335,6 +338,18 @@ asterion-prime-p7-breadth:
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_breadth.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --guest-machine "$(PRIME_ORB_MACHINE)"'
+
+p7-retry-preflight: asterion-prime-p7-retry-preflight
+
+p7-retry: asterion-prime-p7-retry
+
+asterion-prime-p7-retry-preflight asterion-prime-p7-retry:
+	@exec /bin/sh -ec 'if [ "$(origin GAME)" != "command line" ] || [ -z "$(GAME)" ]; then printf "[$@] pass GAME=<alias-or-exact-id> explicitly\n" >&2; exit 2; fi; \
+		printf "[$@] one-shot P7 same-game retry%s\n" "$$(if [ "$@" = asterion-prime-p7-retry-preflight ]; then printf " preflight"; fi)" >&2; \
+		build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		ASTERION_PRIME_P7_RETRY_MODE=1 $(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_retry.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --guest-machine "$(PRIME_ORB_MACHINE)" --game "$(GAME)" $$(if [ "$@" = asterion-prime-p7-retry-preflight ]; then printf -- --preflight-only; fi)'
 
 asterion-prime-p7-targeted-ab: export ASTERION_PRIME_P7_AB_GAME = $(GAME)
 asterion-prime-p7-targeted-ab:
