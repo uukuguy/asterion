@@ -136,3 +136,5 @@ The local single-file Chinese Level-2 reports for VC33 and WA30 are indexed in `
 
 VC33 then passed Level 3 in a separate OFFLINE run `p7-live-20260925112555-4e235588d483805a4edbfb88`: 21 verified prefix actions plus 31 new Level-3 actions, below the human baseline of 44. The run has sealed trace, replay verification and completed guest cleanup; its next-level manifest records `status=verified`. This is an additional solved level for VC33, not a replay of its Level 2. No official card was created.
 An accepted Chinese analysis and standalone HTML report for this Level-3 run are also indexed in the local catalog; the export SHA-256 is `b4176df54ad83a1b3b5647bd07f7598a1a01bf06b20e10e3e6a571480c44cb19`.
+
+WA30's first Level-3 attempt `p7-live-20260925113438-dad7330565bbe94dfbc507e0` used all 183 new actions allowed by that level's human baseline without passing it. Its trace is sealed, replay verified and guest cleaned; the broker terminal reason is `human-baseline` and the next-level manifest remains `unverified`. The prior WA30 Level-2 success remains intact. The operator moved to DC22 Level 3 rather than paying to repeat WA30 Level 3.
