@@ -688,6 +688,26 @@ class SweepScheduler:
         self._write_campaign(campaign)
         return game_id
 
+    def adopt_execution_stalled(self, run_id: str) -> str:
+        """Record one explicitly selected valid supervisor stall without launching work."""
+
+        if not self.config.unbounded_second_round or not _RUN_ID.fullmatch(run_id):
+            raise ValueError("P7 execution stall evidence is invalid")
+        run = self.config.runs_root / run_id
+        game_id = _recorded_game_id(run, set(self._campaign_ids()))
+        if (
+            game_id not in self._campaign_ids()
+            or not self._second_round_campaign_is_ready(self._selected_games())
+            or not self._execution_stalled_is_valid(run_id, game_id)
+        ):
+            raise ValueError("P7 execution stall evidence is invalid")
+        campaign = self._load_or_create_campaign()
+        if any(item["game_id"] == game_id or item["run_id"] == run_id for item in campaign["terminal_attempts"]):
+            raise ValueError("P7 execution stall is already recorded")
+        campaign["terminal_attempts"].append({"game_id": game_id, "run_id": run_id, "outcome": "execution-stalled"})
+        self._write_campaign(campaign)
+        return game_id
+
     def _record_campaign_attempt(self, campaign: dict[str, Any], game_id: str, outcome: str) -> None:
         if outcome not in {"verified", "unsolved", "timed-out-unsealed", "execution-failed", "execution-stalled"} or not self._new_runs:
             raise ValueError
@@ -1207,6 +1227,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--unbounded-second-round", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--adopt-execution-failure")
+    parser.add_argument("--adopt-execution-stalled")
     args = parser.parse_args(argv)
     if args.seed != 0:
         parser.error("--seed must be 0; the P7 Makefile fixes the official game seed")
@@ -1227,6 +1248,8 @@ def main(argv: list[str] | None = None) -> int:
             unbounded_second_round=args.unbounded_second_round,
         )
     )
+    if args.adopt_execution_failure is not None and args.adopt_execution_stalled is not None:
+        parser.error("choose one execution evidence adoption option")
     if args.adopt_execution_failure is not None:
         if not args.unbounded_second_round or args.preflight_only:
             parser.error("--adopt-execution-failure requires only --unbounded-second-round")
@@ -1236,6 +1259,16 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"schema": "asterion.prime.p7-second-round-recovery/v1", "recorded": False}))
             return 1
         print(json.dumps({"schema": "asterion.prime.p7-second-round-recovery/v1", "recorded": True, "game_id": game_id, "outcome": "execution-failed"}, sort_keys=True))
+        return 0
+    if args.adopt_execution_stalled is not None:
+        if not args.unbounded_second_round or args.preflight_only:
+            parser.error("--adopt-execution-stalled requires only --unbounded-second-round")
+        try:
+            game_id = scheduler.adopt_execution_stalled(args.adopt_execution_stalled)
+        except (OSError, ValueError):
+            print(json.dumps({"schema": "asterion.prime.p7-second-round-recovery/v1", "recorded": False}))
+            return 1
+        print(json.dumps({"schema": "asterion.prime.p7-second-round-recovery/v1", "recorded": True, "game_id": game_id, "outcome": "execution-stalled"}, sort_keys=True))
         return 0
     if args.preflight_only:
         if not args.unbounded_second_round:

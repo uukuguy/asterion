@@ -284,6 +284,23 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 self.assertEqual(json.loads(output.getvalue())["recorded"], accepted)
                 run.assert_not_called()
 
+    def test_execution_stall_adoption_cli_never_launches_paid_work(self) -> None:
+        import contextlib
+        import io
+        from tools.run_prime_p7_sweep import SweepScheduler, main
+
+        for accepted in (False, True):
+            with self.subTest(accepted=accepted), tempfile.TemporaryDirectory() as directory:
+                output = io.StringIO()
+                with patch.object(SweepScheduler, "adopt_execution_stalled", return_value="tr87-cd924810",
+                                  side_effect=None if accepted else ValueError("private-sentinel")), patch.object(SweepScheduler, "run") as run, contextlib.redirect_stdout(output):
+                    result = main(["--operator-root", directory, "--arc-root", directory,
+                                   "--unbounded-second-round", "--adopt-execution-stalled", "fixture-stalled"])
+                self.assertEqual(result, 0 if accepted else 1)
+                self.assertNotIn("private-sentinel", output.getvalue())
+                self.assertEqual(json.loads(output.getvalue())["recorded"], accepted)
+                run.assert_not_called()
+
     def test_second_round_requires_pinned_catalog_and_verified_prefixes(self) -> None:
         from types import SimpleNamespace
         from tools.run_prime_p7_sweep import (
