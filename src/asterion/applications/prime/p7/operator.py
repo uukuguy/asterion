@@ -237,7 +237,7 @@ class _P7BrokerClient:
         self._counts = {
             "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
             "checked_plans": 0, "matched_expectations": 0, "mismatches": 0,
-            "unexecuted_items": 0,
+            "unexecuted_items": 0, "checked_plan_errors": 0, "uncertain_items": 0,
         }
 
     def _count(self, name: str, increment: int = 1) -> None:
@@ -273,6 +273,14 @@ class _P7BrokerClient:
             journal_start = len(self._broker.journal)
             try:
                 result = self._broker.act_checked(plan)
+            except Exception:
+                committed = len(self._broker.journal) - journal_start
+                if type(plan) is list and 1 <= len(plan) <= 20:
+                    self._count("checked_plans")
+                    self._count("checked_plan_errors")
+                    self._count("matched_expectations", committed)
+                    self._count("uncertain_items", len(plan) - committed)
+                raise
             finally:
                 self._record_transitions(self._broker.journal[journal_start:])
             self._count("checked_plans")
@@ -736,6 +744,23 @@ def p7_runtime_options(
             "provider": selection.provider,
         }
     )
+
+
+def _private_experiment(
+    variant: str, game: P7GameSelection, runtime_options: Mapping[str, str]
+) -> dict[str, object]:
+    """Project the selected runtime controls into private scalar evidence."""
+    deadline = runtime_options.get("deadline_ms")
+    return {
+        "prediction_variant": variant,
+        "model": _MODEL,
+        "game_id": game.game_id,
+        "seed": game.seed,
+        "target_level": game.target_level,
+        "action_cap": game.action_cap,
+        "deadline_ms": int(deadline) if deadline is not None and deadline.isdecimal() else None,
+        "stall_seconds": None,
+    }
 
 
 def build_p7_operator_resources(
@@ -1230,16 +1255,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                 failure=failure,
                 diagnostics=diagnostics,
                 completed_prefix=completed_prefix,
-                experiment={
-                    "prediction_variant": variant,
-                    "model": _MODEL,
-                    "game_id": invocation.game.game_id,
-                    "seed": invocation.game.seed,
-                    "target_level": invocation.game.target_level,
-                    "action_cap": invocation.game.action_cap,
-                    "deadline_ms": _DEADLINE_MS,
-                    "stall_seconds": None,
-                },
+                experiment=_private_experiment(variant, invocation.game, resources_.runtime_options),
                 prediction_accounting=(
                     resources_._prediction_client.private_accounting()
                     if isinstance(resources_, P7OperatorResources)

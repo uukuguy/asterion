@@ -59,9 +59,46 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(client.private_accounting(), {
                 "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
                 "checked_plans": 1, "matched_expectations": 0, "mismatches": 1,
-                "unexecuted_items": 1, "first_sequence": 0, "last_sequence": 1,
+                "unexecuted_items": 1, "checked_plan_errors": 0, "uncertain_items": 0,
+                "first_sequence": 0, "last_sequence": 1,
             })
             recorder.close()
+
+    def test_checked_engine_error_keeps_prior_match_and_marks_tail_uncertain(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import P7OperatorError, _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(engine=_HistoryEngine(raises_on=2))
+            broker.bind_history("run-1")
+            client = _P7BrokerClient(broker, recorder)
+            plan = [
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}},
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 2}}},
+            ]
+            with self.assertRaises(P7OperatorError):
+                client.act_checked(plan)
+            self.assertEqual(len([entry for entry in recorder.snapshot() if entry.kind == "arc.action"]), 1)
+            accounting = client.private_accounting()
+            self.assertEqual(accounting["checked_plans"], 1)
+            self.assertEqual(accounting["matched_expectations"], 1)
+            self.assertEqual(accounting["checked_plan_errors"], 1)
+            self.assertEqual(accounting["uncertain_items"], 1)
+            self.assertEqual(accounting["unexecuted_items"], 0)
+            self.assertEqual(accounting["last_sequence"], 1)
+            recorder.close()
+
+    def test_experiment_uses_selected_runtime_deadline(self) -> None:
+        from asterion.applications.prime.p7.game import DEFAULT_GAME
+        from asterion.applications.prime.p7.operator import _private_experiment
+
+        bounded = _private_experiment("verified", DEFAULT_GAME, {"deadline_ms": "3600000"})
+        unbounded = _private_experiment("legacy", DEFAULT_GAME, {"deadline_ms": "none"})
+        self.assertEqual(bounded["deadline_ms"], 3600000)
+        self.assertIsNone(unbounded["deadline_ms"])
+        self.assertIsNone(unbounded["stall_seconds"])
 
     def test_private_summary_preserves_paired_configuration_and_public_receipt_redacts(self) -> None:
         from asterion.applications.prime.p7.game import DEFAULT_GAME
