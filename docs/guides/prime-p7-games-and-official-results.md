@@ -115,6 +115,22 @@ make asterion-prime-p7-games
 
 该命令固定这 17 个题号；每题先校验并重放保存的首关动作，然后只尝试第 2 关一次，不自动进入第 3 关。第 2 关新增动作以该题的人类基准为上限，每题最多 30 分钟，没有整轮 token 或时间上限；本轮若连续 5 分钟没有新的 `arc.action`，也会停止当前题并标记为 `execution-stalled`。成功、达到动作上限、有完整用量证据的超时及执行停滞分别记入 `.asterion-private/prime-p7-live/second-round-campaign.json`；中断后重跑同一命令会跳过已记录的题目。执行停滞必须同时具备匹配的题号、seed、首关前缀、哈希链、用量和来宾清理证据，不能把它当作解题成功；SIGTERM 留下未封存 trace 时由调度器写入私有 stall receipt 后才可续跑。若首个动作前连 run 身份或 trace 都没有形成，命令会安全停止并要求人工核对，不能伪造零 token 记录。证据不完整或来宾清理未确认时，命令停止。该命令只运行本地 OFFLINE 游戏，不创建官方 scorecard。新关卡的网页可在对应运行封存并通过回放后生成；不同运行的求解和网页生成可并行，网页目录的写入需串行。
 
+### 未解首关和二关的广度重扫
+
+需要优先覆盖容易的首关和二关时，使用新的独立轮次：
+
+```bash
+make p7-breadth-preflight
+make p7-breadth
+make asterion-prime-p7-games
+```
+
+`p7-breadth-preflight` 只构建并加载本地 wheel，列出当前未解的首关队列和二关候选，不启动 Orb、不调用模型，也不写账本。确认题号后，`p7-breadth` 先按题号顺序各尝试一次未解首关；首关结束后重新计算二关队列，再各尝试一次已有首关前缀的未解二关。已验证的关卡会跳过，同一新轮次中的 `(题号,关卡)` 不会重复付费尝试。
+
+每题沿用人类基准动作数、30 分钟单题上限和连续 5 分钟无新动作停止线。没有整轮 token 或时间上限。每次尝试有独立 UTC `run_id`，结果追加到 `.asterion-private/prime-p7-live/breadth-resweep-campaign.json`；中断后再次运行 `make p7-breadth` 会从该账本继续。账本只接受封存、回放、来宾清理、题号/关卡身份和用量都能绑定到同一运行的证据；停滞、达到上限和执行错误都不是过关。
+
+这一轮仍是本地 OFFLINE 实验，不创建或提交官方 scorecard。成功关卡通过回放后，可以用 `make asterion-prime-p7-stories` 查看或生成对应的本地解题总结网页；提交官方成绩前仍需单独运行第 3 节的 preflight 和第 4 节的官方提交命令。
+
 某题已有通过封存和回放校验的关卡前缀时，只尝试它的**下一关**：
 
 ```bash

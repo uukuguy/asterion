@@ -44,6 +44,9 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p7-sweep
 .PHONY: asterion-prime-p7-first-round
 .PHONY: asterion-prime-p7-second-round
+.PHONY: asterion-prime-p7-breadth-preflight
+.PHONY: asterion-prime-p7-breadth
+.PHONY: p7-breadth-preflight p7-breadth
 .PHONY: asterion-prime-p7-targeted-ab
 .PHONY: asterion-prime-p7-next
 .PHONY: asterion-prime-p7-sweep-attempt
@@ -114,6 +117,8 @@ help:
 	@echo "Asterion Prime local ARC-AGI-3 breadth sweep: asterion-prime-p7-sweep"
 	@echo "Asterion Prime authorized unbounded local L1 sweep: asterion-prime-p7-first-round"
 	@echo "Asterion Prime local L2 sweep of verified L1 games: asterion-prime-p7-second-round"
+	@echo "Asterion Prime local ARC-AGI-3 L1/L2 breadth resweep preflight: p7-breadth-preflight"
+	@echo "Asterion Prime local ARC-AGI-3 L1/L2 breadth resweep: p7-breadth"
 	@echo "Asterion Prime one offline next-level attempt: asterion-prime-p7-next GAME=<alias-or-exact-id>"
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
@@ -308,6 +313,28 @@ asterion-prime-p7-second-round:
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_sweep.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --guest-machine "$(PRIME_ORB_MACHINE)" --unbounded-second-round'
+
+# The breadth resweep has its own ledger. It retries only unresolved Level 1
+# and Level 2 prefixes, in breadth-first order, and keeps the old campaign
+# ledgers untouched. The preflight builds the same wheel and imports the
+# operator with both local ARC wheels, but never starts Orb or a model.
+p7-breadth-preflight: asterion-prime-p7-breadth-preflight
+
+p7-breadth: asterion-prime-p7-breadth
+
+asterion-prime-p7-breadth-preflight:
+	@printf '[asterion-prime-p7-breadth-preflight] local L1/L2 breadth resweep readiness; zero model calls\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_breadth.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --guest-machine "$(PRIME_ORB_MACHINE)" --preflight-only'
+
+asterion-prime-p7-breadth:
+	@printf '[asterion-prime-p7-breadth] local L1/L2 breadth resweep; 30 minutes per game, 5 minutes without action stops the attempt\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_breadth.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --guest-machine "$(PRIME_ORB_MACHINE)"'
 
 asterion-prime-p7-targeted-ab: export ASTERION_PRIME_P7_AB_GAME = $(GAME)
 asterion-prime-p7-targeted-ab:
