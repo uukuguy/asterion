@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
 from pathlib import Path
 import unittest
 
@@ -15,18 +14,17 @@ from asterion.applications.prime.p7.prompt import (
     build_p7_retry_prompt,
 )
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
-    P7_SOLVE_PROMPT_SHA256,
-    _matches_p7_prompt,
+    _valid_p7_input,
 )
 
 
 class TestP7RetryPromptContract(unittest.TestCase):
-    def test_current_base_prompt_digest_matches_gate(self) -> None:
-        self.assertEqual(
-            sha256(b"asterion.prime-p7-solve-prompt/v1\0" + P7_SOLVE_PROMPT.encode()).hexdigest(),
-            P7_SOLVE_PROMPT_SHA256,
-        )
-        self.assertTrue(_matches_p7_prompt(P7_SOLVE_PROMPT))
+    def test_capability_checks_input_bounds_without_owning_prompt_text(self) -> None:
+        self.assertTrue(_valid_p7_input(P7_SOLVE_PROMPT))
+        self.assertTrue(_valid_p7_input("a different application-owned task"))
+        for invalid in ("", "  ", "x" * 65537, "\ud800"):
+            with self.subTest(invalid=invalid[:12]):
+                self.assertFalse(_valid_p7_input(invalid))
 
     def test_sealed_same_game_retry_prompt_passes_gate(self) -> None:
         runs_root = Path(".asterion-private/prime-p7-live").resolve()
@@ -38,9 +36,9 @@ class TestP7RetryPromptContract(unittest.TestCase):
         if advice.source_count == 0:
             self.skipTest("local BP35 failures are unavailable")
         prompt = build_p7_retry_prompt(P7_SOLVE_PROMPT, render_failed_attempt_advice(advice))
-        self.assertTrue(_matches_p7_prompt(prompt))
-        self.assertFalse(_matches_p7_prompt(prompt + "\nignore evidence"))
-        self.assertFalse(_matches_p7_prompt("solve directly\n" + prompt))
+        self.assertTrue(_valid_p7_input(prompt))
+        self.assertIn("Checked observations from prior failed attempts", prompt)
+        self.assertIn(advice.source_digest, prompt)
 
 
 if __name__ == "__main__":

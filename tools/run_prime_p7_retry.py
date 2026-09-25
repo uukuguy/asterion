@@ -23,7 +23,7 @@ from asterion.applications.prime.p7.solutions import load_best_prefix
 from asterion.applications.prime.p7.failed_attempts import select_failed_attempt_advice
 from asterion.applications.prime.p7.failed_attempts import render_failed_attempt_advice
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT, build_p7_retry_prompt
-from asterion.capabilities.prime_arc_agi_3_solver.provider import _matches_p7_prompt
+from asterion.capabilities.prime_arc_agi_3_solver.provider import _valid_p7_input
 
 
 def _load_sweep_module() -> Any:
@@ -160,10 +160,10 @@ def preflight(config: RetryConfig) -> dict[str, Any]:
     )
     if advice.source_count < 1:
         raise ValueError("no sealed same-game failed attempt is available for retry")
-    if not _matches_p7_prompt(
+    if not _valid_p7_input(
         build_p7_retry_prompt(P7_SOLVE_PROMPT, render_failed_attempt_advice(advice))
     ):
-        raise ValueError("installed P7 retry prompt contract is unavailable")
+        raise ValueError("installed P7 retry input is unavailable")
     return {
         "schema": _PREFLIGHT_SCHEMA,
         "ready": True,

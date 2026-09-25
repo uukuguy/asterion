@@ -242,6 +242,12 @@ def _candidate_matches_identity(run: Path, *, game_id: str, seed: int, target_le
             return False
         if (broker.get("game_id"), broker.get("seed"), sweep.get("target_level")) != (game_id, seed, target_level):
             return False
+        if (
+            broker.get("terminal_reason") not in {"human-baseline", "game-over", "action-cap"}
+            or type(broker.get("levels_completed")) is not int
+            or broker["levels_completed"] >= target_level
+        ):
+            return False
         experiment = summary.get("experiment")
         if experiment is not None and (
             not isinstance(experiment, Mapping)

@@ -23,7 +23,9 @@ class FailedAttemptEvidenceTests(unittest.TestCase):
                     summary = json.loads((run / "summary.json").read_text(encoding="utf-8"))
                     broker = summary["broker"]
                     sweep = summary["diagnostics"]["sweep"]
-                    if broker["game_id"] == "bp35-0a0ad940" and broker["seed"] == 0 and sweep["target_level"] == 1:
+                    if (broker["game_id"] == "bp35-0a0ad940" and broker["seed"] == 0
+                            and sweep["target_level"] == 1 and broker["terminal_reason"] in
+                            {"human-baseline", "game-over", "action-cap"}):
                         self.candidates.append(run)
                 except (OSError, KeyError, TypeError, ValueError):
                     continue

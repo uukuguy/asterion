@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from hashlib import sha256
 from pathlib import Path
 import re
 
@@ -31,23 +30,16 @@ CAPABILITY_REF = CapabilityRef("prime.arc-agi-3-gameplay", "1.0.0")
 _ARTIFACT_ID = "prime.p7-gameplay-run.evidence"
 _MEDIA_TYPE = "application/vnd.asterion.prime.p7-gameplay-run+json"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_PROMPT_DOMAIN = b"asterion.prime-p7-solve-prompt/v1\0"
-P7_SOLVE_PROMPT_SHA256 = (
-    "168ac788c1f3ab96d6357e8f17fb85c3a30a230234938255bd2facda61c5de01"
-)
-P7_LEGACY_SOLVE_PROMPT_SHA256 = (
-    "37ed9a8f49c459adf076b988c1c86a4b5325ad785c6d5d899de68be8adad7425"
-)
 
 
-def _matches_p7_prompt(value: object) -> bool:
-    if type(value) is not str:
+def _valid_p7_input(value: object) -> bool:
+    """Check transport bounds; the selected application owns prompt policy."""
+    if type(value) is not str or not value.strip():
         return False
     try:
-        digest = sha256(_PROMPT_DOMAIN + value.encode("utf-8", "strict")).hexdigest()
+        return len(value.encode("utf-8", "strict")) <= 65536
     except UnicodeError:
         return False
-    return digest in {P7_SOLVE_PROMPT_SHA256, P7_LEGACY_SOLVE_PROMPT_SHA256}
 
 
 class PrimeArcAgi3GameplayImplementation:
@@ -59,7 +51,7 @@ class PrimeArcAgi3GameplayImplementation:
         if (
             invocation.runtime.manifest.runtime_id != "asterion.prime"
             or invocation.runtime.manifest.capabilities != ("prime.tool.ipython",)
-            or not _matches_p7_prompt(invocation.input_text)
+            or not _valid_p7_input(invocation.input_text)
         ):
             raise CapabilityExecutionError("Prime gameplay runtime is unavailable")
         accessor = invocation.host_services.get("prime.arc-run-evidence")
@@ -175,8 +167,6 @@ def create_prime_arc_agi_3_gameplay_package() -> InstalledCapabilityPackage:
 
 
 __all__ = (
-    "P7_SOLVE_PROMPT_SHA256",
-    "P7_LEGACY_SOLVE_PROMPT_SHA256",
     "PrimeArcAgi3GameplayImplementation",
     "create_prime_arc_agi_3_gameplay_package",
 )

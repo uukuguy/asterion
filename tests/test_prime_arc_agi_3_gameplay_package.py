@@ -8,7 +8,7 @@ from hashlib import sha256
 import json
 import unittest
 
-from asterion.applications.prime.p7.prompt import P7_LEGACY_SOLVE_PROMPT, P7_SOLVE_PROMPT
+from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 from asterion.capabilities.execution import CapabilityInvocation
 from asterion.runtime.host import RunEvent, RuntimeManifest
 
@@ -102,21 +102,14 @@ def execute(
 
 
 class TestGameplayEvidence(unittest.TestCase):
-    def test_only_shared_application_prompt_digest_is_admitted(self):
+    def test_capability_validates_input_bounds_without_owning_prompt(self):
         from asterion.capabilities.prime_arc_agi_3_gameplay.provider import (
-            P7_LEGACY_SOLVE_PROMPT_SHA256, P7_SOLVE_PROMPT_SHA256, _matches_p7_prompt,
+            _valid_p7_input,
         )
-
-        domain = b"asterion.prime-p7-solve-prompt/v1\0"
-        self.assertEqual(
-            P7_SOLVE_PROMPT_SHA256,
-            sha256(domain + P7_SOLVE_PROMPT.encode("utf-8")).hexdigest(),
-        )
-        self.assertEqual(
-            P7_LEGACY_SOLVE_PROMPT_SHA256,
-            sha256(domain + P7_LEGACY_SOLVE_PROMPT.encode("utf-8")).hexdigest(),
-        )
-        self.assertTrue(_matches_p7_prompt(P7_LEGACY_SOLVE_PROMPT))
+        self.assertTrue(_valid_p7_input(P7_SOLVE_PROMPT))
+        self.assertTrue(_valid_p7_input("another application task"))
+        self.assertFalse(_valid_p7_input(""))
+        self.assertFalse(_valid_p7_input("x" * 65537))
 
     def test_package_exists(self):
         from importlib.util import find_spec
@@ -200,8 +193,6 @@ class TestGameplayEvidence(unittest.TestCase):
                 execute(value, accessor=accessor)
         with self.assertRaises(CapabilityExecutionError):
             execute(value, artifact_id="prime.p7-solving.receipt")
-        with self.assertRaises(CapabilityExecutionError):
-            execute(value, prompt="arbitrary task")
 
     def test_canonical_digest_and_extra_fields(self):
         from asterion.capabilities.prime_arc_agi_3_gameplay.host import (
