@@ -13,15 +13,16 @@
 - L2 封存失败使用 `arc.run.partial`，仅已完成关卡前缀独立 replay verified；旧 `failed_attempts.py` 只接受 `arc.run.failed`，使二关重试预检拒绝。L2 停滞有 unsealed trace 与 `stall-receipt.json`，必须作为独立受检观察。G50T 较新完整失败被较旧 78 summary / 76 recording 缺损记录阻断。设计见 `docs/superpowers/specs/2026-09-26-prime-p7-retry-evidence-recovery-design.md`（`b8f2c08f`）。
 - `1040574c`、`a3ba0ff1`、`f9645609` 已约束 L2 启动历史调用、说明证据范围并要求可恢复局面 RESET 前给出证据；定向 prompt 测试通过。
 - `11905bae`、`89f8ee62`、`23df5003` 完成三类证据读取与身份、动作帧、前缀、停滞目标关卡校验。13 项聚焦测试及 Ruff 通过。安装版预检 G50T、FT09、CD82 都返回 ready，分别覆盖新完整首关、封存二关失败、零新增动作停滞。
-- `make p7-retry GAME=g50t` 第一次实跑未建立 run 目录、无新动作，最终报告 `retry produced ambiguous run evidence`，不可记为解题失败。随后零模型 `orb -m ubuntu ... /bin/echo` 挂起，另一 OrbStack 来宾相同；`orbctl restart ubuntu` 与 `orbctl stop ubuntu` 均超时，ubuntu 处于 `starting`。用户是否允许重启整个 OrbStack 的问题已发出，尚待答复。`8ac5bcae` 已加入付费运行前的 20 秒来宾连通性探针，避免再次长时间空等。
+- `make p7-retry GAME=g50t` 第一次实跑未建立 run 目录、无新动作，最终报告 `retry produced ambiguous run evidence`，不可记为解题失败。当时零模型 OrbStack 执行命令也超时。`8ac5bcae` 已加入付费运行前的 20 秒来宾连通性探针，避免再次长时间空等。
+- 用户已授权 `orbctl restart --all`；四台来宾恢复 running，P7 ubuntu 零模型 echo 及无遗留服务检查通过。随后 G50T 新 run `p7-live-20260925220255-bedfcba9ad8301dd6c41279b` 运行到 30 动作/0 关时，用户指出尚无具体解题策略修复，操作员立即停止。该 run **未封存、未验证，不可视为正式失败或重试建议来源**；私有 `operator-interruption.json` 保存动作和用量计数，来宾无遗留进程。正在对比旧 78 步与新 30 步的动作决策并设计通用修复，完成前不得再付费重试。
 
 ## 当前判断与未完成边界
 
 - 历史读取可能造成零动作停滞，属待实地验证假设；没有证据表明框架/SDK 动作映射错误。未解关不是已证明不可解。
-- 提示词、证据读取器改动还没有实地结果；不能声称提高通过率。官方卡片是截至提交时的已解前缀成绩，后续 OFFLINE 重试结果没有进入这张卡片。
+- 现有 G50T 30 动作是中断观察，不是解题策略修复后的封存结果；不能声称提高通过率。官方卡片是截至提交时的已解前缀成绩，后续 OFFLINE 重试不会自动进入这张卡片。
 
 ## 下一动作
 
-1. 等待 OrbStack 授权答复；不擅自中断其他三台来宾。若允许，全局重启后先零模型检查 `orb -m ubuntu -u root -w /tmp /bin/echo guest-ready`，核对无遗留 P7 进程。
-2. 连通性恢复后，对 G50T L1 和 FT09 L2 运行 `make p7-retry GAME=<alias>`。观察动作、token、状态；每题结束核对 seal/replay/cleanup、manifest 和已验证进度。
-3. 根据逐题诊断，一题一次重试其余未解首关/二关。只修复有证据的通用缺陷；勿写死场景或重跑已解关。更新中文网页、指南、JOURNAL 与本检查点。
+1. 依据旧 G50T 与中断新运行的录制和 worker 决策核对目标假设为何没有在反证后撤销；提出并实施游戏无关、可测的最小决策修复。不要把局部 `act_checked matched` 当作关卡进展。
+2. 修复通过相关零模型测试和审查后，再对 G50T L1 做**一次**受控重试。核对每步行动、token、关卡、seal/replay/cleanup 与新旧记录差异。
+3. 再选 FT09 L2 验证二关重试，随后逐题处理其余未解首关/二关。只修复有证据的通用缺陷；勿写死场景或重跑已解关。更新中文网页、指南、JOURNAL 与本检查点。
