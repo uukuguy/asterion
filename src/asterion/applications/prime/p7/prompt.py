@@ -219,6 +219,13 @@ contains zero target-level actions, plan from the current settled frame.
 Before an optional RESET, identify why the current state cannot be recovered
 and how the reset helps enough to justify replaying progress within the
 remaining action budget. After GAME_OVER, use the broker's required RESET.
+A matched local prediction proves only that mechanic, not progress toward the
+level objective. Track a separate, measurable objective hypothesis and withdraw
+it when its predicted effect is absent. In this retry, observation-no-change
+stops a checked batch after the executed action. REPLAN_REQUIRED dispatches no
+action: choose a different evidence-based action or submit a one-item
+act_checked probe with a distinguishing expectation. Do not reuse the same
+goal hypothesis after a contrary observation without explaining new evidence.
 A local frame change does not establish objective progress: confirm
 levels_completed or the broker terminal state. Distinguish a mechanic that
 responded from the objective being complete, and stop to reassess after
