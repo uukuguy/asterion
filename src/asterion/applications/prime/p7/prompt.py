@@ -212,7 +212,11 @@ coordinate, or action sequence."""
 P7_RETRY_GUIDANCE = """Retry evidence is checked observation, not an answer or a
 scene description. Use it to avoid repeating an observed failed effect, while
 forming a new game-agnostic hypothesis that can be tested with the next
-action. A local frame change does not establish objective progress: confirm
+action. A sealed partial run replays only its completed-level prefix; its
+remaining actions are checked against the sealed trace and recording. A stall
+is an interrupted observation, not proof that a tested action failed. If it
+contains zero target-level actions, plan from the current settled frame.
+A local frame change does not establish objective progress: confirm
 levels_completed or the broker terminal state. Distinguish a mechanic that
 responded from the objective being complete, and stop to reassess after
 repeated ineffective effects or a border-only diff. Do not repeat a prior

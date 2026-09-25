@@ -25,6 +25,11 @@ class TestP7RetryPromptContract(unittest.TestCase):
         self.assertIn("one legal, falsifiable probe", prompt)
         self.assertIn("Further history may be inspected after that probe", prompt)
 
+    def test_retry_guidance_preserves_evidence_scope(self) -> None:
+        prompt = " ".join(build_p7_retry_prompt(P7_SOLVE_PROMPT, "checked facts").split())
+        self.assertIn("A sealed partial run replays only its completed-level prefix", prompt)
+        self.assertIn("A stall is an interrupted observation", prompt)
+
     def test_capability_checks_input_bounds_without_owning_prompt_text(self) -> None:
         self.assertTrue(_valid_p7_input(P7_SOLVE_PROMPT))
         self.assertTrue(_valid_p7_input("a different application-owned task"))
