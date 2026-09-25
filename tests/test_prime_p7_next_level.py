@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 import json
 from pathlib import Path
@@ -36,6 +36,21 @@ class TestPrimeP7NextLevel(unittest.TestCase):
             "stop_reason": "execution-stalled-evidence-invalid",
             "run_ids": result["run_ids"],
         })
+
+    def test_cli_error_omits_private_path(self) -> None:
+        from tools.run_prime_p7_next_level import main
+
+        sentinel = "/private/SENTINEL-OPERATOR-ROOT/.asterion-private/missing"
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("tools.run_prime_p7_next_level.run_next_level",
+                   side_effect=FileNotFoundError(sentinel)), \
+             redirect_stdout(stdout), redirect_stderr(stderr):
+            exit_code = main(["--arc-root", "/tmp/arc", "--game", "lp85"])
+        self.assertEqual(exit_code, 1)
+        self.assertNotIn("SENTINEL-OPERATOR-ROOT", stdout.getvalue())
+        self.assertNotIn("SENTINEL-OPERATOR-ROOT", stderr.getvalue())
+        self.assertEqual(stderr.getvalue(), "[p7-next-level] preflight or evidence invalid\n")
 
     def test_success_needs_new_sealed_replay_and_cleanup(self) -> None:
         from tools.run_prime_p7_next_level import _verified_success

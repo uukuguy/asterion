@@ -237,8 +237,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = run_next_level(args.operator_root, args.arc_root, args.game,
                                 guest_machine=args.guest_machine)
-    except (OSError, ValueError) as error:
-        print(f"[p7-next-level] {error}", file=sys.stderr)
+    except (OSError, ValueError):
+        print("[p7-next-level] preflight or evidence invalid", file=sys.stderr)
         return 1
     public = {key: result[key] for key in (
         "status", "game_id", "target_level", "stop_reason", "run_ids",
