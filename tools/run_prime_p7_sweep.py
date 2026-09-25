@@ -58,6 +58,7 @@ _SECOND_ROUND_CAMPAIGN_SCHEMA = "asterion.prime.p7-second-round-campaign/v1"
 _SECOND_ROUND_CAMPAIGN_FILE = "second-round-campaign.json"
 _SECOND_ROUND_CAMPAIGN_ID = re.compile(r"^second-round-[0-9a-f]{32}$")
 _ACTION_STALL_SECONDS = 5 * 60
+_STALL_RECEIPT_FILE = "stall-receipt.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +186,36 @@ def _trace_action_count(run: Path) -> int | None:
     except (OSError, UnicodeError, ValueError, KeyError, TypeError):
         return None
     return sum(entry["kind"] == "arc.action" for entry in entries)
+
+
+def _write_stall_receipt(
+    run: Path, *, game_id: str, run_id: str, action_count: int,
+    stall_seconds: float, cleanup_complete: bool,
+) -> bool:
+    """Persist the supervisor's evidence when SIGTERM leaves no application summary."""
+
+    if action_count < 0 or stall_seconds < _ACTION_STALL_SECONDS or not cleanup_complete:
+        return False
+    try:
+        entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
+        if not entries or entries[-1]["kind"] == "trace.sealed":
+            return False
+        payload = {
+            "schema": "asterion.prime.p7-stall-receipt/v1",
+            "game_id": game_id, "run_id": run_id, "seed": 0,
+            "action_count": action_count,
+            "stall_seconds": int(stall_seconds),
+            "cleanup_complete": True,
+            "trace_final_sha256": entries[-1]["sha256"],
+        }
+        path = run / _STALL_RECEIPT_FILE
+        if path.is_symlink():
+            return False
+        path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+        os.chmod(path, 0o600)
+        return True
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+        return False
 
 
 class _TraceIntegrityError(ValueError):
@@ -571,9 +602,38 @@ class SweepScheduler:
             return False
 
     def _execution_stalled_is_valid(self, run_id: str, game_id: str, *, allow_later_progress: bool = False) -> bool:
-        """Admit a stall only when the same sealed partial contract is intact."""
+        """Admit a supervisor stall with a hash-valid unsealed trace and receipt."""
 
-        return self._execution_failure_is_valid(run_id, game_id, allow_later_progress=allow_later_progress)
+        if not self.config.unbounded_second_round or not _RUN_ID.fullmatch(run_id):
+            return False
+        run = self.config.runs_root / run_id
+        try:
+            receipt = _read_json(run / _STALL_RECEIPT_FILE)
+            entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
+            if (
+                not receipt or set(receipt) != {"schema", "game_id", "run_id", "seed", "action_count", "stall_seconds", "cleanup_complete", "trace_final_sha256"}
+                or receipt.get("schema") != "asterion.prime.p7-stall-receipt/v1"
+                or receipt.get("game_id") != game_id or receipt.get("run_id") != run_id
+                or receipt.get("seed") != 0 or receipt.get("cleanup_complete") is not True
+                or type(receipt.get("action_count")) is not int or receipt["action_count"] <= 0
+                or type(receipt.get("stall_seconds")) is not int or receipt["stall_seconds"] < _ACTION_STALL_SECONDS
+                or receipt.get("trace_final_sha256") != entries[-1]["sha256"]
+                or entries[-1]["kind"] == "trace.sealed"
+                or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+                or any(row["kind"] not in {"arc.action", "arc.usage.reported", "arc.run.partial"} for row in entries)
+                or sum(row["kind"] == "arc.action" for row in entries) != receipt["action_count"]
+            ):
+                return False
+            usage = read_run_usage(run, in_progress=True)
+            if usage[2] or usage[3]:
+                return False
+            metadata = self._metadata()[game_id]
+            if receipt["action_count"] > metadata["baseline_actions"][0] + metadata["baseline_actions"][1]:
+                return False
+            prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
+            return prefix is not None and prefix.levels_completed >= (1 if allow_later_progress else 1)
+        except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
+            return False
 
     def adopt_execution_failure(self, run_id: str) -> str:
         """Record one explicitly selected existing failure without launching work."""
@@ -791,6 +851,15 @@ class SweepScheduler:
             return 127
         new_runs = sorted((_run_names(self.config.runs_root) - before) | observed.keys())
         self._new_runs.extend(new_runs)
+        if self._stop_reason == "execution-stalled" and len(new_runs) == 1:
+            run = self.config.runs_root / new_runs[0]
+            action_count = _trace_action_count(run)
+            cleanup_complete = self.config.guest_machine is None or cleaned
+            if action_count is None or not _write_stall_receipt(
+                run, game_id=game_id, run_id=new_runs[0], action_count=action_count,
+                stall_seconds=time.monotonic() - started_at, cleanup_complete=cleanup_complete,
+            ):
+                self._stop_reason = "execution-stalled-evidence-invalid"
         if len(new_runs) != 1 and self._stop_reason == "completed":
             self._stop_reason = "child-evidence-missing" if not new_runs else "child-evidence-ambiguous"
         for run_id in new_runs:
