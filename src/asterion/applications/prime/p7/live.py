@@ -898,6 +898,8 @@ def write_summary(
     failure: BaseException | None,
     diagnostics: Mapping[str, object],
     completed_prefix: Mapping[str, object] | None = None,
+    experiment: Mapping[str, object] | None = None,
+    prediction_accounting: Mapping[str, int] | None = None,
 ) -> None:
     """Write the private per-run summary; never a public surface."""
 
@@ -932,6 +934,8 @@ def write_summary(
             "message": str(failure)[:1000],
         },
         "diagnostics": dict(diagnostics),
+        "experiment": None if experiment is None else dict(experiment),
+        "prediction_accounting": None if prediction_accounting is None else dict(prediction_accounting),
     }
     (private / "summary.json").write_text(
         json.dumps(summary, allow_nan=False, indent=2, sort_keys=True) + "\n",

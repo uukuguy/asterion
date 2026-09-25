@@ -219,7 +219,7 @@ class _IpythonBridgeServer:
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder", "_identities", "_variant")
+    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts")
 
     def __init__(
         self,
@@ -234,12 +234,27 @@ class _P7BrokerClient:
         self._recorder = recorder
         self._identities = identities
         self._variant = variant
+        self._counts = {
+            "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
+            "checked_plans": 0, "matched_expectations": 0, "mismatches": 0,
+            "unexecuted_items": 0,
+        }
+
+    def _count(self, name: str, increment: int = 1) -> None:
+        self._counts[name] = min(5000, self._counts[name] + increment)
+
+    def private_accounting(self) -> dict[str, int]:
+        """Return bounded scalar diagnostics without exposing frames or predictions."""
+        return {**self._counts, "first_sequence": 0, "last_sequence": len(self._broker.journal)}
 
     def history(self, start: int, limit: int) -> list[dict[str, object]]:
         try:
             if type(start) is not int or type(limit) is not int:
                 raise ValueError
-            return self._broker.history(start, limit)
+            page = self._broker.history(start, limit)
+            self._count("history_queries")
+            self._count("history_records_returned", len(page))
+            return page
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -247,7 +262,9 @@ class _P7BrokerClient:
         try:
             if type(sequence) is not int:
                 raise ValueError
-            return self._broker.frame_at(sequence)
+            frame = self._broker.frame_at(sequence)
+            self._count("frame_queries")
+            return frame
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -258,6 +275,12 @@ class _P7BrokerClient:
                 result = self._broker.act_checked(plan)
             finally:
                 self._record_transitions(self._broker.journal[journal_start:])
+            self._count("checked_plans")
+            self._count("matched_expectations", result["applied_count"])
+            if result["mismatch"] is not None:
+                self._count("mismatches")
+                self._counts["matched_expectations"] -= 1
+            self._count("unexecuted_items", result["unexecuted_count"])
             batch = result["batch"]
             observation = result["observation"]
             terminal = result["terminal"]
@@ -611,6 +634,7 @@ class P7OperatorResources:
     host_services: Mapping[str, object]
     runtime_options: Mapping[str, str]
     _bridge: _IpythonBridgeServer
+    _prediction_client: _P7BrokerClient | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -818,16 +842,15 @@ def build_p7_operator_resources(
             raise ValueError
         broker.bind_history(history_run_id)
         official = type(game) is ArcGameContract
+        prediction_client = _P7BrokerClient(
+            broker,
+            trace,
+            GAMEPLAY_TRACE_IDENTITIES if official else P7_TRACE_IDENTITIES,
+            variant=variant,
+        )
         ipython = PersistentIpythonHost(
             worker=worker,
-            p7_client=p7_client_facade(
-                _P7BrokerClient(
-                    broker,
-                    trace,
-                    GAMEPLAY_TRACE_IDENTITIES if official else P7_TRACE_IDENTITIES,
-                    variant=variant,
-                )
-            ),
+            p7_client=p7_client_facade(prediction_client),
         )
         private_trace = (
             PrimeGameplayTrace(broker, trace, engine.guid)
@@ -847,6 +870,7 @@ def build_p7_operator_resources(
             },
             runtime_options=p7_runtime_options(selection, game),
             _bridge=bridge,
+            _prediction_client=prediction_client,
         )
     except Exception:
         if bridge is not None:
@@ -1206,6 +1230,22 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                 failure=failure,
                 diagnostics=diagnostics,
                 completed_prefix=completed_prefix,
+                experiment={
+                    "prediction_variant": variant,
+                    "model": _MODEL,
+                    "game_id": invocation.game.game_id,
+                    "seed": invocation.game.seed,
+                    "target_level": invocation.game.target_level,
+                    "action_cap": invocation.game.action_cap,
+                    "deadline_ms": _DEADLINE_MS,
+                    "stall_seconds": None,
+                },
+                prediction_accounting=(
+                    resources_._prediction_client.private_accounting()
+                    if isinstance(resources_, P7OperatorResources)
+                    and resources_._prediction_client is not None
+                    else None
+                ),
             )
     if failure is not None:
         raise P7LiveAttemptFailure(

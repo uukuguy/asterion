@@ -143,6 +143,8 @@ class TestOfficialPipeline(unittest.TestCase):
         receipt_path = evidence_root / "official-receipt.json"
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         self.assertEqual(result, receipt)
+        self.assertNotIn("prediction_accounting", json.dumps(receipt))
+        self.assertNotIn("prediction_variant", json.dumps(receipt))
         self.assertEqual(receipt["scorecard_url"], "https://arcprize.org/scorecards/card-123")
         self.assertEqual([game["state"] for game in receipt["games"]], ["WIN", "GAME_OVER"])
         self.assertEqual(receipt["games_completed"], 1)

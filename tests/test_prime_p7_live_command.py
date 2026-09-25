@@ -40,6 +40,59 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_checked_mismatch_accounts_only_dispatched_action(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(engine=_HistoryEngine())
+            broker.bind_history("run-1")
+            client = _P7BrokerClient(broker, recorder)
+            result = client.act_checked([
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 9}}},
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 2}}},
+            ])
+            self.assertEqual((result["applied_count"], result["unexecuted_count"]), (1, 1))
+            self.assertEqual(len([entry for entry in recorder.snapshot() if entry.kind == "arc.action"]), 1)
+            self.assertEqual(client.private_accounting(), {
+                "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
+                "checked_plans": 1, "matched_expectations": 0, "mismatches": 1,
+                "unexecuted_items": 1, "first_sequence": 0, "last_sequence": 1,
+            })
+            recorder.close()
+
+    def test_private_summary_preserves_paired_configuration_and_public_receipt_redacts(self) -> None:
+        from asterion.applications.prime.p7.game import DEFAULT_GAME
+        from asterion.applications.prime.p7.operator import _public_receipt
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rows = []
+            for variant in ("legacy", "verified"):
+                private = root / variant
+                private.mkdir()
+                live_module.write_summary(
+                    root, private, run_id=f"p7-20260925-{variant}", receipt={},
+                    broker_receipt=None, game=DEFAULT_GAME, replay_verified=False,
+                    sealed_trace=False, cleanup_complete=True, comparison_report=None,
+                    reason=None, failure=None, diagnostics={},
+                    experiment={"prediction_variant": variant, "model": "deepseek-v4-flash",
+                                "game_id": DEFAULT_GAME.game_id, "seed": DEFAULT_GAME.seed,
+                                "target_level": DEFAULT_GAME.target_level, "action_cap": DEFAULT_GAME.action_cap,
+                                "deadline_ms": 3600000, "stall_seconds": 300},
+                    prediction_accounting={"checked_plans": 1, "mismatches": 1},
+                )
+                rows.append(json.loads((private / "summary.json").read_text()))
+            self.assertEqual(rows[0]["experiment"]["prediction_variant"], "legacy")
+            self.assertEqual(rows[1]["experiment"]["prediction_variant"], "verified")
+            for key in ("model", "game_id", "seed", "target_level", "action_cap", "deadline_ms", "stall_seconds"):
+                self.assertEqual(rows[0]["experiment"][key], rows[1]["experiment"][key])
+            rendered = json.dumps(_public_receipt("unsuccessful", "p7-public", game=DEFAULT_GAME))
+            for secret in ("frame", "hypothesis", str(root), "prediction_variant"):
+                self.assertNotIn(secret, rendered)
+
     def test_generated_module_facade_accepts_helpers_and_rejects_unknown_public_name(self) -> None:
         from asterion.applications.prime.p7.ipython_host import P7ClientError, p7_client_module_facade
 
