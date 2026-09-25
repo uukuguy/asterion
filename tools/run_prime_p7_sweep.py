@@ -28,7 +28,6 @@ from asterion.applications.prime.p7.solutions import load_best_prefix
 
 
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FIRST_ROUND_EXCLUDED_GAME_IDS = frozenset({"ls20-9607627b"})
 
 
@@ -316,51 +315,6 @@ class SweepScheduler:
                 result.add((game_id, 2))
         return frozenset(result)
 
-    def _verified_level_one_games(self) -> frozenset[str]:
-        """Read only strict, sealed L1 receipts for the first-round report.
-
-        Recovered AR25 evidence is deliberately summary-backed: its verified
-        receipt is sealed, but its replay prefix is not reusable by
-        ``load_best_prefix``.  Treating the receipt as absent would rerun an
-        already verified L1.
-        """
-
-        known = set(self._metadata())
-        verified: set[str] = set()
-        try:
-            runs = tuple(path for path in self.config.runs_root.iterdir() if path.is_dir() and not path.is_symlink())
-        except OSError:
-            return frozenset()
-        for run in runs:
-            if _RUN_ID.fullmatch(run.name) is None:
-                continue
-            summary_path = run / "summary.json"
-            if summary_path.is_symlink():
-                continue
-            summary = _read_json(summary_path)
-            broker = summary.get("broker") if summary else None
-            receipt = summary.get("receipt") if summary else None
-            if (
-                not summary
-                or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
-                or summary.get("run_id") != run.name
-                or any(summary.get(key) is not True for key in ("replay_verified", "sealed_trace", "cleanup_complete"))
-                or type(broker) is not dict
-                or type(receipt) is not dict
-                or broker.get("game_id") not in known
-                or broker.get("seed") != 0
-                or broker.get("terminal_reason") not in {"level-completed", "game-won"}
-                or type(broker.get("levels_completed")) is not int
-                or broker["levels_completed"] < 1
-                or receipt.get("completed_level_count") != broker["levels_completed"]
-                or receipt.get("primitive_action_count") != broker.get("primitive_actions")
-                or type(receipt.get("receipt_sha256")) is not str
-                or _SHA256.fullmatch(receipt["receipt_sha256"]) is None
-            ):
-                continue
-            verified.add(broker["game_id"])
-        return frozenset(verified)
-
     def _attempt(self, game_id: str, level: int, timeout: float | None) -> int:
         before = _run_names(self.config.runs_root)
         process: subprocess.Popen[str] | None = None
@@ -513,10 +467,9 @@ class SweepScheduler:
         attempted_unsolved_level_one: list[str] = []
         started = time.monotonic()
         if self.config.unbounded_first_round:
-            verified_level_one = self._verified_level_one_games()
             unstarted: list[str] = []
             for game_id in active:
-                if game_id not in verified_level_one and self._next_level(game_id) == 1:
+                if self._next_level(game_id) == 1:
                     unstarted.append(game_id)
                 else:
                     preexisting_level_one.append(game_id)

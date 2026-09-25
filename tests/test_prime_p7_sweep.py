@@ -62,26 +62,6 @@ class TestPrimeP7Sweep(unittest.TestCase):
         self.assertEqual(attempts, [("bp35-2", 1)])
         self.assertEqual(result.newly_verified_level_one, ("bp35-2",))
 
-    def test_first_round_recognizes_sealed_recovered_level_one_receipt(self) -> None:
-        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            run = root / "runs" / "p7-live-recovered"
-            run.mkdir(parents=True)
-            (run / "summary.json").write_text(json.dumps({
-                "schema": "asterion.prime.p7-live-private-summary/v1",
-                "run_id": run.name,
-                "replay_verified": True, "sealed_trace": True, "cleanup_complete": True,
-                "broker": {"game_id": "ar25-1", "seed": 0, "levels_completed": 1,
-                           "primitive_actions": 22, "terminal_reason": "level-completed"},
-                "receipt": {"completed_level_count": 1, "primitive_action_count": 22,
-                            "receipt_sha256": "a" * 64},
-            }), encoding="utf-8")
-            scheduler = SweepScheduler(SweepConfig(root / "arc", root / "runs", unbounded_first_round=True))
-            scheduler._catalog = lambda: ({"game_id": "ar25-1", "baseline_actions": (22,), "win_levels": 8},)  # type: ignore[method-assign]
-            self.assertEqual(scheduler._verified_level_one_games(), frozenset({"ar25-1"}))
-
     def test_default_budget_matches_authorized_first_sweep(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig
 
