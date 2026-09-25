@@ -72,6 +72,13 @@ _DEADLINE_MS = 3_600_000
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
 _BRIDGE_JOIN_SECONDS = 1.0
 _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
+_P7_FRAME_SEMANTICS = (
+    "Frame semantics: an observation may retain an animation as a list of "
+    "2-D frames. The last frame is the settled post-action grid used by "
+    "summary(), render(), positions(), and diff(); the raw animation remains "
+    "available in observation['frame'] for timing analysis."
+)
+
 class P7OperatorError(RuntimeError):
     """The fixed P7 model host is unavailable."""
 
@@ -971,7 +978,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             implementations=application.implementations,
             runtime=runtime,
             run_id=run_id,
-            input_text=P7_SOLVE_PROMPT,
+            input_text=f"{P7_SOLVE_PROMPT}\n\n{_P7_FRAME_SEMANTICS}",
             host_services=resources_.host_services,
             implementation_packages={CAPABILITY_REF: PACKAGE_REF},
             signal=live.NeverCancelled(),

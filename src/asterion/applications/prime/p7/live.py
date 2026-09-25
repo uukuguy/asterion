@@ -485,7 +485,15 @@ def _call(method, *args):
 def _grid(obs=None):
     value = observe() if obs is None else obs
     frame = value["frame"]
-    return frame[0] if isinstance(frame, list) and frame and isinstance(frame[0], list) else frame
+    if (
+        isinstance(frame, list)
+        and frame
+        and isinstance(frame[0], list)
+        and frame[0]
+        and isinstance(frame[0][0], list)
+    ):
+        return frame[-1]
+    return frame
 
 def _shape(value):
     result = []
@@ -566,7 +574,7 @@ def summary(obs=None):
 
 def render(obs=None, *, x0=0, y0=0, x1=64, y1=64):
     grid = _grid(obs)
-    symbols = {{0:"0", 1:"1", 3:".", 4:" ", 5:"#", 8:"8", 9:"9", 11:"A", 12:"B"}}
+    symbols = dict(enumerate("0123456789ABCDEF"))
     rows = []
     for y in range(max(0, y0), min(len(grid), y1)):
         row = grid[y]

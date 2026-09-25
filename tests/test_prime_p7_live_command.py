@@ -40,6 +40,31 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_worker_grid_uses_settled_last_frame_and_preserves_single_grid(self) -> None:
+        namespace: dict[str, object] = {}
+        exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
+
+        animated = {"frame": [[[1]], [[2]], [[3]]]}
+        self.assertEqual(namespace["_grid"](animated), [[3]])  # type: ignore[operator]
+
+        single = {"frame": [[1, 2], [3, 4]]}
+        self.assertEqual(namespace["_grid"](single), [[1, 2], [3, 4]])  # type: ignore[operator]
+
+    def test_worker_render_distinguishes_all_arc_colors(self) -> None:
+        namespace: dict[str, object] = {}
+        exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
+        observation = {"frame": [[list(range(16))]]}
+
+        rendered = namespace["render"](observation, x1=16)  # type: ignore[operator]
+
+        self.assertEqual(rendered, "00 0123456789ABCDEF")
+
+    def test_operator_prompt_explains_settled_frame_axis(self) -> None:
+        from asterion.applications.prime.p7 import operator
+
+        self.assertIn("settled", operator._P7_FRAME_SEMANTICS.lower())
+        self.assertIn("last", operator._P7_FRAME_SEMANTICS.lower())
+
     def test_saved_level_prefix_reenters_broker_and_rejects_mismatch(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcTransition
         from asterion.applications.prime.p7.game import P7GameSelection
