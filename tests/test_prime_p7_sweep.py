@@ -60,17 +60,18 @@ class TestPrimeP7Sweep(unittest.TestCase):
             root = Path(directory)
             runs = root / "runs"
             runs.mkdir()
-            (runs / "first-round-campaign.json").write_text(json.dumps({
+            campaign = {
                 "schema": "asterion.prime.p7-first-round-campaign/v1",
                 "campaign_id": "first-round-0123456789abcdef0123456789abcdef",
                 "catalog_game_ids": ["a-1", "b-2"],
                 "terminal_attempts": [{"game_id": "a-1", "run_id": "run-a", "outcome": "unsolved"}],
-            }), encoding="utf-8")
+            }
             scheduler = SweepScheduler(SweepConfig(
                 root / "arc", runs, games=("a-1", "b-2"), unbounded_first_round=True,
             ))
             scheduler._first_round_campaign_is_ready = lambda _games: True  # type: ignore[method-assign]
             scheduler._first_round_catalog_ids = lambda: ("a-1", "b-2")  # type: ignore[method-assign]
+            scheduler._load_or_create_campaign = lambda: campaign  # type: ignore[method-assign]
             scheduler._next_level = lambda _game_id: 1  # type: ignore[method-assign]
             scheduler._is_complete = lambda _game_id, _level: False  # type: ignore[method-assign]
             attempts: list[tuple[str, int]] = []
@@ -80,6 +81,30 @@ class TestPrimeP7Sweep(unittest.TestCase):
 
         self.assertEqual(attempts, [("b-2", 1)])
         self.assertEqual(result.previously_attempted_unsolved_level_one, ("a-1",))
+
+    def test_campaign_ledger_rejects_nonexistent_duplicate_or_mismatched_evidence(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = root / "runs"
+            runs.mkdir()
+            scheduler = SweepScheduler(SweepConfig(root / "arc", runs, unbounded_first_round=True))
+            scheduler._first_round_catalog_ids = lambda: ("a-1", "b-2")  # type: ignore[method-assign]
+            base = {
+                "schema": "asterion.prime.p7-first-round-campaign/v1",
+                "campaign_id": "first-round-0123456789abcdef0123456789abcdef",
+                "catalog_game_ids": ["a-1", "b-2"],
+            }
+            for attempts in (
+                [{"game_id": "a-1", "run_id": "missing", "outcome": "unsolved"}],
+                [{"game_id": "a-1", "run_id": "same", "outcome": "unsolved"}, {"game_id": "b-2", "run_id": "same", "outcome": "unsolved"}],
+                [{"game_id": "b-2", "run_id": "missing", "outcome": "verified"}],
+            ):
+                with self.subTest(attempts=attempts):
+                    (runs / "first-round-campaign.json").write_text(json.dumps({**base, "terminal_attempts": attempts}), encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        scheduler._load_or_create_campaign()
 
     def test_unbounded_first_round_keeps_thirty_minute_per_game_limit(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler

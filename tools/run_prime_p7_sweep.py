@@ -360,19 +360,53 @@ class SweepScheduler:
             or type(attempts) is not list
         ):
             raise ValueError
-        seen: set[str] = set()
+        seen_games: set[str] = set()
+        seen_runs: set[str] = set()
         for attempt in attempts:
             if (
                 type(attempt) is not dict
                 or set(attempt) != {"game_id", "run_id", "outcome"}
                 or attempt.get("game_id") not in self._first_round_catalog_ids()
-                or attempt["game_id"] in seen
+                or attempt["game_id"] in seen_games
                 or type(attempt.get("run_id")) is not str or _RUN_ID.fullmatch(attempt["run_id"]) is None
+                or attempt["run_id"] in seen_runs
                 or attempt.get("outcome") not in {"verified", "unsolved", "timed-out-unsealed"}
+                or not self._campaign_entry_is_valid(attempt)
             ):
                 raise ValueError
-            seen.add(attempt["game_id"])
+            seen_games.add(attempt["game_id"])
+            seen_runs.add(attempt["run_id"])
         return campaign
+
+    def _campaign_entry_is_valid(self, attempt: dict[str, Any]) -> bool:
+        game_id = attempt["game_id"]
+        run_id = attempt["run_id"]
+        outcome = attempt["outcome"]
+        run = self.config.runs_root / run_id
+        if run.is_symlink() or not run.is_dir():
+            return False
+        trace = run / "trace" / "prime-trace.jsonl"
+        try:
+            entries = _read_hash_chained_trace(trace, in_progress=outcome == "timed-out-unsealed")
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+            return False
+        sealed = bool(entries) and entries[-1]["kind"] == "trace.sealed"
+        if outcome == "timed-out-unsealed":
+            usage = read_run_usage(run, in_progress=True)
+            return (
+                not sealed
+                and not usage[2]
+                and not usage[3]
+                and _recorded_game_id(run, {game_id}) == game_id
+            )
+        summary = _read_json(run / "summary.json")
+        returncode = 0 if outcome == "verified" else 1
+        if not sealed or not _valid_attempt_summary(summary, run_id, game_id, 1, returncode):
+            return False
+        if outcome == "verified":
+            prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
+            return prefix is not None and prefix.levels_completed >= 1
+        return True
 
     def _record_campaign_attempt(self, campaign: dict[str, Any], game_id: str, outcome: str) -> None:
         if outcome not in {"verified", "unsolved", "timed-out-unsealed"} or not self._new_runs:
