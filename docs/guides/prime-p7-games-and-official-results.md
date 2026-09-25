@@ -129,6 +129,8 @@ make asterion-prime-p7-games
 
 每题沿用人类基准动作数、30 分钟单题上限和连续 5 分钟无新动作停止线。没有整轮 token 或时间上限。每次尝试有独立 UTC `run_id`，结果追加到 `.asterion-private/prime-p7-live/breadth-resweep-campaign.json`；中断后再次运行 `make p7-breadth` 会跳过账本中已核验的终态尝试。若中断时仍有 `running` 记录，命令会停下要求人工核对，不会自动重付费。账本只接受封存、回放、来宾清理、题号/关卡身份和用量都能绑定到同一运行的证据；停滞、达到上限和执行错误都不是过关。
 
+若账本因操作员中断而保留 `running`，先确认来宾 P7 单元已结束，再运行零模型审计命令 `make p7-breadth-reconcile`。它核对未封存轨迹、录制身份和用量后，将原条目标为 `interrupted` 并保留原运行；重启 `make p7-breadth` 会对该题重新做一次正式尝试。无法确认来宾清理或证据不一致时，不应手改账本绕过审计。
+
 这一轮仍是本地 OFFLINE 实验，不创建或提交官方 scorecard。成功关卡通过回放后，可以用 `make asterion-prime-p7-stories` 查看或生成对应的本地解题总结网页；提交官方成绩前仍需单独运行第 3 节的 preflight 和第 4 节的官方提交命令。
 
 要在某关已有封存且回放验证的失败记录后，明确付费重试**同一题的下一未解关**，可先零模型检查，再单次运行：
