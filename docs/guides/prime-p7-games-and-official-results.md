@@ -127,7 +127,7 @@ make asterion-prime-p7-games
 
 `p7-breadth-preflight` 只构建并加载本地 wheel，列出当前未解的首关队列和二关候选，不启动 Orb、不调用模型，也不写账本。确认题号后，`p7-breadth` 先按题号顺序各尝试一次未解首关；首关结束后重新计算二关队列，再各尝试一次已有首关前缀的未解二关。已验证的关卡会跳过，同一新轮次中的 `(题号,关卡)` 不会重复付费尝试。
 
-每题沿用人类基准动作数、30 分钟单题上限和连续 5 分钟无新动作停止线。没有整轮 token 或时间上限。每次尝试有独立 UTC `run_id`，结果追加到 `.asterion-private/prime-p7-live/breadth-resweep-campaign.json`；中断后再次运行 `make p7-breadth` 会从该账本继续。账本只接受封存、回放、来宾清理、题号/关卡身份和用量都能绑定到同一运行的证据；停滞、达到上限和执行错误都不是过关。
+每题沿用人类基准动作数、30 分钟单题上限和连续 5 分钟无新动作停止线。没有整轮 token 或时间上限。每次尝试有独立 UTC `run_id`，结果追加到 `.asterion-private/prime-p7-live/breadth-resweep-campaign.json`；中断后再次运行 `make p7-breadth` 会跳过账本中已核验的终态尝试。若中断时仍有 `running` 记录，命令会停下要求人工核对，不会自动重付费。账本只接受封存、回放、来宾清理、题号/关卡身份和用量都能绑定到同一运行的证据；停滞、达到上限和执行错误都不是过关。
 
 这一轮仍是本地 OFFLINE 实验，不创建或提交官方 scorecard。成功关卡通过回放后，可以用 `make asterion-prime-p7-stories` 查看或生成对应的本地解题总结网页；提交官方成绩前仍需单独运行第 3 节的 preflight 和第 4 节的官方提交命令。
 
