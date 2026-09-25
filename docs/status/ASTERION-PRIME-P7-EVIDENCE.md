@@ -116,3 +116,18 @@ Official card [`fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d`](https://arcprize.org/scor
 | WA30 | 37 | 1 | 2.222222 |
 
 The same 17 selected local Level-1 runs now have accepted, evidence-cited Chinese analyses and standalone offline HTML reports under `artifacts/arc-agi-3/exports/`. The local `artifacts/arc-agi-3/catalog.json` indexes all 17 current reports plus the earlier 23-action LS20 historical report. `make asterion-prime-p7-stories` opens the read-only local catalog. Each current report's run ID and action count were checked against this official receipt; its normalized data and accepted analysis remain bound to the sealed local evidence. The report's rounded local partial score is not the official score above.
+
+## 2026-09-25 local Level-2 breadth-first results
+
+The operator-authorized 17-game second-round campaign is complete. The local ledger is `.asterion-private/prime-p7-live/second-round-campaign.json`. Four games have a sealed, replay-verified, guest-cleaned Level-2 run:
+
+| Game | Level-2 new actions | Local run | Provenance |
+|---|---:|---|---|
+| DC22 | 61 | `p7-live-20260925053157-78dacce1eddc1c81872f31ed` | passed before verified-history change |
+| M0R0 | 90 | `p7-live-20260925065812-a0611a8c8f24f7ef189509d2` | passed before verified-history change |
+| VC33 | 14 | `p7-live-20260925110850-b61955289cb652fe638ac65d` | newly passed after verified-history change |
+| WA30 | 58 | `p7-live-20260925111620-c1c66d732b4e873ecfc2da32` | newly passed after verified-history change |
+
+The campaign attempted each of the other 13 games once at Level 2: eleven remain unsolved at the human action cap, LP85 is `execution-failed`, and TR87 is `execution-stalled`. Neither failure category means a solved level. The final resumed command attempted only VC33 and WA30, exited 0, and recorded `newly_verified_level_two` for those two games. It used 8,119,694 input tokens (including cached input) and 153,256 output tokens for those two attempts. No new official scorecard was submitted.
+
+An earlier paid DC22 repeat reached Level 2 in **99 new actions**, versus the previously verified **61**. It is a slower duplicate and provides no evidence of a performance gain. The intended legacy-versus-verified comparison was invalid because the guest launcher initially omitted the history-variant environment value; the comparison tool rejected it before a second arm. After the forwarding fix, a further DC22 repeat was interrupted at the user's direction and was not sealed or counted as a verified result. Further paid attempts are directed to unsolved next levels rather than repeating an already solved level.
