@@ -320,6 +320,40 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
         self.assertEqual(rendered, "00 0123456789ABCDEF")
 
+    def test_worker_diff_separates_interior_and_one_cell_border_changes(self) -> None:
+        namespace: dict[str, object] = {}
+        exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
+        before = {"frame": [[0, 0, 0], [0, 0, 0], [0, 0, 0]]}
+        after = {"frame": [[1, 0, 0], [0, 2, 0], [0, 0, 0]]}
+
+        result = namespace["diff"](before, after)  # type: ignore[operator]
+
+        self.assertEqual(result["changed"], 2)
+        self.assertEqual(result["border_changed_cells"], 1)
+        self.assertEqual(result["interior_changed_cells"], 1)
+        self.assertFalse(result["border_only"])
+
+        border_only = namespace["diff"](before, {"frame": [[1, 0, 0], [0, 0, 0], [0, 0, 0]]})  # type: ignore[operator]
+        self.assertTrue(border_only["border_only"])
+        self.assertEqual(border_only["interior_changed_cells"], 0)
+
+    def test_retry_prompt_separates_mechanics_from_objective(self) -> None:
+        from asterion.applications.prime.p7.prompt import (
+            P7_RETRY_GUIDANCE,
+            P7_SOLVE_PROMPT,
+            build_p7_retry_prompt,
+        )
+
+        prompt = " ".join(build_p7_retry_prompt(P7_SOLVE_PROMPT, "run facts").lower().split())
+        self.assertIn("changed frame", prompt)
+        self.assertIn("not proof of progress", prompt)
+        self.assertIn("new falsifiable hypothesis", prompt)
+        self.assertIn("border_only", prompt)
+        self.assertIn("checked observations from prior failed attempts", prompt)
+
+        with self.assertRaises(ValueError):
+            build_p7_retry_prompt(P7_SOLVE_PROMPT, " ")
+
     def test_operator_prompt_explains_settled_frame_axis(self) -> None:
         from asterion.applications.prime.p7 import operator
         from asterion.applications.prime.p7 import official_operator

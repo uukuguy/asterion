@@ -83,6 +83,16 @@ action has occurred there. Reassess the returned level before another plan.
 If the broker instead reports terminal GAME_OVER, no safe current-level reset
 is available in this session; stop this attempt.
 
+Separate a checked action mechanic from the objective you are trying to
+complete. A changed frame, changed component count, or a border-only change
+shows an observed effect; it is not proof of progress. Use diff()'s
+interior_changed_cells, border_changed_cells, and border_only fields to
+identify changes that may belong to a HUD or timer, while remembering that a
+game may use its border for gameplay. Treat only levels_completed increasing
+or the broker's authoritative terminal state as objective evidence. If an
+action or short sequence repeats an ineffective effect, stop batching it and
+state a new falsifiable hypothesis before trying again.
+
 Before every act or act_checked call, store and print a concise [PLAN] of two or three sentences:
 the current hypothesis, expected change, shortest useful test, stop condition,
 and remaining-budget implication. Unknown mechanics require one action at a
@@ -198,4 +208,40 @@ response is not success. Do not assume a known map, object identity, target
 coordinate, or action sequence."""
 
 
-__all__ = ("P7_SOLVE_PROMPT", "P7_LEGACY_SOLVE_PROMPT")
+P7_RETRY_GUIDANCE = """Retry evidence is checked observation, not an answer or a
+scene description. Use it to avoid repeating an observed failed effect, while
+forming a new game-agnostic hypothesis that can be tested with the next
+action. A local frame change does not establish objective progress: confirm
+levels_completed or the broker terminal state. Distinguish a mechanic that
+responded from the objective being complete, and stop to reassess after
+repeated ineffective effects or a border-only diff. Do not repeat a prior
+failed sequence without stating the new falsifiable reason first."""
+
+
+def build_p7_retry_prompt(base_prompt: str, failed_attempt_advice: str) -> str:
+    """Append bounded checked retry observations to the game-agnostic prompt.
+
+    The caller owns selection and validation of ``failed_attempt_advice``.
+    Keeping this function a pure formatter makes it impossible for the normal
+    prompt path to acquire prior-run data implicitly.
+    """
+
+    if not isinstance(base_prompt, str) or not base_prompt.strip():
+        raise ValueError("base prompt must be non-empty text")
+    if not isinstance(failed_attempt_advice, str) or not failed_attempt_advice.strip():
+        raise ValueError("failed-attempt advice must be non-empty text")
+    return (
+        base_prompt.rstrip()
+        + "\n\n"
+        + P7_RETRY_GUIDANCE
+        + "\n\nChecked observations from prior failed attempts:\n"
+        + failed_attempt_advice.strip()
+    )
+
+
+__all__ = (
+    "P7_SOLVE_PROMPT",
+    "P7_LEGACY_SOLVE_PROMPT",
+    "P7_RETRY_GUIDANCE",
+    "build_p7_retry_prompt",
+)

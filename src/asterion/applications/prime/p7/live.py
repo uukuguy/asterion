@@ -553,11 +553,32 @@ def diff(before, after):
             new_value = after_grid[y][x]
             if value != new_value:
                 changes.append((x, y, value, new_value))
+    rows = len(before_grid)
+    cols = len(before_grid[0]) if rows else 0
+    border_changed = sum(
+        1 for x, y, _old, _new in changes
+        if x == 0 or y == 0 or x == cols - 1 or y == rows - 1
+    )
+    interior_changed = len(changes) - border_changed
     if not changes:
-        return {{"changed": 0, "bbox": None, "sample": []}}
+        return {{
+            "changed": 0,
+            "interior_changed_cells": 0,
+            "border_changed_cells": 0,
+            "border_only": False,
+            "bbox": None,
+            "sample": [],
+        }}
     xs = [item[0] for item in changes]
     ys = [item[1] for item in changes]
-    return {{"changed": len(changes), "bbox": [min(xs), min(ys), max(xs), max(ys)], "sample": changes[:80]}}
+    return {{
+        "changed": len(changes),
+        "interior_changed_cells": interior_changed,
+        "border_changed_cells": border_changed,
+        "border_only": bool(border_changed and not interior_changed),
+        "bbox": [min(xs), min(ys), max(xs), max(ys)],
+        "sample": changes[:80],
+    }}
 
 def summary(obs=None):
     value = observe() if obs is None else obs
