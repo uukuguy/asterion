@@ -248,7 +248,7 @@ Interfaces:
                     "expect": {"state": "WIN"}}])
         self.assertEqual([name for name, _ in calls], ["history", "frame_at", "act_checked"])
 
-Add socket tests for unknown methods, malformed pages, and a response over 16 KiB; each returns only protocol, id, and ok:false.
+Add socket tests for unknown methods, malformed history pages, and a history-page response over 16 KiB; each returns only protocol, id, and ok:false. Preserve complete observe, act, act_checked, and frame_at responses, including valid multiframe observations larger than 16 KiB; a post-action response cap must never hide a committed action.
 
 - [ ] Step 2: Run the failing boundary tests.
 
