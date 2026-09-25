@@ -214,7 +214,7 @@ class P7ClientServer:
     """Operator-side endpoint the restricted worker process calls over a socket.
 
     The worker never receives the live client object; it receives only the
-    three game operations through this single-threaded server, which is the
+    six game operations through this single-threaded server, which is the
     only holder of the sealed facade.
     """
 
@@ -277,12 +277,14 @@ class P7ClientServer:
                 type(request) is not dict
                 or request.get("protocol") != WORKER_PROTOCOL
                 or type(request.get("id")) is not int
-                or request.get("method") not in {"observe", "status", "act"}
+                or request.get("method") not in {"observe", "status", "act", "history", "frame_at", "act_checked"}
                 or type(request.get("args")) is not list
             ):
                 raise ValueError
             method = str(request["method"])
             args = request["args"]
+            if len(args) != {"observe": 0, "status": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1}[method]:
+                raise ValueError
             value = getattr(self._client, method)(*args)
             response = {
                 "id": request["id"],
@@ -290,9 +292,12 @@ class P7ClientServer:
                 "protocol": WORKER_PROTOCOL,
                 "value": value,
             }
+            encoded = json.dumps(response, allow_nan=False, separators=(",", ":")).encode()
+            if len(encoded) > 16384:
+                raise ValueError
+            return encoded
         except Exception:
-            response = {"id": None, "ok": False, "protocol": WORKER_PROTOCOL}
-        return json.dumps(response, allow_nan=False, separators=(",", ":")).encode()
+            return json.dumps({"id": None, "ok": False, "protocol": WORKER_PROTOCOL}, separators=(",", ":")).encode()
 
 
 class SubprocessPythonWorker:
@@ -451,7 +456,7 @@ def client_module_source(socket_path: str) -> str:
     """The exact module the restricted worker imports to reach the game.
 
     ``p7_client_module_facade`` validates this source against a fixed shape, so
-    it stays a plain module with three public functions and no other public
+    it stays a plain module with six public functions and no other public
     statements.
     """
 
@@ -591,6 +596,15 @@ def observe():
 
 def status():
     return _call("status")
+
+def history(start, limit):
+    return _call("history", start, limit)
+
+def frame_at(sequence):
+    return _call("frame_at", sequence)
+
+def act_checked(plan):
+    return _call("act_checked", plan)
 
 def act(actions):
     if isinstance(actions, str):

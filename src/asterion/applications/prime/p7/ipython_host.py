@@ -39,7 +39,7 @@ class P7ClientError(RuntimeError):
 
 
 class P7ClientFacade:
-    """Sealed worker-visible facade containing only the three game operations."""
+    """Sealed worker-visible facade containing the six game operations."""
 
     __slots__ = ("__client", "__module_source", "__sealed")
 
@@ -60,7 +60,7 @@ class P7ClientFacade:
             raise P7ClientError()
         if client is not None and any(
             not callable(getattr(client, name, None))
-            for name in ("observe", "status", "act")
+            for name in ("observe", "status", "act", "history", "frame_at", "act_checked")
         ):
             raise P7ClientError()
         object.__setattr__(self, "_P7ClientFacade__client", client)
@@ -80,25 +80,42 @@ class P7ClientFacade:
         return "<P7ClientFacade redacted>"
 
     def observe(self) -> Mapping[str, object]:
-        return self.__invoke("observe")
+        return cast(Mapping[str, object], self.__invoke("observe"))
 
     def status(self) -> Mapping[str, object]:
-        return self.__invoke("status")
+        return cast(Mapping[str, object], self.__invoke("status"))
 
     def act(self, actions: Sequence[Mapping[str, object]]) -> Mapping[str, object]:
         if isinstance(actions, (str, bytes, bytearray)) or not isinstance(
             actions, Sequence
         ):
             raise P7ClientError()
-        return self.__invoke("act", list(actions))
+        return cast(Mapping[str, object], self.__invoke("act", list(actions)))
 
-    def __invoke(self, name: str, *args: object) -> Mapping[str, object]:
+    def history(self, start: int, limit: int) -> list[dict[str, object]]:
+        if type(start) is not int or type(limit) is not int:
+            raise P7ClientError()
+        return cast(list[dict[str, object]], self.__invoke("history", start, limit))
+
+    def frame_at(self, sequence: int) -> list[list[int]]:
+        if type(sequence) is not int:
+            raise P7ClientError()
+        return cast(list[list[int]], self.__invoke("frame_at", sequence))
+
+    def act_checked(self, plan: object) -> Mapping[str, object]:
+        if type(plan) is not list:
+            raise P7ClientError()
+        return cast(Mapping[str, object], self.__invoke("act_checked", plan))
+
+    def __invoke(self, name: str, *args: object) -> object:
         try:
             if self.__client is None:
                 raise ValueError
             operation = getattr(self.__client, name)
             value = operation(*args)
-            if not isinstance(value, Mapping):
+            if (name in {"observe", "status", "act", "act_checked"} and type(value) is not dict) or (
+                name in {"history", "frame_at"} and type(value) is not list
+            ):
                 raise ValueError
             return value
         except BaseException:
@@ -550,16 +567,24 @@ def _valid_client_module(source: object) -> bool:
         elif type(statement) is ast.FunctionDef:
             if statement.name.startswith("_"):
                 continue
+            if statement.name in public:
+                return False
             public[statement.name] = statement
         else:
             return False
-    if set(public) != {"act", "observe", "status"}:
+    if set(public) != {"act", "observe", "status", "history", "frame_at", "act_checked"}:
         return False
     return (
         _exact_arguments(public["observe"], 0)
         and _exact_arguments(public["status"], 0)
         and _exact_arguments(public["act"], 1)
         and public["act"].args.args[0].arg == "actions"
+        and _exact_arguments(public["history"], 2)
+        and [arg.arg for arg in public["history"].args.args] == ["start", "limit"]
+        and _exact_arguments(public["frame_at"], 1)
+        and public["frame_at"].args.args[0].arg == "sequence"
+        and _exact_arguments(public["act_checked"], 1)
+        and public["act_checked"].args.args[0].arg == "plan"
     )
 
 

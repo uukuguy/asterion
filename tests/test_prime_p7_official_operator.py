@@ -205,6 +205,9 @@ class TestOfficialOperator(unittest.TestCase):
                 "prime.arc-broker", "prime.ipython", "prime.launch", "prime.arc-run-evidence",
             })
             self.assertIs(type(resources.host_services["prime.arc-run-evidence"]), PrimeGameplayTrace)
+            broker = resources.host_services["prime.arc-broker"]
+            self.assertEqual(broker.history(0, 1)[0]["sequence"], 0)
+            self.assertEqual(broker.frame_at(0), [[1]])
             launch = resources.host_services["prime.launch"]
             self.assertNotIn("ARC_API_KEY", launch.approved_environment)
             self.assertNotIn("arc-secret", repr(resources))

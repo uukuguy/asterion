@@ -20,7 +20,9 @@ from asterion.applications.prime.p7.broker import (
     ArcAction,
     ArcBroker,
     ArcBrokerError,
+    ArcObservation,
     ArcRunReceipt,
+    ArcStatus,
     ArcTransition,
     _observation_digest,
 )
@@ -205,17 +207,96 @@ class _IpythonBridgeServer:
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder", "_identities")
+    __slots__ = ("_broker", "_recorder", "_identities", "_variant")
 
     def __init__(
         self,
         broker: ArcBroker,
         recorder: PrimeTraceRecorder,
         identities: Mapping[str, str] = P7_TRACE_IDENTITIES,
+        variant: str = "legacy",
     ) -> None:
+        if variant not in {"legacy", "verified"}:
+            raise P7OperatorError("P7 host services are unavailable")
         self._broker = broker
         self._recorder = recorder
         self._identities = identities
+        self._variant = variant
+
+    def history(self, start: int, limit: int) -> list[dict[str, object]]:
+        try:
+            if type(start) is not int or type(limit) is not int:
+                raise ValueError
+            return self._broker.history(start, limit)
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def frame_at(self, sequence: int) -> list[list[int]]:
+        try:
+            if type(sequence) is not int:
+                raise ValueError
+            return self._broker.frame_at(sequence)
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def act_checked(self, plan: object) -> Mapping[str, object]:
+        try:
+            result = self._broker.act_checked(plan)
+            batch = result["batch"]
+            observation = result["observation"]
+            terminal = result["terminal"]
+            self._record_transitions(batch.transitions)
+            return {
+                "applied_count": result["applied_count"],
+                "stop_reason": result["stop_reason"],
+                "mismatch": result["mismatch"],
+                "unexecuted_count": result["unexecuted_count"],
+                "observation": self._observation_view(observation),
+                "terminal": self._status_view(terminal),
+                "batch": {
+                    "applied_count": batch.applied_count,
+                    "levels_completed": batch.levels_completed,
+                    "transitions": [self._transition_view(item) for item in batch.transitions],
+                },
+            }
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    @staticmethod
+    def _observation_view(observation: ArcObservation) -> dict[str, object]:
+        return {
+            "available_actions": list(observation.available_actions),
+            "frame": observation.frame,
+            "levels_completed": observation.levels_completed,
+            "state": observation.state,
+            "win_levels": observation.win_levels,
+        }
+
+    def _status_view(self, status: ArcStatus) -> dict[str, object]:
+        return {
+            "actions_remaining": status.actions_remaining,
+            "levels_completed": status.levels_completed,
+            "primitive_actions": status.primitive_actions,
+            "target_level": self._broker.game.target_level,
+            "terminal_reason": status.terminal_reason,
+        }
+
+    @staticmethod
+    def _transition_view(transition: ArcTransition) -> dict[str, object]:
+        return {
+            "action": transition.action,
+            "after_sha256": transition.after_sha256,
+            "before_sha256": transition.before_sha256,
+            "levels_completed": transition.levels_completed,
+            "sequence": transition.sequence,
+            **({"data": dict(transition.data)} if transition.data else {}),
+        }
+
+    def _record_transitions(self, transitions: tuple[ArcTransition, ...]) -> None:
+        for transition in transitions:
+            self._recorder.append(
+                "arc.action", self._identities, self._transition_view(transition)
+            )
 
     def observe(self) -> Mapping[str, object]:
         observation = self._broker.observe()
@@ -240,6 +321,8 @@ class _P7BrokerClient:
 
     def act(self, actions: object) -> Mapping[str, object]:
         if type(actions) is not list or not actions:
+            raise P7OperatorError("P7 host services are unavailable")
+        if self._variant == "verified" and len(actions) != 1:
             raise P7OperatorError("P7 host services are unavailable")
         validated: list[ArcAction] = []
         for action in actions:
@@ -266,21 +349,7 @@ class _P7BrokerClient:
             validated.append(ArcAction(name, canonical_data))
         prior_levels = self._broker.status().levels_completed
         result = self._broker.act(tuple(validated))
-        for transition in result.transitions:
-            action_evidence: dict[str, object] = {
-                "action": transition.action,
-                "after_sha256": transition.after_sha256,
-                "before_sha256": transition.before_sha256,
-                "levels_completed": transition.levels_completed,
-                "sequence": transition.sequence,
-            }
-            if transition.data:
-                action_evidence["data"] = dict(transition.data)
-            self._recorder.append(
-                "arc.action",
-                self._identities,
-                action_evidence,
-            )
+        self._record_transitions(result.transitions)
         try:
             observation = self._broker.observe()
             status = self._broker.status()
@@ -626,6 +695,7 @@ def build_p7_operator_resources(
     engine: object,
     private_trace_root: Path,
     game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
+    run_id: str | None = None,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -709,6 +779,14 @@ def build_p7_operator_resources(
         )
         trace = PrimeTraceRecorder(private_trace_root)
         broker = ArcBroker(engine=engine, game=game)
+        history_run_id = private_trace_root.parent.name
+        if (
+            type(history_run_id) is not str or not history_run_id
+            or not history_run_id.isascii()
+            or (run_id is not None and run_id != history_run_id)
+        ):
+            raise ValueError
+        broker.bind_history(history_run_id)
         official = type(game) is ArcGameContract
         ipython = PersistentIpythonHost(
             worker=worker,
@@ -918,6 +996,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         engine=engine,
         private_trace_root=trace_root,
         game=invocation.game,
+        run_id=run_id,
     )
     receipt: Mapping[str, object] = {}
     broker_receipt: ArcRunReceipt | None = None

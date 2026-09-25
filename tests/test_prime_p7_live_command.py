@@ -40,6 +40,80 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_socket_rejects_unknown_malformed_and_oversize_responses(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import p7_client_facade
+
+        class Client:
+            def observe(self) -> dict[str, object]:
+                return {}
+
+            def status(self) -> dict[str, object]:
+                return {}
+
+            def act(self, actions: object) -> dict[str, object]:
+                return {}
+
+            def history(self, start: int, limit: int) -> list[dict[str, object]]:
+                if start < 0 or limit < 1:
+                    raise ValueError("private history sentinel")
+                return [{"data": "x" * 17000}]
+
+            def frame_at(self, sequence: int) -> list[list[int]]:
+                return [[sequence]]
+
+            def act_checked(self, plan: object) -> dict[str, object]:
+                return {}
+
+        server = live_module.P7ClientServer(p7_client_facade(Client()))
+        try:
+            for method, args in (("unknown", []), ("history", [-1, 1]), ("history", [0]), ("history", [0, 1])):
+                with self.subTest(method=method, args=args):
+                    request = {"protocol": live_module.WORKER_PROTOCOL, "id": 1, "method": method, "args": args}
+                    reply = json.loads(server._dispatch(json.dumps(request).encode()))
+                    self.assertEqual(reply, {"protocol": live_module.WORKER_PROTOCOL, "id": None, "ok": False})
+                    self.assertNotIn("private history sentinel", repr(reply))
+        finally:
+            server.close()
+
+    def test_worker_exposes_history_frame_and_checked_plan(self) -> None:
+        namespace: dict[str, object] = {}
+        exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
+        calls: list[tuple[str, tuple[object, ...]]] = []
+        replies: dict[str, object] = {
+            "history": [{"sequence": 0}], "frame_at": [[1]],
+            "act_checked": {"applied_count": 1, "stop_reason": "matched"},
+        }
+        namespace["_call"] = lambda method, *args: calls.append((method, args)) or replies[method]
+        self.assertEqual(namespace["history"](0, 1), [{"sequence": 0}])  # type: ignore[operator]
+        self.assertEqual(namespace["frame_at"](0), [[1]])  # type: ignore[operator]
+        plan = [{"action": {"name": "ACTION1", "data": {}}, "expect": {"state": "WIN"}}]
+        self.assertEqual(namespace["act_checked"](plan), replies["act_checked"])  # type: ignore[operator]
+        self.assertEqual(calls, [("history", (0, 1)), ("frame_at", (0,)), ("act_checked", (plan,))])
+
+    def test_checked_actions_record_exact_applied_transitions(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(engine=_HistoryEngine())
+            broker.bind_history("run-1")
+            client = _P7BrokerClient(broker, recorder)
+            plan = [
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 9}}},
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 2}}},
+            ]
+            result = client.act_checked(plan)
+            self.assertEqual(result["applied_count"], 1)
+            self.assertEqual(result["stop_reason"], "prediction-mismatch")
+            self.assertEqual(len(broker.journal), 1)
+            self.assertEqual(len(recorder.snapshot()), 1)
+            self.assertEqual(recorder.snapshot()[0].kind, "arc.action")
+            self.assertEqual(client.history(0, 2)[-1]["sequence"], 1)
+            self.assertEqual(client.frame_at(1), [[1]])
+            recorder.close()
+
     def test_worker_grid_uses_settled_last_frame_and_preserves_single_grid(self) -> None:
         namespace: dict[str, object] = {}
         exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
