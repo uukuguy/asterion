@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 08:29 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 08:38 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
@@ -21,7 +21,7 @@
 - AR25 原始暂计 1,197,126 加 BP35 已核验 2,299,681，总计 3,496,807/3,500,000 已回报 token；离上限仅 3,193 token，不再启动任何付费尝试。此轮没有触及 4 小时上限。`make asterion-prime-p7-games` 仍仅有 LS20 L1 与 AR25 L1 已验证，其他 23 题尚无已验证前缀；官方既有 scorecard 未新增提交。
 - BP35 的前 10 次模型调用输入合计 170,107 token，后 10 次 1,004,287，显示随会话推进每次输入显著增加；trace 只存总输入/输出，不能区分缓存价格或直接断定增长根因。
 - `291d909d` 新增专用首关扫题入口并移除扫题器/来宾 cgroup 的时间及 token 限制，`1cfdf28b` 改用新 OFFLINE 回放确认 AR25 已解首关。精确安装 wheel 加两只 ARC wheel 预检为 24 题中 AR25 已验证、23 题待尝试（含 BP35）；普通 repo 虚拟环境缺 ARC wheel，会错误地把 `load_best_prefix` 显示为 None，不能据此重复付费。
-- `e77ddb75` 与 `0b1cf1d7` 使题库及 guest 秒数缺失在付费前拒绝，且只在受控首轮模式透传运行标记。`be5c1e66` 使首轮 OFFLINE 原生运行可选无内部 deadline/回调预算，保留动作数，并已通过 160 项定向测试；普通和官方路径仍用有限预算。`5f5993e3` 固定本轮 25 题清单，`cc4ae812` 加入单题 30 分钟与私有 campaign 续跑，`234058bb` 要求每条续跑记录重新核对真实运行证据。Sol 独立复审最终 APPROVE；108 项 P7/Prime 定向测试、真实 Orb 零模型清理探针、lint、docs-check 通过。精确 wheel 零模型预检显示 24 个非 LS20 题中 AR25 已验证、23 题待尝试，首题 BP35。完整 `make promotion-check` 仍在运行，尚未付费启动。
+- `e77ddb75` 与 `0b1cf1d7` 使题库及 guest 秒数缺失在付费前拒绝，且只在受控首轮模式透传运行标记。`be5c1e66` 使首轮 OFFLINE 原生运行可选无内部 deadline/回调预算，保留动作数，并已通过 160 项定向测试；普通和官方路径仍用有限预算。`5f5993e3` 固定本轮 25 题清单，`cc4ae812` 加入单题 30 分钟与私有 campaign 续跑，`234058bb` 要求每条续跑记录重新核对真实运行证据。Sol 独立复审最终 APPROVE；108 项 P7/Prime 定向测试、真实 Orb 零模型清理探针、lint、docs-check 通过。精确 wheel 零模型预检显示 24 个非 LS20 题中 AR25 已验证、23 题待尝试，首题 BP35。完整 `make promotion-check` PASS：25 条命令、0 provider 操作、无完整数据集。尚未付费启动。
 - 官方 Competition 远端不接收 seed；本地 `seed=0` 是 OFFLINE 前缀身份。LS20 本地第 1 关初始观察在 seed 0 两次及 seed 1 一次零动作检查中相同，不能推断后续关卡或其他游戏。官方不能跳关；本轮按连续关进度轮转。
 
 ## 当前判断与未完成边界
@@ -32,5 +32,4 @@
 
 ## 下一动作
 
-1. 等待正在运行的完整 `make promotion-check` 结束；如失败，按失败边界修复并复验，不把定向测试等同完整安装包通过。提交本轮文档及状态更新。
-2. 完整检查通过后运行 `make asterion-prime-p7-first-round`，直到 23 题都尝试完。每题在其人类动作基准或 30 分钟先到时停止；逐题核验封存/回放、用量和无遗留客体进程。超时且未封存只在精确题号、哈希链用量、来宾清理均核对后记为 `timed-out-unsealed` 并换题；遇到其他证据或基础设施故障先修复，再用同一 campaign ledger 续跑。未经另行安排，不创建官方 scorecard。
+1. 运行 `make asterion-prime-p7-first-round`，直到 23 题都尝试完。每题在其人类动作基准或 30 分钟先到时停止；逐题核验封存/回放、用量和无遗留客体进程。超时且未封存只在精确题号、哈希链用量、来宾清理均核对后记为 `timed-out-unsealed` 并换题；遇到其他证据或基础设施故障先修复，再用同一 campaign ledger 续跑。未经另行安排，不创建官方 scorecard。
