@@ -337,6 +337,7 @@ Expected: FAIL because prefix replay does not currently bind or expose history.
     from model text or count unexecuted items.
 
 Use the same prompt in local and official entry points. Define P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT" and resolve only the exact values verified (default) and legacy. A local research invocation may select legacy; official mode rejects legacy before model execution. Pass the resolved variant into _P7BrokerClient and write it only to private diagnostics. In verified mode, unknown mechanics must use one-item act calls and evidence-backed multi-step plans must use act_checked; legacy mode retains the current batched act behavior for the paired research comparison. Add a zero-model test covering default verified, explicit legacy in solve mode, and official rejection. Compute the new prompt digest and replace P7_SOLVE_PROMPT_SHA256 in both solver/provider.py and gameplay/provider.py. The package tests must calculate the digest from P7_SOLVE_PROMPT rather than retaining the old literal.
+For a valid A/B control, the explicit local legacy variant must also receive the prior bounded gameplay prompt without verified-history and act_checked instructions. Admit only the two exact prompt digests in the two providers; the default and official route continue to select the verified prompt. A host-only batch allowance paired with the new prompt is not a behavioral legacy control.
 Forward the research variant through Makefile only for local witness/sweep guest invocations; official presets never forward it. Add one preset test for this boundary.
 
 - [ ] Step 5: Run integration tests.
@@ -379,6 +380,7 @@ Interfaces:
         self.assertNotIn(str(private_root), rendered)
 
 Add an operator-summary test that two timestamped runs retain equal model, game, seed, target, cap, deadline, and stall fields while their private prediction_variant markers differ. Do not modify tools/run_prime_p7_sweep.py, its campaign JSON schema, or resume identity.
+Include a checked-plan exception test: if one expectation matched before a later engine error, persist the completed match and distinguish the unconfirmed tail from a clean zero-plan run. Derive the internal deadline from the actual runtime option; keep any external supervisor deadline and stall limit separate, and do not claim the ordinary witness has the sweep supervisor's 30-minute/5-minute controls.
 
 - [ ] Step 2: Run the failing tests.
 
@@ -405,7 +407,7 @@ Expected: all tests PASS and no private frame or hypothesis appears in public JS
 
 Files:
 - Modify: docs/guides/prime-p7-games-and-official-results.md
-- Modify: docs/status/PRIME-P7-ACCEPTANCE.md only with passing command results
+- Modify: docs/status/PRIME-P1-P7-ACCEPTANCE.md only with passing command results
 
 - [ ] Step 1: Document the operator procedure.
 
