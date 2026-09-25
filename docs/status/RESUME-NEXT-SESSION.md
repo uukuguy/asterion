@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 13:14 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 13:22 CST. **Session remains active — not a final handoff.**
 
 ## 本会话新增的二关轮次入口
 
-用户要求继续广度优先研究，并确认网页可与求解并行。`98ba8b75` 新增 `make asterion-prime-p7-second-round`：固定 17 道已验证首关的题目，各自只尝试第 2 关一次，先严格重放首关；本关人类基准动作数或 30 分钟先到为停止线，无整轮 token/时长上限，不进入第 3 关。独立 `second-round-campaign.json` 让中断后的同命令续跑跳过已记载的成功、失败与有证据超时。普通旧 `sweep` 仍有 350 万 token 总上限，不能用作此轮。定向 30 项测试、lint、docs-check、打包推广检查（25 命令、0 provider）通过；刚打包 wheel 的零模型预检显示固定 17 题的首关前缀均可重放，`ready=true`。Sol 独立复审未发现运行阻断项。此检查点写入时，**第 2 关付费轮次尚未启动**，当前二关 campaign 文件不存在。网页只可对封存且回放通过的新运行生成；求解不同运行可并行，网页目录的 compile/analyze/render 写入必须串行。此轮不提交新官方卡片。
+用户要求继续广度优先研究，并确认网页可与求解并行。`98ba8b75` 新增 `make asterion-prime-p7-second-round`：固定 17 道已验证首关的题目，各自只尝试第 2 关一次，先严格重放首关；本关人类基准动作数或 30 分钟先到为停止线，无整轮 token/时长上限，不进入第 3 关。独立 `second-round-campaign.json` 让中断后的同命令续跑跳过已记载的成功、失败与有证据超时。普通旧 `sweep` 仍有 350 万 token 总上限，不能用作此轮。定向 30 项测试、lint、docs-check、打包推广检查（25 命令、0 provider）通过；刚打包 wheel 的零模型预检显示固定 17 题的首关前缀均可重放，`ready=true`。Sol 独立复审未发现运行阻断项。**二关轮次当前仍在执行**：AR25 第2关新增50步达到人类基准仍未解，其运行 `p7-live-20260925051436-ac98d5fbc33737780c790c44` 已封存、回放和清理，账本记为 `unsolved`；当前正在 CN04 第2关，运行 `p7-live-20260925052111-fa3bb4a805881d80f121d1f9` 尚未封存。网页只可对封存且回放通过的新运行生成；求解不同运行可并行，网页目录的 compile/analyze/render 写入必须串行。此轮不提交新官方卡片。
 
 ## 当前任务
 
