@@ -33,7 +33,7 @@ _MEDIA_TYPE = "application/vnd.asterion.prime.p7-gameplay-run+json"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _PROMPT_DOMAIN = b"asterion.prime-p7-solve-prompt/v1\0"
 P7_SOLVE_PROMPT_SHA256 = (
-    "4aac8a4883ee7a9855a2694672f0ceaf0da994295ea2b4c839498658317a7a8c"
+    "168ac788c1f3ab96d6357e8f17fb85c3a30a230234938255bd2facda61c5de01"
 )
 P7_LEGACY_SOLVE_PROMPT_SHA256 = (
     "37ed9a8f49c459adf076b988c1c86a4b5325ad785c6d5d899de68be8adad7425"

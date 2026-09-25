@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from hashlib import sha256
+import json
 from pathlib import Path
 import re
 
@@ -33,11 +34,13 @@ _MEDIA_TYPE = "application/vnd.asterion.prime.p7-solving-receipt+json"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _PROMPT_DOMAIN = b"asterion.prime-p7-solve-prompt/v1\0"
 P7_SOLVE_PROMPT_SHA256 = (
-    "4aac8a4883ee7a9855a2694672f0ceaf0da994295ea2b4c839498658317a7a8c"
+    "168ac788c1f3ab96d6357e8f17fb85c3a30a230234938255bd2facda61c5de01"
 )
 P7_LEGACY_SOLVE_PROMPT_SHA256 = (
     "37ed9a8f49c459adf076b988c1c86a4b5325ad785c6d5d899de68be8adad7425"
 )
+_RETRY_FACT_MARKER = "CHECKED LOCAL FAILED-ATTEMPT OBSERVATIONS (not a solution or objective):\n"
+_RETRY_PREFIX_SHA256 = "8c0d12fc47ce1099d9a54905e4aecd9120a70e1da799578bfb37e178a53ec518"
 
 
 def _matches_p7_prompt(value: object) -> bool:
@@ -47,7 +50,31 @@ def _matches_p7_prompt(value: object) -> bool:
         digest = sha256(_PROMPT_DOMAIN + value.encode("utf-8", "strict")).hexdigest()
     except UnicodeError:
         return False
-    return digest in {P7_SOLVE_PROMPT_SHA256, P7_LEGACY_SOLVE_PROMPT_SHA256}
+    if digest in {P7_SOLVE_PROMPT_SHA256, P7_LEGACY_SOLVE_PROMPT_SHA256}:
+        return True
+    if len(value.encode("utf-8")) > 65536 or value.count(_RETRY_FACT_MARKER) != 1:
+        return False
+    prefix, facts_text = value.split(_RETRY_FACT_MARKER, 1)
+    if sha256(_PROMPT_DOMAIN + prefix.encode("utf-8")).hexdigest() != _RETRY_PREFIX_SHA256:
+        return False
+    try:
+        facts = json.loads(facts_text)
+    except (ValueError, TypeError):
+        return False
+    return (
+        type(facts) is dict
+        and set(facts) == {"game_id", "seed", "target_level", "source_run_ids", "source_digest", "runs"}
+        and type(facts["game_id"]) is str
+        and type(facts["seed"]) is int
+        and type(facts["target_level"]) is int
+        and type(facts["source_run_ids"]) is list
+        and 1 <= len(facts["source_run_ids"]) <= 2
+        and all(type(run_id) is str and run_id.startswith("p7-live-") for run_id in facts["source_run_ids"])
+        and type(facts["source_digest"]) is str
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", facts["source_digest"]) is not None
+        and type(facts["runs"]) is list
+        and len(facts["runs"]) == len(facts["source_run_ids"])
+    )
 
 
 class PrimeArcAgi3SolvingImplementation:

@@ -21,6 +21,9 @@ from typing import Any
 from asterion.applications.prime.p7.game import _read_catalog
 from asterion.applications.prime.p7.solutions import load_best_prefix
 from asterion.applications.prime.p7.failed_attempts import select_failed_attempt_advice
+from asterion.applications.prime.p7.failed_attempts import render_failed_attempt_advice
+from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT, build_p7_retry_prompt
+from asterion.capabilities.prime_arc_agi_3_solver.provider import _matches_p7_prompt
 
 
 def _load_sweep_module() -> Any:
@@ -101,8 +104,12 @@ def _run_metrics(runs_root: Path, run_id: str | None) -> dict[str, Any]:
         return {"run_id": None, "status": "no-run", "action_count": 0, "input_tokens": 0, "output_tokens": 0}
     run = runs_root / run_id
     summary = _safe_summary(run) or {}
-    sweep = ((summary.get("diagnostics") or {}).get("sweep") or {})
-    status = summary.get("receipt", {}).get("status") if type(summary.get("receipt")) is dict else None
+    diagnostics = summary.get("diagnostics") or {}
+    sweep = diagnostics.get("sweep") or {}
+    broker = summary.get("broker") or {}
+    broker_status = diagnostics.get("broker_status") or {}
+    receipt = summary.get("receipt") or {}
+    status = receipt.get("status")
     try:
         trace = run / "trace" / "prime-trace.jsonl"
         rows = tuple(json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines())
@@ -112,12 +119,12 @@ def _run_metrics(runs_root: Path, run_id: str | None) -> dict[str, Any]:
     usage = tuple(row.get("payload", {}) for row in rows if type(row) is dict and row.get("kind") == "arc.usage.reported")
     return {
         "run_id": run_id,
-        "status": status or summary.get("status") or summary.get("broker", {}).get("terminal_reason"),
+        "status": status or summary.get("status") or broker.get("terminal_reason") or summary.get("reason"),
         "action_count": len(actions),
-        "completed_level_count": summary.get("receipt", {}).get("completed_level_count", sweep.get("levels_completed")) if type(summary.get("receipt")) is dict else sweep.get("levels_completed"),
+        "completed_level_count": receipt.get("completed_level_count", broker.get("levels_completed", broker_status.get("levels_completed", sweep.get("levels_completed")))),
         "input_tokens": sum(item.get("input_tokens", 0) for item in usage if type(item.get("input_tokens")) is int),
         "output_tokens": sum(item.get("output_tokens", 0) for item in usage if type(item.get("output_tokens")) is int),
-        "failed_attempt_advice": ((summary.get("diagnostics") or {}).get("failed_attempt_advice")),
+        "failed_attempt_advice": diagnostics.get("failed_attempt_advice"),
     }
 
 
@@ -153,6 +160,10 @@ def preflight(config: RetryConfig) -> dict[str, Any]:
     )
     if advice.source_count < 1:
         raise ValueError("no sealed same-game failed attempt is available for retry")
+    if not _matches_p7_prompt(
+        build_p7_retry_prompt(P7_SOLVE_PROMPT, render_failed_attempt_advice(advice))
+    ):
+        raise ValueError("installed P7 retry prompt contract is unavailable")
     return {
         "schema": _PREFLIGHT_SCHEMA,
         "ready": True,
