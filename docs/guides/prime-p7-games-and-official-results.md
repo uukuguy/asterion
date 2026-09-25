@@ -197,6 +197,8 @@ make asterion-prime-p7-stories
 
 后续同题重试通过的 FT09 二关网页为 `artifacts/arc-agi-3/exports/arc-agi-3-ft09-0d8bbf25-p7-live-20260925224920-33b4e846d793e3327a2ecd51-web-d3b09034f81b21375173.html`；共 19 步完成前两关，封存、回放、清理均已校验。该网页使用确定性事实摘要（`analysis.status=accepted` 但讲解未经过模型生成）。这次 OFFLINE 结果没有进入此前关闭的官方卡片。
 
+后续同题重试通过的 SC25 二关网页为 `artifacts/arc-agi-3/exports/arc-agi-3-sc25-635fd71a-p7-live-20260925234916-0788304c8a848397a46dacb5-web-7fb30ed74df18ef89b7d.html`；共 28 步完成前两关（22 首关前缀 + 6 二关动作，恰好用完 6 动作上限），封存、回放、清理均已校验。该网页使用确定性事实摘要。这次 OFFLINE 结果没有进入此前关闭的官方卡片。
+
 浏览器中的目录可按题号进入各次运行。LS20 有两个历史运行页面：本轮官方提交所用的 20 步记录是 `p7-live-20260914141314`，此前的 23 步研究记录是 `p7-live-20260909065351`。按 `Ctrl-C` 停止本地目录服务；单文件 HTML 仍可直接离线打开，保存在 `artifacts/arc-agi-3/exports/`。网页中的动作、画面、用量及本地分数来自封存运行；文字讲解只采用通过引用校验的分析版本。官方逐题成绩仍以本指南第 5 节的 `official-receipt.json` 为准。
 
 首轮进度保存在 `.asterion-private/prime-p7-live/first-round-campaign.json`。重启同一命令会跳过这轮已经尝试过而未解的首关，不会把更早的 BP35 中断运行当成本轮完成；已验证过关仍以动作重放结果为准。30 分钟到点时，只有单个题号对应的运行、哈希链用量和来宾清理均得到核对，才记作 `timed_out_unsealed_level_one` 并换题；这个状态不是已验证的过关或封存失败回执。证据不完整时命令停止，修复后可再次运行同一命令。
