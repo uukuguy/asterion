@@ -92,7 +92,7 @@ def _action_fields(value: object) -> tuple[str, tuple[tuple[str, int], ...]]:
     if type(data) is not dict:
         raise ArcPredictionError
     if name == "ACTION6":
-        if tuple(data) != ("x", "y") or any(
+        if set(data) != {"x", "y"} or any(
             type(data[key]) is not int or not 0 <= data[key] <= 63 for key in ("x", "y")
         ):
             raise ArcPredictionError
@@ -169,15 +169,62 @@ class ArcHistoryRecord:
 
     def __post_init__(self) -> None:
         stable = _grid(self.frame)
-        if self.after_frame_sha256 != digest(stable):
-            raise ArcPredictionError
         if (
-            type(self.data) is not tuple
+            type(self.game_id) is not str or not self.game_id
+            or type(self.seed) is not int
+            or type(self.run_id) is not str or not self.run_id or not self.run_id.isascii()
+            or type(self.sequence) is not int or self.sequence < 0
+            or type(self.levels_completed) is not int or self.levels_completed < 0
+            or type(self.state) is not str or not self.state
+            or type(self.changed_cell_count) is not int or self.changed_cell_count < 0
+            or type(self.changed_cells_omitted) is not int or self.changed_cells_omitted < 0
+            or type(self.data) is not tuple
             or type(self.changed_cells) is not tuple
-            or any(type(item) is not tuple for item in self.data)
-            or any(type(item) is not tuple for item in self.changed_cells)
+            or len(self.changed_cells) > 80
+            or self.changed_cell_count > len(stable) * len(stable[0])
+            or self.changed_cell_count != len(self.changed_cells) + self.changed_cells_omitted
         ):
             raise ArcPredictionError
+        _hash(self.after_state_sha256)
+        _hash(self.after_frame_sha256)
+        if self.after_frame_sha256 != digest(stable):
+            raise ArcPredictionError
+        if any(
+            type(item) is not tuple or len(item) != 2
+            or type(item[0]) is not str or type(item[1]) is not int
+            for item in self.data
+        ):
+            raise ArcPredictionError
+        if any(
+            type(item) is not tuple or len(item) != 4
+            or any(type(value) is not int for value in item)
+            or not 0 <= item[0] < len(stable[0])
+            or not 0 <= item[1] < len(stable)
+            or not 0 <= item[2] <= 255 or not 0 <= item[3] <= 255
+            or item[2] == item[3]
+            or item[3] != stable[item[1]][item[0]]
+            for item in self.changed_cells
+        ):
+            raise ArcPredictionError
+        coordinates = tuple((item[1], item[0]) for item in self.changed_cells)
+        if coordinates != tuple(sorted(set(coordinates))):
+            raise ArcPredictionError
+        if self.sequence == 0:
+            if (
+                self.action is not None or self.data
+                or self.before_state_sha256 is not None
+                or self.before_frame_sha256 is not None
+                or self.changed_cell_count != 0
+            ):
+                raise ArcPredictionError
+        else:
+            _hash(self.before_state_sha256)
+            _hash(self.before_frame_sha256)
+            name, canonical_data = _action_fields(
+                {"name": self.action, "data": dict(self.data)}
+            )
+            if name != self.action or canonical_data != self.data:
+                raise ArcPredictionError
         object.__setattr__(self, "frame", stable)
 
     def __repr__(self) -> str:

@@ -51,6 +51,28 @@ class TestVerifiedHistory(unittest.TestCase):
         with self.assertRaisesRegex(ArcPredictionError, "^P7 prediction is unavailable$"):
             replace(first, frame=source)
 
+    def test_direct_record_rejects_mutable_nested_values_and_broken_counts(self) -> None:
+        first = ArcHistoryRecord.initial(
+            game_id="game", seed=0, run_id="private-run", frame=((0,),),
+            levels_completed=0, state="NOT_FINISHED", after_state_sha256=digest("before"),
+        )
+        cases = (
+            {"data": (("x", [1]),)},
+            {"changed_cells": ((0, 0, 0, [1]),)},
+            {"changed_cell_count": 1},
+            {"changed_cells_omitted": 1},
+            {"sequence": 1},
+            {"action": "ACTION1"},
+            {"before_state_sha256": digest("before")},
+            {"after_state_sha256": "bad"},
+            {"state": ["NOT_FINISHED"]},
+            {"frame": ((True,),)},
+        )
+        for changed in cases:
+            with self.subTest(changed=changed):
+                with self.assertRaisesRegex(ArcPredictionError, "^P7 prediction is unavailable$"):
+                    replace(first, **changed)
+
     def test_following_record_keeps_private_data_and_public_copy_is_detached(self) -> None:
         first = ArcHistoryRecord.initial(
             game_id="game", seed=0, run_id="private-run", frame=((0,),),
@@ -70,6 +92,14 @@ class TestVerifiedHistory(unittest.TestCase):
         self.assertEqual(later.public_view()["changed_cells"], [(0, 0, 0, 1)])
         self.assertEqual(later.data, ())
         self.assertNotIn("private-run", repr(later))
+        for changed in (
+            {"changed_cell_count": 2, "changed_cells_omitted": 1},
+            {"changed_cells": ((0, 0, 0, 2),)},
+            {"changed_cells": ((0, 0, 1, 1),)},
+        ):
+            with self.subTest(changed=changed):
+                with self.assertRaisesRegex(ArcPredictionError, "^P7 prediction is unavailable$"):
+                    replace(later, **changed)
         with self.assertRaisesRegex(ArcPredictionError, "^P7 prediction is unavailable$"):
             ArcHistoryRecord.following(
                 first, action=ArcAction("ACTION1"), before_state_sha256=digest("wrong"),
@@ -139,6 +169,15 @@ class TestVerifiedHistory(unittest.TestCase):
                 self.assertEqual(validate_prediction(
                     {"action": action, "expect": expect}, current_levels=0,
                 )[0], "ACTION1")
+
+    def test_action6_json_key_order_is_irrelevant(self) -> None:
+        action = {"name": "ACTION6", "data": {"y": 3, "x": 2}}
+        self.assertEqual(
+            validate_prediction(
+                {"action": action, "expect": {"state": "WIN"}}, current_levels=0,
+            )[:2],
+            ("ACTION6", (("x", 2), ("y", 3))),
+        )
 
     def test_prediction_rejects_malformed_action_and_expectations(self) -> None:
         action = {"name": "ACTION1", "data": {}}
