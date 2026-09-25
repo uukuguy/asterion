@@ -29,6 +29,7 @@ class TestP7RetryPromptContract(unittest.TestCase):
         prompt = " ".join(build_p7_retry_prompt(P7_SOLVE_PROMPT, "checked facts").split())
         self.assertIn("A sealed partial run replays only its completed-level prefix", prompt)
         self.assertIn("A stall is an interrupted observation", prompt)
+        self.assertIn("Before an optional RESET, identify why the current state cannot be recovered", prompt)
 
     def test_capability_checks_input_bounds_without_owning_prompt_text(self) -> None:
         self.assertTrue(_valid_p7_input(P7_SOLVE_PROMPT))

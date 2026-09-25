@@ -216,6 +216,9 @@ action. A sealed partial run replays only its completed-level prefix; its
 remaining actions are checked against the sealed trace and recording. A stall
 is an interrupted observation, not proof that a tested action failed. If it
 contains zero target-level actions, plan from the current settled frame.
+Before an optional RESET, identify why the current state cannot be recovered
+and how the reset helps enough to justify replaying progress within the
+remaining action budget. After GAME_OVER, use the broker's required RESET.
 A local frame change does not establish objective progress: confirm
 levels_completed or the broker terminal state. Distinguish a mechanic that
 responded from the objective being complete, and stop to reassess after
