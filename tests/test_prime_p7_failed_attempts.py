@@ -66,6 +66,28 @@ class FailedAttemptEvidenceTests(unittest.TestCase):
             with self.assertRaises(FailedAttemptEvidenceError):
                 select_failed_attempt_advice(root, game_id="bp35-0a0ad940", seed=0, target_level=1)
 
+    def test_partial_level_two_is_scoped_to_verified_prefix(self) -> None:
+        advice = select_failed_attempt_advice(
+            self.runs_root, game_id="bp35-0a0ad940", seed=0, target_level=2
+        )
+        if not advice.source_count:
+            self.skipTest("local BP35 level-two partial evidence is not present")
+        self.assertEqual(advice.runs[0].source_type, "sealed-partial-failure")
+        self.assertGreater(advice.runs[0].prefix_action_count, 0)
+        self.assertLess(advice.runs[0].prefix_action_count, advice.runs[0].action_count)
+
+    def test_stall_is_admitted_as_observation(self) -> None:
+        try:
+            advice = select_failed_attempt_advice(
+                self.runs_root, game_id="cd82-fb555c5d", seed=0, target_level=2
+            )
+        except FailedAttemptEvidenceError:
+            self.skipTest("local CD82 stall evidence is not present")
+        if not advice.source_count:
+            self.skipTest("local CD82 stall evidence is not present")
+        self.assertEqual(advice.runs[0].source_type, "execution-stall-observation")
+        self.assertEqual(advice.runs[0].terminal_reason, "execution-stalled")
+
 
 if __name__ == "__main__":
     unittest.main()
