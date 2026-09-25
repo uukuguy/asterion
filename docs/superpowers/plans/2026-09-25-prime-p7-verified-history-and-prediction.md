@@ -292,8 +292,10 @@ Files:
 - Test: tests/test_prime_p7_official_operator.py
 - Modify: src/asterion/capabilities/prime_arc_agi_3_solver/provider.py
 - Modify: src/asterion/capabilities/prime_arc_agi_3_gameplay/provider.py
+- Modify: Makefile (forward research variant to local witness/sweep guest only)
 - Test: tests/test_prime_arc_agi_3_solver_package.py
 - Test: tests/test_prime_arc_agi_3_gameplay_package.py
+- Test: tests/test_prime_make_presets.py
 
 Interfaces:
 - Consumes existing VerifiedPrefix, Task 2 history, and one shared P7_SOLVE_PROMPT.
@@ -311,15 +313,23 @@ Expected: FAIL because prefix replay does not currently bind or expose history.
 
 - [ ] Step 4: Update P7_SOLVE_PROMPT with this exact behavior:
 
-    For a target above Level 1, call p7_client.history(0, 32) before planning
-    and request further pages until the sequence containing the Level 1
-    boundary is returned; stop paging at that boundary. Each page contains
+    Read status or observe first. Only when current levels_completed > 0,
+    read the already replayed history before planning; a new game has no
+    prior Level 1 boundary to await. Page through history with
+    p7_client.history(start_sequence, limit), shrinking limit on a 16 KiB
+    page rejection and advancing from the last returned sequence. Stop at
+    the startup primitive_actions count; do not await future actions.
+    Each page contains
     observed facts only: action, stable before/after digests, changed cells,
     level count, and SDK state. Use p7_client.frame_at(sequence) only for a
     sequence already returned by history; it returns that occurred settled
     grid. Write hypotheses that history could disprove. Unknown
     mechanics require one action at a time. Once a plan has evidence, use
-    p7_client.act_checked(plan), with no more than 20 items. Every item must
+    p7_client.act_checked(plan), with no more than 20 items. For example,
+    {"action":{"name":"ACTION1","data":{}},
+    "expect":{"cell":{"x":1,"y":2,"value":3}}} is one plan item;
+    other exact expectation keys are frame_sha256, levels_completed, and
+    state. Every item must
     include a distinguishing expected cell value, full settled-frame hash, level
     advance, or terminal state. The code result is authoritative: on first
     mismatch, unavailable action, level boundary, GAME_OVER, or cap, the
@@ -327,16 +337,17 @@ Expected: FAIL because prefix replay does not currently bind or expose history.
     from model text or count unexecuted items.
 
 Use the same prompt in local and official entry points. Define P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT" and resolve only the exact values verified (default) and legacy. A local research invocation may select legacy; official mode rejects legacy before model execution. Pass the resolved variant into _P7BrokerClient and write it only to private diagnostics. In verified mode, unknown mechanics must use one-item act calls and evidence-backed multi-step plans must use act_checked; legacy mode retains the current batched act behavior for the paired research comparison. Add a zero-model test covering default verified, explicit legacy in solve mode, and official rejection. Compute the new prompt digest and replace P7_SOLVE_PROMPT_SHA256 in both solver/provider.py and gameplay/provider.py. The package tests must calculate the digest from P7_SOLVE_PROMPT rather than retaining the old literal.
+Forward the research variant through Makefile only for local witness/sweep guest invocations; official presets never forward it. Add one preset test for this boundary.
 
 - [ ] Step 5: Run integration tests.
 
-Run: uv run python -m unittest -v tests.test_prime_p7_live_command tests.test_prime_p7_official_operator tests.test_prime_arc_agi_3_solver_package tests.test_prime_arc_agi_3_gameplay_package
+Run: uv run python -m unittest -v tests.test_prime_p7_live_command tests.test_prime_p7_official_operator tests.test_prime_arc_agi_3_solver_package tests.test_prime_arc_agi_3_gameplay_package tests.test_prime_make_presets
 
-Expected: all tests PASS; malformed prefixes fail before worker creation; prompt identity is shared and output remains redacted.
+Expected: all tests PASS; malformed prefixes fail before model execution; prompt identity is shared and output remains redacted.
 
 - [ ] Step 6: Commit prefix and prompt integration.
 
-    git add src/asterion/applications/prime/p7/operator.py src/asterion/applications/prime/p7/prompt.py src/asterion/applications/prime/p7/official_operator.py src/asterion/capabilities/prime_arc_agi_3_solver/provider.py src/asterion/capabilities/prime_arc_agi_3_gameplay/provider.py tests/test_prime_p7_live_command.py tests/test_prime_p7_official_operator.py tests/test_prime_arc_agi_3_solver_package.py tests/test_prime_arc_agi_3_gameplay_package.py
+    git add Makefile src/asterion/applications/prime/p7/operator.py src/asterion/applications/prime/p7/prompt.py src/asterion/applications/prime/p7/official_operator.py src/asterion/capabilities/prime_arc_agi_3_solver/provider.py src/asterion/capabilities/prime_arc_agi_3_gameplay/provider.py tests/test_prime_p7_live_command.py tests/test_prime_p7_official_operator.py tests/test_prime_arc_agi_3_solver_package.py tests/test_prime_arc_agi_3_gameplay_package.py tests/test_prime_make_presets.py
     git commit -m "feat(p7): replay verified history before level-two solving"
 
 ### Task 5: Record private accounting for targeted A/B runs
