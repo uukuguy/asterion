@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Callable, Protocol, cast
 
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
+from .verified_history import ArcHistoryRecord, ArcPredictionError, validate_history_query, validate_prediction
 
 
 class ArcBrokerError(RuntimeError):
@@ -203,6 +205,7 @@ class ArcBroker:
         self._actions_dispatched = 0
         self._failed_action: str | None = None
         self._level_gameplay_actions = 0
+        self._history: list[ArcHistoryRecord] | None = None
 
     @property
     def journal(self) -> tuple[ArcTransition, ...]:
@@ -211,6 +214,109 @@ class ArcBroker:
     @property
     def game(self) -> P7GameSelection | ArcGameContract:
         return self._game
+
+    def bind_history(self, run_id: str) -> None:
+        if (
+            self._history is not None or self._journal
+            or type(run_id) is not str or not run_id or not run_id.isascii()
+        ):
+            raise ArcBrokerError("unavailable")
+        try:
+            initial = ArcHistoryRecord.initial(
+                game_id=self._identity[0], seed=self._identity[1], run_id=run_id,
+                frame=self._initial.frame[-1], levels_completed=0,
+                state=self._initial.state,
+                after_state_sha256=_observation_digest(self._initial),
+            )
+        except ArcPredictionError:
+            raise ArcBrokerError("unavailable") from None
+        self._history = [initial]
+
+    def _bound_history(self) -> list[ArcHistoryRecord]:
+        if self._history is None:
+            raise ArcBrokerError("unavailable")
+        return self._history
+
+    def history(self, start: int, limit: int) -> list[dict[str, object]]:
+        records = self._bound_history()
+        try:
+            validate_history_query(start=start, limit=limit, latest_sequence=len(records) - 1)
+            page = [record.public_view() for record in records[start:start + limit]]
+            if len(json.dumps(page, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > 16384:
+                raise ArcPredictionError
+        except ArcPredictionError:
+            raise ArcBrokerError("unavailable") from None
+        return page
+
+    def frame_at(self, sequence: int) -> list[list[int]]:
+        records = self._bound_history()
+        if type(sequence) is not int or not 0 <= sequence < len(records):
+            raise ArcBrokerError("unavailable")
+        return [list(row) for row in records[sequence].frame]
+
+    def act_checked(self, plan: object) -> dict[str, object]:
+        records = self._bound_history()
+        self._require_open()
+        if type(plan) is not list or not 1 <= len(plan) <= 20:
+            raise ArcBrokerError("unavailable")
+        try:
+            checked = [validate_prediction(item, current_levels=self._current.levels_completed) for item in plan]
+        except ArcPredictionError:
+            raise ArcBrokerError("unavailable") from None
+        transitions: list[ArcTransition] = []
+        stop_reason = "matched"
+        mismatch: dict[str, object] | None = None
+        for name, data, expected in checked:
+            if (
+                self._primitive_actions >= self._game.action_cap
+                or (name == "RESET" and self._level_gameplay_actions == 0)
+                or (name != "RESET" and (
+                    self._terminal_reason == "reset-required"
+                    or name not in self._current.available_actions
+                ))
+            ):
+                stop_reason = "action-unavailable"
+                break
+            previous_levels = self._current.levels_completed
+            batch = self.act((ArcAction(name, data),))
+            transitions.extend(batch.transitions)
+            record = records[-1]
+            cell = expected.get("cell")
+            mismatch = None
+            if cell is not None:
+                cell = cast(dict[str, int], cell)
+                x, y = cell["x"], cell["y"]
+                if y >= len(record.frame) or x >= len(record.frame[0]) or record.frame[y][x] != cell["value"]:
+                    mismatch = {"cell": dict(cell)}
+            for key, actual in (
+                ("frame_sha256", record.after_frame_sha256),
+                ("levels_completed", record.levels_completed),
+                ("state", record.state),
+            ):
+                if key in expected and expected[key] != actual:
+                    mismatch = {**(mismatch or {}), key: expected[key]}
+            if mismatch is not None:
+                stop_reason = "prediction-mismatch"
+                break
+            if record.levels_completed > previous_levels:
+                stop_reason = "level-advanced"
+                break
+            if record.state == "GAME_OVER":
+                stop_reason = "game-over"
+                break
+            if self._primitive_actions >= self._game.action_cap:
+                stop_reason = "action-cap"
+                break
+        result = ArcActResult(len(transitions), self._current.levels_completed - self._initial.levels_completed, tuple(transitions))
+        return {
+            "applied_count": result.applied_count,
+            "stop_reason": stop_reason,
+            "mismatch": mismatch,
+            "observation": self._current,
+            "terminal": self._status(),
+            "batch": result,
+            "unexecuted_count": len(plan) - result.applied_count,
+        }
 
     def _require_open(self) -> None:
         if self._terminal_reason not in {"active", "reset-required"}:
@@ -303,6 +409,20 @@ class ArcBroker:
                 after.levels_completed - self._initial.levels_completed,
                 action.data,
             )
+            if self._history is not None:
+                try:
+                    record = ArcHistoryRecord.following(
+                        self._history[-1], action=action,
+                        before_state_sha256=transition.before_sha256,
+                        after_state_sha256=transition.after_sha256,
+                        frame=after.frame[-1], levels_completed=after.levels_completed,
+                        state=after.state,
+                    )
+                except ArcPredictionError:
+                    self._failed_action = action.name
+                    self._terminal_reason = "engine-invalid"
+                    raise ArcBrokerError("unavailable") from None
+                self._history.append(record)
             self._journal.append(transition)
             transitions.append(transition)
             self._current = after

@@ -106,6 +106,14 @@ class _FullGameEngine(_Engine):
         return self.observe()
 
 
+class _HistoryEngine(_Engine):
+    def observe(self) -> dict[str, object]:
+        value = super().observe()
+        value["available_actions"] = ["ACTION1"]
+        value["frame"] = [[[len(self.calls)]]]
+        return value
+
+
 def _broker(*, level_after: int | None = None, raises_on: int | None = None):
     from asterion.applications.prime.p7.broker import ArcBroker
 
@@ -114,6 +122,127 @@ def _broker(*, level_after: int | None = None, raises_on: int | None = None):
 
 
 class TestNativeP7Broker(unittest.TestCase):
+    def test_bound_history_records_stable_frames_and_distinct_hashes(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.score import digest
+
+        broker = ArcBroker(engine=_HistoryEngine(), game=P7GameSelection("ls20-9607627b", 0, 2))
+        broker.bind_history("run-1")
+        broker.act(("ACTION1",))
+        page = broker.history(0, 32)
+        self.assertEqual([row["sequence"] for row in page], [0, 1])
+        self.assertEqual(broker.frame_at(0), [[0]])
+        self.assertEqual(broker.frame_at(1), [[1]])
+        self.assertEqual(page[1]["before_state_sha256"], broker.journal[0].before_sha256)
+        self.assertEqual(page[1]["after_state_sha256"], broker.journal[0].after_sha256)
+        self.assertEqual(page[1]["after_frame_sha256"], digest(((1,),)))
+        self.assertNotEqual(page[1]["after_frame_sha256"], page[1]["after_state_sha256"])
+        page[1]["changed_cells"].append((0, 0, 0, 9))
+        self.assertEqual(broker.history(0, 32)[1]["changed_cells"], [(0, 0, 0, 1)])
+
+    def test_history_binding_and_page_failures_are_safe(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+
+        broker = ArcBroker(engine=_HistoryEngine())
+        for call in (lambda: broker.history(0, 1), lambda: broker.frame_at(0),
+                     lambda: broker.act_checked([])):
+            with self.subTest(call=call), self.assertRaisesRegex(ArcBrokerError, "^unavailable$"):
+                call()
+        for run_id in ("", "é", 3):
+            with self.subTest(run_id=run_id), self.assertRaisesRegex(ArcBrokerError, "^unavailable$"):
+                broker.bind_history(run_id)
+        broker.bind_history("run-1")
+        with self.assertRaisesRegex(ArcBrokerError, "^unavailable$"):
+            broker.bind_history("run-2")
+        for call in (lambda: broker.history(True, 1), lambda: broker.history(0, 33),
+                     lambda: broker.frame_at(1), lambda: broker.frame_at(False)):
+            with self.subTest(call=call), self.assertRaisesRegex(ArcBrokerError, "^unavailable$"):
+                call()
+
+    def test_checked_plan_stops_on_first_mismatch_without_tail_dispatch(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        engine = _HistoryEngine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history("run-1")
+        plan = [
+            {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 9}}},
+            {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 2}}},
+        ]
+        result = broker.act_checked(plan)
+        self.assertEqual((result["applied_count"], result["unexecuted_count"]), (1, 1))
+        self.assertEqual(result["stop_reason"], "prediction-mismatch")
+        self.assertEqual(engine.calls, ["ACTION1"])
+        self.assertEqual(len(broker.journal), 1)
+        self.assertEqual(result["batch"].applied_count, 1)
+        self.assertEqual(result["mismatch"], {"cell": {"x": 0, "y": 0, "value": 9}})
+
+    def test_checked_plan_stops_at_level_game_over_and_cap(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        plan = [{"action": {"name": "ACTION1", "data": {}}, "expect": {"levels_completed": 1}},
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"state": "WIN"}}]
+        advanced = ArcBroker(engine=_Engine(level_after=1), game=P7GameSelection("ls20-9607627b", 0, 2))
+        advanced.bind_history("run-1")
+        self.assertEqual(advanced.act_checked(plan)["stop_reason"], "level-advanced")
+        self.assertEqual(len(advanced.journal), 1)
+        failed = ArcBroker(engine=_Engine(game_over_after=1))
+        failed.bind_history("run-2")
+        game_over_plan = [{"action": {"name": "ACTION1", "data": {}}, "expect": {"state": "GAME_OVER"}}] * 2
+        self.assertEqual(failed.act_checked(game_over_plan)["stop_reason"], "game-over")
+        self.assertEqual(len(failed.journal), 1)
+        capped = ArcBroker(engine=_HistoryEngine(), game=P7GameSelection("ls20-9607627b", 0, 2, action_cap_override=1))
+        capped.bind_history("run-3")
+        cap_plan = [{"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}}] * 2
+        self.assertEqual(capped.act_checked(cap_plan)["stop_reason"], "action-cap")
+        self.assertEqual(len(capped.journal), 1)
+
+    def test_checked_plan_prechecks_entire_shape_before_dispatch(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+
+        engine = _HistoryEngine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history("run-1")
+        plan = [{"action": {"name": "ACTION1", "data": {}}, "expect": {"state": "WIN"}},
+                {"action": {"name": "ACTION2", "data": {}}, "expect": {"state": "NOT_FINISHED"}}]
+        with self.assertRaisesRegex(ArcBrokerError, "^unavailable$"):
+            broker.act_checked(plan)
+        self.assertEqual(engine.calls, [])
+
+    def test_checked_plan_reports_unavailable_action_without_dispatch(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        engine = _HistoryEngine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history("run-1")
+        result = broker.act_checked([
+            {"action": {"name": "ACTION2", "data": {}}, "expect": {"state": "WIN"}},
+            {"action": {"name": "ACTION1", "data": {}}, "expect": {"state": "WIN"}},
+        ])
+        self.assertEqual((result["stop_reason"], result["applied_count"], result["unexecuted_count"]),
+                         ("action-unavailable", 0, 2))
+        self.assertEqual(engine.calls, [])
+
+    def test_oversized_history_page_is_rejected_without_losing_records(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+
+        class LargeHistoryEngine(_HistoryEngine):
+            def observe(self) -> dict[str, object]:
+                value = super().observe()
+                value["frame"] = [[[len(self.calls) % 2] * 9 for _ in range(9)]]
+                return value
+
+        broker = ArcBroker(engine=LargeHistoryEngine())
+        broker.bind_history("run-1")
+        for _ in range(32):
+            broker.act(("ACTION1",))
+        with self.assertRaisesRegex(ArcBrokerError, "^unavailable$"):
+            broker.history(0, 32)
+        self.assertEqual(broker.history(32, 1)[0]["sequence"], 32)
+
+
     def test_full_game_requires_win_and_dynamic_cap(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import P7GameSelection
