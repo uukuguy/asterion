@@ -30,6 +30,10 @@ _SUMMARY_KEYS = {
     "sealed_trace",
 }
 _CURRENT_SUMMARY_KEYS = _SUMMARY_KEYS | {"completed_prefix"}
+_MODERN_SUMMARY_KEYS = _CURRENT_SUMMARY_KEYS | {
+    "experiment",
+    "prediction_accounting",
+}
 _DIGEST_KEYS = ("summary", "trace", "trace_seal", "recording", "worker_cells")
 _LEGACY_GAME_ID = "ls20-9607627b"
 _LEGACY_WIN_LEVELS = 7
@@ -504,6 +508,60 @@ def _reasoning(path: Path) -> tuple[ReasoningCellFact, ...]:
     return tuple(cells)
 
 
+def _modern_summary_metadata(summary: Mapping[str, object]) -> None:
+    """Validate runner metadata added after the original summary contract."""
+
+    experiment = summary.get("experiment")
+    accounting = summary.get("prediction_accounting")
+    if not isinstance(experiment, Mapping) or not isinstance(accounting, Mapping):
+        _reject()
+    if set(experiment) != {
+        "action_cap",
+        "deadline_ms",
+        "game_id",
+        "model",
+        "prediction_variant",
+        "seed",
+        "stall_seconds",
+        "target_level",
+    }:
+        _reject()
+    if (
+        _integer(experiment["action_cap"], minimum=1) < 1
+        or (
+            experiment["deadline_ms"] is not None
+            and _integer(experiment["deadline_ms"], minimum=1) < 1
+        )
+        or not _text(experiment["game_id"])
+        or not _text(experiment["model"])
+        or not _text(experiment["prediction_variant"])
+        or type(experiment["seed"]) is not int
+        or (
+            experiment["stall_seconds"] is not None
+            and _integer(experiment["stall_seconds"], minimum=0) < 0
+        )
+        or _integer(experiment["target_level"], minimum=1) < 1
+    ):
+        _reject()
+    accounting_keys = {
+        "checked_plan_errors",
+        "checked_plans",
+        "first_sequence",
+        "frame_queries",
+        "history_queries",
+        "history_records_returned",
+        "last_sequence",
+        "matched_expectations",
+        "mismatches",
+        "uncertain_items",
+        "unexecuted_items",
+    }
+    if set(accounting) != accounting_keys:
+        _reject()
+    for value in accounting.values():
+        _integer(value)
+
+
 def read_run_evidence(run_root: Path) -> RunEvidence:
     """Read and reconcile one explicit absolute private run directory."""
 
@@ -524,11 +582,14 @@ def read_run_evidence(run_root: Path) -> RunEvidence:
     recording_path = recordings[0]
     summary = _json(summary_path)
     if (
-        set(summary) != _SUMMARY_KEYS and set(summary) != _CURRENT_SUMMARY_KEYS
+        set(summary)
+        not in (_SUMMARY_KEYS, _CURRENT_SUMMARY_KEYS, _MODERN_SUMMARY_KEYS)
         or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
         or ("completed_prefix" in summary and summary["completed_prefix"] is not None)
     ):
         _reject()
+    if set(summary) == _MODERN_SUMMARY_KEYS:
+        _modern_summary_metadata(summary)
     run_id = _text(summary.get("run_id"))
     if run_id != run_root.name or summary.get("cleanup_complete") is not True:
         _reject()

@@ -158,6 +158,7 @@ def write_completed_fixture(
     action_data: dict[str, int] | None = None,
     reset_during_run: bool = False,
     recovered: bool = False,
+    modern_summary: bool = False,
 ) -> Path:
     run_root = root / "fixture-run"
     trace_root = run_root / "trace"
@@ -327,6 +328,30 @@ def write_completed_fixture(
     }
     if not recovered:
         summary["completed_prefix"] = None
+    if modern_summary:
+        summary["experiment"] = {
+            "action_cap": 25,
+            "deadline_ms": None,
+            "game_id": "fixture-game",
+            "model": "deepseek-v4-flash",
+            "prediction_variant": "verified",
+            "seed": 0,
+            "stall_seconds": None,
+            "target_level": 1,
+        }
+        summary["prediction_accounting"] = {
+            "checked_plan_errors": 0,
+            "checked_plans": 0,
+            "first_sequence": 0,
+            "frame_queries": 1,
+            "history_queries": 0,
+            "history_records_returned": 0,
+            "last_sequence": 1,
+            "matched_expectations": 0,
+            "mismatches": 0,
+            "uncertain_items": 0,
+            "unexecuted_items": 0,
+        }
     (run_root / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -364,6 +389,24 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
         evidence = read_run_evidence(write_completed_fixture(self.root))
 
         self.assertEqual(evidence.levels_completed, 1)
+
+    def test_accepts_modern_summary_metadata_without_relaxing_evidence(self) -> None:
+        evidence = read_run_evidence(
+            write_completed_fixture(self.root, modern_summary=True)
+        )
+
+        self.assertEqual(evidence.game_id, "fixture-game")
+        self.assertEqual(len(evidence.actions), 1)
+
+    def test_rejects_malformed_modern_summary_metadata(self) -> None:
+        run_root = write_completed_fixture(self.root, modern_summary=True)
+        summary_path = run_root / "summary.json"
+        summary = json.loads(summary_path.read_text())
+        summary["prediction_accounting"]["mismatches"] = "zero"
+        summary_path.write_text(json.dumps(summary, sort_keys=True), encoding="utf-8")
+
+        with self.assertRaisesRegex(RunStoryError, "evidence-invalid"):
+            read_run_evidence(run_root)
 
     def test_accepts_click_data_only_when_recording_matches_trace(self) -> None:
         evidence = read_run_evidence(
