@@ -28,6 +28,8 @@ from asterion.applications.prime.p7.solutions import load_best_prefix
 
 
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_FIRST_ROUND_EXCLUDED_GAME_IDS = frozenset({"ls20-9607627b"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,11 +44,15 @@ class SweepConfig:
     # remaining first-level human baselines total 851 actions, implying ~2.95M
     # tokens and 3h13m at that rate.  Old telemetry omitted cache input; the
     # operator authorized a bounded 3.5M-token / 4h first sweep.
-    global_token_cap: int = 3_500_000
-    wallclock_cap: float = 4 * 60 * 60
-    run_timeout: float = 30 * 60
+    global_token_cap: int | None = 3_500_000
+    wallclock_cap: float | None = 4 * 60 * 60
+    run_timeout: float | None = 30 * 60
     max_attempts: int | None = None
     guest_machine: str | None = "ubuntu"
+    # This is an explicit, separately authorized local research pass. It
+    # visits only games without a verified L1 prefix; no token, wallclock, or
+    # per-attempt deadline is installed. The normal sweep stays bounded.
+    unbounded_first_round: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +65,9 @@ class SweepResult:
     output_tokens: int
     stopped_reason: str
     runs: tuple[str, ...]
+    preexisting_level_one: tuple[str, ...] = ()
+    newly_verified_level_one: tuple[str, ...] = ()
+    attempted_unsolved_level_one: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,15 +214,22 @@ class SweepScheduler:
     def __init__(self, config: SweepConfig) -> None:
         if config.seed != 0:
             raise ValueError("P7 sweep seed must be zero")
-        if (
-            type(config.global_token_cap) is not int
-            or config.global_token_cap <= 0
-            or not math.isfinite(config.wallclock_cap)
-            or config.wallclock_cap <= 0
-            or not math.isfinite(config.run_timeout)
-            or config.run_timeout <= 0
-            or (config.max_attempts is not None and (type(config.max_attempts) is not int or config.max_attempts < 0))
-        ):
+        bounded_budget = (
+            type(config.global_token_cap) is int and config.global_token_cap > 0
+            and type(config.wallclock_cap) in (int, float) and math.isfinite(config.wallclock_cap) and config.wallclock_cap > 0
+            and type(config.run_timeout) in (int, float) and math.isfinite(config.run_timeout) and config.run_timeout > 0
+        )
+        if config.unbounded_first_round:
+            if (
+                config.global_token_cap not in (None, 3_500_000)
+                or config.wallclock_cap not in (None, 4 * 60 * 60)
+                or config.run_timeout not in (None, 30 * 60)
+                or config.max_attempts is not None
+            ):
+                raise ValueError("P7 unbounded first round cannot have a budget cap")
+        elif not bounded_budget:
+            raise ValueError("P7 sweep budget is invalid")
+        if config.max_attempts is not None and (type(config.max_attempts) is not int or config.max_attempts < 0):
             raise ValueError("P7 sweep budget is invalid")
         if config.guest_machine is None and config.command == ("make", "asterion-prime-p7-sweep-attempt"):
             raise ValueError("P7 sweep guest containment is required")
@@ -240,7 +256,11 @@ class SweepScheduler:
         # Explicit selections are still validated against the catalog when it
         # is available.  Keeping them in the empty-catalog case makes the
         # scheduler unit-testable and lets the child report the asset error.
-        return tuple(game for game in selected if not metadata or game in metadata)
+        return tuple(
+            game for game in selected
+            if (not metadata or game in metadata)
+            and (not self.config.unbounded_first_round or game not in _FIRST_ROUND_EXCLUDED_GAME_IDS)
+        )
 
     def _next_level(self, game_id: str) -> int:
         if game_id in self._progress:
@@ -252,8 +272,11 @@ class SweepScheduler:
         metadata = self._metadata()[game_id]
         return level > int(metadata["win_levels"])
 
-    def _timeout_for_level(self, game_id: str, level: int) -> float:
+    def _timeout_for_level(self, game_id: str, level: int) -> float | None:
         """Scale the attempt window from the measured 272s / 20 actions."""
+
+        if self.config.unbounded_first_round:
+            return None
 
         metadata = self._metadata().get(game_id)
         baselines = metadata.get("baseline_actions") if metadata else None
@@ -293,11 +316,56 @@ class SweepScheduler:
                 result.add((game_id, 2))
         return frozenset(result)
 
-    def _attempt(self, game_id: str, level: int, timeout: float) -> int:
+    def _verified_level_one_games(self) -> frozenset[str]:
+        """Read only strict, sealed L1 receipts for the first-round report.
+
+        Recovered AR25 evidence is deliberately summary-backed: its verified
+        receipt is sealed, but its replay prefix is not reusable by
+        ``load_best_prefix``.  Treating the receipt as absent would rerun an
+        already verified L1.
+        """
+
+        known = set(self._metadata())
+        verified: set[str] = set()
+        try:
+            runs = tuple(path for path in self.config.runs_root.iterdir() if path.is_dir() and not path.is_symlink())
+        except OSError:
+            return frozenset()
+        for run in runs:
+            if _RUN_ID.fullmatch(run.name) is None:
+                continue
+            summary_path = run / "summary.json"
+            if summary_path.is_symlink():
+                continue
+            summary = _read_json(summary_path)
+            broker = summary.get("broker") if summary else None
+            receipt = summary.get("receipt") if summary else None
+            if (
+                not summary
+                or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+                or summary.get("run_id") != run.name
+                or any(summary.get(key) is not True for key in ("replay_verified", "sealed_trace", "cleanup_complete"))
+                or type(broker) is not dict
+                or type(receipt) is not dict
+                or broker.get("game_id") not in known
+                or broker.get("seed") != 0
+                or broker.get("terminal_reason") not in {"level-completed", "game-won"}
+                or type(broker.get("levels_completed")) is not int
+                or broker["levels_completed"] < 1
+                or receipt.get("completed_level_count") != broker["levels_completed"]
+                or receipt.get("primitive_action_count") != broker.get("primitive_actions")
+                or type(receipt.get("receipt_sha256")) is not str
+                or _SHA256.fullmatch(receipt["receipt_sha256"]) is None
+            ):
+                continue
+            verified.add(broker["game_id"])
+        return frozenset(verified)
+
+    def _attempt(self, game_id: str, level: int, timeout: float | None) -> int:
         before = _run_names(self.config.runs_root)
         process: subprocess.Popen[str] | None = None
         observed: dict[str, tuple[int, int]] = {}
-        deadline = time.monotonic() + timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
         unit = "asterion-p7-" + secrets.token_hex(16) + ".service"
         cleaned = False
 
@@ -352,7 +420,7 @@ class SweepScheduler:
                     self._stop_reason = "usage-trace-integrity-error"
                 observed[run_id] = (max(old[0], usage[0]), max(old[1], usage[1]))
             reported = self._input_tokens + self._output_tokens + sum(sum(value) for value in observed.values())
-            if reported >= self.config.global_token_cap and self._stop_reason == "completed":
+            if not self.config.unbounded_first_round and self.config.global_token_cap is not None and reported >= self.config.global_token_cap and self._stop_reason == "completed":
                 self._stop_reason = "token-cap"
 
         try:
@@ -362,7 +430,7 @@ class SweepScheduler:
                 cwd=self.config.repo_root,
                 env={**os.environ, "ASTERION_PRIME_P7_SEED": "0",
                      "ASTERION_PRIME_P7_ATTEMPT_UNIT": unit,
-                     "ASTERION_PRIME_P7_ATTEMPT_SECONDS": str(min(timeout, 4 * 60 * 60))},
+                     "ASTERION_PRIME_P7_ATTEMPT_SECONDS": "0" if timeout is None else str(min(timeout, 4 * 60 * 60))},
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -376,13 +444,13 @@ class SweepScheduler:
                     if self._stop_reason != "completed":
                         stop_child()
                         break
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
+                    remaining = None if deadline is None else deadline - time.monotonic()
+                    if remaining is not None and remaining <= 0:
                         self._stop_reason = "run-timeout"
                         stop_child()
                         break
                     try:
-                        process.communicate(timeout=min(0.25, remaining))
+                        process.communicate(timeout=0.25 if remaining is None else min(0.25, remaining))
                         monitor()
                         break
                     except subprocess.TimeoutExpired:
@@ -440,16 +508,28 @@ class SweepScheduler:
         completed: list[str] = []
         deferred: list[str] = []
         attempted = 0
+        preexisting_level_one: list[str] = []
+        newly_verified_level_one: list[str] = []
+        attempted_unsolved_level_one: list[str] = []
         started = time.monotonic()
+        if self.config.unbounded_first_round:
+            verified_level_one = self._verified_level_one_games()
+            unstarted: list[str] = []
+            for game_id in active:
+                if game_id not in verified_level_one and self._next_level(game_id) == 1:
+                    unstarted.append(game_id)
+                else:
+                    preexisting_level_one.append(game_id)
+            active = unstarted
         while active:
             next_active: list[str] = []
             for game_id in active:
                 if self._stop_reason != "completed":
                     break
-                if time.monotonic() - started >= self.config.wallclock_cap:
+                if not self.config.unbounded_first_round and self.config.wallclock_cap is not None and time.monotonic() - started >= self.config.wallclock_cap:
                     self._stop_reason = "wallclock-cap"
                     break
-                if self._input_tokens + self._output_tokens >= self.config.global_token_cap:
+                if not self.config.unbounded_first_round and self.config.global_token_cap is not None and self._input_tokens + self._output_tokens >= self.config.global_token_cap:
                     self._stop_reason = "token-cap"
                     break
                 if self.config.max_attempts is not None and attempted >= self.config.max_attempts:
@@ -465,9 +545,11 @@ class SweepScheduler:
                     continue
                 attempted += 1
                 print(f"[p7-sweep] attempt game={game_id} level={level}", file=sys.stderr, flush=True)
-                remaining = self.config.wallclock_cap - (time.monotonic() - started)
-                returncode = self._attempt(game_id, level, min(self._timeout_for_level(game_id, level), remaining))
-                if self._stop_reason == "run-timeout" and time.monotonic() - started >= self.config.wallclock_cap:
+                remaining = None if self.config.unbounded_first_round or self.config.wallclock_cap is None else self.config.wallclock_cap - (time.monotonic() - started)
+                level_timeout = self._timeout_for_level(game_id, level)
+                timeout = level_timeout if remaining is None else min(level_timeout, remaining)
+                returncode = self._attempt(game_id, level, timeout)
+                if self._stop_reason == "run-timeout" and not self.config.unbounded_first_round and self.config.wallclock_cap is not None and time.monotonic() - started >= self.config.wallclock_cap:
                     self._stop_reason = "wallclock-cap"
                 if self._stop_reason != "completed":
                     print(f"[p7-sweep] stopped game={game_id} level={level} reason={self._stop_reason}", file=sys.stderr, flush=True)
@@ -483,12 +565,18 @@ class SweepScheduler:
                     flush=True,
                 )
                 if succeeded:
+                    if self.config.unbounded_first_round and level == 1:
+                        newly_verified_level_one.append(game_id)
+                    if self.config.unbounded_first_round:
+                        continue
                     next_level = self._next_level(game_id)
                     if self._is_complete(game_id, next_level):
                         completed.append(game_id)
                     else:
                         next_active.append(game_id)
                 else:
+                    if self.config.unbounded_first_round and level == 1:
+                        attempted_unsolved_level_one.append(game_id)
                     blocked.append(game_id)
             if self._stop_reason != "completed":
                 break
@@ -502,6 +590,9 @@ class SweepScheduler:
             self._output_tokens,
             self._stop_reason,
             tuple(self._new_runs),
+            tuple(sorted(set(preexisting_level_one))),
+            tuple(sorted(set(newly_verified_level_one))),
+            tuple(sorted(set(attempted_unsolved_level_one))),
         )
 
 
@@ -538,6 +629,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--guest-machine", default=os.environ.get("PRIME_ORB_MACHINE", "ubuntu"))
     parser.add_argument("--run-timeout", type=float, default=30 * 60)
     parser.add_argument("--max-attempts", type=int)
+    parser.add_argument("--unbounded-first-round", action="store_true")
     args = parser.parse_args(argv)
     if args.seed != 0:
         parser.error("--seed must be 0; the P7 Makefile fixes the official game seed")
@@ -548,12 +640,13 @@ def main(argv: list[str] | None = None) -> int:
             runs_root=runs_root,
             games=tuple(args.games),
             seed=args.seed,
-            global_token_cap=args.token_cap,
-            wallclock_cap=args.wallclock_seconds,
-            run_timeout=args.run_timeout,
+            global_token_cap=None if args.unbounded_first_round else args.token_cap,
+            wallclock_cap=None if args.unbounded_first_round else args.wallclock_seconds,
+            run_timeout=None if args.unbounded_first_round else args.run_timeout,
             max_attempts=args.max_attempts,
             repo_root=args.operator_root,
             guest_machine=args.guest_machine,
+            unbounded_first_round=args.unbounded_first_round,
         )
     ).run()
     print(json.dumps({"schema": "asterion.prime.p7-sweep/v1", **asdict(result)}, sort_keys=True))

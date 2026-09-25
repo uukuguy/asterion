@@ -25,9 +25,13 @@ def _unit(value: str) -> str:
     return value
 
 
-def launch(unit: str, seconds: float, command: list[str]) -> int:
+def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     _unit(unit)
-    if not math.isfinite(seconds) or not 0 < seconds <= 4 * 60 * 60 or not command:
+    # The host-only sweep driver uses zero as an explicit wire sentinel for
+    # its separately authorized unbounded first-round campaign.
+    if seconds == 0:
+        seconds = None
+    if (seconds is not None and (not math.isfinite(seconds) or not 0 < seconds <= 4 * 60 * 60)) or not command:
         raise ValueError("invalid attempt bounds")
     if not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
         raise ValueError("guest cgroup unavailable")
@@ -35,9 +39,11 @@ def launch(unit: str, seconds: float, command: list[str]) -> int:
         "systemd-run", "--quiet", "--wait", "--pipe", "--collect",
         "--service-type=exec", f"--unit={unit}",
         "--property=KillMode=control-group", "--property=TimeoutStopSec=5s",
-        "--property=SendSIGKILL=yes", f"--property=RuntimeMaxSec={seconds}s",
+        "--property=SendSIGKILL=yes",
         "--property=WorkingDirectory=/tmp",
     ]
+    if seconds is not None:
+        args.append(f"--property=RuntimeMaxSec={seconds}s")
     args.extend(f"--setenv={name}={os.environ[name]}" for name in _ENVIRONMENT if name in os.environ)
     # systemd-run owns no private provider settings; the operator reads its .env.
     # Replace the Orb-managed process: no launcher child can outlive a killed

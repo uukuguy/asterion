@@ -9,6 +9,17 @@ from tools.run_prime_p7_guest import cleanup, launch
 
 
 class TestPrimeP7Guest(unittest.TestCase):
+    def test_launch_without_deadline_preserves_cgroup_containment(self) -> None:
+        with (
+            patch('tools.run_prime_p7_guest.Path.is_file', return_value=True),
+            patch('tools.run_prime_p7_guest.os.execvp', side_effect=SystemExit(0)) as call,
+        ):
+            with self.assertRaises(SystemExit):
+                launch('asterion-p7-' + 'a' * 32 + '.service', None, ['python3', '-V'])
+        args = call.call_args.args[1]
+        self.assertIn('--property=KillMode=control-group', args)
+        self.assertFalse(any(arg.startswith('--property=RuntimeMaxSec=') for arg in args))
+
     def test_launch_contains_descendants_without_forwarding_credentials(self) -> None:
         with (
             patch('tools.run_prime_p7_guest.Path.is_file', return_value=True),
