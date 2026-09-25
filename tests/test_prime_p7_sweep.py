@@ -10,6 +10,30 @@ from pathlib import Path
 
 
 class TestPrimeP7Sweep(unittest.TestCase):
+    def test_action_stall_monitoring_is_controlled_by_config_not_second_round(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(
+                root / "arc", root / "runs", command=("attempt",), guest_machine=None,
+                action_stall_seconds=300, validate_action_stall=True,
+            ))
+
+        self.assertEqual(scheduler.config.action_stall_seconds, 300)
+        self.assertTrue(scheduler.config.validate_action_stall)
+        self.assertFalse(scheduler.config.unbounded_second_round)
+
+    def test_level_one_execution_stall_validator_is_explicitly_enabled(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        scheduler = SweepScheduler(SweepConfig(
+            Path("arc"), Path("runs"), action_stall_seconds=300, validate_action_stall=True,
+        ))
+
+        self.assertFalse(scheduler.config.unbounded_second_round)
+        self.assertTrue(scheduler.config.validate_action_stall)
+
     def test_second_round_stall_window_is_five_minutes_without_new_action(self) -> None:
         from tools.run_prime_p7_sweep import _ACTION_STALL_SECONDS, _action_stall_reached
 

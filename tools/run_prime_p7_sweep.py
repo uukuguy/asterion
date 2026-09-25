@@ -83,6 +83,10 @@ class SweepConfig:
     # per-game limit. It has no aggregate token or wallclock budget.
     unbounded_first_round: bool = False
     unbounded_second_round: bool = False
+    # Optional explicit five-minute action stall control for operator passes.
+    # The legacy second round remains enabled by its existing flag for compatibility.
+    action_stall_seconds: int | None = None
+    validate_action_stall: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +312,13 @@ class SweepScheduler:
             raise ValueError("P7 research round selection is ambiguous")
         if config.unbounded_second_round and config.run_timeout != 30 * 60:
             raise ValueError("P7 second round requires a 30-minute attempt limit")
+        if config.action_stall_seconds is not None and (
+            type(config.action_stall_seconds) is not int
+            or config.action_stall_seconds != _ACTION_STALL_SECONDS
+        ):
+            raise ValueError("P7 action-stall limit is invalid")
+        if config.validate_action_stall and config.action_stall_seconds != _ACTION_STALL_SECONDS:
+            raise ValueError("P7 action-stall validation requires the five-minute limit")
         bounded_budget = (
             type(config.global_token_cap) is int and config.global_token_cap > 0
             and type(config.wallclock_cap) in (int, float) and math.isfinite(config.wallclock_cap) and config.wallclock_cap > 0
@@ -686,8 +697,9 @@ class SweepScheduler:
         """Admit a supervisor stall with a hash-valid unsealed trace and receipt."""
 
         if (
-            not self.config.unbounded_second_round or not _RUN_ID.fullmatch(run_id)
-            or type(target_level) is not int or target_level < 2
+            not (self.config.unbounded_second_round or self.config.validate_action_stall)
+            or not _RUN_ID.fullmatch(run_id)
+            or type(target_level) is not int or target_level < 1
         ):
             return False
         run = self.config.runs_root / run_id
@@ -711,7 +723,7 @@ class SweepScheduler:
                 or any(row["kind"] not in {"arc.action", "arc.usage.reported", "arc.run.partial"} for row in entries)
                 or sum(row["kind"] == "arc.action" for row in entries) != receipt["action_count"]
                 or _recorded_game_id(run, {game_id}) != game_id
-                or not _trace_reached_level(entries, 1)
+                or (target_level > 1 and not _trace_reached_level(entries, target_level - 1))
             ):
                 return False
             usage = read_run_usage(run, in_progress=True)
@@ -729,6 +741,13 @@ class SweepScheduler:
             if not actions:
                 return False
             prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
+            if target_level == 1:
+                # A Level 1 stall is valid only for a game without an already
+                # verified Level 1 prefix; actions must remain at level zero.
+                if prefix is not None and prefix.levels_completed >= 1:
+                    return False
+                if len(actions) > baselines[0]:
+                    return False
             if target_level > 2 and (
                 prefix is None or prefix.levels_completed != target_level - 1
                 or not prefix.transitions or len(actions) < len(prefix.transitions)
@@ -752,6 +771,8 @@ class SweepScheduler:
                 if sequence > 1 and action.get("before_sha256") != actions[sequence - 2].get("after_sha256"):
                     return False
                 previous_level = level
+            if target_level == 1:
+                return True
             if target_level > 2 and prefix is not None:
                 prefix_actions = len(prefix.transitions)
                 if (
@@ -962,7 +983,11 @@ class SweepScheduler:
                 if usage[3] or usage[0] < old[0] or usage[1] < old[1]:
                     self._stop_reason = "usage-trace-integrity-error"
                 observed[run_id] = (max(old[0], usage[0]), max(old[1], usage[1]))
-                if self.config.unbounded_second_round and self._stop_reason == "completed":
+                if (
+                    (self.config.unbounded_second_round
+                     or self.config.action_stall_seconds == _ACTION_STALL_SECONDS)
+                    and self._stop_reason == "completed"
+                ):
                     action_count = _trace_action_count(run)
                     if action_count is not None and action_count > last_action_count:
                         last_action_count = action_count
@@ -971,7 +996,8 @@ class SweepScheduler:
             if not self._is_research_round(self.config) and self.config.global_token_cap is not None and reported >= self.config.global_token_cap and self._stop_reason == "completed":
                 self._stop_reason = "token-cap"
             if (
-                self.config.unbounded_second_round
+                (self.config.unbounded_second_round
+                 or self.config.action_stall_seconds == _ACTION_STALL_SECONDS)
                 and self._stop_reason == "completed"
                 and started_at
                 and _action_stall_reached(started_at, last_action_at or started_at, time.monotonic())
