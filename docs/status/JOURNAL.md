@@ -3175,3 +3175,4 @@
 - 2026-09-26 G50T 首次重试未创建 run、未产生动作：OrbStack 命令通道失联；仅重启 P7 来宾未恢复，处于 starting，另一来宾零模型 echo 也超时。
 - 8ac5bcae 增加付费重试前的 OrbStack 命令探针，来宾失联时直接拒绝启动。
 - 2026-09-26 安装版 G50T、FT09、CD82 重试预检均 ready；15 项聚焦测试和 docs-check 通过，仍未产生新的付费解题结果。
+- 2026-09-26 经用户授权执行 `orbctl restart --all`，四台本地虚拟机回到 running；P7 ubuntu 零模型 echo 与无遗留单元检查通过，G50T 首关重试已建立新 run 并产生动作。
