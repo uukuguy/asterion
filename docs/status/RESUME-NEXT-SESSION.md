@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-26 CST. Session active; this is a recovery checkpoint, not a handoff.
+> Updated: 2026-09-26 07:48 CST. Session active; this is a recovery checkpoint, not a handoff.
 
 ## 当前任务与授权
 
-用户已授权完成首关/二关广度重扫、做一次官方批量提交，并对失败题逐项诊断、修复和重试。广度轮、**一次**官方提交、G50T 首关诊断修复与一次成功重试均已完成。继续逐题诊断其余失败关卡；不得把失败动作视作已独立回放的答案，不要重复提交官方卡片。用户要求付费验证前避免大规模无关回归，维持每关人类动作上限、每题 30 分钟、5 分钟无动作停止线。
+用户已授权完成首关/二关广度重扫、做一次官方批量提交，并对失败题逐项诊断、修复和重试。广度轮、**一次**官方提交、G50T 首关诊断修复与一次成功重试、FT09 二关同题重试均已完成。继续逐题诊断其余失败关卡；不得把失败动作视作已独立回放的答案，不要重复提交官方卡片。用户要求付费验证前避免大规模无关回归，维持每关人类动作上限、每题 30 分钟、5 分钟无动作停止线。
 
 ## 已验证事实
 
@@ -17,14 +17,18 @@
 - 用户已授权 `orbctl restart --all`；四台来宾恢复 running，P7 ubuntu 零模型 echo 及无遗留服务检查通过。随后 G50T 新 run `p7-live-20260925220255-bedfcba9ad8301dd6c41279b` 运行到 30 动作/0 关时，用户指出尚无具体解题策略修复，操作员立即停止。该 run **未封存、未验证，不可视为正式失败或重试建议来源**；私有 `operator-interruption.json` 保存动作和用量计数，来宾无遗留进程。
 - `f44ce686`、`63072044`、`d8e4af70`、`0177f592` 实现并修订仅 OFFLINE 同题重试的稳定末帧无效动作守卫、局部预测与目标进展区分、可信前缀旁路。80 项相关测试、Ruff、安装版 G50T 零模型预检通过；预检只选旧封存失败 run，没有选中中断 run。
 - G50T 首关独立重试 `p7-live-20260925223031-f6d803c700b5000bf6a527f7` 在 **58/78 步**完成；`sealed_trace=true`、`replay_verified=true`、`cleanup_complete=true`，终态 `level-completed`，输入 7,923,704、输出 187,016 已回报 token。独立 retry manifest 未改广度账本；本地现有 **22/25** 题具已验证首关前缀，未解首关为 KA59、SK48、TN36。G50T 中文事实摘要网页在 `artifacts/arc-agi-3/exports/`，模型讲解未通过格式校验。
+- FT09 二关同题重试 `p7-live-20260925224920-33b4e846d793e3327a2ecd51` 在 **19 步**完成（10 首关前缀 + 9 新增二关动作）；`sealed_trace=true`、`replay_verified=true`、`cleanup_complete=true`，终态 `level-completed`，2/6 关卡通过，本地分 `14.285714`，输入 2,538,451、输出 77,963 已回报 token。预检选用同一题两个封存来源（首关已封存、二关 partial）加同 seed 与 22 动作上限；未改广度账本、未进入已关闭的官方卡片。Run-story bundle `sha256:1150da93a7c04edd4e52dd18d6a5228c786d0090e8d11063cb48617a3fd0fce0`，离线网页 `arc-agi-3-ft09-0d8bbf25-p7-live-20260925224920-33b4e846d793e3327a2ecd51-web-d3b09034f81b21375173.html`（SHA-256 `sha256:e699afe9e3319d43993c33311407720996e22ddee6bc2bf29b3c79a8bbc4de50`）；模型讲解未通过，网页使用确定性事实摘要。`make asterion-prime-p7-games` 现显示 FT09 升至 2/6 关；本地首关前缀仍为 22/25，未解首关为 KA59、SK48、TN36。
 
 ## 当前判断与未完成边界
 
 - 历史读取可能造成零动作停滞，属待实地验证假设；没有证据表明框架/SDK 动作映射错误。未解关不是已证明不可解。
-- G50T 修订后一次实跑成功，但该 run 没有触发 `REPLAN_REQUIRED` 或 `observation-no-change`，不能把成功归因于守卫，也不能声称稳定通过率提高。官方卡片是截至提交时的已解前缀成绩，后续 OFFLINE 重试不会自动进入这张卡片。
+- G50T 修订后一次实跑成功，但该 run 没有触发 `REPLAN_REQUIRED` 或 `observation-no-change`，不能把成功归因于守卫，也不能声称稳定通过率提高。
+- FT09 一次实跑成功，仅说明 `partial-failed` 证据读取路径正确并能解出更少动作的解，不构成对其他 L2 重试的可靠性估计。
+- 官方卡片是截至提交时的已解前缀成绩，后续 OFFLINE 重试不会自动进入这张卡片。
 
 ## 下一动作
 
-1. 对 FT09 L2 做已授权的独立 OFFLINE 重试，验证封存部分失败证据读取、已校验 L1 前缀重放与新的守卫；先做安装版零模型预检，再按人类动作、30 分钟、5 分钟停止线运行。
-2. 逐题处理 KA59、SK48、TN36 首关及其余未解二关；先诊断，再做相关最小修复和单题重试。只修复有证据的通用缺陷，勿写死场景或重复已通过的关卡。
-3. 每次新通过关卡核验 seal/replay/cleanup 与用量，导出中文网页，更新指南、证据和本检查点；不得擅自再次提交官方卡片。
+1. 选择下一题同题重试。优先候选：SC25 L2（28 ac 已封存失败，新作上限较低）、SB26 L2（41 ac）、SP80 L2（64 ac）。停滞关（CD82、LF52、LP85、TR87 L2）暂不重试，需先核对停滞证据读取与新守卫的兼容性。BP35 L2（68 ac 已封存失败）单次成本高，留待守卫效果在低难度题上被部分验证后再尝试。
+2. 对选定题先 `make p7-retry-preflight GAME=<alias>`：必须只选到已校验 L1 前缀和已校验同题旧记录；来宾连通性、seed 一致、动作上限核对均通过。
+3. 启动 `make p7-retry GAME=<alias>`：单次 OFFLINE 重试，30 分钟与 5 分钟无动作停止线维持，每次新通过关卡核验 seal/replay/cleanup 与用量，导出中文网页，更新 `prime-p7-games-and-official-results.md`、`ASTERION-PRIME-P7-EVIDENCE.md` 与本检查点。**不得擅自再次提交官方卡片。**
+4. L2 全部推进后再开始 KA59/SK48/TN36 首关同题重试；这三题目前没有已校验首关前缀，需先用普通 `solve` 走一遍。
