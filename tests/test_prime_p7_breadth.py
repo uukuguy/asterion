@@ -98,11 +98,15 @@ class TestPrimeP7Breadth(unittest.TestCase):
             controller = BreadthCampaignController(BreadthCampaignConfig(
                 root / "arc", root / "runs", root, root,
             ))
-            scheduler = controller._make_scheduler()
+            level_one = controller._make_scheduler(1)
+            level_two = controller._make_scheduler(2)
 
-        self.assertTrue(scheduler.config.unbounded_second_round)
-        self.assertIsNone(scheduler.config.global_token_cap)
-        self.assertIsNone(scheduler.config.wallclock_cap)
+        self.assertTrue(level_one.config.unbounded_first_round)
+        self.assertFalse(level_one.config.unbounded_second_round)
+        self.assertTrue(level_two.config.unbounded_second_round)
+        self.assertFalse(level_two.config.unbounded_first_round)
+        self.assertIsNone(level_one.config.global_token_cap)
+        self.assertIsNone(level_one.config.wallclock_cap)
 
     def test_run_finishes_level_one_queue_before_recomputing_level_two(self) -> None:
         from tools.run_prime_p7_breadth import BreadthCampaignConfig, BreadthCampaignController
@@ -164,6 +168,38 @@ class TestPrimeP7Breadth(unittest.TestCase):
 
         self.assertEqual(result.attempted, 0)
         attempt.assert_not_called()
+
+    def test_verified_entry_uses_its_run_after_a_later_prefix_exists(self) -> None:
+        import tools.run_prime_p7_breadth as breadth
+        from tools.run_prime_p7_breadth import BreadthCampaignConfig, BreadthCampaignController
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run = root / "runs" / "run-l1"
+            (run / "trace").mkdir(parents=True)
+            (run / "trace" / "prime-trace.jsonl").write_text("trace\n", encoding="utf-8")
+            controller = BreadthCampaignController(BreadthCampaignConfig(
+                root / "arc", root / "runs", root, root, guest_machine=None,
+            ))
+            controller._metadata = lambda: {
+                "aa11-00000000": {"baseline_actions": (5, 7), "win_levels": 2},
+            }
+            controller._best_prefix = lambda _game: (_ for _ in ()).throw(AssertionError("used global best prefix"))
+            entry = {
+                "game_id": "aa11-00000000", "target_level": 1, "run_id": "run-l1",
+                "outcome": "verified", "action_count": 1, "input_tokens": 3,
+                "output_tokens": 4, "stop_reason": "completed", "evidence_sha256": "sha256:" + "a" * 64,
+            }
+            rows = (
+                {"identities": breadth.P7_TRACE_IDENTITIES, "kind": "arc.action", "payload": {}, "sha256": "sha256:" + "b" * 64},
+                {"identities": breadth.P7_TRACE_IDENTITIES, "kind": "trace.sealed", "payload": {}, "sha256": "sha256:" + "a" * 64},
+            )
+            with patch.object(breadth, "_read_hash_chained_trace", return_value=rows), \
+                 patch.object(breadth, "read_run_usage", return_value=(3, 4, False, False)), \
+                 patch.object(breadth, "_recorded_game_id", return_value="aa11-00000000"), \
+                 patch.object(breadth, "_valid_attempt_summary", return_value=True), \
+                 patch.object(breadth, "_load_one", return_value=SimpleNamespace(source_run_id="run-l1", levels_completed=1)):
+                self.assertTrue(controller._terminal_entry_is_valid(entry))
 
 
 if __name__ == "__main__":

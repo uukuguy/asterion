@@ -17,18 +17,41 @@ from typing import Any
 
 from asterion.applications.prime.p7.game import _read_catalog
 from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
-from asterion.applications.prime.p7.solutions import load_best_prefix
+from asterion.applications.prime.p7.solutions import _load_one, load_best_prefix
 
-from tools.run_prime_p7_sweep import (
-    _ACTION_STALL_SECONDS,
-    _RUN_ID,
-    _recorded_game_id,
-    _read_hash_chained_trace,
-    _valid_attempt_summary,
-    SweepConfig,
-    SweepScheduler,
-    read_run_usage,
-)
+try:  # Works both as ``python -m tools...`` and installed-wheel ``python -I tools/...``.
+    from tools.run_prime_p7_sweep import (
+        _ACTION_STALL_SECONDS,
+        _RUN_ID,
+        _recorded_game_id,
+        _read_hash_chained_trace,
+        _valid_attempt_summary,
+        SweepConfig,
+        SweepScheduler,
+        read_run_usage,
+    )
+except ModuleNotFoundError as error:  # pragma: no cover - exercised by the isolated CLI.
+    if error.name != "tools":
+        raise
+    import importlib.util
+    import sys
+
+    _sweep_spec = importlib.util.spec_from_file_location(
+        "asterion_prime_p7_sweep", Path(__file__).with_name("run_prime_p7_sweep.py")
+    )
+    if _sweep_spec is None or _sweep_spec.loader is None:
+        raise ImportError("cannot load the P7 sweep helper")
+    _sweep_module = importlib.util.module_from_spec(_sweep_spec)
+    sys.modules[_sweep_spec.name] = _sweep_module
+    _sweep_spec.loader.exec_module(_sweep_module)
+    _ACTION_STALL_SECONDS = _sweep_module._ACTION_STALL_SECONDS
+    _RUN_ID = _sweep_module._RUN_ID
+    _recorded_game_id = _sweep_module._recorded_game_id
+    _read_hash_chained_trace = _sweep_module._read_hash_chained_trace
+    _valid_attempt_summary = _sweep_module._valid_attempt_summary
+    SweepConfig = _sweep_module.SweepConfig
+    SweepScheduler = _sweep_module.SweepScheduler
+    read_run_usage = _sweep_module.read_run_usage
 
 
 _SCHEMA = "asterion.prime.p7-breadth-campaign/v1"
@@ -194,7 +217,9 @@ class BreadthCampaignController:
             runs.add(run_id)
         return ledger
 
-    def _make_scheduler(self) -> SweepScheduler:
+    def _make_scheduler(self, level: int) -> SweepScheduler:
+        if level not in (1, 2):
+            raise ValueError("P7 breadth target level is invalid")
         return SweepScheduler(SweepConfig(
             arc_root=self.config.arc_root,
             runs_root=self.config.runs_root,
@@ -206,10 +231,11 @@ class BreadthCampaignController:
             wallclock_cap=None,
             run_timeout=self.config.run_timeout,
             max_attempts=None,
-            # Breadth is an explicitly authorized research pass.  This is
-            # required when aggregate caps are disabled, while the target
-            # level remains controlled by the direct _attempt call below.
-            unbounded_second_round=True,
+            # Breadth is an explicitly authorized research pass.  Keep the
+            # round flag aligned with the target because timeout evidence has
+            # different prefix requirements for Level 1 and Level 2.
+            unbounded_first_round=level == 1,
+            unbounded_second_round=level == 2,
             action_stall_seconds=self.config.action_stall_seconds,
             validate_action_stall=True,
         ))
@@ -266,7 +292,10 @@ class BreadthCampaignController:
             summary = None if summary_path.is_symlink() else self._read_json(summary_path)
             if not _valid_attempt_summary(summary, run_id, game_id, level, 0):
                 return False
-            prefix = self._best_prefix(game_id)
+            # The best prefix may have advanced after this entry was written.
+            # Validate this exact run independently so an older L1 entry stays
+            # valid when a later L2 run becomes the new best prefix.
+            prefix = _load_one(self.config.arc_root, run, game_id, self.config.seed, None)
             return prefix is not None and prefix.source_run_id == run_id and prefix.levels_completed >= level
         if outcome == "unsolved":
             if entries[-1]["kind"] != "trace.sealed":
@@ -281,14 +310,14 @@ class BreadthCampaignController:
             if not receipt or receipt.get("run_id") != run_id or receipt.get("game_id") != game_id:
                 return False
             try:
-                return self._make_scheduler()._execution_stalled_is_valid(
+                return self._make_scheduler(level)._execution_stalled_is_valid(
                     run_id, game_id, target_level=level, allow_later_progress=True,
                 )
             except (AttributeError, OSError, ValueError, KeyError, TypeError):
                 return False
         if outcome == "execution-failed":
             try:
-                return self._make_scheduler()._execution_failure_is_valid(
+                return self._make_scheduler(level)._execution_failure_is_valid(
                     run_id, game_id, allow_later_progress=True,
                 )
             except (AttributeError, OSError, ValueError, KeyError, TypeError):
@@ -310,7 +339,7 @@ class BreadthCampaignController:
         }
         ledger["terminal_attempts"].append(running)
         self._write_ledger(ledger)
-        scheduler = self._make_scheduler()
+        scheduler = self._make_scheduler(level)
         try:
             returncode = scheduler._attempt(game_id, level, self.config.run_timeout)
         except KeyboardInterrupt:
