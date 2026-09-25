@@ -53,6 +53,59 @@ class TestPrimeP7Sweep(unittest.TestCase):
         with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
             self.assertFalse(scheduler._first_round_campaign_is_ready(scheduler._selected_games()))
 
+    def test_first_round_resume_skips_only_campaign_recorded_unsolved_game(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = root / "runs"
+            runs.mkdir()
+            (runs / "first-round-campaign.json").write_text(json.dumps({
+                "schema": "asterion.prime.p7-first-round-campaign/v1",
+                "campaign_id": "first-round-0123456789abcdef0123456789abcdef",
+                "catalog_game_ids": ["a-1", "b-2"],
+                "terminal_attempts": [{"game_id": "a-1", "run_id": "run-a", "outcome": "unsolved"}],
+            }), encoding="utf-8")
+            scheduler = SweepScheduler(SweepConfig(
+                root / "arc", runs, games=("a-1", "b-2"), unbounded_first_round=True,
+            ))
+            scheduler._first_round_campaign_is_ready = lambda _games: True  # type: ignore[method-assign]
+            scheduler._first_round_catalog_ids = lambda: ("a-1", "b-2")  # type: ignore[method-assign]
+            scheduler._next_level = lambda _game_id: 1  # type: ignore[method-assign]
+            scheduler._is_complete = lambda _game_id, _level: False  # type: ignore[method-assign]
+            attempts: list[tuple[str, int]] = []
+            scheduler._attempt = lambda game_id, level, _timeout: attempts.append((game_id, level)) or 1  # type: ignore[method-assign]
+            scheduler._attempt_result = lambda _game_id, _level: False  # type: ignore[method-assign]
+            result = scheduler.run()
+
+        self.assertEqual(attempts, [("b-2", 1)])
+        self.assertEqual(result.previously_attempted_unsolved_level_one, ("a-1",))
+
+    def test_unbounded_first_round_keeps_thirty_minute_per_game_limit(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        scheduler = SweepScheduler(SweepConfig(Path("arc"), Path("runs"), unbounded_first_round=True))
+        self.assertEqual(scheduler._timeout_for_level("bp35-0a0ad940", 1), 30 * 60)
+
+    def test_first_round_records_admitted_unsealed_timeout_and_continues(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(
+                root / "arc", root / "runs", games=("a-1",), unbounded_first_round=True,
+            ))
+            scheduler._first_round_campaign_is_ready = lambda _games: True  # type: ignore[method-assign]
+            scheduler._first_round_catalog_ids = lambda: ("a-1",)  # type: ignore[method-assign]
+            scheduler._next_level = lambda _game_id: 1  # type: ignore[method-assign]
+            scheduler._is_complete = lambda _game_id, _level: False  # type: ignore[method-assign]
+            scheduler._attempt = lambda *_args: setattr(scheduler, "_stop_reason", "timed-out-unsealed") or 1  # type: ignore[method-assign]
+            scheduler._record_campaign_attempt = lambda *_args: None  # type: ignore[method-assign]
+            result = scheduler.run()
+
+        self.assertEqual(result.stopped_reason, "completed")
+        self.assertEqual(result.timed_out_unsealed_level_one, ("a-1",))
+
     def test_attempt_forwards_runtime_unbounded_marker_only_for_first_round(self) -> None:
         from types import SimpleNamespace
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
@@ -68,13 +121,14 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 root / "arc", root / "runs", command=("attempt",), guest_machine=None,
             ))
             with patch("tools.run_prime_p7_sweep.subprocess.Popen", return_value=process) as popen:
-                first_round._attempt("a-1", 1, None)
+                first_round._attempt("a-1", 1, 30 * 60)
                 first_environment = popen.call_args.kwargs["env"]
                 bounded._attempt("a-1", 1, 1)
                 bounded_environment = popen.call_args.kwargs["env"]
 
         self.assertEqual(first_environment["ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"], "1")
         self.assertEqual(first_environment["OPERATION_MODE"], "offline")
+        self.assertEqual(first_environment["ASTERION_PRIME_P7_ATTEMPT_SECONDS"], "1830")
         self.assertEqual(bounded_environment["ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"], "")
         self.assertEqual(bounded_environment["OPERATION_MODE"], "")
 
@@ -100,9 +154,10 @@ class TestPrimeP7Sweep(unittest.TestCase):
             attempts: list[tuple[str, int, float | None]] = []
             scheduler._attempt = lambda game_id, level, timeout: attempts.append((game_id, level, timeout)) or 1  # type: ignore[method-assign]
             scheduler._attempt_result = lambda _game_id, _level: False  # type: ignore[method-assign]
+            scheduler._record_campaign_attempt = lambda *_args: None  # type: ignore[method-assign]
             result = scheduler.run()
 
-        self.assertEqual(attempts, [("bp35-2", 1, None)])
+        self.assertEqual(attempts, [("bp35-2", 1, 30 * 60)])
         self.assertEqual(result.attempted, 1)
         self.assertEqual(result.preexisting_level_one, ("ar25-1",))
         self.assertEqual(result.newly_verified_level_one, ())
@@ -133,6 +188,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
             attempts: list[tuple[str, int]] = []
             scheduler._attempt = lambda game_id, level, _timeout: attempts.append((game_id, level)) or 0  # type: ignore[method-assign]
             scheduler._attempt_result = lambda _game_id, _level: True  # type: ignore[method-assign]
+            scheduler._record_campaign_attempt = lambda *_args: None  # type: ignore[method-assign]
             result = scheduler.run()
 
         self.assertEqual(attempts, [("bp35-2", 1)])
