@@ -117,6 +117,32 @@ class TestPrimeP7Breadth(unittest.TestCase):
             self.assertEqual(saved["terminal_attempts"][0]["status"], "interrupted")
             self.assertEqual(saved["terminal_attempts"][0]["run_id"], run.name)
 
+    def test_interrupted_entry_does_not_block_replacement_attempt(self) -> None:
+        from tools.run_prime_p7_breadth import BreadthCampaignConfig, BreadthCampaignController
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            controller = BreadthCampaignController(BreadthCampaignConfig(root / "arc", root / "runs", root, root, guest_machine=None))
+            controller._terminal_entry_is_valid = lambda _entry: True
+            controller._catalog = lambda: ({"game_id": "aa11-00000000", "baseline_actions": (5,), "win_levels": 1},)
+            controller._best_prefix = lambda _game: None
+            ledger = {
+                "schema": "asterion.prime.p7-breadth-campaign/v1",
+                "campaign_id": "breadth-resweep-" + "e" * 32,
+                "seed": 0, "run_timeout_seconds": 1800, "no_action_stall_seconds": 300,
+                "terminal_attempts": [{
+                    "status": "interrupted", "game_id": "aa11-00000000", "target_level": 1,
+                    "run_id": "p7-live-20260925132710-" + "f" * 32,
+                    "outcome": "interrupted", "action_count": 1, "input_tokens": 1,
+                    "output_tokens": 1, "stop_reason": "operator-interrupt", "evidence_sha256": "sha256:" + "a" * 64,
+                }],
+            }
+            (root / "runs").mkdir()
+            (root / "runs" / "breadth-resweep-campaign.json").write_text(json.dumps(ledger), encoding="utf-8")
+            loaded = controller._load_or_create_ledger()
+            self.assertFalse(controller._has_terminal(loaded, "aa11-00000000", 1))
+            self.assertEqual(controller.preflight()["level_one"], ["aa11-00000000"])
+
     def test_atomic_ledger_is_private_and_preflight_does_not_create_it(self) -> None:
         from tools.run_prime_p7_breadth import BreadthCampaignConfig, BreadthCampaignController
 

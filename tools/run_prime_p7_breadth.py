@@ -199,6 +199,7 @@ class BreadthCampaignController:
         ):
             raise ValueError("breadth ledger is invalid")
         pairs: set[tuple[str, int]] = set()
+        interrupted_pairs: set[tuple[str, int]] = set()
         runs: set[str] = set()
         for entry in ledger["terminal_attempts"]:
             if type(entry) is not dict:
@@ -209,14 +210,25 @@ class BreadthCampaignController:
                 continue
             pair = (entry.get("game_id"), entry.get("target_level"))
             run_id = entry.get("run_id")
+            outcome = entry.get("outcome")
             if (
                 type(pair[0]) is not str or type(pair[1]) is not int or pair[1] not in (1, 2)
-                or pair in pairs or type(run_id) is not str or not _RUN_ID.fullmatch(run_id)
-                or run_id in runs or entry.get("outcome") not in _OUTCOMES
+                or type(run_id) is not str or not _RUN_ID.fullmatch(run_id)
+                or run_id in runs or outcome not in _OUTCOMES
                 or not self._terminal_entry_is_valid(entry)
             ):
                 raise ValueError("breadth ledger evidence is invalid")
-            pairs.add(pair)
+            # A supervisor interruption is audit evidence, not a completed
+            # attempt.  Preserve it while allowing one later terminal result
+            # for the same game/level.  Completed attempts remain unique.
+            if outcome == "interrupted":
+                if pair in interrupted_pairs:
+                    raise ValueError("breadth ledger has duplicate interrupted evidence")
+                interrupted_pairs.add(pair)
+            elif pair in pairs:
+                raise ValueError("breadth ledger has duplicate terminal evidence")
+            else:
+                pairs.add(pair)
             runs.add(run_id)
         return ledger
 
@@ -357,6 +369,7 @@ class BreadthCampaignController:
     def _has_terminal(ledger: dict[str, Any], game_id: str, level: int) -> bool:
         return any(
             entry.get("game_id") == game_id and entry.get("target_level") == level
+            and entry.get("outcome") != "interrupted"
             for entry in ledger["terminal_attempts"]
         )
 
@@ -376,7 +389,7 @@ class BreadthCampaignController:
             return False
         outcome = entry.get("outcome")
         try:
-            in_progress = outcome in {"timed-out-unsealed", "execution-stalled"}
+            in_progress = outcome in {"timed-out-unsealed", "execution-stalled", "interrupted"}
             entries = _read_hash_chained_trace(trace_path, in_progress=in_progress)
         except (OSError, UnicodeError, ValueError, KeyError, TypeError):
             return False
