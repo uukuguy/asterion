@@ -10,6 +10,181 @@ from pathlib import Path
 
 
 class TestPrimeP7Sweep(unittest.TestCase):
+    @staticmethod
+    def _execution_failure_fixture(root: Path):
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.broker import ArcTransition
+        from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
+        from asterion.applications.prime.p7.score import replay_sha256
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        game_id, run_id = "lp85-305b61c3", "fixture-failed"
+        run = root / "runs" / run_id
+        trace = run / "trace"
+        trace.mkdir(parents=True)
+        transitions = tuple(ArcTransition(i, "ACTION1", "sha256:" + str(i - 1) * 64,
+                                          "sha256:" + str(i) * 64, 1) for i in (1, 2))
+        prefix = {
+            "game_id": game_id, "seed": 0, "win_levels": 8,
+            "levels_completed": 1, "primitive_actions": 1,
+            "terminal_reason": "level-completed",
+            "replay_sha256": replay_sha256(transitions[:1], terminal_reason="level-completed"),
+        }
+        recorder = PrimeTraceRecorder(trace)
+        for item in transitions:
+            recorder.append("arc.action", P7_TRACE_IDENTITIES, {
+                "sequence": item.sequence, "action": item.action,
+                "before_sha256": item.before_sha256, "after_sha256": item.after_sha256,
+                "levels_completed": item.levels_completed,
+            })
+        recorder.append("arc.usage.reported", P7_TRACE_IDENTITIES, {"input_tokens": 10, "output_tokens": 2})
+        recorder.append("arc.run.partial", P7_TRACE_IDENTITIES, prefix)
+        recorder.seal()
+        summary = {
+            "schema": "asterion.prime.p7-live-private-summary/v1", "run_id": run_id,
+            "replay_verified": True, "sealed_trace": True, "cleanup_complete": True,
+            "broker": None, "completed_prefix": prefix, "failure": {"type": "ApplicationRunError", "message": "fixture"},
+            "diagnostics": {
+                "sweep": {"scope": "offline-research", "target_level": 2,
+                          "prefix_actions": 1, "level_action_cap": 38, "run_action_cap": 39},
+                "broker_status": {"primitive_actions": 2, "levels_completed": 1,
+                                  "actions_remaining": 37, "target_level": 2, "terminal_reason": "active"},
+            },
+        }
+        (run / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+        scheduler = SweepScheduler(SweepConfig(root / "arc", root / "runs", unbounded_second_round=True))
+        scheduler._catalog = lambda: ({"game_id": game_id, "baseline_actions": (9, 38), "win_levels": 8},)
+        entry = {"game_id": game_id, "run_id": run_id, "outcome": "execution-failed"}
+        return scheduler, run, summary, entry
+
+    def test_second_round_execution_failure_requires_exact_sealed_partial(self) -> None:
+        from copy import deepcopy
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, run, summary, entry = self._execution_failure_fixture(Path(directory))
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
+                self.assertTrue(scheduler._campaign_entry_is_valid(entry))
+                mutations = (
+                    ("cleanup_complete", False), ("replay_verified", False), ("sealed_trace", False),
+                    ("run_id", "other-run"), ("failure", {"type": "ValueError"}),
+                    ("broker", {}),
+                )
+                for key, value in mutations:
+                    with self.subTest(field=key):
+                        changed = {**summary, key: value}
+                        (run / "summary.json").write_text(json.dumps(changed), encoding="utf-8")
+                        self.assertFalse(scheduler._campaign_entry_is_valid(entry))
+                for section, key, value in (
+                    ("sweep", "target_level", 1), ("sweep", "run_action_cap", 40),
+                    ("sweep", "level_action_cap", 39), ("sweep", "prefix_actions", 2),
+                    ("broker_status", "terminal_reason", "game-over"),
+                    ("broker_status", "primitive_actions", 40),
+                    ("broker_status", "levels_completed", 2),
+                ):
+                    with self.subTest(section=section, field=key):
+                        changed = deepcopy(summary)
+                        changed["diagnostics"][section][key] = value
+                        (run / "summary.json").write_text(json.dumps(changed), encoding="utf-8")
+                        self.assertFalse(scheduler._campaign_entry_is_valid(entry))
+                for key, value in (("seed", 1), ("game_id", "other-game"), ("levels_completed", 2)):
+                    changed = deepcopy(summary)
+                    changed["completed_prefix"][key] = value
+                    (run / "summary.json").write_text(json.dumps(changed), encoding="utf-8")
+                    self.assertFalse(scheduler._campaign_entry_is_valid(entry))
+                (run / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=2)):
+                self.assertFalse(scheduler._execution_failure_is_valid(entry["run_id"], entry["game_id"]))
+                self.assertTrue(scheduler._campaign_entry_is_valid(entry))
+            trace = run / "trace" / "prime-trace.jsonl"
+            trace.write_text(trace.read_text().replace('"input_tokens":10', '"input_tokens":11'), encoding="utf-8")
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
+                self.assertFalse(scheduler._campaign_entry_is_valid(entry))
+
+    def test_second_round_execution_failure_records_and_skips_on_resume(self) -> None:
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, _run, _summary, entry = self._execution_failure_fixture(Path(directory))
+            scheduler._second_round_campaign_is_ready = lambda _games: True
+            scheduler._next_level = lambda _game: 2
+            scheduler._is_complete = lambda *_args: False
+            scheduler._new_runs.append(entry["run_id"])
+            scheduler._selected_games = lambda: (entry["game_id"],)
+            def attempt(*_args):
+                scheduler._stop_reason = "execution-failed"
+                return 1
+            scheduler._attempt = attempt
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
+                result = scheduler.run()
+                self.assertEqual(result.stopped_reason, "completed")
+                self.assertEqual(result.execution_failed_level_two, (entry["game_id"],))
+                self.assertEqual(result.attempted_unsolved_level_two, ())
+                self.assertEqual(scheduler._load_or_create_campaign()["terminal_attempts"], [entry])
+                with patch.object(scheduler, "_attempt") as called:
+                    resumed = scheduler.run()
+                    called.assert_not_called()
+                self.assertEqual(resumed.previously_execution_failed_level_two, (entry["game_id"],))
+                self.assertEqual(resumed.previously_attempted_unsolved_level_two, ())
+
+    def test_second_round_adopts_only_explicit_valid_failure_once(self) -> None:
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, run, summary, entry = self._execution_failure_fixture(Path(directory))
+            scheduler._second_round_campaign_is_ready = lambda _games: True
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)), patch.object(scheduler, "_attempt") as attempt:
+                for run_id in ("missing", "../fixture-failed"):
+                    with self.subTest(run_id=run_id), self.assertRaises(ValueError):
+                        scheduler.adopt_execution_failure(run_id)
+                self.assertFalse(scheduler._campaign_path().exists())
+                (run / "summary.json").write_text(json.dumps({**summary, "cleanup_complete": False}), encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    scheduler.adopt_execution_failure(entry["run_id"])
+                self.assertFalse(scheduler._campaign_path().exists())
+                (run / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+                self.assertEqual(scheduler.adopt_execution_failure(entry["run_id"]), entry["game_id"])
+                with self.assertRaises(ValueError):
+                    scheduler.adopt_execution_failure(entry["run_id"])
+                self.assertEqual(scheduler._load_or_create_campaign()["terminal_attempts"], [entry])
+                attempt.assert_not_called()
+
+    def test_second_round_attempt_classifies_partial_only_after_nonzero_exit(self) -> None:
+        from types import SimpleNamespace
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        for returncode in (0, 1):
+            with self.subTest(returncode=returncode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                scheduler = SweepScheduler(SweepConfig(root / "arc", root / "runs", repo_root=root,
+                                            command=("fixture",), guest_machine=None, unbounded_second_round=True))
+                scheduler._catalog = lambda: ({"game_id": "lp85-305b61c3", "baseline_actions": (9, 38), "win_levels": 8},)
+                def launch(*_args, **_kwargs):
+                    self._execution_failure_fixture(root)
+                    return SimpleNamespace(returncode=returncode, communicate=lambda **_kw: ("", ""))
+                with patch("tools.run_prime_p7_sweep.subprocess.Popen", side_effect=launch), patch(
+                    "tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1),
+                ):
+                    scheduler._attempt("lp85-305b61c3", 2, 1800)
+                self.assertEqual(scheduler._stop_reason, "execution-failed" if returncode else "child-evidence-invalid")
+
+    def test_execution_failure_adoption_cli_never_launches_paid_work(self) -> None:
+        import contextlib
+        import io
+        from tools.run_prime_p7_sweep import SweepScheduler, main
+
+        for accepted in (False, True):
+            with self.subTest(accepted=accepted), tempfile.TemporaryDirectory() as directory:
+                output = io.StringIO()
+                with patch.object(SweepScheduler, "adopt_execution_failure", return_value="lp85-305b61c3",
+                                  side_effect=None if accepted else ValueError("private-sentinel")), patch.object(SweepScheduler, "run") as run, contextlib.redirect_stdout(output):
+                    result = main(["--operator-root", directory, "--arc-root", directory,
+                                   "--unbounded-second-round", "--adopt-execution-failure", "fixture-failed"])
+                self.assertEqual(result, 0 if accepted else 1)
+                self.assertNotIn("private-sentinel", output.getvalue())
+                self.assertEqual(json.loads(output.getvalue())["recorded"], accepted)
+                run.assert_not_called()
+
     def test_second_round_requires_pinned_catalog_and_verified_prefixes(self) -> None:
         from types import SimpleNamespace
         from tools.run_prime_p7_sweep import (

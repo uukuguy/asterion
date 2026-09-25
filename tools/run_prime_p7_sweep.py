@@ -24,6 +24,9 @@ import tempfile
 import time
 from typing import Any
 
+from asterion.applications.prime.p7.broker import ArcTransition
+from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
+from asterion.applications.prime.p7.score import replay_sha256
 from asterion.applications.prime.p7.game import _read_catalog
 from asterion.applications.prime.p7.solutions import load_best_prefix
 
@@ -101,6 +104,8 @@ class SweepResult:
     attempted_unsolved_level_two: tuple[str, ...] = ()
     previously_attempted_unsolved_level_two: tuple[str, ...] = ()
     timed_out_unsealed_level_two: tuple[str, ...] = ()
+    execution_failed_level_two: tuple[str, ...] = ()
+    previously_execution_failed_level_two: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -420,7 +425,7 @@ class SweepScheduler:
                 or attempt["game_id"] in seen_games
                 or type(attempt.get("run_id")) is not str or _RUN_ID.fullmatch(attempt["run_id"]) is None
                 or attempt["run_id"] in seen_runs
-                or attempt.get("outcome") not in {"verified", "unsolved", "timed-out-unsealed"}
+                or attempt.get("outcome") not in {"verified", "unsolved", "timed-out-unsealed", "execution-failed"}
                 or not self._campaign_entry_is_valid(attempt)
             ):
                 raise ValueError
@@ -432,6 +437,8 @@ class SweepScheduler:
         game_id = attempt["game_id"]
         run_id = attempt["run_id"]
         outcome = attempt["outcome"]
+        if outcome == "execution-failed":
+            return self._execution_failure_is_valid(run_id, game_id, allow_later_progress=True)
         run = self.config.runs_root / run_id
         if run.is_symlink() or not run.is_dir():
             return False
@@ -460,8 +467,112 @@ class SweepScheduler:
             return prefix is not None and prefix.levels_completed >= level
         return True
 
+    def _execution_failure_is_valid(self, run_id: str, game_id: str, *, allow_later_progress: bool = False) -> bool:
+        """Admit only a cleaned L2 execution failure with a sealed L1 prefix."""
+
+        if not self.config.unbounded_second_round or not _RUN_ID.fullmatch(run_id):
+            return False
+        run = self.config.runs_root / run_id
+        try:
+            if run.is_symlink() or not run.is_dir() or (run / "summary.json").is_symlink():
+                return False
+            summary = _read_json(run / "summary.json")
+            entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl")
+            if not summary or (
+                summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+                or summary.get("run_id") != run_id
+                or any(summary.get(key) is not True for key in ("cleanup_complete", "replay_verified", "sealed_trace"))
+                or summary.get("broker") is not None
+                or type(summary.get("failure")) is not dict
+                or summary["failure"].get("type") not in {"ApplicationRunError"}
+                or len(entries) < 3
+                or [row["kind"] for row in entries[-2:]] != ["arc.run.partial", "trace.sealed"]
+                or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+                or any(row["kind"] not in {"arc.action", "arc.usage.reported"} for row in entries[:-2])
+                or entries[-1]["payload"] != {"entry_count": len(entries) - 1, "final_sha256": entries[-2]["sha256"]}
+            ):
+                return False
+            prefix = summary.get("completed_prefix")
+            metadata = self._metadata()[game_id]
+            diagnostics = summary["diagnostics"]
+            sweep, status = diagnostics["sweep"], diagnostics["broker_status"]
+            if (
+                type(prefix) is not dict or prefix != entries[-2]["payload"]
+                or prefix.get("game_id") != game_id
+                or type(prefix.get("seed")) is not int or prefix["seed"] != 0
+                or type(prefix.get("levels_completed")) is not int or prefix["levels_completed"] != 1
+                or prefix.get("win_levels") != metadata["win_levels"]
+                or prefix.get("terminal_reason") != "level-completed"
+                or type(prefix.get("primitive_actions")) is not int or prefix["primitive_actions"] <= 0
+                or type(sweep) is not dict or type(status) is not dict
+                or sweep.get("scope") != "offline-research"
+                or any(type(sweep.get(key)) is not int for key in ("target_level", "prefix_actions", "level_action_cap", "run_action_cap"))
+                or sweep["target_level"] != 2 or sweep["prefix_actions"] != prefix["primitive_actions"]
+                or sweep["level_action_cap"] != metadata["baseline_actions"][1]
+                or sweep["run_action_cap"] != sweep["prefix_actions"] + sweep["level_action_cap"]
+                or not 0 < sweep["run_action_cap"] <= 5000
+                or any(type(status.get(key)) is not int for key in ("primitive_actions", "levels_completed", "actions_remaining", "target_level"))
+                or status["target_level"] != 2 or status["levels_completed"] != 1
+                or status.get("terminal_reason") != "active"
+                or not prefix["primitive_actions"] <= status["primitive_actions"] < sweep["run_action_cap"]
+                or status["actions_remaining"] != sweep["run_action_cap"] - status["primitive_actions"]
+            ):
+                return False
+            actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
+            if len(actions) != status["primitive_actions"]:
+                return False
+            transitions: list[ArcTransition] = []
+            previous_level = 0
+            for sequence, action in enumerate(actions, 1):
+                level = action.get("levels_completed")
+                if (
+                    type(action.get("sequence")) is not int or action["sequence"] != sequence
+                    or type(level) is not int or not previous_level <= level <= 1
+                    or (sequence < prefix["primitive_actions"] and level != 0)
+                    or (sequence >= prefix["primitive_actions"] and level != 1)
+                    or (transitions and action.get("before_sha256") != transitions[-1].after_sha256)
+                    or any(type(action.get(key)) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", action[key]) is None for key in ("before_sha256", "after_sha256"))
+                ):
+                    return False
+                transitions.append(ArcTransition(sequence, action["action"], action["before_sha256"], action["after_sha256"], level, tuple(sorted(action.get("data", {}).items()))))
+                previous_level = level
+            if prefix.get("replay_sha256") != replay_sha256(transitions[:prefix["primitive_actions"]], terminal_reason="level-completed"):
+                return False
+            usage = read_run_usage(run)
+            if usage[2] or usage[3]:
+                return False
+            verified = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, 0)
+            return verified is not None and (
+                verified.levels_completed >= 1 if allow_later_progress else verified.levels_completed == 1
+            )
+        except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
+            return False
+
+    def adopt_execution_failure(self, run_id: str) -> str:
+        """Record one explicitly selected existing failure without launching work."""
+
+        if not self.config.unbounded_second_round or not _RUN_ID.fullmatch(run_id):
+            raise ValueError("P7 execution failure evidence is invalid")
+        summary = _read_json(self.config.runs_root / run_id / "summary.json")
+        prefix = None if summary is None else summary.get("completed_prefix")
+        game_id = prefix.get("game_id") if type(prefix) is dict else None
+        if (
+            game_id not in self._campaign_ids()
+            or not self._second_round_campaign_is_ready(self._selected_games())
+            or not self._execution_failure_is_valid(run_id, game_id)
+        ):
+            raise ValueError("P7 execution failure evidence is invalid")
+        campaign = self._load_or_create_campaign()
+        if any(item["game_id"] == game_id or item["run_id"] == run_id for item in campaign["terminal_attempts"]):
+            raise ValueError("P7 execution failure is already recorded")
+        campaign["terminal_attempts"].append({"game_id": game_id, "run_id": run_id, "outcome": "execution-failed"})
+        self._write_campaign(campaign)
+        return game_id
+
     def _record_campaign_attempt(self, campaign: dict[str, Any], game_id: str, outcome: str) -> None:
-        if outcome not in {"verified", "unsolved", "timed-out-unsealed"} or not self._new_runs:
+        if outcome not in {"verified", "unsolved", "timed-out-unsealed", "execution-failed"} or not self._new_runs:
+            raise ValueError
+        if outcome == "execution-failed" and not self._execution_failure_is_valid(self._new_runs[-1], game_id):
             raise ValueError
         attempts = campaign["terminal_attempts"]
         if any(item["game_id"] == game_id for item in attempts):
@@ -665,6 +776,8 @@ class SweepScheduler:
                         self._stop_reason = "timed-out-unsealed"
                     else:
                         self._stop_reason = "run-timeout-evidence-invalid"
+                elif returncode != 0 and level == 2 and self._execution_failure_is_valid(run_id, game_id):
+                    self._stop_reason = "execution-failed"
                 elif not sealed or not _valid_attempt_summary(summary, run_id, game_id, level, returncode):
                     self._stop_reason = "child-evidence-invalid"
         return returncode
@@ -709,6 +822,8 @@ class SweepScheduler:
         attempted_unsolved_level_two: list[str] = []
         previously_attempted_unsolved_level_two: list[str] = []
         timed_out_unsealed_level_two: list[str] = []
+        execution_failed_level_two: list[str] = []
+        previously_execution_failed_level_two: list[str] = []
         started = time.monotonic()
         if self.config.unbounded_first_round:
             assert campaign is not None
@@ -733,6 +848,8 @@ class SweepScheduler:
                 if game_id in prior:
                     if prior[game_id] == "verified":
                         preexisting_level_two.append(game_id)
+                    elif prior[game_id] == "execution-failed":
+                        previously_execution_failed_level_two.append(game_id)
                     else:
                         previously_attempted_unsolved_level_two.append(game_id)
                 elif self._next_level(game_id) == 2:
@@ -768,6 +885,16 @@ class SweepScheduler:
                 level_timeout = self._timeout_for_level(game_id, level)
                 timeout = level_timeout if remaining is None else min(level_timeout, remaining)
                 returncode = self._attempt(game_id, level, timeout)
+                if self.config.unbounded_second_round and self._stop_reason == "execution-failed":
+                    try:
+                        self._record_campaign_attempt(campaign, game_id, "execution-failed")
+                    except (OSError, ValueError):
+                        self._stop_reason = "second-round-campaign-write-failed"
+                        break
+                    execution_failed_level_two.append(game_id)
+                    blocked.append(game_id)
+                    self._stop_reason = "completed"
+                    continue
                 if self._is_research_round(self.config) and self._stop_reason == "timed-out-unsealed":
                     try:
                         self._record_campaign_attempt(campaign, game_id, "timed-out-unsealed")
@@ -861,6 +988,8 @@ class SweepScheduler:
             tuple(sorted(set(attempted_unsolved_level_two))),
             tuple(sorted(set(previously_attempted_unsolved_level_two))),
             tuple(sorted(set(timed_out_unsealed_level_two))),
+            tuple(sorted(set(execution_failed_level_two))),
+            tuple(sorted(set(previously_execution_failed_level_two))),
         )
 
 
@@ -909,6 +1038,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--unbounded-first-round", action="store_true")
     parser.add_argument("--unbounded-second-round", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--adopt-execution-failure")
     args = parser.parse_args(argv)
     if args.seed != 0:
         parser.error("--seed must be 0; the P7 Makefile fixes the official game seed")
@@ -929,6 +1059,16 @@ def main(argv: list[str] | None = None) -> int:
             unbounded_second_round=args.unbounded_second_round,
         )
     )
+    if args.adopt_execution_failure is not None:
+        if not args.unbounded_second_round or args.preflight_only:
+            parser.error("--adopt-execution-failure requires only --unbounded-second-round")
+        try:
+            game_id = scheduler.adopt_execution_failure(args.adopt_execution_failure)
+        except (OSError, ValueError):
+            print(json.dumps({"schema": "asterion.prime.p7-second-round-recovery/v1", "recorded": False}))
+            return 1
+        print(json.dumps({"schema": "asterion.prime.p7-second-round-recovery/v1", "recorded": True, "game_id": game_id, "outcome": "execution-failed"}, sort_keys=True))
+        return 0
     if args.preflight_only:
         if not args.unbounded_second_round:
             parser.error("--preflight-only requires --unbounded-second-round")
