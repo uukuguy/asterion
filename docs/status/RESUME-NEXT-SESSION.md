@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 14:03 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 14:34 CST. **Session remains active — not a final handoff.**
 
 ## 本会话新增的二关轮次入口
 
-用户要求继续广度优先研究，并确认网页可与求解并行。`98ba8b75` 新增 `make asterion-prime-p7-second-round`：固定 17 道已验证首关的题目，各自只尝试第 2 关一次，先严格重放首关；本关人类基准动作数或 30 分钟先到为停止线，无整轮 token/时长上限，不进入第 3 关。独立 `second-round-campaign.json` 让中断后的同命令续跑跳过已记载的成功、失败与有证据超时。普通旧 `sweep` 仍有 350 万 token 总上限，不能用作此轮。定向 30 项测试、lint、docs-check、打包推广检查（25 命令、0 provider）通过；刚打包 wheel 的零模型预检显示固定 17 题的首关前缀均可重放，`ready=true`。Sol 独立复审未发现运行阻断项。**二关轮次当前仍在执行**：前 5 题 AR25、CN04、DC22、FT09、LF52 均已封存、回放及清理；其中 DC22 第2关新增61/102步过关，其余4题在人类动作基准处未解。当前已转到 LP85 第2关。DC22 的中文分析、网页及单文件 HTML 已导出并核验，位于 `artifacts/arc-agi-3/exports/`；讲解入口的 `deepseek-flash` 别名兼容由 `191f581e` 修复并经24项定向测试及 lint 验证。后续过关网页并行制作，但 compile/analyze/render 写入串行。此轮不提交新官方卡片。
+用户要求继续广度优先研究，并确认网页可与求解并行。`98ba8b75` 新增 `make asterion-prime-p7-second-round`：固定 17 道已验证首关的题目，各自只尝试第 2 关一次，先严格重放首关；本关人类基准动作数或 30 分钟先到为停止线，无整轮 token/时长上限，不进入第 3 关。独立 `second-round-campaign.json` 让中断后的同命令续跑跳过已记载的成功、失败与有证据超时。普通旧 `sweep` 仍有 350 万 token 总上限，不能用作此轮。定向 30 项测试、lint、docs-check、打包推广检查（25 命令、0 provider）通过；刚打包 wheel 的零模型预检显示固定 17 题的首关前缀均可重放，`ready=true`。前 5 题 AR25、CN04、DC22、FT09、LF52 均已封存、回放及清理；其中 DC22 第2关新增61/102步过关，其余4题在人类动作基准处未解。DC22 的中文分析、网页及单文件 HTML 已导出并核验，位于 `artifacts/arc-agi-3/exports/`；讲解入口的 `deepseek-flash` 别名兼容由 `191f581e` 修复并经24项定向测试及 lint 验证。**二关轮次在第6题 LP85 停止**：运行 `p7-live-20260925060042-cea223e019e16d428ae2b750` 仅重放首关9步并新增第2关9/38步，模型随后长时间无新动作；trace 有1145条用量，共输入182,991,305、输出140,369 token，输入含缓存。`summary` 的 `broker=null`、`failure.type=ApplicationRunError`，但 trace 哈希链有效且已封存、首关前缀回放通过、清理完成；这不是第2关正常失败或超时。调度器正确停止为 `child-evidence-invalid`，尚未为 LP85 写 campaign 条目；来宾无残留 P7 进程。正在补严格的 `execution-failed` 分类与显式旧运行采纳入口，再续跑剩余11题。此轮不提交新官方卡片。
 
 ## 当前任务
 
