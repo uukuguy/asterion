@@ -613,9 +613,11 @@ class SweepScheduler:
                     continue
                 summary = _read_json(historical / "summary.json")
                 broker = summary.get("broker") if summary else None
+                receipt = summary.get("receipt") if summary else None
                 if (
                     not summary
                     or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+                    or summary.get("run_id") != historical.name
                     or summary.get("replay_verified") is not True
                     or summary.get("sealed_trace") is not True
                     or summary.get("cleanup_complete") is not True
@@ -627,6 +629,10 @@ class SweepScheduler:
                     or type(broker.get("primitive_actions")) is not int
                     or broker["primitive_actions"] <= 0
                     or broker["primitive_actions"] > metadata["baseline_actions"][0]
+                    or type(receipt) is not dict
+                    or receipt.get("completed_level_count") != 1
+                    or receipt.get("primitive_action_count") != broker["primitive_actions"]
+                    or receipt.get("scope") != "p7-solving"
                 ):
                     continue
                 trace_path = historical / "trace" / "prime-trace.jsonl"
@@ -648,6 +654,12 @@ class SweepScheduler:
                 historical_actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
                 count = broker["primitive_actions"]
                 if len(historical_actions) != count or len(actions) < count:
+                    continue
+                historical_first_level = next(
+                    (index for index, action in enumerate(historical_actions) if action.get("levels_completed") == 1),
+                    None,
+                )
+                if historical_first_level is None or historical_first_level + 1 != count:
                     continue
                 if tuple(actions[:count]) != historical_actions:
                     continue
@@ -728,12 +740,17 @@ class SweepScheduler:
                 return False
             if any(action["levels_completed"] != 1 for action in actions[first_level_two:]):
                 return False
+            actual_prefix_actions = first_level_two + 1
+            if len(actions) - actual_prefix_actions > metadata["baseline_actions"][1]:
+                return False
+            if not self._historical_prefix_matches(game_id, actions):
+                return False
             prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
             if prefix is not None:
-                return prefix.levels_completed >= 1 if allow_later_progress else prefix.levels_completed == 1
-            # Offline recovery still requires an independently sealed historical
-            # L1 prefix with identical actions and replay digest.
-            return self._historical_prefix_matches(game_id, actions)
+                return (
+                    prefix.levels_completed >= 1 if allow_later_progress else prefix.levels_completed == 1
+                ) and len(prefix.transitions) == actual_prefix_actions
+            return True
         except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
             return False
 

@@ -137,7 +137,9 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 "cleanup_complete": True,
                 "trace_final_sha256": json.loads(rows[-3])["sha256"],
             }), encoding="utf-8")
-            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1, primitive_actions=1)):
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1, primitive_actions=1, transitions=(object(),))), patch.object(
+                scheduler, "_historical_prefix_matches", return_value=True,
+            ):
                 entry["outcome"] = "execution-stalled"
                 self.assertTrue(scheduler._campaign_entry_is_valid(entry))
                 receipt_path = run / "stall-receipt.json"
