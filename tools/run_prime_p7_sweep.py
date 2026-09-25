@@ -679,10 +679,16 @@ class SweepScheduler:
             return False
         return False
 
-    def _execution_stalled_is_valid(self, run_id: str, game_id: str, *, allow_later_progress: bool = False) -> bool:
+    def _execution_stalled_is_valid(
+        self, run_id: str, game_id: str, *, target_level: int = 2,
+        allow_later_progress: bool = False,
+    ) -> bool:
         """Admit a supervisor stall with a hash-valid unsealed trace and receipt."""
 
-        if not self.config.unbounded_second_round or not _RUN_ID.fullmatch(run_id):
+        if (
+            not self.config.unbounded_second_round or not _RUN_ID.fullmatch(run_id)
+            or type(target_level) is not int or target_level < 2
+        ):
             return False
         run = self.config.runs_root / run_id
         try:
@@ -712,17 +718,30 @@ class SweepScheduler:
             if usage[2] or usage[3]:
                 return False
             metadata = self._metadata()[game_id]
-            if receipt["action_count"] > metadata["baseline_actions"][0] + metadata["baseline_actions"][1]:
+            baselines = metadata.get("baseline_actions")
+            if (
+                type(baselines) is not tuple or target_level > len(baselines)
+                or any(type(item) is not int or item <= 0 for item in baselines[:target_level])
+                or receipt["action_count"] > sum(baselines[:target_level])
+            ):
                 return False
             actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
             if not actions:
                 return False
+            prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
+            if target_level > 2 and (
+                prefix is None or prefix.levels_completed != target_level - 1
+                or not prefix.transitions or len(actions) < len(prefix.transitions)
+            ):
+                return False
+            previous_level = 0
             for sequence, action in enumerate(actions, 1):
                 level = action.get("levels_completed")
                 if (
                     action.get("sequence") != sequence
                     or type(level) is not int
-                    or not 0 <= level <= 1
+                    or not previous_level <= level <= previous_level + 1
+                    or level > target_level - 1
                     or any(
                         type(action.get(key)) is not str
                         or re.fullmatch(r"sha256:[0-9a-f]{64}", action[key]) is None
@@ -732,6 +751,30 @@ class SweepScheduler:
                     return False
                 if sequence > 1 and action.get("before_sha256") != actions[sequence - 2].get("after_sha256"):
                     return False
+                previous_level = level
+            if target_level > 2 and prefix is not None:
+                prefix_actions = len(prefix.transitions)
+                if (
+                    prefix.levels_completed != target_level - 1
+                    or not prefix.transitions
+                    or prefix.transitions[-1].levels_completed != prefix.levels_completed
+                    or len(actions) < prefix_actions
+                ):
+                    return False
+                observed_prefix = tuple(
+                    ArcTransition(
+                        action["sequence"], action["action"], action["before_sha256"],
+                        action["after_sha256"], action["levels_completed"],
+                        tuple(sorted(action.get("data", {}).items())),
+                    ) for action in actions[:prefix_actions]
+                )
+                if observed_prefix != prefix.transitions:
+                    return False
+                if len(actions) - prefix_actions > baselines[target_level - 1]:
+                    return False
+                return allow_later_progress or prefix.levels_completed == target_level - 1
+            if target_level != 2:
+                return False
             first_level_two = next(
                 (index for index, action in enumerate(actions) if action["levels_completed"] >= 1),
                 None,
@@ -741,15 +784,10 @@ class SweepScheduler:
             if any(action["levels_completed"] != 1 for action in actions[first_level_two:]):
                 return False
             actual_prefix_actions = first_level_two + 1
-            if len(actions) - actual_prefix_actions > metadata["baseline_actions"][1]:
+            if len(actions) - actual_prefix_actions > baselines[1]:
                 return False
             if not self._historical_prefix_matches(game_id, actions):
                 return False
-            prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
-            if prefix is not None:
-                return (
-                    prefix.levels_completed >= 1 if allow_later_progress else prefix.levels_completed == 1
-                ) and len(prefix.transitions) == actual_prefix_actions
             return True
         except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
             return False
@@ -1022,7 +1060,7 @@ class SweepScheduler:
                 except (OSError, UnicodeError, ValueError, KeyError, TypeError):
                     sealed = False
                 if self._stop_reason == "execution-stalled":
-                    if not self._execution_stalled_is_valid(run_id, game_id):
+                    if not self._execution_stalled_is_valid(run_id, game_id, target_level=level):
                         self._stop_reason = "execution-stalled-evidence-invalid"
                 elif self._stop_reason == "run-timeout":
                     if (

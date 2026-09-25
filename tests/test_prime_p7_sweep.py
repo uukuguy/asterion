@@ -153,6 +153,49 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 receipt_path.symlink_to(moved.name)
                 self.assertFalse(scheduler._campaign_entry_is_valid(entry))
 
+    def test_next_level_stall_requires_exact_verified_multi_level_prefix(self) -> None:
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, run, _summary, entry = self._execution_failure_fixture(Path(directory))
+            trace = run / "trace" / "prime-trace.jsonl"
+            trace.unlink()
+            from asterion.agents.prime.trace import PrimeTraceRecorder
+            from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
+            recorder = PrimeTraceRecorder(trace.parent)
+            for sequence, level, before, after in ((1, 1, "0", "1"), (2, 2, "1", "2")):
+                recorder.append("arc.action", P7_TRACE_IDENTITIES, {
+                    "sequence": sequence, "action": "ACTION1",
+                    "before_sha256": "sha256:" + before * 64,
+                    "after_sha256": "sha256:" + after * 64,
+                    "levels_completed": level,
+                })
+            recorder.append("arc.usage.reported", P7_TRACE_IDENTITIES, {"input_tokens": 10, "output_tokens": 2})
+            rows = trace.read_text(encoding="utf-8").splitlines()
+            (run / "summary.json").unlink()
+            (run / "recordings").mkdir()
+            (run / "recordings" / f"{entry['game_id']}-fixture.jsonl").write_text("{}\n", encoding="utf-8")
+            (run / "stall-receipt.json").write_text(json.dumps({
+                "schema": "asterion.prime.p7-stall-receipt/v1",
+                "game_id": entry["game_id"], "run_id": entry["run_id"], "seed": 0,
+                "action_count": 2, "stall_seconds": 300,
+                "cleanup_complete": True,
+                "trace_final_sha256": json.loads(rows[-1])["sha256"],
+            }), encoding="utf-8")
+            from asterion.applications.prime.p7.broker import ArcTransition
+            prefix = SimpleNamespace(
+                levels_completed=2,
+                transitions=(
+                    ArcTransition(1, "ACTION1", "sha256:" + "0" * 64, "sha256:" + "1" * 64, 1),
+                    ArcTransition(2, "ACTION1", "sha256:" + "1" * 64, "sha256:" + "2" * 64, 2),
+                ),
+            )
+            scheduler._catalog = lambda: ({"game_id": entry["game_id"], "baseline_actions": (9, 38, 20), "win_levels": 8},)
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=prefix):
+                self.assertTrue(scheduler._execution_stalled_is_valid(
+                    entry["run_id"], entry["game_id"], target_level=3,
+                ))
+
     def test_second_round_execution_stall_rejects_without_replay_or_historical_prefix(self) -> None:
         from unittest.mock import patch
 
