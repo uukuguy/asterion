@@ -385,6 +385,19 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             "legacy",
         )
 
+    def test_legacy_prompt_selection_preserves_old_batch_guidance(self) -> None:
+        from asterion.applications.prime.p7.operator import _prompt_for_variant
+        from asterion.applications.prime.p7.prompt import P7_LEGACY_SOLVE_PROMPT, P7_SOLVE_PROMPT
+
+        self.assertEqual(_prompt_for_variant("verified"), P7_SOLVE_PROMPT)
+        self.assertEqual(_prompt_for_variant("legacy"), P7_LEGACY_SOLVE_PROMPT)
+        self.assertIn("Use a longer batch, never more than 20 actions", P7_LEGACY_SOLVE_PROMPT)
+        self.assertNotIn("p7_client.history", P7_LEGACY_SOLVE_PROMPT)
+        self.assertNotIn("act_checked", P7_LEGACY_SOLVE_PROMPT)
+        self.assertNotEqual(P7_LEGACY_SOLVE_PROMPT, P7_SOLVE_PROMPT)
+        with self.assertRaises(Exception):
+            _prompt_for_variant("arbitrary")
+
     def test_verified_act_rejects_batch_before_dispatch_and_legacy_preserves_it(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import P7GameSelection

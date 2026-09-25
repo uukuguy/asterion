@@ -51,7 +51,7 @@ from asterion.applications.prime.p7.private_trace import (
 )
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
-from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
+from asterion.applications.prime.p7.prompt import P7_LEGACY_SOLVE_PROMPT, P7_SOLVE_PROMPT
 from asterion.applications.prime.runtime_binding import PrimeLaunch
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
@@ -89,6 +89,14 @@ def _resolve_history_variant(
     if variant == "legacy" and type(game) is ArcGameContract:
         raise P7OperatorError("P7 history variant is unavailable")
     return variant
+
+
+def _prompt_for_variant(variant: str) -> str:
+    if variant == "verified":
+        return P7_SOLVE_PROMPT
+    if variant == "legacy":
+        return P7_LEGACY_SOLVE_PROMPT
+    raise P7OperatorError("P7 history variant is unavailable")
 
 
 class P7LiveAttemptFailure(live.P7LiveSolveError):
@@ -1136,7 +1144,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             implementations=application.implementations,
             runtime=runtime,
             run_id=run_id,
-            input_text=P7_SOLVE_PROMPT,
+            input_text=_prompt_for_variant(variant),
             host_services=resources_.host_services,
             implementation_packages={CAPABILITY_REF: PACKAGE_REF},
             signal=live.NeverCancelled(),

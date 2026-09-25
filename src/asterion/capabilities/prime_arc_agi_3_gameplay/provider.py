@@ -35,6 +35,9 @@ _PROMPT_DOMAIN = b"asterion.prime-p7-solve-prompt/v1\0"
 P7_SOLVE_PROMPT_SHA256 = (
     "4aac8a4883ee7a9855a2694672f0ceaf0da994295ea2b4c839498658317a7a8c"
 )
+P7_LEGACY_SOLVE_PROMPT_SHA256 = (
+    "37ed9a8f49c459adf076b988c1c86a4b5325ad785c6d5d899de68be8adad7425"
+)
 
 
 def _matches_p7_prompt(value: object) -> bool:
@@ -44,7 +47,7 @@ def _matches_p7_prompt(value: object) -> bool:
         digest = sha256(_PROMPT_DOMAIN + value.encode("utf-8", "strict")).hexdigest()
     except UnicodeError:
         return False
-    return digest == P7_SOLVE_PROMPT_SHA256
+    return digest in {P7_SOLVE_PROMPT_SHA256, P7_LEGACY_SOLVE_PROMPT_SHA256}
 
 
 class PrimeArcAgi3GameplayImplementation:
@@ -173,6 +176,7 @@ def create_prime_arc_agi_3_gameplay_package() -> InstalledCapabilityPackage:
 
 __all__ = (
     "P7_SOLVE_PROMPT_SHA256",
+    "P7_LEGACY_SOLVE_PROMPT_SHA256",
     "PrimeArcAgi3GameplayImplementation",
     "create_prime_arc_agi_3_gameplay_package",
 )

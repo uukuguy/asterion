@@ -8,7 +8,7 @@ from hashlib import sha256
 from typing import AsyncIterator, cast
 import unittest
 
-from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
+from asterion.applications.prime.p7.prompt import P7_LEGACY_SOLVE_PROMPT, P7_SOLVE_PROMPT
 from asterion.capabilities.prime_arc_agi_3_solver import provider as solver_provider
 from asterion.capabilities.execution import CapabilityInvocation
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
@@ -80,6 +80,15 @@ class TestPrimeArcAgi3SolveReceipt(unittest.TestCase):
             solver_provider.P7_SOLVE_PROMPT_SHA256,
             sha256(domain + P7_SOLVE_PROMPT.encode("utf-8")).hexdigest(),
         )
+        self.assertEqual(
+            solver_provider.P7_LEGACY_SOLVE_PROMPT_SHA256,
+            sha256(domain + P7_LEGACY_SOLVE_PROMPT.encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual(
+            solver_provider.P7_LEGACY_SOLVE_PROMPT_SHA256,
+            "37ed9a8f49c459adf076b988c1c86a4b5325ad785c6d5d899de68be8adad7425",
+        )
+        self.assertTrue(solver_provider._matches_p7_prompt(P7_LEGACY_SOLVE_PROMPT))
         receipt = PrimeArcAgi3SolveReceipt.create(
             run_id="native-reject",
             completed_level_count=1,
