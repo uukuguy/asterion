@@ -33,7 +33,7 @@ _MEDIA_TYPE = "application/vnd.asterion.prime.p7-solving-receipt+json"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _PROMPT_DOMAIN = b"asterion.prime-p7-solve-prompt/v1\0"
 P7_SOLVE_PROMPT_SHA256 = (
-    "5499375630163b6720ecfb3707d2e13e30cadbc860e9349bad6893c684e7afb5"
+    "37ed9a8f49c459adf076b988c1c86a4b5325ad785c6d5d899de68be8adad7425"
 )
 
 
