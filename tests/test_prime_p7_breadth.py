@@ -56,7 +56,7 @@ class TestPrimeP7Breadth(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             runs = root / "runs"
-            runs.mkdir()
+            runs.mkdir(exist_ok=True)
             (runs / "breadth-resweep-campaign.json").write_text(json.dumps({
                 "schema": "asterion.prime.p7-breadth-campaign/v1",
                 "campaign_id": "breadth-resweep-" + "a" * 32,
@@ -74,6 +74,48 @@ class TestPrimeP7Breadth(unittest.TestCase):
 
         self.assertEqual(result.stopped_reason, "breadth-running-entry-requires-audit")
         attempt.assert_not_called()
+
+    def test_reconcile_marks_interrupted_run_without_calling_model(self) -> None:
+        import tools.run_prime_p7_breadth as breadth
+        from tools.run_prime_p7_breadth import BreadthCampaignConfig, BreadthCampaignController
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = root / "runs"
+            run = runs / ("p7-live-20260925132710-" + "d" * 32)
+            (run / "trace").mkdir(parents=True)
+            recording = run / "recordings" / "session"
+            recording.mkdir(parents=True)
+            (recording / "game.jsonl").write_text(
+                json.dumps({"timestamp": "2026-09-25T13:27:11+00:00", "data": {"game_id": "aa11-00000000"}}) + "\n",
+                encoding="utf-8",
+            )
+            ledger = {
+                "schema": "asterion.prime.p7-breadth-campaign/v1",
+                "campaign_id": "breadth-resweep-" + "c" * 32,
+                "seed": 0, "run_timeout_seconds": 1800, "no_action_stall_seconds": 300,
+                "terminal_attempts": [{
+                    "status": "running", "game_id": "aa11-00000000", "target_level": 1,
+                    "started_at": "2026-09-25T13:27:04+00:00",
+                }],
+            }
+            runs.mkdir(exist_ok=True)
+            (runs / "breadth-resweep-campaign.json").write_text(json.dumps(ledger), encoding="utf-8")
+            controller = BreadthCampaignController(BreadthCampaignConfig(root / "arc", runs, root, root, guest_machine=None))
+            rows = (
+                {"identities": breadth.P7_TRACE_IDENTITIES, "kind": "arc.action", "payload": {}, "sha256": "sha256:" + "b" * 64},
+            )
+            with patch.object(controller, "_metadata", return_value={"aa11-00000000": {"baseline_actions": (5,)}}), \
+                 patch.object(controller, "_interrupted_run_candidates", return_value=(run,)), \
+                 patch.object(breadth, "_read_hash_chained_trace", return_value=rows), \
+                 patch.object(breadth, "read_run_usage", return_value=(3, 4, False, False)), \
+                 patch.object(breadth, "_recorded_game_id", return_value="aa11-00000000"):
+                result = controller.reconcile_running(guest_cleanup_confirmed=True)
+
+            self.assertEqual(result["outcome"], "interrupted")
+            saved = json.loads((runs / "breadth-resweep-campaign.json").read_text())
+            self.assertEqual(saved["terminal_attempts"][0]["status"], "interrupted")
+            self.assertEqual(saved["terminal_attempts"][0]["run_id"], run.name)
 
     def test_atomic_ledger_is_private_and_preflight_does_not_create_it(self) -> None:
         from tools.run_prime_p7_breadth import BreadthCampaignConfig, BreadthCampaignController

@@ -60,6 +60,7 @@ _RESULT_SCHEMA = "asterion.prime.p7-breadth-result/v1"
 _LEDGER_FILE = "breadth-resweep-campaign.json"
 _OUTCOMES = frozenset({
     "verified", "unsolved", "timed-out-unsealed", "execution-failed", "execution-stalled",
+    "interrupted",
 })
 
 
@@ -169,7 +170,7 @@ class BreadthCampaignController:
             except FileNotFoundError:
                 pass
 
-    def _load_or_create_ledger(self) -> dict[str, Any]:
+    def _load_or_create_ledger(self, *, allow_running: bool = False) -> dict[str, Any]:
         path = self._ledger_path()
         if not path.exists():
             ledger = {
@@ -203,7 +204,9 @@ class BreadthCampaignController:
             if type(entry) is not dict:
                 raise ValueError("breadth ledger entry is invalid")
             if entry.get("status") == "running":
-                raise _RunningEntryRequiresAudit
+                if not allow_running:
+                    raise _RunningEntryRequiresAudit
+                continue
             pair = (entry.get("game_id"), entry.get("target_level"))
             run_id = entry.get("run_id")
             if (
@@ -216,6 +219,116 @@ class BreadthCampaignController:
             pairs.add(pair)
             runs.add(run_id)
         return ledger
+
+    def _interrupted_run_candidates(self, entry: dict[str, Any]) -> tuple[Path, ...]:
+        """Find the one unsealed run belonging to a paused ledger entry.
+
+        A running ledger row intentionally has no run id: the supervisor was
+        interrupted before it could publish terminal evidence.  We recover it
+        only from the exact game id and the recording timestamp.  This keeps a
+        later run, or a run for another game, from being attached silently.
+        """
+        game_id = entry.get("game_id")
+        started_at = entry.get("started_at")
+        if type(game_id) is not str or type(started_at) is not str:
+            return ()
+        try:
+            from datetime import datetime
+            started = datetime.fromisoformat(started_at)
+        except (TypeError, ValueError):
+            return ()
+        candidates: list[Path] = []
+        try:
+            runs = tuple(path for path in self.config.runs_root.iterdir()
+                         if path.is_dir() and not path.is_symlink())
+        except OSError:
+            return ()
+        for run in runs:
+            trace = run / "trace" / "prime-trace.jsonl"
+            if trace.is_symlink() or not trace.is_file():
+                continue
+            if (run / "summary.json").exists() or (run / "stall-receipt.json").exists():
+                continue
+            recording = tuple(run.glob("recordings/*/*.jsonl"))
+            if len(recording) != 1 or recording[0].is_symlink():
+                continue
+            try:
+                first = json.loads(recording[0].read_text(encoding="utf-8").splitlines()[0])
+                when = datetime.fromisoformat(str(first["timestamp"]))
+                recorded_game = first["data"]["game_id"]
+                rows = _read_hash_chained_trace(trace, in_progress=True)
+            except (OSError, UnicodeError, ValueError, KeyError, TypeError, IndexError):
+                continue
+            if recorded_game == game_id and when >= started and rows and rows[-1]["kind"] != "trace.sealed":
+                candidates.append(run)
+        return tuple(sorted(candidates))
+
+    def reconcile_running(self, *, guest_cleanup_confirmed: bool = False) -> dict[str, Any]:
+        """Convert a supervisor-interrupted row into explicit non-success evidence.
+
+        This command is deliberately separate from ``run``.  It never retries
+        a game and never marks an interrupted run solved; it only makes the
+        queue resumable after the operator has confirmed guest cleanup.
+        """
+        if not guest_cleanup_confirmed:
+            raise ValueError("guest cleanup must be confirmed before reconciliation")
+        ledger = self._load_or_create_ledger(allow_running=True)
+        running = [entry for entry in ledger["terminal_attempts"] if entry.get("status") == "running"]
+        if not running:
+            return {"schema": "asterion.prime.p7-breadth-reconcile/v1", "status": "no-running-entry"}
+        if len(running) != 1:
+            raise ValueError("multiple running breadth entries require manual audit")
+        entry = running[0]
+        candidates = self._interrupted_run_candidates(entry)
+        if len(candidates) != 1:
+            raise ValueError("interrupted breadth run is ambiguous or missing")
+        run = candidates[0]
+        run_id = run.name
+        if _RUN_ID.fullmatch(run_id) is None:
+            raise ValueError("interrupted breadth run id is invalid")
+        rows = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
+        if any(row.get("identities") != P7_TRACE_IDENTITIES for row in rows):
+            raise ValueError("interrupted breadth trace identity is invalid")
+        game_id = entry["game_id"]
+        level = entry["target_level"]
+        usage = read_run_usage(run, in_progress=True)
+        if usage[2] or usage[3]:
+            raise ValueError("interrupted breadth usage is invalid")
+        action_count = sum(row.get("kind") == "arc.action" for row in rows)
+        if action_count < 0 or _recorded_game_id(run, {game_id}) != game_id:
+            raise ValueError("interrupted breadth recording identity is invalid")
+        metadata = self._metadata().get(game_id)
+        baselines = metadata.get("baseline_actions") if metadata else None
+        if type(baselines) is not tuple or len(baselines) < level or action_count > sum(baselines[:level]):
+            raise ValueError("interrupted breadth action evidence is invalid")
+        reconciled = {
+            "status": "interrupted",
+            "game_id": game_id,
+            "target_level": level,
+            "run_id": run_id,
+            "outcome": "interrupted",
+            "action_count": action_count,
+            "input_tokens": usage[0],
+            "output_tokens": usage[1],
+            "stop_reason": "operator-interrupt",
+            "evidence_sha256": rows[-1]["sha256"],
+            "reconciled_from": "running",
+            "reconciliation": "trace-chain-and-recording-validated-after-supervisor-interrupt",
+            "guest_cleanup_confirmed": True,
+        }
+        ledger["terminal_attempts"][ledger["terminal_attempts"].index(entry)] = reconciled
+        self._write_ledger(ledger)
+        return {
+            "schema": "asterion.prime.p7-breadth-reconcile/v1",
+            "status": "reconciled",
+            "outcome": "interrupted",
+            "game_id": game_id,
+            "target_level": level,
+            "run_id": run_id,
+            "action_count": action_count,
+            "input_tokens": usage[0],
+            "output_tokens": usage[1],
+        }
 
     def _make_scheduler(self, level: int) -> SweepScheduler:
         if level not in (1, 2):
@@ -305,6 +418,15 @@ class BreadthCampaignController:
             return _valid_attempt_summary(summary, run_id, game_id, level, 1)
         if outcome == "timed-out-unsealed":
             return entries[-1]["kind"] != "trace.sealed" and not (run / "summary.json").exists()
+        if outcome == "interrupted":
+            return (
+                entries[-1]["kind"] != "trace.sealed"
+                and not (run / "summary.json").exists()
+                and entry.get("status") == "interrupted"
+                and entry.get("stop_reason") == "operator-interrupt"
+                and entry.get("reconciled_from") == "running"
+                and entry.get("guest_cleanup_confirmed") is True
+            )
         if outcome == "execution-stalled":
             receipt = self._read_json(run / "stall-receipt.json")
             if not receipt or receipt.get("run_id") != run_id or receipt.get("game_id") != game_id:
@@ -439,6 +561,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs-root", type=Path)
     parser.add_argument("--guest-machine", default=os.environ.get("PRIME_ORB_MACHINE", "ubuntu"))
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--reconcile-running", action="store_true")
+    parser.add_argument("--guest-cleanup-confirmed", action="store_true")
     args = parser.parse_args(argv)
     operator_root = args.operator_root.resolve()
     config = BreadthCampaignConfig(
@@ -447,6 +571,9 @@ def main(argv: list[str] | None = None) -> int:
         operator_root=operator_root, repo_root=operator_root, guest_machine=args.guest_machine,
     )
     controller = BreadthCampaignController(config)
+    if args.reconcile_running:
+        print(json.dumps(controller.reconcile_running(guest_cleanup_confirmed=args.guest_cleanup_confirmed), sort_keys=True))
+        return 0
     if args.preflight_only:
         print(json.dumps(controller.preflight(), sort_keys=True))
         return 0

@@ -46,7 +46,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p7-second-round
 .PHONY: asterion-prime-p7-breadth-preflight
 .PHONY: asterion-prime-p7-breadth
-.PHONY: p7-breadth-preflight p7-breadth
+.PHONY: p7-breadth-preflight p7-breadth p7-breadth-reconcile
 .PHONY: p7-retry-preflight p7-retry
 .PHONY: asterion-prime-p7-retry-preflight asterion-prime-p7-retry
 .PHONY: asterion-prime-p7-targeted-ab
@@ -325,6 +325,8 @@ p7-breadth-preflight: asterion-prime-p7-breadth-preflight
 
 p7-breadth: asterion-prime-p7-breadth
 
+p7-breadth-reconcile: asterion-prime-p7-breadth-reconcile
+
 asterion-prime-p7-breadth-preflight:
 	@printf '[asterion-prime-p7-breadth-preflight] local L1/L2 breadth resweep readiness; zero model calls\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
@@ -338,6 +340,13 @@ asterion-prime-p7-breadth:
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_breadth.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --guest-machine "$(PRIME_ORB_MACHINE)"'
+
+asterion-prime-p7-breadth-reconcile:
+	@printf '[asterion-prime-p7-breadth-reconcile] reconcile paused breadth entry; zero model calls\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_breadth.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --guest-machine "$(PRIME_ORB_MACHINE)" --reconcile-running --guest-cleanup-confirmed'
 
 p7-retry-preflight: asterion-prime-p7-retry-preflight
 
