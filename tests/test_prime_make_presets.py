@@ -122,6 +122,17 @@ class TestPrimeMakePresets(unittest.TestCase):
                     completed.stdout,
                 )
 
+    def test_p7_history_variant_reaches_only_local_witness_and_sweep_guest(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        makefile = (root / "Makefile").read_text()
+        local = _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt")
+        official = _recipe(makefile, "asterion-prime-p7-official-preflight asterion-prime-p7-official-submit asterion-prime-p7-official-live-eval")
+        self.assertIn(
+            'if [ "$@" = asterion-prime-p7-level-witness ] || [ "$@" = asterion-prime-p7-sweep-attempt ]; then ORBENV="$$ORBENV:ASTERION_PRIME_P7_HISTORY_VARIANT"; fi',
+            local,
+        )
+        self.assertNotIn("ASTERION_PRIME_P7_HISTORY_VARIANT", official)
+
     def test_unknown_game_does_not_block_unrelated_make_targets(self) -> None:
         root = Path(__file__).resolve().parents[1]
         completed = subprocess.run(

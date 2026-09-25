@@ -15,17 +15,26 @@ from the current level; do not repeat completed levels. Your secondary
 objective is to minimize cumulative actions.
 
 Use only the persistent ipython tool. Import only p7_client; do not inspect its
-source. The broker API is p7_client.observe(), p7_client.status(), and
-p7_client.act(actions). act takes a list of action dictionaries such as
+source. The broker API is p7_client.observe(), p7_client.status(),
+p7_client.history(start, limit), p7_client.frame_at(sequence),
+p7_client.act(actions), and p7_client.act_checked(plan). act takes a list of action dictionaries such as
 {"name":"ACTION1","data":{}} and returns the complete post-batch view. The
 optional summary(), render(), diff(), positions(), and act_and_observe() helpers
-only analyze or wrap those three operations. act_and_observe returns exactly
+only analyze or wrap broker operations. act_and_observe returns exactly
 act, diff, and summary entries; call observe separately for a full frame.
 Frame semantics: an observation may retain an animation as a list of 2-D
 frames. The last frame is the settled post-action grid used by summary(),
 render(), positions(), and diff(); the raw animation remains available in
 observation["frame"] for timing analysis. render() uses hexadecimal symbols
 0-9 and A-F, where A-F represent color values 10-15.
+
+For a target above Level 1, call p7_client.history(0, 32) before planning.
+Request further pages until the sequence containing the Level 1 boundary is
+returned; stop paging at that boundary. Each page contains observed facts only:
+action, stable before/after digests, changed cells, level count, and SDK state.
+Use p7_client.frame_at(sequence) only for a sequence already returned by
+history; it returns that occurred settled grid. Write hypotheses that history
+could disprove, and compare each with the observed facts before using it.
 
 Treat only broker observations and retained Python state as game information.
 Never inspect engine source, another game or run, network resources, credentials,
@@ -66,11 +75,16 @@ action has occurred there. Reassess the returned level before another plan.
 If the broker instead reports terminal GAME_OVER, no safe current-level reset
 is available in this session; stop this attempt.
 
-Before every act call, store and print a concise [PLAN] of two or three sentences:
+Before every act or act_checked call, store and print a concise [PLAN] of two or three sentences:
 the current hypothesis, expected change, shortest useful test, stop condition,
-and remaining-budget implication. Prefer one- or two-action short experiments
-for uncertainty. Use a longer batch, never more than 20 actions, only when the
-sequence is supported by observations. After each broker response, inspect the
+and remaining-budget implication. Unknown mechanics require one action at a
+time through a one-item act call. Once a multi-step plan has evidence, use
+p7_client.act_checked(plan), with no more than 20 items. Every item must include
+an action and a distinguishing expected cell value, full settled-frame hash,
+level advance, or terminal state. The code result is authoritative: on first
+mismatch, unavailable action, level boundary, GAME_OVER, or cap, the remaining
+plan was not executed. Never claim an unchecked prediction passed from model
+text or count unexecuted items. After each broker response, inspect the
 returned result and settled observation, compare expected with observed changes,
 update retained notes, and formulate the next plan. Never use Python or shell
 loops to submit actions. Reject no-ops and death paths. Never repeat an unchanged

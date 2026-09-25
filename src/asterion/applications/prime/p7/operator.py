@@ -69,6 +69,7 @@ _RUNTIME_ID = "asterion.prime"
 _PROVIDER = "deepseek"
 _MODEL = "deepseek-v4-flash"
 UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
+P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
@@ -77,6 +78,17 @@ _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command
 
 class P7OperatorError(RuntimeError):
     """The fixed P7 model host is unavailable."""
+
+
+def _resolve_history_variant(
+    environment: Mapping[str, str], game: P7GameSelection | ArcGameContract
+) -> str:
+    variant = environment.get(P7_HISTORY_VARIANT_ENV, "verified")
+    if variant not in {"verified", "legacy"}:
+        raise P7OperatorError("P7 history variant is unavailable")
+    if variant == "legacy" and type(game) is ArcGameContract:
+        raise P7OperatorError("P7 history variant is unavailable")
+    return variant
 
 
 class P7LiveAttemptFailure(live.P7LiveSolveError):
@@ -214,7 +226,7 @@ class _P7BrokerClient:
         broker: ArcBroker,
         recorder: PrimeTraceRecorder,
         identities: Mapping[str, str] = P7_TRACE_IDENTITIES,
-        variant: str = "legacy",
+        variant: str = "verified",
     ) -> None:
         if variant not in {"legacy", "verified"}:
             raise P7OperatorError("P7 host services are unavailable")
@@ -400,8 +412,10 @@ def _apply_saved_prefix(
 
     if not transitions or any(type(item) is not ArcTransition for item in transitions):
         raise P7OperatorError("P7 saved prefix is unavailable")
-    client = _P7BrokerClient(broker, recorder)
     try:
+        if len(broker.history(0, 1)) != 1 or broker.history(0, 1)[0]["sequence"] != 0:
+            raise ValueError
+        client = _P7BrokerClient(broker, recorder, variant="verified")
         for expected in transitions:
             if (
                 expected.sequence != len(broker.journal) + 1
@@ -411,6 +425,18 @@ def _apply_saved_prefix(
             client.act([{"name": expected.action, "data": dict(expected.data)}])
             if broker.journal[-1] != expected:
                 raise ValueError
+            record = broker.history(expected.sequence, 1)[0]
+            if (
+                record["sequence"] != expected.sequence
+                or record["before_state_sha256"] != expected.before_sha256
+                or record["after_state_sha256"] != expected.after_sha256
+                or record["levels_completed"] != expected.levels_completed
+                or broker.frame_at(expected.sequence)
+                != [list(row) for row in broker.observe().frame[-1]]
+            ):
+                raise ValueError
+        if broker.history(transitions[-1].sequence, 1)[0]["sequence"] != len(transitions):
+            raise ValueError
         if broker.status().levels_completed != transitions[-1].levels_completed:
             raise ValueError
     except Exception:
@@ -708,12 +734,13 @@ def build_p7_operator_resources(
     trace: PrimeTraceRecorder | None = None
     bridge: _IpythonBridgeServer | None = None
     try:
+        variant = _resolve_history_variant(environment, game)
         selection = resolve_p7_runtime(environment, game)
         # The ARC credential belongs only to the SDK session. The Pi model
         # subprocess needs the model host key, never the scorecard key.
         provider_environment = {
             name: value for name, value in environment.items()
-            if name not in {"ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE"}
+            if name not in {"ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE", P7_HISTORY_VARIANT_ENV}
         }
         if (
             type(pi_base_command) is not tuple
@@ -798,6 +825,7 @@ def build_p7_operator_resources(
                     broker,
                     trace,
                     GAMEPLAY_TRACE_IDENTITIES if official else P7_TRACE_IDENTITIES,
+                    variant=variant,
                 )
             ),
         )
@@ -967,6 +995,8 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
 
     from .solutions import load_best_prefix
 
+    variant = _resolve_history_variant(invocation.environment, invocation.game)
+
     root = invocation.operator_root
     prefix = (
         load_best_prefix(
@@ -1010,6 +1040,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     reason: str | None = None
     failure: BaseException | None = None
     diagnostics: dict[str, object] = {}
+    diagnostics["prediction_variant"] = variant
     if invocation.sweep_mode:
         diagnostics["sweep"] = {
             "scope": "offline-research",
@@ -1035,6 +1066,8 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                 ):
                     raise P7OperatorError("P7 saved prefix is unavailable")
                 _apply_saved_prefix(broker, evidence.runtime_recorder, prefix.transitions)
+                if broker.status().levels_completed != prefix.levels_completed:
+                    raise P7OperatorError("P7 saved prefix is unavailable")
         print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
         application = _resolve_p7_application()
         assembly = application.assemblies[0]

@@ -16,6 +16,14 @@ from asterion.applications.prime.p7.operator import p7_runtime_options, resolve_
 
 
 class TestOfficialOperator(unittest.TestCase):
+    def test_official_rejects_legacy_history_variant(self) -> None:
+        from asterion.applications.prime.p7.operator import (
+            P7OperatorError, P7_HISTORY_VARIANT_ENV, _resolve_history_variant,
+        )
+
+        with self.assertRaises(P7OperatorError):
+            _resolve_history_variant({P7_HISTORY_VARIANT_ENV: "legacy"}, ArcGameContract("ab12-12345678", 2))
+
     def test_saved_submit_routes_without_model_preflight(self) -> None:
         from asterion.applications.prime.p7.official_operator import SavedInvocation, main
 

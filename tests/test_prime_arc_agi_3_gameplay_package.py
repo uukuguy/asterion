@@ -102,6 +102,15 @@ def execute(
 
 
 class TestGameplayEvidence(unittest.TestCase):
+    def test_only_shared_application_prompt_digest_is_admitted(self):
+        from asterion.capabilities.prime_arc_agi_3_gameplay.provider import P7_SOLVE_PROMPT_SHA256
+
+        domain = b"asterion.prime-p7-solve-prompt/v1\0"
+        self.assertEqual(
+            P7_SOLVE_PROMPT_SHA256,
+            sha256(domain + P7_SOLVE_PROMPT.encode("utf-8")).hexdigest(),
+        )
+
     def test_package_exists(self):
         from importlib.util import find_spec
 

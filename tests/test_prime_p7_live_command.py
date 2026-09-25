@@ -211,6 +211,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("settled", P7_SOLVE_PROMPT.lower())
         self.assertIn("last", P7_SOLVE_PROMPT.lower())
         self.assertIn("a-f represent color values 10-15", P7_SOLVE_PROMPT.lower())
+        self.assertIn("p7_client.history(0, 32)", P7_SOLVE_PROMPT)
+        self.assertIn("p7_client.frame_at(sequence)", P7_SOLVE_PROMPT)
+        self.assertIn("p7_client.act_checked(plan)", P7_SOLVE_PROMPT)
+        self.assertIn("remaining plan was not executed", " ".join(P7_SOLVE_PROMPT.split()))
         self.assertIs(official_operator.P7_SOLVE_PROMPT, P7_SOLVE_PROMPT)
         self.assertFalse(hasattr(operator, "_P7_FRAME_SEMANTICS"))
 
@@ -231,8 +235,15 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             recorder = PrimeTraceRecorder(Path(directory))
             engine = _FullGameEngine()
             broker = ArcBroker(engine=engine, game=game)
+            broker.bind_history("run-1")
             _apply_saved_prefix(broker, recorder, expected)
             self.assertEqual(broker.journal, expected)
+            history = broker.history(0, 32)
+            self.assertEqual(len(history), len(expected) + 1)
+            self.assertEqual(history[-1]["before_state_sha256"], expected[-1].before_sha256)
+            self.assertEqual(history[-1]["after_state_sha256"], expected[-1].after_sha256)
+            self.assertIn("after_frame_sha256", history[-1])
+            self.assertEqual(broker.frame_at(len(expected)), [list(row) for row in broker.observe().frame[-1]])
             self.assertEqual(broker.status().levels_completed, 1)
             self.assertEqual(engine.calls, ["ACTION1"])
             recorder.close()
@@ -240,10 +251,60 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             recorder = PrimeTraceRecorder(Path(directory))
             engine = _FullGameEngine()
             broker = ArcBroker(engine=engine, game=game)
+            broker.bind_history("run-1")
             forged = ArcTransition(1, "ACTION1", "sha256:" + "0" * 64, expected[0].after_sha256, 1)
             with self.assertRaisesRegex(P7OperatorError, "saved prefix"):
                 _apply_saved_prefix(broker, recorder, (forged,))
             self.assertEqual(engine.calls, [])
+            recorder.close()
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            engine = _FullGameEngine()
+            broker = ArcBroker(engine=engine, game=game)
+            with self.assertRaisesRegex(P7OperatorError, "saved prefix"):
+                _apply_saved_prefix(broker, recorder, expected)
+            self.assertEqual(engine.calls, [])
+            recorder.close()
+
+    def test_history_variant_defaults_verified_and_accepts_explicit_local_research(self) -> None:
+        from asterion.applications.prime.p7.operator import (
+            P7OperatorError, P7_HISTORY_VARIANT_ENV, _resolve_history_variant,
+        )
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection("ls20-9607627b", 0, 2)
+        self.assertEqual(_resolve_history_variant({}, game), "verified")
+        self.assertEqual(
+            _resolve_history_variant({P7_HISTORY_VARIANT_ENV: "legacy", "ASTERION_PRIME_P7_RUN_MODE": "solve"}, game),
+            "legacy",
+        )
+        for value in ("Legacy", "", "other"):
+            with self.subTest(value=value), self.assertRaises(P7OperatorError):
+                _resolve_history_variant({P7_HISTORY_VARIANT_ENV: value}, game)
+        self.assertEqual(
+            _resolve_history_variant({P7_HISTORY_VARIANT_ENV: "legacy", "ASTERION_PRIME_P7_RUN_MODE": "sweep"}, game),
+            "legacy",
+        )
+
+    def test_verified_act_rejects_batch_before_dispatch_and_legacy_preserves_it(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.operator import P7OperatorError, _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        game = P7GameSelection("ls20-9607627b", 0, 2)
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            engine = _HistoryEngine()
+            broker = ArcBroker(engine=engine, game=game)
+            checked = _P7BrokerClient(broker, recorder)
+            actions = [{"name": "ACTION1", "data": {}}] * 2
+            with self.assertRaises(P7OperatorError):
+                checked.act(actions)
+            self.assertEqual(engine.calls, [])
+            legacy = _P7BrokerClient(broker, recorder, variant="legacy")
+            self.assertEqual(legacy.act(actions)["applied_count"], 2)
+            self.assertEqual(engine.calls, ["ACTION1", "ACTION1"])
             recorder.close()
 
     def test_game_over_act_returns_terminal_view_without_closed_reads(self) -> None:
@@ -741,7 +802,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             broker = ArcBroker(engine=_Engine(), game=game)
             recorder = PrimeTraceRecorder(trace_root)
             evidence = P7PrivateTraceReceipt(broker, recorder)
-            client = _P7BrokerClient(broker, recorder)
+            client = _P7BrokerClient(broker, recorder, variant="legacy")
             client.act([{"name": "ACTION1", "data": {}}] * 2)
             client.act([{"name": "ACTION1", "data": {}}])
             self.assertEqual((broker.journal[-1].levels_completed, len(broker.journal)), (1, 3))
@@ -757,7 +818,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             incomplete_trace_root.mkdir()
             other_broker = ArcBroker(engine=_Engine(), game=game)
             other_recorder = PrimeTraceRecorder(incomplete_trace_root)
-            other_client = _P7BrokerClient(other_broker, other_recorder)
+            other_client = _P7BrokerClient(other_broker, other_recorder, variant="legacy")
             other_client.act([{"name": "ACTION1", "data": {}}] * 2)
             other_broker.act(("ACTION1",))
             with mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=lambda **_: _Engine()):
@@ -792,7 +853,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 nonlocal client
                 broker = ArcBroker(engine=kwargs["engine"], game=game)
                 evidence = P7PrivateTraceReceipt(broker, PrimeTraceRecorder(kwargs["private_trace_root"]))
-                client = _P7BrokerClient(broker, evidence.runtime_recorder)
+                client = _P7BrokerClient(broker, evidence.runtime_recorder, variant="legacy")
 
                 async def close_resources() -> None:
                     evidence.close()
