@@ -24,6 +24,20 @@ class TestPrimeP7Guest(unittest.TestCase):
         self.assertIn('--setenv=ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND=1', args)
         self.assertFalse(any(arg.startswith('--property=RuntimeMaxSec=') for arg in args))
 
+    def test_guest_drops_empty_runtime_marker_and_offline_mode(self) -> None:
+        with (
+            patch('tools.run_prime_p7_guest.Path.is_file', return_value=True),
+            patch.dict('os.environ', {
+                'ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND': '', 'OPERATION_MODE': 'offline',
+            }, clear=True),
+            patch('tools.run_prime_p7_guest.os.execvp', side_effect=SystemExit(0)) as call,
+        ):
+            with self.assertRaises(SystemExit):
+                launch('asterion-p7-' + 'a' * 32 + '.service', 30, ['python3', '-V'])
+        args = call.call_args.args[1]
+        self.assertNotIn('--setenv=ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND=', args)
+        self.assertNotIn('--setenv=OPERATION_MODE=offline', args)
+
     def test_launch_contains_descendants_without_forwarding_credentials(self) -> None:
         with (
             patch('tools.run_prime_p7_guest.Path.is_file', return_value=True),

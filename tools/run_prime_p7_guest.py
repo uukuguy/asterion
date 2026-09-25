@@ -18,6 +18,7 @@ _ENVIRONMENT = (
     "ASTERION_PRIME_P7_RUN_MODE", "ASTERION_PRIME_P7_TARGET_LEVEL",
     "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND", "OPERATION_MODE",
 )
+_UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 
 
 def _unit(value: str) -> str:
@@ -47,7 +48,13 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     ]
     if seconds is not None:
         args.append(f"--property=RuntimeMaxSec={seconds}s")
-    args.extend(f"--setenv={name}={os.environ[name]}" for name in _ENVIRONMENT if name in os.environ)
+    for name in _ENVIRONMENT:
+        value = os.environ.get(name)
+        if value is None:
+            continue
+        if name in {_UNBOUNDED_FIRST_ROUND_ENV, "OPERATION_MODE"} and os.environ.get(_UNBOUNDED_FIRST_ROUND_ENV) != "1":
+            continue
+        args.append(f"--setenv={name}={value}")
     # systemd-run owns no private provider settings; the operator reads its .env.
     # Replace the Orb-managed process: no launcher child can outlive a killed
     # Orb session and submit a new service after cleanup has checked absence.
