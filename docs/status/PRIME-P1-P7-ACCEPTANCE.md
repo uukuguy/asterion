@@ -45,7 +45,9 @@ make asterion-prime-p1-run
 
 ---
 
-## P7 — 跑通 ARC-AGI-3 第一关(research preset)
+## P7 — ARC-AGI-3 多题多关研究
+
+> 2026-09-25 更新：本地 25 题中 17 题有已封存、回放验证的首关解法；DC22、M0R0 已验证第二关，尚无整题通关。一次已授权的官方卡片完成 17 道首关，总分 `2.5044733044733043`。当前已实现同局历史、稳定末帧查询与逐步预测停步；这些代码与零模型测试不证明二关通过率提升。完整操作与逐题状态见[指南](../guides/prime-p7-games-and-official-results.md)。
 
 ### 用它做什么
 
@@ -69,18 +71,18 @@ make asterion-prime-p7-solve
 
 先用 `make asterion-prime-p7-games` 查看本地题目和已验证进度；完整题号、官方 scorecard 与其它关卡的当前边界见[操作指南](../guides/prime-p7-games-and-official-results.md)。该清单命令不启动模型。
 
-Makefile 已将下一题 `tu93-0768757b`、seed `0` 和本地题库位置设为默认值。操作者只需记住这条命令；以后换题时由项目维护者更新默认选题。历史题 `ls20-9607627b` 仍在受控选题列表中。
+Makefile 当前默认 `tu93-0768757b`、本地 seed `0`；实跑时建议显式指定 `GAME`，并用 `LEVEL` 选择按顺序解到的关卡。例如 `make asterion-prime-p7-level-witness GAME=dc22 LEVEL=2`。`make asterion-prime-p7-games` 可列出本地题号与已验证关卡。
 
-选择值由 Makefile 经 Orb 注入给应用；引擎、Broker、回放、密封 trace 和公开 receipt 使用同一 `game_id`/`seed`。公开 receipt 的 `selection_receipt_sha256` 还将题目身份、能力收据和 Broker 回放摘要绑定在一起；原 `receipt_sha256` 仍是能力层收据摘要。这个 preset 在完成**一关**后停止，内部上限为 500 个原始动作、128 次 callback 和 1 小时；它会实际调用模型。新题目前只做无模型预检，尚未启动该付费求解。
+选择值由 Makefile 经 Orb 注入给应用；引擎、Broker、回放、密封 trace 和公开 receipt 使用同一 `game_id`/`seed`。公开 receipt 的 `selection_receipt_sha256` 还将题目身份、能力收据和 Broker 回放摘要绑定在一起；原 `receipt_sha256` 仍是能力层收据摘要。普通 `solve` 在整题通过或失败时结束；显式 `LEVEL=N` 的 witness 在第 N 关通过后停止。普通运行保留内部 callback/期限控制；受控二关扫题额外执行每题人类基准动作数、30 分钟及连续 5 分钟无动作停止线。命令会实际调用模型，不能把 preflight 的成功当作解题成功。
 
-2026-09-24 的两次 P7 运行分别留下 `p7-live-20260924094143` 和 `p7-live-20260924112844` 私有摘要：均在应用组合校验阶段失败，原始动作与 IPython 单元均为 0，尚未生成能力收据；摘要不能证明当时选了哪道题，也不能算求解成功。原因是 P7 入口拿包含 P1–P7 的公开 provider 配仅 P7 能力包。入口现改用只包含 P7 的专用 provider；安装 wheel 在 Orb 中无模型通过相同组合校验，安装版假 Pi 回归测试通过。相关定向测试 41 项与 `make promotion-check` 25 条隔离发行命令均通过，模型操作 0。tu93 真实求解仍未验证。
+**历史诊断（2026-09-24）**：两次 P7 运行 `p7-live-20260924094143` 和 `p7-live-20260924112844` 在应用组合校验阶段失败，原始动作与 IPython 单元均为 0。随后改用 P7 专用 provider，安装版假 Pi 回归测试通过。这些历史记录不能算求解成功；之后的 tu93 付费尝试也未解出首关，当前进度以题目清单和逐题证据为准。
 
 **期望**:退出码 0;输出有 `receipt_sha256`、`partial_game_score`、`terminal_reason`。历史通过跑(receipt `c00e3263cb...`,2026-09-14)——20 个原始动作、40 个 IPython 单元、`ls20-9607627b` 第 1 关、`partial_game_score=3.571429`、`terminal_reason=level-completed`。
 
 ### 边界与未验证项
 
-✅ **已验证**:Level 1 / 种子 0 / `deepseek-v4-flash` 下通过;trace 完整、回放通过、清理干净。
-⚠️ **设计选择但未端到端验证**:多关 / 多种子 / 多游戏 / 完整 benchmark;`promotion` 仍是 `unpromoted`(只跑过一次的边界)。
+✅ **已验证**：17 题首关与 DC22、M0R0 第二关在本地 seed 0 的独立动作回放通过；一次官方卡片的 17 题首关成绩已保存。
+⚠️ **未完成边界**：尚无整题通过，也没有证明新的历史与预测机制能稳定提高第二关通过率；25 题完整 benchmark、多种子泛化与新官方卡片均未完成。已实现和零模型验证不能替代付费 A/B 及独立回放证据。
 ℹ️ **历史说明**:P7 是原验收文档写作时唯一直接跑真模型的见证。P1 与 P3–P6 后来已有各自固定有界真实运行；P2 的能力边界仍见本节。
 ℹ️ **P7 没有独立的"native spec"**:它是 Phase 3 的产物,设计沉淀在 `docs/superpowers/specs/2026-09-12-asterion-prime-p1-p7-native-detachment-design.md` 的 P7 应用章节里。
 
