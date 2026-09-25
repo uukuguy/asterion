@@ -17,6 +17,7 @@ from .broker import ArcTransition
 from .live import read_trace_entries
 from .run_story.evidence import _recording
 from .score import replay_sha256
+from .private_trace import P7_TRACE_IDENTITIES
 
 
 class FailedAttemptEvidenceError(ValueError):
@@ -159,6 +160,8 @@ def _raw_trace(run: Path, *, sealed: bool) -> tuple[dict[str, object], ...]:
             identities = value["identities"]
         elif value["identities"] != identities:
             _fail()
+        if value["identities"] != P7_TRACE_IDENTITIES:
+            _fail()
         encoded = json.dumps({"identities": value["identities"], "kind": value["kind"], "payload": value["payload"], "previous_sha256": previous, "sequence": expected}, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
         digest = "sha256:" + hashlib.sha256(encoded).hexdigest()
         if value["sha256"] != digest:
@@ -290,6 +293,8 @@ def _load_one(run: Path, *, game_id: str, seed: int, target_level: int) -> Faile
         prefix_count = _int(terminal_payload.get("primitive_actions"), minimum=1)
         if prefix_count > action_count or _int(terminal_payload.get("levels_completed"), minimum=1) != levels:
             _fail()
+        if prefix_count > len(tuple(entry for entry in entries if entry.kind == "arc.action")):
+            _fail()
         if transitions := _transitions(entries):
             if transitions[prefix_count - 1].levels_completed != levels or any(item.levels_completed >= levels for item in transitions[:prefix_count - 1]):
                 _fail()
@@ -380,7 +385,13 @@ def _candidate_matches_identity(run: Path, *, game_id: str, seed: int, target_le
         summary_file = run / "summary.json"
         if not summary_file.exists() and (run / "stall-receipt.json").is_file():
             receipt = json.loads((run / "stall-receipt.json").read_text(encoding="utf-8"))
-            return isinstance(receipt, Mapping) and (receipt.get("game_id"), receipt.get("seed")) == (game_id, seed)
+            if not isinstance(receipt, Mapping) or (receipt.get("game_id"), receipt.get("seed")) != (game_id, seed):
+                return False
+            rows = _raw_trace(run, sealed=False)
+            actions = tuple(row["payload"] for row in rows if row["kind"] == "arc.action")
+            return bool(actions) and max(
+                item.get("levels_completed") for item in actions if isinstance(item, Mapping)
+            ) == target_level - 1
         summary = json.loads(summary_file.read_text(encoding="utf-8"))
         if not isinstance(summary, Mapping):
             return False

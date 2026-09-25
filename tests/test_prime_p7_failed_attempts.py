@@ -90,6 +90,12 @@ class FailedAttemptEvidenceTests(unittest.TestCase):
         self.assertEqual(advice.runs[0].terminal_reason, "execution-stalled")
         self.assertTrue(advice.runs[0].evidence_digest.startswith("sha256:"))
 
+    def test_stall_for_another_target_level_is_not_selected(self) -> None:
+        advice = select_failed_attempt_advice(
+            self.runs_root, game_id="cd82-fb555c5d", seed=0, target_level=3
+        )
+        self.assertEqual(advice.source_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
