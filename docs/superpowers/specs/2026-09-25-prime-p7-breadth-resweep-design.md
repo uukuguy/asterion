@@ -19,6 +19,7 @@ At design time, eight games lack Level 1 and 13 of the existing Level-1 games la
 
 - `make asterion-prime-p7-breadth-preflight` is zero-model and prints safe counts and game IDs selected for Level 1 and Level 2. It creates no game action or official card.
 - `make asterion-prime-p7-breadth` builds an isolated wheel, loads the existing local ARC wheels, and runs a new operator-only controller. It requires no `GAME`, seed, token, or time arguments.
+- Short aliases `make p7-breadth-preflight` and `make p7-breadth` call those same targets; user guidance shows the short names first.
 - Level 1 candidates are sorted by canonical game ID and attempted first. After that phase finishes, recompute verified progress and form the sorted Level 2 queue. A newly solved Level 1 game can therefore join Level 2 in the same pass.
 - Each `(game_id, target_level)` is attempted at most once in this new campaign. Previous unsolved attempts do not block this one pass. Re-running the command resumes from its new ledger and cannot spend again on a terminal entry.
 - A new run has a distinct time-stamped run ID. Existing first/second round ledgers, run directories, and official scorecards are never modified.
