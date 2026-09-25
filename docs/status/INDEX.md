@@ -23,7 +23,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `PRIME-TYPICAL-APPLICATIONS.md` | 🟡 decision-history | Historical Prime-backed P1-P7 behavior and traces; not native Asterion Prime closure. |
 | `FRAMEWORK-INTEGRATION-WORKLIST.md` | 🟡 decision-history | Completed framework integration worklist; superseded as active route by the 2026-09-12 native reset. |
 | `FRAMEWORK-PUBLIC-INVENTORY.md` | 🟢 active | Metadata-only inventory of application providers, capability refs, AgentRuntime IDs, separate control providers, and evidence boundaries. |
-| `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native P7 evidence, official partial card, new levels and reports, action caps, and reviewed stall evidence. |
+| `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native P7 evidence, official partial card, new levels and reports, action caps, stalls, and interrupted-run boundaries. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `../guides/prime-p7-games-and-official-results.md` | 🟢 active | P7 本地题目与完成进度、官方 scorecard 和排行榜操作指南。 |
 | `DECISIONS.md` | 🟢 active | Indexed architecture and trust-boundary decisions; D-2026-09-12-01 governs native P1-P7 work. |
