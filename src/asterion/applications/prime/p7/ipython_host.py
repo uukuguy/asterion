@@ -553,8 +553,7 @@ def _valid_client_module(source: object) -> bool:
         if type(statement) is ast.Import:
             if any(
                 alias.name not in {"json", "socket"}
-                or alias.asname is None
-                or not alias.asname.startswith("_")
+                or alias.asname is not None
                 for alias in statement.names
             ):
                 return False
@@ -572,7 +571,10 @@ def _valid_client_module(source: object) -> bool:
             public[statement.name] = statement
         else:
             return False
-    if set(public) != {"act", "observe", "status", "history", "frame_at", "act_checked"}:
+    if set(public) != {
+        "act", "observe", "status", "history", "frame_at", "act_checked",
+        "positions", "diff", "summary", "render", "act_and_observe",
+    }:
         return False
     return (
         _exact_arguments(public["observe"], 0)
@@ -585,6 +587,36 @@ def _valid_client_module(source: object) -> bool:
         and public["frame_at"].args.args[0].arg == "sequence"
         and _exact_arguments(public["act_checked"], 1)
         and public["act_checked"].args.args[0].arg == "plan"
+        and _helper_arguments(public["positions"], ("values", "obs"), (None,))
+        and _helper_arguments(public["diff"], ("before", "after"), ())
+        and _helper_arguments(public["summary"], ("obs",), (None,))
+        and _helper_arguments(
+            public["render"], ("obs",), (None,),
+            ("x0", "y0", "x1", "y1"), (0, 0, 64, 64),
+        )
+        and _helper_arguments(public["act_and_observe"], ("actions",), ())
+    )
+
+
+def _helper_arguments(
+    function: ast.FunctionDef,
+    positional: tuple[str, ...],
+    defaults: tuple[object, ...],
+    keyword_only: tuple[str, ...] = (),
+    keyword_defaults: tuple[object, ...] = (),
+) -> bool:
+    arguments = function.args
+    return (
+        not function.decorator_list
+        and not arguments.posonlyargs
+        and arguments.vararg is None
+        and arguments.kwarg is None
+        and tuple(arg.arg for arg in arguments.args) == positional
+        and tuple(arg.arg for arg in arguments.kwonlyargs) == keyword_only
+        and len(arguments.defaults) == len(defaults)
+        and all(type(node) is ast.Constant and node.value == value for node, value in zip(arguments.defaults, defaults))
+        and len(arguments.kw_defaults) == len(keyword_defaults)
+        and all(type(node) is ast.Constant and node.value == value for node, value in zip(arguments.kw_defaults, keyword_defaults))
     )
 
 

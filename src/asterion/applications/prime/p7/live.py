@@ -293,7 +293,7 @@ class P7ClientServer:
                 "value": value,
             }
             encoded = json.dumps(response, allow_nan=False, separators=(",", ":")).encode()
-            if len(encoded) > 16384:
+            if method == "history" and len(json.dumps(value, allow_nan=False, separators=(",", ":")).encode()) > 16384:
                 raise ValueError
             return encoded
         except Exception:

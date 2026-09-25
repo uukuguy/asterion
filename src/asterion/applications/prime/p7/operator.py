@@ -241,11 +241,14 @@ class _P7BrokerClient:
 
     def act_checked(self, plan: object) -> Mapping[str, object]:
         try:
-            result = self._broker.act_checked(plan)
+            journal_start = len(self._broker.journal)
+            try:
+                result = self._broker.act_checked(plan)
+            finally:
+                self._record_transitions(self._broker.journal[journal_start:])
             batch = result["batch"]
             observation = result["observation"]
             terminal = result["terminal"]
-            self._record_transitions(batch.transitions)
             return {
                 "applied_count": result["applied_count"],
                 "stop_reason": result["stop_reason"],

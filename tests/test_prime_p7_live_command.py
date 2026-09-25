@@ -40,6 +40,76 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_generated_module_facade_accepts_helpers_and_rejects_unknown_public_name(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import P7ClientError, p7_client_module_facade
+
+        source = live_module.client_module_source("/tmp/test-p7.sock").encode()
+        self.assertIsNotNone(p7_client_module_facade(source))
+        with self.assertRaises(P7ClientError):
+            p7_client_module_facade(source + b"\ndef extra():\n    return 1\n")
+
+    def test_checked_trace_keeps_success_before_later_engine_error(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import P7OperatorError, _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(engine=_HistoryEngine(raises_on=2))
+            broker.bind_history("run-1")
+            client = _P7BrokerClient(broker, recorder)
+            plan = [
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}},
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 2}}},
+            ]
+            with self.assertRaises(P7OperatorError):
+                client.act_checked(plan)
+            self.assertEqual(len(broker.journal), 1)
+            self.assertEqual([entry.kind for entry in recorder.snapshot()], ["arc.action"])
+            recorder.close()
+
+    def test_socket_returns_multiframe_action_result_over_history_page_cap(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import p7_client_facade
+
+        class Client:
+            def __init__(self) -> None:
+                self.actions = 0
+
+            def observe(self) -> dict[str, object]:
+                return {}
+
+            def status(self) -> dict[str, object]:
+                return {}
+
+            def act(self, actions: object) -> dict[str, object]:
+                self.actions += 1
+                return {"applied_count": 1, "observation": {"frame": [[[1] * 64 for _ in range(64)] for _ in range(4)]}}
+
+            def history(self, start: int, limit: int) -> list[dict[str, object]]:
+                return []
+
+            def frame_at(self, sequence: int) -> list[list[int]]:
+                return [[1] * 128 for _ in range(128)]
+
+            def act_checked(self, plan: object) -> dict[str, object]:
+                return {}
+
+        client = Client()
+        server = live_module.P7ClientServer(p7_client_facade(client))
+        try:
+            request = {"protocol": live_module.WORKER_PROTOCOL, "id": 1, "method": "act", "args": [[{"name": "ACTION1", "data": {}}]]}
+            response = json.loads(server._dispatch(json.dumps(request).encode()))
+            self.assertEqual(client.actions, 1)
+            self.assertTrue(response["ok"])
+            self.assertEqual(response["value"]["applied_count"], 1)
+            self.assertGreater(len(json.dumps(response).encode()), 16384)
+            frame_request = {"protocol": live_module.WORKER_PROTOCOL, "id": 2, "method": "frame_at", "args": [0]}
+            frame_response = json.loads(server._dispatch(json.dumps(frame_request).encode()))
+            self.assertTrue(frame_response["ok"])
+            self.assertEqual(len(frame_response["value"]), 128)
+        finally:
+            server.close()
+
     def test_socket_rejects_unknown_malformed_and_oversize_responses(self) -> None:
         from asterion.applications.prime.p7.ipython_host import p7_client_facade
 
