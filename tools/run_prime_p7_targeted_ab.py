@@ -18,10 +18,18 @@ from typing import Any
 
 from asterion.applications.prime.p7.solutions import load_best_prefix
 from asterion.applications.prime.p7.game import _read_catalog
-from tools.run_prime_p7_sweep import (
-    SweepConfig, SweepScheduler, _read_hash_chained_trace, _read_json,
-    _valid_attempt_summary, read_run_usage,
-)
+# Direct ``python tools/...`` execution puts tools/ on sys.path; module imports
+# use the repository root. Both paths bind the same supervisor implementation.
+if __package__:
+    from tools.run_prime_p7_sweep import (
+        SweepConfig, SweepScheduler, _read_hash_chained_trace, _read_json,
+        _valid_attempt_summary, read_run_usage,
+    )
+else:
+    from run_prime_p7_sweep import (
+        SweepConfig, SweepScheduler, _read_hash_chained_trace, _read_json,
+        _valid_attempt_summary, read_run_usage,
+    )
 
 _TIMEOUT_SECONDS = 30 * 60
 _STALL_SECONDS = 5 * 60
