@@ -66,6 +66,7 @@ from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 _RUNTIME_ID = "asterion.prime"
 _PROVIDER = "deepseek"
 _MODEL = "deepseek-v4-flash"
+UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
@@ -473,8 +474,9 @@ class P7RuntimeSelection:
     provider: str
     model: str
     max_actions: int
-    max_callbacks: int
-    deadline_ms: int
+    max_callbacks: int | None
+    deadline_ms: int | None
+    unbounded_first_round: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -483,8 +485,10 @@ class P7RuntimeSelection:
             or self.model != _MODEL
             or type(self.max_actions) is not int
             or not 1 <= self.max_actions <= 5000
-            or self.max_callbacks != _MAX_CALLBACKS
-            or self.deadline_ms != _DEADLINE_MS
+            or type(self.unbounded_first_round) is not bool
+            or (self.max_callbacks, self.deadline_ms) != (
+                (None, None) if self.unbounded_first_round else (_MAX_CALLBACKS, _DEADLINE_MS)
+            )
         ):
             raise P7OperatorError("P7 runtime selection is invalid")
 
@@ -497,6 +501,7 @@ class P7RuntimeSelection:
         object.__setattr__(value, "max_actions", game.action_cap)
         object.__setattr__(value, "max_callbacks", _MAX_CALLBACKS)
         object.__setattr__(value, "deadline_ms", _DEADLINE_MS)
+        object.__setattr__(value, "unbounded_first_round", False)
         return value
 
 
@@ -561,13 +566,23 @@ def resolve_p7_runtime(
     """Resolve the one fixed model/runtime preset without exposing tuning knobs."""
 
     provider = resolve_pi_provider(environment, model=_MODEL)
+    unbounded = UNBOUNDED_FIRST_ROUND_ENV in environment
+    if unbounded and (
+        environment[UNBOUNDED_FIRST_ROUND_ENV] != "1"
+        or environment.get("ASTERION_PRIME_P7_RUN_MODE") != "sweep"
+        or environment.get("OPERATION_MODE", "").lower() != "offline"
+        or type(game) is not P7GameSelection
+        or game.action_cap_override is None
+    ):
+        raise P7OperatorError("P7 first-round runtime mode is invalid")
     return P7RuntimeSelection(
         runtime_id=_RUNTIME_ID,
         provider=provider,
         model=_MODEL,
         max_actions=game.action_cap,
-        max_callbacks=_MAX_CALLBACKS,
-        deadline_ms=_DEADLINE_MS,
+        max_callbacks=None if unbounded else _MAX_CALLBACKS,
+        deadline_ms=None if unbounded else _DEADLINE_MS,
+        unbounded_first_round=unbounded,
     )
 
 
@@ -578,14 +593,22 @@ def p7_runtime_options(
 
     if (
         type(selection) is not P7RuntimeSelection
-        or selection != P7RuntimeSelection.fixed(game)
+        or selection != replace(
+            P7RuntimeSelection.fixed(game),
+            max_callbacks=None if selection.unbounded_first_round else _MAX_CALLBACKS,
+            deadline_ms=None if selection.unbounded_first_round else _DEADLINE_MS,
+            unbounded_first_round=selection.unbounded_first_round,
+        )
+        or (selection.unbounded_first_round and (
+            type(game) is not P7GameSelection or game.action_cap_override is None
+        ))
     ):
         raise P7OperatorError("P7 runtime selection is invalid")
     return MappingProxyType(
         {
-            "deadline_ms": str(selection.deadline_ms),
+            "deadline_ms": "none" if selection.deadline_ms is None else str(selection.deadline_ms),
             "max_actions": str(selection.max_actions),
-            "max_callbacks": str(selection.max_callbacks),
+            "max_callbacks": "none" if selection.max_callbacks is None else str(selection.max_callbacks),
             "model": selection.model,
             "provider": selection.provider,
         }
@@ -679,7 +702,7 @@ def build_p7_operator_resources(
             binding_inherited_fds=binding.inherited_fds,
             binding_environment=dict(binding.environment),
             extension_lease=lease,
-            deadline_seconds=selection.deadline_ms / 1000,
+            deadline_seconds=None if selection.deadline_ms is None else selection.deadline_ms / 1000,
             compact_events=True,
             approved_environment=approved_environment,
         )
@@ -783,7 +806,18 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
     if not root.is_dir():
         raise P7OperatorError("P7 operator root is invalid")
     try:
-        resolved = live.load_operator_environment(root)
+        resolved = dict(live.load_operator_environment(root))
+        resolved.pop(UNBOUNDED_FIRST_ROUND_ENV, None)
+        if UNBOUNDED_FIRST_ROUND_ENV in environment:
+            if (
+                environment[UNBOUNDED_FIRST_ROUND_ENV] != "1"
+                or environment.get("ASTERION_PRIME_P7_RUN_MODE") != "sweep"
+                or environment.get("OPERATION_MODE", "").lower() != "offline"
+            ):
+                raise P7OperatorError("P7 first-round runtime mode is invalid")
+            resolved[UNBOUNDED_FIRST_ROUND_ENV] = "1"
+            resolved["ASTERION_PRIME_P7_RUN_MODE"] = "sweep"
+            resolved["OPERATION_MODE"] = "offline"
         arc_root = live.resolve_arc_root(resolved)
         return P7Invocation(
             operator_root=root,

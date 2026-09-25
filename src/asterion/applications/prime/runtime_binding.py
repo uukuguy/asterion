@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import cast
 
 from asterion.agents.prime.session import AsterionPrimeSession
+from asterion.agents.prime.execution import ASTERION_PRIME_LIMITS, AsterionPrimeLimits
+from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcStatus
 from asterion.applications.prime.p7.ipython_host import PersistentIpythonHost
@@ -100,7 +102,7 @@ class PrimeLaunch:
     binding_inherited_fds: tuple[int, ...]
     binding_environment: Mapping[str, str]
     extension_lease: ExtensionLease
-    deadline_seconds: float
+    deadline_seconds: float | None
     compact_events: bool = True
     approved_environment: Mapping[str, str] | None = None
 
@@ -119,8 +121,9 @@ class PrimeLaunch:
             and self.extension_capabilities == ("prime.tool.ipython",)
             and type(self.binding_inherited_fds) is tuple
             and isinstance(self.binding_environment, Mapping)
-            and type(self.deadline_seconds) is float
-            and self.deadline_seconds > 0
+            and (self.deadline_seconds is None or (
+                type(self.deadline_seconds) is float and self.deadline_seconds > 0
+            ))
             and type(self.compact_events) is bool
             and not lease.closed
         )
@@ -362,6 +365,22 @@ def build_p7_runtime(
             trace_service if type(trace_service) is P7PrivateTraceReceipt else None
         )
         trace = None if trace_adapter is None else trace_adapter.runtime_recorder
+        unbounded = launch is not None and launch.deadline_seconds is None
+        expected_options = dict(_RUNTIME_OPTIONS)
+        if unbounded:
+            # The operator validates OFFLINE authorization before stripping ARC
+            # configuration from the model subprocess environment. This seam
+            # consumes that injected launch and its local sweep action cap.
+            environment = launch.approved_environment or {}
+            if (
+                type(broker) is not ArcBroker
+                or type(broker.game) is not P7GameSelection
+                or broker.game.action_cap_override is None
+                or environment.get("ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND") != "1"
+                or environment.get("ASTERION_PRIME_P7_RUN_MODE") != "sweep"
+            ):
+                raise RuntimeFactoryError(_ERROR)
+            expected_options.update(deadline_ms="none", max_callbacks="none")
         if (
             context.provider_id != "prime-applications"
             or context.application_id != "prime.arc-agi-3-solving"
@@ -374,7 +393,7 @@ def build_p7_runtime(
             or getattr(ipython, "_lost", True)
             or type(broker) is not ArcBroker
             or dict(context.options) != {
-                **_RUNTIME_OPTIONS,
+                **expected_options,
                 "max_actions": str(broker.game.action_cap),
             }
             or trace_adapter is None
@@ -413,6 +432,7 @@ def build_p7_runtime(
             extension_lease=launch.extension_lease,
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
+            limits=AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS,
             completion_predicate=lambda: _p7_terminal(broker),
         )
         launch = None

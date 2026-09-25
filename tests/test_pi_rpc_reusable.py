@@ -146,7 +146,7 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         self.temporary.cleanup()
 
     def make_session(
-        self, *, deadline_seconds: float = 2.0, compact_events: bool = False,
+        self, *, deadline_seconds: float | None = 2.0, compact_events: bool = False,
         diagnostics=None,
     ) -> PiRpcSession:
         return PiRpcSession(
@@ -159,6 +159,23 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
             ),
             diagnostics=diagnostics,
         )
+
+    async def test_explicit_no_deadline_keeps_reusable_commands_and_cancellation(self) -> None:
+        rpc = self.make_session(deadline_seconds=None)
+        await rpc.open(signal=NeverCancelled())
+        self.addAsyncCleanup(rpc.close)
+        self.assertIsNone(rpc._session_deadline)
+        self.assertIsNotNone(rpc.validate_lifecycle(opened=True))
+        for prompt in ("first", "second"):
+            result = await rpc.prompt(prompt, signal=NeverCancelled(), on_event=self.events.append)
+            self.assertEqual(result.final_text, prompt)
+        await rpc.compact(signal=NeverCancelled(), on_event=self.events.append)
+        signal = MutableSignal()
+        pending = asyncio.create_task(rpc.prompt("blocking", signal=signal, on_event=self.events.append))
+        await asyncio.sleep(0.05)
+        signal.cancelled = True
+        with self.assertRaisesRegex(RuntimeError, "cancelled"):
+            await asyncio.wait_for(pending, 2)
 
     async def test_prompt_waits_for_settlement_after_agent_end(self) -> None:
         rpc = self.make_session(deadline_seconds=0.2)

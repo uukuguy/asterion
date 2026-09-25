@@ -199,13 +199,15 @@ class SessionFixture:
         release: asyncio.Event | None = None,
         release_after_events: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
+        unbounded: bool = False,
     ) -> tuple[AsterionPrimeSession, FakePiRpcSession, PiExtensionLease]:
+        limits = prime_session_module.AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS
         lease = self.binding.preflight()
         config = PiRpcConfig(
             command=("pi", "--mode", "rpc", *lease.command_args()),
             cwd=self.root,
             environment=dict(lease.environment),
-            deadline_seconds=ASTERION_PRIME_LIMITS.deadline_ms / 1000,
+            deadline_seconds=None if unbounded else ASTERION_PRIME_LIMITS.deadline_ms / 1000,
             inherited_fds=lease.inherited_fds,
         )
         rpc = FakePiRpcSession(
@@ -223,7 +225,7 @@ class SessionFixture:
             extension_binding=self.binding,
             extension_lease=lease,
             approved_command=config.command,
-            limits=ASTERION_PRIME_LIMITS,
+            limits=limits,
             completion_predicate=completion_predicate,
         )
         return session, rpc, lease
@@ -604,6 +606,41 @@ class TestAsterionPrimeSession(unittest.TestCase):
                         asyncio.run(collect(session))
                 finally:
                     fixture.close()
+
+    def test_unbounded_session_exceeds_callback_caps(self) -> None:
+        values = []
+        for index in range(513):
+            values.extend([
+                ("turn_start", {}),
+                ("tool_execution_start", {"toolCallId": f"call-{index}", "toolName": "ipython", "args": {}}),
+                ("tool_execution_end", {"toolCallId": f"call-{index}", "toolName": "ipython", "result": {"content": []}, "isError": False}),
+            ])
+        values.append(("agent_end", {}))
+        session, _rpc, lease = self.fixture.make(native_events(*values), unbounded=True)
+        events = asyncio.run(collect(session))
+        self.assertEqual(events[-1].payload, {"status": "completed"})
+        self.assertTrue(lease.closed)
+
+    def test_unbounded_session_continues_beyond_128_rounds(self) -> None:
+        rounds = 0
+
+        def completed() -> bool:
+            nonlocal rounds
+            rounds += 1
+            return rounds == 129
+
+        session, rpc, _lease = self.fixture.make(
+            native_events(("turn_start", {}), ("agent_end", {})),
+            unbounded=True, completion_predicate=completed,
+        )
+        events = asyncio.run(collect(session))
+        self.assertEqual(rpc.calls, 129)
+        self.assertEqual(events[-1].payload, {"status": "completed"})
+
+    def test_unbounded_limits_require_all_bounds_absent(self) -> None:
+        for values in ((None, 128, None), (128, None, 3600000), (128, 512, None)):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                prime_session_module.AsterionPrimeLimits(*values)
 
     def test_model_callback_cap_is_exactly_128(self) -> None:
         events = native_events(

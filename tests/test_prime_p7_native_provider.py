@@ -447,6 +447,68 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         self.assertNotIn("private-token", repr(selection))
         self.assertNotIn("private-token", repr(options))
 
+    def test_offline_first_round_removes_runtime_bounds_only_with_explicit_mode(self) -> None:
+        from asterion.applications.prime.p7.operator import _sweep_game
+        game = _sweep_game(P7GameSelection("ls20-9607627b", 0), None)
+        environment = {
+            "DEEPSEEK_API_KEY": "fixture",
+            "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1",
+            "ASTERION_PRIME_P7_RUN_MODE": "sweep",
+            "OPERATION_MODE": "offline",
+        }
+        selected = resolve_p7_runtime(environment, game)
+        self.assertIsNone(selected.deadline_ms)
+        self.assertIsNone(selected.max_callbacks)
+        self.assertEqual(selected.max_actions, game.baseline_actions[0])
+        self.assertEqual(p7_runtime_options(selected, game)["deadline_ms"], "none")
+        for change in (
+            {"ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "0"},
+            {"ASTERION_PRIME_P7_RUN_MODE": "solve"},
+            {"OPERATION_MODE": "competition"},
+        ):
+            with self.subTest(change=change), self.assertRaises(P7OperatorError):
+                resolve_p7_runtime({**environment, **change}, game)
+        with self.assertRaises(P7OperatorError):
+            resolve_p7_runtime(environment)
+        from asterion.applications.prime.p7.game import ArcGameContract
+        with self.assertRaises(P7OperatorError):
+            resolve_p7_runtime(environment, ArcGameContract("ab12-12345678", win_levels=12))
+
+    def test_unbounded_operator_resources_construct_a_no_deadline_session(self) -> None:
+        from asterion.applications.prime.p7.operator import _sweep_game
+        from asterion.applications.prime.runtime_binding import build_p7_runtime
+        game = _sweep_game(P7GameSelection("ls20-9607627b", 0), None)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            extension = root / "prime_ipython.mjs"
+            extension.write_text("export default function extension() {}\n")
+            resources = build_p7_operator_resources(
+                environment={
+                    "DEEPSEEK_API_KEY": "fixture",
+                    "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1",
+                    "ASTERION_PRIME_P7_RUN_MODE": "sweep",
+                    "OPERATION_MODE": "offline",
+                },
+                pi_base_command=("/usr/bin/pi", "--mode", "rpc"),
+                extension_path=extension, working_directory=root,
+                worker=_Worker(), engine=_CompletingEngine(), private_trace_root=root,
+                game=game,
+            )
+            try:
+                runtime = build_p7_runtime(RuntimeFactoryContext(
+                    provider_id="prime-applications", application_id="prime.arc-agi-3-solving",
+                    application_version="1.0.0", runtime_id="asterion.prime",
+                    assembly_path=ASSEMBLY, options=resources.runtime_options,
+                    host_services=resources.host_services,
+                ))
+                self.assertIsNone(runtime._session._rpc_session.config.deadline_seconds)
+                self.assertIsNone(runtime._session._limits.model_callbacks)
+                self.assertIsNone(runtime._session._limits.tool_callbacks)
+                self.assertNotIn("OPERATION_MODE", resources.host_services["prime.launch"].approved_environment)
+                runtime._session.close()
+            finally:
+                asyncio.run(resources.close())
+
     def test_missing_model_host_fails_with_public_safe_error(self) -> None:
         for environment in ({}, {"DEEPSEEK_API_KEY": "   "}):
             with self.subTest(environment=environment):

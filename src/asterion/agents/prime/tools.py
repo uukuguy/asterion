@@ -105,8 +105,8 @@ class PrimeToolLedger:
 
     __slots__ = ("_calls", "_max_callbacks", "_results", "_sealed")
 
-    def __init__(self, *, max_callbacks: int) -> None:
-        if (
+    def __init__(self, *, max_callbacks: int | None) -> None:
+        if max_callbacks is not None and (
             isinstance(max_callbacks, bool)
             or not isinstance(max_callbacks, int)
             or max_callbacks <= 0
@@ -136,7 +136,7 @@ class PrimeToolLedger:
             raise ProtocolError("Asterion-prime tool call is invalid")
         if call.call_id in self._calls:
             raise ProtocolError("Asterion-prime emitted a duplicate tool call")
-        if len(self._calls) >= self._max_callbacks:
+        if self._max_callbacks is not None and len(self._calls) >= self._max_callbacks:
             raise ProtocolError("Asterion-prime tool callback limit exceeded")
         self._calls[call.call_id] = call
 

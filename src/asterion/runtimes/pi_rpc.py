@@ -310,7 +310,7 @@ class PiRpcConfig:
     command: tuple[str, ...]
     cwd: Path
     environment: Mapping[str, str]
-    deadline_seconds: float
+    deadline_seconds: float | None
     inherited_fds: tuple[int, ...] = ()
     compact_events: bool = False
 
@@ -335,7 +335,7 @@ class PiRpcConfig:
             for key, value in environment.items()
         ):
             raise ValueError("Pi RPC environment is invalid")
-        if (
+        if self.deadline_seconds is not None and (
             isinstance(self.deadline_seconds, bool)
             or not isinstance(self.deadline_seconds, (int, float))
             or not math.isfinite(self.deadline_seconds)
@@ -351,7 +351,10 @@ class PiRpcConfig:
         object.__setattr__(self, "command", tuple(self.command))
         object.__setattr__(self, "cwd", Path(self.cwd))
         object.__setattr__(self, "environment", MappingProxyType(environment))
-        object.__setattr__(self, "deadline_seconds", float(self.deadline_seconds))
+        object.__setattr__(
+            self, "deadline_seconds",
+            None if self.deadline_seconds is None else float(self.deadline_seconds),
+        )
         object.__setattr__(
             self, "inherited_fds", tuple(sorted(set(self.inherited_fds)))
         )
@@ -550,8 +553,11 @@ class PiRpcSession:
                 or state is None
                 or state.output_error is not None
                 or state.process.poll() is not None
-                or self._session_deadline is None
-                or self._session_deadline <= time.monotonic()
+                or (self.config.deadline_seconds is not None and self._session_deadline is None)
+                or (
+                    self._session_deadline is not None
+                    and self._session_deadline <= time.monotonic()
+                )
                 or self._lifecycle_identity is None
             ):
                 raise RuntimeError("Pi RPC lifecycle is unavailable")
@@ -973,9 +979,11 @@ class PiRpcSession:
             except OSError:
                 pass
 
-    def _remaining_session_seconds(self, operation: str) -> float:
+    def _remaining_session_seconds(self, operation: str) -> float | None:
         deadline = self._session_deadline
         if deadline is None:
+            if self._lifecycle_open and self.config.deadline_seconds is None:
+                return None
             raise RuntimeError("Pi RPC session is not open")
         remaining = max(0.0, deadline - time.monotonic())
         if remaining == 0:
@@ -985,7 +993,7 @@ class PiRpcSession:
             )
         return remaining
 
-    def _check_command_ready(self, operation: str, signal: CancellationSignal) -> float:
+    def _check_command_ready(self, operation: str, signal: CancellationSignal) -> float | None:
         if not self._lifecycle_open or self.process is None:
             raise RuntimeError("Pi RPC session is not open")
         if self._lifecycle_poisoned:
@@ -1084,7 +1092,10 @@ class PiRpcSession:
             self._request_id = 0
             self._event_sequence = 0
             self._lifecycle_poisoned = False
-            self._session_deadline = time.monotonic() + self.config.deadline_seconds
+            self._session_deadline = (
+                None if self.config.deadline_seconds is None
+                else time.monotonic() + self.config.deadline_seconds
+            )
             try:
                 self.start()
             except BaseException:
@@ -1112,7 +1123,6 @@ class PiRpcSession:
             self._last_diagnostic_id = None
             self._check_command_ready("prompt", signal)
             absolute_deadline = self._session_deadline
-            assert absolute_deadline is not None
             events: list[PiRpcEvent] = []
             text_parts: list[str] = []
             text_bytes = 0
@@ -1242,7 +1252,6 @@ class PiRpcSession:
         async with self._command_lock:
             self._check_command_ready("compact", signal)
             absolute_deadline = self._session_deadline
-            assert absolute_deadline is not None
             events: list[PiRpcEvent] = []
             loop = asyncio.get_running_loop()
             local_cancel = threading.Event()
@@ -1398,7 +1407,7 @@ def build_rpc_session(
     command: tuple[str, ...],
     cwd: Path,
     environment: Mapping[str, str],
-    deadline_seconds: float,
+    deadline_seconds: float | None,
     inherited_fds: tuple[int, ...] = (),
     compact_events: bool = False,
     diagnostics: DiagnosticSink | None = None,

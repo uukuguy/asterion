@@ -154,12 +154,16 @@ def _snapshot_native_events(events: object) -> tuple[PiRpcEvent, ...]:
 
 @dataclass(frozen=True, slots=True)
 class AsterionPrimeLimits:
-    model_callbacks: int
-    tool_callbacks: int
-    deadline_ms: int
+    """Execution bounds; all-None explicitly delegates stopping to the caller."""
+
+    model_callbacks: int | None
+    tool_callbacks: int | None
+    deadline_ms: int | None
 
     def __post_init__(self) -> None:
         values = (self.model_callbacks, self.tool_callbacks, self.deadline_ms)
+        if all(value is None for value in values):
+            return
         if any(isinstance(value, bool) or type(value) is not int for value in values):
             raise ValueError("Asterion-prime limits are invalid")
         if (
@@ -237,7 +241,10 @@ class PrimeExecutionKernel:
         signal: CancellationSignal | None,
         emit: Callable[[str, Mapping[str, object]], None],
     ) -> PrimeExecutionResult:
-        if self.model_callbacks >= self._limits.model_callbacks:
+        if (
+            self._limits.model_callbacks is not None
+            and self.model_callbacks >= self._limits.model_callbacks
+        ):
             raise ProtocolError("Asterion-prime model callback limit exceeded")
         self._native_events = []
         self._final_text = ""
@@ -309,7 +316,7 @@ class PrimeExecutionKernel:
             or config.command != approved_command
             or approved_command[-2:] != lease.command_args()
             or approved_command.count(lease.command_args()[0]) != 1
-            or config.deadline_seconds * 1000 != limits.deadline_ms
+            or (None if config.deadline_seconds is None else config.deadline_seconds * 1000) != limits.deadline_ms
         ):
             raise ProtocolError("Asterion-prime launch material is invalid")
         for name, value in binding.environment.items():
@@ -363,7 +370,10 @@ class PrimeExecutionKernel:
             if event_type == "turn_start":
                 model_callbacks += 1
                 self.model_callbacks = model_callbacks
-                if model_callbacks > self._limits.model_callbacks:
+                if (
+                    self._limits.model_callbacks is not None
+                    and model_callbacks > self._limits.model_callbacks
+                ):
                     raise _NativeEventRejected(_NativeDiagnostic.MODEL_CALLBACK_LIMIT)
                 return
             if event_type == "message_update":
@@ -381,7 +391,10 @@ class PrimeExecutionKernel:
                 return
             if event_type == "tool_execution_start":
                 call = self._tool_call(payload)
-                if self.tool_callbacks >= self._limits.tool_callbacks:
+                if (
+                    self._limits.tool_callbacks is not None
+                    and self.tool_callbacks >= self._limits.tool_callbacks
+                ):
                     raise _NativeEventRejected(_NativeDiagnostic.TOOL_CALLBACK_LIMIT)
                 try:
                     ledger.record_call(call)
@@ -514,8 +527,14 @@ class PrimeExecutionKernel:
                 emit("run.completed", {"status": "completed"})
                 return
             if (
-                model_callbacks >= self._limits.model_callbacks
-                or self.tool_callbacks >= self._limits.tool_callbacks
+                (
+                    self._limits.model_callbacks is not None
+                    and model_callbacks >= self._limits.model_callbacks
+                )
+                or (
+                    self._limits.tool_callbacks is not None
+                    and self.tool_callbacks >= self._limits.tool_callbacks
+                )
             ):
                 emit(
                     "run.failed",

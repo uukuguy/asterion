@@ -58,7 +58,7 @@ class AsterionPrimeSession:
         continuation_prompt: Callable[[int], str] | None = None,
     ) -> None:
         try:
-            if limits != ASTERION_PRIME_LIMITS:
+            if limits not in (ASTERION_PRIME_LIMITS, AsterionPrimeLimits(None, None, None)):
                 raise ProtocolError("Asterion-prime launch material is invalid")
             PrimeExecutionKernel._validate_launch_material(
                 rpc_session,
