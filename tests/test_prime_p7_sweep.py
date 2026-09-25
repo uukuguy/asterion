@@ -151,6 +151,28 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 receipt_path.symlink_to(moved.name)
                 self.assertFalse(scheduler._campaign_entry_is_valid(entry))
 
+    def test_second_round_execution_stall_does_not_require_external_prefix_replay(self) -> None:
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, run, _summary, entry = self._execution_failure_fixture(Path(directory))
+            trace = run / "trace" / "prime-trace.jsonl"
+            rows = trace.read_text(encoding="utf-8").splitlines()
+            trace.write_text("\n".join(rows[:-2]) + "\n", encoding="utf-8")
+            (run / "summary.json").unlink()
+            (run / "recordings").mkdir()
+            (run / "recordings" / f"{entry['game_id']}-fixture.jsonl").write_text("{}\n", encoding="utf-8")
+            (run / "stall-receipt.json").write_text(json.dumps({
+                "schema": "asterion.prime.p7-stall-receipt/v1",
+                "game_id": entry["game_id"], "run_id": entry["run_id"], "seed": 0,
+                "action_count": 2, "stall_seconds": 300,
+                "cleanup_complete": True,
+                "trace_final_sha256": json.loads(rows[-3])["sha256"],
+            }), encoding="utf-8")
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=None):
+                entry["outcome"] = "execution-stalled"
+                self.assertTrue(scheduler._campaign_entry_is_valid(entry))
+
     def test_second_round_execution_failure_records_and_skips_on_resume(self) -> None:
         from types import SimpleNamespace
 

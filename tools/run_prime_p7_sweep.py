@@ -636,16 +636,34 @@ class SweepScheduler:
             metadata = self._metadata()[game_id]
             if receipt["action_count"] > metadata["baseline_actions"][0] + metadata["baseline_actions"][1]:
                 return False
-            prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
             actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
-            if prefix is None or prefix.levels_completed < 1 or prefix.primitive_actions > len(actions):
+            if not actions:
                 return False
             for sequence, action in enumerate(actions, 1):
-                if action.get("sequence") != sequence:
+                level = action.get("levels_completed")
+                if (
+                    action.get("sequence") != sequence
+                    or type(level) is not int
+                    or not 0 <= level <= 1
+                    or any(
+                        type(action.get(key)) is not str
+                        or re.fullmatch(r"sha256:[0-9a-f]{64}", action[key]) is None
+                        for key in ("before_sha256", "after_sha256")
+                    )
+                ):
                     return False
                 if sequence > 1 and action.get("before_sha256") != actions[sequence - 2].get("after_sha256"):
                     return False
-            return prefix.levels_completed >= 1 if allow_later_progress else prefix.levels_completed == 1
+            first_level_two = next(
+                (index for index, action in enumerate(actions) if action["levels_completed"] >= 1),
+                None,
+            )
+            if first_level_two is None or any(action["levels_completed"] != 0 for action in actions[:first_level_two]):
+                return False
+            # The trace itself carries the verified L1 boundary.  Requiring a
+            # fresh engine replay here made valid stalls unverifiable whenever
+            # the external replay engine was unavailable after cleanup.
+            return first_level_two + 1 <= metadata["baseline_actions"][0]
         except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
             return False
 
