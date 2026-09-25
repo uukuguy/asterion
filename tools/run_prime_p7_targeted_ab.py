@@ -16,8 +16,11 @@ import secrets
 import sys
 from typing import Any
 
-from asterion.applications.prime.p7.solutions import load_best_prefix
+from asterion.applications.prime.p7.broker import ArcTransition
 from asterion.applications.prime.p7.game import _read_catalog
+from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
+from asterion.applications.prime.p7.score import replay_sha256
+from asterion.applications.prime.p7.solutions import VerifiedPrefix, load_best_prefix
 # Direct ``python tools/...`` execution puts tools/ on sys.path; module imports
 # use the repository root. Both paths bind the same supervisor implementation.
 if __package__:
@@ -55,25 +58,43 @@ def _write_manifest(path: Path, value: dict[str, Any]) -> None:
 
 def _read_arm(
     runs_root: Path, run_id: str, game_id: str, variant: str, returncode: int,
-    prefix_actions: int, baseline: int,
+    prefix: VerifiedPrefix, baseline: int,
 ) -> dict[str, Any]:
     if not _RUN_ID.fullmatch(run_id):
         raise ValueError("A/B run ID is invalid")
     run = runs_root / run_id
     summary_path = run / "summary.json"
     trace_path = run / "trace" / "prime-trace.jsonl"
-    if run.is_symlink() or not run.is_dir() or summary_path.is_symlink() or trace_path.is_symlink():
+    seal_path = run / "trace" / "prime-trace.seal.json"
+    if (run.is_symlink() or not run.is_dir() or summary_path.is_symlink()
+            or trace_path.is_symlink() or seal_path.is_symlink()):
         raise ValueError("A/B private evidence is invalid")
     summary = _read_json(summary_path)
     entries = _read_hash_chained_trace(trace_path)
-    if not entries or entries[-1]["kind"] != "trace.sealed":
-        raise ValueError("A/B trace is unsealed")
+    seal = _read_json(seal_path)
+    if (
+        not entries or entries[-1]["kind"] != "trace.sealed"
+        or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+        or [row["kind"] for row in entries[-2:]] != ["arc.run.completed", "trace.sealed"]
+        or any(row["kind"] not in {"arc.action", "arc.usage.reported"} for row in entries[:-2])
+        or entries[-1]["payload"] != {
+            "entry_count": len(entries) - 1,
+            "final_sha256": entries[-2]["sha256"],
+        }
+        or type(seal) is not dict
+        or set(seal) != {"entry_count", "final_sha256", "sealed_at"}
+        or seal["entry_count"] != len(entries)
+        or seal["final_sha256"] != entries[-1]["sha256"]
+        or type(seal["sealed_at"]) is not str
+    ):
+        raise ValueError("A/B sealed trace evidence is invalid")
     if not _valid_attempt_summary(summary, run_id, game_id, 2, returncode):
         raise ValueError("A/B summary or cleanup is invalid")
     assert summary is not None
     diagnostics = summary["diagnostics"]
     sweep = diagnostics["sweep"]
     experiment = summary.get("experiment")
+    prefix_actions = len(prefix.transitions)
     cap = prefix_actions + baseline
     if (
         diagnostics.get("prediction_variant") != variant
@@ -91,10 +112,65 @@ def _read_arm(
         or experiment.get("stall_seconds") is not None
     ):
         raise ValueError("A/B variant or constraints differ")
-    actions = [row for row in entries if row["kind"] == "arc.action"]
-    count = summary["broker"]["primitive_actions"]
-    if len(actions) != count or count < prefix_actions:
-        raise ValueError("A/B action accounting is invalid")
+    broker = summary["broker"]
+    completed = entries[-2]["payload"]
+    if (
+        broker.get("win_levels") != prefix.win_levels
+        or completed != broker
+        or set(completed) != {
+            "game_id", "seed", "win_levels", "levels_completed",
+            "primitive_actions", "terminal_reason", "replay_sha256",
+        }
+    ):
+        raise ValueError("A/B completed-run evidence is invalid")
+    transitions = []
+    previous_hash = None
+    previous_level = 0
+    for sequence, row in enumerate(
+        (row for row in entries if row["kind"] == "arc.action"), 1,
+    ):
+        payload = row["payload"]
+        data = payload.get("data", {})
+        if (
+            set(payload) not in (
+                {"sequence", "action", "before_sha256", "after_sha256", "levels_completed"},
+                {"sequence", "action", "before_sha256", "after_sha256", "levels_completed", "data"},
+            )
+            or type(payload.get("sequence")) is not int or payload["sequence"] != sequence
+            or type(payload.get("action")) is not str
+            or type(payload.get("before_sha256")) is not str
+            or type(payload.get("after_sha256")) is not str
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", payload["before_sha256"]) is None
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", payload["after_sha256"]) is None
+            or (previous_hash is not None and payload["before_sha256"] != previous_hash)
+            or type(payload.get("levels_completed")) is not int
+            or not previous_level <= payload["levels_completed"] <= previous_level + 1
+            or (sequence < prefix_actions and payload["levels_completed"] != 0)
+            or (sequence >= prefix_actions and sequence <= prefix_actions
+                and payload["levels_completed"] != 1)
+            or (sequence > prefix_actions and payload["levels_completed"] < 1)
+            or type(data) is not dict
+            or any(type(key) is not str or type(value) is not int for key, value in data.items())
+        ):
+            raise ValueError("A/B action trace is invalid")
+        transitions.append(ArcTransition(
+            sequence, payload["action"], payload["before_sha256"],
+            payload["after_sha256"], payload["levels_completed"],
+            tuple(sorted(data.items())),
+        ))
+        previous_hash = payload["after_sha256"]
+        previous_level = payload["levels_completed"]
+    count = broker["primitive_actions"]
+    if (
+        len(transitions) != count or count < prefix_actions
+        or tuple(transitions[:prefix_actions]) != prefix.transitions
+        or previous_level != broker["levels_completed"]
+        or replay_sha256(transitions, terminal_reason=broker["terminal_reason"])
+        != broker.get("replay_sha256")
+        or (broker["terminal_reason"] == "human-baseline" and count != cap)
+        or (broker["terminal_reason"] == "game-over" and count >= cap)
+    ):
+        raise ValueError("A/B action accounting or replay digest is invalid")
     input_tokens, output_tokens, usage_missing, usage_invalid = read_run_usage(run)
     if usage_missing or usage_invalid:
         raise ValueError("A/B token accounting is invalid")
@@ -124,10 +200,11 @@ def run_targeted_ab(
     if not guest_machine or not re.fullmatch(r"[A-Za-z0-9._-]+", guest_machine):
         raise ValueError("P7 guest machine is invalid")
     catalog = _read_catalog(arc_root)
-    matches = [row for row in catalog if row["game_id"] == game_id]
+    matches = [row for row in catalog if game_id in {row["game_id"], row.get("alias")}]
     if len(matches) != 1 or len(matches[0]["baseline_actions"]) < 2:
-        raise ValueError("P7 game is absent from the exact local catalog")
+        raise ValueError("P7 game is absent or ambiguous in the exact local catalog")
     metadata = matches[0]
+    game_id = metadata["game_id"]
     baseline = metadata["baseline_actions"][1]
     runs_root = operator_root / ".asterion-private" / "prime-p7-live"
     prefix = load_best_prefix(arc_root, runs_root, game_id, 0, max_level=1)
@@ -175,7 +252,7 @@ def run_targeted_ab(
                 raise ValueError(f"A/B arm {variant} stopped: {scheduler._stop_reason}")
             arm = _read_arm(
                 runs_root, scheduler._new_runs[0], game_id, variant, returncode,
-                len(prefix.transitions), baseline,
+                prefix, baseline,
             )
             if any(existing["run_id"] == arm["run_id"] for existing in manifest["arms"]):
                 raise ValueError("A/B arms reused one run directory")
