@@ -225,6 +225,34 @@ class TestNativeP7Broker(unittest.TestCase):
                          ("action-unavailable", 0, 2))
         self.assertEqual(engine.calls, [])
 
+    def test_checked_reset_stops_before_predicted_tail(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        engine = _ResetEngine()
+        broker = ArcBroker(engine=engine, game=P7GameSelection(engine.game_id, 0, 2))
+        broker.bind_history("run-1")
+        broker.act(("ACTION1",))
+        broker.act(("ACTION1",))
+        result = broker.act_checked([
+            {"action": {"name": "RESET", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 3}}},
+            {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 4}}},
+        ])
+        self.assertEqual((result["stop_reason"], result["applied_count"], result["unexecuted_count"]),
+                         ("reset-applied", 1, 1))
+        self.assertEqual([name for name, _ in engine.calls], ["ACTION1", "ACTION1", "RESET"])
+        self.assertEqual(len(broker.journal), 3)
+
+    def test_history_cannot_bind_after_failed_first_dispatch(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+
+        broker = ArcBroker(engine=_Engine(raises_on=1))
+        with self.assertRaisesRegex(ArcBrokerError, "^uncertain$"):
+            broker.act(("ACTION1",))
+        self.assertEqual(broker.journal, ())
+        with self.assertRaisesRegex(ArcBrokerError, "^unavailable$"):
+            broker.bind_history("run-1")
+
     def test_oversized_history_page_is_rejected_without_losing_records(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 

@@ -218,6 +218,7 @@ class ArcBroker:
     def bind_history(self, run_id: str) -> None:
         if (
             self._history is not None or self._journal
+            or self._actions_dispatched != 0 or self._terminal_reason != "active"
             or type(run_id) is not str or not run_id or not run_id.isascii()
         ):
             raise ArcBrokerError("unavailable")
@@ -297,6 +298,9 @@ class ArcBroker:
                     mismatch = {**(mismatch or {}), key: expected[key]}
             if mismatch is not None:
                 stop_reason = "prediction-mismatch"
+                break
+            if name == "RESET":
+                stop_reason = "reset-applied"
                 break
             if record.levels_completed > previous_levels:
                 stop_reason = "level-advanced"
