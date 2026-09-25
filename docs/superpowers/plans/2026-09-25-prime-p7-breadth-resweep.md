@@ -58,31 +58,26 @@
 Add these tests to `tests/test_prime_p7_sweep.py`:
 
 ```python
-def test_action_stall_monitoring_is_controlled_by_config_not_second_round(self) -> None:
-    from types import SimpleNamespace
-    from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+def test_action_stall_monitoring_can_be_enabled_for_level_one(self) -> None:
+    from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler, _ACTION_STALL_SECONDS
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
-        process = SimpleNamespace(returncode=1, communicate=lambda **_kwargs: ("", ""))
         scheduler = SweepScheduler(SweepConfig(
-            root / "arc", root / "runs", command=("attempt",), guest_machine=None,
-            action_stall_seconds=300, validate_action_stall=True,
+            root / "arc", root / "runs", guest_machine=None,
+            action_stall_seconds=_ACTION_STALL_SECONDS, validate_action_stall=True,
         ))
-        scheduler._attempt("bp35-0a0ad940", 1, 1800)
 
-    self.assertEqual(scheduler.config.action_stall_seconds, 300)
+    self.assertTrue(scheduler._uses_action_stall_monitoring())
     self.assertTrue(scheduler.config.validate_action_stall)
 
 
-def test_level_one_execution_stall_validator_does_not_require_l1_reached(self) -> None:
+def test_unbounded_second_round_still_enables_action_stall_by_default(self) -> None:
     from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
 
-    scheduler = SweepScheduler(SweepConfig(
-        Path("arc"), Path("runs"), action_stall_seconds=300, validate_action_stall=True,
-    ))
-    self.assertFalse(scheduler.config.unbounded_second_round)
-    self.assertTrue(scheduler.config.validate_action_stall)
+    scheduler = SweepScheduler(SweepConfig(Path("arc"), Path("runs"), unbounded_second_round=True))
+
+    self.assertTrue(scheduler._uses_action_stall_monitoring())
 ```
 
 - [ ] **Step 2: Run the failing tests**
@@ -90,10 +85,10 @@ def test_level_one_execution_stall_validator_does_not_require_l1_reached(self) -
 Run:
 
 ```bash
-uv run python -m unittest -v tests.test_prime_p7_sweep.TestPrimeP7Sweep.test_action_stall_monitoring_is_controlled_by_config_not_second_round tests.test_prime_p7_sweep.TestPrimeP7Sweep.test_level_one_execution_stall_validator_does_not_require_l1_reached
+uv run python -m unittest -v tests.test_prime_p7_sweep.TestPrimeP7Sweep.test_action_stall_monitoring_can_be_enabled_for_level_one tests.test_prime_p7_sweep.TestPrimeP7Sweep.test_unbounded_second_round_still_enables_action_stall_by_default
 ```
 
-Expected: FAIL because `SweepConfig` has no `action_stall_seconds` or `validate_action_stall`.
+Expected: FAIL because `SweepConfig` has no explicit stall fields and `SweepScheduler` has no `_uses_action_stall_monitoring()` helper.
 
 - [ ] **Step 3: Add the minimal config fields and validation**
 
@@ -107,21 +102,36 @@ In `SweepConfig`, add:
 In `SweepScheduler.__init__`, add:
 
 ```python
+        effective_action_stall_seconds = (
+            _ACTION_STALL_SECONDS
+            if config.unbounded_second_round and config.action_stall_seconds is None
+            else config.action_stall_seconds
+        )
         if config.action_stall_seconds is not None and (
             type(config.action_stall_seconds) is not int
             or config.action_stall_seconds != _ACTION_STALL_SECONDS
         ):
             raise ValueError("P7 action-stall limit is invalid")
-        if config.validate_action_stall and config.action_stall_seconds != _ACTION_STALL_SECONDS:
+        if config.validate_action_stall and effective_action_stall_seconds != _ACTION_STALL_SECONDS:
             raise ValueError("P7 action-stall validation requires the five-minute limit")
+        self._effective_action_stall_seconds = effective_action_stall_seconds
 ```
+
+Then add:
+
+```python
+    def _uses_action_stall_monitoring(self) -> bool:
+        return self._effective_action_stall_seconds == _ACTION_STALL_SECONDS
+```
+
+This preserves every existing `SweepConfig(unbounded_second_round=True)` caller and test without requiring each construction site to remember the new field.
 
 - [ ] **Step 4: Use the new fields in `_attempt()`**
 
 Replace second-round-only action monitoring checks with:
 
 ```python
-                if self.config.action_stall_seconds == _ACTION_STALL_SECONDS and self._stop_reason == "completed":
+                if self._uses_action_stall_monitoring() and self._stop_reason == "completed":
                     action_count = _trace_action_count(run)
                     if action_count is not None and action_count > last_action_count:
                         last_action_count = action_count
@@ -131,13 +141,13 @@ Replace second-round-only action monitoring checks with:
 and:
 
 ```python
-                self.config.action_stall_seconds == _ACTION_STALL_SECONDS
+                self._uses_action_stall_monitoring()
                 and self._stop_reason == "completed"
                 and started_at
                 and _action_stall_reached(started_at, last_action_at or started_at, time.monotonic())
 ```
 
-Keep old `unbounded_second_round=True` behavior by passing `action_stall_seconds=_ACTION_STALL_SECONDS` from existing second-round and next-level construction points when needed.
+Do not rely on changing every construction site for old behavior. The default derivation in `__init__` is the compatibility guarantee; explicit breadth callers still pass `action_stall_seconds=_ACTION_STALL_SECONDS` to document intent.
 
 - [ ] **Step 5: Allow Level 1 stalled evidence when explicitly requested**
 
@@ -160,6 +170,26 @@ Then change the `level reached` requirement to:
 ```
 
 and keep the verified-prefix comparison only when `target_level > 1`.
+
+Replace the existing final `if target_level != 2: return False` branch with an explicit Level 1 branch before the Level 2 historical-prefix logic:
+
+```python
+            if target_level == 1:
+                if any(action["levels_completed"] != 0 for action in actions):
+                    return False
+                if len(actions) > baselines[0]:
+                    return False
+                verified = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
+                return (
+                    verified is None
+                    or allow_later_progress
+                    or verified.levels_completed < 1
+                )
+            if target_level != 2:
+                return False
+```
+
+This admits only a hash-valid, usage-valid, guest-cleaned stalled Level 1 attempt that has not crossed the first level in its trace. It does not promote the stall to success; a later verified prefix is still discovered only through `load_best_prefix()`.
 
 - [ ] **Step 6: Run focused regressions**
 
@@ -597,12 +627,15 @@ Use `terminal_attempts` entries with exact keys:
 }
 ```
 
-Implement `_terminal_entry_is_valid(entry)` so:
+Implement `_terminal_entry_is_valid(entry)` so every outcome is bound to the ledger's exact `run_id`, `game_id`, `target_level`, and evidence digest:
 
-- `verified` requires `load_best_prefix(...).levels_completed >= target_level`.
-- `execution-stalled` requires `SweepScheduler(...)._execution_stalled_is_valid(run_id, game_id, target_level=target_level, allow_later_progress=True)`.
-- `unsolved`, `timed-out-unsealed`, and `execution-failed` require one existing run directory, valid nonnegative token counts, matching game ID, and no symlinked evidence path.
-- All outcomes require valid `(game_id, target_level)`, `seed == 0`, nonnegative `action_count`, nonnegative `input_tokens`, nonnegative `output_tokens`, and `evidence_sha256` matching the run trace final hash or summary hash used by the validator.
+- All outcomes require a non-symlinked `runs_root / run_id`, non-symlinked `trace/prime-trace.jsonl`, hash-chain-valid trace rows, `P7_TRACE_IDENTITIES` on every row, matching `_recorded_game_id(run, {game_id})`, valid usage rows, and ledger `input_tokens`/`output_tokens` exactly equal to `read_run_usage(run, in_progress=...)`.
+- `verified` requires non-symlinked `summary.json`, `_valid_attempt_summary(summary, run_id, game_id, target_level, 0)`, sealed trace, terminal `arc.run.completed` followed by `trace.sealed`, summary `cleanup_complete`, `replay_verified`, and `sealed_trace` all true, broker `game_id`, `seed`, `levels_completed`, `primitive_actions`, `terminal_reason`, and `replay_sha256` matching the trace, action chain length within the target action cap, replay digest matching the broker, and `load_best_prefix(...).source_run_id == run_id` with `levels_completed >= target_level`.
+- `unsolved` requires non-symlinked `summary.json`, `_valid_attempt_summary(summary, run_id, game_id, target_level, 1)`, sealed trace, exact trace final hash, cleanup/seal/replay fields true where the existing summary validator requires them, action count within the target action cap, and no replay-verified prefix from this same run at the target level.
+- `timed-out-unsealed` requires no sealed terminal row, `read_run_usage(..., in_progress=True)` valid, matching recording game ID, trace action count within the target action cap, and no summary or partial evidence that contradicts `game_id`, `seed`, or `target_level`.
+- `execution-failed` requires the same strict partial summary contract used by `_execution_failure_is_valid()` when `target_level == 2`; for `target_level == 1`, require a sealed `arc.run.partial`, cleanup true, matching diagnostics sweep target/caps/status, valid usage, exact game identity, and action count within the Level 1 cap.
+- `execution-stalled` requires `SweepScheduler(...)._execution_stalled_is_valid(run_id, game_id, target_level=target_level, allow_later_progress=True)`, a valid non-symlinked `stall-receipt.json`, exact receipt `trace_final_sha256`, exact ledger token counts, and action count within the target action cap.
+- `evidence_sha256` must be the exact final trace row sha256 for sealed and unsealed trace outcomes. If the run lacks complete evidence for its declared outcome, return `False`; never accept an entry from directory existence, nonnegative tokens, or an unrelated `load_best_prefix()` result alone.
 
 - [ ] **Step 6: Implement `run()` BFS**
 
@@ -650,7 +683,7 @@ Algorithm:
         return BreadthCampaignResult(attempted, level_one, level_two, tuple(newly_l1), tuple(newly_l2), tuple(sorted(set(blocked))), input_tokens, output_tokens, reason, tuple(runs))
 ```
 
-`_attempt_pair()` must create a `running` ledger entry before launching, call `scheduler._attempt(game_id, target_level, 1800)`, finalize exactly one run into a terminal entry, and write the ledger atomically before continuing. If an interrupted `running` entry cannot be finalized from complete matching evidence, return `stopped_reason="breadth-running-entry-requires-audit"` and do not retry.
+`_attempt_pair()` must create a `running` ledger entry before launching, call `scheduler._attempt(game_id, target_level, 1800)`, finalize exactly one run into a terminal entry, and write the ledger atomically before continuing. If an interrupted `running` entry cannot be finalized from complete matching evidence, return `stopped_reason="breadth-running-entry-requires-audit"` and do not retry. Unit tests may stub `_terminal_entry_is_valid()` to exercise resume branching, but a mocked `run-aa` style run ID is not acceptance evidence; the strict evidence tests in Task 5 are the gate.
 
 - [ ] **Step 7: Run focused tests**
 
