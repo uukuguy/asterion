@@ -171,6 +171,8 @@ make asterion-prime-p7-official-live-eval
 
 ## 5. 回执和 scorecard 对照
 
+2026-09-25 已执行一次 `GAME=all` 官方提交。最新本地回执是 `.asterion-private/prime-p7-official/p7-live-20260925031809-dabd0f7fd2131740a0cbfacc/official-receipt.json`；[官方卡片](https://arcprize.org/scorecards/fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d)的总分为 `2.5044733044733043`。17 道题各完成首关、均未整题通关，8 道未选题为零动作占位。逐题官方动作数和分数保存在回执的 `games` 数组，并列于[证据记录](../status/ASTERION-PRIME-P7-EVIDENCE.md)。这次命令正常关闭并直接写出 `closed-confirmed` 回执，无需恢复命令。
+
 验证通过的官方回执保存于：
 
 ```text

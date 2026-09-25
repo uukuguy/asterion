@@ -88,3 +88,29 @@ One operator-authorized `GAME=ls20` saved-action submission created and normally
 closed official card [`14868b83-3f40-4afd-84b0-4d25176f97d0`](https://arcprize.org/scorecards/14868b83-3f40-4afd-84b0-4d25176f97d0). The original command returned `recovery-required` because its result validator rejected the official zero-action placeholders for unselected games. After correcting that rule, a GET-only public result recovery bound the card ID, complete 25-game catalog, and selected LS20 run ID to the private normal-close record. The private `official-receipt.json` is `closed-confirmed`, with closure digest `07d24be4adebe5667631aaa94bab491f056532cb39602a1d35b6c76a0e4ab9b3`.
 
 The service reports LS20 score `3.571428571428571`, one completed level, 20 actions, and state `NOT_FINISHED`. The overall Competition score is `0.14285714285714285`; the other 24 games are zero-action, zero-score placeholders. This verifies a partial official score and the saved-action submission path. It does not establish a full LS20 win, all-game solving, or a live model Competition run. The recovery used no new card, game action, or model call. See the [operator guide](../guides/prime-p7-games-and-official-results.md) and [live checkpoint](RESUME-NEXT-SESSION.md) for commands and the current verification boundary.
+
+## 2026-09-25 official Competition 17-game submission
+
+With operator authorization, `make asterion-prime-p7-official-submit GAME=all` revalidated the 17 locally verified Level-1 action prefixes and played them under one new Competition card. The command exited 0 after normal closure. Local authoritative receipt: `.asterion-private/prime-p7-official/p7-live-20260925031809-dabd0f7fd2131740a0cbfacc/official-receipt.json`, schema `asterion.prime.p7-official-receipt/v1`, status `closed-confirmed`, closure digest `5a85d3ffc778bb4622ca19d215b11ee502e9b5b1dca5e7ff10964783bdf6e60b`.
+
+Official card [`fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d`](https://arcprize.org/scorecards/fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d) reports overall score **`2.5044733044733043`** across the 25-game catalog. Seventeen selected games each completed Level 1 and remain `NOT_FINISHED`; eight unselected games have zero-action placeholders. No whole game was won (`games_completed=0`). Per-game scores below are the official SDK close result, not local estimates.
+
+| Game | Official actions | Levels completed | Official score |
+|---|---:|---:|---:|
+| AR25 | 22 | 1 | 2.777778 |
+| CN04 | 18 | 1 | 4.761905 |
+| DC22 | 43 | 1 | 4.761905 |
+| FT09 | 10 | 1 | 4.761905 |
+| LF52 | 28 | 1 | 1.818182 |
+| LP85 | 9 | 1 | 2.777778 |
+| LS20 | 20 | 1 | 3.571429 |
+| M0R0 | 17 | 1 | 4.761905 |
+| R11L | 10 | 1 | 4.761905 |
+| RE86 | 21 | 1 | 2.777778 |
+| SB26 | 13 | 1 | 2.777778 |
+| SC25 | 22 | 1 | 4.761905 |
+| SP80 | 6 | 1 | 4.761905 |
+| SU15 | 13 | 1 | 2.222222 |
+| TR87 | 40 | 1 | 4.761905 |
+| VC33 | 7 | 1 | 3.571429 |
+| WA30 | 37 | 1 | 2.222222 |
