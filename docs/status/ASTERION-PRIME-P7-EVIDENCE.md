@@ -117,6 +117,58 @@ Official card [`fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d`](https://arcprize.org/scor
 
 The same 17 selected local Level-1 runs now have accepted, evidence-cited Chinese analyses and standalone offline HTML reports under `artifacts/arc-agi-3/exports/`. The local `artifacts/arc-agi-3/catalog.json` indexes all 17 current reports plus the earlier 23-action LS20 historical report. `make asterion-prime-p7-stories` opens the read-only local catalog. Each current report's run ID and action count were checked against this official receipt; its normalized data and accepted analysis remain bound to the sealed local evidence. The report's rounded local partial score is not the official score above.
 
+## 2026-09-25 official Competition breadth batch
+
+After the local breadth resweep, the operator authorized one batch
+`GAME=all` submission. The command selected 21 games with verified local
+prefixes and skipped four games that still lacked a verified prefix. The
+authoritative private receipt is
+`.asterion-private/prime-p7-official/p7-live-20260925194924-200e3e5e7a7b26c04ea21d67/official-receipt.json`;
+it reports `status=closed-confirmed`, `selected_count=21`,
+`skipped_count=4`, closure digest
+`39e5dd2f902dd3df3816525bd00d379d19a38391727dd6ee0851d6d455c58eaa`,
+and overall score **`6.498124098124098`**.
+
+The official card is
+[`403c8b05-ae64-4dd9-b6f6-1d22910a2e24`](https://arcprize.org/scorecards/403c8b05-ae64-4dd9-b6f6-1d22910a2e24).
+It replayed the locally verified prefixes under a new Competition card;
+the official service reports 21 played runs and four zero-action skipped
+placeholders. No complete game was won (`games_completed=0`). The selected
+set includes verified progress through Level 3 for M0R0 and VC33, through
+Level 2 for AR25, CN04, DC22, LS20, RE86 and TU93, and verified Level 1
+prefixes for the remaining selected games. The skipped games were G50T,
+KA59, SK48 and TN36. Official scores and actions are the service result,
+not local estimates.
+
+| Game | Official actions | Levels completed | Official score | State |
+|---|---:|---:|---:|---|
+| AR25 | 38 | 2 | 8.333333 | NOT_FINISHED |
+| BP35 | 20 | 1 | 2.222222 | NOT_FINISHED |
+| CD82 | 28 | 1 | 4.761905 | NOT_FINISHED |
+| CN04 | 66 | 2 | 14.285714 | NOT_FINISHED |
+| DC22 | 104 | 2 | 14.285714 | NOT_FINISHED |
+| FT09 | 10 | 1 | 4.761905 | NOT_FINISHED |
+| LF52 | 28 | 1 | 1.818182 | NOT_FINISHED |
+| LP85 | 9 | 1 | 2.777778 | NOT_FINISHED |
+| LS20 | 94 | 2 | 10.714286 | NOT_FINISHED |
+| M0R0 | 191 | 3 | 28.571429 | NOT_FINISHED |
+| R11L | 10 | 1 | 4.761905 | NOT_FINISHED |
+| RE86 | 60 | 2 | 8.333333 | NOT_FINISHED |
+| S5I5 | 19 | 1 | 2.777778 | NOT_FINISHED |
+| SB26 | 13 | 1 | 2.777778 | NOT_FINISHED |
+| SC25 | 22 | 1 | 4.761905 | NOT_FINISHED |
+| SP80 | 6 | 1 | 4.761905 | NOT_FINISHED |
+| SU15 | 13 | 1 | 2.222222 | NOT_FINISHED |
+| TR87 | 40 | 1 | 4.761905 | NOT_FINISHED |
+| TU93 | 35 | 2 | 6.666667 | GAME_OVER |
+| VC33 | 52 | 3 | 21.428571 | NOT_FINISHED |
+| WA30 | 95 | 2 | 6.666667 | NOT_FINISHED |
+
+This card supersedes the earlier 17-game card as the latest batch result;
+the earlier cards remain historical records. It is a batch of saved local
+actions executed afresh by the official service, not a claim that the local
+solver can complete all selected games.
+
 ## 2026-09-25 local Level-2 breadth-first results
 
 The operator-authorized 17-game second-round campaign is complete. The local ledger is `.asterion-private/prime-p7-live/second-round-campaign.json`. Four games have a sealed, replay-verified, guest-cleaned Level-2 run:
