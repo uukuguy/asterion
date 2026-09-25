@@ -601,6 +601,72 @@ class SweepScheduler:
         except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
             return False
 
+    def _historical_prefix_matches(self, game_id: str, actions: tuple[dict[str, Any], ...]) -> bool:
+        """Match a stalled run's L1 prefix to a sealed local L1 run without replay."""
+
+        metadata = self._metadata().get(game_id)
+        if not metadata or type(metadata.get("baseline_actions")) is not tuple:
+            return False
+        try:
+            for historical in sorted(self.config.runs_root.iterdir(), key=lambda item: item.name):
+                if historical.is_symlink() or not historical.is_dir():
+                    continue
+                summary = _read_json(historical / "summary.json")
+                broker = summary.get("broker") if summary else None
+                if (
+                    not summary
+                    or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+                    or summary.get("replay_verified") is not True
+                    or summary.get("sealed_trace") is not True
+                    or summary.get("cleanup_complete") is not True
+                    or type(broker) is not dict
+                    or broker.get("game_id") != game_id
+                    or broker.get("seed") != self.config.seed
+                    or broker.get("levels_completed") != 1
+                    or broker.get("terminal_reason") != "level-completed"
+                    or type(broker.get("primitive_actions")) is not int
+                    or broker["primitive_actions"] <= 0
+                    or broker["primitive_actions"] > metadata["baseline_actions"][0]
+                ):
+                    continue
+                trace_path = historical / "trace" / "prime-trace.jsonl"
+                seal_path = historical / "trace" / "prime-trace.seal.json"
+                if trace_path.is_symlink() or seal_path.is_symlink() or not seal_path.is_file():
+                    continue
+                entries = _read_hash_chained_trace(trace_path)
+                seal = _read_json(seal_path)
+                if (
+                    not entries
+                    or entries[-1]["kind"] != "trace.sealed"
+                    or not seal
+                    or set(seal) != {"entry_count", "final_sha256", "sealed_at"}
+                    or seal["entry_count"] != len(entries)
+                    or seal["final_sha256"] != entries[-1]["sha256"]
+                    or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+                ):
+                    continue
+                historical_actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
+                count = broker["primitive_actions"]
+                if len(historical_actions) != count or len(actions) < count:
+                    continue
+                if tuple(actions[:count]) != historical_actions:
+                    continue
+                transitions = tuple(
+                    ArcTransition(
+                        row["payload"]["sequence"], row["payload"]["action"],
+                        row["payload"]["before_sha256"], row["payload"]["after_sha256"],
+                        row["payload"]["levels_completed"],
+                        tuple(sorted(row["payload"].get("data", {}).items())),
+                    )
+                    for row in entries if row["kind"] == "arc.action"
+                )
+                if broker.get("replay_sha256") != replay_sha256(transitions, terminal_reason="level-completed"):
+                    continue
+                return True
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError, IndexError):
+            return False
+        return False
+
     def _execution_stalled_is_valid(self, run_id: str, game_id: str, *, allow_later_progress: bool = False) -> bool:
         """Admit a supervisor stall with a hash-valid unsealed trace and receipt."""
 
@@ -660,10 +726,14 @@ class SweepScheduler:
             )
             if first_level_two is None or any(action["levels_completed"] != 0 for action in actions[:first_level_two]):
                 return False
-            # The trace itself carries the verified L1 boundary.  Requiring a
-            # fresh engine replay here made valid stalls unverifiable whenever
-            # the external replay engine was unavailable after cleanup.
-            return first_level_two + 1 <= metadata["baseline_actions"][0]
+            if any(action["levels_completed"] != 1 for action in actions[first_level_two:]):
+                return False
+            prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
+            if prefix is not None:
+                return prefix.levels_completed >= 1 if allow_later_progress else prefix.levels_completed == 1
+            # Offline recovery still requires an independently sealed historical
+            # L1 prefix with identical actions and replay digest.
+            return self._historical_prefix_matches(game_id, actions)
         except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
             return False
 
