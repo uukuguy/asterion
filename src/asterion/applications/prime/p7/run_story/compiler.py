@@ -102,8 +102,9 @@ def _bundle_files(evidence: RunEvidence) -> dict[str, bytes]:
         "usage": None if evidence.usage is None else dict(evidence.usage),
         "source_evidence": dict(evidence.source_digests),
     }
-    actions = [
-        {
+    actions = []
+    for action in evidence.actions:
+        item: dict[str, object] = {
             "schema": SCHEMA,
             "action_index": action.index,
             "action": action.name,
@@ -117,8 +118,9 @@ def _bundle_files(evidence: RunEvidence) -> dict[str, bytes]:
             if action_diffs[action.index]["changed_cell_count"] == 0
             else "productive",
         }
-        for action in evidence.actions
-    ]
+        if action.data:
+            item["data"] = dict(action.data)
+        actions.append(item)
     reasoning = [
         {
             "schema": SCHEMA,

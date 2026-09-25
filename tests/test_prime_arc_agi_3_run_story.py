@@ -12,6 +12,7 @@ from typing import Any
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import digest
+from asterion.capabilities.prime_arc_agi_3_solver import PrimeArcAgi3SolveReceipt
 from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
 from asterion.applications import first_party_cli as asterion_cli
 from asterion.applications.prime.p7.run_story import (
@@ -125,6 +126,7 @@ def _recording_row(
     levels_completed: int,
     timestamp: str,
     animation: list[list[list[int]]] | None = None,
+    action_data: dict[str, int] | None = None,
     win_levels: int = 7,
 ) -> dict[str, object]:
     return {
@@ -134,7 +136,11 @@ def _recording_row(
             "state": "FINISHED" if levels_completed else "NOT_FINISHED",
             "levels_completed": levels_completed,
             "win_levels": win_levels,
-            "action_input": {"id": action, "data": {}, "reasoning": None},
+            "action_input": {
+                "id": action,
+                "data": {} if action_data is None else action_data,
+                "reasoning": None,
+            },
             "guid": "fixture-guid",
             "full_reset": action == "RESET",
             "available_actions": [1, 2, 3, 4],
@@ -149,6 +155,9 @@ def write_completed_fixture(
     worker_secret: str = "private",
     animated: bool = False,
     win_levels: int = 7,
+    action_data: dict[str, int] | None = None,
+    reset_during_run: bool = False,
+    recovered: bool = False,
 ) -> Path:
     run_root = root / "fixture-run"
     trace_root = run_root / "trace"
@@ -162,19 +171,42 @@ def write_completed_fixture(
     middle[20][20] = 1
     animation = [middle, after] if animated else [after]
     before_sha = _observation_digest(before, 0, win_levels=win_levels)
-    after_sha = _observation_digest_frames(animation, 1, win_levels=win_levels)
+    steps = [("ACTION6" if action_data else "ACTION1", action_data or {}, animation, 1)]
+    if reset_during_run:
+        steps = [
+            ("ACTION1", action_data or {}, [after], 0),
+            ("RESET", {}, [before], 0),
+            ("ACTION1", {}, animation, 1),
+        ]
     recorder = PrimeTraceRecorder(trace_root)
-    recorder.append(
-        "arc.action",
-        P7_TRACE_IDENTITIES,
-        {
-            "action": "ACTION1",
-            "after_sha256": after_sha,
-            "before_sha256": before_sha,
-            "levels_completed": 1,
-            "sequence": 1,
-        },
-    )
+    if recovered:
+        recorder.append(
+            "arc.recovery.source",
+            P7_TRACE_IDENTITIES,
+            {
+                "recording_sha256s": ["a" * 64],
+                "source_run_id": "source-run",
+                "summary_sha256": "b" * 64,
+                "trace_seal_sha256": "c" * 64,
+                "trace_sha256": "d" * 64,
+            },
+        )
+    previous_sha = before_sha
+    for sequence, (action, data, grids, levels_completed) in enumerate(steps, start=1):
+        current_sha = _observation_digest_frames(
+            grids, levels_completed, win_levels=win_levels
+        )
+        payload: dict[str, object] = {
+            "action": action,
+            "after_sha256": current_sha,
+            "before_sha256": previous_sha,
+            "levels_completed": levels_completed,
+            "sequence": sequence,
+        }
+        if data:
+            payload["data"] = data
+        recorder.append("arc.action", P7_TRACE_IDENTITIES, payload)
+        previous_sha = current_sha
     recorder.append(
         "arc.usage.reported",
         P7_TRACE_IDENTITIES,
@@ -186,7 +218,7 @@ def write_completed_fixture(
         {
             "game_id": "fixture-game",
             "levels_completed": 1,
-            "primitive_actions": 1,
+            "primitive_actions": len(steps),
             "replay_sha256": "sha256:" + "a" * 64,
             "seed": 0,
             "terminal_reason": "level-completed",
@@ -209,13 +241,17 @@ def write_completed_fixture(
             timestamp="2026-09-09T00:00:00.001000+00:00",
             win_levels=win_levels,
         ),
-        _recording_row(
-            action="ACTION1",
-            grid=after,
-            levels_completed=1,
-            timestamp="2026-09-09T00:00:01+00:00",
-            animation=animation,
-            win_levels=win_levels,
+        *(
+            _recording_row(
+                action=action,
+                grid=grids[-1],
+                levels_completed=levels_completed,
+                timestamp=f"2026-09-09T00:00:0{sequence}+00:00",
+                animation=grids,
+                action_data=data,
+                win_levels=win_levels,
+            )
+            for sequence, (action, data, grids, levels_completed) in enumerate(steps, start=1)
         ),
     )
     recording = recording_root / "fixture-game-guid.jsonl"
@@ -223,36 +259,42 @@ def write_completed_fixture(
         "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows),
         encoding="utf-8",
     )
-    (run_root / "worker-cells.jsonl").write_text(
-        json.dumps(
-            {
-                "cell_count": 1,
-                "code": worker_secret,
-                "code_sha256": "b" * 64,
-                "is_error": False,
-                "output": worker_secret,
-                "output_sha256": "c" * 64,
-            },
-            separators=(",", ":"),
+    if not recovered:
+        (run_root / "worker-cells.jsonl").write_text(
+            json.dumps(
+                {
+                    "cell_count": 1,
+                    "code": worker_secret,
+                    "code_sha256": "b" * 64,
+                    "is_error": False,
+                    "output": worker_secret,
+                    "output_sha256": "c" * 64,
+                },
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
+    receipt = dict(
+        vars(
+            PrimeArcAgi3SolveReceipt.create(
+                run_id="fixture-run",
+                completed_level_count=1,
+                primitive_action_count=len(steps),
+                partial_game_score="3.571429",
+            )
+        )
     )
+    receipt.pop("run_id")
+    receipt["receipt_sha256"] = receipt["receipt_sha256"].removeprefix("sha256:")
     summary = {
         "schema": "asterion.prime.p7-live-private-summary/v1",
         "run_id": "fixture-run",
-        "receipt": {
-            "completed_level_count": 1,
-            "partial_game_score": "3.571429",
-            "primitive_action_count": 1,
-            "promotion": "unpromoted",
-            "receipt_sha256": "d" * 64,
-            "scope": "p7-solving",
-        },
+        "receipt": receipt,
         "broker": {
             "game_id": "fixture-game",
             "levels_completed": 1,
-            "primitive_actions": 1,
+            "primitive_actions": len(steps),
             "replay_sha256": "sha256:" + "a" * 64,
             "seed": 0,
             "terminal_reason": "level-completed",
@@ -264,8 +306,27 @@ def write_completed_fixture(
         "comparison_report": None,
         "reason": None,
         "failure": None,
-        "diagnostics": {"worker_cell_count": 1},
+        "diagnostics": (
+            {
+                "recovered_from": "source-run",
+                "recovery_kind": "concurrent-trace-append",
+                "source_hashes": {
+                    "recording_sha256s": ["a" * 64],
+                    "summary_sha256": "b" * 64,
+                    "trace_seal_sha256": "c" * 64,
+                    "trace_sha256": "d" * 64,
+                },
+                "source_usage_input_tokens": 120,
+                "source_usage_output_tokens": 31,
+                "usage_attributed_to_source": True,
+                "worker_cell_count": 0,
+            }
+            if recovered
+            else {"worker_cell_count": 1}
+        ),
     }
+    if not recovered:
+        summary["completed_prefix"] = None
     (run_root / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -298,6 +359,78 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
 
         self.assertEqual(evidence.game_id, "fixture-game")
         self.assertEqual(tuple(action.name for action in evidence.actions), ("ACTION1",))
+
+    def test_accepts_current_completed_summary_shape(self) -> None:
+        evidence = read_run_evidence(write_completed_fixture(self.root))
+
+        self.assertEqual(evidence.levels_completed, 1)
+
+    def test_accepts_click_data_only_when_recording_matches_trace(self) -> None:
+        evidence = read_run_evidence(
+            write_completed_fixture(self.root, action_data={"x": 12, "y": 34})
+        )
+
+        self.assertEqual(tuple(action.name for action in evidence.actions), ("ACTION6",))
+
+    def test_rejects_click_data_mismatch_from_trace(self) -> None:
+        run_root = write_completed_fixture(
+            self.root, action_data={"x": 12, "y": 34}
+        )
+        recording = next((run_root / "recordings").glob("*/*.jsonl"))
+        rows = [json.loads(line) for line in recording.read_text().splitlines()]
+        rows[-1]["data"]["action_input"]["data"] = {"x": 12, "y": 35}
+        recording.write_text(
+            "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(RunStoryError, "evidence-invalid"):
+            read_run_evidence(run_root)
+
+    def test_accepts_reset_as_a_recorded_primitive_action(self) -> None:
+        evidence = read_run_evidence(write_completed_fixture(self.root, reset_during_run=True))
+
+        self.assertEqual(
+            tuple(action.name for action in evidence.actions),
+            ("ACTION1", "RESET", "ACTION1"),
+        )
+
+    def test_accepts_recovered_evidence_without_worker_reasoning_cells(self) -> None:
+        evidence = read_run_evidence(write_completed_fixture(self.root, recovered=True))
+
+        self.assertEqual(evidence.worker_cell_count, 0)
+        self.assertEqual(evidence.reasoning_cells, ())
+        self.assertNotIn("worker_cells", evidence.source_digests)
+
+    def test_rejects_workerless_run_without_bound_recovery_provenance(self) -> None:
+        run_root = write_completed_fixture(self.root, recovered=True)
+        summary_path = run_root / "summary.json"
+        summary = json.loads(summary_path.read_text())
+        summary["diagnostics"]["recovered_from"] = "another-run"
+        summary_path.write_text(json.dumps(summary, sort_keys=True), encoding="utf-8")
+
+        with self.assertRaisesRegex(RunStoryError, "evidence-invalid"):
+            read_run_evidence(run_root)
+
+    def test_rejects_verified_summary_without_cleanup_or_valid_receipt(self) -> None:
+        for field, value in (
+            ("cleanup_complete", False),
+            ("receipt_sha256", "0" * 64),
+        ):
+            with self.subTest(field=field):
+                run_root = write_completed_fixture(self.root / field)
+                summary_path = run_root / "summary.json"
+                summary = json.loads(summary_path.read_text())
+                if field == "receipt_sha256":
+                    summary["receipt"][field] = value
+                else:
+                    summary[field] = value
+                summary_path.write_text(
+                    json.dumps(summary, sort_keys=True), encoding="utf-8"
+                )
+
+                with self.assertRaisesRegex(RunStoryError, "evidence-invalid"):
+                    read_run_evidence(run_root)
 
     def test_rejects_recording_with_inconsistent_win_levels(self) -> None:
         run_root = write_completed_fixture(self.root, win_levels=9)
@@ -357,6 +490,7 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
         self.assertEqual(first.bundle_sha256, second.bundle_sha256)
         run = json.loads((first.run_root / "data" / "run.json").read_text())
         self.assertEqual(run["action_count"], 1)
+        self.assertIsNone(run["action_limit"])
         self.assertEqual(
             run["usage"], {"input_tokens": 120, "output_tokens": 31}
         )
@@ -393,6 +527,17 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
         self.assertEqual((actions[0]["before_frame"], actions[0]["after_frame"]), (0, 2))
         self.assertEqual(actions[0]["changed_cell_count"], 1)
         self.assertEqual([diff["action_index"] for diff in diffs], [1, 1])
+
+    def test_compiler_preserves_click_coordinates_in_action_data(self) -> None:
+        bundle = compile_run(
+            write_completed_fixture(self.root, action_data={"x": 12, "y": 34}),
+            self.root / "artifacts" / "arc-agi-3",
+        )
+
+        action = json.loads(
+            (bundle.run_root / "data" / "actions.jsonl").read_text().strip()
+        )
+        self.assertEqual(action["data"], {"x": 12, "y": 34})
 
     def test_analysis_is_versioned_and_rejects_fact_mutation(self) -> None:
         bundle = compile_run(

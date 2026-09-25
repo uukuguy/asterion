@@ -35,6 +35,7 @@ class ActionFact:
     before_sha256: str
     after_sha256: str
     levels_completed: int
+    data: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True, repr=False, slots=True)

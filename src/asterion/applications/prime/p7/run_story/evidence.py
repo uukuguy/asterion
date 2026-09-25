@@ -11,7 +11,7 @@ from types import MappingProxyType
 
 from asterion.agents.prime.trace import PrimeTraceEntry, validate_trace
 from asterion.applications.prime.p7.broker import digest
-from asterion.applications.prime.p7.score import P7_ACTION_CAP
+from asterion.capabilities.prime_arc_agi_3_solver import PrimeArcAgi3SolveReceipt
 
 from .model import ActionFact, FrameFact, ReasoningCellFact, RunEvidence, RunStoryError
 
@@ -29,6 +29,7 @@ _SUMMARY_KEYS = {
     "schema",
     "sealed_trace",
 }
+_CURRENT_SUMMARY_KEYS = _SUMMARY_KEYS | {"completed_prefix"}
 _DIGEST_KEYS = ("summary", "trace", "trace_seal", "recording", "worker_cells")
 _LEGACY_GAME_ID = "ls20-9607627b"
 _LEGACY_WIN_LEVELS = 7
@@ -39,6 +40,16 @@ _COMPLETED_KEYS = {
     "terminal_reason",
 }
 _IDENTIFIED_COMPLETED_KEYS = _COMPLETED_KEYS | {"game_id", "seed", "win_levels"}
+_RECEIPT_KEYS = {
+    "completed_level_count",
+    "partial_game_score",
+    "primitive_action_count",
+    "promotion",
+    "receipt_sha256",
+    "run_id",
+    "scope",
+}
+_LEGACY_RECEIPT_KEYS = _RECEIPT_KEYS - {"run_id"}
 
 
 def _reject() -> None:
@@ -164,9 +175,21 @@ def _available(value: object) -> tuple[str, ...]:
     return tuple(names)
 
 
+def _action_data(value: object) -> tuple[tuple[str, int], ...]:
+    if not isinstance(value, Mapping) or any(
+        type(key) is not str
+        or type(item) is not int
+        or isinstance(item, bool)
+        for key, item in value.items()
+    ):
+        _reject()
+    return tuple(sorted(value.items()))
+
+
 @dataclass(frozen=True, slots=True)
 class _RecordedObservation:
     action: str
+    action_data: tuple[tuple[str, int], ...]
     game_id: str
     timestamp: str
     state: str
@@ -179,6 +202,7 @@ class _RecordedObservation:
 @dataclass(frozen=True, slots=True)
 class _RecordedAction:
     name: str
+    data: tuple[tuple[str, int], ...]
     before_frame: int
     after_frame: int
     before_sha256: str
@@ -210,8 +234,28 @@ def _recorded_observation(row: Mapping[str, object]) -> _RecordedObservation:
     timestamp = row["timestamp"]
     if type(timestamp) is not str or not timestamp:
         _reject()
-    action_id = data["action_input"].get("id")
-    if type(action_id) is not str:
+    action_input = data["action_input"]
+    if set(action_input) != {"data", "id", "reasoning"}:
+        _reject()
+    action_id = action_input.get("id")
+    action_data = action_input.get("data")
+    if (
+        type(action_id) is not str
+        or not isinstance(action_data, Mapping)
+        or action_input.get("reasoning") is not None
+    ):
+        _reject()
+    canonical_data = _action_data(action_data)
+    if action_id == "ACTION6":
+        if (
+            tuple(key for key, _ in canonical_data) != ("x", "y")
+            or any(not 0 <= value <= 63 for _, value in canonical_data)
+        ):
+            _reject()
+    elif action_id == "RESET" or action_id in {f"ACTION{number}" for number in range(1, 8)}:
+        if canonical_data:
+            _reject()
+    else:
         _reject()
     observation_sha = digest(
         {
@@ -224,6 +268,7 @@ def _recorded_observation(row: Mapping[str, object]) -> _RecordedObservation:
     )
     return _RecordedObservation(
         action_id,
+        canonical_data,
         _text(data["game_id"]),
         timestamp,
         state,
@@ -274,14 +319,13 @@ def _recording(
             if observation.action != "RESET":
                 _reject()
         else:
-            if observation.action not in {
-                f"ACTION{number}" for number in range(1, 8)
-            }:
+            if observation.action not in {"RESET", *{f"ACTION{number}" for number in range(1, 8)}}:
                 _reject()
             assert previous is not None
             actions.append(
                 _RecordedAction(
                     observation.action,
+                    observation.action_data,
                     first_frame - 1,
                     len(frames) - 1,
                     previous.observation_sha256,
@@ -295,6 +339,42 @@ def _recording(
         tuple(frames),
         tuple(actions),
     )
+
+
+def _recovered_without_worker(
+    trace: tuple[PrimeTraceEntry, ...], diagnostics: Mapping[str, object]
+) -> bool:
+    required = {
+        "recovered_from",
+        "recovery_kind",
+        "source_hashes",
+        "source_usage_input_tokens",
+        "source_usage_output_tokens",
+        "usage_attributed_to_source",
+        "worker_cell_count",
+    }
+    if set(diagnostics) != required or diagnostics.get("recovery_kind") != "concurrent-trace-append" or diagnostics.get("usage_attributed_to_source") is not True or _integer(diagnostics.get("worker_cell_count")) != 0:
+        return False
+    source_run_id = diagnostics.get("recovered_from")
+    source_hashes = diagnostics.get("source_hashes")
+    if type(source_run_id) is not str or not source_run_id or not isinstance(source_hashes, Mapping):
+        return False
+    if set(source_hashes) != {"recording_sha256s", "summary_sha256", "trace_seal_sha256", "trace_sha256"}:
+        return False
+    hashes = tuple(source_hashes[name] for name in ("summary_sha256", "trace_seal_sha256", "trace_sha256"))
+    recordings = source_hashes["recording_sha256s"]
+    if type(recordings) is not list or not recordings or any(type(value) is not str or len(value) != 64 for value in (*hashes, *recordings)):
+        return False
+    _integer(diagnostics.get("source_usage_input_tokens"))
+    _integer(diagnostics.get("source_usage_output_tokens"))
+    recovery = tuple(entry.payload for entry in trace if entry.kind == "arc.recovery.source")
+    return len(recovery) == 1 and recovery[0] == {
+        "recording_sha256s": tuple(recordings),
+        "source_run_id": source_run_id,
+        "summary_sha256": source_hashes["summary_sha256"],
+        "trace_seal_sha256": source_hashes["trace_seal_sha256"],
+        "trace_sha256": source_hashes["trace_sha256"],
+    }
 
 
 def _completed_identity(
@@ -356,6 +436,46 @@ def _completed_identity(
         _reject()
 
 
+def _receipt(
+    receipt: Mapping[str, object],
+    *,
+    run_id: str,
+    levels_completed: int,
+    primitive_actions: int,
+) -> str:
+    if set(receipt) == _LEGACY_RECEIPT_KEYS:
+        receipt_run_id = run_id
+    elif set(receipt) == _RECEIPT_KEYS:
+        receipt_run_id = _text(receipt.get("run_id"))
+        if receipt_run_id != run_id:
+            _reject()
+    else:
+        _reject()
+    try:
+        expected = PrimeArcAgi3SolveReceipt.create(
+            run_id=receipt_run_id,
+            completed_level_count=_integer(
+                receipt.get("completed_level_count"), minimum=1
+            ),
+            primitive_action_count=_integer(
+                receipt.get("primitive_action_count"), minimum=1
+            ),
+            partial_game_score=_text(receipt.get("partial_game_score")),
+        )
+    except ValueError:
+        _reject()
+    if (
+        receipt.get("scope") != expected.scope
+        or receipt.get("promotion") != expected.promotion
+        or receipt.get("receipt_sha256")
+        != expected.receipt_sha256.removeprefix("sha256:")
+        or expected.completed_level_count != levels_completed
+        or expected.primitive_action_count != primitive_actions
+    ):
+        _reject()
+    return expected.partial_game_score
+
+
 def _reasoning(path: Path) -> tuple[ReasoningCellFact, ...]:
     values = _jsonl(path)
     cells: list[ReasoningCellFact] = []
@@ -403,11 +523,27 @@ def read_run_evidence(run_root: Path) -> RunEvidence:
         _reject()
     recording_path = recordings[0]
     summary = _json(summary_path)
-    if set(summary) != _SUMMARY_KEYS or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1":
+    if (
+        set(summary) != _SUMMARY_KEYS and set(summary) != _CURRENT_SUMMARY_KEYS
+        or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+        or ("completed_prefix" in summary and summary["completed_prefix"] is not None)
+    ):
+        _reject()
+    run_id = _text(summary.get("run_id"))
+    if run_id != run_root.name or summary.get("cleanup_complete") is not True:
         _reject()
     trace = _trace(trace_path, seal_path)
     game_id, win_levels, frames, recording_actions = _recording(recording_path)
-    cells = _reasoning(worker_path)
+    diagnostics = summary.get("diagnostics")
+    if not isinstance(diagnostics, Mapping):
+        _reject()
+    recovered_without_worker = not worker_path.exists()
+    if recovered_without_worker:
+        if not _recovered_without_worker(trace, diagnostics):
+            _reject()
+        cells = ()
+    else:
+        cells = _reasoning(worker_path)
     action_entries = tuple(entry for entry in trace if entry.kind == "arc.action")
     if len(action_entries) != len(recording_actions):
         _reject()
@@ -417,18 +553,28 @@ def read_run_evidence(run_root: Path) -> RunEvidence:
     ):
         payload = entry.payload
         if (
-            set(payload)
-            != {
+            set(payload) not in ({
                 "action",
                 "after_sha256",
                 "before_sha256",
                 "levels_completed",
                 "sequence",
-            }
+            }, {
+                "action",
+                "after_sha256",
+                "before_sha256",
+                "data",
+                "levels_completed",
+                "sequence",
+            })
             or payload.get("sequence") != index
             or payload.get("action") != recorded.name
             or payload.get("before_sha256") != recorded.before_sha256
             or payload.get("after_sha256") != recorded.after_sha256
+            or (
+                ("data" in payload and _action_data(payload["data"]) != recorded.data)
+                or ("data" not in payload and recorded.data)
+            )
         ):
             _reject()
         actions.append(
@@ -440,22 +586,27 @@ def read_run_evidence(run_root: Path) -> RunEvidence:
                 recorded.before_sha256,
                 recorded.after_sha256,
                 _integer(payload["levels_completed"]),
+                recorded.data,
             )
         )
     receipt = summary.get("receipt")
     broker = summary.get("broker")
-    diagnostics = summary.get("diagnostics")
-    if not all(isinstance(item, Mapping) for item in (receipt, broker, diagnostics)):
+    if not all(isinstance(item, Mapping) for item in (receipt, broker)):
         _reject()
     assert isinstance(receipt, Mapping)
     assert isinstance(broker, Mapping)
-    assert isinstance(diagnostics, Mapping)
     _completed_identity(trace, broker, game_id=game_id, win_levels=win_levels)
     action_count = _integer(receipt.get("primitive_action_count"))
     levels = _integer(receipt.get("completed_level_count"))
     worker_count = _integer(diagnostics.get("worker_cell_count"))
     if action_count != len(actions) or levels != frames[-1].levels_completed or worker_count != len(cells):
         _reject()
+    score = _receipt(
+        receipt,
+        run_id=run_id,
+        levels_completed=levels,
+        primitive_actions=action_count,
+    )
     usage_entries = tuple(entry.payload for entry in trace if entry.kind == "arc.usage.reported")
     usage: Mapping[str, int] | None = None
     if usage_entries:
@@ -471,20 +622,26 @@ def read_run_evidence(run_root: Path) -> RunEvidence:
         )
     if summary.get("replay_verified") is not True or summary.get("sealed_trace") is not True:
         _reject()
-    source_paths = (summary_path, trace_path, seal_path, recording_path, worker_path)
+    source_paths = (summary_path, trace_path, seal_path, recording_path)
+    digest_keys = _DIGEST_KEYS[:-1]
+    if not recovered_without_worker:
+        source_paths += (worker_path,)
+        digest_keys = _DIGEST_KEYS
     source_digests = MappingProxyType(
-        {name: _sha(path) for name, path in zip(_DIGEST_KEYS, source_paths, strict=True)}
+        {name: _sha(path) for name, path in zip(digest_keys, source_paths, strict=True)}
     )
     identities = trace[0].identities
     return RunEvidence(
-        run_id=_text(summary.get("run_id")),
+        run_id=run_id,
         game_id=game_id,
         identities=identities,
         frames=frames,
         actions=tuple(actions),
         reasoning_cells=cells,
-        score=_text(receipt.get("partial_game_score")),
-        action_limit=P7_ACTION_CAP,
+        score=score,
+        # Per-game human action limits live in mutable diagnostics rather than
+        # the sealed trace, so the public evidence bundle must not claim one.
+        action_limit=None,
         levels_completed=levels,
         terminal_reason=_text(broker.get("terminal_reason")),
         verification="VERIFIED",
