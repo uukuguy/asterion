@@ -73,12 +73,12 @@ class TestPrimeP7Guest(unittest.TestCase):
         unit = 'asterion-p7-' + 'a' * 32 + '.service'
         with (
             patch('tools.run_prime_p7_guest.Path.is_file', return_value=True),
-            patch.dict('os.environ', {'ASTERION_PRIME_P7_RETRY_MODE': '1'}, clear=True),
+            patch.dict('os.environ', {'ASTERION_PRIME_P7_RETRY_MODE': 'same-game-failed-attempt'}, clear=True),
             patch('tools.run_prime_p7_guest.os.execvp', side_effect=SystemExit(0)) as call,
         ):
             with self.assertRaises(SystemExit):
                 launch(unit, 30, ['python3', '-V'])
-        self.assertIn('--setenv=ASTERION_PRIME_P7_RETRY_MODE=1', call.call_args.args[1])
+        self.assertIn('--setenv=ASTERION_PRIME_P7_RETRY_MODE=same-game-failed-attempt', call.call_args.args[1])
 
     def test_cleanup_rejects_unconfirmed_guest_state(self) -> None:
         unit = 'asterion-p7-' + 'a' * 32 + '.service'

@@ -89,6 +89,10 @@ class TestP7RetryController(unittest.TestCase):
     def test_makefile_forwards_exact_retry_marker(self) -> None:
         makefile = (Path(__file__).parents[1] / "Makefile").read_text(encoding="utf-8")
         self.assertIn("ASTERION_PRIME_P7_RETRY_MODE=same-game-failed-attempt", makefile)
+        self.assertIn(
+            'if [ "$$ASTERION_PRIME_P7_RETRY_MODE" = same-game-failed-attempt ]; then ORBENV=',
+            makefile,
+        )
         self.assertIn("p7-retry-preflight", makefile)
 
 
