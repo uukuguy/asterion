@@ -19,6 +19,12 @@ from asterion.capabilities.prime_arc_agi_3_solver.provider import (
 
 
 class TestP7RetryPromptContract(unittest.TestCase):
+    def test_later_level_history_review_has_a_bounded_startup(self) -> None:
+        prompt = " ".join(P7_SOLVE_PROMPT.split())
+        self.assertIn("no more than three startup history calls", prompt)
+        self.assertIn("one legal, falsifiable probe", prompt)
+        self.assertIn("Further history may be inspected after that probe", prompt)
+
     def test_capability_checks_input_bounds_without_owning_prompt_text(self) -> None:
         self.assertTrue(_valid_p7_input(P7_SOLVE_PROMPT))
         self.assertTrue(_valid_p7_input("a different application-owned task"))

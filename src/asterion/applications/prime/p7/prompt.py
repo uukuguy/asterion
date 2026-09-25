@@ -31,15 +31,16 @@ observation["frame"] for timing analysis. render() uses hexadecimal symbols
 First save the status() values levels_completed and primitive_actions. If
 levels_completed is 0, this run is still at Level 1: use observe() and plan
 from the current game; do not wait for a nonexistent Level 1 history boundary.
-If levels_completed is above 0, review the replayed prefix before planning:
-call p7_client.history(0, 32). A valid page can exceed the 16 KiB limit;
-if any page call is unavailable, retry with a smaller limit (16, 8, 4, 2, 1).
-Page forward from the last returned sequence plus 1, with a limit no larger
-than the remaining records through the saved primitive_actions value. Stop
-when the Level 1 boundary appears or that startup sequence is reached; never
-wait for future actions or query a future sequence. Each page contains observed
-facts only: action, stable before/after digests, changed cells, level count,
-and SDK state.
+If levels_completed is above 0, inspect the replayed prefix with
+p7_client.history(0, 32), but make no more than three startup history calls
+before forming one legal, falsifiable probe from the current settled frame.
+An unavailable page counts as a call; retry it at a smaller limit such as
+16, 8, 4, 2, or 1. A valid page can exceed the 16 KiB limit. Do not wait to
+finish paging the prefix before acting. Further history may be inspected after
+that probe, paging from the last returned sequence plus 1 and never beyond the
+saved primitive_actions value. Never query a future sequence. Each page contains
+observed facts only: action, stable before/after digests, changed cells, level
+count, and SDK state.
 Use p7_client.frame_at(sequence) only for a sequence already returned by
 history; it returns that occurred settled grid. Write hypotheses that history
 could disprove, and compare each with the observed facts before using it.
