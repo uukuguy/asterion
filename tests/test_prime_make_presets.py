@@ -18,6 +18,22 @@ def _recipe(makefile: str, target: str) -> str:
 
 
 class TestPrimeMakePresets(unittest.TestCase):
+    def test_p7_next_level_requires_explicit_game_and_uses_operator_driver(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        makefile = (root / "Makefile").read_text()
+        recipe = _recipe(makefile, "asterion-prime-p7-next")
+        self.assertIn("tools/run_prime_p7_next_level.py", recipe)
+        self.assertIn("--guest-machine", recipe)
+        self.assertIn("$(origin GAME)", recipe)
+        self.assertNotIn("official", recipe)
+        completed = subprocess.run(
+            ["make", "--no-print-directory", "-n", "asterion-prime-p7-next", "GAME=lp85"],
+            cwd=root, text=True, capture_output=True,
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertIn("--game", completed.stdout)
+        self.assertIn("ASTERION_PRIME_P7_NEXT_GAME", completed.stdout)
+
     def test_p7_targeted_ab_is_explicit_operator_only_preset(self) -> None:
         root = Path(__file__).resolve().parents[1]
         makefile = (root / "Makefile").read_text()

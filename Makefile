@@ -45,6 +45,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p7-first-round
 .PHONY: asterion-prime-p7-second-round
 .PHONY: asterion-prime-p7-targeted-ab
+.PHONY: asterion-prime-p7-next
 .PHONY: asterion-prime-p7-sweep-attempt
 .PHONY: asterion-prime-p7-games
 .PHONY: asterion-prime-p7-stories
@@ -113,6 +114,7 @@ help:
 	@echo "Asterion Prime local ARC-AGI-3 breadth sweep: asterion-prime-p7-sweep"
 	@echo "Asterion Prime authorized unbounded local L1 sweep: asterion-prime-p7-first-round"
 	@echo "Asterion Prime local L2 sweep of verified L1 games: asterion-prime-p7-second-round"
+	@echo "Asterion Prime one offline next-level attempt: asterion-prime-p7-next GAME=<alias-or-exact-id>"
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
 	@echo "Asterion Prime local ARC-AGI-3 solved-game story pages: asterion-prime-p7-stories"
@@ -314,6 +316,14 @@ asterion-prime-p7-targeted-ab:
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python tools/run_prime_p7_targeted_ab.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --game "$$ASTERION_PRIME_P7_AB_GAME" --guest-machine "$(PRIME_ORB_MACHINE)"'
+
+asterion-prime-p7-next: export ASTERION_PRIME_P7_NEXT_GAME = $(GAME)
+asterion-prime-p7-next:
+	@exec /bin/sh -ec 'if [ "$(origin GAME)" != "command line" ] || [ -z "$$ASTERION_PRIME_P7_NEXT_GAME" ]; then printf "[asterion-prime-p7-next] pass GAME=<alias-or-exact-id> explicitly\n" >&2; exit 2; fi; \
+		build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python tools/run_prime_p7_next_level.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --game "$$ASTERION_PRIME_P7_NEXT_GAME" --guest-machine "$(PRIME_ORB_MACHINE)"'
 
 asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt:
 	@exec /bin/sh -ec 'if [ "$@" = asterion-prime-p7-level-witness ] || [ "$@" = asterion-prime-p7-sweep-attempt ] || [ "$(ASTERION_PRIME_P7_LEVEL_EXPLICIT)" = 1 ]; then case "$$ASTERION_PRIME_P7_TARGET_LEVEL" in '\''\'\''|*[^0-9]*|0) printf '\''[$@] LEVEL must be a positive integer; got %s\n'\'' "$$ASTERION_PRIME_P7_TARGET_LEVEL" >&2; exit 2 ;; esac; fi; \
