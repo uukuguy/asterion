@@ -215,6 +215,15 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("p7_client.frame_at(sequence)", P7_SOLVE_PROMPT)
         self.assertIn("p7_client.act_checked(plan)", P7_SOLVE_PROMPT)
         self.assertIn("remaining plan was not executed", " ".join(P7_SOLVE_PROMPT.split()))
+        normalized = " ".join(P7_SOLVE_PROMPT.split())
+        self.assertIn("levels_completed is 0", normalized)
+        self.assertIn("primitive_actions", normalized)
+        self.assertIn("retry with a smaller limit", normalized)
+        self.assertIn("last returned sequence plus 1", normalized)
+        self.assertIn('"action":{"name":"ACTION1","data":{}}', normalized)
+        self.assertIn('"expect":{"cell":{"x":2,"y":3,"value":7}}', normalized)
+        for key in ('frame_sha256', 'levels_completed', 'state'):
+            self.assertIn(key, normalized)
         self.assertIs(official_operator.P7_SOLVE_PROMPT, P7_SOLVE_PROMPT)
         self.assertFalse(hasattr(operator, "_P7_FRAME_SEMANTICS"))
 

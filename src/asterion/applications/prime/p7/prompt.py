@@ -28,10 +28,18 @@ render(), positions(), and diff(); the raw animation remains available in
 observation["frame"] for timing analysis. render() uses hexadecimal symbols
 0-9 and A-F, where A-F represent color values 10-15.
 
-For a target above Level 1, call p7_client.history(0, 32) before planning.
-Request further pages until the sequence containing the Level 1 boundary is
-returned; stop paging at that boundary. Each page contains observed facts only:
-action, stable before/after digests, changed cells, level count, and SDK state.
+First save the status() values levels_completed and primitive_actions. If
+levels_completed is 0, this run is still at Level 1: use observe() and plan
+from the current game; do not wait for a nonexistent Level 1 history boundary.
+If levels_completed is above 0, review the replayed prefix before planning:
+call p7_client.history(0, 32). A valid page can exceed the 16 KiB limit;
+if any page call is unavailable, retry with a smaller limit (16, 8, 4, 2, 1).
+Page forward from the last returned sequence plus 1, with a limit no larger
+than the remaining records through the saved primitive_actions value. Stop
+when the Level 1 boundary appears or that startup sequence is reached; never
+wait for future actions or query a future sequence. Each page contains observed
+facts only: action, stable before/after digests, changed cells, level count,
+and SDK state.
 Use p7_client.frame_at(sequence) only for a sequence already returned by
 history; it returns that occurred settled grid. Write hypotheses that history
 could disprove, and compare each with the observed facts before using it.
@@ -81,7 +89,12 @@ and remaining-budget implication. Unknown mechanics require one action at a
 time through a one-item act call. Once a multi-step plan has evidence, use
 p7_client.act_checked(plan), with no more than 20 items. Every item must include
 an action and a distinguishing expected cell value, full settled-frame hash,
-level advance, or terminal state. The code result is authoritative: on first
+level advance, or terminal state. A legal one-item call is
+p7_client.act_checked([{"action":{"name":"ACTION1","data":{}},
+"expect":{"cell":{"x":2,"y":3,"value":7}}}]). The expect object may instead
+use frame_sha256 for the full settled-frame digest, levels_completed for a
+strict level increase, or state with WIN or GAME_OVER. Use observed evidence
+to choose the expected result. The code result is authoritative: on first
 mismatch, unavailable action, level boundary, GAME_OVER, or cap, the remaining
 plan was not executed. Never claim an unchecked prediction passed from model
 text or count unexecuted items. After each broker response, inspect the
