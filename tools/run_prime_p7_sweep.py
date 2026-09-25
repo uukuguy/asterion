@@ -64,8 +64,8 @@ class SweepConfig:
     max_attempts: int | None = None
     guest_machine: str | None = "ubuntu"
     # This is an explicit, separately authorized local research pass. It
-    # visits only games without a verified L1 prefix; no token, wallclock, or
-    # per-attempt deadline is installed. The normal sweep stays bounded.
+    # visits only games without a verified L1 prefix and keeps a 30-minute
+    # per-game limit. It has no aggregate token or wallclock budget.
     unbounded_first_round: bool = False
 
 
