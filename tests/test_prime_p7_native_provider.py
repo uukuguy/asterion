@@ -390,7 +390,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         for required in (
             "ipython",
             "hypotheses",
-            "short experiments",
+            "shortest useful test",
             "before/after",
             "no-ops",
             "death paths",
@@ -400,6 +400,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "reset the current level",
             "never use python or shell loops to submit actions",
             "[plan]",
+            "p7_client.history(0, 32)",
+            "p7_client.act_checked(plan)",
         ):
             self.assertIn(required, lowered)
         for forbidden in (
