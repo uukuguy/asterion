@@ -36,7 +36,8 @@ def _run(
 def _official_fake_pi_source() -> str:
     """Give the existing fake Pi one valid gameplay cell in both protocol spots."""
     cell = (
-        'import p7_client; p7_client.act([{"name":"ACTION1","data":{}}] * 13); '
+        'import p7_client; '
+        '[p7_client.act([{"name":"ACTION1","data":{}}]) for _ in range(13)]; '
         'print("completed")'
     )
     source = FAKE_PI.read_text(encoding="utf-8")
