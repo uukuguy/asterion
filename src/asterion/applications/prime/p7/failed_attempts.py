@@ -229,6 +229,31 @@ def _load_one(run: Path, *, game_id: str, seed: int, target_level: int) -> Faile
     return FailedRunFacts(run.name, terminal, target_level, action_count, input_tokens, output_tokens, bounded)
 
 
+def _candidate_matches_identity(run: Path, *, game_id: str, seed: int, target_level: int) -> bool:
+    """Cheap identity filter used before parsing a candidate's evidence."""
+    try:
+        summary = json.loads((run / "summary.json").read_text(encoding="utf-8"))
+        if not isinstance(summary, Mapping):
+            return False
+        broker = summary.get("broker")
+        diagnostics = summary.get("diagnostics")
+        sweep = diagnostics.get("sweep") if isinstance(diagnostics, Mapping) else None
+        if not isinstance(broker, Mapping) or not isinstance(sweep, Mapping):
+            return False
+        if (broker.get("game_id"), broker.get("seed"), sweep.get("target_level")) != (game_id, seed, target_level):
+            return False
+        experiment = summary.get("experiment")
+        if experiment is not None and (
+            not isinstance(experiment, Mapping)
+            or (experiment.get("game_id"), experiment.get("seed"), experiment.get("target_level"))
+            != (game_id, seed, target_level)
+        ):
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def select_failed_attempt_advice(runs_root: Path, *, game_id: str, seed: int, target_level: int, limit: int = 2) -> FailedAttemptAdvice:
     """Select up to ``limit`` newest sealed failures for one exact identity."""
     if type(game_id) is not str or not game_id or type(seed) is not int or isinstance(seed, bool) or type(target_level) is not int or target_level < 1 or type(limit) is not int or limit < 1:
@@ -239,10 +264,11 @@ def select_failed_attempt_advice(runs_root: Path, *, game_id: str, seed: int, ta
     for run in runs_root.iterdir():
         if run.is_symlink() or not run.is_dir():
             continue
-        try:
-            candidate = _load_one(run, game_id=game_id, seed=seed, target_level=target_level)
-        except (Exception, FailedAttemptEvidenceError):
+        if not _candidate_matches_identity(run, game_id=game_id, seed=seed, target_level=target_level):
             continue
+        # Once the cheap identity matches, malformed evidence is a hard
+        # failure.  It must not silently become advice for a retry.
+        candidate = _load_one(run, game_id=game_id, seed=seed, target_level=target_level)
         candidates.append(candidate)
     candidates.sort(key=lambda item: item.run_id, reverse=True)
     selected = tuple(candidates[:limit])
@@ -256,7 +282,7 @@ def render_failed_attempt_advice(advice: FailedAttemptAdvice) -> str:
         _fail()
     rows = []
     for run in advice.runs:
-        rows.append({"run_id": run.run_id, "terminal_reason": run.terminal_reason, "actions": [{"sequence": fact.sequence, "action": dict(fact.action), "levels_completed": fact.levels_completed, "changed_cells": fact.changed_cells, "interior_changed_cells": fact.interior_changed_cells, "border_changed_cells": fact.border_changed_cells, "border_only": fact.border_only, "color_counts": dict(fact.color_counts)} for fact in run.actions[:32]]})
+        rows.append({"run_id": run.run_id, "terminal_reason": run.terminal_reason, "actions": [{"sequence": fact.sequence, "action": dict(fact.action), "levels_completed": fact.levels_completed, "changed_cells": fact.changed_cells, "interior_changed_cells": fact.interior_changed_cells, "border_changed_cells": fact.border_changed_cells, "border_only": fact.border_only, "color_counts": dict(fact.color_counts)} for fact in run.actions]})
     return "CHECKED LOCAL FAILED-ATTEMPT OBSERVATIONS (not a solution or objective):\n" + json.dumps({"game_id": advice.game_id, "seed": advice.seed, "target_level": advice.target_level, "source_run_ids": list(advice.source_run_ids), "source_digest": advice.source_digest, "runs": rows}, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
