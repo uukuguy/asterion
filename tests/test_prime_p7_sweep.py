@@ -26,9 +26,11 @@ class TestPrimeP7Sweep(unittest.TestCase):
 
     def test_unbounded_first_round_requires_pinned_inventory_and_ar25_replay(self) -> None:
         from types import SimpleNamespace
-        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+        from tools.run_prime_p7_sweep import (
+            _FIRST_ROUND_CATALOG_GAME_IDS, SweepConfig, SweepScheduler,
+        )
 
-        game_ids = ("ls20-9607627b", "ar25-0c556536", *(f"g{number:02d}-abc" for number in range(23)))
+        game_ids = _FIRST_ROUND_CATALOG_GAME_IDS
         scheduler = SweepScheduler(SweepConfig(Path("arc"), Path("runs"), unbounded_first_round=True))
         scheduler._catalog = lambda: tuple({"game_id": game_id} for game_id in game_ids)  # type: ignore[method-assign]
         games = scheduler._selected_games()
@@ -38,6 +40,18 @@ class TestPrimeP7Sweep(unittest.TestCase):
         with patch("tools.run_prime_p7_sweep.load_best_prefix") as replay:
             self.assertFalse(scheduler._first_round_campaign_is_ready(scheduler._selected_games()))
             replay.assert_not_called()
+
+    def test_unbounded_first_round_rejects_swapped_catalog_game_id(self) -> None:
+        from types import SimpleNamespace
+        from tools.run_prime_p7_sweep import (
+            _FIRST_ROUND_CATALOG_GAME_IDS, SweepConfig, SweepScheduler,
+        )
+
+        scheduler = SweepScheduler(SweepConfig(Path("arc"), Path("runs"), unbounded_first_round=True))
+        swapped = (*_FIRST_ROUND_CATALOG_GAME_IDS[:-1], "zz99-deadbeef")
+        scheduler._catalog = lambda: tuple({"game_id": game_id} for game_id in swapped)  # type: ignore[method-assign]
+        with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
+            self.assertFalse(scheduler._first_round_campaign_is_ready(scheduler._selected_games()))
 
     def test_attempt_forwards_runtime_unbounded_marker_only_for_first_round(self) -> None:
         from types import SimpleNamespace

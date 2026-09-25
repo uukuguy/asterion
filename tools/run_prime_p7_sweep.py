@@ -28,9 +28,18 @@ from asterion.applications.prime.p7.solutions import load_best_prefix
 
 
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_FIRST_ROUND_CATALOG_GAME_IDS = (
+    "ar25-0c556536", "bp35-0a0ad940", "cd82-fb555c5d", "cn04-2fe56bfb",
+    "dc22-fdcac232", "ft09-0d8bbf25", "g50t-5849a774", "ka59-38d34dbb",
+    "lf52-271a04aa", "lp85-305b61c3", "ls20-9607627b", "m0r0-492f87ba",
+    "r11l-495a7899", "re86-8af5384d", "s5i5-18d95033", "sb26-7fbdac44",
+    "sc25-635fd71a", "sk48-d8078629", "sp80-589a99af", "su15-1944f8ab",
+    "tn36-ef4dde99", "tr87-cd924810", "tu93-0768757b", "vc33-5430563c",
+    "wa30-ee6fef47",
+)
 _FIRST_ROUND_EXCLUDED_GAME_IDS = frozenset({"ls20-9607627b"})
 _FIRST_ROUND_REPLAYED_GAME_ID = "ar25-0c556536"
-_FIRST_ROUND_CATALOG_SIZE = 25
+_FIRST_ROUND_CATALOG_SIZE = len(_FIRST_ROUND_CATALOG_GAME_IDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,11 +277,12 @@ class SweepScheduler:
 
         metadata = self._metadata()
         catalog_ids = frozenset(metadata)
-        expected = tuple(sorted(catalog_ids - _FIRST_ROUND_EXCLUDED_GAME_IDS))
+        expected = tuple(sorted(set(_FIRST_ROUND_CATALOG_GAME_IDS) - _FIRST_ROUND_EXCLUDED_GAME_IDS))
         if (
             self.config.games
             or len(metadata) != _FIRST_ROUND_CATALOG_SIZE
             or len(catalog_ids) != _FIRST_ROUND_CATALOG_SIZE
+            or catalog_ids != frozenset(_FIRST_ROUND_CATALOG_GAME_IDS)
             or not _FIRST_ROUND_EXCLUDED_GAME_IDS <= catalog_ids
             or _FIRST_ROUND_REPLAYED_GAME_ID not in catalog_ids
             or games != expected
