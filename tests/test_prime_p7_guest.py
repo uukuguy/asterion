@@ -52,6 +52,23 @@ class TestPrimeP7Guest(unittest.TestCase):
         self.assertIn('--setenv=ASTERION_PRIME_P7_GAME_ID=a-1', args)
         self.assertNotIn('sentinel', ' '.join(args))
 
+    def test_sweep_launch_forwards_history_variant_to_contained_operator(self) -> None:
+        unit = 'asterion-p7-' + 'a' * 32 + '.service'
+        for variant in ('legacy', 'verified'):
+            with self.subTest(variant=variant), patch(
+                'tools.run_prime_p7_guest.Path.is_file', return_value=True,
+            ), patch.dict(
+                'os.environ', {'ASTERION_PRIME_P7_HISTORY_VARIANT': variant}, clear=True,
+            ), patch(
+                'tools.run_prime_p7_guest.os.execvp', side_effect=SystemExit(0),
+            ) as call:
+                with self.assertRaises(SystemExit):
+                    launch(unit, 30, ['python3', '-V'])
+                self.assertIn(
+                    f'--setenv=ASTERION_PRIME_P7_HISTORY_VARIANT={variant}',
+                    call.call_args.args[1],
+                )
+
     def test_cleanup_rejects_unconfirmed_guest_state(self) -> None:
         unit = 'asterion-p7-' + 'a' * 32 + '.service'
         for state in ('', 'LoadState=loaded\nActiveState=active\n'):
