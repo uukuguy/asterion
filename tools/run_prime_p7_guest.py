@@ -16,6 +16,7 @@ _ENVIRONMENT = (
     "ASTERION_PRIME_PI_ENTRY", "ASTERION_PRIME_NODE",
     "ASTERION_PRIME_P7_GAME_ID", "ASTERION_PRIME_P7_SEED",
     "ASTERION_PRIME_P7_RUN_MODE", "ASTERION_PRIME_P7_TARGET_LEVEL",
+    "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND", "OPERATION_MODE",
 )
 
 
@@ -29,6 +30,8 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     _unit(unit)
     # The host-only sweep driver uses zero as an explicit wire sentinel for
     # its separately authorized unbounded first-round campaign.
+    if type(seconds) not in (int, float) or isinstance(seconds, bool):
+        raise ValueError("invalid attempt bounds")
     if seconds == 0:
         seconds = None
     if (seconds is not None and (not math.isfinite(seconds) or not 0 < seconds <= 4 * 60 * 60)) or not command:

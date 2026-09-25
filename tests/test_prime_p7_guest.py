@@ -9,15 +9,19 @@ from tools.run_prime_p7_guest import cleanup, launch
 
 
 class TestPrimeP7Guest(unittest.TestCase):
-    def test_launch_without_deadline_preserves_cgroup_containment(self) -> None:
+    def test_only_explicit_zero_sentinel_removes_guest_deadline(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid attempt bounds"):
+            launch('asterion-p7-' + 'a' * 32 + '.service', None, ['python3', '-V'])
         with (
             patch('tools.run_prime_p7_guest.Path.is_file', return_value=True),
+            patch.dict('os.environ', {'ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND': '1'}, clear=True),
             patch('tools.run_prime_p7_guest.os.execvp', side_effect=SystemExit(0)) as call,
         ):
             with self.assertRaises(SystemExit):
-                launch('asterion-p7-' + 'a' * 32 + '.service', None, ['python3', '-V'])
+                launch('asterion-p7-' + 'a' * 32 + '.service', 0, ['python3', '-V'])
         args = call.call_args.args[1]
         self.assertIn('--property=KillMode=control-group', args)
+        self.assertIn('--setenv=ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND=1', args)
         self.assertFalse(any(arg.startswith('--property=RuntimeMaxSec=') for arg in args))
 
     def test_launch_contains_descendants_without_forwarding_credentials(self) -> None:

@@ -10,6 +10,66 @@ from pathlib import Path
 
 
 class TestPrimeP7Sweep(unittest.TestCase):
+    def test_unbounded_first_round_rejects_missing_catalog_before_attempt(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(root / "arc", root / "runs", unbounded_first_round=True))
+            scheduler._catalog = lambda: ()  # type: ignore[method-assign]
+            attempts: list[tuple[str, int]] = []
+            scheduler._attempt = lambda game_id, level, _timeout: attempts.append((game_id, level)) or 0  # type: ignore[method-assign]
+            result = scheduler.run()
+
+        self.assertEqual(attempts, [])
+        self.assertEqual(result.stopped_reason, "first-round-catalog-invalid")
+
+    def test_unbounded_first_round_requires_pinned_inventory_and_ar25_replay(self) -> None:
+        from types import SimpleNamespace
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        game_ids = ("ls20-9607627b", "ar25-0c556536", *(f"g{number:02d}-abc" for number in range(23)))
+        scheduler = SweepScheduler(SweepConfig(Path("arc"), Path("runs"), unbounded_first_round=True))
+        scheduler._catalog = lambda: tuple({"game_id": game_id} for game_id in game_ids)  # type: ignore[method-assign]
+        games = scheduler._selected_games()
+        with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
+            self.assertTrue(scheduler._first_round_campaign_is_ready(games))
+        scheduler._catalog = lambda: tuple({"game_id": game_id} for game_id in game_ids[:-1])  # type: ignore[method-assign]
+        with patch("tools.run_prime_p7_sweep.load_best_prefix") as replay:
+            self.assertFalse(scheduler._first_round_campaign_is_ready(scheduler._selected_games()))
+            replay.assert_not_called()
+
+    def test_attempt_forwards_runtime_unbounded_marker_only_for_first_round(self) -> None:
+        from types import SimpleNamespace
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            process = SimpleNamespace(returncode=1, communicate=lambda **_kwargs: ("", ""))
+            first_round = SweepScheduler(SweepConfig(
+                root / "arc", root / "runs", command=("attempt",), guest_machine=None,
+                unbounded_first_round=True,
+            ))
+            bounded = SweepScheduler(SweepConfig(
+                root / "arc", root / "runs", command=("attempt",), guest_machine=None,
+            ))
+            with patch("tools.run_prime_p7_sweep.subprocess.Popen", return_value=process) as popen:
+                first_round._attempt("a-1", 1, None)
+                first_environment = popen.call_args.kwargs["env"]
+                bounded._attempt("a-1", 1, 1)
+                bounded_environment = popen.call_args.kwargs["env"]
+
+        self.assertEqual(first_environment["ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"], "1")
+        self.assertEqual(first_environment["OPERATION_MODE"], "offline")
+        self.assertEqual(bounded_environment["ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"], "")
+        self.assertEqual(bounded_environment["OPERATION_MODE"], "")
+
+    def test_make_forwards_first_round_runtime_marker_and_offline_mode(self) -> None:
+        makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(encoding="utf-8")
+        recipe = makefile.split("asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt:\n", 1)[1]
+        self.assertIn("ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND", recipe)
+        self.assertIn("OPERATION_MODE", recipe)
+
     def test_unbounded_first_round_selects_only_unstarted_first_levels(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
 
@@ -21,6 +81,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 unbounded_first_round=True,
             ))
             scheduler._next_level = lambda game_id: {"ar25-1": 2, "bp35-2": 1, "ls20-9607627b": 2}[game_id]  # type: ignore[method-assign]
+            scheduler._first_round_campaign_is_ready = lambda _games: True  # type: ignore[method-assign]
             scheduler._is_complete = lambda _game_id, _level: False  # type: ignore[method-assign]
             attempts: list[tuple[str, int, float | None]] = []
             scheduler._attempt = lambda game_id, level, timeout: attempts.append((game_id, level, timeout)) or 1  # type: ignore[method-assign]
@@ -53,6 +114,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 unbounded_first_round=True,
             ))
             scheduler._next_level = lambda game_id: 1  # type: ignore[method-assign]
+            scheduler._first_round_campaign_is_ready = lambda _games: True  # type: ignore[method-assign]
             scheduler._is_complete = lambda _game_id, _level: False  # type: ignore[method-assign]
             attempts: list[tuple[str, int]] = []
             scheduler._attempt = lambda game_id, level, _timeout: attempts.append((game_id, level)) or 0  # type: ignore[method-assign]

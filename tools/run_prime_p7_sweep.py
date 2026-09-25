@@ -29,6 +29,8 @@ from asterion.applications.prime.p7.solutions import load_best_prefix
 
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _FIRST_ROUND_EXCLUDED_GAME_IDS = frozenset({"ls20-9607627b"})
+_FIRST_ROUND_REPLAYED_GAME_ID = "ar25-0c556536"
+_FIRST_ROUND_CATALOG_SIZE = 25
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +263,28 @@ class SweepScheduler:
             and (not self.config.unbounded_first_round or game not in _FIRST_ROUND_EXCLUDED_GAME_IDS)
         )
 
+    def _first_round_campaign_is_ready(self, games: tuple[str, ...]) -> bool:
+        """Require the pinned local campaign inventory before any attempt."""
+
+        metadata = self._metadata()
+        catalog_ids = frozenset(metadata)
+        expected = tuple(sorted(catalog_ids - _FIRST_ROUND_EXCLUDED_GAME_IDS))
+        if (
+            self.config.games
+            or len(metadata) != _FIRST_ROUND_CATALOG_SIZE
+            or len(catalog_ids) != _FIRST_ROUND_CATALOG_SIZE
+            or not _FIRST_ROUND_EXCLUDED_GAME_IDS <= catalog_ids
+            or _FIRST_ROUND_REPLAYED_GAME_ID not in catalog_ids
+            or games != expected
+            or len(games) != _FIRST_ROUND_CATALOG_SIZE - len(_FIRST_ROUND_EXCLUDED_GAME_IDS)
+        ):
+            return False
+        prefix = load_best_prefix(
+            self.config.arc_root, self.config.runs_root,
+            _FIRST_ROUND_REPLAYED_GAME_ID, self.config.seed,
+        )
+        return prefix is not None and prefix.levels_completed >= 1
+
     def _next_level(self, game_id: str) -> int:
         if game_id in self._progress:
             return self._progress[game_id] + 1
@@ -384,7 +408,9 @@ class SweepScheduler:
                 cwd=self.config.repo_root,
                 env={**os.environ, "ASTERION_PRIME_P7_SEED": "0",
                      "ASTERION_PRIME_P7_ATTEMPT_UNIT": unit,
-                     "ASTERION_PRIME_P7_ATTEMPT_SECONDS": "0" if timeout is None else str(min(timeout, 4 * 60 * 60))},
+                     "ASTERION_PRIME_P7_ATTEMPT_SECONDS": "0" if timeout is None else str(min(timeout, 4 * 60 * 60)),
+                     "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1" if self.config.unbounded_first_round else "",
+                     "OPERATION_MODE": "offline" if self.config.unbounded_first_round else ""},
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -453,6 +479,8 @@ class SweepScheduler:
 
     def run(self) -> SweepResult:
         games = self._selected_games()
+        if self.config.unbounded_first_round and not self._first_round_campaign_is_ready(games):
+            return SweepResult(0, (), (), (), 0, 0, "first-round-catalog-invalid", ())
         if not games:
             return SweepResult(0, (), (), (), 0, 0, "no-games", ())
         # A resumed sweep must finish untouched first levels before advancing
