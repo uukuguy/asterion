@@ -300,7 +300,7 @@ asterion-prime-p7-first-round:
 		$(UV_BIN) run --no-project --isolated --with "$$1" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_sweep.py --operator-root "$(CURDIR)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --guest-machine "$(PRIME_ORB_MACHINE)" --unbounded-first-round'
 
 asterion-prime-p7-second-round:
-	@printf '[asterion-prime-p7-second-round] local L2 campaign; 30 minutes per game, no total token or time cap\n' >&2; \
+	@printf '[asterion-prime-p7-second-round] local L2 campaign; 30 minutes per game, stop after 5 minutes without an action, no total token or time cap\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
