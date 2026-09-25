@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -67,6 +68,7 @@ class TestP7RetryController(unittest.TestCase):
             with (
                 patch.object(retry, "preflight", return_value=check),
                 patch.object(retry, "resolve_game", return_value=metadata),
+                patch.object(retry, "_probe_guest"),
                 patch.object(retry, "_load_sweep_module", return_value=fake_sweep),
                 patch.object(retry, "_run_metrics", return_value=metrics),
             ):
@@ -85,6 +87,14 @@ class TestP7RetryController(unittest.TestCase):
         observed = dict(expected, source_run_ids=["other"])
         with self.assertRaises(ValueError):
             retry._validate_advice_binding(observed, expected)
+
+    def test_guest_probe_stops_before_scheduler_on_timeout(self) -> None:
+        config = retry.RetryConfig(Path("/tmp"), Path("/tmp"), Path("/tmp"), "bp35", guest_machine="ubuntu")
+        with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired(["orb"], 20)) as run:
+            with self.assertRaisesRegex(ValueError, "P7 guest is unavailable"):
+                retry._probe_guest(config)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][-1], "/bin/true")
 
     def test_makefile_forwards_exact_retry_marker(self) -> None:
         makefile = (Path(__file__).parents[1] / "Makefile").read_text(encoding="utf-8")

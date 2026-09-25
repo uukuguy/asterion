@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Any
 
@@ -150,6 +151,20 @@ def _manifest_path(config: RetryConfig, game_id: str, level: int) -> Path:
     return root / f"{stamp}-{game_id}-level-{level}.json"
 
 
+def _probe_guest(config: RetryConfig) -> None:
+    """Fail before a paid attempt when the selected Orb guest cannot execute."""
+    try:
+        result = subprocess.run(
+            ["orb", "-m", config.guest_machine, "-u", "root", "-w", "/tmp", "/bin/true"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("P7 guest is unavailable") from error
+    if result.returncode != 0:
+        raise ValueError("P7 guest is unavailable")
+
+
 def preflight(config: RetryConfig) -> dict[str, Any]:
     if config.seed != 0 or config.run_timeout_seconds != 1800 or config.no_action_stall_seconds != 300:
         raise ValueError("P7 retry controls are fixed to seed 0, 30 minutes, and 5 minutes")
@@ -184,6 +199,7 @@ def run_once(config: RetryConfig) -> dict[str, Any]:
     check = preflight(config)
     metadata = resolve_game(config.arc_root, config.game)
     level = int(check["target_level"])
+    _probe_guest(config)
     sweep = _load_sweep_module()
     scheduler = sweep.SweepScheduler(sweep.SweepConfig(
         arc_root=config.arc_root, runs_root=config.runs_root, games=(str(metadata["game_id"]),), seed=0,
