@@ -419,7 +419,34 @@ class _P7BrokerClient:
                 raise P7OperatorError("P7 host services are unavailable")
             validated.append(ArcAction(name, canonical_data))
         prior_levels = self._broker.status().levels_completed
-        result = self._broker.act(tuple(validated))
+        try:
+            result = self._broker.act(tuple(validated))
+        except ArcBrokerError as error:
+            if str(error) != "REPLAN_REQUIRED":
+                raise P7OperatorError("P7 host services are unavailable") from None
+            observation = self._broker.observe()
+            status = self._broker.status()
+            return {
+                "applied_count": 0,
+                "level_advanced": False,
+                "levels_completed": prior_levels,
+                "observation": {
+                    "available_actions": list(observation.available_actions),
+                    "frame": observation.frame,
+                    "levels_completed": observation.levels_completed,
+                    "state": observation.state,
+                    "win_levels": observation.win_levels,
+                },
+                "terminal": {
+                    "actions_remaining": status.actions_remaining,
+                    "levels_completed": status.levels_completed,
+                    "primitive_actions": status.primitive_actions,
+                    "target_level": self._broker.game.target_level,
+                    "terminal_reason": status.terminal_reason,
+                },
+                "stop_reason": "REPLAN_REQUIRED",
+                "transitions": [],
+            }
         self._record_transitions(result.transitions)
         try:
             observation = self._broker.observe()
@@ -799,6 +826,8 @@ def build_p7_operator_resources(
     private_trace_root: Path,
     game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
     run_id: str | None = None,
+    no_effect_guard: bool = False,
+    initial_no_effect_counts: Mapping[tuple[int, str], int] | None = None,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -882,7 +911,18 @@ def build_p7_operator_resources(
             approved_environment=approved_environment,
         )
         trace = PrimeTraceRecorder(private_trace_root)
-        broker = ArcBroker(engine=engine, game=game)
+        retry_guard = (
+            no_effect_guard
+            and type(game) is P7GameSelection
+            and environment.get(P7_RETRY_MODE_ENV) == _SAME_GAME_FAILED_ATTEMPT
+            and environment.get("OPERATION_MODE", "").lower() == "offline"
+        )
+        broker = ArcBroker(
+            engine=engine,
+            game=game,
+            no_effect_guard=retry_guard,
+            initial_no_effect_counts=initial_no_effect_counts if retry_guard else None,
+        )
         history_run_id = private_trace_root.parent.name
         if (
             type(history_run_id) is not str or not history_run_id
@@ -1089,6 +1129,14 @@ def _retry_input_and_diagnostics(
     )
     if not advice.source_run_ids:
         raise P7OperatorError("P7 retry evidence is unavailable")
+    no_effect_counts: dict[tuple[int, str], int] = {}
+    for run in advice.runs:
+        for fact in run.actions:
+            if fact.changed_cells == 0:
+                action_name = fact.action.get("name")
+                if type(action_name) is str:
+                    key = (fact.levels_completed, action_name)
+                    no_effect_counts[key] = min(3, no_effect_counts.get(key, 0) + 1)
     return (
         build_p7_retry_prompt(prompt, render_failed_attempt_advice(advice)),
         {
@@ -1096,6 +1144,10 @@ def _retry_input_and_diagnostics(
             "source_digest": advice.source_digest,
             "source_count": len(advice.source_run_ids),
             "fact_count": advice.fact_count,
+            "no_effect_counts": [
+                {"level": level, "action": action, "count": count}
+                for (level, action), count in sorted(no_effect_counts.items())
+            ],
         },
     )
 
@@ -1148,6 +1200,18 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         private_trace_root=trace_root,
         game=invocation.game,
         run_id=run_id,
+        no_effect_guard=retry_diagnostics is not None,
+        initial_no_effect_counts=(
+            {
+                (item["level"], item["action"]): item["count"]
+                for item in retry_diagnostics.get("no_effect_counts", [])
+                if isinstance(item, Mapping)
+                and type(item.get("level")) is int
+                and type(item.get("action")) is str
+                and type(item.get("count")) is int
+            }
+            if retry_diagnostics is not None else None
+        ),
     )
     receipt: Mapping[str, object] = {}
     broker_receipt: ArcRunReceipt | None = None

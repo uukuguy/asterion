@@ -40,6 +40,47 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_retry_replan_required_is_returned_without_trace_dispatch(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _SettledNoEffectEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            engine = _SettledNoEffectEngine()
+            broker = ArcBroker(
+                engine=engine,
+                no_effect_guard=True,
+                initial_no_effect_counts={(0, "ACTION1"): 3},
+            )
+            client = _P7BrokerClient(broker, recorder)
+            result = client.act([{"name": "ACTION1", "data": {}}])
+            self.assertEqual(result["stop_reason"], "REPLAN_REQUIRED")
+            self.assertEqual(result["applied_count"], 0)
+            self.assertEqual(engine.calls, [])
+            self.assertEqual([entry for entry in recorder.snapshot() if entry.kind == "arc.action"], [])
+            recorder.close()
+
+    def test_retry_checked_replan_required_is_structured(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _SettledNoEffectEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(
+                engine=_SettledNoEffectEngine(),
+                no_effect_guard=True,
+                initial_no_effect_counts={(0, "ACTION1"): 3},
+            )
+            broker.bind_history("run-1")
+            client = _P7BrokerClient(broker, recorder)
+            result = client.act_checked([
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 7}}},
+            ])
+            self.assertEqual((result["stop_reason"], result["applied_count"]), ("REPLAN_REQUIRED", 0))
+            recorder.close()
+
     def test_checked_mismatch_accounts_only_dispatched_action(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.operator import _P7BrokerClient
@@ -339,7 +380,6 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
     def test_retry_prompt_separates_mechanics_from_objective(self) -> None:
         from asterion.applications.prime.p7.prompt import (
-            P7_RETRY_GUIDANCE,
             P7_SOLVE_PROMPT,
             build_p7_retry_prompt,
         )

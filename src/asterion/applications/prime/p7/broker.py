@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-from typing import Callable, Protocol, cast
+from typing import Callable, Mapping, Protocol, cast
 
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
@@ -181,7 +181,14 @@ def _engine_identity(engine: object, game: P7GameSelection | ArcGameContract) ->
 class ArcBroker:
     """Journal bounded actions through the selected target level."""
 
-    def __init__(self, *, engine: object, game: P7GameSelection | ArcGameContract = DEFAULT_GAME) -> None:
+    def __init__(
+        self,
+        *,
+        engine: object,
+        game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
+        no_effect_guard: bool = False,
+        initial_no_effect_counts: Mapping[tuple[int, str], int] | None = None,
+    ) -> None:
         if type(game) not in (P7GameSelection, ArcGameContract):
             raise ArcBrokerError("unavailable")
         if not callable(getattr(engine, "observe", None)) or not (
@@ -206,6 +213,19 @@ class ArcBroker:
         self._failed_action: str | None = None
         self._level_gameplay_actions = 0
         self._history: list[ArcHistoryRecord] | None = None
+        if type(no_effect_guard) is not bool:
+            raise ArcBrokerError("unavailable")
+        counts = {} if initial_no_effect_counts is None else dict(initial_no_effect_counts)
+        if any(
+            type(key) is not tuple or len(key) != 2
+            or type(key[0]) is not int or isinstance(key[0], bool) or key[0] < 0
+            or type(key[1]) is not str or key[1] not in {f"ACTION{number}" for number in range(1, 8)}
+            or type(value) is not int or isinstance(value, bool) or not 0 <= value <= 3
+            for key, value in counts.items()
+        ):
+            raise ArcBrokerError("unavailable")
+        self._no_effect_guard = no_effect_guard
+        self._no_effect_counts = counts
 
     @property
     def journal(self) -> tuple[ArcTransition, ...]:
@@ -279,7 +299,14 @@ class ArcBroker:
                 stop_reason = "action-unavailable"
                 break
             previous_levels = self._current.levels_completed
-            batch = self.act((ArcAction(name, data),))
+            distinguishing = len(plan) == 1 and self._guard_probe_distinguishes(expected)
+            try:
+                batch = self.act((ArcAction(name, data),), _allow_guard_probe=distinguishing)
+            except ArcBrokerError as error:
+                if str(error) != "REPLAN_REQUIRED":
+                    raise
+                stop_reason = "REPLAN_REQUIRED"
+                break
             transitions.extend(batch.transitions)
             record = records[-1]
             cell = expected.get("cell")
@@ -304,6 +331,9 @@ class ArcBroker:
                 break
             if record.levels_completed > previous_levels:
                 stop_reason = "level-advanced"
+                break
+            if self._no_effect_guard and self._settled_grid_unchanged(record):
+                stop_reason = "observation-no-change"
                 break
             if record.state == "GAME_OVER":
                 stop_reason = "game-over"
@@ -375,9 +405,20 @@ class ArcBroker:
             raise ValueError
         return act({"name": action.name, "data": dict(action.data)})
 
-    def act(self, actions: tuple[str | ArcAction, ...]) -> ArcActResult:
+    def act(
+        self,
+        actions: tuple[str | ArcAction, ...],
+        *,
+        _allow_guard_probe: bool = False,
+    ) -> ArcActResult:
         self._require_open()
         validated = self._validate_actions(actions)
+        if (
+            self._no_effect_guard
+            and not _allow_guard_probe
+            and any(self._no_effect_counts.get((self._current.levels_completed, action.name), 0) >= 3 for action in validated)
+        ):
+            raise ArcBrokerError("REPLAN_REQUIRED")
         transitions: list[ArcTransition] = []
         for action in validated:
             if action.name == "RESET":
@@ -431,9 +472,12 @@ class ArcBroker:
             transitions.append(transition)
             self._current = after
             if action.name == "RESET" or after.levels_completed > before.levels_completed:
+                self._clear_no_effect_level(before.levels_completed)
                 self._level_gameplay_actions = 0
             else:
                 self._level_gameplay_actions += 1
+                if self._no_effect_guard and after.frame[-1] == before.frame[-1]:
+                    self._record_no_effect(action.name, after.levels_completed)
             if after.levels_completed == self._game.target_level:
                 self._terminal_reason = (
                     ("game-won" if after.state == "WIN" else "game-incomplete")
@@ -457,6 +501,36 @@ class ArcBroker:
             if action.name == "RESET" or after.levels_completed > before.levels_completed:
                 break
         return ArcActResult(len(transitions), self._current.levels_completed - self._initial.levels_completed, tuple(transitions))
+
+    @staticmethod
+    def _settled_grid_unchanged(record: ArcHistoryRecord) -> bool:
+        return record.changed_cell_count == 0
+
+    def _guard_probe_distinguishes(self, expected: Mapping[str, object]) -> bool:
+        """Allow a guarded probe only when it predicts a changed fact."""
+
+        if "cell" in expected:
+            cell = cast(dict[str, int], expected["cell"])
+            x, y = cell["x"], cell["y"]
+            current = self._current.frame[-1]
+            if y < len(current) and x < len(current[0]) and current[y][x] != cell["value"]:
+                return True
+        if "frame_sha256" in expected and expected["frame_sha256"] != digest(self._current.frame[-1]):
+            return True
+        if "levels_completed" in expected and expected["levels_completed"] != self._current.levels_completed:
+            return True
+        if "state" in expected and expected["state"] != self._current.state:
+            return True
+        return False
+
+    def _record_no_effect(self, action: str, level: int) -> None:
+        key = (level, action)
+        self._no_effect_counts[key] = min(3, self._no_effect_counts.get(key, 0) + 1)
+
+    def _clear_no_effect_level(self, level: int) -> None:
+        for key in tuple(self._no_effect_counts):
+            if key[0] == level:
+                del self._no_effect_counts[key]
 
     def seal(self) -> ArcRunReceipt:
         if self._terminal_reason == "active":
