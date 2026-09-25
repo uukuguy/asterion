@@ -117,7 +117,23 @@ def _run_metrics(runs_root: Path, run_id: str | None) -> dict[str, Any]:
         "completed_level_count": summary.get("receipt", {}).get("completed_level_count", sweep.get("levels_completed")) if type(summary.get("receipt")) is dict else sweep.get("levels_completed"),
         "input_tokens": sum(item.get("input_tokens", 0) for item in usage if type(item.get("input_tokens")) is int),
         "output_tokens": sum(item.get("output_tokens", 0) for item in usage if type(item.get("output_tokens")) is int),
+        "failed_attempt_advice": ((summary.get("diagnostics") or {}).get("failed_attempt_advice")),
     }
+
+
+def _validate_advice_binding(metrics: dict[str, Any], preflight_result: dict[str, Any]) -> None:
+    """Require the guest run to record the exact advice selected before launch."""
+    advice = metrics.get("failed_attempt_advice")
+    if type(advice) is not dict:
+        raise ValueError("retry run did not record failed-attempt advice")
+    expected_ids = list(preflight_result["source_run_ids"])
+    if (
+        advice.get("source_run_ids") != expected_ids
+        or advice.get("source_digest") != preflight_result["source_digest"]
+        or advice.get("source_count") != preflight_result["source_count"]
+        or advice.get("fact_count") != preflight_result["fact_count"]
+    ):
+        raise ValueError("retry run advice does not match preflight selection")
 
 
 def _manifest_path(config: RetryConfig, game_id: str, level: int) -> Path:
@@ -165,10 +181,13 @@ def run_once(config: RetryConfig) -> dict[str, Any]:
         unbounded_first_round=True, action_stall_seconds=config.no_action_stall_seconds,
         validate_action_stall=True,
     ))
-    os.environ["ASTERION_PRIME_P7_RETRY_MODE"] = "1"
+    os.environ["ASTERION_PRIME_P7_RETRY_MODE"] = "same-game-failed-attempt"
     scheduler._attempt(str(metadata["game_id"]), level, config.run_timeout_seconds)
     run_id = scheduler._new_runs[-1] if len(scheduler._new_runs) == 1 else None
     metrics = _run_metrics(config.runs_root, run_id)
+    if run_id is None:
+        raise ValueError("retry produced ambiguous run evidence")
+    _validate_advice_binding(metrics, check)
     result = {
         "schema": _RESULT_SCHEMA, "manifest_schema": _MANIFEST_SCHEMA,
         "created_at": datetime.now(timezone.utc).isoformat(),
