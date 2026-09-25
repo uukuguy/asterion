@@ -10,6 +10,63 @@ from pathlib import Path
 
 
 class TestPrimeP7Sweep(unittest.TestCase):
+    def test_second_round_requires_pinned_catalog_and_verified_prefixes(self) -> None:
+        from types import SimpleNamespace
+        from tools.run_prime_p7_sweep import (
+            _FIRST_ROUND_CATALOG_GAME_IDS, _SECOND_ROUND_GAME_IDS, SweepConfig, SweepScheduler,
+        )
+
+        scheduler = SweepScheduler(SweepConfig(Path("arc"), Path("runs"), unbounded_second_round=True))
+        scheduler._catalog = lambda: tuple({"game_id": game_id} for game_id in _FIRST_ROUND_CATALOG_GAME_IDS)  # type: ignore[method-assign]
+        games = scheduler._selected_games()
+        self.assertEqual(games, _SECOND_ROUND_GAME_IDS)
+        with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
+            self.assertTrue(scheduler._second_round_campaign_is_ready(games))
+        with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=None):
+            self.assertFalse(scheduler._second_round_campaign_is_ready(games))
+        scheduler._catalog = lambda: tuple({"game_id": game_id} for game_id in _FIRST_ROUND_CATALOG_GAME_IDS[:-1])  # type: ignore[method-assign]
+        self.assertFalse(scheduler._second_round_campaign_is_ready(scheduler._selected_games()))
+
+    def test_second_round_visits_each_level_two_once_and_ignores_old_deferral(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(
+                root / "arc", root / "runs", games=("a-1", "b-2", "c-3"),
+                unbounded_second_round=True,
+            ))
+            scheduler._second_round_campaign_is_ready = lambda _games: True  # type: ignore[method-assign]
+            scheduler._load_or_create_campaign = lambda: {"terminal_attempts": [
+                {"game_id": "c-3", "outcome": "unsolved"},
+            ]}  # type: ignore[method-assign]
+            scheduler._next_level = lambda game_id: {"a-1": 2, "b-2": 2, "c-3": 2}[game_id]  # type: ignore[method-assign]
+            scheduler._is_complete = lambda _game_id, _level: False  # type: ignore[method-assign]
+            scheduler._deferred_levels = frozenset({("a-1", 2)})
+            scheduler._attempt = lambda game_id, level, timeout: (attempts.append((game_id, level, timeout)), 0 if game_id == "a-1" else 1)[1]  # type: ignore[method-assign]
+            scheduler._attempt_result = lambda game_id, _level: game_id == "a-1"  # type: ignore[method-assign]
+            scheduler._record_campaign_attempt = lambda *_args: None  # type: ignore[method-assign]
+            attempts: list[tuple[str, int, float | None]] = []
+            result = scheduler.run()
+
+        self.assertEqual(attempts, [("a-1", 2, 1800), ("b-2", 2, 1800)])
+        self.assertEqual(result.newly_verified_level_two, ("a-1",))
+        self.assertEqual(result.attempted_unsolved_level_two, ("b-2",))
+        self.assertEqual(result.previously_attempted_unsolved_level_two, ("c-3",))
+        self.assertEqual(result.stopped_reason, "completed")
+
+    def test_second_round_requires_thirty_minutes_and_timeout_trace_at_level_one(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler, _trace_reached_level
+
+        with self.assertRaisesRegex(ValueError, "30-minute"):
+            SweepScheduler(SweepConfig(Path("arc"), Path("runs"), unbounded_second_round=True, run_timeout=None))
+        self.assertFalse(_trace_reached_level(({
+            "kind": "arc.action", "payload": {"levels_completed": 0},
+        },), 1))
+        self.assertTrue(_trace_reached_level(({
+            "kind": "arc.action", "payload": {"levels_completed": 1},
+        },), 1))
+
     def test_unbounded_first_round_rejects_missing_catalog_before_attempt(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
 
@@ -131,7 +188,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
         self.assertEqual(result.stopped_reason, "completed")
         self.assertEqual(result.timed_out_unsealed_level_one, ("a-1",))
 
-    def test_attempt_forwards_runtime_unbounded_marker_only_for_first_round(self) -> None:
+    def test_attempt_forwards_runtime_unbounded_marker_for_research_rounds(self) -> None:
         from types import SimpleNamespace
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
 
@@ -142,18 +199,27 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 root / "arc", root / "runs", command=("attempt",), guest_machine=None,
                 unbounded_first_round=True,
             ))
+            second_round = SweepScheduler(SweepConfig(
+                root / "arc", root / "runs", command=("attempt",), guest_machine=None,
+                unbounded_second_round=True,
+            ))
             bounded = SweepScheduler(SweepConfig(
                 root / "arc", root / "runs", command=("attempt",), guest_machine=None,
             ))
             with patch("tools.run_prime_p7_sweep.subprocess.Popen", return_value=process) as popen:
                 first_round._attempt("a-1", 1, 30 * 60)
                 first_environment = popen.call_args.kwargs["env"]
+                second_round._attempt("a-1", 2, 30 * 60)
+                second_environment = popen.call_args.kwargs["env"]
                 bounded._attempt("a-1", 1, 1)
                 bounded_environment = popen.call_args.kwargs["env"]
 
         self.assertEqual(first_environment["ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"], "1")
         self.assertEqual(first_environment["OPERATION_MODE"], "offline")
         self.assertEqual(first_environment["ASTERION_PRIME_P7_ATTEMPT_SECONDS"], "1830")
+        self.assertEqual(second_environment["ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"], "1")
+        self.assertEqual(second_environment["OPERATION_MODE"], "offline")
+        self.assertEqual(second_environment["ASTERION_PRIME_P7_ATTEMPT_SECONDS"], "1830")
         self.assertEqual(bounded_environment["ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"], "")
         self.assertEqual(bounded_environment["OPERATION_MODE"], "")
 

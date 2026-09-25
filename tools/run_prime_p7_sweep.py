@@ -44,6 +44,16 @@ _FIRST_ROUND_CATALOG_SIZE = len(_FIRST_ROUND_CATALOG_GAME_IDS)
 _FIRST_ROUND_CAMPAIGN_SCHEMA = "asterion.prime.p7-first-round-campaign/v1"
 _FIRST_ROUND_CAMPAIGN_FILE = "first-round-campaign.json"
 _FIRST_ROUND_CAMPAIGN_ID = re.compile(r"^first-round-[0-9a-f]{32}$")
+_SECOND_ROUND_GAME_IDS = (
+    "ar25-0c556536", "cn04-2fe56bfb", "dc22-fdcac232", "ft09-0d8bbf25",
+    "lf52-271a04aa", "lp85-305b61c3", "ls20-9607627b", "m0r0-492f87ba",
+    "r11l-495a7899", "re86-8af5384d", "sb26-7fbdac44", "sc25-635fd71a",
+    "sp80-589a99af", "su15-1944f8ab", "tr87-cd924810", "vc33-5430563c",
+    "wa30-ee6fef47",
+)
+_SECOND_ROUND_CAMPAIGN_SCHEMA = "asterion.prime.p7-second-round-campaign/v1"
+_SECOND_ROUND_CAMPAIGN_FILE = "second-round-campaign.json"
+_SECOND_ROUND_CAMPAIGN_ID = re.compile(r"^second-round-[0-9a-f]{32}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +77,7 @@ class SweepConfig:
     # visits only games without a verified L1 prefix and keeps a 30-minute
     # per-game limit. It has no aggregate token or wallclock budget.
     unbounded_first_round: bool = False
+    unbounded_second_round: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +96,11 @@ class SweepResult:
     previously_attempted_unsolved_level_one: tuple[str, ...] = ()
     interrupted_without_evidence_level_one: tuple[str, ...] = ()
     timed_out_unsealed_level_one: tuple[str, ...] = ()
+    preexisting_level_two: tuple[str, ...] = ()
+    newly_verified_level_two: tuple[str, ...] = ()
+    attempted_unsolved_level_two: tuple[str, ...] = ()
+    previously_attempted_unsolved_level_two: tuple[str, ...] = ()
+    timed_out_unsealed_level_two: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,19 +247,24 @@ class SweepScheduler:
     def __init__(self, config: SweepConfig) -> None:
         if config.seed != 0:
             raise ValueError("P7 sweep seed must be zero")
+        if config.unbounded_first_round and config.unbounded_second_round:
+            raise ValueError("P7 research round selection is ambiguous")
+        if config.unbounded_second_round and config.run_timeout != 30 * 60:
+            raise ValueError("P7 second round requires a 30-minute attempt limit")
         bounded_budget = (
             type(config.global_token_cap) is int and config.global_token_cap > 0
             and type(config.wallclock_cap) in (int, float) and math.isfinite(config.wallclock_cap) and config.wallclock_cap > 0
             and type(config.run_timeout) in (int, float) and math.isfinite(config.run_timeout) and config.run_timeout > 0
         )
-        if config.unbounded_first_round:
+        if self._is_research_round(config):
             if (
                 config.global_token_cap not in (None, 3_500_000)
                 or config.wallclock_cap not in (None, 4 * 60 * 60)
                 or config.run_timeout not in (None, 30 * 60)
                 or config.max_attempts is not None
             ):
-                raise ValueError("P7 unbounded first round cannot have a budget cap")
+                label = "second round" if config.unbounded_second_round else "first round"
+                raise ValueError(f"P7 unbounded {label} cannot have a budget cap")
         elif not bounded_budget:
             raise ValueError("P7 sweep budget is invalid")
         if config.max_attempts is not None and (type(config.max_attempts) is not int or config.max_attempts < 0):
@@ -258,6 +279,10 @@ class SweepScheduler:
         self._stop_reason = "completed"
         self._deferred_levels = self._find_deferred_levels()
 
+    @staticmethod
+    def _is_research_round(config: SweepConfig) -> bool:
+        return config.unbounded_first_round or config.unbounded_second_round
+
     def _catalog(self) -> tuple[dict[str, object], ...]:
         try:
             return _read_catalog(self.config.arc_root)
@@ -269,7 +294,9 @@ class SweepScheduler:
 
     def _selected_games(self) -> tuple[str, ...]:
         metadata = self._metadata()
-        selected = self.config.games or tuple(sorted(metadata))
+        selected = self.config.games or (
+            _SECOND_ROUND_GAME_IDS if self.config.unbounded_second_round else tuple(sorted(metadata))
+        )
         # Explicit selections are still validated against the catalog when it
         # is available.  Keeping them in the empty-catalog case makes the
         # scheduler unit-testable and lets the child report the asset error.
@@ -305,8 +332,27 @@ class SweepScheduler:
     def _first_round_catalog_ids(self) -> tuple[str, ...]:
         return _FIRST_ROUND_CATALOG_GAME_IDS
 
+    def _second_round_campaign_is_ready(self, games: tuple[str, ...]) -> bool:
+        metadata = self._metadata()
+        if (
+            self.config.games
+            or len(metadata) != _FIRST_ROUND_CATALOG_SIZE
+            or frozenset(metadata) != frozenset(_FIRST_ROUND_CATALOG_GAME_IDS)
+            or games != _SECOND_ROUND_GAME_IDS
+        ):
+            return False
+        for game_id in games:
+            prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
+            if prefix is None or prefix.levels_completed < 1:
+                return False
+        return True
+
+    def _campaign_ids(self) -> tuple[str, ...]:
+        return _SECOND_ROUND_GAME_IDS if self.config.unbounded_second_round else self._first_round_catalog_ids()
+
     def _campaign_path(self) -> Path:
-        return self.config.runs_root / _FIRST_ROUND_CAMPAIGN_FILE
+        name = _SECOND_ROUND_CAMPAIGN_FILE if self.config.unbounded_second_round else _FIRST_ROUND_CAMPAIGN_FILE
+        return self.config.runs_root / name
 
     def _write_campaign(self, campaign: dict[str, Any]) -> None:
         root = self.config.runs_root
@@ -318,7 +364,7 @@ class SweepScheduler:
         path = self._campaign_path()
         if path.is_symlink():
             raise ValueError
-        descriptor, temporary_name = tempfile.mkstemp(prefix=".p7-first-round-", dir=root)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".p7-research-round-", dir=root)
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -333,6 +379,10 @@ class SweepScheduler:
             raise
 
     def _load_or_create_campaign(self) -> dict[str, Any]:
+        second = self.config.unbounded_second_round
+        schema = _SECOND_ROUND_CAMPAIGN_SCHEMA if second else _FIRST_ROUND_CAMPAIGN_SCHEMA
+        identity = _SECOND_ROUND_CAMPAIGN_ID if second else _FIRST_ROUND_CAMPAIGN_ID
+        label = "second-round-" if second else "first-round-"
         path = self._campaign_path()
         if path.exists() or path.is_symlink():
             if path.is_symlink() or not path.is_file():
@@ -342,9 +392,9 @@ class SweepScheduler:
                 raise ValueError
         else:
             campaign = {
-                "schema": _FIRST_ROUND_CAMPAIGN_SCHEMA,
-                "campaign_id": "first-round-" + secrets.token_hex(16),
-                "catalog_game_ids": list(self._first_round_catalog_ids()),
+                "schema": schema,
+                "campaign_id": label + secrets.token_hex(16),
+                "catalog_game_ids": list(self._campaign_ids()),
                 "terminal_attempts": [],
             }
             self._write_campaign(campaign)
@@ -354,9 +404,9 @@ class SweepScheduler:
         campaign_id = campaign.get("campaign_id")
         if (
             set(campaign) != {"schema", "campaign_id", "catalog_game_ids", "terminal_attempts"}
-            or campaign.get("schema") != _FIRST_ROUND_CAMPAIGN_SCHEMA
-            or type(campaign_id) is not str or _FIRST_ROUND_CAMPAIGN_ID.fullmatch(campaign_id) is None
-            or catalog != list(self._first_round_catalog_ids())
+            or campaign.get("schema") != schema
+            or type(campaign_id) is not str or identity.fullmatch(campaign_id) is None
+            or catalog != list(self._campaign_ids())
             or type(attempts) is not list
         ):
             raise ValueError
@@ -366,7 +416,7 @@ class SweepScheduler:
             if (
                 type(attempt) is not dict
                 or set(attempt) != {"game_id", "run_id", "outcome"}
-                or attempt.get("game_id") not in self._first_round_catalog_ids()
+                or attempt.get("game_id") not in self._campaign_ids()
                 or attempt["game_id"] in seen_games
                 or type(attempt.get("run_id")) is not str or _RUN_ID.fullmatch(attempt["run_id"]) is None
                 or attempt["run_id"] in seen_runs
@@ -398,14 +448,16 @@ class SweepScheduler:
                 and not usage[2]
                 and not usage[3]
                 and _recorded_game_id(run, {game_id}) == game_id
+                and (not self.config.unbounded_second_round or _trace_reached_level(entries, 1))
             )
         summary = _read_json(run / "summary.json")
         returncode = 0 if outcome == "verified" else 1
-        if not sealed or not _valid_attempt_summary(summary, run_id, game_id, 1, returncode):
+        level = 2 if self.config.unbounded_second_round else 1
+        if not sealed or not _valid_attempt_summary(summary, run_id, game_id, level, returncode):
             return False
         if outcome == "verified":
             prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
-            return prefix is not None and prefix.levels_completed >= 1
+            return prefix is not None and prefix.levels_completed >= level
         return True
 
     def _record_campaign_attempt(self, campaign: dict[str, Any], game_id: str, outcome: str) -> None:
@@ -430,7 +482,7 @@ class SweepScheduler:
     def _timeout_for_level(self, game_id: str, level: int) -> float | None:
         """Scale the attempt window from the measured 272s / 20 actions."""
 
-        if self.config.unbounded_first_round:
+        if self._is_research_round(self.config):
             return self.config.run_timeout
 
         metadata = self._metadata().get(game_id)
@@ -530,7 +582,7 @@ class SweepScheduler:
                     self._stop_reason = "usage-trace-integrity-error"
                 observed[run_id] = (max(old[0], usage[0]), max(old[1], usage[1]))
             reported = self._input_tokens + self._output_tokens + sum(sum(value) for value in observed.values())
-            if not self.config.unbounded_first_round and self.config.global_token_cap is not None and reported >= self.config.global_token_cap and self._stop_reason == "completed":
+            if not self._is_research_round(self.config) and self.config.global_token_cap is not None and reported >= self.config.global_token_cap and self._stop_reason == "completed":
                 self._stop_reason = "token-cap"
 
         try:
@@ -541,9 +593,9 @@ class SweepScheduler:
                 env={**os.environ, "ASTERION_PRIME_P7_SEED": "0",
                      "ASTERION_PRIME_P7_ATTEMPT_UNIT": unit,
                      "ASTERION_PRIME_P7_ATTEMPT_SECONDS": "0" if timeout is None else str(min(
-                         timeout + 30 if self.config.unbounded_first_round else timeout, 4 * 60 * 60)),
-                     "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1" if self.config.unbounded_first_round else "",
-                     "OPERATION_MODE": "offline" if self.config.unbounded_first_round else ""},
+                         timeout + 30 if self._is_research_round(self.config) else timeout, 4 * 60 * 60)),
+                     "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1" if self._is_research_round(self.config) else "",
+                     "OPERATION_MODE": "offline" if self._is_research_round(self.config) else ""},
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -608,6 +660,7 @@ class SweepScheduler:
                         and not usage[2]
                         and not usage[3]
                         and _recorded_game_id(run, {game_id}) == game_id
+                        and (not self.config.unbounded_second_round or _trace_reached_level(entries, 1))
                     ):
                         self._stop_reason = "timed-out-unsealed"
                     else:
@@ -627,12 +680,15 @@ class SweepScheduler:
         games = self._selected_games()
         if self.config.unbounded_first_round and not self._first_round_campaign_is_ready(games):
             return SweepResult(0, (), (), (), 0, 0, "first-round-catalog-invalid", ())
+        if self.config.unbounded_second_round and not self._second_round_campaign_is_ready(games):
+            return SweepResult(0, (), (), (), 0, 0, "second-round-catalog-invalid", ())
         campaign: dict[str, Any] | None = None
-        if self.config.unbounded_first_round:
+        if self._is_research_round(self.config):
             try:
                 campaign = self._load_or_create_campaign()
             except (OSError, ValueError):
-                return SweepResult(0, (), (), (), 0, 0, "first-round-campaign-invalid", ())
+                label = "second-round" if self.config.unbounded_second_round else "first-round"
+                return SweepResult(0, (), (), (), 0, 0, f"{label}-campaign-invalid", ())
         if not games:
             return SweepResult(0, (), (), (), 0, 0, "no-games", ())
         # A resumed sweep must finish untouched first levels before advancing
@@ -648,6 +704,11 @@ class SweepScheduler:
         previously_attempted_unsolved_level_one: list[str] = []
         interrupted_without_evidence_level_one: list[str] = []
         timed_out_unsealed_level_one: list[str] = []
+        preexisting_level_two: list[str] = []
+        newly_verified_level_two: list[str] = []
+        attempted_unsolved_level_two: list[str] = []
+        previously_attempted_unsolved_level_two: list[str] = []
+        timed_out_unsealed_level_two: list[str] = []
         started = time.monotonic()
         if self.config.unbounded_first_round:
             assert campaign is not None
@@ -664,15 +725,30 @@ class SweepScheduler:
                 else:
                     preexisting_level_one.append(game_id)
             active = unstarted
+        if self.config.unbounded_second_round:
+            assert campaign is not None
+            prior = {item["game_id"]: item["outcome"] for item in campaign["terminal_attempts"]}
+            unstarted = []
+            for game_id in active:
+                if game_id in prior:
+                    if prior[game_id] == "verified":
+                        preexisting_level_two.append(game_id)
+                    else:
+                        previously_attempted_unsolved_level_two.append(game_id)
+                elif self._next_level(game_id) == 2:
+                    unstarted.append(game_id)
+                else:
+                    preexisting_level_two.append(game_id)
+            active = unstarted
         while active:
             next_active: list[str] = []
             for game_id in active:
                 if self._stop_reason != "completed":
                     break
-                if not self.config.unbounded_first_round and self.config.wallclock_cap is not None and time.monotonic() - started >= self.config.wallclock_cap:
+                if not self._is_research_round(self.config) and self.config.wallclock_cap is not None and time.monotonic() - started >= self.config.wallclock_cap:
                     self._stop_reason = "wallclock-cap"
                     break
-                if not self.config.unbounded_first_round and self.config.global_token_cap is not None and self._input_tokens + self._output_tokens >= self.config.global_token_cap:
+                if not self._is_research_round(self.config) and self.config.global_token_cap is not None and self._input_tokens + self._output_tokens >= self.config.global_token_cap:
                     self._stop_reason = "token-cap"
                     break
                 if self.config.max_attempts is not None and attempted >= self.config.max_attempts:
@@ -682,27 +758,30 @@ class SweepScheduler:
                 if self._is_complete(game_id, level):
                     completed.append(game_id)
                     continue
-                if (game_id, level) in self._deferred_levels:
+                if not self.config.unbounded_second_round and (game_id, level) in self._deferred_levels:
                     deferred.append(f"{game_id}:level-{level}")
                     blocked.append(game_id)
                     continue
                 attempted += 1
                 print(f"[p7-sweep] attempt game={game_id} level={level}", file=sys.stderr, flush=True)
-                remaining = None if self.config.unbounded_first_round or self.config.wallclock_cap is None else self.config.wallclock_cap - (time.monotonic() - started)
+                remaining = None if self._is_research_round(self.config) or self.config.wallclock_cap is None else self.config.wallclock_cap - (time.monotonic() - started)
                 level_timeout = self._timeout_for_level(game_id, level)
                 timeout = level_timeout if remaining is None else min(level_timeout, remaining)
                 returncode = self._attempt(game_id, level, timeout)
-                if self.config.unbounded_first_round and level == 1 and self._stop_reason == "timed-out-unsealed":
+                if self._is_research_round(self.config) and self._stop_reason == "timed-out-unsealed":
                     try:
                         self._record_campaign_attempt(campaign, game_id, "timed-out-unsealed")
                     except (OSError, ValueError):
-                        self._stop_reason = "first-round-campaign-write-failed"
+                        self._stop_reason = "research-round-campaign-write-failed"
                         break
-                    timed_out_unsealed_level_one.append(game_id)
+                    if self.config.unbounded_second_round:
+                        timed_out_unsealed_level_two.append(game_id)
+                    else:
+                        timed_out_unsealed_level_one.append(game_id)
                     blocked.append(game_id)
                     self._stop_reason = "completed"
                     continue
-                if self._stop_reason == "run-timeout" and not self.config.unbounded_first_round and self.config.wallclock_cap is not None and time.monotonic() - started >= self.config.wallclock_cap:
+                if self._stop_reason == "run-timeout" and not self._is_research_round(self.config) and self.config.wallclock_cap is not None and time.monotonic() - started >= self.config.wallclock_cap:
                     self._stop_reason = "wallclock-cap"
                 if self._stop_reason != "completed":
                     if self.config.unbounded_first_round and level == 1 and self._stop_reason.startswith("run-timeout"):
@@ -727,7 +806,16 @@ class SweepScheduler:
                             self._stop_reason = "first-round-campaign-write-failed"
                             break
                         newly_verified_level_one.append(game_id)
+                    if self.config.unbounded_second_round:
+                        try:
+                            self._record_campaign_attempt(campaign, game_id, "verified")
+                        except (OSError, ValueError):
+                            self._stop_reason = "second-round-campaign-write-failed"
+                            break
+                        newly_verified_level_two.append(game_id)
                     if self.config.unbounded_first_round:
+                        continue
+                    if self.config.unbounded_second_round:
                         continue
                     next_level = self._next_level(game_id)
                     if self._is_complete(game_id, next_level):
@@ -742,6 +830,13 @@ class SweepScheduler:
                             self._stop_reason = "first-round-campaign-write-failed"
                             break
                         attempted_unsolved_level_one.append(game_id)
+                    if self.config.unbounded_second_round:
+                        try:
+                            self._record_campaign_attempt(campaign, game_id, "unsolved")
+                        except (OSError, ValueError):
+                            self._stop_reason = "second-round-campaign-write-failed"
+                            break
+                        attempted_unsolved_level_two.append(game_id)
                     blocked.append(game_id)
             if self._stop_reason != "completed":
                 break
@@ -761,6 +856,11 @@ class SweepScheduler:
             tuple(sorted(set(previously_attempted_unsolved_level_one))),
             tuple(sorted(set(interrupted_without_evidence_level_one))),
             tuple(sorted(set(timed_out_unsealed_level_one))),
+            tuple(sorted(set(preexisting_level_two))),
+            tuple(sorted(set(newly_verified_level_two))),
+            tuple(sorted(set(attempted_unsolved_level_two))),
+            tuple(sorted(set(previously_attempted_unsolved_level_two))),
+            tuple(sorted(set(timed_out_unsealed_level_two))),
         )
 
 
@@ -785,6 +885,15 @@ def _recorded_game_id(run: Path, known: set[str]) -> str | None:
     return None
 
 
+def _trace_reached_level(entries: tuple[dict[str, Any], ...], level: int) -> bool:
+    return any(
+        entry["kind"] == "arc.action"
+        and type(entry["payload"].get("levels_completed")) is int
+        and entry["payload"]["levels_completed"] >= level
+        for entry in entries
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--operator-root", type=Path, default=Path.cwd())
@@ -798,25 +907,42 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-timeout", type=float, default=30 * 60)
     parser.add_argument("--max-attempts", type=int)
     parser.add_argument("--unbounded-first-round", action="store_true")
+    parser.add_argument("--unbounded-second-round", action="store_true")
+    parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args(argv)
     if args.seed != 0:
         parser.error("--seed must be 0; the P7 Makefile fixes the official game seed")
     runs_root = args.runs_root or args.operator_root / ".asterion-private" / "prime-p7-live"
-    result = SweepScheduler(
+    scheduler = SweepScheduler(
         SweepConfig(
             arc_root=args.arc_root,
             runs_root=runs_root,
             games=tuple(args.games),
             seed=args.seed,
-            global_token_cap=None if args.unbounded_first_round else args.token_cap,
-            wallclock_cap=None if args.unbounded_first_round else args.wallclock_seconds,
+            global_token_cap=None if args.unbounded_first_round or args.unbounded_second_round else args.token_cap,
+            wallclock_cap=None if args.unbounded_first_round or args.unbounded_second_round else args.wallclock_seconds,
             run_timeout=args.run_timeout,
             max_attempts=args.max_attempts,
             repo_root=args.operator_root,
             guest_machine=args.guest_machine,
             unbounded_first_round=args.unbounded_first_round,
+            unbounded_second_round=args.unbounded_second_round,
         )
-    ).run()
+    )
+    if args.preflight_only:
+        if not args.unbounded_second_round:
+            parser.error("--preflight-only requires --unbounded-second-round")
+        games = scheduler._selected_games()
+        ready = scheduler._second_round_campaign_is_ready(games)
+        campaign_path = scheduler._campaign_path()
+        if ready and (campaign_path.exists() or campaign_path.is_symlink()):
+            try:
+                scheduler._load_or_create_campaign()
+            except (OSError, ValueError):
+                ready = False
+        print(json.dumps({"schema": "asterion.prime.p7-second-round-preflight/v1", "ready": ready, "games": games}, sort_keys=True))
+        return 0 if ready else 1
+    result = scheduler.run()
     print(json.dumps({"schema": "asterion.prime.p7-sweep/v1", **asdict(result)}, sort_keys=True))
     return 0 if result.stopped_reason in {"completed", "no-games"} else 1
 
