@@ -61,9 +61,14 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
     def test_operator_prompt_explains_settled_frame_axis(self) -> None:
         from asterion.applications.prime.p7 import operator
+        from asterion.applications.prime.p7 import official_operator
+        from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 
-        self.assertIn("settled", operator._P7_FRAME_SEMANTICS.lower())
-        self.assertIn("last", operator._P7_FRAME_SEMANTICS.lower())
+        self.assertIn("settled", P7_SOLVE_PROMPT.lower())
+        self.assertIn("last", P7_SOLVE_PROMPT.lower())
+        self.assertIn("a-f represent color values 10-15", P7_SOLVE_PROMPT.lower())
+        self.assertIs(official_operator.P7_SOLVE_PROMPT, P7_SOLVE_PROMPT)
+        self.assertFalse(hasattr(operator, "_P7_FRAME_SEMANTICS"))
 
     def test_saved_level_prefix_reenters_broker_and_rejects_mismatch(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcTransition

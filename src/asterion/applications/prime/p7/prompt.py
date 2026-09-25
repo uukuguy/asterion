@@ -21,6 +21,11 @@ p7_client.act(actions). act takes a list of action dictionaries such as
 optional summary(), render(), diff(), positions(), and act_and_observe() helpers
 only analyze or wrap those three operations. act_and_observe returns exactly
 act, diff, and summary entries; call observe separately for a full frame.
+Frame semantics: an observation may retain an animation as a list of 2-D
+frames. The last frame is the settled post-action grid used by summary(),
+render(), positions(), and diff(); the raw animation remains available in
+observation["frame"] for timing analysis. render() uses hexadecimal symbols
+0-9 and A-F, where A-F represent color values 10-15.
 
 Treat only broker observations and retained Python state as game information.
 Never inspect engine source, another game or run, network resources, credentials,
