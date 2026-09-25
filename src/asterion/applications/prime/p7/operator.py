@@ -390,7 +390,7 @@ class _P7BrokerClient:
             "terminal_reason": status.terminal_reason,
         }
 
-    def act(self, actions: object) -> Mapping[str, object]:
+    def act(self, actions: object, *, _trusted_prefix_replay: bool = False) -> Mapping[str, object]:
         if type(actions) is not list or not actions:
             raise P7OperatorError("P7 host services are unavailable")
         if self._variant == "verified" and len(actions) != 1:
@@ -420,7 +420,9 @@ class _P7BrokerClient:
             validated.append(ArcAction(name, canonical_data))
         prior_levels = self._broker.status().levels_completed
         try:
-            result = self._broker.act(tuple(validated))
+            result = self._broker.act(
+                tuple(validated), _allow_guard_probe=_trusted_prefix_replay
+            )
         except ArcBrokerError as error:
             if str(error) != "REPLAN_REQUIRED":
                 raise P7OperatorError("P7 host services are unavailable") from None
@@ -505,7 +507,10 @@ def _apply_saved_prefix(
                 or _observation_digest(broker.observe()) != expected.before_sha256
             ):
                 raise ValueError
-            client.act([{"name": expected.action, "data": dict(expected.data)}])
+            client.act(
+                [{"name": expected.action, "data": dict(expected.data)}],
+                _trusted_prefix_replay=True,
+            )
             if broker.journal[-1] != expected:
                 raise ValueError
             record = broker.history(expected.sequence, 1)[0]
@@ -1134,7 +1139,7 @@ def _retry_input_and_diagnostics(
         for fact in run.actions:
             if fact.changed_cells == 0:
                 action_name = fact.action.get("name")
-                if type(action_name) is str:
+                if type(action_name) is str and action_name.startswith("ACTION"):
                     key = (fact.levels_completed, action_name)
                     no_effect_counts[key] = min(3, no_effect_counts.get(key, 0) + 1)
     return (

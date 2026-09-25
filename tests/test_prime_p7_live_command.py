@@ -434,7 +434,12 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             recorder = PrimeTraceRecorder(Path(directory))
             engine = _FullGameEngine()
-            broker = ArcBroker(engine=engine, game=game)
+            broker = ArcBroker(
+                engine=engine,
+                game=game,
+                no_effect_guard=True,
+                initial_no_effect_counts={(0, "ACTION1"): 3},
+            )
             broker.bind_history("run-1")
             _apply_saved_prefix(broker, recorder, expected)
             self.assertEqual(broker.journal, expected)
