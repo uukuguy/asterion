@@ -75,6 +75,7 @@ class FailedAttemptEvidenceTests(unittest.TestCase):
         self.assertEqual(advice.runs[0].source_type, "sealed-partial-failure")
         self.assertGreater(advice.runs[0].prefix_action_count, 0)
         self.assertLess(advice.runs[0].prefix_action_count, advice.runs[0].action_count)
+        self.assertTrue(advice.runs[0].evidence_digest.startswith("sha256:"))
 
     def test_stall_is_admitted_as_observation(self) -> None:
         try:
@@ -87,6 +88,7 @@ class FailedAttemptEvidenceTests(unittest.TestCase):
             self.skipTest("local CD82 stall evidence is not present")
         self.assertEqual(advice.runs[0].source_type, "execution-stall-observation")
         self.assertEqual(advice.runs[0].terminal_reason, "execution-stalled")
+        self.assertTrue(advice.runs[0].evidence_digest.startswith("sha256:"))
 
 
 if __name__ == "__main__":

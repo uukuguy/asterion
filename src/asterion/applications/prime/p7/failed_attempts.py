@@ -48,6 +48,7 @@ class FailedRunFacts:
     actions: tuple[FailedActionFact, ...]
     source_type: str = "sealed-failure"
     prefix_action_count: int = 0
+    evidence_digest: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +184,7 @@ def _action_facts(
         _fail()
     facts: list[FailedActionFact] = []
     for transition, recorded in zip(transitions, recorded_actions):
-        if (transition.action, transition.data, transition.before_sha256, transition.after_sha256, transition.levels_completed) != (recorded.name, recorded.data, recorded.before_sha256, recorded.after_sha256, transition.levels_completed):
+        if (transition.action, transition.data, transition.before_sha256, transition.after_sha256, transition.levels_completed) != (recorded.name, recorded.data, recorded.before_sha256, recorded.after_sha256, frames[recorded.after_frame].levels_completed):
             _fail()
         before = frames[recorded.before_frame].grid
         after = frames[recorded.after_frame].grid
@@ -289,6 +290,9 @@ def _load_one(run: Path, *, game_id: str, seed: int, target_level: int) -> Faile
         prefix_count = _int(terminal_payload.get("primitive_actions"), minimum=1)
         if prefix_count > action_count or _int(terminal_payload.get("levels_completed"), minimum=1) != levels:
             _fail()
+        if transitions := _transitions(entries):
+            if transitions[prefix_count - 1].levels_completed != levels or any(item.levels_completed >= levels for item in transitions[:prefix_count - 1]):
+                _fail()
         source_type = "sealed-partial-failure"
         if len(entries) < 2 or entries[-2].kind != "arc.run.partial" or entries[-1].kind != "trace.sealed":
             _fail()
@@ -301,7 +305,10 @@ def _load_one(run: Path, *, game_id: str, seed: int, target_level: int) -> Faile
     input_tokens = sum(_int(_mapping(item).get("input_tokens")) for item in usage)
     output_tokens = sum(_int(_mapping(item).get("output_tokens")) for item in usage)
     bounded = facts[:32] + (facts[-32:] if len(facts) > 64 else ())
-    return FailedRunFacts(run.name, terminal, target_level, action_count, input_tokens, output_tokens, bounded, source_type, prefix_count)
+    evidence_digest = terminal_payload.get("replay_sha256") if source_type == "sealed-partial-failure" else entries[-1].sha256
+    if type(evidence_digest) is not str:
+        _fail()
+    return FailedRunFacts(run.name, terminal, target_level, action_count, input_tokens, output_tokens, bounded, source_type, prefix_count, evidence_digest)
 
 
 def _load_stall(run: Path, *, game_id: str, seed: int, target_level: int) -> FailedRunFacts:
@@ -322,13 +329,49 @@ def _load_stall(run: Path, *, game_id: str, seed: int, target_level: int) -> Fai
         _fail()
     facts, transitions = _action_facts(run, rows, game_id=game_id, action_count=action_count, levels=levels)
     prefix_count = next((item.sequence for item in transitions if item.levels_completed == levels), 0)
-    if prefix_count <= 0 or replay_sha256(transitions[:prefix_count], terminal_reason="level-completed") == "":
+    if prefix_count <= 0 or not _matches_verified_prefix(run.parent, game_id=game_id, seed=seed, transitions=transitions, prefix_count=prefix_count):
         _fail()
     usage = [row["payload"] for row in rows if row["kind"] == "arc.usage.reported"]
     input_tokens = sum(_int(_mapping(item).get("input_tokens")) for item in usage)
     output_tokens = sum(_int(_mapping(item).get("output_tokens")) for item in usage)
     bounded = facts[:32] + (facts[-32:] if len(facts) > 64 else ())
-    return FailedRunFacts(run.name, "execution-stalled", target_level, action_count, input_tokens, output_tokens, bounded, "execution-stall-observation", prefix_count)
+    evidence_digest = _digest_payload({"trace_final_sha256": receipt["trace_final_sha256"], "prefix_replay_sha256": replay_sha256(transitions[:prefix_count], terminal_reason="level-completed")})
+    return FailedRunFacts(run.name, "execution-stalled", target_level, action_count, input_tokens, output_tokens, bounded, "execution-stall-observation", prefix_count, evidence_digest)
+
+
+def _matches_verified_prefix(
+    runs_root: Path, *, game_id: str, seed: int,
+    transitions: tuple[ArcTransition, ...], prefix_count: int,
+) -> bool:
+    """Bind a stall's retained prefix to a separately sealed level witness."""
+    for candidate in runs_root.iterdir():
+        if candidate.is_symlink() or not candidate.is_dir() or (candidate / "summary.json").is_symlink():
+            continue
+        try:
+            summary = _mapping(json.loads((candidate / "summary.json").read_text(encoding="utf-8")))
+            broker = _mapping(summary.get("broker"))
+            if (
+                summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+                or summary.get("run_id") != candidate.name
+                or summary.get("sealed_trace") is not True
+                or summary.get("replay_verified") is not True
+                or summary.get("cleanup_complete") is not True
+                or broker.get("game_id") != game_id or _int(broker.get("seed")) != seed
+                or broker.get("levels_completed") != transitions[prefix_count - 1].levels_completed
+                or broker.get("terminal_reason") != "level-completed"
+                or _int(broker.get("primitive_actions"), minimum=1) != prefix_count
+            ):
+                continue
+            entries = read_trace_entries(_safe_path(candidate, "trace"))
+            historical = _transitions(entries)
+            if len(historical) != prefix_count or historical != transitions[:prefix_count]:
+                continue
+            if broker.get("replay_sha256") != replay_sha256(historical, terminal_reason="level-completed"):
+                continue
+            return True
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError, IndexError, FailedAttemptEvidenceError):
+            continue
+    return False
 
 
 def _candidate_matches_identity(run: Path, *, game_id: str, seed: int, target_level: int) -> bool:
@@ -394,7 +437,7 @@ def select_failed_attempt_advice(runs_root: Path, *, game_id: str, seed: int, ta
     if malformed_newest:
         _fail()
     selected = tuple(candidates[:limit])
-    payload = [{"run_id": run.run_id, "source_type": run.source_type, "prefix_action_count": run.prefix_action_count, "terminal_reason": run.terminal_reason, "target_level": run.target_level, "action_count": run.action_count, "input_tokens": run.input_tokens, "output_tokens": run.output_tokens, "actions": [{"sequence": action.sequence, "action": dict(action.action), "levels_completed": action.levels_completed, "before_sha256": action.before_sha256, "after_sha256": action.after_sha256, "changed_cells": action.changed_cells, "interior_changed_cells": action.interior_changed_cells, "border_changed_cells": action.border_changed_cells, "border_only": action.border_only, "color_counts": dict(action.color_counts)} for action in run.actions]} for run in selected]
+    payload = [{"run_id": run.run_id, "source_type": run.source_type, "prefix_action_count": run.prefix_action_count, "evidence_digest": run.evidence_digest, "terminal_reason": run.terminal_reason, "target_level": run.target_level, "action_count": run.action_count, "input_tokens": run.input_tokens, "output_tokens": run.output_tokens, "actions": [{"sequence": action.sequence, "action": dict(action.action), "levels_completed": action.levels_completed, "before_sha256": action.before_sha256, "after_sha256": action.after_sha256, "changed_cells": action.changed_cells, "interior_changed_cells": action.interior_changed_cells, "border_changed_cells": action.border_changed_cells, "border_only": action.border_only, "color_counts": dict(action.color_counts)} for action in run.actions]} for run in selected]
     return FailedAttemptAdvice("asterion.prime.p7-failed-attempt-advice/v1", game_id, seed, target_level, tuple(run.run_id for run in selected), _digest_payload(payload), selected)
 
 
@@ -404,7 +447,7 @@ def render_failed_attempt_advice(advice: FailedAttemptAdvice) -> str:
         _fail()
     rows = []
     for run in advice.runs:
-        rows.append({"run_id": run.run_id, "source_type": run.source_type, "prefix_action_count": run.prefix_action_count, "terminal_reason": run.terminal_reason, "actions": [{"sequence": fact.sequence, "action": dict(fact.action), "levels_completed": fact.levels_completed, "changed_cells": fact.changed_cells, "interior_changed_cells": fact.interior_changed_cells, "border_changed_cells": fact.border_changed_cells, "border_only": fact.border_only, "color_counts": dict(fact.color_counts)} for fact in run.actions]})
+        rows.append({"run_id": run.run_id, "source_type": run.source_type, "prefix_action_count": run.prefix_action_count, "evidence_digest": run.evidence_digest, "terminal_reason": run.terminal_reason, "actions": [{"sequence": fact.sequence, "action": dict(fact.action), "levels_completed": fact.levels_completed, "changed_cells": fact.changed_cells, "interior_changed_cells": fact.interior_changed_cells, "border_changed_cells": fact.border_changed_cells, "border_only": fact.border_only, "color_counts": dict(fact.color_counts)} for fact in run.actions]})
     return "CHECKED LOCAL FAILED-ATTEMPT OBSERVATIONS (not a solution or objective):\n" + json.dumps({"game_id": advice.game_id, "seed": advice.seed, "target_level": advice.target_level, "source_run_ids": list(advice.source_run_ids), "source_digest": advice.source_digest, "runs": rows}, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
