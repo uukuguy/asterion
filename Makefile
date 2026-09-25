@@ -45,6 +45,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p7-first-round
 .PHONY: asterion-prime-p7-sweep-attempt
 .PHONY: asterion-prime-p7-games
+.PHONY: asterion-prime-p7-stories
 .PHONY: asterion-prime-p7-sync-games
 .PHONY: asterion-prime-p7-official-preflight
 .PHONY: asterion-prime-p7-official-submit
@@ -111,6 +112,7 @@ help:
 	@echo "Asterion Prime authorized unbounded local L1 sweep: asterion-prime-p7-first-round"
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
+	@echo "Asterion Prime local ARC-AGI-3 solved-game story pages: asterion-prime-p7-stories"
 	@echo "Asterion Prime sync official public games without a scorecard: asterion-prime-p7-sync-games"
 	@echo "Asterion Prime official ARC-AGI-3 catalog readiness: asterion-prime-p7-official-preflight"
 	@echo "Asterion Prime submit saved verified actions: asterion-prime-p7-official-submit GAME=<alias-or-all>"
@@ -275,6 +277,9 @@ asterion-prime-p2-run:
 # root. The operator rejects missing or unusable assets before a model run.
 asterion-prime-p7-games:
 	@PYTHONPATH="$(CURDIR)/src" python3 tools/list_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --runs-root "$(CURDIR)/.asterion-private/prime-p7-live"
+
+asterion-prime-p7-stories:
+	@$(UV_BIN) run asterion arc-story serve --open-browser
 
 asterion-prime-p7-sync-games:
 	@python3 tools/sync_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --env-file "$(CURDIR)/.env"

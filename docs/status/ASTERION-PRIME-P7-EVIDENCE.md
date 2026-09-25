@@ -114,3 +114,5 @@ Official card [`fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d`](https://arcprize.org/scor
 | TR87 | 40 | 1 | 4.761905 |
 | VC33 | 7 | 1 | 3.571429 |
 | WA30 | 37 | 1 | 2.222222 |
+
+The same 17 selected local Level-1 runs now have accepted, evidence-cited Chinese analyses and standalone offline HTML reports under `artifacts/arc-agi-3/exports/`. The local `artifacts/arc-agi-3/catalog.json` indexes all 17 current reports plus the earlier 23-action LS20 historical report. `make asterion-prime-p7-stories` opens the read-only local catalog. Each current report's run ID and action count were checked against this official receipt; its normalized data and accepted analysis remain bound to the sealed local evidence. The report's rounded local partial score is not the official score above.

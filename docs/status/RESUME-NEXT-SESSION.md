@@ -1,17 +1,19 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 11:23 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-09-25 12:08 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务
 
 按用户授权完成 ARC-AGI-3 首关本地 OFFLINE 轮次：25 题中 LS20、AR25 的第 1 关原已验证，本轮其余 23 题各尝试一次，不自动进入第 2 关。每题以人类基准动作数或 30 分钟先到为停止线，无总 token/总时长上限。23 题中 15 题 L1 过关且回放、封存、清理均核验；8 题在各自人类动作数上限未解。现有 17/25 题具有已验证首关前缀，没有任何整题通关。本轮输入 41,713,134、输出 1,547,660，共 43,260,794 已回报 token，输入含缓存读写，无法从总 token 推算账单费用。用户当天 2.42 元人民币为此前报告的账单数，不是这轮的已核验费用。本轮没有创建或提交官方 scorecard。详见指南的逐题表与私有 campaign ledger。
 
-之后用户另行授权一次官方提交：`GAME=all` 在一张新 Competition 卡中重放 17 个已验证首关前缀，正常关闭并写出本地 `closed-confirmed` 回执；官方总分 `2.5044733044733043`，17 题各完成首关但无整题通关。用户随后要求每个已完成题目有与 LS20 类似的解题总结网页；当前仅 LS20 历史页面存在。使用既有 `arc-story compile → analyze → render → export` 流水线生成其余网页时，发现编译器拒绝新首关 summary 和带点击数据/RESET 的动作记录；兼容修复与页面生成正在进行中。
+之后用户另行授权一次官方提交：`GAME=all` 在一张新 Competition 卡中重放 17 个已验证首关前缀，正常关闭并写出本地 `closed-confirmed` 回执；官方总分 `2.5044733044733043`，17 题各完成首关但无整题通关。用户随后要求每个已完成题目有与 LS20 类似的解题总结网页；`220ae2ea` 修复旧 reader 对新首关 summary、点击数据、计数 RESET、恢复版 AR25 的读取，并加回执摘要/清理校验。17 题均已由既有 `arc-story compile → analyze → render → export` 流水线生成通过校验的中文讲解和离线单文件 HTML；历史 LS20 23 步页面仍保留，本次官方提交对应的 LS20 20 步页面另行生成。`make asterion-prime-p7-stories` 可打开本地目录。
 
 ## 已验证事实与历史过程
 
 - 本轮 `make asterion-prime-p7-first-round` 退出码 0，终端报告 `attempted=23`、`stopped_reason=completed`、15 个 `newly_verified_level_one`、8 个 `attempted_unsolved_level_one`，没有 timeout 或 unsealed 中断。ledger 中 23 条记录的题号唯一，逐条核验 `summary.json` 的 `replay_verified`、`sealed_trace`、`cleanup_complete` 均为 true；每条动作数不超过对应 metadata 第 1 关人类基准，未解的 8 题均正好达到基准。逐条 trace usage 求和为输入 41,713,134、输出 1,547,660，与终端累计一致。`make asterion-prime-p7-games` 显示 17 题已验证首关、8 题无已验证关卡，25 题 `full_win=False`。宿主及 Orb 来宾均无遗留 P7 求解进程或 systemd unit。
 - `make asterion-prime-p7-official-preflight` 只读通过，25 题 catalog 就绪。随后 `make asterion-prime-p7-official-submit GAME=all` 退出码 0，在卡 `fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d` 正常关闭；回执 `.asterion-private/prime-p7-official/p7-live-20260925031809-dabd0f7fd2131740a0cbfacc/official-receipt.json` 的 `status=closed-confirmed`、`selected_count=played_runs=17`、`skipped_count=8`、`overall_score=2.5044733044733043`、`games_completed=0`。17 条已选题结果均为 `levels_completed=1`、`state=NOT_FINISHED`。逐题分数已记录于 `ASTERION-PRIME-P7-EVIDENCE.md`。
+- Run-story 修复经 22 项定向 `unittest`、`make lint` 通过；17 题当前首关 run 均成功编译，均有 `status=accepted` 的分析、一个 web render 和单文件 HTML export。`catalog.json` 共 18 条 run（含旧 LS20 历史 23 步页），当前 17 条 run 的动作数逐题与官方回执一致，点击题归一化 actions 含 `x/y`，单文件 HTML 的 SHA-256 与 export 回报一致且无外部资产路径。本地 `ArtifactApplication` 对目录、catalog 和 VC33 页面均返回 200。网页制品在忽略 Git 的 `artifacts/arc-agi-3/`，源码及指南为受版本控制文件。
+- 新网页模板属于 wheel 打包资源；变更后 `make promotion-check` 完整 PASS：25 条命令、0 provider 操作、无完整数据集。`make docs-check` 检查 235 个 Markdown 和 61 个本地链接通过，`git diff --check` 通过；`make -n asterion-prime-p7-stories` 指向只读本地 catalog 服务。
 
 - 本轮开始前，`make asterion-prime-p7-games` 列出 25 题，只有 LS20 与 AR25 各有已验证第 1 关前缀。官方既有卡 `14868b83-3f40-4afd-84b0-4d25176f97d0` 只有 LS20 第 1 关的部分成绩，其他题未选，不能视为整题通关。
 - LS20 第 1 关的可计量运行记录为 20 步、输入 32,830、输出 36,418，共 69,248 旧口径 token，历时 272 秒。其余 24 题首关的人类上限合计 851 步，按每步消耗机械推算约 295 万 token、3 小时 13 分钟，旧记录漏计缓存输入。用户确认首轮总停止线为 350 万 token、4 小时；每次尝试时间按关卡步数估算，10 至 30 分钟；运行中每 250 毫秒核对已上报用量，到上限即停止本次尝试。
@@ -37,4 +39,4 @@
 
 ## 下一动作
 
-1. 完成用户要求的 17 题首关解题总结网页。先修复 `run_story/evidence.py` 对新封存首关运行的只读兼容，再逐题用现有 `arc-story` 流水线生成、核验离线单文件 HTML；LS20 已有历史页面。官方提交已完成，无需重提。后续解第 2 关或重试未解题仍须单独安排范围。
+1. 首关轮次、官方提交和 17 题网页制品均已完成。后续若继续研究，先确定是重试 8 个未解首关，还是从 17 个已解首关进入第 2 关；新官方提交需再次获得明确授权。无需重复本次已完成的卡片提交或网页生成。
