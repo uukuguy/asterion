@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-25 20:00 CST. Session remains active; this is a recovery checkpoint.
+> Updated: 2026-09-25 20:13 CST. Session remains active; this is a recovery checkpoint.
 
 ## 当前任务与授权
 
@@ -15,7 +15,7 @@
 - 代码审计确认 L2 重放首关动作后新建空 Python worker，只继承游戏状态，不继承 L1 的规则、观察或笔记。Retrodict/Tycho 等社区实现保留逐步记录并用历史检查可执行规则；模型/成本/公开题目条件不同，不能直接比较排行榜通过率。既有失败如 FT09 L2 12/12 次点击、SB26 26/28 次点击，多数动作改变状态，尚不足以断言具体游戏规则或模型能力上限。
 - 已实现本次运行的稳定帧历史与有界分页、`frame_at`、逐项 `act_checked` 与首次不符停步（`a2202614`、`983af587`、`1d03db09`、`544a836c`、`4cf293f6`、`1323af25`）。`c48f1426` 和 `93544849` 将已验证首关前缀在模型启动前注入同一 broker，并修正共享提示词。`1b42a616`、`3b5e11ae`、`3d93461b` 记录私有计数；`6ffbaebc` 使显式本地 legacy 选用原有提示词。独立复审批准核心代码。定向测试、`make lint`、`make docs-check`、最终 `make check` 和 `make promotion-check` 均通过；早期失败日志只属修复前历史。
 - 单题 A/B 入口曾对已解的 DC22 付费重复运行。首轮 intended legacy 实际运行在 verified 模式，因为 guest systemd 缺 `ASTERION_PRIME_P7_HISTORY_VARIANT` 转发；它以新增 **99 步**通过 DC22 L2，慢于之前的 **61 步**，工具正确拒绝将其计入 A/B 并未启动第二臂。`03cc46b1` 修复转发，安装版只读检查确认 guest 接收 legacy；随后按用户要求中断另一场 DC22 重复，不具封存成功证据，不计成绩。**不得再对已解关卡做付费对照，也不得声称 99 步显示改进。**
-- `4b5dc9df` 新增 `make asterion-prime-p7-next GAME=<题号>`，自动选最高已回放验证前缀的下一关，固定人类动作、30 分钟和 5 分钟停止线，只有新运行封存、回放与清理成功才记 verified。`f97207d8`、`2b487922` 修正私有路径输出泄漏；独立复审批准，21 项聚焦测试及 Ruff 通过。VC33 L3 新增 31/44 步已验证通过，运行 `p7-live-20260925112555-4e235588d483805a4edbfb88`。WA30 L3 用满 183 新增动作未解，失败运行封存、回放、清理通过，不自动重试。DC22 L3 `p7-live-20260925115050-aa51a29c969b32fa07662b18` 重放104步前缀后零新增动作，五分钟停滞；原始 stall receipt 记载清理完成，但工具目前以 `execution-stalled-evidence-invalid` 标记，因为通用停滞校验硬编码 L2。该轮不得记为通过；已派单独工作者修正 L3+ 非成功停滞分类，不改原始记录。当前 M0R0 L3 单次尝试正在运行，日志 `.asterion-private/p7-next-m0r0-20260925.log`，运行 `p7-live-20260925115949-e2170cc432ebeab1d5b84875`。不要并行启动其他付费游戏。
+- `4b5dc9df` 新增 `make asterion-prime-p7-next GAME=<题号>`，自动选最高已回放验证前缀的下一关，固定人类动作、30 分钟和 5 分钟停止线，只有新运行封存、回放与清理成功才记 verified。`f97207d8`、`2b487922` 修正私有路径输出泄漏；独立复审批准，21 项聚焦测试及 Ruff 通过。VC33 L3 新增 31/44 步已验证通过，运行 `p7-live-20260925112555-4e235588d483805a4edbfb88`。WA30 L3 用满 183 新增动作未解，失败运行封存、回放、清理通过，不自动重试。DC22 L3 `p7-live-20260925115050-aa51a29c969b32fa07662b18` 重放104步前缀后零新增动作，五分钟停滞；原始 stall receipt 记载清理完成，旧 manifest 仍以 `execution-stalled-evidence-invalid` 标记。`cbdf0a86` 修复 L3+ 严格停滞验证，48 项聚焦测试和 Ruff 通过，独立复审批准本单题入口；安装版含 ARC wheels 的只读验收对原始 DC22 记录返回 `True`，不改原始证据或称其过关。当前 M0R0 L3 单次尝试正在运行，日志 `.asterion-private/p7-next-m0r0-20260925.log`，运行 `p7-live-20260925115949-e2170cc432ebeab1d5b84875`。不要并行启动其他付费游戏。
 
 ## 当前判断与未完成边界
 
@@ -27,5 +27,5 @@
 ## 下一动作
 
 1. 等待当前 M0R0 L3 单次尝试结束，核对 `.asterion-private/prime-p7-next-level/` 的 manifest 与新运行封存、回放、清理。已验证即保存并只推进下一未解关卡；失败则换题，不自动重复付费。
-2. 修复并只读审查 DC22 L3 停滞证据分类，不重跑或篡改原始记录；再尝试已过 L3 的 VC33 下一关，优先广度推进。WA30 L3 已到动作上限，不再自动重试。所有付费游戏串行，不再重复已解关卡。
+2. 再尝试已过 L3 的 VC33 下一关，优先广度推进。DC22 L3 原始停滞已只读校验，无需重跑；WA30 L3 已到动作上限，不再自动重试。所有付费游戏串行，不再重复已解关卡。
 3. 为后续过关生成中文网页，更新证据和本检查点。无需重新提交官方 scorecard。
