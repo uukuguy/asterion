@@ -10,6 +10,15 @@ from pathlib import Path
 
 
 class TestPrimeP7Sweep(unittest.TestCase):
+    def test_second_round_stall_window_is_five_minutes_without_new_action(self) -> None:
+        from tools.run_prime_p7_sweep import _ACTION_STALL_SECONDS, _action_stall_reached
+
+        self.assertEqual(_ACTION_STALL_SECONDS, 5 * 60)
+        started = 100.0
+        self.assertFalse(_action_stall_reached(started, started, 399.9))
+        self.assertTrue(_action_stall_reached(started, started, 400.0))
+        self.assertFalse(_action_stall_reached(started, 399.0, 400.0))
+
     @staticmethod
     def _execution_failure_fixture(root: Path):
         from asterion.agents.prime.trace import PrimeTraceRecorder
@@ -101,6 +110,15 @@ class TestPrimeP7Sweep(unittest.TestCase):
             with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
                 self.assertFalse(scheduler._campaign_entry_is_valid(entry))
 
+    def test_second_round_execution_stall_uses_same_strict_partial_evidence(self) -> None:
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, _run, _summary, entry = self._execution_failure_fixture(Path(directory))
+            entry["outcome"] = "execution-stalled"
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
+                self.assertTrue(scheduler._campaign_entry_is_valid(entry))
+
     def test_second_round_execution_failure_records_and_skips_on_resume(self) -> None:
         from types import SimpleNamespace
 
@@ -125,7 +143,33 @@ class TestPrimeP7Sweep(unittest.TestCase):
                     resumed = scheduler.run()
                     called.assert_not_called()
                 self.assertEqual(resumed.previously_execution_failed_level_two, (entry["game_id"],))
-                self.assertEqual(resumed.previously_attempted_unsolved_level_two, ())
+        self.assertEqual(resumed.previously_attempted_unsolved_level_two, ())
+
+    def test_second_round_execution_stall_records_and_skips_on_resume(self) -> None:
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, _run, _summary, entry = self._execution_failure_fixture(Path(directory))
+            scheduler._second_round_campaign_is_ready = lambda _games: True
+            scheduler._next_level = lambda _game: 2
+            scheduler._is_complete = lambda *_args: False
+            scheduler._new_runs.append(entry["run_id"])
+            scheduler._selected_games = lambda: (entry["game_id"],)
+
+            def attempt(*_args):
+                scheduler._stop_reason = "execution-stalled"
+                return 1
+
+            scheduler._attempt = attempt
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
+                result = scheduler.run()
+                self.assertEqual(result.stopped_reason, "completed")
+                self.assertEqual(result.execution_stalled_level_two, (entry["game_id"],))
+                self.assertEqual(result.previously_execution_stalled_level_two, ())
+                with patch.object(scheduler, "_attempt") as called:
+                    resumed = scheduler.run()
+                    called.assert_not_called()
+                self.assertEqual(resumed.previously_execution_stalled_level_two, (entry["game_id"],))
 
     def test_second_round_adopts_only_explicit_valid_failure_once(self) -> None:
         from types import SimpleNamespace

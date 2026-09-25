@@ -57,6 +57,7 @@ _SECOND_ROUND_GAME_IDS = (
 _SECOND_ROUND_CAMPAIGN_SCHEMA = "asterion.prime.p7-second-round-campaign/v1"
 _SECOND_ROUND_CAMPAIGN_FILE = "second-round-campaign.json"
 _SECOND_ROUND_CAMPAIGN_ID = re.compile(r"^second-round-[0-9a-f]{32}$")
+_ACTION_STALL_SECONDS = 5 * 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +107,8 @@ class SweepResult:
     timed_out_unsealed_level_two: tuple[str, ...] = ()
     execution_failed_level_two: tuple[str, ...] = ()
     previously_execution_failed_level_two: tuple[str, ...] = ()
+    execution_stalled_level_two: tuple[str, ...] = ()
+    previously_execution_stalled_level_two: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +124,12 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     except (OSError, UnicodeError, ValueError):
         return None
     return value if type(value) is dict else None
+
+
+def _action_stall_reached(started_at: float, last_action_at: float, now: float) -> bool:
+    """Return true after five minutes without an action, including startup."""
+
+    return now - max(started_at, last_action_at) >= _ACTION_STALL_SECONDS
 
 
 def read_run_usage(run: Path, *, in_progress: bool = False) -> tuple[int, int, bool, bool]:
@@ -164,6 +173,18 @@ def read_run_usage(run: Path, *, in_progress: bool = False) -> tuple[int, int, b
         output_tokens += outgoing
         usage_count += 1
     return input_tokens, output_tokens, usage_count == 0, integrity_error
+
+
+def _trace_action_count(run: Path) -> int | None:
+    """Read the count of valid action rows from an in-progress trace."""
+
+    try:
+        entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
+    except _TraceIntegrityError as error:
+        entries = error.rows
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+        return None
+    return sum(entry["kind"] == "arc.action" for entry in entries)
 
 
 class _TraceIntegrityError(ValueError):
@@ -425,7 +446,7 @@ class SweepScheduler:
                 or attempt["game_id"] in seen_games
                 or type(attempt.get("run_id")) is not str or _RUN_ID.fullmatch(attempt["run_id"]) is None
                 or attempt["run_id"] in seen_runs
-                or attempt.get("outcome") not in {"verified", "unsolved", "timed-out-unsealed", "execution-failed"}
+                or attempt.get("outcome") not in {"verified", "unsolved", "timed-out-unsealed", "execution-failed", "execution-stalled"}
                 or not self._campaign_entry_is_valid(attempt)
             ):
                 raise ValueError
@@ -437,8 +458,9 @@ class SweepScheduler:
         game_id = attempt["game_id"]
         run_id = attempt["run_id"]
         outcome = attempt["outcome"]
-        if outcome == "execution-failed":
-            return self._execution_failure_is_valid(run_id, game_id, allow_later_progress=True)
+        if outcome in {"execution-failed", "execution-stalled"}:
+            validator = self._execution_stalled_is_valid if outcome == "execution-stalled" else self._execution_failure_is_valid
+            return validator(run_id, game_id, allow_later_progress=True)
         run = self.config.runs_root / run_id
         if run.is_symlink() or not run.is_dir():
             return False
@@ -548,6 +570,11 @@ class SweepScheduler:
         except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
             return False
 
+    def _execution_stalled_is_valid(self, run_id: str, game_id: str, *, allow_later_progress: bool = False) -> bool:
+        """Admit a stall only when the same sealed partial contract is intact."""
+
+        return self._execution_failure_is_valid(run_id, game_id, allow_later_progress=allow_later_progress)
+
     def adopt_execution_failure(self, run_id: str) -> str:
         """Record one explicitly selected existing failure without launching work."""
 
@@ -570,9 +597,11 @@ class SweepScheduler:
         return game_id
 
     def _record_campaign_attempt(self, campaign: dict[str, Any], game_id: str, outcome: str) -> None:
-        if outcome not in {"verified", "unsolved", "timed-out-unsealed", "execution-failed"} or not self._new_runs:
+        if outcome not in {"verified", "unsolved", "timed-out-unsealed", "execution-failed", "execution-stalled"} or not self._new_runs:
             raise ValueError
         if outcome == "execution-failed" and not self._execution_failure_is_valid(self._new_runs[-1], game_id):
+            raise ValueError
+        if outcome == "execution-stalled" and not self._execution_stalled_is_valid(self._new_runs[-1], game_id):
             raise ValueError
         attempts = campaign["terminal_attempts"]
         if any(item["game_id"] == game_id for item in attempts):
@@ -639,6 +668,9 @@ class SweepScheduler:
         process: subprocess.Popen[str] | None = None
         observed: dict[str, tuple[int, int]] = {}
         deadline = None if timeout is None else time.monotonic() + timeout
+        started_at = 0.0
+        last_action_at = 0.0
+        last_action_count = 0
         unit = "asterion-p7-" + secrets.token_hex(16) + ".service"
         cleaned = False
 
@@ -678,6 +710,7 @@ class SweepScheduler:
             cleanup_guest()
 
         def monitor() -> None:
+            nonlocal last_action_at, last_action_count
             new = sorted(_run_names(self.config.runs_root) - before)
             if len(new) > 1:
                 self._stop_reason = "child-evidence-ambiguous"
@@ -692,9 +725,21 @@ class SweepScheduler:
                 if usage[3] or usage[0] < old[0] or usage[1] < old[1]:
                     self._stop_reason = "usage-trace-integrity-error"
                 observed[run_id] = (max(old[0], usage[0]), max(old[1], usage[1]))
+                if self.config.unbounded_second_round and self._stop_reason == "completed":
+                    action_count = _trace_action_count(run)
+                    if action_count is not None and action_count > last_action_count:
+                        last_action_count = action_count
+                        last_action_at = time.monotonic()
             reported = self._input_tokens + self._output_tokens + sum(sum(value) for value in observed.values())
             if not self._is_research_round(self.config) and self.config.global_token_cap is not None and reported >= self.config.global_token_cap and self._stop_reason == "completed":
                 self._stop_reason = "token-cap"
+            if (
+                self.config.unbounded_second_round
+                and self._stop_reason == "completed"
+                and started_at
+                and _action_stall_reached(started_at, last_action_at or started_at, time.monotonic())
+            ):
+                self._stop_reason = "execution-stalled"
 
         try:
             process = subprocess.Popen(
@@ -712,6 +757,8 @@ class SweepScheduler:
                 text=True,
                 start_new_session=True,
             )
+            started_at = time.monotonic()
+            last_action_at = started_at
             try:
                 # Usage is reported after calls; this stops on reported tokens.
                 # Provider-side in-flight/unreported usage can exceed that ceiling.
@@ -756,7 +803,7 @@ class SweepScheduler:
                 self._stop_reason = "usage-trace-integrity-error"
             elif usage[2] and self._stop_reason == "completed":
                 self._stop_reason = "usage-missing-after-model-activity"
-            if len(new_runs) == 1 and self._stop_reason in {"completed", "run-timeout"}:
+            if len(new_runs) == 1 and self._stop_reason in {"completed", "run-timeout", "execution-stalled"}:
                 summary = _read_json(run / "summary.json")
                 try:
                     entries = _read_hash_chained_trace(
@@ -765,7 +812,10 @@ class SweepScheduler:
                     sealed = entries[-1]["kind"] == "trace.sealed"
                 except (OSError, UnicodeError, ValueError, KeyError, TypeError):
                     sealed = False
-                if self._stop_reason == "run-timeout":
+                if self._stop_reason == "execution-stalled":
+                    if not self._execution_stalled_is_valid(run_id, game_id):
+                        self._stop_reason = "execution-stalled-evidence-invalid"
+                elif self._stop_reason == "run-timeout":
                     if (
                         not sealed
                         and not usage[2]
@@ -824,6 +874,8 @@ class SweepScheduler:
         timed_out_unsealed_level_two: list[str] = []
         execution_failed_level_two: list[str] = []
         previously_execution_failed_level_two: list[str] = []
+        execution_stalled_level_two: list[str] = []
+        previously_execution_stalled_level_two: list[str] = []
         started = time.monotonic()
         if self.config.unbounded_first_round:
             assert campaign is not None
@@ -850,6 +902,8 @@ class SweepScheduler:
                         preexisting_level_two.append(game_id)
                     elif prior[game_id] == "execution-failed":
                         previously_execution_failed_level_two.append(game_id)
+                    elif prior[game_id] == "execution-stalled":
+                        previously_execution_stalled_level_two.append(game_id)
                     else:
                         previously_attempted_unsolved_level_two.append(game_id)
                 elif self._next_level(game_id) == 2:
@@ -892,6 +946,16 @@ class SweepScheduler:
                         self._stop_reason = "second-round-campaign-write-failed"
                         break
                     execution_failed_level_two.append(game_id)
+                    blocked.append(game_id)
+                    self._stop_reason = "completed"
+                    continue
+                if self.config.unbounded_second_round and self._stop_reason == "execution-stalled":
+                    try:
+                        self._record_campaign_attempt(campaign, game_id, "execution-stalled")
+                    except (OSError, ValueError):
+                        self._stop_reason = "second-round-campaign-write-failed"
+                        break
+                    execution_stalled_level_two.append(game_id)
                     blocked.append(game_id)
                     self._stop_reason = "completed"
                     continue
@@ -990,6 +1054,8 @@ class SweepScheduler:
             tuple(sorted(set(timed_out_unsealed_level_two))),
             tuple(sorted(set(execution_failed_level_two))),
             tuple(sorted(set(previously_execution_failed_level_two))),
+            tuple(sorted(set(execution_stalled_level_two))),
+            tuple(sorted(set(previously_execution_stalled_level_two))),
         )
 
 
