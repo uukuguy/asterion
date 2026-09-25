@@ -190,11 +190,11 @@ def _trace_action_count(run: Path) -> int | None:
 
 def _write_stall_receipt(
     run: Path, *, game_id: str, run_id: str, action_count: int,
-    stall_seconds: float, cleanup_complete: bool,
+    expected_action_count: int, stall_seconds: float, cleanup_complete: bool,
 ) -> bool:
     """Persist the supervisor's evidence when SIGTERM leaves no application summary."""
 
-    if action_count < 0 or stall_seconds < _ACTION_STALL_SECONDS or not cleanup_complete:
+    if action_count < 0 or action_count != expected_action_count or stall_seconds < _ACTION_STALL_SECONDS or not cleanup_complete:
         return False
     try:
         entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
@@ -608,6 +608,10 @@ class SweepScheduler:
             return False
         run = self.config.runs_root / run_id
         try:
+            receipt_path = run / _STALL_RECEIPT_FILE
+            trace_path = run / "trace" / "prime-trace.jsonl"
+            if run.is_symlink() or receipt_path.is_symlink() or trace_path.is_symlink():
+                return False
             receipt = _read_json(run / _STALL_RECEIPT_FILE)
             entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
             if (
@@ -622,6 +626,8 @@ class SweepScheduler:
                 or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
                 or any(row["kind"] not in {"arc.action", "arc.usage.reported", "arc.run.partial"} for row in entries)
                 or sum(row["kind"] == "arc.action" for row in entries) != receipt["action_count"]
+                or _recorded_game_id(run, {game_id}) != game_id
+                or not _trace_reached_level(entries, 1)
             ):
                 return False
             usage = read_run_usage(run, in_progress=True)
@@ -631,7 +637,15 @@ class SweepScheduler:
             if receipt["action_count"] > metadata["baseline_actions"][0] + metadata["baseline_actions"][1]:
                 return False
             prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
-            return prefix is not None and prefix.levels_completed >= (1 if allow_later_progress else 1)
+            actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
+            if prefix is None or prefix.levels_completed < 1 or prefix.primitive_actions > len(actions):
+                return False
+            for sequence, action in enumerate(actions, 1):
+                if action.get("sequence") != sequence:
+                    return False
+                if sequence > 1 and action.get("before_sha256") != actions[sequence - 2].get("after_sha256"):
+                    return False
+            return prefix.levels_completed >= 1 if allow_later_progress else prefix.levels_completed == 1
         except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
             return False
 
@@ -857,7 +871,8 @@ class SweepScheduler:
             cleanup_complete = self.config.guest_machine is None or cleaned
             if action_count is None or not _write_stall_receipt(
                 run, game_id=game_id, run_id=new_runs[0], action_count=action_count,
-                stall_seconds=time.monotonic() - started_at, cleanup_complete=cleanup_complete,
+                expected_action_count=last_action_count,
+                stall_seconds=time.monotonic() - last_action_at, cleanup_complete=cleanup_complete,
             ):
                 self._stop_reason = "execution-stalled-evidence-invalid"
         if len(new_runs) != 1 and self._stop_reason == "completed":
