@@ -77,6 +77,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             plan = [
                 {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}},
                 {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 2}}},
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 3}}},
             ]
             with self.assertRaises(P7OperatorError):
                 client.act_checked(plan)
@@ -86,8 +87,34 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(accounting["matched_expectations"], 1)
             self.assertEqual(accounting["checked_plan_errors"], 1)
             self.assertEqual(accounting["uncertain_items"], 1)
-            self.assertEqual(accounting["unexecuted_items"], 0)
+            self.assertEqual(accounting["unexecuted_items"], 1)
             self.assertEqual(accounting["last_sequence"], 1)
+            recorder.close()
+
+    def test_checked_precheck_rejection_counts_only_unexecuted_items(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import P7OperatorError, _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(engine=_HistoryEngine())
+            broker.bind_history("run-1")
+            client = _P7BrokerClient(broker, recorder)
+            plan = [
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}},
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"levels_completed": 0}},
+                {"action": {"name": "ACTION1", "data": {}}, "expect": {"state": "WIN"}},
+            ]
+            with self.assertRaises(P7OperatorError):
+                client.act_checked(plan)
+            self.assertEqual(len(broker.journal), 0)
+            accounting = client.private_accounting()
+            self.assertEqual(accounting["checked_plans"], 1)
+            self.assertEqual(accounting["checked_plan_errors"], 1)
+            self.assertEqual(accounting["matched_expectations"], 0)
+            self.assertEqual(accounting["uncertain_items"], 0)
+            self.assertEqual(accounting["unexecuted_items"], 3)
             recorder.close()
 
     def test_experiment_uses_selected_runtime_deadline(self) -> None:

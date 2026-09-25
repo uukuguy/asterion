@@ -279,15 +279,22 @@ class _P7BrokerClient:
     def act_checked(self, plan: object) -> Mapping[str, object]:
         try:
             journal_start = len(self._broker.journal)
+            dispatch_start = self._broker.status().primitive_actions
             try:
                 result = self._broker.act_checked(plan)
             except Exception:
                 committed = len(self._broker.journal) - journal_start
                 if type(plan) is list and 1 <= len(plan) <= 20:
+                    try:
+                        dispatched = self._broker.status().primitive_actions
+                    except ArcBrokerError:
+                        dispatched = self._broker.terminal_snapshot().status.primitive_actions
+                    dispatched -= dispatch_start
                     self._count("checked_plans")
                     self._count("checked_plan_errors")
                     self._count("matched_expectations", committed)
-                    self._count("uncertain_items", len(plan) - committed)
+                    self._count("uncertain_items", dispatched - committed)
+                    self._count("unexecuted_items", len(plan) - dispatched)
                 raise
             finally:
                 self._record_transitions(self._broker.journal[journal_start:])
