@@ -45,7 +45,7 @@
   - It writes `.asterion-private/prime-p7-live/retry-manifests/<timestamp>-<game>-level-<n>.json`.
 - Modify `Makefile`
   - Add `.PHONY` entries and recipes for `p7-retry-preflight`, `asterion-prime-p7-retry-preflight`, `p7-retry`, and `asterion-prime-p7-retry`.
-  - Forward retry-only environment names through Orb: `ASTERION_PRIME_P7_RETRY_MODE`, `ASTERION_PRIME_P7_RETRY_ADVICE_DIGEST`, and `ASTERION_PRIME_P7_RETRY_SOURCE_RUNS`.
+  - Forward only the retry marker through Orb: `ASTERION_PRIME_P7_RETRY_MODE`. The operator recomputes same-game sources inside the new run; source IDs and digest are not trusted from environment variables.
 - Add `tests/test_prime_p7_failed_attempts.py`
   - Evidence reader, safety, fact block, and prompt/operator unit tests.
 - Add `tests/test_prime_p7_retry.py`
@@ -93,14 +93,14 @@ def write_failed_run_fixture(
         "sealed_trace": sealed_trace,
         "cleanup_complete": cleanup_complete,
         "diagnostics": {"sweep": {"target_level": target_level}, "broker_status": {"levels_completed": 0, "primitive_actions": actions, "terminal_reason": "human-baseline"}, "worker_cell_count": 0},
-        "experiment": {"game": {"game_id": game_id, "seed": seed, "target_level": target_level}},
+        "experiment": {"game_id": game_id, "seed": seed, "target_level": target_level},
     }
     write_minimal_failed_trace_and_recording(run, game_id=game_id, actions=actions)
     (run / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
     return run
 ```
 
-`write_minimal_failed_trace_and_recording()` should live in the same test file and emit hash-chained `arc.action` rows plus matching recording rows with small 3x3 frames. The fixture does not need real ARC SDK output; it only needs enough fields to test the reader's binding rules.
+`write_minimal_failed_trace_and_recording()` should live in the same test file and emit hash-chained `arc.action` rows plus matching recording rows with 64x64 integer frames, because real ARC observations are 64x64 and the reader must not gain a synthetic acceptance path for smaller dimensions. The fixture must include the same fields the reader requires from real failed evidence: sealed trace rows, trace seal digest, action name/data, before/after frame digests, sequence, level count, recording identity, and per-action settled frames. It may keep the board mostly zero-filled, but each action must have a deterministic 64x64 before/after pair that exercises both an interior change and a border-only change.
 
 Then create three run directories:
 
@@ -131,6 +131,22 @@ def test_rejects_interrupted_unsealed_and_symlinked_candidates(self) -> None:
     advice = select_failed_attempt_advice(runs_root, game_id="bp35-00000000", seed=0, target_level=1)
 
     self.assertEqual(advice.source_run_ids, ("p7-live-good",))
+```
+
+Add one compatibility test for the known older BP35 failure shape:
+
+```python
+def test_accepts_old_failed_run_without_experiment_when_recording_identity_matches(self) -> None:
+    runs_root = self.root / ".asterion-private" / "prime-p7-live"
+    run = write_failed_run_fixture(runs_root, "p7-live-old-shape", game_id="bp35-00000000", seed=0, target_level=1, actions=2)
+    summary_path = run / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary.pop("experiment")
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+    advice = select_failed_attempt_advice(runs_root, game_id="bp35-00000000", seed=0, target_level=1)
+
+    self.assertEqual(advice.source_run_ids, ("p7-live-old-shape",))
 ```
 
 - [ ] **Step 2: Run the focused tests and verify failure**
@@ -192,9 +208,10 @@ Reader rules:
 
 - Reject non-absolute roots, symlink roots, symlink run directories, symlink source files, and run paths outside the supplied `runs_root`.
 - Require `summary["schema"] == "asterion.prime.p7-live-private-summary/v1"`, `sealed_trace is True`, `replay_verified is True`, `cleanup_complete is True`.
-- Require `diagnostics.sweep.target_level == target_level` and `experiment.game.game_id`, `experiment.game.seed` when available; for older summaries with no `experiment`, accept only if recording identity and diagnostics target match.
-- Require terminal reason in `{"human-baseline", "game-over", "ACTION_CAP", "GAME_OVER"}` or broker status with `levels_completed < target_level` and `primitive_actions > 0`.
-- Bind trace action entries to recording actions by sequence, action name/data, before/after digest, and level count.
+- Require `diagnostics.sweep.target_level == target_level` and flat `experiment.game_id`, `experiment.seed`, `experiment.target_level` when `experiment` exists. Older failed runs may have no `experiment`; accept them only if recording identity, diagnostics target, and caller-supplied seed match the expected same-game identity.
+- Require terminal reason in `{"human-baseline", "game-over", "action-cap"}` or broker status with `levels_completed < target_level` and `primitive_actions > 0`.
+- Validate evidence content, not only summary flags: recompute the hash-chained trace and seal digest; read the recording; verify the recording game ID; bind every trace `arc.action` to the corresponding recording action by sequence, action name/data, before/after digest, level count, and settled frame; reject if any trace action lacks an exact recording counterpart or if recording actions are not fully represented.
+- Treat `replay_verified is True` as a required prior replay signal, then perform the trace/recording equivalence check above as the local replay-equivalent validation available to the reader without launching ARC.
 - Include up to 32 first plus 32 last target-level actions per run, de-duplicated when a run has at most 64 actions.
 - Compute `interior_changed_cells` on cells where `0 < x < width - 1` and `0 < y < height - 1`; compute `border_changed_cells` on the one-cell border; `border_only` is true when `changed_cells > 0`, `interior_changed_cells == 0`, and `border_changed_cells == changed_cells`.
 - Compute `source_digest = "sha256:" + sha256(canonical_json_without_private_paths).hexdigest()`.
@@ -230,7 +247,7 @@ git commit -m "feat: read verified P7 failed-attempt facts"
 
 - [ ] **Step 1: Write failing tests for retry-only prompt injection and redaction**
 
-Add tests with a fake advice block:
+Add tests with a constructed in-memory advice block. Do not write private paths, worker cells, raw frames, or prompt text into this block.
 
 ```python
 def make_advice(*, source_run_ids: tuple[str, ...], source_digest: str) -> FailedAttemptAdvice:
@@ -443,7 +460,7 @@ git commit -m "feat: report P7 border and interior action effects"
 - Test: `tests/test_prime_make_presets.py`
 
 **Interfaces:**
-- Consumes: game alias/exact ID, ARC catalog, P7 runs root, failed-attempt advice reader, and `SweepScheduler._attempt()`.
+- Consumes: game alias/exact ID, ARC catalog, P7 runs root, failed-attempt advice reader for preflight only, and `SweepScheduler._attempt()`.
 - Produces:
   - `make p7-retry-preflight GAME=bp35`
   - `make p7-retry GAME=bp35`
@@ -488,6 +505,7 @@ def test_retry_run_invokes_scheduler_once_and_writes_private_manifest(self) -> N
     controller._resolve_game = lambda value: "bp35-00000000"
     controller._next_unresolved_level = lambda game_id: 1
     controller._failed_advice = lambda game_id, level: SimpleNamespace(source_run_ids=("p7-live-a",), source_digest="sha256:" + "a" * 64)
+    controller._read_new_run_retry_summary = lambda run_id: {"source_run_ids": ("p7-live-a",), "source_digest": "sha256:" + "a" * 64, "source_count": 1, "fact_count": 4}
 
     with patch("tools.run_prime_p7_retry.SweepScheduler") as scheduler:
         scheduler.return_value._attempt.return_value = 0
@@ -498,6 +516,7 @@ def test_retry_run_invokes_scheduler_once_and_writes_private_manifest(self) -> N
     manifest = json.loads(next((self.runs_root / "retry-manifests").glob("*.json")).read_text())
     self.assertEqual(manifest["schema"], "asterion.prime.p7-retry-manifest/v1")
     self.assertEqual(manifest["prior_failed_run_ids"], ["p7-live-a"])
+    self.assertEqual(manifest["prior_failed_source_digest"], "sha256:" + "a" * 64)
 ```
 
 Add a guard test:
@@ -519,6 +538,8 @@ In `tests/test_prime_make_presets.py`, assert:
 self.assertIn(".PHONY: p7-retry-preflight", makefile)
 self.assertIn(".PHONY: p7-retry", makefile)
 self.assertIn("ASTERION_PRIME_P7_RETRY_MODE", _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt"))
+self.assertNotIn("ASTERION_PRIME_P7_RETRY_ADVICE_DIGEST", makefile)
+self.assertNotIn("ASTERION_PRIME_P7_RETRY_SOURCE_RUNS", makefile)
 ```
 
 Also dry-run:
@@ -544,7 +565,7 @@ Expected: FAIL because the controller and Make targets do not exist.
 
 - Resolve `GAME` using the same catalog/alias behavior as existing P7 commands.
 - Select next unresolved level from `load_best_prefix()`: if no prefix, target `1`; otherwise `prefix.levels_completed + 1`.
-- Call `select_failed_attempt_advice()` and require at least one source run.
+- Call `select_failed_attempt_advice()` before launch and require at least one source run. This is a readiness check and operator preview only; the launched P7 operator must recompute the same advice from local evidence and bind it in the new run's private diagnostics.
 - Create `SweepConfig` with:
   - `command=("make", "asterion-prime-p7-sweep-attempt")`
   - `unbounded_first_round=True`
@@ -554,10 +575,9 @@ Expected: FAIL because the controller and Make targets do not exist.
   - `validate_action_stall=True`
   - `global_token_cap=None`
   - `wallclock_cap=None`
-- Set environment for the child attempt:
-  - `ASTERION_PRIME_P7_RETRY_MODE=same-game-failed-attempt`
-  - `ASTERION_PRIME_P7_RETRY_ADVICE_DIGEST=<digest>`
-  - `ASTERION_PRIME_P7_RETRY_SOURCE_RUNS=<comma-separated run IDs>`
+- Set only `ASTERION_PRIME_P7_RETRY_MODE=same-game-failed-attempt` for the child attempt.
+- After the attempt, identify the new run through the existing `SweepScheduler` run-detection path and read `summary.json` private diagnostics. Copy only `diagnostics["failed_attempt_advice"]` source IDs, source digest, source count, and fact count into the retry manifest. If the new summary lacks matching retry diagnostics, mark the manifest `evidence-invalid` and do not invent source data from preflight.
+- If `SweepScheduler._attempt()` does not expose the new run ID directly, snapshot direct child directories under `runs_root` before and after the attempt and accept exactly one new `p7-live-*` run. More than one new run is `evidence-ambiguous`; zero new runs is `evidence-missing`.
 - Append a manifest under `retry-manifests/` with `0600` permissions and atomic replace.
 - Never read or write `breadth-resweep-campaign.json`.
 
@@ -579,7 +599,7 @@ asterion-prime-p7-retry:
 	exec /bin/sh -ec 'if [ "$(origin GAME)" != "command line" ] || [ -z "$(GAME)" ]; then printf "[asterion-prime-p7-retry] pass GAME=<alias-or-exact-id> explicitly\n" >&2; exit 2; fi; build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; uv build --wheel --out-dir "$$build_dir" >/dev/null; wheel="$$(find "$$build_dir" -name "*.whl" -print -quit)"; uv run --isolated --with "$$wheel" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$(ASTERION_PRIME_ARC_ROOT)/wheels/arcengine-0.9.3-py3-none-any.whl" python -I tools/run_prime_p7_retry.py --game "$(GAME)" --operator-root "$(ASTERION_PRIME_OPERATOR_ROOT)" --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --repo-root "$(CURDIR)"'
 ```
 
-Extend the Orb environment forwarding in the existing P7 attempt recipe to include the three retry environment names.
+Extend the Orb environment forwarding in the existing P7 attempt recipe to include only `ASTERION_PRIME_P7_RETRY_MODE`.
 
 - [ ] **Step 6: Run focused tests and verify pass**
 
@@ -644,18 +664,16 @@ Expected:
 - It does not create or modify `.asterion-private/prime-p7-live/breadth-resweep-campaign.json`.
 - It does not launch Orb or a model process.
 
-- [ ] **Step 3: Run docs and style checks**
+- [ ] **Step 3: Run focused verification**
 
 Run:
 
 ```bash
 uv run python -m unittest -v tests.test_prime_p7_failed_attempts tests.test_prime_p7_retry tests.test_prime_make_presets
-make lint
-make docs-check
 git diff --check
 ```
 
-Expected: PASS.
+Expected: PASS. Do not run broad project lint/docs gates for this research-scoped change unless the focused tests expose a shared-contract risk.
 
 - [ ] **Step 4: Commit**
 
@@ -743,7 +761,7 @@ Label improvement only when evidence supports it:
 - `make p7-retry-preflight GAME=bp35` is installed-wheel, zero-model, and read-only with respect to the breadth ledger.
 - `make p7-retry GAME=bp35` runs exactly one supervised attempt with seed `0`, human action cap, 30-minute limit, and five-minute no-action stop.
 - The retry writes a separate timestamped manifest and does not edit `breadth-resweep-campaign.json`.
-- Before the paid retry, focused tests, Ruff, docs check, diff check, installed preflight, and independent review pass.
+- Before the paid retry, focused tests, dry-run Make checks, diff check, installed preflight, and independent review pass.
 - After the paid retry, the report tracks action-by-action evidence and states plainly whether behavior improved.
 
 ## Commands Summary
@@ -752,8 +770,6 @@ Label improvement only when evidence supports it:
 uv run python -m unittest -v tests.test_prime_p7_failed_attempts
 uv run python -m unittest -v tests.test_prime_p7_retry tests.test_prime_make_presets
 make p7-retry-preflight GAME=bp35
-make lint
-make docs-check
 git diff --check
 make p7-retry GAME=bp35
 make asterion-prime-p7-games
