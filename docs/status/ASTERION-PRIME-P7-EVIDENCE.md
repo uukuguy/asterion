@@ -415,3 +415,14 @@ TN36 L1 first-pass after SK48 L1 — both using the new framework with compactio
 TN36 used 50 actions (vs SK48's 42, KA59's 36) — the new mechanism consistently costs ~6-15 more actions than the old one but stays within the human-baseline cap.
 
 Local L1 prefix coverage after these two runs: **25/25**.
+
+## 2026-09-26 Official 25-game batch submission — score 7.837
+
+After all 25 games had verified level-witness prefixes locally (24 with L1, 6 with L2, 1 with L3, etc.), the 25-game batch was submitted to the official card.
+
+- card_id: `17868877-8db4-4981-b4c1-a90f3a90e79b`
+- overall_score: **7.837** (up from 6.498 in the prior 21-game batch, +1.339 / +20%)
+- selected_count: 25, skipped_count: 0, played_runs: 25
+- New passes included: KA59 L1, SU15 L2 v5, SC25 L2 v6, SK48 L1, TN36 L1, FT09 L2 v5
+
+The post-refactor mechanism (compaction + 3 callable tools + 2 auto-inject hints) produced all these new passes. SU15 L2 — which previously failed at the cap in 5+ attempts — passed once under the new framework, contributing 6.67% to the score.
