@@ -577,3 +577,9 @@ Pivot: focus on passing more levels (L4, L3 un-tried games) since retry supports
 User's image insight: even all-9 WIN scores 100 because of cap; even all-6 WIN scores 97.77 if one level below 115. Both strategies valid:
 - Pass more levels → increase cap
 - Tighten under-115 → increase weighted (if not yet at cap)
+
+## 2026-09-27 M0R0 L4 retry — failed (process killed early)
+
+M0R0 L4 retry: terminal_reason=active (interrupted), only 3 L4 actions dispatched. Likely the background job was killed by the harness after monitor timeout. Summary shows primitive_actions=193 with target_level=4 but no L4 advance.
+
+L4 baseline=26. With only 3 actions, no chance to pass. Process needs to survive long enough for full L4 solve (~30+ min).
