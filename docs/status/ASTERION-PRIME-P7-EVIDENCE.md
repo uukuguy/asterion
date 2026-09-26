@@ -457,3 +457,11 @@ Strategy shift: focus on L3+ for L2-passed games (12 candidates) over L2 retries
 SU15 L3 retry (cap=80 = ~54 L2 prefix + 26 L3 baseline) passed in 24 L3 actions. levels_completed=3, terminal=level-completed, primitive_actions=78. Efficiency 92% (24/26). Click-only game (actions=[6,7]).
 
 SU15 L2 took 42 actions (baseline 42 = 100% efficiency) and SU15 L3 took 24/26 (92%). Click-type games consistent: model can solve within baseline when L2 prefix exists.
+
+## 2026-09-26 SC25 L3 retry — failed (human-baseline)
+
+SC25 L3 retry (cap=60 = 28 L2 prefix + 32 L3 baseline) ended at human-baseline after 60 actions. Levels reached 2 (L3 not passed). Model explored (35-30 x, 50-60 y) with click (ACTION6) and direction (ACTION1-4) but did not converge on the L3 mechanism.
+
+**Pattern**: SC25 L2 took 6 actions to clear (very easy). SC25 L3 took 60 (= full cap) and failed. The "easy L2 → hard L3" jump indicates L2 doesn't share mechanism with L3 — model had to discover new pattern, ran out of budget.
+
+Per user instruction "碰到没过关的时候做", now implementing cross-run tried_actions tool so the L4+ retry can avoid re-trying L3 positions.
