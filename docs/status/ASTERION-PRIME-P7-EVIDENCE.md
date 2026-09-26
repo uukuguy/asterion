@@ -616,3 +616,15 @@ FT09 game score impact:
 - Gain: +19.05 game score points (biggest gain yet!)
 
 Three L4 passes today (AR25, TU93, FT09).
+
+## 2026-09-27 VC33 L4 retry — failed (62/61 baseline)
+
+VC33 L4 retry (cap=113 = 52 prefix + 61 L4 baseline) failed at human-baseline. 62/61 L4 actions used (102%). Model nearly exhausted budget but didn't advance L4. Click-only game (actions=[6]).
+
+L4 retry status this session:
+- M0R0: failed (killed at 3 actions, process died)
+- VC33: failed (62/61, cap-hit)
+- AR25: PASSED (33 actions, +11.11 game score)
+- TU93: PASSED (42 actions, +8.89)
+- FT09: PASSED (24 actions, +19.05)
+- SU15: not finished (killed, can retry)
