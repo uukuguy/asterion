@@ -388,3 +388,16 @@ After trimming the worker module surface to 6 public methods (p7_act, p7_observe
 Conclusion: the model uses more proper-function-calling tools than v5, but **analysis overhead consumed too many actions** — model called history/frame_at/observe repeatedly without dispatching actions. Auto-injection alone doesn't drive convergence; the model must commit to actions.
 
 Next direction: cap per-cell tool-call count, or bias the prompt to prefer direct dispatch over analysis when context permits.
+
+## 2026-09-26 SK48 Level-1 first-pass under new framework — passed
+
+After the framework refactor (commit ba6011a8 + 0a1729a3 + b4ea95d9 + 1253d325 + 119f8d16) was in place, SK48 L1 first-pass was the first L1 to exercise the new pipeline. KA59 L1 had previously passed under the OLD mechanism (no compaction, no tool wiring).
+
+| L1 first-pass | Actions | Tool calls | Input | Result |
+| --- | ---: | --- | ---: | --- |
+| KA59 (old mechanism, pre-refactor) | 36 | 0 | ~4.5M | ✅ |
+| **SK48 (new mechanism: compaction + 3 tools + 2 auto-inject hints)** | **42** | **observe=16, act_checked=9** | **7.4M** | **✅** |
+
+SK48 used **25 proper function-calling tool calls** (vs KA59's 0) and reached the L1 pass at action 42 — 6 more actions than KA59, ~64% more tokens. The model used p7_act_checked heavily (9 calls with prediction expectation) and p7_observe for state inspection. The new tool surface did not slow the model down to a cap-hit; both runs completed within their action caps.
+
+Conclusion: the framework tool mechanism (proper function-calling + TypeBox schemas + auto-injected hints with stable markers for replacement) works end-to-end for L1. The cost is +6 actions / +64% tokens for the same outcome (L1 pass), which is acceptable given that the model gets richer structured feedback.
