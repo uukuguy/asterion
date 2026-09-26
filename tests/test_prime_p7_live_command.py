@@ -50,15 +50,17 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             engine = _SettledNoEffectEngine()
             broker = ArcBroker(
                 engine=engine,
-                no_effect_guard=True,
-                initial_no_effect_counts={(0, "ACTION1"): 3},
             )
             client = _P7BrokerClient(broker, recorder)
+            # Reach the runtime guard threshold with three successive
+            # no-effect actions; the fourth must be rejected.
+            for _ in range(3):
+                client.act([{"name": "ACTION1", "data": {}}])
             result = client.act([{"name": "ACTION1", "data": {}}])
             self.assertEqual(result["stop_reason"], "REPLAN_REQUIRED")
             self.assertEqual(result["applied_count"], 0)
-            self.assertEqual(engine.calls, [])
-            self.assertEqual([entry for entry in recorder.snapshot() if entry.kind == "arc.action"], [])
+            self.assertEqual(engine.calls, ["ACTION1"] * 3)
+            self.assertEqual(len([entry for entry in recorder.snapshot() if entry.kind == "arc.action"]), 3)
             recorder.close()
 
     def test_retry_checked_replan_required_is_structured(self) -> None:
@@ -70,11 +72,13 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             recorder = PrimeTraceRecorder(Path(directory))
             broker = ArcBroker(
                 engine=_SettledNoEffectEngine(),
-                no_effect_guard=True,
-                initial_no_effect_counts={(0, "ACTION1"): 3},
             )
             broker.bind_history("run-1")
             client = _P7BrokerClient(broker, recorder)
+            # Same runtime-guard semantics: three raw no-effect actions,
+            # then a checked probe matching the current frame is rejected.
+            for _ in range(3):
+                client.act([{"name": "ACTION1", "data": {}}])
             result = client.act_checked([
                 {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 7}}},
             ])
@@ -378,22 +382,6 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertTrue(border_only["border_only"])
         self.assertEqual(border_only["interior_changed_cells"], 0)
 
-    def test_retry_prompt_separates_mechanics_from_objective(self) -> None:
-        from asterion.applications.prime.p7.prompt import (
-            P7_SOLVE_PROMPT,
-            build_p7_retry_prompt,
-        )
-
-        prompt = " ".join(build_p7_retry_prompt(P7_SOLVE_PROMPT, "run facts").lower().split())
-        self.assertIn("changed frame", prompt)
-        self.assertIn("not proof of progress", prompt)
-        self.assertIn("new falsifiable hypothesis", prompt)
-        self.assertIn("border_only", prompt)
-        self.assertIn("checked observations from prior failed attempts", prompt)
-
-        with self.assertRaises(ValueError):
-            build_p7_retry_prompt(P7_SOLVE_PROMPT, " ")
-
     def test_operator_prompt_explains_settled_frame_axis(self) -> None:
         from asterion.applications.prime.p7 import operator
         from asterion.applications.prime.p7 import official_operator
@@ -437,8 +425,6 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             broker = ArcBroker(
                 engine=engine,
                 game=game,
-                no_effect_guard=True,
-                initial_no_effect_counts={(0, "ACTION1"): 3},
             )
             broker.bind_history("run-1")
             _apply_saved_prefix(broker, recorder, expected)

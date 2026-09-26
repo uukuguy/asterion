@@ -209,54 +209,7 @@ response is not success. Do not assume a known map, object identity, target
 coordinate, or action sequence."""
 
 
-P7_RETRY_GUIDANCE = """Retry evidence is checked observation, not an answer or a
-scene description. Use it to avoid repeating an observed failed effect, while
-forming a new game-agnostic hypothesis that can be tested with the next
-action. A sealed partial run replays only its completed-level prefix; its
-remaining actions are checked against the sealed trace and recording. A stall
-is an interrupted observation, not proof that a tested action failed. If it
-contains zero target-level actions, plan from the current settled frame.
-Before an optional RESET, identify why the current state cannot be recovered
-and how the reset helps enough to justify replaying progress within the
-remaining action budget. After GAME_OVER, use the broker's required RESET.
-A matched local prediction proves only that mechanic, not progress toward the
-level objective. Track a separate, measurable objective hypothesis and withdraw
-it when its predicted effect is absent. In this retry, observation-no-change
-stops a checked batch after the executed action. REPLAN_REQUIRED dispatches no
-action: choose a different evidence-based action or submit a one-item
-act_checked probe with a distinguishing expectation. Do not reuse the same
-goal hypothesis after a contrary observation without explaining new evidence.
-A local frame change does not establish objective progress: confirm
-levels_completed or the broker terminal state. Distinguish a mechanic that
-responded from the objective being complete, and stop to reassess after
-repeated ineffective effects or a border-only diff. Do not repeat a prior
-failed sequence without stating the new falsifiable reason first."""
-
-
-def build_p7_retry_prompt(base_prompt: str, failed_attempt_advice: str) -> str:
-    """Append bounded checked retry observations to the game-agnostic prompt.
-
-    The caller owns selection and validation of ``failed_attempt_advice``.
-    Keeping this function a pure formatter makes it impossible for the normal
-    prompt path to acquire prior-run data implicitly.
-    """
-
-    if not isinstance(base_prompt, str) or not base_prompt.strip():
-        raise ValueError("base prompt must be non-empty text")
-    if not isinstance(failed_attempt_advice, str) or not failed_attempt_advice.strip():
-        raise ValueError("failed-attempt advice must be non-empty text")
-    return (
-        base_prompt.rstrip()
-        + "\n\n"
-        + P7_RETRY_GUIDANCE
-        + "\n\nChecked observations from prior failed attempts:\n"
-        + failed_attempt_advice.strip()
-    )
-
-
 __all__ = (
     "P7_SOLVE_PROMPT",
     "P7_LEGACY_SOLVE_PROMPT",
-    "P7_RETRY_GUIDANCE",
-    "build_p7_retry_prompt",
 )

@@ -135,7 +135,7 @@ class TestNativeP7Broker(unittest.TestCase):
         from asterion.applications.prime.p7.broker import ArcBroker
 
         engine = _SettledNoEffectEngine()
-        broker = ArcBroker(engine=engine, no_effect_guard=True)
+        broker = ArcBroker(engine=engine)
         broker.bind_history("run-1")
         result = broker.act_checked([
             {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 7}}},
@@ -149,25 +149,21 @@ class TestNativeP7Broker(unittest.TestCase):
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 
         engine = _SettledNoEffectEngine()
-        broker = ArcBroker(
-            engine=engine,
-            no_effect_guard=True,
-            initial_no_effect_counts={(0, "ACTION1"): 3},
-        )
+        broker = ArcBroker(engine=engine)
+        # Three successive no-effect actions trigger the guard at runtime.
+        broker.act(("ACTION1",))
+        broker.act(("ACTION1",))
+        broker.act(("ACTION1",))
         with self.assertRaisesRegex(ArcBrokerError, "^REPLAN_REQUIRED$"):
             broker.act(("ACTION1",))
-        self.assertEqual(engine.calls, [])
-        self.assertEqual(len(broker.journal), 0)
+        self.assertEqual(engine.calls, ["ACTION1"] * 3)
+        self.assertEqual(len(broker.journal), 3)
 
     def test_retry_guard_allows_checked_single_distinguishing_probe(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
 
         engine = _SettledNoEffectEngine()
-        broker = ArcBroker(
-            engine=engine,
-            no_effect_guard=True,
-            initial_no_effect_counts={(0, "ACTION1"): 3},
-        )
+        broker = ArcBroker(engine=engine)
         broker.bind_history("run-1")
         result = broker.act_checked([
             {"action": {"name": "ACTION1", "data": {}}, "expect": {"frame_sha256": "sha256:" + "0" * 64}},
@@ -180,33 +176,36 @@ class TestNativeP7Broker(unittest.TestCase):
         from asterion.applications.prime.p7.broker import ArcBroker
 
         engine = _SettledNoEffectEngine()
-        broker = ArcBroker(
-            engine=engine,
-            no_effect_guard=True,
-            initial_no_effect_counts={(0, "ACTION1"): 3},
-        )
+        broker = ArcBroker(engine=engine)
+        # Bind history before dispatch; reach the guard threshold by
+        # repetition, then a checked probe matching the current frame must
+        # be rejected.
         broker.bind_history("run-1")
+        broker.act(("ACTION1",))
+        broker.act(("ACTION1",))
+        broker.act(("ACTION1",))
         result = broker.act_checked([
             {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 7}}},
         ])
         self.assertEqual(result["stop_reason"], "REPLAN_REQUIRED")
-        self.assertEqual(engine.calls, [])
+        self.assertEqual(engine.calls, ["ACTION1"] * 3)
 
     def test_retry_guard_preserves_next_level_seed_after_prefix_advance(self) -> None:
-        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import P7GameSelection
 
         engine = _Engine(level_after=1)
         broker = ArcBroker(
             engine=engine,
             game=P7GameSelection("ls20-9607627b", 0, 2),
-            no_effect_guard=True,
-            initial_no_effect_counts={(1, "ACTION1"): 3},
         )
         broker.act(("ACTION1",))
-        with self.assertRaisesRegex(ArcBrokerError, "REPLAN_REQUIRED"):
-            broker.act(("ACTION1",))
-        self.assertEqual(engine.calls, ["ACTION1"])
+        broker.act(("ACTION1",))
+        # After level advance, the guard counts reset and history is sealed;
+        # a third ACTION1 on the new level should not raise REPLAN_REQUIRED
+        # because the runtime counter for (1, ACTION1) is still below 3.
+        broker.act(("ACTION1",))
+        self.assertEqual(engine.calls, ["ACTION1"] * 3)
 
     def test_retry_guard_is_disabled_by_default(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker

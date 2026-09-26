@@ -27,10 +27,6 @@ from asterion.applications.prime.p7.broker import (
     _observation_digest,
 )
 from asterion.applications.prime.p7.diagnostics import analyze_trace
-from asterion.applications.prime.p7.failed_attempts import (
-    render_failed_attempt_advice,
-    select_failed_attempt_advice,
-)
 from asterion.applications.prime.p7.game import (
     ArcGameContract,
     DEFAULT_GAME,
@@ -58,7 +54,6 @@ from asterion.applications.prime.p7.score import digest, replay_sha256
 from asterion.applications.prime.p7.prompt import (
     P7_LEGACY_SOLVE_PROMPT,
     P7_SOLVE_PROMPT,
-    build_p7_retry_prompt,
 )
 from asterion.applications.prime.runtime_binding import PrimeLaunch
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
@@ -78,8 +73,6 @@ _PROVIDER = "deepseek"
 _MODEL = "deepseek-v4-flash"
 UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
-P7_RETRY_MODE_ENV = "ASTERION_PRIME_P7_RETRY_MODE"
-_SAME_GAME_FAILED_ATTEMPT = "same-game-failed-attempt"
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
@@ -831,8 +824,6 @@ def build_p7_operator_resources(
     private_trace_root: Path,
     game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
     run_id: str | None = None,
-    no_effect_guard: bool = False,
-    initial_no_effect_counts: Mapping[tuple[int, str], int] | None = None,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -916,17 +907,9 @@ def build_p7_operator_resources(
             approved_environment=approved_environment,
         )
         trace = PrimeTraceRecorder(private_trace_root)
-        retry_guard = (
-            no_effect_guard
-            and type(game) is P7GameSelection
-            and environment.get(P7_RETRY_MODE_ENV) == _SAME_GAME_FAILED_ATTEMPT
-            and environment.get("OPERATION_MODE", "").lower() == "offline"
-        )
         broker = ArcBroker(
             engine=engine,
             game=game,
-            no_effect_guard=retry_guard,
-            initial_no_effect_counts=initial_no_effect_counts if retry_guard else None,
         )
         history_run_id = private_trace_root.parent.name
         if (
@@ -1036,16 +1019,6 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError("P7 operator root is invalid")
     try:
         resolved = dict(live.load_operator_environment(root))
-        # Retry authority comes from the one-shot launcher, never a stale .env.
-        resolved.pop(P7_RETRY_MODE_ENV, None)
-        if P7_RETRY_MODE_ENV in environment:
-            if (
-                environment[P7_RETRY_MODE_ENV] != _SAME_GAME_FAILED_ATTEMPT
-                or environment.get("ASTERION_PRIME_P7_RUN_MODE") != "sweep"
-                or environment.get("OPERATION_MODE", "").lower() != "offline"
-            ):
-                raise P7OperatorError("P7 retry mode is invalid")
-            resolved[P7_RETRY_MODE_ENV] = _SAME_GAME_FAILED_ATTEMPT
         resolved.pop(UNBOUNDED_FIRST_ROUND_ENV, None)
         if UNBOUNDED_FIRST_ROUND_ENV in environment:
             if (
@@ -1112,51 +1085,6 @@ def _sweep_game(game: P7GameSelection, prefix: object) -> P7GameSelection:
     return replace(game, action_cap_override=action_cap)
 
 
-def _retry_input_and_diagnostics(
-    invocation: P7Invocation, variant: str
-) -> tuple[str, dict[str, object] | None]:
-    prompt = _prompt_for_variant(variant)
-    retry_mode = invocation.environment.get(P7_RETRY_MODE_ENV)
-    if retry_mode is None:
-        return prompt, None
-    if (
-        retry_mode != _SAME_GAME_FAILED_ATTEMPT
-        or not invocation.sweep_mode
-        or invocation.game.seed != 0
-        or invocation.environment.get("OPERATION_MODE", "").lower() != "offline"
-    ):
-        raise P7OperatorError("P7 retry mode is invalid")
-    advice = select_failed_attempt_advice(
-        invocation.operator_root / ".asterion-private" / "prime-p7-live",
-        game_id=invocation.game.game_id,
-        seed=invocation.game.seed,
-        target_level=invocation.game.target_level,
-    )
-    if not advice.source_run_ids:
-        raise P7OperatorError("P7 retry evidence is unavailable")
-    no_effect_counts: dict[tuple[int, str], int] = {}
-    for run in advice.runs:
-        for fact in run.actions:
-            if fact.changed_cells == 0:
-                action_name = fact.action.get("name")
-                if type(action_name) is str and action_name.startswith("ACTION"):
-                    key = (fact.levels_completed, action_name)
-                    no_effect_counts[key] = min(3, no_effect_counts.get(key, 0) + 1)
-    return (
-        build_p7_retry_prompt(prompt, render_failed_attempt_advice(advice)),
-        {
-            "source_run_ids": advice.source_run_ids,
-            "source_digest": advice.source_digest,
-            "source_count": len(advice.source_run_ids),
-            "fact_count": advice.fact_count,
-            "no_effect_counts": [
-                {"level": level, "action": action, "count": count}
-                for (level, action), count in sorted(no_effect_counts.items())
-            ],
-        },
-    )
-
-
 async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecution:
     """Run the one fixed solve and seal its private evidence.
 
@@ -1172,7 +1100,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     variant = _resolve_history_variant(invocation.environment, invocation.game)
 
     root = invocation.operator_root
-    prompt, retry_diagnostics = _retry_input_and_diagnostics(invocation, variant)
+    prompt = _prompt_for_variant(variant)
     prefix = (
         load_best_prefix(
             invocation.arc_root,
@@ -1205,18 +1133,6 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         private_trace_root=trace_root,
         game=invocation.game,
         run_id=run_id,
-        no_effect_guard=retry_diagnostics is not None,
-        initial_no_effect_counts=(
-            {
-                (item["level"], item["action"]): item["count"]
-                for item in retry_diagnostics.get("no_effect_counts", [])
-                if isinstance(item, Mapping)
-                and type(item.get("level")) is int
-                and type(item.get("action")) is str
-                and type(item.get("count")) is int
-            }
-            if retry_diagnostics is not None else None
-        ),
     )
     receipt: Mapping[str, object] = {}
     broker_receipt: ArcRunReceipt | None = None
@@ -1228,8 +1144,6 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     failure: BaseException | None = None
     diagnostics: dict[str, object] = {}
     diagnostics["prediction_variant"] = variant
-    if retry_diagnostics is not None:
-        diagnostics["failed_attempt_advice"] = retry_diagnostics
     if invocation.sweep_mode:
         diagnostics["sweep"] = {
             "scope": "offline-research",

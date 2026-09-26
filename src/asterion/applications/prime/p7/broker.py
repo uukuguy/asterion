@@ -186,8 +186,6 @@ class ArcBroker:
         *,
         engine: object,
         game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
-        no_effect_guard: bool = False,
-        initial_no_effect_counts: Mapping[tuple[int, str], int] | None = None,
     ) -> None:
         if type(game) not in (P7GameSelection, ArcGameContract):
             raise ArcBrokerError("unavailable")
@@ -213,19 +211,12 @@ class ArcBroker:
         self._failed_action: str | None = None
         self._level_gameplay_actions = 0
         self._history: list[ArcHistoryRecord] | None = None
-        if type(no_effect_guard) is not bool:
-            raise ArcBrokerError("unavailable")
-        counts = {} if initial_no_effect_counts is None else dict(initial_no_effect_counts)
-        if any(
-            type(key) is not tuple or len(key) != 2
-            or type(key[0]) is not int or isinstance(key[0], bool) or key[0] < 0
-            or type(key[1]) is not str or key[1] not in {f"ACTION{number}" for number in range(1, 8)}
-            or type(value) is not int or isinstance(value, bool) or not 0 <= value <= 3
-            for key, value in counts.items()
-        ):
-            raise ArcBrokerError("unavailable")
-        self._no_effect_guard = no_effect_guard
-        self._no_effect_counts = counts
+        # Stable-last-frame no-effect guard is a generic runtime observation:
+        # it counts repeated (level, action) pairs with no observed frame
+        # change during the current run and surfaces that count to the model.
+        # It starts empty and accumulates only from the current run.
+        self._no_effect_guard = True
+        self._no_effect_counts: dict[tuple[int, str], int] = {}
 
     @property
     def journal(self) -> tuple[ArcTransition, ...]:

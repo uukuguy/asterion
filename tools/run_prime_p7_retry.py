@@ -1,18 +1,25 @@
-"""Run exactly one supervised, local P7 retry for an explicitly selected game.
+"""Run exactly one supervised, local P7 same-game retry from a saved prefix.
 
-The retry has its own manifest and never reads or writes a breadth campaign
-ledger.  This module is deliberately an operator tool: ``--preflight-only``
-does not start Orb or a model.
+The retry runs the same generic solve path as the regular sweep, but is
+restricted to one explicit game and the next level after the locally verified
+prefix. It does not inject any game-specific facts into the model prompt.
+The prefix is data only; the model analyzes the current frame and forms its
+own hypotheses. Only the stable-last-frame no-effect guard and the
+prediction-mismatch guard are active at runtime, both generic observations
+derived from the current run.
+
+This module is deliberately an operator tool: ``--preflight-only`` does not
+start Orb or a model.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import importlib.util
 import json
 import os
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 import subprocess
@@ -21,10 +28,6 @@ from typing import Any
 
 from asterion.applications.prime.p7.game import _read_catalog
 from asterion.applications.prime.p7.solutions import load_best_prefix
-from asterion.applications.prime.p7.failed_attempts import select_failed_attempt_advice
-from asterion.applications.prime.p7.failed_attempts import render_failed_attempt_advice
-from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT, build_p7_retry_prompt
-from asterion.capabilities.prime_arc_agi_3_solver.provider import _valid_p7_input
 
 
 def _load_sweep_module() -> Any:
@@ -68,7 +71,10 @@ def resolve_game(arc_root: Path, requested: str) -> dict[str, Any]:
     if type(requested) is not str or not requested:
         raise ValueError("GAME is required")
     rows = tuple(_read_catalog(arc_root))
-    matches = tuple(row for row in rows if row.get("game_id") == requested or row.get("alias") == requested)
+    matches = tuple(
+        row for row in rows
+        if row.get("game_id") == requested or row.get("alias") == requested
+    )
     if len(matches) != 1:
         raise ValueError("GAME does not identify one local ARC game")
     row = matches[0]
@@ -78,7 +84,9 @@ def resolve_game(arc_root: Path, requested: str) -> dict[str, Any]:
     return dict(row)
 
 
-def next_unresolved_level(arc_root: Path, runs_root: Path, metadata: dict[str, Any], seed: int) -> int:
+def next_unresolved_level(
+    arc_root: Path, runs_root: Path, metadata: dict[str, Any], seed: int
+) -> int:
     """Return the next level after the locally verified prefix."""
     game_id = str(metadata["game_id"])
     prefix = load_best_prefix(arc_root, runs_root, game_id, seed)
@@ -102,7 +110,10 @@ def _safe_summary(run: Path) -> dict[str, Any] | None:
 
 def _run_metrics(runs_root: Path, run_id: str | None) -> dict[str, Any]:
     if not run_id:
-        return {"run_id": None, "status": "no-run", "action_count": 0, "input_tokens": 0, "output_tokens": 0}
+        return {
+            "run_id": None, "status": "no-run",
+            "action_count": 0, "input_tokens": 0, "output_tokens": 0,
+        }
     run = runs_root / run_id
     summary = _safe_summary(run) or {}
     diagnostics = summary.get("diagnostics") or {}
@@ -110,38 +121,63 @@ def _run_metrics(runs_root: Path, run_id: str | None) -> dict[str, Any]:
     broker = summary.get("broker") or {}
     broker_status = diagnostics.get("broker_status") or {}
     receipt = summary.get("receipt") or {}
-    status = receipt.get("status")
+    status = (
+        receipt.get("status")
+        or summary.get("status")
+        or broker.get("terminal_reason")
+        or summary.get("reason")
+    )
     try:
         trace = run / "trace" / "prime-trace.jsonl"
         rows = tuple(json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines())
     except (OSError, UnicodeError, ValueError):
         rows = ()
-    actions = tuple(row for row in rows if type(row) is dict and row.get("kind") == "arc.action")
-    usage = tuple(row.get("payload", {}) for row in rows if type(row) is dict and row.get("kind") == "arc.usage.reported")
+    actions = tuple(
+        row for row in rows
+        if type(row) is dict and row.get("kind") == "arc.action"
+    )
+    usage = tuple(
+        row.get("payload", {})
+        for row in rows
+        if type(row) is dict and row.get("kind") == "arc.usage.reported"
+    )
     return {
         "run_id": run_id,
-        "status": status or summary.get("status") or broker.get("terminal_reason") or summary.get("reason"),
+        "status": status,
         "action_count": len(actions),
-        "completed_level_count": receipt.get("completed_level_count", broker.get("levels_completed", broker_status.get("levels_completed", sweep.get("levels_completed")))),
-        "input_tokens": sum(item.get("input_tokens", 0) for item in usage if type(item.get("input_tokens")) is int),
-        "output_tokens": sum(item.get("output_tokens", 0) for item in usage if type(item.get("output_tokens")) is int),
-        "failed_attempt_advice": diagnostics.get("failed_attempt_advice"),
+        "completed_level_count": receipt.get(
+            "completed_level_count",
+            broker.get("levels_completed",
+                       broker_status.get("levels_completed",
+                                          sweep.get("levels_completed"))),
+        ),
+        "input_tokens": sum(
+            item.get("input_tokens", 0)
+            for item in usage
+            if type(item.get("input_tokens")) is int
+        ),
+        "output_tokens": sum(
+            item.get("output_tokens", 0)
+            for item in usage
+            if type(item.get("output_tokens")) is int
+        ),
     }
 
 
-def _validate_advice_binding(metrics: dict[str, Any], preflight_result: dict[str, Any]) -> None:
-    """Require the guest run to record the exact advice selected before launch."""
-    advice = metrics.get("failed_attempt_advice")
-    if type(advice) is not dict:
-        raise ValueError("retry run did not record failed-attempt advice")
-    expected_ids = list(preflight_result["source_run_ids"])
-    if (
-        advice.get("source_run_ids") != expected_ids
-        or advice.get("source_digest") != preflight_result["source_digest"]
-        or advice.get("source_count") != preflight_result["source_count"]
-        or advice.get("fact_count") != preflight_result["fact_count"]
-    ):
-        raise ValueError("retry run advice does not match preflight selection")
+def _validate_prefix_replay(
+    runs_root: Path, run_id: str, game_id: str, seed: int, target_level: int
+) -> int:
+    """Require the new run to record the same sealed prefix used for replay."""
+    prefix = load_best_prefix(runs_root.parent, runs_root, game_id, seed)
+    if prefix is None or prefix.levels_completed >= target_level:
+        raise ValueError("saved prefix is missing or already covers the target level")
+    summary = _safe_summary(runs_root / run_id) or {}
+    diagnostics = summary.get("diagnostics") or {}
+    sweep = diagnostics.get("sweep") or {}
+    prefix_actions = sweep.get("prefix_actions")
+    if type(prefix_actions) is not int or prefix_actions != len(prefix.transitions):
+        raise ValueError("recorded prefix action count does not match saved prefix")
+    return prefix_actions
 
 
 def _manifest_path(config: RetryConfig, game_id: str, level: int) -> Path:
@@ -170,15 +206,13 @@ def preflight(config: RetryConfig) -> dict[str, Any]:
         raise ValueError("P7 retry controls are fixed to seed 0, 30 minutes, and 5 minutes")
     metadata = resolve_game(config.arc_root, config.game)
     level = next_unresolved_level(config.arc_root, config.runs_root, metadata, config.seed)
-    advice = select_failed_attempt_advice(
-        config.runs_root, game_id=str(metadata["game_id"]), seed=config.seed, target_level=level,
+    prefix = load_best_prefix(
+        config.arc_root, config.runs_root, str(metadata["game_id"]), config.seed
     )
-    if advice.source_count < 1:
-        raise ValueError("no sealed same-game failed attempt is available for retry")
-    if not _valid_p7_input(
-        build_p7_retry_prompt(P7_SOLVE_PROMPT, render_failed_attempt_advice(advice))
-    ):
-        raise ValueError("installed P7 retry input is unavailable")
+    if prefix is None:
+        raise ValueError("saved prefix is unavailable; run a normal solve first")
+    if prefix.levels_completed >= level:
+        raise ValueError("saved prefix already covers the target level")
     return {
         "schema": _PREFLIGHT_SCHEMA,
         "ready": True,
@@ -187,10 +221,9 @@ def preflight(config: RetryConfig) -> dict[str, Any]:
         "seed": config.seed,
         "run_timeout_seconds": config.run_timeout_seconds,
         "no_action_stall_seconds": config.no_action_stall_seconds,
-        "source_run_ids": list(advice.source_run_ids),
-        "source_digest": advice.source_digest,
-        "source_count": advice.source_count,
-        "fact_count": sum(len(run.actions) for run in advice.runs),
+        "prefix_actions": len(prefix.transitions),
+        "prefix_game_id": prefix.game_id,
+        "prefix_seed": prefix.seed,
     }
 
 
@@ -202,29 +235,36 @@ def run_once(config: RetryConfig) -> dict[str, Any]:
     _probe_guest(config)
     sweep = _load_sweep_module()
     scheduler = sweep.SweepScheduler(sweep.SweepConfig(
-        arc_root=config.arc_root, runs_root=config.runs_root, games=(str(metadata["game_id"]),), seed=0,
+        arc_root=config.arc_root, runs_root=config.runs_root,
+        games=(str(metadata["game_id"]),), seed=0,
         repo_root=config.operator_root, guest_machine=config.guest_machine,
-        run_timeout= config.run_timeout_seconds, global_token_cap=None, wallclock_cap=None,
-        unbounded_first_round=True, action_stall_seconds=config.no_action_stall_seconds,
+        run_timeout=config.run_timeout_seconds, global_token_cap=None,
+        wallclock_cap=None, unbounded_first_round=True,
+        action_stall_seconds=config.no_action_stall_seconds,
         validate_action_stall=True,
     ))
-    os.environ["ASTERION_PRIME_P7_RETRY_MODE"] = "same-game-failed-attempt"
     scheduler._attempt(str(metadata["game_id"]), level, config.run_timeout_seconds)
     run_id = scheduler._new_runs[-1] if len(scheduler._new_runs) == 1 else None
     metrics = _run_metrics(config.runs_root, run_id)
     if run_id is None:
         raise ValueError("retry produced ambiguous run evidence")
-    _validate_advice_binding(metrics, check)
+    prefix_actions = _validate_prefix_replay(
+        config.runs_root, run_id,
+        str(metadata["game_id"]), config.seed, level,
+    )
     result = {
         "schema": _RESULT_SCHEMA, "manifest_schema": _MANIFEST_SCHEMA,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "game_id": metadata["game_id"], "target_level": level, "seed": 0,
-        "source_run_ids": check["source_run_ids"], "source_digest": check["source_digest"],
+        "prefix_actions": prefix_actions,
         "run": metrics, "scheduler_stop_reason": scheduler._stop_reason,
         "breadth_ledger_touched": False,
     }
     path = _manifest_path(config, str(metadata["game_id"]), level)
-    path.write_text(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
     os.chmod(path, 0o600)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return result
@@ -236,15 +276,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--arc-root", type=Path, required=True)
     parser.add_argument("--runs-root", type=Path)
     parser.add_argument("--game", required=True)
-    parser.add_argument("--guest-machine", default=os.environ.get("PRIME_ORB_MACHINE", "ubuntu"))
+    parser.add_argument(
+        "--guest-machine",
+        default=os.environ.get("PRIME_ORB_MACHINE", "ubuntu"),
+    )
     parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args(argv)
     root = args.operator_root.resolve()
-    config = RetryConfig(root, args.arc_root.resolve(), (args.runs_root or root / ".asterion-private" / "prime-p7-live").resolve(), args.game, guest_machine=args.guest_machine)
+    config = RetryConfig(
+        root, args.arc_root.resolve(),
+        (args.runs_root or root / ".asterion-private" / "prime-p7-live").resolve(),
+        args.game, guest_machine=args.guest_machine,
+    )
     try:
         result = preflight(config) if args.preflight_only else run_once(config)
     except (OSError, ValueError, KeyError, TypeError) as error:
-        print(json.dumps({"schema": _PREFLIGHT_SCHEMA if args.preflight_only else _RESULT_SCHEMA, "ready": False, "error": str(error)}, sort_keys=True))
+        print(json.dumps({
+            "schema": _PREFLIGHT_SCHEMA if args.preflight_only else _RESULT_SCHEMA,
+            "ready": False, "error": str(error),
+        }, sort_keys=True))
         return 1
     if args.preflight_only:
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
