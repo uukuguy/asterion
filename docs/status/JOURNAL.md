@@ -3189,3 +3189,5 @@
 - 07:48 RESUME 已刷新，记录 FT09 L2 验证结果与下一动作（SC25/SB26/SP80 L2 同题重试），KA59/SK48/TN36 首关保留至 L2 完成后处理。
 - 07:57 SC25 二关同题重试 `p7-live-20260925234916` 28 步通过（22 前缀 + 6 二关，恰好用完 6 动作上限），封存、回放、清理校验完成；本地网页 `arc-agi-3-sc25-635fd71a-...-web-7fb30ed74df18ef89b7d.html` 已导出；22 worker cell 16 分析 / 6 直接 act。
 - 07:57 RESUME 已刷新，记录 SC25 L2 验证结果与下一动作（SB26/SP80/SU15 L2 同题重试，紧 cap 战略不再选）。
+- 08:11 SB26 二关同题重试 `p7-live-20260926000100` 失败：28 步（13 前缀 + 28 二关，用完 cap）未过 L2；seal/replay/cleanup 校验完成；9 个 act_checked plan，16 matched/5 mismatch；token 3.84M/138K；partial-failure 经验成功率 2/3。
+- 08:11 RESUME 已刷新，记录 SB26 L2 失败与下一动作（SP80/SU15 → R11L → S5I5 → BP35 按 cap 排序），暂停引入其它经验类型。
