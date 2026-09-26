@@ -122,7 +122,25 @@ or the fixed callback/deadline limit ends the attempt. If no evidence-based
 recovery plan remains, report the failed attempt rather than repeating a losing
 sequence. A final text
 response is not success. Do not assume a known map, object identity, target
-coordinate, or action sequence."""
+coordinate, or action sequence.
+
+Tool reference (P7 application surface; do not assume these are game-specific):
+- \`p7_client.tried_actions(level=None)\`: enumerate every (level, action_name,
+  position) tuple you have dispatched this run, with counts. Position is
+  {\"x\": int, \"y\": int} for ACTION6 clicks and None for direction /
+  interact actions. Call this before dispatching a probe you are unsure
+  about; if the same (action, position) tuple already has a non-zero
+  count at this level, the broker has already observed its outcome.
+- \`p7_client.last_outcome_summary(level=None)\`: aggregate per-action counts
+  for the current run, split into {\"attempts\": {action: count},
+  \"no_effect\": {action: count}}. Useful for spotting an action that has
+  been attempted many times at this level with no observed frame change.
+- When \`act_checked\` returns \`stop_reason: \"observation-no-change\"\` the
+  response also carries a \`no_effect_hint\` field with this same action
+  and position plus a no-effect count; read it in-band instead of
+  recomputing.
+The framework prompt only carries general principles; this tool list is
+injected by the P7 application at run start and may evolve."""
 
 
 # Frozen pre-history guidance for the explicit local A/B control.
