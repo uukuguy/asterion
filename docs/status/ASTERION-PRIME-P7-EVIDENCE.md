@@ -660,3 +660,9 @@ BP35 only had L1 verified prefix; retry target L3 means "next after L1", which i
 SB26 L3 retry: 31 actions, 5-min no-action stall (stall_seconds=300). L1=12, L2=19 actions (1 over baseline). Model stalled before advancing past L2.
 
 Same pattern as BP35 — L2 prefix missing, retry attempted fresh L2 solve, failed.
+
+## 2026-09-27 SK48 L3 retry — failed (process killed)
+
+SK48 L3 retry: 42 actions (L1=41 efficient, L2=1 just started). Process died at ~1 hour, no L2 advance. No L2 prefix existed; target was effectively L2.
+
+SK48 has only L1 prefix saved. L2 baseline=177, but model didn't get to use it (process killed early).
