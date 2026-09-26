@@ -4,8 +4,12 @@ import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment
 export { registerContextWitness, ContextWitness, composeSummarizationRequest, summarizeInstruction } from "./context-witness.js";
 export { canonicalJson, projectPrimeContext, countRebuiltContext } from "./context-counter.js";
 import {
+  Array as TypeArray,
+  Null as TypeNull,
+  Number as TypeNumber,
   Object as TypeObject,
   String as TypeString,
+  Union as TypeUnion,
   type Static,
 } from "typebox";
 
@@ -19,6 +23,8 @@ const FD_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_FD";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const RESULT_KEYS = ["output", "protocol", "request_id", "status", "type"];
 const REQUEST_KEYS = ["code", "protocol", "request_id", "type"];
+const METHOD_RESULT_KEYS = ["error", "params", "protocol", "request_id", "status", "type", "value"];
+const METHOD_REQUEST_KEYS = ["method", "params", "protocol", "request_id", "type"];
 
 type ResultStatus = "ok" | "error" | "uncertain";
 
@@ -32,7 +38,7 @@ interface ExecuteRequest {
 interface ExecuteResult {
   protocol: typeof PROTOCOL;
   request_id: string;
-  type: "result";
+  type: "result" | "method_result";
   status: ResultStatus;
   output: string;
 }
@@ -211,6 +217,46 @@ export class IpythonBridge {
     return await this.#readResult(requestId);
   }
 
+  async callMethod(
+    requestId: string,
+    method: string,
+    params: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const request = JSON.stringify(
+      {
+        method,
+        params,
+        protocol: PROTOCOL,
+        request_id: requestId,
+        type: "method_call",
+      },
+      (_key: string, value: unknown): unknown =>
+        typeof value === "bigint" ? value.toString() : value,
+    );
+    await writeAll(
+      this.#descriptor,
+      Buffer.from(request, "utf8"),
+    );
+    const executeResult = await this.#withCancellation(
+      this.#readResult(requestId),
+      signal,
+    );
+    if (executeResult.type !== "method_result") {
+      throw new Error("expected method_result, got " + executeResult.type);
+    }
+    if (executeResult.status === "error") {
+      throw new Error(executeResult.output || "method call failed");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(executeResult.output);
+    } catch {
+      parsed = executeResult.output;
+    }
+    return parsed;
+  }
+
   #validRequest(value: unknown): value is ExecuteRequest {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
     const request = value as Record<string, unknown>;
@@ -261,7 +307,7 @@ export class IpythonBridge {
       !exactKeys(result, RESULT_KEYS) ||
       result.protocol !== PROTOCOL ||
       result.request_id !== requestId ||
-      result.type !== "result" ||
+      (result.type !== "result" && result.type !== "method_result") ||
       !["ok", "error", "uncertain"].includes(result.status as string) ||
       typeof result.output !== "string" ||
       !isWellFormed(result.output) ||
@@ -312,7 +358,148 @@ export function createIpythonBridge(
 }
 
 export function toolNames(): string[] {
-  return ["ipython"];
+  return ["ipython", "p7_observe", "p7_act_checked"];
+}
+
+interface MethodToolInput {
+  level?: number;
+}
+
+interface ActCheckedInput {
+  plan: unknown;
+}
+
+interface HistoryInput {
+  start: number;
+  limit: number;
+}
+
+interface FrameAtInput {
+  sequence: number;
+}
+
+interface MethodTool {
+  name: string;
+  description: string;
+  parameters: unknown;
+  execute(
+    id: string,
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+}
+
+function makeMethodTool(
+  bridge: IpythonBridge,
+  name: string,
+  description: string,
+  inputType: unknown,
+  method: string,
+  inputKey?: string,
+): MethodTool {
+  return {
+    name,
+    description,
+    parameters: inputType,
+    execute: async (
+      id: string,
+      input: unknown,
+      signal?: AbortSignal,
+    ): Promise<unknown> => {
+      const params = inputKey
+        ? (input as Record<string, unknown> | null | undefined)?.[inputKey] ?? null
+        : input;
+      return await bridge.callMethod(id, method, params, signal);
+    },
+  };
+}
+
+export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
+  return [
+    makeMethodTool(
+      bridge,
+      "p7_observe",
+      "Read the current game state: available_actions, last settled frame, levels_completed, state, win_levels. Call this *first* on a new level. The framework also injects a component summary and untried-clicks list into your observation-no-change responses, so you don't need to call p7_components or p7_untried_clicks manually.",
+      TypeObject({}, { additionalProperties: false }),
+      "observe",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_status",
+      "Read the broker status: actions_remaining, levels_completed, primitive_actions, target_level, terminal_reason.",
+      TypeObject({}, { additionalProperties: false }),
+      "status",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_tried_actions",
+      "Enumerate every (level, action, position) tuple you have dispatched this run, with counts. Position is {\"x\": int, \"y\": int} for ACTION6 clicks and None for direction/interact actions. Cross-run: the broker records prefix-replay actions too, so this view spans prior verified levels. Call this before dispatching a probe you are unsure about; if the same (action, position) tuple already has a non-zero count at this level, the broker has already observed its outcome.",
+      TypeObject(
+        {
+          level: TypeUnion([
+            TypeNumber({ minimum: 0 }),
+            TypeNull(),
+          ]),
+        },
+        { additionalProperties: false },
+      ),
+      "tried_actions",
+      "level",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_last_outcome_summary",
+      "Aggregate per-action counts for the current run, split into {\"attempts\": {action: count}, \"no_effect\": {action: count}}. Useful for spotting an action that has been attempted many times at this level with no observed frame change.",
+      TypeObject(
+        {
+          level: TypeUnion([
+            TypeNumber({ minimum: 0 }),
+            TypeNull(),
+          ]),
+        },
+        { additionalProperties: false },
+      ),
+      "last_outcome_summary",
+      "level",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_history",
+      "Read a page of session history records starting at index `start` with up to `limit` records.",
+      TypeObject(
+        {
+          start: TypeNumber({ minimum: 0 }),
+          limit: TypeNumber({ minimum: 1 }),
+        },
+        { additionalProperties: false },
+      ),
+      "history",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_frame_at",
+      "Read the settled frame at history sequence `sequence`.",
+      TypeObject(
+        { sequence: TypeNumber({ minimum: 0 }) },
+        { additionalProperties: false },
+      ),
+      "frame_at",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_act_checked",
+      "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. The broker stops at first prediction mismatch / no-effect / unavailable action.",
+      TypeObject(
+        {
+          plan: TypeArray(
+            TypeObject({ action: TypeObject({}), expect: TypeObject({}) }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+      "act_checked",
+    ),
+  ];
 }
 
 export function createIpythonTool(bridge: IpythonBridge) {
@@ -349,6 +536,9 @@ export function register(pi: ExtensionApi, dependencies?: unknown): void {
     const bridge = createIpythonBridge(descriptor);
     witness = registerContextWitnessFromEnvironment(pi, dependencies);
     pi.registerTool(createIpythonTool(bridge));
+    for (const tool of createAppLevelTools(bridge)) {
+      pi.registerTool(tool as unknown as ReturnType<typeof createIpythonTool>);
+    }
   } catch {
     witness?.close();
     discardContextWitnessEnvironment();

@@ -608,26 +608,132 @@ def render(obs=None, *, x0=0, y0=0, x1=64, y1=64):
     return "\\n".join(rows)
 
 def act_and_observe(actions):
-    before = observe()
-    after = act(actions)
+    before = p7_observe()
+    after = p7_act(actions)
     return {{"act": after["batch"], "diff": diff(before, after), "summary": summary(after)}}
 
-def observe():
+def p7_observe():
+    """Read the current game state.
+
+    Returns the full observation dictionary: available_actions, last
+    settled frame, levels_completed, state, win_levels. Use this *first*
+    on a new level to see what actions are available and where you are.
+    """
     return _call("observe")
 
-def status():
-    return _call("status")
-
-def history(start, limit):
+def p7_history(start, limit):
+    """Read a page of session history records starting at index `start` with up to `limit` records."""
     return _call("history", start, limit)
 
-def frame_at(sequence):
+def p7_frame_at(sequence):
+    """Read the settled frame at history sequence `sequence`."""
     return _call("frame_at", sequence)
 
-def act_checked(plan):
+def p7_act_checked(plan):
+    """Dispatch a checked batch of actions with prediction.
+
+    ``plan`` is a list of ``{{action, expect}}`` dicts. Each ``expect`` keys
+    on a cell value, frame hash, levels_completed, or state. The broker
+    stops at the first mismatch / no-effect / unavailable action. Use this
+    instead of bare :func:`p7_act` when you have a specific hypothesis to
+    test; a wrong prediction costs only one tool_use call instead of an
+    action slot.
+    """
     return _call("act_checked", plan)
 
-def act(actions):
+def p7_tried_actions(level=None):
+    """Enumerate every ``(level, action, position)`` tuple the model has
+    dispatched this run, with counts.
+
+    ``level=None`` returns all levels. ``position`` is
+    ``{{"x": int, "y": int}}`` for ``ACTION6`` clicks and ``None`` for
+    direction / interact actions. The broker records every dispatched
+    action unconditionally — including the prefix replay from any prior
+    verified level — so this view spans cross-level history. Call this
+    before dispatching a probe you are unsure about: if the same
+    ``(action, position)`` tuple already has a non-zero count at this
+    level, the broker has already observed its outcome.
+    """
+    return _call("tried_actions", level)
+
+def p7_last_outcome_summary(level=None):
+    """Aggregate per-action counts for the current run, split into
+    ``{{"attempts": {{action: count}}, "no_effect": {{action: count}}}}``.
+
+    Useful for spotting an action that has been attempted many times
+    at this level with no observed frame change. ``level=None`` sums
+    across all levels.
+    """
+    return _call("last_outcome_summary", level)
+
+def p7_components(level=None):
+    """Return connected-component analysis of the current settled grid.
+
+    Each component is a 4-connected region of non-background cells, with
+    its color value, axis-aligned bounding box, and cell count. Background
+    is treated as value 4 by convention; pass a different value if the
+    game uses a different background color.
+
+    This is what the worker should call *first* on a new level: it gives
+    the structural layout (cart, markers, walls, etc.) without forcing the
+    model to recompute connected components in Python.
+    """
+    value = p7_observe()
+    grid = _grid(value)
+    return _components(grid)
+
+
+def _p7_untried_clicks(level=None):
+    """Return the components at ``level`` that the model has NOT yet clicked.
+
+    Combines :func:`p7_components` with :func:`p7_tried_actions` so the
+    model can see, at a glance, which component positions are still
+    unexplored. ``tried_actions`` only returns a flat list of counts;
+    this function returns structured component positions that are NOT
+    in the tried set.
+
+    Call this before dispatching a probe on a component that has not
+    been visited yet; the broker will still apply ``no_effect_guard`` on
+    repeated clicks inside that component.
+    """
+    components = p7_components(level)
+    tried = p7_tried_actions(level)
+    tried_keys = {{
+        (
+            item["action"],
+            tuple(sorted(item["position"].items()))
+            if item.get("position") is not None
+            else None,
+        )
+        for item in tried
+    }}
+    untried: list[dict[str, object]] = []
+    for comp in components:
+        position = {{"x": (comp["bbox"][0] + comp["bbox"][2]) // 2,
+                     "y": (comp["bbox"][1] + comp["bbox"][3]) // 2}}
+        action_name = "ACTION6"
+        key = (
+            action_name,
+            tuple(sorted(position.items())),
+        )
+        if key not in tried_keys:
+            entry = dict(comp, position=position, suggested_action=action_name)
+            untried.append(entry)
+    return untried
+
+
+def _p7_hypothesis(level, key, value=None):
+    """DEPRECATED: model rarely uses this; framework injects components
+    and untried-clicks directly via level_hint / no_effect_hint.
+
+    Kept for backward-compatibility but new model runs should prefer
+    calling p7_observe and inspecting the auto-injected hints.
+    """
+    from .hypothesis_store import hypothesis_store
+    return hypothesis_store(level).getset(key, value)
+
+
+def p7_act(actions):
     if isinstance(actions, str):
         actions = [{{"name": actions, "data": {{}}}}]
     elif isinstance(actions, dict):
