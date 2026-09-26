@@ -432,3 +432,7 @@ The post-refactor mechanism (compaction + 3 callable tools + 2 auto-inject hints
 CD82 L2 retry (cap=6) under the new mechanism (compaction + 3 callable tools + 2 auto-inject hints) failed at the human-baseline cap. 36 actions dispatched (23 L2 attempts over cap=6 means model spent many cycles without progressing); levels_completed=1, terminal=human-baseline. The model did not identify the level-2 mechanism within the budget.
 
 CD82 L2 sequence shows the model repeated similar ACTION6 clicks at different positions without convergence — the level_hint / no_effect_hint injections were present but did not change the action strategy. This matches SK48 L1 and SU15 L2 v6 patterns: model uses tools (proper function-calling) but the strategy stays within the action-cap cycle.
+
+## 2026-09-26 KA59 L2 retry — failed (model stuck on ACTION4)
+
+KA59 L2 retry (cap=7 levels; L2 human-baseline cap=109 actions) under new mechanism failed. Model dispatched 74 actions in ~9 min then was killed for non-convergence. Last 30 actions: ACTION4×13, ACTION2×7, ACTION3×6, ACTION6×3, ACTION1×1 — model looped without advancing L2. Levels reached: {0, 1} only. Same pattern as SP80/CD82: model uses all 5 available actions but no level_hint / no_effect_hint guidance changes strategy.
