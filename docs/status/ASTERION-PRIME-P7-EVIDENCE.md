@@ -605,3 +605,14 @@ TU93 game score impact:
 - Gain: +8.89 game score points
 
 Two L4 passes today (AR25, TU93). Need to re-submit to bake in score gains.
+
+## 2026-09-27 FT09 L4 retry — PASSED in 24 L4 actions
+
+FT09 L4 retry (cap=51 = 19 prefix + 28 L4 baseline + 1 L5 advance) passed in 24 L4 actions. levels=4, terminal=level-completed. L4 efficiency 86% (24/28 baseline) → score 115 cap.
+
+FT09 game score impact:
+- Old: 3/6 levels, score 28.57
+- New: 4/6 levels, score = 10/21*100 = 47.62 (capped, weighted if all 115 = 54.76, capped at 47.62)
+- Gain: +19.05 game score points (biggest gain yet!)
+
+Three L4 passes today (AR25, TU93, FT09).
