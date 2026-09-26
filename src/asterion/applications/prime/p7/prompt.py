@@ -35,6 +35,16 @@ pressing ACTION5 more than 10 times in a level without progress are
 strong signals you are in a no-effect loop: change the action, the
 position, or RESET to a new hypothesis before the next dispatch.
 
+Hard rule: if the same ``(action, position)`` tuple has produced zero
+frame change 3 times in a row at the current level, the next dispatch
+of that tuple will raise ``REPLAN_REQUIRED``. After 3 no-effect repeats
+of any single action at the current level, you MUST either: (1) RESET
+the level and try a new hypothesis, (2) switch to a different action
+name, or (3) switch to a different position. Do not dispatch the same
+``(action, position)`` tuple a 4th time after 3 no-effect repeats.
+The framework auto-injects a ``tried_summary`` field on every observe
+call; treat ``no_effect`` counts >= 2 as a stop-and-reflect signal.
+
 Use only the persistent ipython tool. Import only p7_client; do not inspect its
 source. The broker API is p7_client.observe(), p7_client.status(),
 p7_client.history(start, limit), p7_client.frame_at(sequence),

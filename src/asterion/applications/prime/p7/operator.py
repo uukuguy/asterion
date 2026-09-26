@@ -73,6 +73,7 @@ from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 _RUNTIME_ID = "asterion.prime"
 _PROVIDER = "deepseek"
 _MODEL = "deepseek-v4-flash"
+_MISSING = object()
 UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
 PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
@@ -192,33 +193,46 @@ class _IpythonBridgeServer:
         request_id = "invalid"
         try:
             value = json.loads(raw.decode("utf-8", "strict"))
-            if (
-                type(value) is not dict
-                or set(value) != {"code", "protocol", "request_id", "type"}
-                or value["protocol"] != _BRIDGE_PROTOCOL
-                or value["type"] != "execute"
-                or type(value["request_id"]) is not str
-                or not value["request_id"]
-                or type(value["code"]) is not str
-                or not value["code"]
-            ):
+            if type(value) is not dict or value.get("protocol") != _BRIDGE_PROTOCOL:
                 raise ValueError
-            request_id = value["request_id"]
-            result = asyncio.run(
-                self._host.execute(request_id, value["code"], _BridgeSignal())
-            )
-            output = ""
-            if result.status == "ok" and result.content:
-                candidate = result.content[0].get("text")
-                if type(candidate) is str:
-                    output = candidate
-            response = {
-                "output": output,
-                "protocol": _BRIDGE_PROTOCOL,
-                "request_id": request_id,
-                "status": result.status,
-                "type": "result",
-            }
+            request_id = value.get("request_id")
+            if type(request_id) is not str or not request_id:
+                raise ValueError
+            request_type = value.get("type")
+            if request_type == "execute":
+                if (
+                    set(value) != {"code", "protocol", "request_id", "type"}
+                    or type(value["code"]) is not str
+                    or not value["code"]
+                ):
+                    raise ValueError
+                result = asyncio.run(
+                    self._host.execute(request_id, value["code"], _BridgeSignal())
+                )
+                output = ""
+                if result.status == "ok" and result.content:
+                    candidate = result.content[0].get("text")
+                    if type(candidate) is str:
+                        output = candidate
+                response = {
+                    "output": output,
+                    "protocol": _BRIDGE_PROTOCOL,
+                    "request_id": request_id,
+                    "status": result.status,
+                    "type": "result",
+                }
+            elif request_type == "method_call":
+                if (
+                    "method" not in value
+                    or type(value["method"]) is not str
+                    or "params" not in value
+                ):
+                    raise ValueError
+                response = self._dispatch_method_call(
+                    request_id, value["method"], value["params"]
+                )
+            else:
+                raise ValueError
         except BaseException:
             response = {
                 "output": "",
@@ -228,6 +242,37 @@ class _IpythonBridgeServer:
                 "type": "result",
             }
         return json.dumps(response, separators=(",", ":"), sort_keys=True).encode()
+
+    def _dispatch_method_call(
+        self, request_id: str, method: str, params: object
+    ) -> dict[str, object]:
+        """Dispatch a non-code method invocation to the broker.
+
+        The TypeScript extension registers each p7_client method as its
+        own Pi tool. The model invokes the tool with JSON parameters and
+        Pi serializes the call through this bridge with ``type ==
+        "method_call"`` instead of going through the ipython cell-execution
+        path.
+        """
+        from .ipython_host import p7_client_facade
+        try:
+            facade = p7_client_facade(self._host.broker())
+            value = getattr(facade, method)(params)
+        except BaseException as exc:
+            return {
+                "protocol": _BRIDGE_PROTOCOL,
+                "request_id": request_id,
+                "status": "error",
+                "type": "method_result",
+                "error": str(exc),
+            }
+        return {
+            "protocol": _BRIDGE_PROTOCOL,
+            "request_id": request_id,
+            "status": "ok",
+            "type": "method_result",
+            "value": value,
+        }
 
 
 class _P7BrokerClient:
@@ -367,12 +412,30 @@ class _P7BrokerClient:
 
     def observe(self) -> Mapping[str, object]:
         observation = self._broker.observe()
+        # Auto-inject tried-summary so the model can see no-effect state on
+        # every observe call, not only inside act_checked responses. Targets
+        # the L3 failure mode where the model loops on the same (action,
+        # position) without ever calling tried_actions().
+        no_effects = self._broker.last_outcome_summary(observation.levels_completed)
+        tried = self._broker.tried_actions(observation.levels_completed)
+        top_tried = sorted(
+            tried,
+            key=lambda item: (
+                -(item.get("count", 0) or 0),
+                item.get("action", ""),
+            ),
+        )[:5]
         return {
             "available_actions": list(observation.available_actions),
             "frame": observation.frame,
             "levels_completed": observation.levels_completed,
             "state": observation.state,
             "win_levels": observation.win_levels,
+            "tried_summary": {
+                "attempts": no_effects.get("attempts", {}),
+                "no_effect": no_effects.get("no_effect", {}),
+                "top_repeated": top_tried,
+            },
         }
 
 
@@ -393,6 +456,41 @@ class _P7BrokerClient:
         self, level: int | None = None
     ) -> Mapping[str, object]:
         return self._broker.last_outcome_summary(level)
+
+    def components(
+        self, level: int | None = None
+    ) -> list[dict[str, object]]:
+        """Connected-component analysis of the current settled grid.
+
+        Returns a list of ``{value, bbox, size}`` entries — each one a
+        4-connected region of non-background cells at the requested level.
+        The model calls this to discover the structural layout
+        (cart, markers, walls, etc.) without re-implementing flood fill.
+        """
+        return self._broker.components(level)
+
+    def untried_clicks(
+        self, level: int | None = None
+    ) -> list[dict[str, object]]:
+        """Components at ``level`` that have not been clicked yet.
+
+        Combines :meth:`components` with :meth:`tried_actions` so the
+        model sees structured component positions that are NOT in the
+        tried set, with a suggested ``ACTION6`` action for each.
+        """
+        return self._broker.untried_clicks(level)
+
+    def hypothesis(
+        self, level: int, key: str, value: object = _MISSING
+    ) -> object:
+        """Persistent-kernel hypothesis storage.
+
+        Call with ``value=_MISSING`` (or omit) to read; with any other
+        ``value`` to write. The store lives in the IPython namespace so
+        values survive compaction summaries.
+        """
+        from .hypothesis_store import hypothesis_store
+        return hypothesis_store(level).getset(key, value)
 
     def act(self, actions: object, *, _trusted_prefix_replay: bool = False) -> Mapping[str, object]:
         if type(actions) is not list or not actions:
@@ -533,6 +631,47 @@ def _apply_saved_prefix(
             raise ValueError
     except Exception:
         raise P7OperatorError("P7 saved prefix is unavailable") from None
+
+
+def _summarize_prefix_mechanics(prefix: object) -> str:
+    """Derive a short markdown summary of the prefix's action distribution.
+
+    Used to auto-inject a "what worked in earlier levels" hint so the
+    current retry can re-use patterns instead of re-discovering them.
+    Targets the L3 failure mode where the model treats each new level as
+    blank-slate and does not transfer the prior level's mechanics.
+    """
+    transitions = getattr(prefix, "transitions", None)
+    if not transitions or not isinstance(transitions, tuple):
+        return ""
+    from collections import Counter
+    by_level: dict[int, Counter[str]] = {}
+    levels_completed: set[int] = set()
+    for transition in transitions:
+        levels_completed.add(int(getattr(transition, "levels_completed", 0)))
+    last_level = max(levels_completed) if levels_completed else 0
+    for transition in transitions:
+        level = int(getattr(transition, "levels_completed", 0))
+        action = str(getattr(transition, "action", ""))
+        by_level.setdefault(level, Counter())[action] += 1
+    if not by_level:
+        return ""
+    bullets: list[str] = []
+    bullets.append(
+        f"## Prior verified levels (auto-summary of saved prefix)\n"
+        f"Highest verified level: {last_level}. "
+        f"Use this to bootstrap hypotheses at level "
+        f"{int(last_level) + 1}."
+    )
+    for level in sorted(by_level.keys()):
+        c = by_level[level]
+        total = sum(c.values())
+        top = c.most_common(3)
+        items = ", ".join(f"{name}={n}" for name, n in top)
+        bullets.append(
+            f"- L{level}: {total} actions. Top: {items}"
+        )
+    return "\n".join(bullets)
 
 
 def _seal_verified_partial_run(
@@ -1178,6 +1317,10 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         )
         if invocation.game.target_level > 1 else None
     )
+    if prefix is not None and len(prefix.transitions) > 0:
+        summary = _summarize_prefix_mechanics(prefix)
+        if summary:
+            prompt = prompt + "\n\n" + summary
     if invocation.sweep_mode:
         invocation = replace(invocation, game=_sweep_game(invocation.game, prefix))
     private = live.private_root(root, run_id)
