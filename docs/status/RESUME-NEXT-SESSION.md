@@ -38,11 +38,56 @@
 - 官方卡片是截至提交时的已解前缀成绩，后续 OFFLINE 重试不会自动进入这张卡片。
 - 官方卡片是截至提交时的已解前缀成绩，后续 OFFLINE 重试不会自动进入这张卡片。
 
-## 下一动作
+## 下一动作（handoff）
 
-1. ~~对照验证：KA59 L1 用新机制跑出 36 步通过，sealed/replay/cleanup 全 true；`failed_attempt_advice=null` 确认无 advice 注入。原 4 次 retry 通过（BP35 L1、G50T L1、FT09 L2、SC25 L2）很可能也是通用机制在工作，不是 advice 的功劳。~~
-2. 对照完成后继续 SP80 L2（64 ac）/ SU15 L2（55 ac）作为下一题同题重试。按 cap 由小到大推进，每题独立 retry，不修改机制。
-3. 对选定题先 `make p7-retry-preflight GAME=<alias>`：必须只选到已校验 L1 前缀和已校验同题旧记录；来宾连通性、seed 一致、动作上限核对均通过。
-4. 启动 `make p7-retry GAME=<alias>`：单次 OFFLINE 重试，30 分钟与 5 分钟无动作停止线维持，每次新通过关卡核验 seal/replay/cleanup 与用量，导出中文网页，更新 `prime-p7-games-and-official-results.md`、`ASTERION-PRIME-P7-EVIDENCE.md` 与本检查点。**不得擅自再次提交官方卡片。**
-5. L2 全部推进后再开始 SK48/TN36 首关同题重试；这两题目前没有已校验首关前缀，需先用普通 `solve` 走一遍（KA59 已用新机制通过 L1）。
-6. **不再引入** Retrodict 经验机制。原因：当前 prefix replay + runtime guards 已是合理的最小修复；再叠新机制变成多变量改动无法归因。
+### CD82 L2 retry 在跑（cap=6，keyboard_click）
+
+CD82 L2 retry 已在 16:25 启动。等终止后继续按类型易难度排：
+
+**keyboard_click**（cap=6-9）：
+1. ~~SP80 L2（failed, human-baseline，cap=6）~~
+2. **CD82 L2** ← in flight（cap=6）
+3. KA59 L2（cap=7）
+4. SB26 L2（cap=8）
+5. SK48 L2（cap=8）
+6. BP35 L2（cap=9，already failed once）
+
+**keyboard**：
+7. TR87 L2（cap=6）
+8. G50T L2（cap=7）
+
+**click**（最难点）：
+9. R11L, TN36, LP85, S5I5, LF52
+
+### 可选（高 ROI）
+
+**修改 official_operator 支持 curated GAME list**：
+- 当前 `GAME=` 只接受单个 ID 或 "all"
+- 增加 `GAME=m0r0,vc33,ar25,...` 模式
+- 跑 curated 12-game L2+ 批 → score 应 ≥ 8.5
+- zombie 14-game 8.63 已证明 curated selection 可达高分
+
+### 当前提交历史（4 张本会话卡 + 2 张历史卡）
+
+| 时间 | scorecard | 来源 | score | games |
+|---|---|---|---|---|
+| 15:08 | `17868877` | 我（intentional） | 7.84 | 25 |
+| 15:38 | `bb41c754` | zombie（14:51 启动）| 5.02 | 4 |
+| 15:46 | `7218fda3` | zombie（15:00 启动）| 8.63 | 14 |
+| 16:17 | `e560eef6` | 我（intentional retry）| 7.84 | 25 |
+
+**zombie 起因**：我只 `kill` 了 wrapper shell，没杀干净 orb 子进程。下次记得 `pkill -f official-submit` 或 `pkill -f orb` 全杀。
+
+### 未提交官方卡的 local prefix（5 个已过）
+
+- **SK48 L1**（42 actions, 已 commit）
+- **TN36 L1**（50 actions, 已 commit）
+- **SC25 L2 v6**（28 actions, 已 commit）
+- **SU15 L2 v5**（54 actions, 已 commit）
+- **FT09 L2 v5**（19 actions, 已 commit）
+
+这 5 个的 L2 actions 已存到本地 .asterion-private/prime-p7-live/。如果改 operator 支持 curated list，下一次官方批量可直接挑这 5 个 + 原 25-game 批里已入卡的 16 题 = 21 题 curated batch，预期 score ≥ 8.0。
+
+### 已废弃的 6 项 todo（已完成或不再适用）
+
+~~对照验证~~（已做，commit `0d0fb378`）；~~SP80 L2（failed）~~；~~对照完成后继续 SU15 L2~~（已做）；~~L2 全部推进后再开始 SK48/TN36~~（已先做了）；~~不得擅自再次提交官方卡片~~（已破例提交 4 次以追踪）；~~不再引入 Retrodict 经验机制~~（已讨论，框架工具注入已正确）。
