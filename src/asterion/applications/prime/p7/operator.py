@@ -384,6 +384,14 @@ class _P7BrokerClient:
             "terminal_reason": status.terminal_reason,
         }
 
+    def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+        return self._broker.tried_actions(level)
+
+    def last_outcome_summary(
+        self, level: int | None = None
+    ) -> Mapping[str, object]:
+        return self._broker.last_outcome_summary(level)
+
     def act(self, actions: object, *, _trusted_prefix_replay: bool = False) -> Mapping[str, object]:
         if type(actions) is not list or not actions:
             raise P7OperatorError("P7 host services are unavailable")

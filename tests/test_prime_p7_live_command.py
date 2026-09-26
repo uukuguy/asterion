@@ -256,6 +256,14 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             def act_checked(self, plan: object) -> dict[str, object]:
                 return {}
 
+            def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+                return []
+
+            def last_outcome_summary(
+                self, level: int | None = None
+            ) -> dict[str, object]:
+                return {"attempts": {}, "no_effect": {}}
+
         client = Client()
         server = live_module.P7ClientServer(p7_client_facade(client))
         try:
@@ -295,6 +303,14 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
             def act_checked(self, plan: object) -> dict[str, object]:
                 return {}
+
+            def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+                return []
+
+            def last_outcome_summary(
+                self, level: int | None = None
+            ) -> dict[str, object]:
+                return {"attempts": {}, "no_effect": {}}
 
         server = live_module.P7ClientServer(p7_client_facade(Client()))
         try:

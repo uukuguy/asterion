@@ -60,7 +60,10 @@ class P7ClientFacade:
             raise P7ClientError()
         if client is not None and any(
             not callable(getattr(client, name, None))
-            for name in ("observe", "status", "act", "history", "frame_at", "act_checked")
+            for name in (
+                "observe", "status", "act", "history", "frame_at", "act_checked",
+                "tried_actions", "last_outcome_summary",
+            )
         ):
             raise P7ClientError()
         object.__setattr__(self, "_P7ClientFacade__client", client)
@@ -106,6 +109,20 @@ class P7ClientFacade:
         if type(plan) is not list:
             raise P7ClientError()
         return cast(Mapping[str, object], self.__invoke("act_checked", plan))
+
+    def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+        """Retrodict: enumerate (level, action, position, count) tuples tried."""
+        return cast(
+            list[dict[str, object]],
+            self.__invoke("tried_actions", level),
+        )
+
+    def last_outcome_summary(self, level: int | None = None) -> Mapping[str, object]:
+        """Retrodict: per-action aggregate of attempts and no-effect outcomes."""
+        return cast(
+            Mapping[str, object],
+            self.__invoke("last_outcome_summary", level),
+        )
 
     def __invoke(self, name: str, *args: object) -> object:
         try:
