@@ -426,3 +426,9 @@ After all 25 games had verified level-witness prefixes locally (24 with L1, 6 wi
 - New passes included: KA59 L1, SU15 L2 v5, SC25 L2 v6, SK48 L1, TN36 L1, FT09 L2 v5
 
 The post-refactor mechanism (compaction + 3 callable tools + 2 auto-inject hints) produced all these new passes. SU15 L2 — which previously failed at the cap in 5+ attempts — passed once under the new framework, contributing 6.67% to the score.
+
+## 2026-09-26 CD82 L2 retry — failed at cap
+
+CD82 L2 retry (cap=6) under the new mechanism (compaction + 3 callable tools + 2 auto-inject hints) failed at the human-baseline cap. 36 actions dispatched (23 L2 attempts over cap=6 means model spent many cycles without progressing); levels_completed=1, terminal=human-baseline. The model did not identify the level-2 mechanism within the budget.
+
+CD82 L2 sequence shows the model repeated similar ACTION6 clicks at different positions without convergence — the level_hint / no_effect_hint injections were present but did not change the action strategy. This matches SK48 L1 and SU15 L2 v6 patterns: model uses tools (proper function-calling) but the strategy stays within the action-cap cycle.
