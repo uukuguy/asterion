@@ -473,3 +473,12 @@ TU93 L3 retry (cap=69 = 35 L2 prefix + 34 L3 baseline) passed in 24 L3 actions. 
 L3 efficiency 71% (24/34 baseline). After SC25's 60/60 fail on kb_click, this kb_click L3 retry (TU93) passed with budget to spare.
 
 L3+ retry pass rate now: 3 pass (FT09, SU15, TU93), 1 fail (SC25) = 75%.
+
+## 2026-09-26 DC22 L3 retry — failed (clustering anomaly)
+
+DC22 L3 retry (cap=107 = 40 L2 prefix + 67 L3 baseline) exceeded baseline: 68 L3 actions used. levels_completed=2 (L3 not advanced). Diagnostic at 68/67:
+- Histogram: ACTION1×17, ACTION3×17, ACTION2×13, ACTION4×7, ACTION6 at x=48×12 (26,18,35 etc.)
+- 68/68 actions stuck at levels=2 (no progress)
+- Pattern: model clustered clicks at column x=48 across 12 attempts with different y values; no exploration of other columns.
+
+Same anomaly pattern as SC25 L3 (model cluster-clicks at one position). Killed at 68 actions to free resources for next retry.
