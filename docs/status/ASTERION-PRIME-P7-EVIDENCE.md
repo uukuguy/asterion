@@ -401,3 +401,17 @@ After the framework refactor (commit ba6011a8 + 0a1729a3 + b4ea95d9 + 1253d325 +
 SK48 used **25 proper function-calling tool calls** (vs KA59's 0) and reached the L1 pass at action 42 — 6 more actions than KA59, ~64% more tokens. The model used p7_act_checked heavily (9 calls with prediction expectation) and p7_observe for state inspection. The new tool surface did not slow the model down to a cap-hit; both runs completed within their action caps.
 
 Conclusion: the framework tool mechanism (proper function-calling + TypeBox schemas + auto-injected hints with stable markers for replacement) works end-to-end for L1. The cost is +6 actions / +64% tokens for the same outcome (L1 pass), which is acceptable given that the model gets richer structured feedback.
+
+## 2026-09-26 TN36 Level-1 first-pass under new framework — passed
+
+TN36 L1 first-pass after SK48 L1 — both using the new framework with compaction + 3 callable tools + 2 auto-inject hints.
+
+| L1 first-pass | Actions | Input | Tool calls | Result |
+| --- | ---: | ---: | --- | --- |
+| KA59 (old mechanism, pre-refactor) | 36 | ~4.5M | 0 | ✅ |
+| **SK48 (new mechanism)** | **42** | **7.4M** | **observe=16, act_checked=9** | **✅** |
+| **TN36 (new mechanism)** | **50** | **4.0M** | **tbd** | **✅** |
+
+TN36 used 50 actions (vs SK48's 42, KA59's 36) — the new mechanism consistently costs ~6-15 more actions than the old one but stays within the human-baseline cap.
+
+Local L1 prefix coverage after these two runs: **25/25**.
