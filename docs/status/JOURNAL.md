@@ -3195,3 +3195,4 @@
 - 08:52 KA59 L1 控制验证通过：`p7-live-20260926004403` 在 36 步通过 L1，sealed/replay/cleanup 全 true；`failed_attempt_advice=null` 确认新机制无 advice 注入；输入 4.5M、输出 58K token。验证：原 `failed_attempt_advice` 注入不是 P7 L1 通过的必要条件。
 - 09:30 SP80 L2 重试 `p7-live-20260926011612` 触发 5 分钟无动作停滞：13 个 L2 动作后 stall-receipt 写入，无 summary.json（未封存）。这是 runtime guard 的预期行为而非缺陷。SP80 暂搁置，转 SU15 L2。
 - 09:46 SU15 L2 重试 `p7-live-20260926013245` 撞 cap 失败：55 步（13 前缀 + 42 L2），terminal=human-baseline；`failed_attempt_advice=null` 确认无 advice；prediction 2 plans/5 matched/1 mismatch；input 7.6M、output 174K token。新机制下 L2 第二次连续失败（SP80 stall + SU15 cap）；KA59 L1 control 仍是唯一一次新机制通过样本。转 R11L L2。
+- 10:08 SU15 L2 带压缩对照完成：同样撞 55 cap，同样 L2 没通过，但 input tokens 从 7.6M 降到 3.7M（−51%）、output 从 174K 降到 128K（−26%）。压缩机械上生效（Pi summarization 路径走通），但没解决机制识别问题。结论：压缩是 Prime 必要默认，但模型归纳能力是另一回事。

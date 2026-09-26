@@ -331,3 +331,16 @@ SU15 L1 prefix `p7-live-20260925020545-47e9d29b354c697a009d2c27` (13 verified ac
 | New-mechanism control `p7-live-20260926013245-…` | **1 level (cap-hit, no advance)** | **42** | 7,632,934 / 174,280 |
 
 Two consecutive new-mechanism L2 failures (SP80 stall + SU15 cap-hit) suggest the generic mechanism is reliable for narrow-cap L1 (KA59 control) but unreliable for L2 where the model needs stronger mechanism hypotheses. The 55-action cap and 14-minute runtime were not the limiting factor; the model's exploration strategy under larger action space did not converge.
+
+## 2026-09-26 SU15 Level-2 control validation: compaction ON vs OFF
+
+After wiring Pi's compaction into P7 operator as default (commit 0a1729a3), SU15 L2 was retried with the same game / seed / cap as the previously failed baseline (cap-hit, 42 L2 actions, no advance). The two runs share identical conditions except for the new compaction wiring.
+
+| SU15 Level-2 run | Result | New actions | Input / output tokens |
+| --- | --- | ---: | ---: |
+| No compaction, baseline `p7-live-20260926013245-…` | 1 level (cap-hit, no advance) | 42 | 7,632,934 / 174,280 |
+| With compaction, control `p7-live-20260926015614-…` | **1 level (cap-hit, no advance)** | **42** | **3,679,010 / 127,853** |
+
+The compressed run hit cap at the exact same L2 action count (42) with the same outcome (cap-hit, levels_completed still 1). Token usage was reduced by ~51% in input and ~26% in output, confirming Pi's summarization path is actually exercised end-to-end. However, the model still failed to identify the level-2 mechanism within the cap, regardless of context size.
+
+Conclusion: compaction is a necessary framework default for Prime's persistent-kernel agent (P7 was missing it; context growth was unbounded), but it is not sufficient to solve P7's mechanism-identification problem. The remaining bottleneck is the model's own inductive strategy, not context management.
