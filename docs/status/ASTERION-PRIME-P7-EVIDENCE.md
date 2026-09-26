@@ -465,3 +465,11 @@ SC25 L3 retry (cap=60 = 28 L2 prefix + 32 L3 baseline) ended at human-baseline a
 **Pattern**: SC25 L2 took 6 actions to clear (very easy). SC25 L3 took 60 (= full cap) and failed. The "easy L2 → hard L3" jump indicates L2 doesn't share mechanism with L3 — model had to discover new pattern, ran out of budget.
 
 Per user instruction "碰到没过关的时候做", now implementing cross-run tried_actions tool so the L4+ retry can avoid re-trying L3 positions.
+
+## 2026-09-26 TU93 L3 retry — PASSED in 24 L3 actions (with new tried_actions tool)
+
+TU93 L3 retry (cap=69 = 35 L2 prefix + 34 L3 baseline) passed in 24 L3 actions. levels_completed=3, terminal=level-completed. New `p7_tried_actions` and `p7_last_outcome_summary` tools were available to the model in this run (commit c93264a9 exposed them in client_module_source and TypeScript extension).
+
+L3 efficiency 71% (24/34 baseline). After SC25's 60/60 fail on kb_click, this kb_click L3 retry (TU93) passed with budget to spare.
+
+L3+ retry pass rate now: 3 pass (FT09, SU15, TU93), 1 fail (SC25) = 75%.
