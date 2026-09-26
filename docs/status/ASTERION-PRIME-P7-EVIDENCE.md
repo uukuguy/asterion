@@ -527,3 +527,13 @@ M0R0 L4 retry (cap=217 = 191 prefix + 26 L4 baseline) failed at human-baseline. 
 L4 actions distribution: ACTION4 7, ACTION1 6, ACTION5 2, ACTION3 1, ACTION6 1, RESET 1. No cluster/wander anomaly but no progress either. Model explored with directional + click but didn't find L4 mechanism.
 
 Starting VC33 L4 (last L4 candidate, baseline 61 click).
+
+## 2026-09-26 VC33 L4 retry — failed (full baseline consumed)
+
+VC33 L4 retry (cap=113 = 52 prefix + 61 L4 baseline) failed at human-baseline. 61/61 L4 actions used (100%), levels_completed=3. Click-only game (actions=[6]). Model clicked 62 times at various positions but no L4 advance.
+
+L4 queue complete: 0 pass / 2 attempts (M0R0 L4, VC33 L4). Both games hit cap without progressing. L3+L4 cumulative pass: 4 / 11 = 36%.
+
+Action plan:
+- Submit accumulated score (4 new L3 passes: FT09, SU15, TU93, AR25)
+- L3/L4 retry queue exhausted (no L3-passed games have working L4 mechanisms within baseline)
