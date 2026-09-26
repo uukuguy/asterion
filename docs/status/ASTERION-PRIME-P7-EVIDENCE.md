@@ -654,3 +654,9 @@ CN04 was un-tried L2-passed game. Model solved L3 with same over-budget pattern 
 BP35 L3 retry: 68 actions, levels=1, terminal=human-baseline. L1=19 actions (prefix), L2=49 actions (model failed to pass L2 itself). Only L1 prefix existed; L3 retry effectively attempted L2 fresh solve.
 
 BP35 only had L1 verified prefix; retry target L3 means "next after L1", which is L2.
+
+## 2026-09-27 SB26 L3 retry — failed (5-min stall)
+
+SB26 L3 retry: 31 actions, 5-min no-action stall (stall_seconds=300). L1=12, L2=19 actions (1 over baseline). Model stalled before advancing past L2.
+
+Same pattern as BP35 — L2 prefix missing, retry attempted fresh L2 solve, failed.
