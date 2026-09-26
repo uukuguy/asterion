@@ -309,3 +309,14 @@ The resulting OFFLINE run `p7-live-20260926004403-80d2bc7a81a8ce44a6b601f5` **pa
 The same game, same seed, same action cap (78), same operator profile — passed in 36 actions (46% of cap) without any pre-computed advice injection. This is the single-variable confirmation that the `failed_attempt_advice` mechanism was not necessary for P7 Level-1 solve. The previously-cached advice-field evidence from the 5 pre-refactor retries (BP35 L1, G50T L1, FT09 L2, SC25 L2, SB26 L2) cannot be attributed to advice effects; the verified outcomes are most parsimoniously explained by the generic mechanism.
 
 `make asterion-prime-p7-games` now reports **24/25 games** with a verified first-level prefix; only SK48 and TN36 remain unsolved on Level 1.
+
+## 2026-09-26 SP80 Level-2 same-game retry (stalled)
+
+The first new-mechanism queue item. SP80 L1 prefix `p7-live-20260925020429-0e53573ddb009b6dafa76fde` (6 verified actions, sealed, replay-verified) was replayed, then 13 L2 actions dispatched in 13 minutes before the 5-minute no-action supervisor fired. The run produced a `stall-receipt.json` (cleanup_complete=true) but no `summary.json` because the trace was not sealed — the stall path is the canonical outcome, not a sealed failure.
+
+| SP80 Level-2 run | Result | New actions | Input / output tokens |
+| --- | --- | ---: | ---: |
+| Breadth resweep failure `p7-live-20260925020429-…` | 0 levels (0/6) | 6 (cap hit at L1, partial) | — |
+| New-mechanism control `p7-live-20260926011612-…` | **execution-stalled** | **13** | ~2,770,037 / ~184,678 |
+
+The 5-min no-action supervisor correctly interrupted the run; this is the intended runtime guard behavior, not a defect. SP80 L2 needs either a more decisive model trajectory or a different game strategy; the next queue item will proceed without re-attempting SP80.
