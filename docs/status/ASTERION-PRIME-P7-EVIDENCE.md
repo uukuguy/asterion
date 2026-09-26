@@ -547,3 +547,19 @@ SC25 L3 retry after applying 4 no-effect-loop guards still failed:
 - Action diversity improved: 4 direction keys (8+8+7+4) + 3 click positions
 
 Improvements had PARTIAL effect: cluster-mode reduced but model still doesn't find L3 mechanism within baseline budget. The 3-strike guard freed actions but not insight.
+
+## 2026-09-26 Per-level score analysis (user-driven optimization target)
+
+User pointed out: official scores reflect (baseline/actions)^2 * 100 per level, capped at 115. Each under-115 level costs score proportionally. Our 9.98 overall is below 24.59% theoretical max (45/183 levels passed) because most passed levels use too many actions.
+
+Levels NOT at 115 cap (from trace + image scorecard):
+- **TN36 L1**: 49/32 actions, score 42.6%, baseline*0.9325=29 → need ≤29, gain +25 game points
+- **KA59 L1**: 35/28, score 64%, need ≤26, gain +30 game points
+- **SU15 L2**: 41/42, score 104.9%, need ≤39, gain +10 game points
+- **TU93 L1**: 18/19, score 111.4%, need ≤17, gain +4 game points
+- SC25 L2: 6/6 (at baseline exactly), would need ≤5 (likely impossible)
+- TU93 L2: 16/16 (at baseline), would need ≤15 (likely impossible)
+
+All other passed levels are at 115 cap.
+
+Optimization plan: re-solve from scratch for the games with the highest gains (TN36, KA59, SU15). Each requires a full solve because the prefix is what it is — tightening L1 means re-solving from L1.
