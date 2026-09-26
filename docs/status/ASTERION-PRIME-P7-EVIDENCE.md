@@ -482,3 +482,9 @@ DC22 L3 retry (cap=107 = 40 L2 prefix + 67 L3 baseline) exceeded baseline: 68 L3
 - Pattern: model clustered clicks at column x=48 across 12 attempts with different y values; no exploration of other columns.
 
 Same anomaly pattern as SC25 L3 (model cluster-clicks at one position). Killed at 68 actions to free resources for next retry.
+
+## 2026-09-26 LS20 L3 retry — failed (direction-key loop)
+
+LS20 L3 retry (cap=145) failed at 74 L3 actions / 73 L3 baseline. levels_completed=2. Action histogram: ACTION1 27, ACTION4 19, ACTION2 18, ACTION3 10 — model wandered direction keys without finding L3 mechanism. Killed.
+
+L3 retry pass rate: 3/6 (FT09, SU15, TU93 pass; SC25, DC22, LS20 fail). All 3 fails show "loop" anomaly: SC25 cluster-clicks, DC22 column-x=48, LS20 direction keys.
