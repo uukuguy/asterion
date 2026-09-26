@@ -451,3 +451,9 @@ FT09 L3 retry (cap=42 = 19 L2 prefix + 23 L3 baseline) passed in 17 L3 actions u
 Model transferred "color X → 12" rule from L2 to L3. This confirms: previous level solutions help current level. L2+ retries are MORE valuable than L2 retries because the model has accumulated patterns.
 
 Strategy shift: focus on L3+ for L2-passed games (12 candidates) over L2 retries for L1-only games.
+
+## 2026-09-26 SU15 L3 retry — PASSED in 24 actions
+
+SU15 L3 retry (cap=80 = ~54 L2 prefix + 26 L3 baseline) passed in 24 L3 actions. levels_completed=3, terminal=level-completed, primitive_actions=78. Efficiency 92% (24/26). Click-only game (actions=[6,7]).
+
+SU15 L2 took 42 actions (baseline 42 = 100% efficiency) and SU15 L3 took 24/26 (92%). Click-type games consistent: model can solve within baseline when L2 prefix exists.
