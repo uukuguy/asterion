@@ -563,3 +563,17 @@ Levels NOT at 115 cap (from trace + image scorecard):
 All other passed levels are at 115 cap.
 
 Optimization plan: re-solve from scratch for the games with the highest gains (TN36, KA59, SU15). Each requires a full solve because the prefix is what it is — tightening L1 means re-solving from L1.
+
+## 2026-09-26 TN36 L1 re-solve (no improvement)
+
+TN36 L1 retry attempt did NOT tighten actions:
+- L1 prefix replay: 49 actions (same as before)
+- L2 phase: 73 actions, didn't advance L2
+
+Root cause: retry tool always uses saved prefix. To genuinely tighten L1 actions, would need to delete prefix file and force fresh solve (destructive, risky).
+
+Pivot: focus on passing more levels (L4, L3 un-tried games) since retry supports that natively.
+
+User's image insight: even all-9 WIN scores 100 because of cap; even all-6 WIN scores 97.77 if one level below 115. Both strategies valid:
+- Pass more levels → increase cap
+- Tighten under-115 → increase weighted (if not yet at cap)
